@@ -7,9 +7,16 @@
     <RunWorkingDirectory>$(MagicRoot)</RunWorkingDirectory>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Built before the sample so its Run has a Magic to start; nothing of it is referenced or copied. -->
+    <!-- Built before the sample so its Run has a Magic, and the gems it lists, to start; nothing of them is referenced
+         or copied. -->
     <ProjectReference
-      Include="$(MagicRoot)src/Launcher/Magic.Launcher.csproj"
+      Include="$(MagicRoot)src/Core/Launcher/Magic.Launcher.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      SkipGetTargetFrameworkProperties="true"
+    />
+    <ProjectReference
+      Include="$(MagicRoot)src/Gems/Hello/Hello.csproj"
       ReferenceOutputAssembly="false"
       Private="false"
       SkipGetTargetFrameworkProperties="true"

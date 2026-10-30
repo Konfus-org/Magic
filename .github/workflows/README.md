@@ -3,7 +3,7 @@
 GitHub runs the checks on every pull request into `dev` or `main`, on every push to either, and by hand from the
 Actions tab. They run `tools/Scripts/Validate.ps1` in `Release` ([Tools](../../tools/README.md)): the Build and
 Headless steps on Windows, Linux and macOS, and the Test step on Linux. They also check that every commit's subject
-starts with `type(scope): ` ([Commits](../../AGENTS.md#commits)), check every link in the Markdown and run GitHub's
+starts with `type: ` ([Commits](../../AGENTS.md#commits)), check every link in the Markdown and run GitHub's
 CodeQL analysis on the C#. The Screenshot step doesn't run here.
 
 - The repository's rulesets require every check to pass before a merge into `dev` or `main`. Give every job a name
@@ -29,11 +29,11 @@ use a larger runner rather than a longer limit.
 
 Each Build job packages Magic's output folder, a zip on Windows and a tarball on Linux and macOS, and keeps it with
 the run for a week. Once every build of a push to `main` passes, those packages become a GitHub release tagged
-`v<version>`. The version is Core's `VersionPrefix` with the run number as the patch. A project with its own version,
+`v<version>`. The version is Magic's `VersionPrefix` with the run number as the patch. A project with its own version,
 such as a gem, keeps it. The release's notes list the commits since the previous release, grouped by type as
 `cliff.toml` lays them out, with GitHub's own notes after them.
 
 ## Dependabot
 
 Every week, Dependabot opens one pull request into `dev` for the NuGet packages and one for the actions. Their
-subjects start with `build(deps)` and `ci(deps)`.
+subjects start with `build:` and `ci:`.

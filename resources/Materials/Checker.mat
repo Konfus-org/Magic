@@ -1,0 +1,8 @@
+{
+    "shader": { "id": 10001 },
+    "params": {
+        "color": { "r": 1, "g": 1, "b": 1, "a": 1 },
+        "roughness": { "x": 0.8 },
+        "colorMap": { "texture": { "id": 36 } }
+    }
+}

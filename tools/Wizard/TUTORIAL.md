@@ -15,7 +15,7 @@ This guide is temporary: delete it once Part 8 has written `tools/Wizard/README.
  ┌──────────────────────────────────────┐            ┌─────────────────────────────────┐
  │ Electron shell  (Shell/)             │            │ Core: knows nothing of editors  │
  │   window, menu, native dialogs       │            │                                 │
- │        │ starts, shows its URL       │            │ Mcp gem (src/Bundled/Gems/Mcp)  │
+ │        │ starts, shows its URL       │            │ Mcp gem (src/Gems/Mcp)          │
  │        ▼                             │   starts   │   HttpListener on pool threads  │
  │ Wizard server  (Wizard/)             │───────────▶│   Threads ──▶ main thread       │
  │   Blazor Server, all logic in C#     │ --set port │   tools over World, Assets,     │
@@ -86,21 +86,23 @@ In `src/Core/README.md`, add this to "What a gem can ask for":
 
 ### 1.2 The project
 
-Create `src/Bundled/Gems/Mcp/Mcp.csproj`. The rest of its build comes from `src/Bundled/Gems/Directory.Build.props`.
+Make the gem from the gem template, which adds it to `src/Magic.slnx`'s `/Gems/` folder:
+
+```powershell
+dotnet new magic-gem -n Mcp -o src/Gems/Mcp
+```
+
+In `src/Gems/Mcp/Mcp.csproj`, set the description and add the SDK:
 
 ```xml
-<!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
     <Description>Serves the engine to MCP clients, an editor or an LLM, over localhost HTTP.</Description>
-    <Version>1.0.0</Version>
-  </PropertyGroup>
+```
 
+```xml
   <ItemGroup>
     <!-- The official C# MCP SDK's protocol and server, without ASP.NET Core, which a gem cannot load. -->
     <PackageReference Include="ModelContextProtocol.Core" />
   </ItemGroup>
-</Project>
 ```
 
 Add the SDK's version to `Directory.Packages.props`, in order:
@@ -110,18 +112,18 @@ Add the SDK's version to `Directory.Packages.props`, in order:
     <PackageVersion Include="ModelContextProtocol.Core" Version="2.2.0" />
 ```
 
-In `src/Magic.slnx`, add the project to the `/Gems/` folder, in order:
+In `src/Magic.slnx`, check the template put it in the `/Gems/` folder, in order:
 
 ```xml
-    <Project Path="src/Bundled/Gems/LogMetrics/LogMetrics.csproj" />
-    <Project Path="src/Bundled/Gems/Mcp/Mcp.csproj" />
+    <Project Path="Gems/Hello/Hello.csproj" />
+    <Project Path="Gems/Mcp/Mcp.csproj" />
 ```
 
 Nothing else registers it.
 
 ### 1.3 The settings
 
-Create `src/Bundled/Gems/Mcp/McpSettings.cs`:
+Create `src/Gems/Mcp/McpSettings.cs`:
 
 ```csharp
 using System.ComponentModel;
@@ -150,7 +152,7 @@ F4 shows the doc comments, keeps the value in the range and lists the port under
 
 ### 1.4 The gem
 
-Create `src/Bundled/Gems/Mcp/McpGem.cs`:
+Create `src/Gems/Mcp/McpGem.cs`:
 
 ```csharp
 using System.ComponentModel;
@@ -746,7 +748,7 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
 
 ### 1.5 Its README
 
-Create `src/Bundled/Gems/Mcp/README.md`:
+Create `src/Gems/Mcp/README.md`:
 
 ```markdown
 # Mcp
@@ -776,12 +778,10 @@ Each POST to `/mcp` carries one JSON-RPC message and gets one answer. Nothing is
 
 ### 1.6 List it
 
-Add `Mcp` after `LogMetrics` in `samples/Samples.magic`:
+Add `Mcp` after `Hello` in `samples/HelloWorld/HelloWorld.magic`:
 
 ```json
-        "LogMetrics",
-        "Mcp"
-    ]
+{ "name": "HelloWorld", "gems": ["Hello", "Mcp"] }
 ```
 
 Do the same in `tools/VS Templates/Project/ProjectName.magic`, then run `tools/VS Templates/InstallTemplates.ps1` again to update the
@@ -1934,7 +1934,7 @@ dotnet run --project Wizard
 
 It prints `Now listening on: http://localhost:5211`. Open that in a browser.
 
-1. Paste the full path of the samples folder, or of its `Samples.magic`, into the box and press **Play**.
+1. Paste the full path of `samples/HelloWorld`, or of its `HelloWorld.magic`, into the box and press **Play**.
 2. The engine window opens on the Hub. The status on the right reads `Samples · frame N · 49 entities`, with the frame
    counting up.
 3. The console fills with the engine's log, starting at `Gem Mcp 1.0.0 by Konfus started`. The terminal running
@@ -2149,7 +2149,7 @@ npm start
 ```
 
 1. A native window titled Wizard opens on the same page as the browser did, with a File, Edit and View menu.
-2. **Browse…** opens the native file dialog, filtered to `.magic` files. Pick `samples/Samples.magic`.
+2. **Browse…** opens the native file dialog, filtered to `.magic` files. Pick `samples/HelloWorld/HelloWorld.magic`.
 3. **Play** starts the engine, as before; the terminal shows Wizard's and the engine's output.
 4. Close the Wizard window while the engine runs. Within a few seconds the engine window closes too. Check that
    nothing is left behind:

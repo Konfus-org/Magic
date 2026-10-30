@@ -4,7 +4,7 @@
   "classifications": [ "Magic", "Core" ],
   "identity": "Magic.Templates.Core",
   "name": "Magic Core Module",
-  "description": "A module of Magic's Core. Give it the bare name, without Magic. (Assets makes Magic.Assets), and keep its location at src, the solution's folder.",
+  "description": "A module of Magic's Core. Give it the bare name, without Magic. (Assets makes Magic.Assets), and set its location to src/Core.",
   "shortName": "magic-core",
   "sourceName": "ModuleName",
   "preferNameDirectory": true,

@@ -1,5 +1,5 @@
-# Every commit's subject starts with type(scope): (AGENTS.md, Commits). The repository's hook writes it where the
-# commit is made; this checks what reached GitHub, every subject of a push or pull request, and names each one
+# Every commit's subject starts with type: and has no scope (AGENTS.md, Commits). The repository's hook writes it where
+# the commit is made; this checks what reached GitHub, every subject of a push or pull request, and names each one
 # without it.
 name: Commits
 
@@ -40,7 +40,7 @@ jobs:
           elif [ -n "$BEFORE" ] && git cat-file -e "$BEFORE" 2>/dev/null; then range="$BEFORE..HEAD"
           elif [ -n "$(git rev-list origin/main..HEAD)" ]; then range="origin/main..HEAD"
           else range="HEAD^..HEAD"; fi
-          pattern='^[0-9a-f]+ (feat|fix|refactor|docs|test|build|ci)(\([A-Za-z0-9][A-Za-z0-9:, -]*\))?!?: [^ ]'
+          pattern='^[0-9a-f]+ (feat|fix|refactor|docs|test|build|ci)!?: [^ ]'
           echo "Checking $(git rev-list --no-merges --count "$range") commits in $range."
           bad=$(git log --no-merges --format='%h %s' "$range" | grep -Ev "$pattern" || true)
-          [ -z "$bad" ] || { printf '%s\n' "$bad" | cut -c1-160 | sed 's/^/::error::no type(scope) prefix: /'; exit 1; }
+          [ -z "$bad" ] || { printf '%s\n' "$bad" | cut -c1-160 | sed 's/^/::error::no type: prefix, or a scope: /'; exit 1; }

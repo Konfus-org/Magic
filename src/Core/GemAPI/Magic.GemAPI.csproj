@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Debugging/Magic.Debugging.csproj" />
+    <ProjectReference Include="../Files/Magic.Files.csproj" />
+    <ProjectReference Include="../Host/Magic.Host.csproj" />
+    <ProjectReference Include="../Utils/Magic.Utils.csproj" />
+  </ItemGroup>
+</Project>

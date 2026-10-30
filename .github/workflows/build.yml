@@ -41,14 +41,14 @@ jobs:
       - id: setup
         uses: ./.github/actions/setup
 
-      # Core's VersionPrefix with this run's number as the patch, so every build is newer than the last and no one
+      # Magic's VersionPrefix with this run's number as the patch, so every build is newer than the last and no one
       # bumps a number by hand. MSBuild reads Version from the environment; a project with a Version of its own, as a
       # gem has, keeps it.
       - name: Name the version
         id: version
         shell: pwsh
         run: |
-          $prefix = dotnet msbuild src/Core/Core.csproj -getProperty:VersionPrefix
+          $prefix = dotnet msbuild src/Core/Launcher/Magic.Launcher.csproj -getProperty:VersionPrefix
           $version = "$prefix.${{ github.run_number }}"
           "version=$version" >> $env:GITHUB_OUTPUT
           "Version=$version" >> $env:GITHUB_ENV

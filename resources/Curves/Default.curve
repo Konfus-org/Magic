@@ -1,0 +1,4 @@
+{
+    // 1 everywhere: a curve left out changes nothing it scales.
+    "keys": [ { "at": 0, "value": 1 } ]
+}

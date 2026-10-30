@@ -1,0 +1,4 @@
+{
+    // The engine's settings: every settings class states its defaults, so nothing is set here. A project's own
+    // Presets/Default.preset, its settings, replaces this one, and any other preset applied goes over it.
+}

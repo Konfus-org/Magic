@@ -1,0 +1,14 @@
+<!-- The assets that ship with Magic: the engine's own and its bundled gems'. Core ships the folder; this project compiles
+     the scripts, the .cs assets among them, into Resources/Resources.dll beside Magic (the root Directory.Build.props
+     places it there), which Core loads as it loads a project's own code. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- The scripts are Magic's own: Magic.Scripts, as in Core. -->
+    <RootNamespace>Magic</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Compiled against, never copied: at run time the scripts use the Magic that loaded them. -->
+    <ProjectReference Include="../../Core/Core.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+</Project>

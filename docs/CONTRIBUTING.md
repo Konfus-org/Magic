@@ -7,7 +7,7 @@
 - The [README](../README.md) covers the requirements and the build. Format your change with
   `tools/Scripts/Format.ps1` and pass `tools/Scripts/Validate.ps1` ([Tools](../tools/README.md)).
 - Once per clone, run `git config core.hooksPath .githooks`. The hooks start each commit's subject with
-  `type(scope): ` and refuse one without it ([Git hooks](../.githooks/README.md)).
+  `type: ` and refuse one without it ([Git hooks](../.githooks/README.md)).
 
 ## Pull requests
 

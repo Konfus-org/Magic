@@ -29,8 +29,8 @@
     <CSharpier_LogLevel>Warning</CSharpier_LogLevel>
   </PropertyGroup>
 
-  <!-- Output. Build/bin/<Configuration>/ is Magic's folder, and where it loads the rest from: the bundled gems from
-       Gems/<Name>/, the bundled scripts from Resources/, a project's code from Projects/<Name>/; tests and the build's
+  <!-- Output. Build/bin/<Configuration>/ is Magic's folder, and where it loads the rest from: the gems in src/Gems/
+       from Gems/<Name>/, the assets in src/Resources/ from Resources/, a project's code from Projects/<Name>/; tests and the build's
        tools, which never ship, go under Tests/<Name>/ and Tools/<Name>/. A project is placed by where its source is,
        here rather than in its own folder, because MSBuild fixes the intermediate folder before any project file or
        nearer Directory.Build.props is read. A project's intermediate files are its own, in
@@ -39,8 +39,8 @@
   <PropertyGroup>
     <MagicRoot>$(MSBuildThisFileDirectory)</MagicRoot>
     <MagicSource>$([MSBuild]::MakeRelative('$(MSBuildThisFileDirectory)', '$(MSBuildProjectDirectory)').Replace('\', '/'))/</MagicSource>
-    <MagicOutput Condition="$(MagicSource.StartsWith('src/Bundled/Gems/'))">Gems/$(MSBuildProjectName)/</MagicOutput>
-    <MagicOutput Condition="$(MagicSource.StartsWith('src/Bundled/Resources/'))">Resources/</MagicOutput>
+    <MagicOutput Condition="$(MagicSource.StartsWith('src/Gems/'))">Gems/$(MSBuildProjectName)/</MagicOutput>
+    <MagicOutput Condition="$(MagicSource.StartsWith('src/Resources/'))">Resources/</MagicOutput>
     <MagicOutput Condition="$(MagicSource.StartsWith('samples/'))">Projects/$(MSBuildProjectName)/</MagicOutput>
     <MagicOutput Condition="$(MagicSource.StartsWith('tests/'))">Tests/$(MSBuildProjectName)/</MagicOutput>
     <MagicOutput Condition="$(MagicSource.StartsWith('tools/'))">Tools/$(MSBuildProjectName)/</MagicOutput>

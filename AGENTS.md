@@ -177,11 +177,11 @@ on the user. Keep any session that was interrupted, never started, or waits on t
 
 ### Commits
 
-- The subject starts with `type(scope): `, which the repository's hook writes from the branch's type and the files
-  staged ([Git hooks](.githooks/README.md)): `feature/` gives `feat`, every other branch type its own word, and a
-  commit of Markdown alone `docs`; the scope names the areas the files are in, each gem by name, as in
-  `fix(core, gem:Box3DPhysics,SteamAudio, samples): `. Write the subject alone, never an area prefix such as
-  `Core, Gems:`. The `commit-msg` hook refuses a commit whose subject lacks one, and the Commits check a push.
+- The subject starts with `type: `, as in `fix: `, which the repository's hook writes from the branch's type and
+  the files staged ([Git hooks](.githooks/README.md)): `feature/` gives `feat`, every other branch type its own word,
+  and a commit of Markdown alone `docs`. Write the subject alone, never a scope or area prefix such as
+  `fix(core): ` or `Core, Gems:`. The `commit-msg` hook refuses a commit whose subject lacks the type or has a scope,
+  and the Commits check a push.
 - Commit only after the user approves the review.
 - Never push.
 - No co-author lines, and nothing in code, comments, commit messages or branch names that hints the work was
