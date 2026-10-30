@@ -9,7 +9,7 @@
   <ItemGroup>
     <!-- Built before the project so its Run has a Magic to start; nothing of it is referenced or copied. -->
     <ProjectReference
-      Include="$(MagicRoot)src/Launcher/Magic.Launcher.csproj"
+      Include="$(MagicRoot)src/Core/Launcher/Magic.Launcher.csproj"
       ReferenceOutputAssembly="false"
       Private="false"
       SkipGetTargetFrameworkProperties="true"

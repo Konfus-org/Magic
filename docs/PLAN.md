@@ -83,11 +83,11 @@ Copy [`Directory.Build.props`](https://github.com/Konfus-org/Slop-Magic/blob/dev
 ```powershell
 git status
 git add -A
-git commit -m "build(core): the empty solution, Core and the build rules"
+git commit -m "build: the empty solution, Core and the build rules"
 git log --oneline
 ```
 
-_Nugget._ `git add` copies files into the index, the staging area, and a commit is made from the index, never straight from the working tree; `git status` shows the two apart. `git add -p` stages hunk by hunk when a change mixes two things. This repository's subjects read `type(scope): what`, enforced by a hook; start that habit on commit one.
+_Nugget._ `git add` copies files into the index, the staging area, and a commit is made from the index, never straight from the working tree; `git status` shows the two apart. `git add -p` stages hunk by hunk when a change mixes two things. This repository's subjects read `type: what`, enforced by a hook; start that habit on commit one.
 
 **The remote and the push.** The GitHub CLI is installed and signed in on this machine, so one command makes the repository, adds the remote and pushes:
 

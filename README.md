@@ -1,6 +1,6 @@
 # Magic
 
-Magic is a plugin-driven game engine written in C#. It is being rewritten by hand; [the plan](docs/PLAN.md) says
+Magic is a plugin-driven game engine written in C#. It is being actively developed, [the plan](docs/PLAN.md) says
 where it is going. Today it is the `Magic` program, its log and asserts, and the build rules.
 
 ## Requirements
@@ -12,11 +12,11 @@ where it is going. Today it is the `Magic` program, its log and asserts, and the
 
 ```powershell
 dotnet build src/Magic.slnx
-dotnet run --project src/Launcher -- open <path> --headless
+dotnet run --project src/Core/Launcher -- open <path> --headless
 dotnet run --project samples/HelloWorld
 ```
 
-What follows `--` goes to Magic, whose commands are declared in [`Cli.cs`](src/CommandLine/Cli.cs); `--help` lists
+What follows `--` goes to Magic, whose commands are declared in [`Cli.cs`](src/Core/CommandLine/Cli.cs); `--help` lists
 them. With `--headless`, each line typed into the terminal runs the same commands, and an option may leave out its
 leading `--`. A typed `open <path>` or `headless false` restarts the run. The build output goes to
 `Build/bin/<Configuration>/`.
@@ -31,11 +31,9 @@ know, such as `-o <folder>`. Install Magic's templates first with `tools/VS Temp
 ## Folders
 
 ```
-src/Launcher/    the Magic program
-src/Host/        the app, the project and the gem contract
-src/Debugging/   the log, asserts and crashes
-src/Threading/   helpers for tasks and threads
-src/Utils/       small value types and helpers the other projects share
+src/             all source code for the engine goes in here
+src/Core/        the engine: the Magic program and everything it is built from
+src/Gems/        the plugins that come with Magic, each built to Gems/<Name>/ beside it
 samples/         the sample projects, which show and test Magic
 tools/           the scripts and the analyzers; nothing here ships
 docs/            the plan, how to contribute and the code standards

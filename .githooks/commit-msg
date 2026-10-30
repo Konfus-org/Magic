@@ -1,11 +1,11 @@
 #!/bin/sh
-# Refuses a commit whose subject doesn't start with type(scope): (AGENTS.md, Commits), the same rule the Commits check
-# applies on GitHub. prepare-commit-msg writes the prefix first, so this catches a branch that gives no type and a
-# prefix edited away. Fixups and merge commits pass.
+# Refuses a commit whose subject doesn't start with type: , or has a scope, (AGENTS.md, Commits), the same rule the
+# Commits check applies on GitHub. prepare-commit-msg writes the prefix first, so this catches a branch that gives no
+# type and a prefix edited away. Fixups and merge commits pass.
 first=$(git stripspace --strip-comments < "$1" | head -n 1)
 case $first in fixup!*|squash!*|amend!*|Merge\ *) exit 0 ;; esac
-printf '%s\n' "$first" | grep -Eq '^(feat|fix|refactor|docs|test|build|ci)(\([A-Za-z0-9][A-Za-z0-9:, -]*\))?!?: [^ ]' && exit 0
+printf '%s\n' "$first" | grep -Eq '^(feat|fix|refactor|docs|test|build|ci)!?: [^ ]' && exit 0
 
-echo "commit-msg: start the subject with type(scope): , such as 'feat(core, gem:Physics,Audio): Add ...'." >&2
+echo "commit-msg: start the subject with type: and no scope, such as 'feat: Add ...'." >&2
 echo "commit-msg: types are feat, fix, refactor, docs, test, build and ci (AGENTS.md, Commits)." >&2
 exit 1

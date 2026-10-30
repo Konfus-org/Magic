@@ -6,7 +6,7 @@ in a screenshot to look at.
 .DESCRIPTION
 The steps run in order and the first failure ends the run with that step's exit code; a run that passes exits 0.
 The build is incremental, so what is built already is reused, and the native libraries are built once per machine,
-shared by every checkout (src/Bundled/Gems/README.md, Native libraries). The build makes every warning but a TODO's an
+shared by every checkout (src/Gems/README.md, Native libraries). The build makes every warning but a TODO's an
 error, so a clean build is one that exits 0. It logs with MSBuild's plain console logger, so the native libraries'
 progress shows as it happens, which the terminal logger holds back until each project ends. Formatting is not checked
 here: tools/Scripts/Format.ps1 formats a change before it is validated, and the build fails on every rule it applies that a
