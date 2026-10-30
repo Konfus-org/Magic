@@ -125,6 +125,7 @@ internal static class Launcher
         for (uint index = 0; ; index++)
         {
             Cli.Pump(app);
+
             if (app.ShouldExitOnError && Log.ErrorCount > 0)
                 return Result.Failure($"Exiting with code 2 due to logged errors. Error count: {Log.ErrorCount}");
 

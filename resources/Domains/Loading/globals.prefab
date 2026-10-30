@@ -1,0 +1,17 @@
+{
+    "entities": [
+        {
+            "name": "Sky",
+            "components": {
+                "Sky": {}
+            }
+        },
+        {
+            "name": "Camera",
+            "components": {
+                "Transform": {},
+                "Camera": {}
+            }
+        }
+    ]
+}
