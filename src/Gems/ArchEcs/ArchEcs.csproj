@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A gem: Magic loads it from Gems/ArchEcs/ArchEcs.dll when a project lists ArchEcs. -->
+  <PropertyGroup>
+    <!-- Shown beside the gem as Magic starts it. -->
+    <Description>The entity world, through Arch: provides IEcs.</Description>
+    <Version>1.0.0</Version>
+    <!-- Only what is referenced below is built against, so nothing of Magic's comes along by another reference. -->
+    <DisableTransitiveProjectReferences>true</DisableTransitiveProjectReferences>
+    <!-- Copies the gem's own NuGet dependencies next to it, where its load context finds them. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="Magic.Author" Value="$(Authors)" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Arch" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its IEcs. -->
+    <ProjectReference Include="$(MagicRoot)src/Core/GemAPI/Magic.GemAPI.csproj" Private="false" />
+    <ProjectReference Include="$(MagicRoot)src/Core/Ecs/Magic.Ecs.csproj" Private="false" />
+  </ItemGroup>
+</Project>

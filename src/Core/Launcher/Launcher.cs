@@ -3,6 +3,7 @@ using Magic.Assets.Pipeline;
 using Magic.CommandLine;
 using Magic.Debugging;
 using Magic.Files;
+using Magic.GemAPI;
 using Magic.Runtime;
 using Magic.Utils;
 using Microsoft.Extensions.DependencyInjection;
@@ -38,7 +39,7 @@ internal static class Launcher
         while (true)
         {
             ServiceCollection services = [];
-            (App app, IFileSystem files, AssetManager assets) = services.RegisterRequiredServices();
+            (App app, IFileSystem files, AssetManager assets, Events events) = services.RegisterRequiredServices();
             using (assets)
             {
                 Result ran = Cli.Run(app, files, commandLine);
@@ -53,7 +54,7 @@ internal static class Launcher
                 if (app.IsExiting || app.Project is null)
                     return Log.ErrorCount == 0 ? 0 : 1;
 
-                Result ended = app.Run(services, files, assets);
+                Result ended = app.Run(services, files, assets, events);
                 if (!ended.Ok)
                 {
                     Log.Critical(ended.Error);

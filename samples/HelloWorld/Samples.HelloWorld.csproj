@@ -21,5 +21,11 @@
       Private="false"
       SkipGetTargetFrameworkProperties="true"
     />
+    <ProjectReference
+      Include="$(MagicRoot)src/Gems/ArchEcs/ArchEcs.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      SkipGetTargetFrameworkProperties="true"
+    />
   </ItemGroup>
 </Project>

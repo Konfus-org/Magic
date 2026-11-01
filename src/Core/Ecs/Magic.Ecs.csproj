@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The entity world's contract, which a gem provides, and the components gems share. -->
+  <ItemGroup>
+    <ProjectReference Include="../Assets/Magic.Assets.csproj" />
+  </ItemGroup>
+</Project>

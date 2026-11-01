@@ -8,4 +8,8 @@
     <ProjectReference Include="../Assets/Magic.Assets.csproj" />
     <ProjectReference Include="../Utils/Magic.Utils.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- The host's plumbing: taking each frame's messages. -->
+    <InternalsVisibleTo Include="Magic" />
+  </ItemGroup>
 </Project>

@@ -9,6 +9,8 @@
     <!--#endif -->
     <!-- Only what is referenced below is built against, so nothing of Magic's comes along by another reference. -->
     <DisableTransitiveProjectReferences>true</DisableTransitiveProjectReferences>
+    <!-- Copies the gem's own NuGet dependencies next to it, where its load context finds them. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>
   <ItemGroup>
     <AssemblyMetadata Include="Magic.Author" Value="$(Authors)" />

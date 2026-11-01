@@ -10,6 +10,8 @@
     <ProjectReference Include="../Assets/Magic.Assets.csproj" />
     <ProjectReference Include="../CommandLine/Magic.CommandLine.csproj" />
     <ProjectReference Include="../Debugging/Magic.Debugging.csproj" />
+    <!-- Not used by Magic itself, but shipped beside it for the gems built against it. -->
+    <ProjectReference Include="../Ecs/Magic.Ecs.csproj" TreatAsUsed="true" />
     <ProjectReference Include="../GemAPI/Magic.GemAPI.csproj" />
     <ProjectReference Include="../Runtime/Magic.Runtime.csproj" />
   </ItemGroup>

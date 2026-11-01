@@ -19,7 +19,8 @@ internal static class AppExtensions
         /// Runs the app's project: adds its folder to <paramref name="assets"/>, registers its gems with
         /// <paramref name="services"/>, which holds what the host provides, indexes the assets, makes and sets up the
         /// gems, and runs their frames until the commands ask to exit or for another project or mode, then unloads them.
-        /// Runs a line typed into the terminal and pumps <paramref name="assets"/> between frames. The gem that provides
+        /// Runs a line typed into the terminal, pumps <paramref name="assets"/> and takes what was published on
+        /// <paramref name="events"/> between frames. The gem that provides
         /// <see cref="IWindow"/> is the app's <see cref="App.Window"/> for the run. Fails when no project is open, and at
         /// the first error under --fail-on-error.
         /// </summary>
@@ -28,7 +29,7 @@ internal static class AppExtensions
             "CA1031:Do not catch general exception types",
             Justification = "Whatever a gem throws, it is logged and the gem leaves the loop; the others go on."
         )]
-        internal Result Run(ServiceCollection services, IFileSystem files, AssetManager assets)
+        internal Result Run(ServiceCollection services, IFileSystem files, AssetManager assets, Events events)
         {
             const double FrameSec = 1.0 / 60;
             const double FixedStepSec = 1.0 / 60;
@@ -69,6 +70,7 @@ internal static class AppExtensions
             {
                 Cli.Pump(app, files);
                 assets.Pump();
+                FrameEvents published = events.Take();
 
                 if (app.ShouldExitOnError && Log.ErrorCount > 0)
                     break;
@@ -87,6 +89,7 @@ internal static class AppExtensions
                         AppDeltaSec = nowSec - lastSec,
                         SimSec = pausedAtSec.Value,
                         SimDeltaSec = pausedDeltaSec.Value,
+                        Events = published,
                     };
                 }
                 else
@@ -100,6 +103,7 @@ internal static class AppExtensions
                         AppDeltaSec = nowSec - lastSec,
                         SimSec = nowSec,
                         SimDeltaSec = nowSec - lastSec,
+                        Events = published,
                     };
                 }
                 lastSec = nowSec;
@@ -124,6 +128,7 @@ internal static class AppExtensions
                             {
                                 SimSec = fixedSec + (step * FixedStepSec),
                                 SimDeltaSec = FixedStepSec,
+                                Events = FrameEvents.None,
                             };
                             gem.Gem.DeterministicTick(in fixedFrame);
                         }

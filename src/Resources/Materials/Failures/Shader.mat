@@ -1,6 +1,8 @@
 {
-    "shader": { "id": 10003 },
-    "params": {
-        "kind": { "x": 1 }
+    "visuals": {
+        "shader": { "id": 10003 },
+        "params": {
+            "kind": { "x": 1 }
+        }
     }
 }

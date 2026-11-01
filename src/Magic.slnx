@@ -4,6 +4,7 @@
     <Project Path="Core/Assets/Magic.Assets.csproj" />
     <Project Path="Core/CommandLine/Magic.CommandLine.csproj" />
     <Project Path="Core/Debugging/Magic.Debugging.csproj" />
+    <Project Path="Core/Ecs/Magic.Ecs.csproj" />
     <Project Path="Core/Files/Magic.Files.csproj" Id="dd604984-bd65-4521-840f-f207ddcec01d" />
     <Project Path="Core/GemAPI/Magic.GemAPI.csproj" />
     <Project Path="Core/Launcher/Magic.Launcher.csproj" />
@@ -13,6 +14,7 @@
     <Project Path="Core/Utils/Magic.Utils.csproj" />
   </Folder>
   <Folder Name="/Gems/">
+    <Project Path="Gems/ArchEcs/ArchEcs.csproj" />
     <Project Path="Gems/Hello/Hello.csproj" />
   </Folder>
   <Folder Name="/Docs/">

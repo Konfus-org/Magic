@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using Magic.Debugging;
 using Magic.GemAPI;
 
@@ -6,14 +5,10 @@ namespace GemName;
 
 /// <summary>
 /// The gem: the one class in its assembly that implements <see cref="IGem"/>. Magic makes it after whatever its
-/// constructor takes, and every other interface it implements is what it provides to the gems made after it.
+/// constructor takes, and every other interface it implements is what it provides to the gems made after it. It is
+/// public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-[SuppressMessage(
-    "Performance",
-    "CA1812:Avoid uninstantiated internal classes",
-    Justification = "Magic makes it by reflection when a project lists the gem."
-)]
-internal sealed class GemNameGem : IGem
+public sealed class GemNameGem : IGem
 {
     public void Tick(in Frame frame)
     {

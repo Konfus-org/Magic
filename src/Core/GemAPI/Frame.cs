@@ -1,7 +1,7 @@
 namespace Magic.GemAPI;
 
 /// <summary>
-/// One frame's clocks, handed to every gem's hooks.
+/// One frame's clocks and messages, handed to every gem's hooks.
 /// </summary>
 public readonly record struct Frame
 {
@@ -28,4 +28,10 @@ public readonly record struct Frame
     public required double SimDeltaSec { get; init; }
 
     public bool IsPaused { get; init; }
+
+    /// <summary>
+    /// The messages published during the last frame. None in a fixed step, which takes what it needs from what
+    /// <see cref="IGem.Tick"/> read.
+    /// </summary>
+    public FrameEvents Events { get; init; }
 }
