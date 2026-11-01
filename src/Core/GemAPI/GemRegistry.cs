@@ -182,8 +182,10 @@ public sealed class GemRegistry
             List<string> needs = [];
             foreach (ParameterInfo parameter in gem.Type.GetConstructors()[0].GetParameters())
             {
-                bool isGem = providers.TryGetValue(parameter.ParameterType, out string? provider);
-                if (isGem && provider != gem.Name && !needs.Contains(provider))
+                if (!providers.TryGetValue(parameter.ParameterType, out string? provider))
+                    continue;
+
+                if (provider != gem.Name && !needs.Contains(provider))
                     needs.Add(provider);
             }
 
