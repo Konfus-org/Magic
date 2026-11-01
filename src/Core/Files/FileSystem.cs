@@ -12,7 +12,7 @@ namespace Magic.Files;
     "RS0030:Do not use banned APIs",
     Justification = "The IFileSystem implementation is the one place that touches the disk."
 )]
-public sealed class FileSystem : IFileSystem
+internal sealed class FileSystem : IFileSystem
 {
     public string Combine(params ReadOnlySpan<string> parts) => Path.Combine(parts);
 

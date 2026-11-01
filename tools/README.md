@@ -11,9 +11,12 @@ switches: `Get-Help ./tools/Scripts/Validate.ps1 -Full`.
 
 Formats the `.cs`, `.csproj`, `.props` and `.targets` files that differ from the last commit, new files included.
 `-All` formats every file. It orders each type's members, applies the code style, then lays the code out with
-CSharpier. A local build formats too, and `Validate.ps1` checks.
+CSharpier. A local build formats too, and `Validate.ps1` checks. Last, it builds the solution and removes each project
+or package reference nothing compiled uses, which the build otherwise refuses.
 
 - Fixes that would delete, invent or rename code are left to you. The build still reports them.
+- A reference needed by something other than the code, such as a package that only adds build steps, says
+  `TreatAsUsed="true"`, and is kept.
 - After it moves statics, check that no static initializer reads a static declared below it, which would still be
   unset.
 
@@ -41,19 +44,9 @@ and a state already stamped returns at once. It also points git at the repositor
 
 ## Templates
 
-`VS Templates/` holds the `dotnet new` templates for a Core module, a gem and a sample project, and `InstallTemplates.ps1`
-installs them. Run it once, and again after a template changes. Each template is a project in the solution's
+`VS Templates/` holds the `dotnet new` templates for a gem and a sample project, and `InstallTemplates.ps1` installs
+them. Run it once, and again after a template changes. Each template is a project in the solution's
 `Tools/VS Templates` folder and builds where it is, so a template that no longer compiles fails the build.
-
-To add a Core module:
-
-- **Visual Studio:** right-click the `Core` solution folder, choose Add > New Project > Magic Core Module and give it
-  the bare name (`Assets`, not `Magic.Assets`). Set its location to `src/Core`.
-- **Command line:** `Magic new core Assets -o src/Core/Assets` from the repository's root, which runs
-  `dotnet new magic-core -n Assets -o src/Core/Assets`.
-
-Either makes `src/Core/Assets/Magic.Assets.csproj` and adds it to the solution's `Core` folder. Its settings come from
-`Directory.Build.props`, so the project file lists only its references. Add those, and the folder's line in the [README](../README.md#folders).
 
 To add a gem:
 

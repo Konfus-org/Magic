@@ -28,10 +28,12 @@
   </ItemGroup>
   <!-- Analyzers every project runs; their rules are configured in .editorconfig. CSharpier's package makes the build
        refuse a file the formatter would change (Directory.Build.props); its version is the one
-       .config/dotnet-tools.json pins for tools/Scripts/Format.ps1. -->
+       .config/dotnet-tools.json pins for tools/Scripts/Format.ps1. ReferenceTrimmer makes it refuse a project or
+       package reference nothing compiled uses, which tools/Scripts/Format.ps1 removes. -->
   <ItemGroup>
     <GlobalPackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" />
     <GlobalPackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="18.12.1" />
     <GlobalPackageReference Include="CSharpier.MSBuild" Version="1.3.0" />
+    <GlobalPackageReference Include="ReferenceTrimmer" Version="3.5.13" />
   </ItemGroup>
 </Project>
