@@ -8,7 +8,7 @@ namespace Magic.GemAPI;
 /// is a sink, and whatever is registered for it later), then the gem itself, then its load context, which frees its
 /// assemblies once nothing refers to the gem.
 /// </summary>
-public sealed class LoadedGem : IDisposable
+internal sealed class LoadedGem : IDisposable
 {
     /// <summary>
     /// The gem's load context, held so it lives as long as the gem is in use: nothing else keeps it alive, and once
@@ -17,14 +17,14 @@ public sealed class LoadedGem : IDisposable
     private readonly AssemblyLoadContext? _context;
     private bool _isDisposed;
 
-    internal LoadedGem(IGem gem, string name, Version version, string author, string description)
+    internal LoadedGem(IGem gem, GemInfo info)
     {
         _context = AssemblyLoadContext.GetLoadContext(gem.GetType().Assembly);
         Gem = gem;
-        Name = name;
-        Version = version;
-        Author = author;
-        Description = description;
+        Name = info.Name;
+        Version = info.Version;
+        Author = info.Author;
+        Description = info.Description;
     }
 
     public IGem Gem { get; }

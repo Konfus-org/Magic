@@ -12,7 +12,7 @@ where it is going. Today it is the `Magic` program, its log and asserts, and the
 
 ```powershell
 dotnet build src/Magic.slnx
-dotnet run --project src/Core/Launcher -- open <path> --headless
+dotnet run --project src/Core -- open <path> --headless
 dotnet run --project samples/HelloWorld
 ```
 

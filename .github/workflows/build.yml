@@ -48,7 +48,7 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          $prefix = dotnet msbuild src/Core/Launcher/Magic.Launcher.csproj -getProperty:VersionPrefix
+          $prefix = dotnet msbuild src/Core/Magic.Core.csproj -getProperty:VersionPrefix
           $version = "$prefix.${{ github.run_number }}"
           "version=$version" >> $env:GITHUB_OUTPUT
           "Version=$version" >> $env:GITHUB_ENV

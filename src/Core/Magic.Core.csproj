@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Magic: the executable that loads and launches a project, and the API its gems compile against. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Magic</AssemblyName>
+    <RootNamespace>Magic</RootNamespace>
+    <!-- Magic's version; CI adds the run's number as the patch. -->
+    <VersionPrefix>0.1</VersionPrefix>
+    <!-- The engine's own assets, every project's: Resources/ beside Magic in a release, else read where they are. -->
+    <MagicResources>$(MagicRoot)src/Resources</MagicResources>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Magic's own: no gem compiles against them or inherits them. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" PrivateAssets="all" />
+    <PackageReference Include="System.CommandLine" PrivateAssets="all" />
+    <PackageReference Include="System.IO.Hashing" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

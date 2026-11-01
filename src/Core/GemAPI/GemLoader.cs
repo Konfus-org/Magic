@@ -1,65 +1,59 @@
-using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
-using System.IO;
-using System.Linq;
-using System.Reflection;
+using Magic.Assets.Pipeline;
 using Magic.Debugging;
-using Magic.Files;
-using Magic.Utils;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Magic.GemAPI;
 
 /// <summary>
-/// Loads the gems a project lists and makes them, each after the gems its constructor asks for. A gem that can't be
-/// loaded or made is logged, and the others go on without it.
-/// Also provides an API to unload gems.
+/// Makes the gems a <see cref="GemRegistry"/> registered, each after the gems it needs, and sets them up; ends them
+/// with <see cref="Unload"/>. A gem that can't be made is logged, and the others go on without it.
 /// </summary>
-public static class GemLoader
+internal static class GemLoader
 {
     /// <summary>
-    /// Loads the <paramref name="gemsToLoad"/>, registers each with <paramref name="services"/>, which
-    /// already holds what the host provides, and makes them: the gems made, in dependency order. End them in reverse by
-    /// disposing each <see cref="LoadedGem"/>, which also frees the gem's assemblies.
+    /// Makes the gems in <paramref name="registry"/> through <paramref name="provider"/>, which was built from the
+    /// services they were registered with, and sets each up: on the log when it is a sink, and reading for
+    /// <paramref name="assets"/> the asset types it reads. The gems made, in dependency order. End them with
+    /// <see cref="Unload"/>, which also frees the gems' assemblies once nothing holds the provider.
     /// </summary>
-    public static IReadOnlyList<LoadedGem> Load(
-        ServiceCollection services,
-        IFileSystem files,
-        ImmutableArray<string> gemsToLoad
-    )
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Whatever a gem's constructor throws, it is logged and the gem is not made; the others go on."
+    )]
+    public static IReadOnlyList<LoadedGem> Load(IServiceProvider provider, GemRegistry registry, AssetManager assets)
     {
-        if (gemsToLoad.Any())
-            Log.Info($"Loading {string.Join(", ", gemsToLoad)}.");
-
-        // The gems made, in the order their constructors finished, which is dependency order; those tried, so a failed
-        // one isn't made twice; and those being made, so one asked for again is a cycle, on which the provider hangs.
-        List<LoadedGem> created = [];
-        HashSet<Type> tried = [];
-        HashSet<Type> creating = [];
-        List<GemInfo> gems = Register(
-            services,
-            files,
-            gemsToLoad,
-            (scope, gem) => CreateGem(scope, gem, created, tried, creating)
-        );
-
-        // Never disposed, since its singletons are the gems, which the caller owns; dropped when this returns, so it
-        // keeps no gem from unloading.
-        IServiceProvider provider = services.BuildServiceProvider();
-        foreach (GemInfo gem in gems)
+        List<LoadedGem> loaded = [];
+        foreach (GemInfo gem in Sort(registry))
         {
+            IGem made;
             try
             {
-                provider.GetRequiredService(gem.Type);
+                made = (IGem)provider.GetRequiredService(gem.Type);
             }
-            catch (InvalidOperationException)
+            catch (Exception ex)
             {
-                // CreateGem has logged why.
+                // A missing service, a gem it needs that wasn't made, or a gem that can't start says why in the message;
+                // anything else is a bug in the gem, and its stack says where.
+                string why = ex is InvalidOperationException ? ex.Message : ex.ToString();
+                Log.Error($"Gem {gem.Name} was not made: {why}");
+                continue;
             }
+
+            LoadedGem setUp = new(made, gem);
+            loaded.Add(setUp);
+            if (made is ILogSink sink)
+                setUp.Subscriptions.Add(Log.Register(sink));
+
+            if (gem.Reads.Count > 0)
+                setUp.Subscriptions.Add(assets.AddLoader(made));
+
+            string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
+            Log.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");
         }
 
-        return created;
+        return loaded;
     }
 
     public static void Unload(IReadOnlyList<LoadedGem> gems)
@@ -73,284 +67,57 @@ public static class GemLoader
     }
 
     /// <summary>
-    /// The gem <paramref name="name"/> from <c>Gems/&lt;name&gt;/&lt;name&gt;.dll</c> beside Magic, or why it can't be
-    /// made: it must hold one <see cref="IGem"/> class with one public constructor.
+    /// The gems in <paramref name="registry"/>, each after the gems it needs. A gem in a cycle, or one that needs it, is
+    /// logged and left out, since the provider hangs making a cycle.
     /// </summary>
-    private static Result<GemInfo> LoadGem(IFileSystem files, string name)
+    private static List<GemInfo> Sort(GemRegistry registry)
     {
-        string path = files.Combine(AppContext.BaseDirectory, "Gems", name, name + ".dll");
-        Result<Assembly> loaded = LoadAssembly(files, path, name);
-        if (!loaded.Ok)
-            return Result.Failure(loaded.Error);
-
-        Assembly assembly = loaded.Value;
-        List<Type> gems = [];
-        foreach (Type type in GetTypes(assembly))
+        List<GemInfo> sorted = [];
+        HashSet<string> placed = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> refused = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> visiting = new(StringComparer.OrdinalIgnoreCase);
+        foreach (GemInfo gem in registry.Gems)
         {
-            if (type.IsClass && !type.IsAbstract && type.IsAssignableTo(typeof(IGem)))
-                gems.Add(type);
+            Place(gem, registry, sorted, placed, refused, visiting);
         }
 
-        if (gems.Count != 1)
-            return Result.Failure($"Gem {name} must hold one class that implements IGem; it holds {gems.Count}.");
-
-        Type gem = gems[0];
-        int constructors = gem.GetConstructors().Length;
-        if (constructors != 1)
-            return Result.Failure($"Gem {name}: {gem.Name} must have one public constructor; it has {constructors}.");
-
-        // What the host takes itself isn't provided, so any number of gems can be sinks.
-        List<Type> provides = [];
-        foreach (Type contract in gem.GetInterfaces())
-        {
-            if (contract != typeof(IGem) && contract != typeof(IDisposable) && contract != typeof(ILogSink))
-                provides.Add(contract);
-        }
-
-        string author = GetMetadata(assembly, "Magic.Author") ?? name;
-        string description = assembly.GetCustomAttribute<AssemblyDescriptionAttribute>()?.Description ?? string.Empty;
-        Version version = assembly.GetName().Version ?? new Version(1, 0, 0);
-
-        return Result.Success(new GemInfo(name, author, description, version, gem, provides));
+        return sorted;
     }
 
     /// <summary>
-    /// The assembly at <paramref name="path"/>, loaded from its file into a <see cref="GemLoadContext"/> of its own.
+    /// Places <paramref name="gem"/> in <paramref name="sorted"/> after the gems it needs: whether it was.
     /// </summary>
-    private static Result<Assembly> LoadAssembly(IFileSystem files, string path, string name)
+    private static bool Place(
+        GemInfo gem,
+        GemRegistry registry,
+        List<GemInfo> sorted,
+        HashSet<string> placed,
+        HashSet<string> refused,
+        HashSet<string> visiting
+    )
     {
-        if (!files.FileExists(path))
-            return Result.Failure($"Gem {name} was not found: there is no {path}.");
+        if (placed.Contains(gem.Name))
+            return true;
 
-        try
-        {
-            return Result.Success(new GemLoadContext(path, files).LoadFromAssemblyPath(path));
-        }
-        catch (Exception ex) when (ex is BadImageFormatException or FileLoadException or IOException)
-        {
-            return Result.Failure($"Gem {name} could not be loaded from {path}: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Every type <paramref name="assembly"/> holds; those that load, when some don't.
-    /// </summary>
-    private static IReadOnlyList<Type> GetTypes(Assembly assembly)
-    {
-        try
-        {
-            return assembly.GetTypes();
-        }
-        catch (ReflectionTypeLoadException ex)
-        {
-            List<Type> loaded = [];
-            foreach (Type? type in ex.Types)
-            {
-                if (type is not null)
-                    loaded.Add(type);
-            }
-
-            return loaded;
-        }
-    }
-
-    /// <summary>
-    /// What <paramref name="assembly"/>'s build recorded as <paramref name="key"/>; null when nothing, or an empty
-    /// string, was.
-    /// </summary>
-    private static string? GetMetadata(Assembly assembly, string key)
-    {
-        foreach (AssemblyMetadataAttribute metadata in assembly.GetCustomAttributes<AssemblyMetadataAttribute>())
-        {
-            if (string.Equals(metadata.Key, key, StringComparison.Ordinal) && metadata.Value is { Length: > 0 } value)
-                return value;
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Whether <paramref name="version"/> matches each part <paramref name="wanted"/> gives (<c>1</c>, <c>1.2</c>,
-    /// <c>1.2.3</c>); anything but one to four numbers matches nothing.
-    /// </summary>
-    private static bool IsVersion(Version version, string wanted)
-    {
-        ReadOnlySpan<int> parts = [version.Major, version.Minor, version.Build, version.Revision];
-        string[] asked = wanted.Split('.');
-        if (asked.Length > parts.Length)
+        // A gem visited again before it is placed is in a cycle; the gem that needs it says so.
+        if (refused.Contains(gem.Name) || !visiting.Add(gem.Name))
             return false;
 
-        for (int i = 0; i < asked.Length; i++)
+        foreach (string name in gem.Needs)
         {
-            bool isNumber = int.TryParse(asked[i], NumberStyles.None, CultureInfo.InvariantCulture, out int part);
-            if (!isNumber || part != parts[i])
-                return false;
+            if (registry.Find(name) is not { } need || Place(need, registry, sorted, placed, refused, visiting))
+                continue;
+
+            string why = visiting.Contains(name) ? "which needs it: a cycle" : "which was not made";
+            Log.Error($"Gem {gem.Name} was not made: it needs {name}, {why}.");
+            visiting.Remove(gem.Name);
+            refused.Add(gem.Name);
+            return false;
         }
 
+        visiting.Remove(gem.Name);
+        placed.Add(gem.Name);
+        sorted.Add(gem);
         return true;
     }
-
-    /// <summary>
-    /// Why <paramref name="gem"/> is refused when <paramref name="services"/> already provides an interface it does;
-    /// null when none.
-    /// </summary>
-    private static string? FindClash(ServiceCollection services, GemInfo gem)
-    {
-        foreach (Type contract in gem.Provides)
-        {
-            foreach (ServiceDescriptor service in services)
-            {
-                // A gem is registered as its class before its interfaces, so the class is what is found.
-                Type provider = service.ImplementationInstance?.GetType() ?? service.ServiceType;
-                if (provider.IsAssignableTo(contract))
-                    return $"Gem {gem.Name} provides {GetName(contract)}, which {provider.Name} already provides.";
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// <paramref name="type"/>'s name as C# writes it: <c>IAssetLoader&lt;Texture&gt;</c>, not <c>IAssetLoader`1</c>.
-    /// </summary>
-    private static string GetName(Type type)
-    {
-        if (!type.IsGenericType)
-            return type.Name;
-
-        string name = type.Name[..type.Name.IndexOf('`', StringComparison.Ordinal)];
-
-        return $"{name}<{string.Join(", ", Array.ConvertAll(type.GetGenericArguments(), GetName))}>";
-    }
-
-    /// <summary>
-    /// Loads the gems and registers each with <paramref name="services"/> as its class
-    /// and every interface it provides, made by <paramref name="create"/>. A name listed twice, the wrong version, or
-    /// an interface already provided is refused.
-    /// </summary>
-    private static List<GemInfo> Register(
-        ServiceCollection services,
-        IFileSystem files,
-        ImmutableArray<string> gems,
-        Func<IServiceProvider, GemInfo, IGem> create
-    )
-    {
-        List<GemInfo> registered = [];
-        HashSet<string> listed = new(StringComparer.OrdinalIgnoreCase);
-        foreach (string listing in gems)
-        {
-            // A gem is listed by its name, then @ and the version it must be where that matters.
-            int at = listing.IndexOf('@', StringComparison.Ordinal);
-            string name = at < 0 ? listing : listing[..at];
-            string wanted = at < 0 ? string.Empty : listing[(at + 1)..];
-            if (!listed.Add(name))
-            {
-                Log.Error($"Gem {name} is listed twice; it is made once.");
-                continue;
-            }
-
-            Result<GemInfo> loaded = LoadGem(files, name);
-            if (!loaded.Ok)
-            {
-                Log.Error(loaded.Error);
-                continue;
-            }
-
-            GemInfo gem = loaded.Value;
-            if (wanted.Length > 0 && !IsVersion(gem.Version, wanted))
-            {
-                Log.Error($"Gem {name} is {gem.Version.ToString(3)}, but {project.Name} asks for {wanted}.");
-                continue;
-            }
-
-            if (FindClash(services, gem) is { } clash)
-            {
-                Log.Error(clash);
-                continue;
-            }
-
-            services.AddSingleton(gem.Type, provider => create(provider, gem));
-            foreach (Type contract in gem.Provides)
-            {
-                services.AddSingleton(contract, provider => provider.GetRequiredService(gem.Type));
-            }
-
-            registered.Add(gem);
-        }
-
-        return registered;
-    }
-
-    /// <summary>
-    /// The provider's factory for <paramref name="gem"/>, which adds it to <paramref name="created"/>, on the log when
-    /// it is a sink. Why it couldn't
-    /// be made is logged here, once; the gems that need it are told only that it wasn't.
-    /// </summary>
-    [SuppressMessage(
-        "Design",
-        "CA1031:Do not catch general exception types",
-        Justification = "Whatever a gem's constructor throws, it is logged and the gem is not made; the others go on."
-    )]
-    private static IGem CreateGem(
-        IServiceProvider services,
-        GemInfo gem,
-        List<LoadedGem> created,
-        HashSet<Type> tried,
-        HashSet<Type> creating
-    )
-    {
-        if (creating.Contains(gem.Type))
-            throw new InvalidOperationException($"it needs {gem.Name}, which needs it: a cycle.");
-
-        if (!tried.Add(gem.Type))
-            throw new InvalidOperationException($"it needs {gem.Name}, which was not made.");
-
-        IGem made;
-        creating.Add(gem.Type);
-        try
-        {
-            made = (IGem)ActivatorUtilities.CreateInstance(services, gem.Type);
-        }
-        catch (Exception ex)
-        {
-            // A missing service or a gem that can't start says why in the message; anything else is a bug in the gem,
-            // and its stack says where.
-            Log.Error($"Gem {gem.Name} was not made: {(ex is InvalidOperationException ? ex.Message : ex.ToString())}");
-
-            throw new InvalidOperationException($"it needs {gem.Name}, which was not made.", ex);
-        }
-        finally
-        {
-            creating.Remove(gem.Type);
-        }
-
-        LoadedGem loaded = new(made, gem.Name, gem.Version, gem.Author, gem.Description);
-        if (made is ILogSink sink)
-            loaded.Subscriptions.Add(Log.Register(sink));
-
-        created.Add(loaded);
-
-        string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
-        Log.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");
-
-        return made;
-    }
-
-    /// <summary>
-    /// A gem's assembly as loaded, and what making the gem takes.
-    /// </summary>
-    /// <param name="Name">The gem's name, as the project lists it.</param>
-    /// <param name="Author">Who made it; its name when its project says nothing.</param>
-    /// <param name="Description">What it is, in a sentence; empty when its project says nothing.</param>
-    /// <param name="Version">Its version; 1.0.0 when its project says nothing.</param>
-    /// <param name="Type">Its one <see cref="IGem"/> class.</param>
-    /// <param name="Provides">The interfaces it provides to other gems.</param>
-    private readonly record struct GemInfo(
-        string Name,
-        string Author,
-        string Description,
-        Version Version,
-        Type Type,
-        List<Type> Provides
-    );
 }

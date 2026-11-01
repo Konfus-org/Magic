@@ -1,1 +1,1 @@
-{ "name": "HelloWorld", "gems": ["Hello"] }
+{ "name": "HelloWorld", "gems": ["Hello", "ArchEcs"] }
