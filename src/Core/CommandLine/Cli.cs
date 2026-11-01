@@ -64,20 +64,20 @@ public static class Cli
     }
 
     /// <summary>
-    /// Runs the lines typed into the terminal since the last pump. Stops after a line that ends the run, so the caller
-    /// acts on it before the lines after it run; one that ends it without exiting is kept, for the runs after it.
+    /// Runs the next line typed into the terminal, if one is waiting. One that ends the run without exiting is kept, for
+    /// the runs after it.
     /// </summary>
     public static void Pump(App app, IFileSystem files)
     {
-        while (app.IsRunning && Terminal.Pump(out string? line))
-        {
-            Result ran = Run(app, files, line);
-            if (!ran.Ok)
-                Log.Error($"Couldn't run '{line}': {ran.Error}");
+        if (!Terminal.Pump(out string? line))
+            return;
 
-            if (!app.IsRunning && !app.IsExiting)
-                _restarts.Add(line);
-        }
+        Result ran = Run(app, files, line);
+        if (!ran.Ok)
+            Log.Error($"Couldn't run '{line}': {ran.Error}");
+
+        if (!app.IsRunning && !app.IsExiting)
+            _restarts.Add(line);
     }
 
     /// <summary>

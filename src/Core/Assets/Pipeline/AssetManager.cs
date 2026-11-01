@@ -14,8 +14,8 @@ using Magic.Utils;
 namespace Magic.Assets.Pipeline;
 
 /// <summary>
-/// The assets: what the files under the asset directories describe, the project's <c>Assets/</c> folder, then Magic's
-/// built-in <c>Resources/</c>, then each gem's, the first winning a path two of them have. A file is an asset when a
+/// The assets: what the files under the asset directories describe, the project's folder, then each gem's
+/// <c>Resources/</c>, then Magic's built-in one, the first winning a path two of them have. A file is an asset when a
 /// <c>.meta</c> sidecar is beside it, holding its 64-bit id, which is what a <see cref="Handle{T}"/> holds, and the
 /// import settings its loader reads. An asset path is relative to its asset directory, with <c>/</c> between folders on
 /// every OS. Any thread.
@@ -101,7 +101,7 @@ public sealed class AssetManager : IDisposable
     private AssetState _state = AssetState.Empty;
 
     /// <summary>
-    /// Assets under the directories added (<see cref="AddAssetDirectory"/>), the project's own <c>Assets/</c> then each
+    /// Assets under the directories added (<see cref="AddAssetDirectory"/>), the project's own folder then each
     /// gem's <c>Resources/</c>, and last Magic's built-in <c>Resources/</c>.
     /// </summary>
     internal AssetManager(IFileSystem files)
@@ -377,7 +377,7 @@ public sealed class AssetManager : IDisposable
 
     /// <summary>
     /// Adds <paramref name="directory"/> to the asset directories, after those added before it, which win a path it
-    /// shares with them: the project's own <c>Assets/</c>, then each gem's <c>Resources/</c> as the gem loads. One that
+    /// shares with them: the project's own folder, then each gem's <c>Resources/</c> as the gem loads. One that
     /// does not exist, or is added already, is left out. Only before they are indexed.
     /// </summary>
     internal void AddAssetDirectory(string directory)

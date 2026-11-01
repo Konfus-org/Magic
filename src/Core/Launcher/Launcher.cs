@@ -3,7 +3,6 @@ using Magic.Assets.Pipeline;
 using Magic.CommandLine;
 using Magic.Debugging;
 using Magic.Files;
-using Magic.GemAPI;
 using Magic.Runtime;
 using Magic.Utils;
 using Microsoft.Extensions.DependencyInjection;
@@ -39,7 +38,7 @@ internal static class Launcher
         while (true)
         {
             ServiceCollection services = [];
-            (App app, IFileSystem files, AssetManager assets) = services.RegisterMagicServices();
+            (App app, IFileSystem files, AssetManager assets) = services.RegisterRequiredServices();
             using (assets)
             {
                 Result ran = Cli.Run(app, files, commandLine);
@@ -51,14 +50,10 @@ internal static class Launcher
 
                 // A job, like new or --version, is done once it ran, and failed if it logged an error, as a project
                 // that won't open does.
-                if (app.IsExiting || app.Project is not { } project)
+                if (app.IsExiting || app.Project is null)
                     return Log.ErrorCount == 0 ? 0 : 1;
 
-                assets.AddAssetDirectory(files.Combine(files.GetParent(project.Path), "Assets"));
-                IReadOnlyList<LoadedGem> gems = GemLoader.Load(services, files, project.Gems, assets);
-
-                Result ended = project.Run(app, gems, assets, () => Cli.Pump(app, files));
-                GemLoader.Unload(gems);
+                Result ended = app.Run(services, files, assets);
                 if (!ended.Ok)
                 {
                     Log.Critical(ended.Error);

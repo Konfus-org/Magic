@@ -17,14 +17,14 @@ public sealed class LoadedGem : IDisposable
     private readonly AssemblyLoadContext? _context;
     private bool _isDisposed;
 
-    internal LoadedGem(IGem gem, string name, Version version, string author, string description)
+    internal LoadedGem(IGem gem, GemInfo info)
     {
         _context = AssemblyLoadContext.GetLoadContext(gem.GetType().Assembly);
         Gem = gem;
-        Name = name;
-        Version = version;
-        Author = author;
-        Description = description;
+        Name = info.Name;
+        Version = info.Version;
+        Author = info.Author;
+        Description = info.Description;
     }
 
     public IGem Gem { get; }

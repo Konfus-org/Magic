@@ -6,7 +6,7 @@ constructor.
 A file is an asset when a `.meta` file is beside it, such as `Rock.png.meta` for `Rock.png`. The `.meta` is JSON: the
 asset's `id`, a whole number above 0 that no other asset uses, its `type`, the name of its asset type such as
 `"Material"`, and its import settings. Assets refer to each other by id, written `{ "id": 3400 }`, so a file can move
-or be renamed. The asset directories are the project's `Assets/`, then each gem's `Resources/`, then Magic's built-in
+or be renamed. The asset directories are the project's folder, the one holding its `.magic` file, then each gem's `Resources/`, then Magic's built-in
 `src/Resources/`; the first wins a path two of them have.
 
 ## Finding an asset

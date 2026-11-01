@@ -19,7 +19,7 @@ internal static class ServiceCollectionExtensions
             "CA2000:Dispose objects before losing scope",
             Justification = "The assets go to the caller, which ends them with the run."
         )]
-        internal (App App, IFileSystem Files, AssetManager Assets) RegisterMagicServices()
+        internal (App App, IFileSystem Files, AssetManager Assets) RegisterRequiredServices()
         {
             App app = new();
             FileSystem files = new();
