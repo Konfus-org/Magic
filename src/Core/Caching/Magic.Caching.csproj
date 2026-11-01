@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The cache: what is slow to make, kept on disk by type, key and the version it was made from. -->
+  <ItemGroup>
+    <ProjectReference Include="../Debugging/Magic.Debugging.csproj" />
+    <ProjectReference Include="../Files/Magic.Files.csproj" />
+    <ProjectReference Include="../Utils/Magic.Utils.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The host makes the caches once it knows the project. -->
+    <InternalsVisibleTo Include="Magic" />
+  </ItemGroup>
+</Project>

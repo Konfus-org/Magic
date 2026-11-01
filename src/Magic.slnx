@@ -2,6 +2,7 @@
   <Folder Name="/Core/">
     <File Path="../README.md" />
     <Project Path="Core/Assets/Magic.Assets.csproj" />
+    <Project Path="Core/Caching/Magic.Caching.csproj" />
     <Project Path="Core/CommandLine/Magic.CommandLine.csproj" />
     <Project Path="Core/Debugging/Magic.Debugging.csproj" />
     <Project Path="Core/Ecs/Magic.Ecs.csproj" />

@@ -8,6 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Assets/Magic.Assets.csproj" />
+    <ProjectReference Include="../Caching/Magic.Caching.csproj" />
     <ProjectReference Include="../CommandLine/Magic.CommandLine.csproj" />
     <ProjectReference Include="../Debugging/Magic.Debugging.csproj" />
     <!-- Not used by Magic itself, but shipped beside it for the gems built against it. -->

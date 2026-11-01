@@ -8,6 +8,7 @@
     <PackageReference Include="System.IO.Hashing" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="../Caching/Magic.Caching.csproj" />
     <ProjectReference Include="../Debugging/Magic.Debugging.csproj" />
     <ProjectReference Include="../Files/Magic.Files.csproj" />
     <ProjectReference Include="../Serialization/Magic.Serialization.csproj" />

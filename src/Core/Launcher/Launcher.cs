@@ -39,31 +39,29 @@ internal static class Launcher
         while (true)
         {
             ServiceCollection services = [];
-            (App app, IFileSystem files, AssetManager assets, Events events) = services.RegisterRequiredServices();
-            using (assets)
+            (App app, IFileSystem files, Events events) = services.RegisterRequiredServices();
+            Result ran = Cli.Run(app, files, commandLine);
+            if (!ran.Ok)
             {
-                Result ran = Cli.Run(app, files, commandLine);
-                if (!ran.Ok)
-                {
-                    Log.Critical($"Couldn't run the command line: {ran.Error}");
-                    return 1;
-                }
-
-                // A job, like new or --version, is done once it ran, and failed if it logged an error, as a project
-                // that won't open does.
-                if (app.IsExiting || app.Project is null)
-                    return Log.ErrorCount == 0 ? 0 : 1;
-
-                Result ended = app.Run(services, files, assets, events);
-                if (!ended.Ok)
-                {
-                    Log.Critical(ended.Error);
-                    return 2;
-                }
-
-                if (app.IsExiting)
-                    return 0;
+                Log.Critical($"Couldn't run the command line: {ran.Error}");
+                return 1;
             }
+
+            // A job, like new or --version, is done once it ran, and failed if it logged an error, as a project that
+            // won't open does.
+            if (app.IsExiting || app.Project is not { } project)
+                return Log.ErrorCount == 0 ? 0 : 1;
+
+            using AssetManager assets = services.RegisterProjectServices(files, project);
+            Result ended = app.Run(services, files, assets, events);
+            if (!ended.Ok)
+            {
+                Log.Critical(ended.Error);
+                return 2;
+            }
+
+            if (app.IsExiting)
+                return 0;
         }
     }
 }

@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
+using Magic.Caching;
 using Magic.Debugging;
 using Magic.Files;
 using Magic.Serialization;
@@ -65,6 +66,11 @@ public sealed class AssetManager : IDisposable
     private readonly IFileSystem _files;
 
     /// <summary>
+    /// Where what a loader that is also an <see cref="ICache{T}"/> made is kept, by the asset's id and version.
+    /// </summary>
+    private readonly Caches _caches;
+
+    /// <summary>
     /// Magic's built-in <c>Resources/</c>: where the defaults and failures are, and only there.
     /// </summary>
     private readonly string _builtIn;
@@ -104,9 +110,10 @@ public sealed class AssetManager : IDisposable
     /// Assets under the directories added (<see cref="AddAssetDirectory"/>), the project's own folder then each
     /// gem's <c>Resources/</c>, and last Magic's built-in <c>Resources/</c>.
     /// </summary>
-    internal AssetManager(IFileSystem files)
+    internal AssetManager(IFileSystem files, Caches caches)
     {
         _files = files;
+        _caches = caches;
         _stopped = _stopping.Token;
         _builtIn = GetResources(files, typeof(AssetManager).Assembly, AppContext.BaseDirectory);
         AddAssetTypes(typeof(AssetManager).Assembly);
@@ -510,11 +517,13 @@ public sealed class AssetManager : IDisposable
     /// <summary>
     /// <paramref name="file"/> read as a <typeparamref name="T"/>, its <c>.meta</c>'s settings read against the
     /// type's <see cref="AssetMetaAttribute"/> properties first: by <paramref name="loader"/>, the gem that reads the
-    /// type, when the file has one of its extensions; else by Core itself (<see cref="ReadBuiltIn{T}"/>).
+    /// type, when the file has one of its extensions, through <paramref name="caches"/>; else by Core itself
+    /// (<see cref="ReadBuiltIn{T}"/>).
     /// </summary>
     private static async Task<Result<object>> ReadAsync<T>(
         AssetBytes file,
         object? loader,
+        Caches caches,
         IProgress<LoadProgress>? progress,
         CancellationToken cancel
     )
@@ -529,7 +538,7 @@ public sealed class AssetManager : IDisposable
         {
             AssetFile asset = new(file.Id, file.Path, file.Bytes, metadata.Value, file.Version);
             read = HasExtension(file.Path, reader.Extensions)
-                ? await reader.LoadAsync(asset, progress, cancel).ConfigureAwait(false)
+                ? await LoadThroughCachesAsync(reader, asset, caches, progress, cancel).ConfigureAwait(false)
                 : Result.Failure($"a {typeof(T).Name}'s file ends in {string.Join(", ", reader.Extensions)}.");
         }
         else
@@ -538,6 +547,32 @@ public sealed class AssetManager : IDisposable
         }
 
         return read.Ok ? Result.Success<object>(read.Value) : Result.Failure(read.Error);
+    }
+
+    /// <summary>
+    /// What <paramref name="reader"/> makes of <paramref name="file"/>: read from <paramref name="caches"/> by the
+    /// file's id and version when the loader is also an <see cref="ICache{T}"/>, else loaded and then kept there.
+    /// </summary>
+    private static async Task<Result<T>> LoadThroughCachesAsync<T>(
+        IAssetLoader<T> reader,
+        AssetFile file,
+        Caches caches,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
+        where T : IAsset<T>
+    {
+        if (reader is not ICache<T> cache)
+            return await reader.LoadAsync(file, progress, cancel).ConfigureAwait(false);
+
+        if (await caches.ReadAsync(file.Id, file.Version, cache, cancel).ConfigureAwait(false) is { Ok: true } cached)
+            return cached;
+
+        Result<T> loaded = await reader.LoadAsync(file, progress, cancel).ConfigureAwait(false);
+        if (loaded.Ok)
+            await caches.WriteAsync(file.Id, file.Version, loaded.Value, cache, cancel).ConfigureAwait(false);
+
+        return loaded;
     }
 
     /// <summary>
@@ -722,7 +757,7 @@ public sealed class AssetManager : IDisposable
 
             ulong version = AssetIndex.ComputeVersion(bytes.Value, file.Settings);
             AssetBytes read = new(id, file.Path, bytes.Value, file.Settings, version);
-            asset = await type.Read(read, null, null, cancel).ConfigureAwait(false);
+            asset = await type.Read(read, null, _caches, null, cancel).ConfigureAwait(false);
         }
         else if (!state.Loaders.ContainsKey(type.Type))
         {
@@ -732,7 +767,7 @@ public sealed class AssetManager : IDisposable
         else
         {
             // TODO(Konfus): keep each gem-read asset's dependency ids in the disk cache, keyed by its file's version,
-            // once Caches is ported, so finding them doesn't load it.
+            // so finding them doesn't load it.
             asset = await LoadAnyAsync(id, null, cancel).ConfigureAwait(false);
         }
 
@@ -943,7 +978,7 @@ public sealed class AssetManager : IDisposable
             {
                 ulong version = AssetIndex.ComputeVersion(bytes.Value, read.File.Settings);
                 AssetBytes file = new(read.Id, path, bytes.Value, read.File.Settings, version);
-                Result<object> asset = await read.Read(file, read.Loader, read.Progress, _stopped)
+                Result<object> asset = await read.Read(file, read.Loader, _caches, read.Progress, _stopped)
                     .ConfigureAwait(false);
                 made = new Made(asset.Ok ? asset : Result.Failure($"{path} is not a {type}: {asset.Error}"), version);
             }

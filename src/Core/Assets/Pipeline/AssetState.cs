@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text.Json;
+using Magic.Caching;
 using Magic.Utils;
 
 namespace Magic.Assets.Pipeline;
@@ -40,11 +41,13 @@ internal readonly record struct AssetBytes(
 
 /// <summary>
 /// Reads an asset's file as its type, by <paramref name="loader"/>, the gem that reads the type, or by Core itself when
-/// there is none: what a load of the type runs on a worker.
+/// there is none, through <paramref name="caches"/> when the loader is also an <see cref="ICache{T}"/>: what a load of
+/// the type runs on a worker.
 /// </summary>
 internal delegate Task<Result<object>> AssetReader(
     AssetBytes file,
     object? loader,
+    Caches caches,
     IProgress<LoadProgress>? progress,
     CancellationToken cancel
 );
