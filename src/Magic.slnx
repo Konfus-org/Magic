@@ -1,18 +1,7 @@
 <Solution>
   <Folder Name="/Core/">
     <File Path="../README.md" />
-    <Project Path="Core/Assets/Magic.Assets.csproj" />
-    <Project Path="Core/Caching/Magic.Caching.csproj" />
-    <Project Path="Core/CommandLine/Magic.CommandLine.csproj" />
-    <Project Path="Core/Debugging/Magic.Debugging.csproj" />
-    <Project Path="Core/Ecs/Magic.Ecs.csproj" />
-    <Project Path="Core/Files/Magic.Files.csproj" Id="dd604984-bd65-4521-840f-f207ddcec01d" />
-    <Project Path="Core/GemAPI/Magic.GemAPI.csproj" />
-    <Project Path="Core/Launcher/Magic.Launcher.csproj" />
-    <Project Path="Core/Runtime/Magic.Runtime.csproj" />
-    <Project Path="Core/Serialization/Magic.Serialization.csproj" />
-    <Project Path="Core/Threading/Magic.Threading.csproj" />
-    <Project Path="Core/Utils/Magic.Utils.csproj" />
+    <Project Path="Core/Magic.Core.csproj" />
   </Folder>
   <Folder Name="/Gems/">
     <Project Path="Gems/ArchEcs/ArchEcs.csproj" />
@@ -46,12 +35,6 @@
   </Folder>
   <Folder Name="/Tools/VS Templates/">
     <File Path="../tools/VS Templates/InstallTemplates.ps1" />
-  </Folder>
-  <Folder Name="/Tools/VS Templates/Core/">
-    <File Path="../tools/VS Templates/Core/.template.config/icon.png" />
-    <File Path="../tools/VS Templates/Core/.template.config/ide.host.json" />
-    <File Path="../tools/VS Templates/Core/.template.config/template.json" />
-    <Project Path="../tools/VS Templates/Core/Magic.ModuleName.csproj" />
   </Folder>
   <Folder Name="/Tools/VS Templates/Gem/">
     <File Path="../tools/VS Templates/Gem/.template.config/icon.png" />

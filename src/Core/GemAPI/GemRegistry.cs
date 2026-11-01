@@ -15,7 +15,7 @@ namespace Magic.GemAPI;
 /// The gems a project lists, found and registered with the services as their class and every interface they provide,
 /// but not yet made. A gem that can't be found or registered is logged, and the others go on without it.
 /// </summary>
-public sealed class GemRegistry
+internal sealed class GemRegistry
 {
     private readonly Dictionary<string, GemInfo> _byName;
 

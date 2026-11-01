@@ -8,7 +8,7 @@ namespace Magic.GemAPI;
 /// is a sink, and whatever is registered for it later), then the gem itself, then its load context, which frees its
 /// assemblies once nothing refers to the gem.
 /// </summary>
-public sealed class LoadedGem : IDisposable
+internal sealed class LoadedGem : IDisposable
 {
     /// <summary>
     /// The gem's load context, held so it lives as long as the gem is in use: nothing else keeps it alive, and once

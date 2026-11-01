@@ -1,6 +1,6 @@
 {
   "profiles": {
-    "Magic.Launcher": {
+    "Magic": {
       "commandName": "Project",
       "commandLineArgs": "open samples/HelloWorld/HelloWorld.magic --headless True",
       "workingDirectory": "$(ProjectDir)../.."

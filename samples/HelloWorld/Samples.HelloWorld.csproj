@@ -10,7 +10,7 @@
     <!-- Built before the sample so its Run has a Magic, and the gems it lists, to start; nothing of them is referenced
          or copied. -->
     <ProjectReference
-      Include="$(MagicRoot)src/Core/Launcher/Magic.Launcher.csproj"
+      Include="$(MagicRoot)src/Core/Magic.Core.csproj"
       ReferenceOutputAssembly="false"
       Private="false"
       SkipGetTargetFrameworkProperties="true"

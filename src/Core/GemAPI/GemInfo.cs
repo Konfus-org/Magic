@@ -12,7 +12,7 @@ namespace Magic.GemAPI;
 /// <param name="Reads">The asset types it reads, one for each asset loader it implements.</param>
 /// <param name="Needs">The names of the registered gems its constructor asks for.</param>
 /// <param name="Resources">The folder of its own assets; null when it has none.</param>
-public sealed record GemInfo(
+internal sealed record GemInfo(
     string Name,
     string Author,
     string Description,

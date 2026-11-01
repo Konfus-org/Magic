@@ -9,6 +9,6 @@
 
   <ItemGroup>
     <!-- Compiled against, never copied: at run time the scripts use the Magic that loaded them. -->
-    <ProjectReference Include="../../Core/Core.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../Core/Magic.Core.csproj" Private="false" ExcludeAssets="runtime" />
   </ItemGroup>
 </Project>

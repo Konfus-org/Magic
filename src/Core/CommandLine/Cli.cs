@@ -11,7 +11,7 @@ namespace Magic.CommandLine;
 /// Magic's commands, run against the <see cref="App"/>: the command line Magic was launched with is the first of
 /// them, and each line typed into the terminal runs the same commands.
 /// </summary>
-public static class Cli
+internal static class Cli
 {
     /// <summary>
     /// The typed lines that ended earlier runs without exiting, such as <c>open Other.magic</c>, in order: each run
@@ -95,7 +95,7 @@ public static class Cli
                     Arguments = { new Argument<string>("project") { Description = "The .magic file to run" } },
                     Action = new CliCommand(cmds => Open(app, files, cmds.GetRequiredValue<string>("project"))),
                 },
-                new Command("new", "Makes a project, gem or module from Magic's dotnet new templates")
+                new Command("new", "Makes a project or gem from Magic's dotnet new templates")
                 {
                     Arguments =
                     {

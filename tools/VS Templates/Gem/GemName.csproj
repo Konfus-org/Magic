@@ -7,8 +7,6 @@
     <!--#if (authors != "") -->
     <Authors>GemAuthors</Authors>
     <!--#endif -->
-    <!-- Only what is referenced below is built against, so nothing of Magic's comes along by another reference. -->
-    <DisableTransitiveProjectReferences>true</DisableTransitiveProjectReferences>
     <!-- Copies the gem's own NuGet dependencies next to it, where its load context finds them. -->
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>
@@ -17,7 +15,6 @@
   </ItemGroup>
   <ItemGroup>
     <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its log. -->
-    <ProjectReference Include="$(MagicRoot)src/Core/GemAPI/Magic.GemAPI.csproj" Private="false" />
-    <ProjectReference Include="$(MagicRoot)src/Core/Debugging/Magic.Debugging.csproj" Private="false" />
+    <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" Private="false" />
   </ItemGroup>
 </Project>

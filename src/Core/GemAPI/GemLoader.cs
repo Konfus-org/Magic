@@ -9,7 +9,7 @@ namespace Magic.GemAPI;
 /// Makes the gems a <see cref="GemRegistry"/> registered, each after the gems it needs, and sets them up; ends them
 /// with <see cref="Unload"/>. A gem that can't be made is logged, and the others go on without it.
 /// </summary>
-public static class GemLoader
+internal static class GemLoader
 {
     /// <summary>
     /// Makes the gems in <paramref name="registry"/> through <paramref name="provider"/>, which was built from the
@@ -42,13 +42,12 @@ public static class GemLoader
             }
 
             LoadedGem setUp = new(made, gem);
+            loaded.Add(setUp);
             if (made is ILogSink sink)
                 setUp.Subscriptions.Add(Log.Register(sink));
 
             if (gem.Reads.Count > 0)
                 setUp.Subscriptions.Add(assets.AddLoader(made));
-
-            loaded.Add(setUp);
 
             string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
             Log.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");
