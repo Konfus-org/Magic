@@ -5,13 +5,19 @@ namespace Magic.Pipelines;
 
 /// <summary>
 /// Once, every gem made, before the first frame. Awaited: frames don't run until every one has ended, though what it
-/// awaits does (the assets, the main thread, an exit typed into the terminal).
+/// awaits does (<see cref="HostPump"/>).
 /// </summary>
 public readonly record struct Startup(Project Project);
 
 /// <summary>
-/// First in a frame: Core's own takes in what the main thread, the terminal and the assets have, and
-/// gives the frame its messages. For what the frame's work reads, such as input.
+/// What keeps the host going, before each frame and while <see cref="Startup"/> or <see cref="Shutdown"/> are awaited, when
+/// no frames run: what was posted to the main thread, the terminal, the assets. A gem whose work outside the frames must
+/// go on then too, such as a window's, joins here.
+/// </summary>
+public readonly record struct HostPump;
+
+/// <summary>
+/// First in a frame, with the frame's messages: for what the frame's work reads, such as input.
 /// </summary>
 public readonly record struct BeginUpdate(Frame Frame);
 

@@ -5,7 +5,9 @@ using Magic.CommandLine;
 using Magic.Debugging;
 using Magic.Files;
 using Magic.GemAPI;
+using Magic.Pipelines;
 using Magic.Runtime;
+using Magic.Threading;
 using Magic.Utils;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -42,12 +44,14 @@ internal static class Program
             App app = new();
             FileSystem files = new();
             Events events = new();
+            Threads threads = new();
 
             // Setup required core services
             ServiceCollection services = [];
             services.AddSingleton(app);
             services.AddSingleton<IFileSystem>(files);
             services.AddSingleton(events);
+            services.AddSingleton(threads);
 
             // Runs initial arguments
             Result ran = Cli.Run(app, files, commandLine);
@@ -64,12 +68,13 @@ internal static class Program
 
             // Setup services that require a project
             Caches caches = new(files, project.Name, files.GetParent(project.Path));
-            using AssetManager assets = new(files, caches);
+            PipelineCoordinator pipelines = new(threads);
+            using AssetManager assets = new(files, caches, pipelines);
             services.AddSingleton(caches);
             services.AddSingleton(assets);
 
             // Run the application
-            Result ended = app.Run(services, files, assets, events);
+            Result ended = app.Run(services, files, assets, events, threads, pipelines);
             if (!ended.Ok)
             {
                 Log.Critical(ended.Error);

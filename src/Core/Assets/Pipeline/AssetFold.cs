@@ -5,7 +5,7 @@ using Magic.Utils;
 namespace Magic.Assets.Pipeline;
 
 /// <summary>
-/// What happened that the asset manager takes in: handed to <see cref="AssetPipeline.Pump"/> one at a time.
+/// What happened that the asset manager takes in: handed to <see cref="AssetFold.Pump"/> one at a time.
 /// </summary>
 internal abstract record AssetInput;
 
@@ -59,7 +59,7 @@ internal sealed record AssetLoadingEnabled : AssetInput;
 internal sealed record AssetDependenciesScanned(ulong Id, ImmutableArray<ulong> Dependencies) : AssetInput;
 
 /// <summary>
-/// What the asset manager's shell does for a <see cref="AssetPipeline.Pump"/>.
+/// What the asset manager's shell does for a <see cref="AssetFold.Pump"/>.
 /// </summary>
 internal abstract record AssetAction;
 
@@ -85,7 +85,7 @@ internal sealed record CompleteAssetLoad(TaskCompletionSource<Made> Waiter, Made
 /// How the asset manager's state changes: a pure function from the state and one input to the next state and what the
 /// shell does for it, as a fold over everything the manager takes in. It only logs.
 /// </summary>
-internal static class AssetPipeline
+internal static class AssetFold
 {
     /// <summary>
     /// The state after <paramref name="input"/>, and what to do for it.

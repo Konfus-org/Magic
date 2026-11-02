@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using Magic.Debugging;
 using Magic.GemAPI;
@@ -18,9 +17,9 @@ internal sealed class PipelineList<TState> : IPipeline<TState>, IPipelineList
     private readonly Threads _threads;
 
     /// <summary>
-    /// Replaced whole on the main thread, so a run walks them as they were when it began.
+    /// Replaced whole on the main thread, and read whole on any, so a run walks them as they were when it began.
     /// </summary>
-    private ImmutableArray<Nested> _nested = [];
+    private Nested[] _nested = [];
 
     internal PipelineList(PipelineCoordinator pipelines, Threads threads)
     {
@@ -41,7 +40,7 @@ internal sealed class PipelineList<TState> : IPipeline<TState>, IPipelineList
     /// </summary>
     internal TState Run(TState state, CancellationToken cancel)
     {
-        foreach (Nested nested in _nested)
+        foreach (Nested nested in Volatile.Read(ref _nested))
         {
             state = RunWithinCall(nested, state, cancel);
         }
@@ -72,9 +71,10 @@ internal sealed class PipelineList<TState> : IPipeline<TState>, IPipelineList
     /// Nests <paramref name="pipeline"/> last: <paramref name="gem"/>'s, or Core's when it is none. Main thread.
     /// </summary>
     internal void Add(IPipeline<TState> pipeline, string name, IGem? gem) =>
-        _nested = _nested.Add(new(pipeline, name, gem));
+        Volatile.Write(ref _nested, [.. _nested, new(pipeline, name, gem)]);
 
-    void IPipelineList.Remove(IGem gem) => _nested = _nested.RemoveAll(nested => ReferenceEquals(nested.Gem, gem));
+    void IPipelineList.Remove(IGem gem) =>
+        Volatile.Write(ref _nested, Array.FindAll(_nested, nested => !ReferenceEquals(nested.Gem, gem)));
 
     [SuppressMessage(
         "Design",
@@ -118,7 +118,7 @@ internal sealed class PipelineList<TState> : IPipeline<TState>, IPipelineList
         if (isOnMain)
             await _threads.Enter(EngineThread.Main);
 
-        ImmutableArray<Nested> all = _nested;
+        Nested[] all = Volatile.Read(ref _nested);
         for (int i = 0; i < all.Length; i++)
         {
             Nested nested = all[isReversed ? all.Length - 1 - i : i];

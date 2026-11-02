@@ -95,15 +95,19 @@ public sealed class App
     /// <see cref="IWindow"/> is the app's <see cref="Window"/> for the run. Fails when no project is open, and at the
     /// first error under --fail-on-error.
     /// </summary>
-    internal Result Run(ServiceCollection services, IFileSystem files, AssetManager assets, Events events)
+    internal Result Run(
+        ServiceCollection services,
+        IFileSystem files,
+        AssetManager assets,
+        Events events,
+        Threads threads,
+        PipelineCoordinator pipelines
+    )
     {
         if (Project is not { } project)
             return Result.Failure("No project is open.");
 
         assets.AddAssetDirectory(files.GetParent(project.Path));
-        Threads threads = new();
-        PipelineCoordinator pipelines = new(threads);
-        services.AddSingleton(threads);
         GemRegistry registry = new(services, files, project.Gems, assets);
 
         // Every asset directory is indexed before any gem is made, so a constructor can find assets.
@@ -115,8 +119,11 @@ public sealed class App
 
         // Core's own join first, so each gem's runs after them.
         Stopwatch clock = new();
-        PumpPipeline pump = new(this, files, assets, events, threads);
-        pipelines.Get<BeginUpdate>().Add(pump, nameof(PumpPipeline), null);
+        PipelineList<HostPump> pump = pipelines.Get<HostPump>();
+        pump.Add(new PostedWorkPipeline(threads), nameof(PostedWorkPipeline), null);
+        pump.Add(new TerminalPipeline(this, files), nameof(TerminalPipeline), null);
+        pump.Add(new AssetsPipeline(assets), nameof(AssetsPipeline), null);
+        pipelines.Get<BeginUpdate>().Add(new EventsPipeline(events), nameof(EventsPipeline), null);
         PipelineList<CoreState> core = pipelines.Get<CoreState>();
         core.Add(new ClockPipeline(this, clock), nameof(ClockPipeline), null);
         core.Add(new FramePipeline(pipelines), nameof(FramePipeline), null);
@@ -184,12 +191,12 @@ public sealed class App
     /// has ended, as what it awaits needs it, cancelling <paramref name="stopping"/> once the run is to end. The
     /// one wait on the main thread: no frame is due meanwhile, and this is what keeps the rest going.
     /// </summary>
-    private void RunUntil(Task running, PumpPipeline pump, CancellationTokenSource stopping)
+    private void RunUntil(Task running, PipelineList<HostPump> pump, CancellationTokenSource stopping)
     {
         running.FireAndForget();
         while (!running.IsCompleted)
         {
-            pump.Pump();
+            pump.Run(default, stopping.Token);
             if (!IsRunning)
                 stopping.Cancel();
 

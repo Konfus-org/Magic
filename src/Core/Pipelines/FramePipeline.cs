@@ -7,6 +7,7 @@ namespace Magic.Pipelines;
 /// </summary>
 internal sealed class FramePipeline(PipelineCoordinator pipelines) : IPipeline<CoreState>
 {
+    private readonly PipelineList<HostPump> _hostPump = pipelines.Get<HostPump>();
     private readonly PipelineList<BeginUpdate> _beginUpdate = pipelines.Get<BeginUpdate>();
     private readonly PipelineList<Update> _update = pipelines.Get<Update>();
     private readonly PipelineList<FixedUpdate> _fixedUpdate = pipelines.Get<FixedUpdate>();
@@ -16,6 +17,7 @@ internal sealed class FramePipeline(PipelineCoordinator pipelines) : IPipeline<C
 
     public ValueTask<CoreState> RunAsync(CoreState state, CancellationToken cancel)
     {
+        _hostPump.Run(default, cancel);
         Frame frame = _beginUpdate.Run(new BeginUpdate(state.Frame), cancel).Frame;
         frame = _update.Run(new Update(frame), cancel).Frame;
         for (int step = 1; step <= state.FixedSteps; step++)

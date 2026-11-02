@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Text.Json;
-using Magic.Caching;
 using Magic.Utils;
 
 namespace Magic.Assets.Pipeline;
@@ -24,38 +23,26 @@ internal enum AssetStage : byte
 }
 
 /// <summary>
-/// An asset's file as read from disk, before its <c>.meta</c>'s settings are read as its type's.
+/// Runs the pipeline that loads asset <paramref name="id"/> as its type, by <paramref name="loader"/>, the gem that reads
+/// the type, or by Core itself when there is none: what a load of the type runs on a worker.
 /// </summary>
-/// <param name="Id">The asset's id.</param>
-/// <param name="Path">Where it is from its asset directory, with <c>/</c>.</param>
-/// <param name="Bytes">What the file holds.</param>
-/// <param name="Settings">Its <c>.meta</c> without the id and the type.</param>
-/// <param name="Version">A hash of the file and its <c>.meta</c>.</param>
-internal readonly record struct AssetBytes(
-    ulong Id,
-    string Path,
-    ReadOnlyMemory<byte> Bytes,
-    JsonElement Settings,
-    ulong Version
-);
-
-/// <summary>
-/// Reads an asset's file as its type, by <paramref name="loader"/>, the gem that reads the type, or by Core itself when
-/// there is none, through <paramref name="caches"/> when the loader is also an <see cref="ICache{T}"/>: what a load of
-/// the type runs on a worker.
-/// </summary>
-internal delegate Task<Result<object>> AssetReader(
-    AssetBytes file,
+internal delegate Task<Made> AssetReader(
+    ulong id,
+    IndexedFile file,
     object? loader,
-    Caches caches,
     IProgress<LoadProgress>? progress,
     CancellationToken cancel
 );
 
 /// <summary>
+/// Reads an asset's file as its type, by Core itself, loading nothing: for finding what it holds.
+/// </summary>
+internal delegate Result<object> AssetBuiltInReader(ReadOnlyMemory<byte> bytes, JsonElement settings);
+
+/// <summary>
 /// An asset type, as a <c>.meta</c>'s <c>"type"</c> names it: the type, and how its files are read.
 /// </summary>
-internal sealed record AssetType(Type Type, AssetReader Read);
+internal sealed record AssetType(Type Type, AssetReader Read, AssetBuiltInReader ReadBuiltIn);
 
 /// <summary>
 /// What a load of an asset gave: the asset, of its type, or why there is none; and its version, a hash of its file and
@@ -114,7 +101,7 @@ internal sealed record AssetEntry
 }
 
 /// <summary>
-/// Everything the asset manager knows at one moment: a value, replaced whole by each <see cref="AssetPipeline.Pump"/>,
+/// Everything the asset manager knows at one moment: a value, replaced whole by each <see cref="AssetFold.Pump"/>,
 /// and read by any thread as it is.
 /// </summary>
 internal sealed record AssetState

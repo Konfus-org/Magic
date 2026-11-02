@@ -1,14 +1,12 @@
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
-using System.Text;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using Magic.Caching;
 using Magic.Debugging;
 using Magic.Files;
-using Magic.Serialization;
+using Magic.Pipelines;
 using Magic.Threading;
 using Magic.Utils;
 
@@ -26,8 +24,10 @@ namespace Magic.Assets.Pipeline;
 /// reads its type may be made after the one asking.
 /// </para>
 /// <para>
-/// A file is read by the <see cref="IAssetLoader{T}"/> a gem provides for its type, else by Core itself for a type
-/// marked <see cref="AssetFormatAttribute"/>. What loaded is kept for the run.
+/// Each file is loaded on a worker by the pipeline over an <see cref="AssetLoad{T}"/> of its type: read it, read its
+/// <c>.meta</c>, look in the cache, make it, keep it in the cache, then whatever gems joined. It is made by the
+/// <see cref="IAssetLoader{T}"/> a gem provides for its type, else by Core itself for a type marked
+/// <see cref="AssetFormatAttribute"/>. What loaded is kept for the run.
 /// </para>
 /// <para>
 /// The asset directories are watched until the manager is disposed. Once their changes settle, they are indexed again,
@@ -38,7 +38,7 @@ namespace Magic.Assets.Pipeline;
 /// <para>
 /// What it knows is one <see cref="AssetState"/> value, which every call reads as it is. It changes in one place,
 /// <see cref="Pump"/>, which the host calls once a frame: it folds what happened since, handed to it as data, through
-/// <see cref="AssetPipeline.Pump"/>, and runs the actions each returns. So the assets hold still for the whole frame,
+/// <see cref="AssetFold.Pump"/>, and runs the actions each returns. So the assets hold still for the whole frame,
 /// and a load lands, or an asset changes, only between frames.
 /// </para>
 /// </summary>
@@ -69,6 +69,8 @@ public sealed class AssetManager : IDisposable
     /// Where what a loader that is also an <see cref="ICache{T}"/> made is kept, by the asset's id and version.
     /// </summary>
     private readonly Caches _caches;
+
+    private readonly PipelineCoordinator _pipelines;
 
     /// <summary>
     /// Magic's built-in <c>Resources/</c>: where the defaults and failures are, and only there.
@@ -110,10 +112,11 @@ public sealed class AssetManager : IDisposable
     /// Assets under the directories added (<see cref="AddAssetDirectory"/>), the project's own folder then each
     /// gem's <c>Resources/</c>, and last Magic's built-in <c>Resources/</c>.
     /// </summary>
-    internal AssetManager(IFileSystem files, Caches caches)
+    internal AssetManager(IFileSystem files, Caches caches, PipelineCoordinator pipelines)
     {
         _files = files;
         _caches = caches;
+        _pipelines = pipelines;
         _stopped = _stopping.Token;
         _builtIn = GetResources(files, typeof(AssetManager).Assembly, AppContext.BaseDirectory);
         AddAssetTypes(typeof(AssetManager).Assembly);
@@ -276,7 +279,7 @@ public sealed class AssetManager : IDisposable
     {
         // What each asset depends on, turned around: who depends on each.
         AssetIndex index = Volatile.Read(ref _state).Index;
-        string work = $"Finding what depends on {AssetPipeline.GetName(index, asset.Id)}";
+        string work = $"Finding what depends on {AssetFold.GetName(index, asset.Id)}";
         Dictionary<ulong, List<ulong>> dependents = [];
         int scanned = 0;
         foreach (ulong id in index.ById.Keys)
@@ -371,7 +374,7 @@ public sealed class AssetManager : IDisposable
             throw new ArgumentException($"A {typeof(T).Name} is added with no handle.", nameof(handle));
 
         ArgumentNullException.ThrowIfNull(asset);
-        Post(new AssetAdded(handle.Id, typeof(T), ReadAsync<T>, asset));
+        Post(new AssetAdded(handle.Id, typeof(T), RunLoadAsync<T>, asset));
     }
 
     /// <summary>
@@ -487,13 +490,15 @@ public sealed class AssetManager : IDisposable
                 continue;
             }
 
-            AssetReader read = GetGeneric(nameof(ReadAsync), type).CreateDelegate<AssetReader>();
-            _state = _state with { Types = _state.Types.Add(type.Name, new AssetType(type, read)) };
+            GetGeneric(nameof(AddLoadPipelines), type).Invoke(this, null);
+            AssetReader read = GetGeneric(nameof(RunLoadAsync), type).CreateDelegate<AssetReader>(this);
+            AssetBuiltInReader readBuiltIn = GetGeneric(nameof(ReadBuiltIn), type).CreateDelegate<AssetBuiltInReader>();
+            _state = _state with { Types = _state.Types.Add(type.Name, new AssetType(type, read, readBuiltIn)) };
         }
     }
 
     /// <summary>
-    /// Takes in what happened since the last pump, through <see cref="AssetPipeline.Pump"/>, publishes the state it
+    /// Takes in what happened since the last pump, through <see cref="AssetFold.Pump"/>, publishes the state it
     /// gives and does what it asks: starts reads on workers and gives waiting callers their assets. The host's to call
     /// once a frame, before the gems', on its thread, the first time once every gem is made, so each type's loader is
     /// there: that is when asset loads start.
@@ -505,7 +510,7 @@ public sealed class AssetManager : IDisposable
 
         while (_inputs.Reader.TryRead(out AssetInput? input))
         {
-            (AssetState state, ImmutableArray<AssetAction> actions) = AssetPipeline.Pump(_state, input);
+            (AssetState state, ImmutableArray<AssetAction> actions) = AssetFold.Pump(_state, input);
             Volatile.Write(ref _state, state);
             foreach (AssetAction action in actions)
             {
@@ -515,112 +520,19 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// <paramref name="file"/> read as a <typeparamref name="T"/>, its <c>.meta</c>'s settings read against the
-    /// type's <see cref="AssetMetaAttribute"/> properties first: by <paramref name="loader"/>, the gem that reads the
-    /// type, when the file has one of its extensions, through <paramref name="caches"/>; else by Core itself
-    /// (<see cref="ReadBuiltIn{T}"/>).
+    /// <paramref name="bytes"/> read as a <typeparamref name="T"/> by Core itself, with its <c>.meta</c>'s
+    /// <paramref name="settings"/> read against the type first.
     /// </summary>
-    private static async Task<Result<object>> ReadAsync<T>(
-        AssetBytes file,
-        object? loader,
-        Caches caches,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    )
+    private static Result<object> ReadBuiltIn<T>(ReadOnlyMemory<byte> bytes, JsonElement settings)
         where T : IAsset<T>
     {
-        Result<AssetMetadata> metadata = ReadMetadata<T>(file.Settings);
+        Result<AssetMetadata> metadata = ReadMetadataPipeline<T>.Read(settings);
         if (!metadata.Ok)
             return Result.Failure(metadata.Error);
 
-        Result<T> read;
-        if (loader is IAssetLoader<T> reader)
-        {
-            AssetFile asset = new(file.Id, file.Path, file.Bytes, metadata.Value, file.Version);
-            read = HasExtension(file.Path, reader.Extensions)
-                ? await LoadThroughCachesAsync(reader, asset, caches, progress, cancel).ConfigureAwait(false)
-                : Result.Failure($"a {typeof(T).Name}'s file ends in {string.Join(", ", reader.Extensions)}.");
-        }
-        else
-        {
-            read = ReadBuiltIn<T>(file);
-        }
+        Result<T> read = ImportPipeline<T>.ReadBuiltIn(bytes, settings);
 
         return read.Ok ? Result.Success<object>(read.Value) : Result.Failure(read.Error);
-    }
-
-    /// <summary>
-    /// What <paramref name="reader"/> makes of <paramref name="file"/>: read from <paramref name="caches"/> by the
-    /// file's id and version when the loader is also an <see cref="ICache{T}"/>, else loaded and then kept there.
-    /// </summary>
-    private static async Task<Result<T>> LoadThroughCachesAsync<T>(
-        IAssetLoader<T> reader,
-        AssetFile file,
-        Caches caches,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    )
-        where T : IAsset<T>
-    {
-        if (reader is not ICache<T> cache)
-            return await reader.LoadAsync(file, progress, cancel).ConfigureAwait(false);
-
-        if (await caches.ReadAsync(file.Id, file.Version, cache, cancel).ConfigureAwait(false) is { Ok: true } cached)
-            return cached;
-
-        Result<T> loaded = await reader.LoadAsync(file, progress, cancel).ConfigureAwait(false);
-        if (loaded.Ok)
-            await caches.WriteAsync(file.Id, file.Version, loaded.Value, cache, cancel).ConfigureAwait(false);
-
-        return loaded;
-    }
-
-    /// <summary>
-    /// <paramref name="settings"/>, a <c>.meta</c>'s, read as the values of <typeparamref name="T"/>'s
-    /// <see cref="AssetMetaAttribute"/> properties, each in the type of its property, one it leaves out its
-    /// initializer; or why they are not: a key no marked property has, or a value not of its property's type.
-    /// </summary>
-    private static Result<AssetMetadata> ReadMetadata<T>(JsonElement settings)
-        where T : IAsset<T>
-    {
-        // A type made with its initializers is where the defaults are; one with no parameterless constructor has none.
-        object? defaults = typeof(T).GetConstructor(Type.EmptyTypes) is null ? null : Activator.CreateInstance<T>();
-        Dictionary<string, PropertyInfo> byKey = new(StringComparer.Ordinal);
-        ImmutableDictionary<string, object?>.Builder values = ImmutableDictionary.CreateBuilder<string, object?>(
-            StringComparer.Ordinal
-        );
-        foreach (PropertyInfo property in typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance))
-        {
-            if (property.GetCustomAttribute<AssetMetaAttribute>() is null)
-                continue;
-
-            byKey.Add(JsonNamingPolicy.CamelCase.ConvertName(property.Name), property);
-            values[property.Name] =
-                defaults is not null ? property.GetValue(defaults)
-                : property.PropertyType.IsValueType ? Activator.CreateInstance(property.PropertyType)
-                : null;
-        }
-
-        foreach (JsonProperty setting in settings.EnumerateObject())
-        {
-            if (!byKey.TryGetValue(setting.Name, out PropertyInfo? property))
-            {
-                string takes = byKey.Count == 0 ? "none" : string.Join(", ", byKey.Keys);
-                return Result.Failure(
-                    $"its .meta sets \"{setting.Name}\", which a {typeof(T).Name} does not take; it takes {takes}."
-                );
-            }
-
-            Result<object> value = Json.Read(setting.Value, property.PropertyType);
-            if (!value.Ok)
-                return Result.Failure(
-                    $"its .meta's \"{setting.Name}\" is not a {property.PropertyType.Name}: {value.Error}"
-                );
-
-            values[property.Name] = value.Value;
-        }
-
-        return Result.Success(new AssetMetadata(values.ToImmutable()));
     }
 
     /// <summary>
@@ -648,64 +560,50 @@ public sealed class AssetManager : IDisposable
     /// </summary>
     private static MethodInfo GetGeneric(string name, Type type) =>
         (
-            typeof(AssetManager).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static)
-            ?? throw new InvalidOperationException($"AssetManager has no static method {name}.")
+            typeof(AssetManager).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance)
+            ?? throw new InvalidOperationException($"AssetManager has no method {name}.")
         ).MakeGenericMethod(type);
 
     /// <summary>
-    /// <paramref name="file"/> read by Core itself, in the <see cref="AssetFileFormat"/> its type is marked with, with
-    /// what its <c>.meta</c> sets, already read against the type's <see cref="AssetMetaAttribute"/> properties, set
-    /// over it; else no gem the project lists reads the type.
+    /// Has Core's own join the pipeline that loads a <typeparamref name="T"/>, ahead of any gem's.
     /// </summary>
-    private static Result<T> ReadBuiltIn<T>(AssetBytes file)
+    private void AddLoadPipelines<T>()
         where T : IAsset<T>
     {
-        if (typeof(T).GetCustomAttribute<AssetFormatAttribute>() is not { } format)
-            return Result.Failure($"no gem the project lists reads {typeof(T).Name}s.");
-
-        if (format.Format == AssetFileFormat.Json && file.Settings.GetPropertyCount() == 0)
-            return Json.Read<T>(file.Bytes.Span);
-
-        JsonObject json;
-        if (format.Format == AssetFileFormat.Json)
-        {
-            Result<JsonObject> read = Json.Read<JsonObject>(file.Bytes.Span);
-            if (!read.Ok)
-                return Result.Failure(read.Error);
-
-            json = read.Value;
-        }
-        else
-        {
-            ReadOnlySpan<byte> text = file.Bytes.Span;
-            if (text.StartsWith(Encoding.UTF8.Preamble))
-                text = text[Encoding.UTF8.Preamble.Length..];
-
-            json = new JsonObject { ["text"] = Encoding.UTF8.GetString(text) };
-        }
-
-        foreach (JsonProperty setting in file.Settings.EnumerateObject())
-        {
-            json[setting.Name] = JsonNode.Parse(setting.Value.GetRawText());
-        }
-
-        Result<JsonElement> element = Json.Write(json, typeof(JsonObject));
-
-        return element.Ok ? Json.Read<T>(element.Value) : Result.Failure(element.Error);
+        PipelineList<AssetLoad<T>> load = _pipelines.Get<AssetLoad<T>>();
+        load.Add(new ReadFilePipeline<T>(_files), "Reading the file", null);
+        load.Add(new ReadMetadataPipeline<T>(), "Reading its settings", null);
+        load.Add(new ReadCachePipeline<T>(_caches), "Looking in the cache", null);
+        load.Add(new ImportPipeline<T>(), "Making it", null);
+        load.Add(new WriteCachePipeline<T>(_caches), "Keeping it in the cache", null);
     }
 
     /// <summary>
-    /// Whether <paramref name="path"/> ends in one of <paramref name="extensions"/>.
+    /// Runs the pipeline that loads asset <paramref name="id"/> as a <typeparamref name="T"/>, and says what it made.
     /// </summary>
-    private static bool HasExtension(string path, ImmutableArray<string> extensions)
+    private async Task<Made> RunLoadAsync<T>(
+        ulong id,
+        IndexedFile file,
+        object? loader,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
+        where T : IAsset<T>
     {
-        foreach (string extension in extensions)
+        AssetLoad<T> load = new()
         {
-            if (path.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
+            Id = id,
+            Path = file.Path,
+            File = file.File,
+            Settings = file.Settings,
+            Loader = loader as IAssetLoader<T>,
+            Progress = progress,
+        };
+        AssetLoad<T> done = await _pipelines.Get<AssetLoad<T>>().RunAsync(load, cancel).ConfigureAwait(false);
 
-        return false;
+        return done.Asset is { Ok: true, Value: { } asset }
+            ? new Made(Result.Success<object>(asset), done.Version)
+            : new Made(Result.Failure(done.Asset?.Error ?? $"{file.Path} made nothing."), done.Version);
     }
 
     /// <summary>
@@ -720,7 +618,8 @@ public sealed class AssetManager : IDisposable
     )
         where T : IAsset<T>
     {
-        Made made = await RequestAsync(id, dependent, typeof(T), ReadAsync<T>, progress, cancel).ConfigureAwait(false);
+        Made made = await RequestAsync(id, dependent, typeof(T), RunLoadAsync<T>, progress, cancel)
+            .ConfigureAwait(false);
 
         return made.Value.Ok ? Result.Success((T)made.Value.Value) : Result.Failure(made.Value.Error);
     }
@@ -755,9 +654,7 @@ public sealed class AssetManager : IDisposable
             if (!bytes.Ok)
                 return Result.Failure($"{file.Path} could not be read: {bytes.Error}");
 
-            ulong version = AssetIndex.ComputeVersion(bytes.Value, file.Settings);
-            AssetBytes read = new(id, file.Path, bytes.Value, file.Settings, version);
-            asset = await type.Read(read, null, _caches, null, cancel).ConfigureAwait(false);
+            asset = type.ReadBuiltIn(bytes.Value, file.Settings);
         }
         else if (!state.Loaders.ContainsKey(type.Type))
         {
@@ -790,7 +687,7 @@ public sealed class AssetManager : IDisposable
         CancellationToken cancel
     )
     {
-        string work = $"Finding what {AssetPipeline.GetName(Volatile.Read(ref _state).Index, id)} depends on";
+        string work = $"Finding what {AssetFold.GetName(Volatile.Read(ref _state).Index, id)} depends on";
         HashSet<ulong> found = [];
         List<ulong> level = [id];
         int scanned = 0;
@@ -880,7 +777,7 @@ public sealed class AssetManager : IDisposable
     )
     {
         AssetState state = Volatile.Read(ref _state);
-        string work = $"Loading {AssetPipeline.GetName(state.Index, id)}";
+        string work = $"Loading {AssetFold.GetName(state.Index, id)}";
         progress?.Report(new LoadProgress(work, 0, 1));
 
         // Loaded already, it needs no pump, but a dependency is recorded in one.
@@ -964,28 +861,14 @@ public sealed class AssetManager : IDisposable
     )]
     private async Task ReadFileAsync(ReadAssetFile read)
     {
-        string path = read.File.Path;
-        string type = read.Type.Name;
         Made made;
         try
         {
-            Result<byte[]> bytes = await _files.ReadBytesAsync(read.File.File, _stopped).ConfigureAwait(false);
-            if (!bytes.Ok)
-            {
-                made = new Made(Result.Failure($"{path} could not be read: {bytes.Error}"), 0);
-            }
-            else
-            {
-                ulong version = AssetIndex.ComputeVersion(bytes.Value, read.File.Settings);
-                AssetBytes file = new(read.Id, path, bytes.Value, read.File.Settings, version);
-                Result<object> asset = await read.Read(file, read.Loader, _caches, read.Progress, _stopped)
-                    .ConfigureAwait(false);
-                made = new Made(asset.Ok ? asset : Result.Failure($"{path} is not a {type}: {asset.Error}"), version);
-            }
+            made = await read.Read(read.Id, read.File, read.Loader, read.Progress, _stopped).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            made = new Made(Result.Failure($"{path} is not a {type}: its loader threw: {ex}"), 0);
+            made = new Made(Result.Failure($"{read.File.Path} is not a {read.Type.Name}: its loader threw: {ex}"), 0);
         }
 
         _inputs.Writer.TryWrite(new AssetFileRead(read.Id, made));
