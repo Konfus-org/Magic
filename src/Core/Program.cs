@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Runtime;
 using Magic.Assets.Pipeline;
 using Magic.Caching;
@@ -40,8 +39,17 @@ internal static class Program
         // next starts anew from the command line and the commands like it.
         while (true)
         {
+            App app = new();
+            FileSystem files = new();
+            Events events = new();
+
+            // Setup required core services
             ServiceCollection services = [];
-            (App app, IFileSystem files, Events events) = RegisterRequiredServices(services);
+            services.AddSingleton(app);
+            services.AddSingleton<IFileSystem>(files);
+            services.AddSingleton(events);
+
+            // Runs initial arguments
             Result ran = Cli.Run(app, files, commandLine);
             if (!ran.Ok)
             {
@@ -54,7 +62,13 @@ internal static class Program
             if (app.IsExiting || app.Project is not { } project)
                 return Log.ErrorCount == 0 ? 0 : 1;
 
-            using AssetManager assets = RegisterProjectServices(services, files, project);
+            // Setup services that require a project
+            Caches caches = new(files, project.Name, files.GetParent(project.Path));
+            using AssetManager assets = new(files, caches);
+            services.AddSingleton(caches);
+            services.AddSingleton(assets);
+
+            // Run the application
             Result ended = app.Run(services, files, assets, events);
             if (!ended.Ok)
             {
@@ -65,40 +79,5 @@ internal static class Program
             if (app.IsExiting)
                 return 0;
         }
-    }
-
-    /// <summary>
-    /// Makes and registers with <paramref name="services"/> what Magic provides a run before it knows the project, all
-    /// new for it: the app, the file system and the gems' messages.
-    /// </summary>
-    private static (App App, IFileSystem Files, Events Events) RegisterRequiredServices(ServiceCollection services)
-    {
-        App app = new();
-        FileSystem files = new();
-        Events events = new();
-        services.AddSingleton(app);
-        services.AddSingleton<IFileSystem>(files);
-        services.AddSingleton(events);
-
-        return (app, files, events);
-    }
-
-    /// <summary>
-    /// Makes and registers with <paramref name="services"/> what Magic provides a run of <paramref name="project"/>: its
-    /// caches and the assets, which the caller ends with the run.
-    /// </summary>
-    [SuppressMessage(
-        "Reliability",
-        "CA2000:Dispose objects before losing scope",
-        Justification = "The assets go to the caller, which ends them with the run."
-    )]
-    private static AssetManager RegisterProjectServices(ServiceCollection services, IFileSystem files, Project project)
-    {
-        Caches caches = new(files, project.Name, files.GetParent(project.Path));
-        AssetManager assets = new(files, caches);
-        services.AddSingleton(caches);
-        services.AddSingleton(assets);
-
-        return assets;
     }
 }
