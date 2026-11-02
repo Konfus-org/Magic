@@ -12,8 +12,9 @@ which the build still reports; and CSharpier, which decides every line break, in
 .editorconfig's [*] block and is what the build checks (Directory.Build.props). CSharpier is the local dotnet tool
 .config/dotnet-tools.json pins, restored before its pass. The first two read the code as the last build left it and
 build nothing. A fourth pass builds the solution and removes each project or package reference ReferenceTrimmer says
-nothing uses (Directory.Packages.props) from its project file. tools/Scripts/AgentTaskComplete.ps1 runs this first, so
-an agent's change is formatted before it is validated. Runs from any current directory.
+nothing uses (Directory.Packages.props) from its project file. A project that fails that build holds back those built
+on it, so a reference only they leave unused is removed on the next run. tools/Scripts/AgentTaskComplete.ps1 runs this
+first, so an agent's change is formatted before it is validated. Runs from any current directory.
 
 .PARAMETER All
 Formats every file in the repository rather than the changed ones.
@@ -73,11 +74,11 @@ $passes = @(
     @{
         Name = 'References'
         Run = {
-            # Built with every warning a warning, so each project builds and reports what it doesn't use, ReferenceTrimmer's
-            # RT0002 (a project) and RT0003 (a package); whatever else fails is the build's to report, not this pass's.
+            # As strict as any build, so a project that fails stays out of date and fails the next build too. A project
+            # reports what it doesn't use as it compiles, ReferenceTrimmer's RT0002 (a project) and RT0003 (a package);
+            # whatever else fails is the build's to report, not this pass's.
             $found = @(
-                dotnet build $solution -tl:off -nologo -v:q -p:TreatWarningsAsErrors=false `
-                    -p:MSBuildTreatWarningsAsErrors=false 2>&1 |
+                dotnet build $solution -tl:off -nologo -v:q 2>&1 |
                     ForEach-Object { "$_" } |
                     Select-String -Pattern 'RT000[23]: (ProjectReference|PackageReference) (\S+) can be removed \[(.+?\.csproj)' |
                     ForEach-Object { $_.Matches[0] } |
