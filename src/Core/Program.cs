@@ -1,7 +1,6 @@
 using System.Runtime;
 using Magic.Assets.Pipeline;
 using Magic.Caching;
-using Magic.CommandLine;
 using Magic.Debugging;
 using Magic.Files;
 using Magic.GemAPI;
@@ -41,10 +40,11 @@ internal static class Program
         // next starts anew from the command line and the commands like it.
         while (true)
         {
-            App app = new();
             FileSystem files = new();
             Events events = new();
             Threads threads = new();
+            PipelineCoordinator pipelines = new(threads);
+            App app = new(files, events, threads, pipelines);
 
             // Setup required core services
             ServiceCollection services = [];
@@ -54,7 +54,7 @@ internal static class Program
             services.AddSingleton(threads);
 
             // Runs initial arguments
-            Result ran = Cli.Run(app, files, commandLine);
+            Result ran = app.Cli.Execute(commandLine);
             if (!ran.Ok)
             {
                 Log.Critical($"Couldn't run the command line: {ran.Error}");
@@ -68,13 +68,12 @@ internal static class Program
 
             // Setup services that require a project
             Caches caches = new(files, project.Name, files.GetParent(project.Path));
-            PipelineCoordinator pipelines = new(threads);
             using AssetManager assets = new(files, caches, pipelines);
             services.AddSingleton(caches);
             services.AddSingleton(assets);
 
             // Run the application
-            Result ended = app.Run(services, files, assets, events, threads, pipelines);
+            Result ended = app.Run(services, assets);
             if (!ended.Ok)
             {
                 Log.Critical(ended.Error);

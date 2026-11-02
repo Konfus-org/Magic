@@ -11,23 +11,33 @@ namespace Magic.CommandLine;
 /// Magic's commands, run against the <see cref="App"/>: the command line Magic was launched with is the first of
 /// them, and each line typed into the terminal runs the same commands.
 /// </summary>
-internal static class Cli
+internal sealed class Cli
 {
     /// <summary>
     /// The typed lines that ended earlier runs without exiting, such as <c>open Other.magic</c>, in order: each run
-    /// starts anew from the command line and then these.
+    /// starts anew from the command line and then these. Static because each run has its own Cli.
     /// </summary>
     private static readonly List<string> _restarts = [];
 
+    private readonly App _app;
+    private readonly IFileSystem _files;
+    private readonly RootCommand _commands;
+
+    public Cli(App app, IFileSystem files)
+    {
+        _app = app;
+        _files = files;
+        _commands = CreateCommands();
+    }
+
     /// <summary>
-    /// Runs the commands Magic was launched with, then the typed lines that ended earlier runs, or says why the
+    /// Executes the commands Magic was launched with, then the typed lines that ended earlier runs, or says why the
     /// commands didn't run. Only open runs a project; any other command does its job and leaves the app exiting.
     /// </summary>
-    public static Result Run(App app, IFileSystem files, string[] commandLine)
+    public Result Execute(string[] commands)
     {
-        RootCommand commands = CreateCommands(app, files);
-        ParseResult parsed = commands.Parse(commandLine);
-        if (parsed.Errors.Count == 0 && parsed.Action == commands.Action)
+        ParseResult parsed = _commands.Parse(commands);
+        if (parsed.Errors.Count == 0 && parsed.Action == _commands.Action)
             return Result.Failure(
                 "it has no command; open a project with 'Magic open <project>', or see 'Magic --help'."
             );
@@ -35,56 +45,65 @@ internal static class Cli
         Result ran = Invoke(parsed);
         foreach (string line in _restarts)
         {
-            Run(app, files, line);
+            Execute(line);
         }
 
-        if (app.Project is null)
-            app.Exit();
+        if (_app.Project is null)
+            _app.Exit();
 
         return ran;
     }
 
     /// <summary>
-    /// Runs one typed line, or says why it didn't run. A line that doesn't start with a command is options, which may
+    /// Executes one typed command, or says why it didn't run. One that doesn't start with a verb is options, which may
     /// leave out the leading --, or the - of a one-letter option.
     /// </summary>
-    public static Result Run(App app, IFileSystem files, string line)
+    public Result Execute(string command)
     {
-        if (string.IsNullOrWhiteSpace(line))
+        if (string.IsNullOrWhiteSpace(command))
             return Result.Success();
 
-        RootCommand commands = CreateCommands(app, files);
-        string firstWord = line.Split(' ', 2)[0];
-        if (line.StartsWith('-') || commands.Subcommands.Any(command => command.Name == firstWord))
-            return Invoke(commands.Parse(line));
+        string firstWord = command.Split(' ', 2)[0];
+        if (command.StartsWith('-') || _commands.Subcommands.Any(subcommand => subcommand.Name == firstWord))
+            return Invoke(_commands.Parse(command));
 
-        string dashes = line.Length == 1 ? "-" : "--";
+        string dashes = command.Length == 1 ? "-" : "--";
 
-        return Invoke(commands.Parse(dashes + line));
+        return Invoke(_commands.Parse(dashes + command));
     }
 
     /// <summary>
-    /// Runs the next line typed into the terminal, if one is waiting. One that ends the run without exiting is kept, for
-    /// the runs after it.
+    /// Executes the next line typed into the terminal, if one is waiting. One that ends the run without exiting is kept,
+    /// for the runs after it.
     /// </summary>
-    public static void Pump(App app, IFileSystem files)
+    public void Pump()
     {
         if (!Terminal.Pump(out string? line))
             return;
 
-        Result ran = Run(app, files, line);
+        Result ran = Execute(line);
         if (!ran.Ok)
             Log.Error($"Couldn't run '{line}': {ran.Error}");
 
-        if (!app.IsRunning && !app.IsExiting)
+        if (!_app.IsRunning && !_app.IsExiting)
             _restarts.Add(line);
     }
 
+    private static Result Invoke(ParseResult parsed)
+    {
+        if (parsed.Errors.Count > 0)
+            return Result.Failure(string.Join("; ", parsed.Errors.Select(error => error.Message)));
+
+        parsed.Invoke();
+
+        return Result.Success();
+    }
+
     /// <summary>
-    /// The commands: verbs that act on <paramref name="app"/> or do a job of their own, and options that set how it
-    /// runs, given before or after the verb.
+    /// The commands: verbs that act on the app or do a job of their own, and options that set how it runs, given before
+    /// or after the verb.
     /// </summary>
-    private static RootCommand CreateCommands(App app, IFileSystem files)
+    private RootCommand CreateCommands()
     {
         RootCommand commands = new("Magic CLI.\nAllows interaction with the Magic game engine from the command line.")
         {
@@ -93,7 +112,7 @@ internal static class Cli
                 new Command("open", "Opens the project at the given path and runs it, ending the run of any other")
                 {
                     Arguments = { new Argument<string>("project") { Description = "The .magic file to run" } },
-                    Action = new CliCommand(cmds => Open(app, files, cmds.GetRequiredValue<string>("project"))),
+                    Action = new CliCommand(cmds => Open(cmds.GetRequiredValue<string>("project"))),
                 },
                 new Command("new", "Makes a project or gem from Magic's dotnet new templates")
                 {
@@ -125,7 +144,7 @@ internal static class Cli
                         if (!cmds.GetValue<bool>("--now"))
                         {
                             Log.Info("Exiting.");
-                            app.Exit();
+                            _app.Exit();
                             return;
                         }
 
@@ -141,7 +160,7 @@ internal static class Cli
                 {
                     Description = "Run without a GUI (headless mode)",
                     Recursive = true,
-                    Action = new CliCommand(cmds => app.IsHeadless = cmds.GetValue<bool>("--headless")),
+                    Action = new CliCommand(cmds => _app.IsHeadless = cmds.GetValue<bool>("--headless")),
                 },
                 new Option<Log.VerbosityLevel>("--verbosity", "-v")
                 {
@@ -153,7 +172,7 @@ internal static class Cli
                 {
                     Description = "Exit with code 2 as soon as an error is logged",
                     Recursive = true,
-                    Action = new CliCommand(cmds => app.ShouldExitOnError = cmds.GetValue<bool>("--fail-on-error")),
+                    Action = new CliCommand(cmds => _app.ShouldExitOnError = cmds.GetValue<bool>("--fail-on-error")),
                 },
             },
         };
@@ -165,28 +184,18 @@ internal static class Cli
     }
 
     /// <summary>
-    /// Reads the project at <paramref name="path"/> and has <paramref name="app"/> run it; one that won't read is
-    /// logged as an error, and whatever runs goes on.
+    /// Reads the project at <paramref name="path"/> and has the app run it; one that won't read is logged as an error,
+    /// and whatever runs goes on.
     /// </summary>
-    private static void Open(App app, IFileSystem files, string path)
+    private void Open(string path)
     {
-        Result<Project> project = Project.Load(path, files);
+        Result<Project> project = Project.Load(path, _files);
         if (!project.Ok)
         {
             Log.Error(project.Error);
             return;
         }
 
-        app.Project = project.Value;
-    }
-
-    private static Result Invoke(ParseResult parsed)
-    {
-        if (parsed.Errors.Count > 0)
-            return Result.Failure(string.Join("; ", parsed.Errors.Select(error => error.Message)));
-
-        parsed.Invoke();
-
-        return Result.Success();
+        _app.Project = project.Value;
     }
 }

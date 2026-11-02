@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Magic.Assets.Pipeline;
+using Magic.CommandLine;
 using Magic.Debugging;
 using Magic.Files;
 using Magic.GemAPI;
@@ -16,6 +17,23 @@ namespace Magic.Runtime;
 /// </summary>
 public sealed class App
 {
+    private readonly IFileSystem _files;
+    private readonly Events _events;
+    private readonly Threads _threads;
+    private readonly PipelineCoordinator _pipelines;
+
+    /// <summary>
+    /// Makes the app of one run and the commands that act on it.
+    /// </summary>
+    internal App(IFileSystem files, Events events, Threads threads, PipelineCoordinator pipelines)
+    {
+        _files = files;
+        _events = events;
+        _threads = threads;
+        _pipelines = pipelines;
+        Cli = new(this, files);
+    }
+
     /// <summary>
     /// The project to run, as read from its <c>.magic</c> file; none until one is opened. Opening another ends the run,
     /// and Magic runs the new project next; opening the same file again changes nothing.
@@ -77,6 +95,11 @@ public sealed class App
     public bool IsExiting { get; private set; }
 
     /// <summary>
+    /// The commands that act on this app: the command line, and each line typed into the terminal.
+    /// </summary>
+    internal Cli Cli { get; }
+
+    /// <summary>
     /// Whether --fail-on-error has seen its error.
     /// </summary>
     private bool HasFailed => ShouldExitOnError && Log.ErrorCount > 0;
@@ -95,20 +118,13 @@ public sealed class App
     /// <see cref="IWindow"/> is the app's <see cref="Window"/> for the run. Fails when no project is open, and at the
     /// first error under --fail-on-error.
     /// </summary>
-    internal Result Run(
-        ServiceCollection services,
-        IFileSystem files,
-        AssetManager assets,
-        Events events,
-        Threads threads,
-        PipelineCoordinator pipelines
-    )
+    internal Result Run(ServiceCollection services, AssetManager assets)
     {
         if (Project is not { } project)
             return Result.Failure("No project is open.");
 
-        assets.AddAssetDirectory(files.GetParent(project.Path));
-        GemRegistry registry = new(services, files, project.Gems, assets);
+        assets.AddAssetDirectory(_files.GetParent(project.Path));
+        GemRegistry registry = new(services, _files, project.Gems, assets);
 
         // Every asset directory is indexed before any gem is made, so a constructor can find assets.
         assets.Index();
@@ -119,17 +135,17 @@ public sealed class App
 
         // Core's own join first, so each gem's runs after them.
         Stopwatch clock = new();
-        PipelineList<HostPump> pump = pipelines.Get<HostPump>();
-        pump.Add(new PostedWorkPipeline(threads), nameof(PostedWorkPipeline), null);
-        pump.Add(new TerminalPipeline(this, files), nameof(TerminalPipeline), null);
+        PipelineList<HostPump> pump = _pipelines.Get<HostPump>();
+        pump.Add(new PostedWorkPipeline(_threads), nameof(PostedWorkPipeline), null);
+        pump.Add(new TerminalPipeline(Cli), nameof(TerminalPipeline), null);
         pump.Add(new AssetsPipeline(assets), nameof(AssetsPipeline), null);
-        pipelines.Get<BeginUpdate>().Add(new EventsPipeline(events), nameof(EventsPipeline), null);
-        PipelineList<CoreState> core = pipelines.Get<CoreState>();
+        _pipelines.Get<BeginUpdate>().Add(new EventsPipeline(_events), nameof(EventsPipeline), null);
+        PipelineList<CoreState> core = _pipelines.Get<CoreState>();
         core.Add(new ClockPipeline(this, clock), nameof(ClockPipeline), null);
-        core.Add(new FramePipeline(pipelines), nameof(FramePipeline), null);
+        core.Add(new FramePipeline(_pipelines), nameof(FramePipeline), null);
         core.Add(new SyncPipeline(clock), nameof(SyncPipeline), null);
 
-        IReadOnlyList<LoadedGem> gems = GemLoader.Load(provider, registry, assets, pipelines);
+        IReadOnlyList<LoadedGem> gems = GemLoader.Load(provider, registry, assets, _pipelines);
         Window = GetWindow(provider);
 
         Log.Info($"Running {project.Name} in {(IsHeadless ? "headless" : "GUI")} mode.");
@@ -140,7 +156,7 @@ public sealed class App
             Exit();
 
         using CancellationTokenSource stopping = new();
-        Task starting = pipelines.Get<Startup>().RunOnMainAsync(new Startup(project), null, stopping.Token).AsTask();
+        Task starting = _pipelines.Get<Startup>().RunOnMainAsync(new Startup(project), null, stopping.Token).AsTask();
         RunUntil(starting, pump, stopping);
 
         clock.Start();
@@ -151,7 +167,7 @@ public sealed class App
         }
 
         stopping.Cancel();
-        Task ending = pipelines
+        Task ending = _pipelines
             .Get<Shutdown>()
             .RunOnMainInReverseAsync(new Shutdown(IsExiting), null, default)
             .AsTask();

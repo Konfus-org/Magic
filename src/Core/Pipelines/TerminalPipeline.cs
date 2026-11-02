@@ -1,17 +1,15 @@
 using Magic.CommandLine;
-using Magic.Files;
-using Magic.Runtime;
 
 namespace Magic.Pipelines;
 
 /// <summary>
-/// Runs the lines typed into the terminal.
+/// Executes the lines typed into the terminal.
 /// </summary>
-internal sealed class TerminalPipeline(App app, IFileSystem files) : IPipeline<HostPump>
+internal sealed class TerminalPipeline(Cli cli) : IPipeline<HostPump>
 {
     public ValueTask<HostPump> RunAsync(HostPump state, CancellationToken cancel)
     {
-        Cli.Pump(app, files);
+        cli.Pump();
 
         return ValueTask.FromResult(state);
     }
