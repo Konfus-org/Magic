@@ -6,6 +6,7 @@ using System.Reflection;
 using Magic.Assets.Pipeline;
 using Magic.Debugging;
 using Magic.Files;
+using Magic.Pipelines;
 using Magic.Utils;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -136,14 +137,17 @@ internal sealed class GemRegistry
         if (constructors != 1)
             return Result.Failure($"Gem {name}: {gem.Name} must have one public constructor; it has {constructors}.");
 
-        // What the host takes itself isn't provided, so any number of gems can be sinks, and the assets say which gem
-        // reads a type.
+        // What the host takes itself isn't provided, so any number of gems can be sinks, the assets say which gem reads
+        // a type, and only the engine runs a pipeline.
         List<Type> provides = [];
         List<Type> reads = [];
+        List<Type> joins = [];
         foreach (Type contract in gem.GetInterfaces())
         {
             if (contract.IsGenericType && contract.GetGenericTypeDefinition() == typeof(IAssetLoader<>))
                 reads.Add(contract.GetGenericArguments()[0]);
+            else if (contract.IsGenericType && contract.GetGenericTypeDefinition() == typeof(IPipeline<>))
+                joins.Add(contract.GetGenericArguments()[0]);
             else if (contract != typeof(IGem) && contract != typeof(IDisposable) && contract != typeof(ILogSink))
                 provides.Add(contract);
         }
@@ -156,7 +160,18 @@ internal sealed class GemRegistry
         bool hasResources = files.DirectoryExists(resources);
 
         return Result.Success(
-            new GemInfo(name, author, description, version, gem, provides, reads, [], hasResources ? resources : null)
+            new GemInfo(
+                name,
+                author,
+                description,
+                version,
+                gem,
+                provides,
+                reads,
+                joins,
+                [],
+                hasResources ? resources : null
+            )
         );
     }
 

@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using Magic.Assets.Pipeline;
 using Magic.Debugging;
+using Magic.Pipelines;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Magic.GemAPI;
@@ -13,8 +14,9 @@ internal static class GemLoader
 {
     /// <summary>
     /// Makes the gems in <paramref name="registry"/> through <paramref name="provider"/>, which was built from the
-    /// services they were registered with, and sets each up: on the log when it is a sink, and reading for
-    /// <paramref name="assets"/> the asset types it reads. The gems made, in dependency order. End them with
+    /// services they were registered with, and sets each up: on the log when it is a sink, reading for
+    /// <paramref name="assets"/> the asset types it reads, and in the <paramref name="pipelines"/> it joins, so they run
+    /// in the order the gems are made. The gems made, in dependency order. End them with
     /// <see cref="Unload"/>, which also frees the gems' assemblies once nothing holds the provider.
     /// </summary>
     [SuppressMessage(
@@ -22,7 +24,12 @@ internal static class GemLoader
         "CA1031:Do not catch general exception types",
         Justification = "Whatever a gem's constructor throws, it is logged and the gem is not made; the others go on."
     )]
-    public static IReadOnlyList<LoadedGem> Load(IServiceProvider provider, GemRegistry registry, AssetManager assets)
+    public static IReadOnlyList<LoadedGem> Load(
+        IServiceProvider provider,
+        GemRegistry registry,
+        AssetManager assets,
+        PipelineCoordinator pipelines
+    )
     {
         List<LoadedGem> loaded = [];
         foreach (GemInfo gem in Sort(registry))
@@ -48,6 +55,9 @@ internal static class GemLoader
 
             if (gem.Reads.Count > 0)
                 setUp.Subscriptions.Add(assets.AddLoader(made));
+
+            if (gem.Joins.Count > 0)
+                setUp.Subscriptions.Add(pipelines.Register(made, gem.Name, gem.Joins));
 
             string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
             Log.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");

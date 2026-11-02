@@ -1,7 +1,9 @@
+using Magic.Pipelines;
+
 namespace Magic.GemAPI;
 
 /// <summary>
-/// One frame's clocks and messages, handed to every gem's hooks.
+/// One frame's clocks and messages, handed to every pipeline the frame runs.
 /// </summary>
 public readonly record struct Frame
 {
@@ -31,7 +33,7 @@ public readonly record struct Frame
 
     /// <summary>
     /// The messages published during the last frame. None in a fixed step, which takes what it needs from what
-    /// <see cref="IGem.Tick"/> read.
+    /// <see cref="Update"/> read.
     /// </summary>
     public FrameEvents Events { get; init; }
 }

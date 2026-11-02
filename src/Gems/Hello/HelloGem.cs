@@ -1,23 +1,27 @@
 using System.Diagnostics.CodeAnalysis;
 using Magic.Debugging;
 using Magic.GemAPI;
+using Magic.Pipelines;
 
 namespace Hello;
 
 /// <summary>
 /// The gem: the one class in its assembly that implements <see cref="IGem"/>. Magic makes it after whatever its
-/// constructor takes, and every other interface it implements is what it provides to the gems made after it.
+/// constructor takes. Each <see cref="IPipeline{TState}"/> it implements is a pipeline it joins, and every other
+/// interface is what it provides to the gems made after it.
 /// </summary>
 [SuppressMessage(
     "Performance",
     "CA1812:Avoid uninstantiated internal classes",
     Justification = "Magic makes it by reflection when a project lists the gem."
 )]
-internal sealed class HelloGem : IGem
+internal sealed class HelloGem : IGem, IPipeline<Update>
 {
-    public void Tick(in Frame frame)
+    public ValueTask<Update> RunAsync(Update state, CancellationToken cancel)
     {
-        if (frame.Index % 60 == 0)
-            Log.Info($"Hello is running, at frame {frame.Index}.");
+        if (state.Frame.Index % 60 == 0)
+            Log.Info($"Hello is running, at frame {state.Frame.Index}.");
+
+        return ValueTask.FromResult(state);
     }
 }

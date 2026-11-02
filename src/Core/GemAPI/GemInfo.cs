@@ -1,3 +1,5 @@
+using Magic.Pipelines;
+
 namespace Magic.GemAPI;
 
 /// <summary>
@@ -10,6 +12,7 @@ namespace Magic.GemAPI;
 /// <param name="Type">Its one <see cref="IGem"/> class.</param>
 /// <param name="Provides">The interfaces it provides to other gems.</param>
 /// <param name="Reads">The asset types it reads, one for each asset loader it implements.</param>
+/// <param name="Joins">The states of the pipelines it joins, one for each <see cref="IPipeline{TState}"/> it implements.</param>
 /// <param name="Needs">The names of the registered gems its constructor asks for.</param>
 /// <param name="Resources">The folder of its own assets; null when it has none.</param>
 internal sealed record GemInfo(
@@ -20,6 +23,7 @@ internal sealed record GemInfo(
     Type Type,
     IReadOnlyList<Type> Provides,
     IReadOnlyList<Type> Reads,
+    IReadOnlyList<Type> Joins,
     IReadOnlyList<string> Needs,
     string? Resources
 );

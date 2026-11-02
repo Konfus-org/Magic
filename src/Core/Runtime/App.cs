@@ -1,10 +1,10 @@
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using Magic.Assets.Pipeline;
-using Magic.CommandLine;
 using Magic.Debugging;
 using Magic.Files;
 using Magic.GemAPI;
+using Magic.Pipelines;
+using Magic.Threading;
 using Magic.Utils;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -76,6 +76,11 @@ public sealed class App
     /// </summary>
     public bool IsExiting { get; private set; }
 
+    /// <summary>
+    /// Whether --fail-on-error has seen its error.
+    /// </summary>
+    private bool HasFailed => ShouldExitOnError && Log.ErrorCount > 0;
+
     public void Exit()
     {
         IsExiting = true;
@@ -85,27 +90,20 @@ public sealed class App
     /// <summary>
     /// Runs the app's project: adds its folder to <paramref name="assets"/>, registers its gems with
     /// <paramref name="services"/>, which holds what the host provides, indexes the assets, makes and sets up the
-    /// gems, and runs their frames until the commands ask to exit or for another project or mode, then unloads them.
-    /// Runs a line typed into the terminal, pumps <paramref name="assets"/> and takes what was published on
-    /// <paramref name="events"/> between frames. The gem that provides
-    /// <see cref="IWindow"/> is the app's <see cref="Window"/> for the run. Fails when no project is open, and at
-    /// the first error under --fail-on-error.
+    /// gems, then runs its pipelines: <see cref="Startup"/> once, the core pipeline until the commands ask to exit or for
+    /// another project or mode, and <see cref="Shutdown"/> once, then unloads the gems. The gem that provides
+    /// <see cref="IWindow"/> is the app's <see cref="Window"/> for the run. Fails when no project is open, and at the
+    /// first error under --fail-on-error.
     /// </summary>
-    [SuppressMessage(
-        "Design",
-        "CA1031:Do not catch general exception types",
-        Justification = "Whatever a gem throws, it is logged and the gem leaves the loop; the others go on."
-    )]
     internal Result Run(ServiceCollection services, IFileSystem files, AssetManager assets, Events events)
     {
-        const double FrameSec = 1.0 / 60;
-        const double FixedStepSec = 1.0 / 60;
-        const int MaxFixedSteps = 4;
-
         if (Project is not { } project)
             return Result.Failure("No project is open.");
 
         assets.AddAssetDirectory(files.GetParent(project.Path));
+        Threads threads = new();
+        PipelineCoordinator pipelines = new(threads);
+        services.AddSingleton(threads);
         GemRegistry registry = new(services, files, project.Gems, assets);
 
         // Every asset directory is indexed before any gem is made, so a constructor can find assets.
@@ -114,7 +112,17 @@ public sealed class App
         // Never disposed, since its singletons are the gems, which Unload ends.
         services.MakeReadOnly();
         IServiceProvider provider = services.BuildServiceProvider();
-        IReadOnlyList<LoadedGem> gems = GemLoader.Load(provider, registry, assets);
+
+        // Core's own join first, so each gem's runs after them.
+        Stopwatch clock = new();
+        PumpPipeline pump = new(this, files, assets, events, threads);
+        pipelines.Get<BeginUpdate>().Add(pump, nameof(PumpPipeline), null);
+        PipelineList<CoreState> core = pipelines.Get<CoreState>();
+        core.Add(new ClockPipeline(this, clock), nameof(ClockPipeline), null);
+        core.Add(new FramePipeline(pipelines), nameof(FramePipeline), null);
+        core.Add(new SyncPipeline(clock), nameof(SyncPipeline), null);
+
+        IReadOnlyList<LoadedGem> gems = GemLoader.Load(provider, registry, assets, pipelines);
         Window = GetWindow(provider);
 
         Log.Info($"Running {project.Name} in {(IsHeadless ? "headless" : "GUI")} mode.");
@@ -124,106 +132,25 @@ public sealed class App
         if (!IsHeadless)
             Exit();
 
-        // The gems still running: one that throws leaves.
-        List<LoadedGem> running = [.. gems];
-        Stopwatch clock = Stopwatch.StartNew();
-        double lastSec = 0;
-        double? pausedAtSec = null;
-        double? pausedDeltaSec = null;
-        double fixedSec = 0;
-        double fixedOwedSec = 0;
-        double nextFrameSec = 0;
-        for (uint index = 0; IsRunning; index++)
+        using CancellationTokenSource stopping = new();
+        Task starting = pipelines.Get<Startup>().RunOnMainAsync(new Startup(project), null, stopping.Token).AsTask();
+        RunUntil(starting, pump, stopping);
+
+        clock.Start();
+        CoreState state = default;
+        while (IsRunning && !HasFailed)
         {
-            Cli.Pump(this, files);
-            assets.Pump();
-            FrameEvents published = events.Take();
-
-            if (ShouldExitOnError && Log.ErrorCount > 0)
-                break;
-
-            double nowSec = clock.Elapsed.TotalSeconds;
-
-            Frame frame;
-            if (IsPaused)
-            {
-                pausedAtSec ??= nowSec;
-                pausedDeltaSec ??= nowSec - lastSec;
-                frame = new()
-                {
-                    Index = index,
-                    AppSec = nowSec,
-                    AppDeltaSec = nowSec - lastSec,
-                    SimSec = pausedAtSec.Value,
-                    SimDeltaSec = pausedDeltaSec.Value,
-                    Events = published,
-                };
-            }
-            else
-            {
-                pausedAtSec = null;
-                pausedDeltaSec = null;
-                frame = new()
-                {
-                    Index = index,
-                    AppSec = nowSec,
-                    AppDeltaSec = nowSec - lastSec,
-                    SimSec = nowSec,
-                    SimDeltaSec = nowSec - lastSec,
-                    Events = published,
-                };
-            }
-            lastSec = nowSec;
-
-            // Fixed steps catch the simulation up with the frame, a step at a time, at most MaxFixedSteps of them.
-            fixedOwedSec += frame.AppDeltaSec;
-            int fixedSteps = Math.Min((int)(fixedOwedSec / FixedStepSec), MaxFixedSteps);
-            fixedOwedSec -= fixedSteps * FixedStepSec;
-            if (fixedOwedSec >= FixedStepSec)
-                fixedOwedSec = 0;
-
-            // Each gem in the order made runs its whole frame; one that throws is logged and leaves.
-            for (int i = 0; i < running.Count; i++)
-            {
-                LoadedGem gem = running[i];
-                try
-                {
-                    gem.Gem.Tick(in frame);
-                    for (int step = 1; step <= fixedSteps; step++)
-                    {
-                        Frame fixedFrame = frame with
-                        {
-                            SimSec = fixedSec + (step * FixedStepSec),
-                            SimDeltaSec = FixedStepSec,
-                            Events = FrameEvents.None,
-                        };
-                        gem.Gem.DeterministicTick(in fixedFrame);
-                    }
-
-                    gem.Gem.Render(in frame);
-                }
-                catch (Exception ex)
-                {
-                    Log.Error($"Gem {gem.Name} threw and stops running: {ex}");
-                    running.RemoveAt(i);
-                    i--;
-                }
-            }
-
-            fixedSec += fixedSteps * FixedStepSec;
-
-            // Nothing sets the pace yet, so the loop sleeps until the next frame is due rather than spin. Due times
-            // are fixed steps of FrameSec, so a sleep the OS rounds up to its timer's tick is made up by the next one;
-            // a frame late by more than a frame starts the count again rather than run frames back to back.
-            nextFrameSec += FrameSec;
-            double leftSec = nextFrameSec - clock.Elapsed.TotalSeconds;
-            if (leftSec > 0)
-                Thread.Sleep(TimeSpan.FromSeconds(leftSec));
-            else if (leftSec < -FrameSec)
-                nextFrameSec = clock.Elapsed.TotalSeconds;
+            state = core.Run(state, stopping.Token);
         }
 
-        bool isFailed = ShouldExitOnError && Log.ErrorCount > 0;
+        stopping.Cancel();
+        Task ending = pipelines
+            .Get<Shutdown>()
+            .RunOnMainInReverseAsync(new Shutdown(IsExiting), null, default)
+            .AsTask();
+        RunUntil(ending, pump, stopping);
+
+        bool isFailed = HasFailed;
         if (!isFailed)
             Log.Info($"Closing {project.Name} and {(IsExiting ? "exiting" : "restarting")}.");
 
@@ -249,6 +176,24 @@ public sealed class App
         {
             // The gem loader has logged why it wasn't made.
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Keeps <paramref name="pump"/> going until <paramref name="running"/>, an awaited pipeline outside the frames,
+    /// has ended, as what it awaits needs it, cancelling <paramref name="stopping"/> once the run is to end. The
+    /// one wait on the main thread: no frame is due meanwhile, and this is what keeps the rest going.
+    /// </summary>
+    private void RunUntil(Task running, PumpPipeline pump, CancellationTokenSource stopping)
+    {
+        running.FireAndForget();
+        while (!running.IsCompleted)
+        {
+            pump.Pump();
+            if (!IsRunning)
+                stopping.Cancel();
+
+            Thread.Sleep(1);
         }
     }
 }
