@@ -107,13 +107,6 @@ public sealed class AssetManager : IDisposable
     private AssetState _state = AssetState.Empty;
 
     /// <summary>
-    /// What it knows as of now, as any thread reads it.
-    /// </summary>
-    internal AssetState State => Volatile.Read(ref _state);
-
-    internal IFileSystem Files { get; }
-
-    /// <summary>
     /// Assets under the directories added (<see cref="AddAssetDirectory"/>), the project's own folder then each
     /// gem's <c>Resources/</c>, and last Magic's built-in <c>Resources/</c>.
     /// </summary>
@@ -126,6 +119,13 @@ public sealed class AssetManager : IDisposable
         _builtIn = GetResources(files, typeof(AssetManager).Assembly, AppContext.BaseDirectory);
         AddAssetTypes(typeof(AssetManager).Assembly);
     }
+
+    /// <summary>
+    /// What it knows as of now, as any thread reads it.
+    /// </summary>
+    internal AssetState State => Volatile.Read(ref _state);
+
+    internal IFileSystem Files { get; }
 
     /// <summary>
     /// Stops the loads on their way and the watching: the host's to call, at the end of the run, on its thread. A load
@@ -480,6 +480,51 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
+    /// Asset <paramref name="id"/> as <paramref name="type"/>, at once when it has loaded, else once a pump has it
+    /// loaded; asked for by asset <paramref name="dependent"/>'s loader when that is not 0.
+    /// </summary>
+    internal async Task<Made> RequestAsync(
+        ulong id,
+        ulong dependent,
+        Type type,
+        AssetReader read,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
+    {
+        AssetState state = Volatile.Read(ref _state);
+        string work = $"Loading {AssetFold.GetName(state.Index, id)}";
+        progress?.Report(new LoadProgress(work, 0, 1));
+
+        // Loaded already, it needs no pump, but a dependency is recorded in one.
+        Made made;
+        if (
+            dependent == 0
+            && state.Assets.TryGetValue(id, out AssetEntry? entry)
+            && entry.Stage == AssetStage.Loaded
+            && entry.Type == type
+        )
+        {
+            made = entry.Outcome;
+        }
+        else
+        {
+            TaskCompletionSource<Made> waiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            Post(new AssetRequested(id, type, read, progress, waiter, dependent));
+            made = await waiter.Task.WaitAsync(cancel).ConfigureAwait(false);
+        }
+
+        progress?.Report(new LoadProgress(work, 1, 1));
+
+        return made;
+    }
+
+    /// <summary>
+    /// Hands <paramref name="input"/> to the next <see cref="Pump"/>; once the manager is disposed, there is none.
+    /// </summary>
+    internal void Post(AssetInput input) => ObjectDisposedException.ThrowIf(!_inputs.Writer.TryWrite(input), this);
+
+    /// <summary>
     /// <paramref name="bytes"/> read as a <typeparamref name="T"/> by Core itself, with its <c>.meta</c>'s
     /// <paramref name="settings"/> read against the type first.
     /// </summary>
@@ -585,46 +630,6 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Asset <paramref name="id"/> as <paramref name="type"/>, at once when it has loaded, else once a pump has it
-    /// loaded; asked for by asset <paramref name="dependent"/>'s loader when that is not 0.
-    /// </summary>
-    internal async Task<Made> RequestAsync(
-        ulong id,
-        ulong dependent,
-        Type type,
-        AssetReader read,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    )
-    {
-        AssetState state = Volatile.Read(ref _state);
-        string work = $"Loading {AssetFold.GetName(state.Index, id)}";
-        progress?.Report(new LoadProgress(work, 0, 1));
-
-        // Loaded already, it needs no pump, but a dependency is recorded in one.
-        Made made;
-        if (
-            dependent == 0
-            && state.Assets.TryGetValue(id, out AssetEntry? entry)
-            && entry.Stage == AssetStage.Loaded
-            && entry.Type == type
-        )
-        {
-            made = entry.Outcome;
-        }
-        else
-        {
-            TaskCompletionSource<Made> waiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            Post(new AssetRequested(id, type, read, progress, waiter, dependent));
-            made = await waiter.Task.WaitAsync(cancel).ConfigureAwait(false);
-        }
-
-        progress?.Report(new LoadProgress(work, 1, 1));
-
-        return made;
-    }
-
-    /// <summary>
     /// The built-in asset named <paramref name="name"/> in <paramref name="folder"/>, as
     /// <see cref="AssetIndex.FindBuiltIn"/> finds it; <paramref name="what"/> says which kind of named asset it is when
     /// it is missing, which a pump says once.
@@ -645,11 +650,6 @@ public sealed class AssetManager : IDisposable
 
         return Handle<T>.None;
     }
-
-    /// <summary>
-    /// Hands <paramref name="input"/> to the next <see cref="Pump"/>; once the manager is disposed, there is none.
-    /// </summary>
-    internal void Post(AssetInput input) => ObjectDisposedException.ThrowIf(!_inputs.Writer.TryWrite(input), this);
 
     /// <summary>
     /// Does what a pump asked for.
