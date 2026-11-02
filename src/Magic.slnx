@@ -12,7 +12,6 @@
     <File Path="../docs/CODE_OF_CONDUCT.md" />
     <File Path="../docs/CODE_STANDARDS.md" />
     <File Path="../docs/CONTRIBUTING.md" />
-    <File Path="../docs/PLAN.md" />
   </Folder>
   <Folder Name="/Samples/">
     <File Path="../samples/README.md" />

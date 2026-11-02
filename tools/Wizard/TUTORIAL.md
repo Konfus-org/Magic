@@ -474,19 +474,18 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
     /// What the world refuses, as the world throws it, becomes the tool's error, which the SDK passes on with its
     /// message; any other exception it reports with none.
     /// </summary>
-    private Task<string> OnMainThreadAsync(Func<string> work)
+    private async Task<string> OnMainThreadAsync(Func<string> work)
     {
-        return _threads.PostAsync(EngineThread.Main, () =>
+        await _threads.Enter(EngineThread.Main);
+        _stopping.Token.ThrowIfCancellationRequested();
+        try
         {
-            try
-            {
-                return work();
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or NotSupportedException)
-            {
-                throw new McpException(ex.Message, ex);
-            }
-        }, _stopping.Token);
+            return work();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or NotSupportedException)
+        {
+            throw new McpException(ex.Message, ex);
+        }
     }
 
     private string FormatEngineInfo()
