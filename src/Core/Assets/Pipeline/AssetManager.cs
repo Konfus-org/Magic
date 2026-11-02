@@ -63,8 +63,6 @@ public sealed class AssetManager : IDisposable
     /// </summary>
     private static readonly TimeSpan _settleTime = TimeSpan.FromMilliseconds(300);
 
-    private readonly IFileSystem _files;
-
     /// <summary>
     /// Where what a loader that is also an <see cref="ICache{T}"/> made is kept, by the asset's id and version.
     /// </summary>
@@ -109,12 +107,19 @@ public sealed class AssetManager : IDisposable
     private AssetState _state = AssetState.Empty;
 
     /// <summary>
+    /// What it knows as of now, as any thread reads it.
+    /// </summary>
+    internal AssetState State => Volatile.Read(ref _state);
+
+    internal IFileSystem Files { get; }
+
+    /// <summary>
     /// Assets under the directories added (<see cref="AddAssetDirectory"/>), the project's own folder then each
     /// gem's <c>Resources/</c>, and last Magic's built-in <c>Resources/</c>.
     /// </summary>
     internal AssetManager(IFileSystem files, Caches caches, PipelineCoordinator pipelines)
     {
-        _files = files;
+        Files = files;
         _caches = caches;
         _pipelines = pipelines;
         _stopped = _stopping.Token;
@@ -207,7 +212,7 @@ public sealed class AssetManager : IDisposable
         if (!state.Index.ById.TryGetValue(asset.Id, out IndexedFile? file))
             return 0;
 
-        Result<byte[]> bytes = _files.ReadBytes(file.File);
+        Result<byte[]> bytes = Files.ReadBytes(file.File);
 
         return bytes.Ok ? AssetIndex.ComputeVersion(bytes.Value, file.Settings) : 0;
     }
@@ -261,7 +266,7 @@ public sealed class AssetManager : IDisposable
         IProgress<LoadProgress>? progress,
         CancellationToken cancel
     )
-        where TAsset : IAsset<TAsset> => CrawlDownAsync(asset.Id, levels, progress, cancel);
+        where TAsset : IAsset<TAsset> => AssetCrawl.FindDependenciesAsync(this, asset.Id, levels, progress, cancel);
 
     /// <summary>
     /// The ids of what depends on <paramref name="asset"/>, as the files under the asset directories name it, up to
@@ -269,60 +274,13 @@ public sealed class AssetManager : IDisposable
     /// Found without loading any of them, reading every asset's file the first time it is asked; one that cannot be
     /// read is taken to depend on nothing.
     /// </summary>
-    public async Task<ImmutableArray<ulong>> FindDependentsAsync<TAsset>(
+    public Task<ImmutableArray<ulong>> FindDependentsAsync<TAsset>(
         Handle<TAsset> asset,
         int levels,
         IProgress<LoadProgress>? progress,
         CancellationToken cancel
     )
-        where TAsset : IAsset<TAsset>
-    {
-        // What each asset depends on, turned around: who depends on each.
-        AssetIndex index = Volatile.Read(ref _state).Index;
-        string work = $"Finding what depends on {AssetFold.GetName(index, asset.Id)}";
-        Dictionary<ulong, List<ulong>> dependents = [];
-        int scanned = 0;
-        foreach (ulong id in index.ById.Keys)
-        {
-            Result<ImmutableArray<ulong>> dependencies = await ScanAsync(id, cancel).ConfigureAwait(false);
-            progress?.Report(new LoadProgress(work, ++scanned, index.ById.Count));
-            if (!dependencies.Ok)
-                continue;
-
-            foreach (ulong dependency in dependencies.Value)
-            {
-                if (!dependents.TryGetValue(dependency, out List<ulong>? of))
-                {
-                    of = [];
-                    dependents.Add(dependency, of);
-                }
-
-                of.Add(id);
-            }
-        }
-
-        HashSet<ulong> found = [];
-        List<ulong> level = [asset.Id];
-        for (int depth = 0; depth < levels && level.Count > 0; depth++)
-        {
-            List<ulong> next = [];
-            foreach (ulong id in level)
-            {
-                if (!dependents.TryGetValue(id, out List<ulong>? of))
-                    continue;
-
-                foreach (ulong dependent in of)
-                {
-                    if (dependent != asset.Id && found.Add(dependent))
-                        next.Add(dependent);
-                }
-            }
-
-            level = next;
-        }
-
-        return [.. found];
-    }
+        where TAsset : IAsset<TAsset> => AssetCrawl.FindDependentsAsync(this, asset.Id, levels, progress, cancel);
 
     /// <summary>
     /// Loads what <paramref name="asset"/> depends on, down to <paramref name="levels"/> levels, as
@@ -340,7 +298,9 @@ public sealed class AssetManager : IDisposable
         Result<ImmutableArray<ulong>> found = await FindDependenciesAsync(asset, levels, progress, cancel)
             .ConfigureAwait(false);
 
-        return found.Ok ? await LoadAllAsync(found.Value, progress, cancel).ConfigureAwait(false) : found;
+        return found.Ok
+            ? await AssetCrawl.LoadAllAsync(this, found.Value, progress, cancel).ConfigureAwait(false)
+            : found;
     }
 
     /// <summary>
@@ -358,7 +318,7 @@ public sealed class AssetManager : IDisposable
     {
         ImmutableArray<ulong> found = await FindDependentsAsync(asset, levels, progress, cancel).ConfigureAwait(false);
 
-        return await LoadAllAsync(found, progress, cancel).ConfigureAwait(false);
+        return await AssetCrawl.LoadAllAsync(this, found, progress, cancel).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -393,7 +353,7 @@ public sealed class AssetManager : IDisposable
     internal void AddAssetDirectory(string directory)
     {
         directory = directory.TrimEnd('/', '\\');
-        if (!_files.DirectoryExists(directory))
+        if (!Files.DirectoryExists(directory))
             return;
 
         foreach (string added in _state.Directories)
@@ -416,7 +376,7 @@ public sealed class AssetManager : IDisposable
         // Watched before they are read, so nothing written meanwhile is missed.
         foreach (string directory in _state.Directories)
         {
-            Result<IFileWatcher> watched = _files.Watch(directory);
+            Result<IFileWatcher> watched = Files.Watch(directory);
             if (!watched.Ok)
             {
                 Log.Warn(
@@ -437,7 +397,7 @@ public sealed class AssetManager : IDisposable
             _watches.Add(new Subscription(watcher.Dispose));
         }
 
-        _state = _state with { Index = AssetIndex.Create(_files, _state.Directories, _builtIn) };
+        _state = _state with { Index = AssetIndex.Create(Files, _state.Directories, _builtIn) };
         Log.Info($"Indexed {_state.Index.ById.Count} assets under {_state.Directories.Length} folders.");
         WatchAsync(_stopped).FireAndForget();
     }
@@ -571,7 +531,7 @@ public sealed class AssetManager : IDisposable
         where T : IAsset<T>
     {
         PipelineList<AssetLoad<T>> load = _pipelines.Get<AssetLoad<T>>();
-        load.Add(new ReadFilePipeline<T>(_files), "Reading the file", null);
+        load.Add(new ReadFilePipeline<T>(Files), "Reading the file", null);
         load.Add(new ReadMetadataPipeline<T>(), "Reading its settings", null);
         load.Add(new ReadCachePipeline<T>(_caches), "Looking in the cache", null);
         load.Add(new ImportPipeline<T>(), "Making it", null);
@@ -625,149 +585,10 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// The ids of the handles asset <paramref name="id"/> holds, found by reflection: from the last scan of it while its
-    /// file is the same, else from it as it has loaded, else from its file read by Core for a type Core reads, else
-    /// from loading it; or why it could not be read.
-    /// </summary>
-    private async Task<Result<ImmutableArray<ulong>>> ScanAsync(ulong id, CancellationToken cancel)
-    {
-        AssetState state = Volatile.Read(ref _state);
-        if (state.Scanned.TryGetValue(id, out ImmutableArray<ulong> scanned))
-            return Result.Success(scanned);
-
-        if (!state.Index.ById.TryGetValue(id, out IndexedFile? file))
-            return Result.Failure($"No asset has the id {id}.");
-
-        if (!state.Types.TryGetValue(file.Type, out AssetType? type))
-            return Result.Failure(
-                $"{file.Path} is a {file.Type}, which neither Magic nor a gem the project lists holds."
-            );
-
-        Result<object> asset;
-        if (state.Assets.TryGetValue(id, out AssetEntry? entry) && entry.Current is { } current)
-        {
-            asset = current.Value;
-        }
-        else if (type.Type.GetCustomAttribute<AssetFormatAttribute>() is not null)
-        {
-            Result<byte[]> bytes = await _files.ReadBytesAsync(file.File, cancel).ConfigureAwait(false);
-            if (!bytes.Ok)
-                return Result.Failure($"{file.Path} could not be read: {bytes.Error}");
-
-            asset = type.ReadBuiltIn(bytes.Value, file.Settings);
-        }
-        else if (!state.Loaders.ContainsKey(type.Type))
-        {
-            // No gem the project lists reads it, so it names nothing that can be found.
-            return Result.Success<ImmutableArray<ulong>>([]);
-        }
-        else
-        {
-            // TODO(Konfus): keep each gem-read asset's dependency ids in the disk cache, keyed by its file's version,
-            // so finding them doesn't load it.
-            asset = await LoadAnyAsync(id, null, cancel).ConfigureAwait(false);
-        }
-
-        if (!asset.Ok)
-            return Result.Failure(asset.Error);
-
-        ImmutableArray<ulong> dependencies = AssetScan.FindHandles(asset.Value);
-        Post(new AssetDependenciesScanned(id, dependencies));
-
-        return Result.Success(dependencies);
-    }
-
-    /// <summary>
-    /// The ids <paramref name="id"/> depends on, down to <paramref name="levels"/> levels, scanning each.
-    /// </summary>
-    private async Task<Result<ImmutableArray<ulong>>> CrawlDownAsync(
-        ulong id,
-        int levels,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    )
-    {
-        string work = $"Finding what {AssetFold.GetName(Volatile.Read(ref _state).Index, id)} depends on";
-        HashSet<ulong> found = [];
-        List<ulong> level = [id];
-        int scanned = 0;
-        for (int depth = 0; depth < levels && level.Count > 0; depth++)
-        {
-            List<ulong> next = [];
-            foreach (ulong asset in level)
-            {
-                Result<ImmutableArray<ulong>> dependencies = await ScanAsync(asset, cancel).ConfigureAwait(false);
-                if (!dependencies.Ok)
-                    return Result.Failure(dependencies.Error);
-
-                progress?.Report(new LoadProgress(work, ++scanned, scanned + level.Count + next.Count));
-                foreach (ulong dependency in dependencies.Value)
-                {
-                    if (dependency != id && found.Add(dependency))
-                        next.Add(dependency);
-                }
-            }
-
-            level = next;
-        }
-
-        return Result.Success<ImmutableArray<ulong>>([.. found]);
-    }
-
-    /// <summary>
-    /// Loads each of <paramref name="ids"/> as the type its <c>.meta</c> names: their ids, or why any could not load.
-    /// </summary>
-    private async Task<Result<ImmutableArray<ulong>>> LoadAllAsync(
-        ImmutableArray<ulong> ids,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    )
-    {
-        Task<Result<object>>[] loading = new Task<Result<object>>[ids.Length];
-        for (int i = 0; i < ids.Length; i++)
-        {
-            loading[i] = LoadAnyAsync(ids[i], progress, cancel);
-        }
-
-        Result<object>[] loaded = await Task.WhenAll(loading).ConfigureAwait(false);
-        List<string> errors = [];
-        foreach (Result<object> one in loaded)
-        {
-            if (!one.Ok)
-                errors.Add(one.Error);
-        }
-
-        return errors.Count == 0 ? Result.Success(ids) : Result.Failure(string.Join(" ", errors));
-    }
-
-    /// <summary>
-    /// Asset <paramref name="id"/>, loaded as the type its <c>.meta</c> names.
-    /// </summary>
-    private async Task<Result<object>> LoadAnyAsync(
-        ulong id,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    )
-    {
-        AssetState state = Volatile.Read(ref _state);
-        if (!state.Index.ById.TryGetValue(id, out IndexedFile? file))
-            return Result.Failure($"No asset has the id {id}.");
-
-        if (!state.Types.TryGetValue(file.Type, out AssetType? type))
-            return Result.Failure(
-                $"{file.Path} is a {file.Type}, which neither Magic nor a gem the project lists holds."
-            );
-
-        Made made = await RequestAsync(id, 0, type.Type, type.Read, progress, cancel).ConfigureAwait(false);
-
-        return made.Value;
-    }
-
-    /// <summary>
     /// Asset <paramref name="id"/> as <paramref name="type"/>, at once when it has loaded, else once a pump has it
     /// loaded; asked for by asset <paramref name="dependent"/>'s loader when that is not 0.
     /// </summary>
-    private async Task<Made> RequestAsync(
+    internal async Task<Made> RequestAsync(
         ulong id,
         ulong dependent,
         Type type,
@@ -828,7 +649,7 @@ public sealed class AssetManager : IDisposable
     /// <summary>
     /// Hands <paramref name="input"/> to the next <see cref="Pump"/>; once the manager is disposed, there is none.
     /// </summary>
-    private void Post(AssetInput input) => ObjectDisposedException.ThrowIf(!_inputs.Writer.TryWrite(input), this);
+    internal void Post(AssetInput input) => ObjectDisposedException.ThrowIf(!_inputs.Writer.TryWrite(input), this);
 
     /// <summary>
     /// Does what a pump asked for.
@@ -919,7 +740,7 @@ public sealed class AssetManager : IDisposable
 
             try
             {
-                AssetIndex index = AssetIndex.Create(_files, Volatile.Read(ref _state).Directories, _builtIn);
+                AssetIndex index = AssetIndex.Create(Files, Volatile.Read(ref _state).Directories, _builtIn);
                 _inputs.Writer.TryWrite(new AssetDirectoriesReindexed(index, paths.ToImmutable()));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
