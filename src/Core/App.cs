@@ -179,7 +179,7 @@ public sealed class App
     private void PumpUntil(Task running, CancellationTokenSource stopping)
     {
         running.FireAndForget();
-        PipelineRunner<ServicePump> pump = _pipelines.Get<ServicePump>();
+        PipelineRunner<ServicePump> pump = _pipelines.Get<ServicePump>(); // TODO(Konfus): why do we do this here? Does it belong elsewhere?
         while (!running.IsCompleted)
         {
             pump.Run(default, stopping.Token);
