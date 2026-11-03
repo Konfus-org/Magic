@@ -1,8 +1,14 @@
 // A gradient written through the heap: red along x, green along y, a quarter blue, opaque. The pass header's x is the
 // target texture's id and y and z its size.
 module "Checks/Gradient";
+// Every module of the core library, so the check compiles the library as well as the entry.
 import Core.Heap;
 import Core.Pass;
+import Core.Math;
+import Core.Color;
+import Core.Pack;
+import Core.Sampling;
+import Core.Random;
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
