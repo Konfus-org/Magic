@@ -53,14 +53,12 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           "Version=$version" >> $env:GITHUB_ENV
 
-      # The build bakes the samples' caches beside them in Build/bin/Release/Projects/Samples, and the headless run
-      # opens them there, so it runs on what ships and reads the bundle the package carries.
       - name: Build and run headless
         shell: pwsh
-        run: ./tools/Scripts/Validate.ps1 -Configuration Release -Only Build,Headless -Project Build/bin/Release/Projects/Samples
+        run: ./tools/Scripts/Validate.ps1 -Configuration Release -Only Build,Headless
 
-      # Magic's folder without what the build and the run left in it; a project's baked Cache/ inside it ships. tar
-      # keeps the executable bit that a zip would lose, so Linux and macOS get a tarball.
+      # Magic's folder without what the build and the run left in it. tar keeps the executable bit that a zip would
+      # lose, so Linux and macOS get a tarball.
       - name: Package
         shell: pwsh
         run: |
