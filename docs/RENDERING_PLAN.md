@@ -220,8 +220,10 @@ Every model draws as clusters of up to 128 triangles and 128 vertices in a hiera
    cluster's own; draw when the parent's is above the threshold and the cluster's is at or below), then the HZB test
    against last frame's pyramid. Visible clusters go to the visible list; clusters that fail only the HZB go to a
    retest list.
-3. `vkCmdDrawIndexedIndirectCount` over the visible list, one indirect draw per cluster, the vertex shader fetching
-   through `gl_DrawID`. The pixel shader writes the visibility id.
+3. `vkCmdDrawIndirectCount` over the visible list, one indirect draw per cluster, not indexed: the vertex shader
+   fetches each vertex by its place in the cluster's run of the index pool, so the triangle index is the vertex id
+   over three and no pixel shader needs `SV_PrimitiveID`, which Metal has no geometry stage to give. The vertex
+   shader writes the visibility id as a flat varying and the pixel shader stores it.
 4. Build this frame's HZB from the depth so far. Retest the retest list against it, draw what passed. Nothing that is
    visible this frame is missed, and nothing that was hidden last frame and still is costs a pixel.
 

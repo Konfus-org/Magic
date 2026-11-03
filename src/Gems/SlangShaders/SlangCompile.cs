@@ -43,6 +43,7 @@ internal static unsafe class SlangCompile
         if (session is null)
             return Result.Failure(error);
         void* module = null;
+        List<nint> typeModules = [];
         foreach (SlangModule source in modules)
         {
             Result<nint> loaded = session.LoadModule(source);
@@ -51,6 +52,8 @@ internal static unsafe class SlangCompile
 
             if (source.Name == entryModule)
                 module = (void*)loaded.Value;
+            else if (IsTypeModule(source.Name, typeArguments))
+                typeModules.Add(loaded.Value);
         }
 
         if (module == null)
@@ -60,7 +63,7 @@ internal static unsafe class SlangCompile
         if (!entryPoint.Ok)
             return Result.Failure(entryPoint.Error);
 
-        Result<nint> composed = session.Compose(module, (void*)entryPoint.Value);
+        Result<nint> composed = session.Compose(module, (void*)entryPoint.Value, typeModules);
         if (!composed.Ok)
             return Result.Failure(composed.Error);
 
@@ -95,6 +98,17 @@ internal static unsafe class SlangCompile
                 GroupSizeZ = z,
             }
         );
+    }
+
+    private static bool IsTypeModule(string module, ImmutableArray<(string Module, string Type)> typeArguments)
+    {
+        foreach ((string typeModule, _) in typeArguments)
+        {
+            if (typeModule == module)
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -232,12 +246,29 @@ internal static unsafe class SlangCompile
             return Result.Success((nint)entryPoint);
         }
 
-        public Result<nint> Compose(void* module, void* entryPoint)
+        /// <summary>
+        /// The entry's module, the entry point and the modules its type arguments are declared in as one program, so
+        /// a type argument is found in the program's own layout.
+        /// </summary>
+        public Result<nint> Compose(void* module, void* entryPoint, List<nint> typeModules)
         {
-            void** parts = stackalloc void*[2] { module, entryPoint };
+            void** parts = stackalloc void*[2 + typeModules.Count];
+            parts[0] = module;
+            parts[1] = entryPoint;
+            for (int i = 0; i < typeModules.Count; i++)
+            {
+                parts[2 + i] = (void*)typeModules[i];
+            }
+
             void* composite;
             void* diagnostics = null;
-            int result = Slang.CreateCompositeComponentType(_session, parts, 2, &composite, &diagnostics);
+            int result = Slang.CreateCompositeComponentType(
+                _session,
+                parts,
+                2 + typeModules.Count,
+                &composite,
+                &diagnostics
+            );
             string messages = TakeDiagnostics(diagnostics);
             if (result < 0 || composite == null)
                 return Result.Failure($"the entry and its module do not compose:\n{messages}");

@@ -190,21 +190,6 @@ public sealed partial class SlangShadersGem : IGem, IShaderCompiler, ICache<Comp
     [GeneratedRegex(@"^\s*(?:__exported\s+)?import\s+([A-Za-z_][\w.]*)\s*;", RegexOptions.Multiline)]
     private static partial Regex ImportLine();
 
-    private static ImmutableArray<(string Module, string Type)> GetTypeArguments(in ShaderEntry entry)
-    {
-        ImmutableArray<(string, string)>.Builder arguments = ImmutableArray.CreateBuilder<(string, string)>(
-            entry.TypeArguments.Length
-        );
-        foreach (ShaderTypeArgument argument in entry.TypeArguments)
-        {
-            arguments.Add(
-                (argument.Module.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), argument.Type)
-            );
-        }
-
-        return arguments.MoveToImmutable();
-    }
-
     private static ulong GetKey(
         string entryPath,
         in ShaderEntry entry,
@@ -242,6 +227,23 @@ public sealed partial class SlangShadersGem : IGem, IShaderCompiler, ICache<Comp
         }
 
         return hash.GetCurrentHashAsUInt64();
+    }
+
+    /// <summary>
+    /// Each type argument as the module's name and the type's, as the compile composes and names them.
+    /// </summary>
+    private ImmutableArray<(string Module, string Type)> GetTypeArguments(in ShaderEntry entry)
+    {
+        ImmutableArray<(string, string)>.Builder arguments = ImmutableArray.CreateBuilder<(string, string)>(
+            entry.TypeArguments.Length
+        );
+        foreach (ShaderTypeArgument argument in entry.TypeArguments)
+        {
+            string? path = _assets.GetPath(argument.Module);
+            arguments.Add((path is null ? string.Empty : ToModuleName(path), argument.Type));
+        }
+
+        return arguments.MoveToImmutable();
     }
 
     /// <summary>

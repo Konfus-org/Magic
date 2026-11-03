@@ -7,6 +7,7 @@ using Magic.Files;
 using Magic.Images;
 using Magic.Projects;
 using Magic.Utils;
+using Magic.Worlds;
 
 namespace Magic.CommandLine;
 
@@ -26,6 +27,8 @@ internal sealed class Cli
     private readonly IFileSystem _files;
     private readonly EventCoordinator _events;
     private readonly RootCommand _commands;
+    private int _waitFrames;
+    private bool _isWaitingForWorld;
 
     public Cli(App app, IFileSystem files, EventCoordinator events)
     {
@@ -34,6 +37,11 @@ internal sealed class Cli
         _events = events;
         _commands = CreateCommands();
     }
+
+    /// <summary>
+    /// The run's world, which <c>wait loaded</c> watches; none before a run.
+    /// </summary>
+    internal World? World { get; set; }
 
     /// <summary>
     /// Executes the commands Magic was launched with, then the typed lines that ended earlier runs, or says why the
@@ -83,6 +91,21 @@ internal sealed class Cli
     /// </summary>
     public void Pump()
     {
+        if (_waitFrames > 0)
+        {
+            _waitFrames--;
+
+            return;
+        }
+
+        if (_isWaitingForWorld)
+        {
+            if (World is not { } world || world.IsLoading || world.Contents.IsEmpty)
+                return;
+
+            _isWaitingForWorld = false;
+        }
+
         if (!Terminal.Pump(out string? line))
             return;
 
@@ -102,6 +125,25 @@ internal sealed class Cli
         parsed.Invoke();
 
         return Result.Success();
+    }
+
+    /// <summary>
+    /// Holds the lines after this one until <paramref name="until"/> frames have passed, or, for <c>loaded</c>, until
+    /// the world has content and is not loading.
+    /// </summary>
+    private void Wait(string until)
+    {
+        if (until == "loaded")
+        {
+            _isWaitingForWorld = true;
+
+            return;
+        }
+
+        if (int.TryParse(until, NumberStyles.Integer, CultureInfo.InvariantCulture, out int frames))
+            _waitFrames = Math.Max(frames, 0);
+        else
+            Log.Error($"wait takes a number of frames or loaded, not '{until}'.");
     }
 
     /// <summary>
@@ -149,6 +191,14 @@ internal sealed class Cli
                         string path = _files.Combine(AppContext.BaseDirectory, "Screenshots", $"{name}.png");
                         _events.Publish(new ScreenshotRequested(path));
                     }),
+                },
+                new Command("wait", "Holds the lines after it for a number of frames, or until the world has loaded")
+                {
+                    Arguments =
+                    {
+                        new Argument<string>("until") { Description = "How many frames pass first, or loaded" },
+                    },
+                    Action = new CliCommand(cmds => Wait(cmds.GetRequiredValue<string>("until"))),
                 },
                 new Command("exit", "Ends the run and exits")
                 {

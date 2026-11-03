@@ -51,3 +51,13 @@ public float4 UnpackUnorm4x8(uint packed)
 public uint EncodeUnitVector(float3 unit) { return PackUnorm2x16(EncodeOctahedral(unit) * 0.5 + 0.5); }
 
 public float3 DecodeUnitVector(uint packed) { return DecodeOctahedral(UnpackUnorm2x16(packed) * 2.0 - 1.0); }
+
+// A number in [-1, 1] from a signed 16-bit fraction in the low half of a word, as a cluster's cone cutoff is kept.
+public float UnpackSnorm16(uint packed)
+{
+    int bits = int(packed & 0xFFFFu);
+    if (bits >= 32768)
+        bits -= 65536;
+
+    return max(float(bits) / 32767.0, -1.0);
+}

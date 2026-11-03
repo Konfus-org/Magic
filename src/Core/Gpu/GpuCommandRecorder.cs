@@ -182,6 +182,33 @@ public sealed class GpuCommandRecorder
         );
 
     /// <summary>
+    /// As many draws as the unsigned count at <paramref name="countOffset"/> in <paramref name="count"/>, up to
+    /// <paramref name="maxDraws"/>, their arguments <paramref name="stride"/> bytes apart from
+    /// <paramref name="argumentsOffset"/> in <paramref name="arguments"/>, each four unsigned integers: vertices,
+    /// instances, first vertex, first instance.
+    /// </summary>
+    public void DrawIndirectCount(
+        GpuBuffer arguments,
+        ulong argumentsOffset,
+        GpuBuffer count,
+        ulong countOffset,
+        uint maxDraws,
+        uint stride = 16
+    ) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.DrawIndirectCount,
+                Id = arguments.Id,
+                Offset = argumentsOffset,
+                Id2 = count.Id,
+                Offset2 = countOffset,
+                X = maxDraws,
+                Y = stride,
+            }
+        );
+
+    /// <summary>
     /// As many indexed draws as the unsigned count at <paramref name="countOffset"/> in <paramref name="count"/>, up
     /// to <paramref name="maxDraws"/>, their arguments <paramref name="stride"/> bytes apart from
     /// <paramref name="argumentsOffset"/> in <paramref name="arguments"/>, each five unsigned integers: indices,

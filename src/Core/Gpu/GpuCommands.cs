@@ -173,6 +173,7 @@ public enum GpuCommandKind : byte
     BindIndexBuffer,
     Draw,
     DrawIndexed,
+    DrawIndirectCount,
     DrawIndexedIndirectCount,
     CopyBuffer,
     CopyBufferToTexture,

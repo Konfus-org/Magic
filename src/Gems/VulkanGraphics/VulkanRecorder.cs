@@ -346,6 +346,21 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
             case GpuCommandKind.DrawIndexed:
                 api.vkCmdDrawIndexed(cmd, command.X, command.Y, command.Z, 0, command.W);
                 break;
+            case GpuCommandKind.DrawIndirectCount:
+                if (resources.GetBuffer(command.Id) is { } plain && resources.GetBuffer(command.Id2) is { } plainCount)
+                {
+                    api.vkCmdDrawIndirectCount(
+                        cmd,
+                        plain.Buffer,
+                        command.Offset,
+                        plainCount.Buffer,
+                        command.Offset2,
+                        command.X,
+                        command.Y
+                    );
+                }
+
+                break;
             case GpuCommandKind.DrawIndexedIndirectCount:
                 if (resources.GetBuffer(command.Id) is { } draws && resources.GetBuffer(command.Id2) is { } count)
                 {
