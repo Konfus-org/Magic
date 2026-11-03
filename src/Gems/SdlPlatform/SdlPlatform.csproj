@@ -22,7 +22,7 @@
       Repository="https://github.com/libsdl-org/SDL"
       Tag="release-3.4.18"
       CMakeOptions="-DSDL_TEST_LIBRARY=OFF;-DSDL_EXAMPLES=OFF;-DSDL_INSTALL_TESTS=OFF"
-      Headers="include/SDL3/SDL.h"
+      Headers="include/SDL3/SDL.h;include/SDL3/SDL_vulkan.h"
       IncludePath="include"
       Unbound="SDL_wcslen;SDL_wcsnlen;SDL_wcslcpy;SDL_wcslcat;SDL_wcsdup;SDL_wcsstr;SDL_wcsnstr;
                             SDL_wcscmp;SDL_wcsncmp;SDL_wcscasecmp;SDL_wcsncasecmp;SDL_wcstol;

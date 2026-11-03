@@ -1,0 +1,356 @@
+using System.Collections.Immutable;
+
+namespace Magic.Gpu;
+
+/// <summary>
+/// Builds a <see cref="GpuCommands"/>: begin a pass, add its transitions and commands, end it, and take the value with
+/// <see cref="Finish"/>. One per frame, on whatever thread records; the value it makes is handed to
+/// <see cref="IGraphicsApi.Submit"/> on the main thread. Each method's parameters say which of a
+/// <see cref="GpuCommand"/>'s fields its kind reads.
+/// </summary>
+public sealed class GpuCommandRecorder
+{
+    private readonly ImmutableArray<GpuPass>.Builder _passes = ImmutableArray.CreateBuilder<GpuPass>();
+    private readonly ImmutableArray<GpuTransition>.Builder _transitions = ImmutableArray.CreateBuilder<GpuTransition>();
+    private readonly ImmutableArray<GpuCommand>.Builder _commands = ImmutableArray.CreateBuilder<GpuCommand>();
+
+    private string _name = string.Empty;
+    private GpuPassKind _kind;
+    private GpuRenderTargets _targets;
+    private bool _isInPass;
+
+    public void BeginComputePass(string name) => Begin(name, GpuPassKind.Compute, default);
+
+    public void BeginDrawPass(string name, in GpuRenderTargets targets) => Begin(name, GpuPassKind.Draw, targets);
+
+    public void BeginTransferPass(string name) => Begin(name, GpuPassKind.Transfer, default);
+
+    public void EndPass()
+    {
+        ThrowIfNotInPass();
+        _passes.Add(
+            new()
+            {
+                Name = _name,
+                Kind = _kind,
+                Transitions = _transitions.DrainToImmutable(),
+                Commands = _commands.DrainToImmutable(),
+                Targets = _targets,
+            }
+        );
+        _isInPass = false;
+    }
+
+    /// <summary>
+    /// The passes recorded, and the recorder empty for the next frame.
+    /// </summary>
+    public GpuCommands Finish()
+    {
+        if (_isInPass)
+            throw new InvalidOperationException($"The pass {_name} was not ended.");
+
+        return new(_passes.DrainToImmutable());
+    }
+
+    public void Transition(GpuBuffer buffer, GpuAccess before, GpuAccess after)
+    {
+        ThrowIfNotInPass();
+        _transitions.Add(
+            new()
+            {
+                Id = buffer.Id,
+                IsTexture = false,
+                Before = before,
+                After = after,
+            }
+        );
+    }
+
+    /// <summary>
+    /// Every level of <paramref name="texture"/>, or <paramref name="level"/> alone.
+    /// </summary>
+    public void Transition(GpuTexture texture, GpuAccess before, GpuAccess after, int level = -1)
+    {
+        ThrowIfNotInPass();
+        _transitions.Add(
+            new()
+            {
+                Id = texture.Id,
+                IsTexture = true,
+                Before = before,
+                After = after,
+                Level = level,
+            }
+        );
+    }
+
+    public void BindPipeline(GpuPipeline pipeline) =>
+        Add(new() { Kind = GpuCommandKind.BindPipeline, Id = pipeline.Id });
+
+    public void PushConstants(in GpuConstants constants) =>
+        Add(new() { Kind = GpuCommandKind.PushConstants, Constants = constants });
+
+    public void Dispatch(uint groupsX, uint groupsY = 1, uint groupsZ = 1) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.Dispatch,
+                X = groupsX,
+                Y = groupsY,
+                Z = groupsZ,
+            }
+        );
+
+    /// <summary>
+    /// Three unsigned group counts read from <paramref name="arguments"/> at <paramref name="offset"/>.
+    /// </summary>
+    public void DispatchIndirect(GpuBuffer arguments, ulong offset) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.DispatchIndirect,
+                Id = arguments.Id,
+                Offset = offset,
+            }
+        );
+
+    /// <summary>
+    /// The whole target when every argument is 0.
+    /// </summary>
+    public void SetViewport(uint x, uint y, uint width, uint height) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.SetViewport,
+                X = x,
+                Y = y,
+                Z = width,
+                W = height,
+            }
+        );
+
+    /// <summary>
+    /// The whole target when every argument is 0.
+    /// </summary>
+    public void SetScissor(uint x, uint y, uint width, uint height) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.SetScissor,
+                X = x,
+                Y = y,
+                Z = width,
+                W = height,
+            }
+        );
+
+    /// <summary>
+    /// 32-bit indices from <paramref name="offset"/> on.
+    /// </summary>
+    public void BindIndexBuffer(GpuBuffer indices, ulong offset = 0) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.BindIndexBuffer,
+                Id = indices.Id,
+                Offset = offset,
+            }
+        );
+
+    public void Draw(uint vertices, uint instances = 1, uint firstVertex = 0, uint firstInstance = 0) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.Draw,
+                X = vertices,
+                Y = instances,
+                Z = firstVertex,
+                W = firstInstance,
+            }
+        );
+
+    public void DrawIndexed(uint indices, uint instances = 1, uint firstIndex = 0, uint firstInstance = 0) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.DrawIndexed,
+                X = indices,
+                Y = instances,
+                Z = firstIndex,
+                W = firstInstance,
+            }
+        );
+
+    /// <summary>
+    /// As many indexed draws as the unsigned count at <paramref name="countOffset"/> in <paramref name="count"/>, up
+    /// to <paramref name="maxDraws"/>, their arguments <paramref name="stride"/> bytes apart from
+    /// <paramref name="argumentsOffset"/> in <paramref name="arguments"/>, each five unsigned integers: indices,
+    /// instances, first index, vertex offset, first instance.
+    /// </summary>
+    public void DrawIndexedIndirectCount(
+        GpuBuffer arguments,
+        ulong argumentsOffset,
+        GpuBuffer count,
+        ulong countOffset,
+        uint maxDraws,
+        uint stride = 20
+    ) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.DrawIndexedIndirectCount,
+                Id = arguments.Id,
+                Offset = argumentsOffset,
+                Id2 = count.Id,
+                Offset2 = countOffset,
+                X = maxDraws,
+                Y = stride,
+            }
+        );
+
+    public void CopyBuffer(
+        GpuBuffer source,
+        ulong sourceOffset,
+        GpuBuffer destination,
+        ulong destinationOffset,
+        ulong bytes
+    ) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.CopyBuffer,
+                Id = source.Id,
+                Offset = sourceOffset,
+                Id2 = destination.Id,
+                Offset2 = destinationOffset,
+                Size = bytes,
+            }
+        );
+
+    /// <summary>
+    /// A whole level of a layer, tightly packed from <paramref name="sourceOffset"/> on.
+    /// </summary>
+    public void CopyBufferToTexture(
+        GpuBuffer source,
+        ulong sourceOffset,
+        GpuTexture destination,
+        int level = 0,
+        int layer = 0
+    ) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.CopyBufferToTexture,
+                Id = source.Id,
+                Offset = sourceOffset,
+                Id2 = destination.Id,
+                X = (uint)level,
+                Y = (uint)layer,
+            }
+        );
+
+    /// <summary>
+    /// A whole level of a layer, tightly packed from <paramref name="destinationOffset"/> on.
+    /// </summary>
+    public void CopyTextureToBuffer(
+        GpuTexture source,
+        int level,
+        int layer,
+        GpuBuffer destination,
+        ulong destinationOffset
+    ) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.CopyTextureToBuffer,
+                Id = source.Id,
+                X = (uint)level,
+                Y = (uint)layer,
+                Id2 = destination.Id,
+                Offset2 = destinationOffset,
+            }
+        );
+
+    /// <summary>
+    /// Level 0 of one texture to level 0 of another of the same size and format.
+    /// </summary>
+    public void CopyTexture(GpuTexture source, GpuTexture destination) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.CopyTexture,
+                Id = source.Id,
+                Id2 = destination.Id,
+            }
+        );
+
+    /// <summary>
+    /// Level 0 of one texture stretched over level 0 of another, filtered linearly; the formats may differ.
+    /// </summary>
+    public void BlitTexture(GpuTexture source, GpuTexture destination) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.BlitTexture,
+                Id = source.Id,
+                Id2 = destination.Id,
+            }
+        );
+
+    /// <summary>
+    /// Every 4 bytes from <paramref name="offset"/> for <paramref name="bytes"/>, or to the end when 0, set to
+    /// <paramref name="value"/>.
+    /// </summary>
+    public void FillBuffer(GpuBuffer buffer, uint value, ulong offset = 0, ulong bytes = 0) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.FillBuffer,
+                Id = buffer.Id,
+                Offset = offset,
+                Size = bytes,
+                X = value,
+            }
+        );
+
+    /// <summary>
+    /// Every level, to <paramref name="color"/> as four floats, or as its first float for a depth texture.
+    /// </summary>
+    public void ClearTexture(GpuTexture texture, in GpuConstants color) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.ClearTexture,
+                Id = texture.Id,
+                Constants = color,
+            }
+        );
+
+    /// <summary>
+    /// The GPU's clock here, reported by <paramref name="label"/> in <see cref="GpuTimings"/> two frames on.
+    /// </summary>
+    public void Timestamp(string label) => Add(new() { Kind = GpuCommandKind.Timestamp, Label = label });
+
+    private void Begin(string name, GpuPassKind kind, in GpuRenderTargets targets)
+    {
+        if (_isInPass)
+            throw new InvalidOperationException($"The pass {_name} was not ended before {name} began.");
+
+        _name = name;
+        _kind = kind;
+        _targets = targets;
+        _isInPass = true;
+    }
+
+    private void Add(in GpuCommand command)
+    {
+        ThrowIfNotInPass();
+        _commands.Add(command);
+    }
+
+    private void ThrowIfNotInPass()
+    {
+        if (!_isInPass)
+            throw new InvalidOperationException("No pass has begun.");
+    }
+}

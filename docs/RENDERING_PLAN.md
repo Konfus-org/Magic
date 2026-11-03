@@ -62,21 +62,21 @@ command list as data, and hands the list over once per frame.
 public interface IGraphicsApi
 {
     GpuFeatures Features { get; }                      // what is optional and present: MeshShaders, RayQuery, Atomic64
-    GpuLimits Limits { get; }                          // heap sizes, max dispatch, alignment, timestamp period
-    GpuTexture? WindowTarget { get; }                  // the swapchain image this frame, null when headless
+    GpuLimits Limits { get; }                          // the device's name, heap size, alignments, memory
+    GpuTexture WindowTarget { get; }                   // the swapchain image this frame, none when headless
+    GpuTimings Timings { get; }                        // the GPU's own timing of the frame finished two frames ago
 
     Result<GpuBuffer> CreateBuffer(in BufferDescription description);
     Result<GpuTexture> CreateTexture(in TextureDescription description);
-    GpuSampler CreateSampler(in SamplerDescription description);
+    Result<GpuSampler> CreateSampler(in SamplerDescription description);
     Result<GpuPipeline> CreatePipeline(in ComputePipelineDescription description);
     Result<GpuPipeline> CreatePipeline(in GraphicsPipelineDescription description);
-    void Destroy(GpuHandle handle);                    // deferred until no frame in flight uses it
+    void Destroy(GpuBuffer buffer);                    // deferred until no frame in flight uses it; same for the rest
 
-    GpuUpload BeginUpload(int bytes, int alignment);   // a span in this frame's staging ring
-    Task<Result<ReadOnlyMemory<byte>>> ReadBackAsync(GpuBuffer buffer, Range range, CancellationToken cancel);
+    GpuUpload BeginUpload(int bytes);                  // a span in this frame's staging ring
+    Task<Result<ReadOnlyMemory<byte>>> ReadBackAsync(GpuBuffer buffer, long offset, int bytes, CancellationToken cancel);
 
-    void Submit(in GpuCommands commands);              // once per frame, on the render thread
-    GpuTimings Timings { get; }                        // the previous completed frame's stamped groups
+    void Submit(in GpuCommands commands);              // once per frame, on the main thread
 }
 ```
 
@@ -89,15 +89,15 @@ public interface IGraphicsApi
   copy, clear, timestamp, begin and end debug group. Recording goes through a `GpuCommandRecorder` ref struct that
   builds the arrays; the renderer's graph compiler is what calls it.
 - **Transitions are the caller's.** A transition names a resource, the access before and the access after, as
-  API-neutral `GpuAccess` flags (`ShaderRead`, `ShaderWrite`, `ColorTarget`, `DepthTarget`, `CopySource`, `Indirect`,
+  API-neutral `GpuAccess` values (`ShaderRead`, `ShaderWrite`, `ColorTarget`, `DepthTarget`, `CopySource`, `Indirect`,
   `Present`). The driver maps them to `vkCmdPipelineBarrier2` with exact stage and access masks and the image layout
-  each needs. Putting the planning in the render graph keeps the driver a translator and makes the plan a pure
-  function a test can check.
+  each needs, keeping each texture level's layout as the transitions move it. Putting the planning in the render graph
+  keeps the driver a translator and makes the plan a pure function a test can check.
 - **Graphics pipelines use dynamic rendering**, no render pass objects. A `GraphicsPipelineDescription` is the SPIR-V
   per stage, the vertex layout (none for the cluster path: vertices are fetched), the target formats, depth and blend
   state, cull mode and topology. The viewport and scissor are commands.
 - **Frames in flight are two.** The driver owns a staging ring per frame, a deferred-destroy queue per frame and the
-  timestamp pool; `Submit` waits on the fence from two frames ago and nothing else.
+  timestamp pool; the frame begins by waiting on the fence from two frames ago and nothing else.
 - **One queue.** Async compute is a later optimisation the graph is shaped for (pass kinds and declared accesses are
   what a scheduler needs) and the interface never exposes.
 - **Headless** runs the same code with no swapchain; `WindowTarget` is null and the pipeline draws into a texture the
@@ -461,28 +461,38 @@ Extension points, from the cheapest up:
 
 ## Inside the engine
 
-- **State.** `Step` holds nothing but the last `RenderWorld`'s entity-to-slot map. `Render`'s record holds every GPU
-  table and its free list, the resident models and textures, the VSM page table and pool state, the probe clipmaps'
-  scroll origins, the last frame's HZB and history textures, and the compiled pipelines, all as immutable collections
-  of handles replaced `with` each frame.
+Core runs one thread and a set of pipelines (`PipelineStages.cs`); a gem joins the stages it needs with
+`IPipeline<TStage>`, and the gems run in the order the project lists them, each after the gems it took in its
+constructor. The renderer fits that shape:
+
+- **Stages.** The GPU provider joins `Render` first, as it is made first: it waits for the frame two before, takes the
+  window's image and resets the staging ring. The renderer joins `Update`, where it reads the ECS into a `RenderWorld`
+  value, and `Render`, where it diffs that value against the GPU tables, runs the pipeline script into a graph, compiles
+  the graph into `GpuCommands` and submits. The provider also joins `ServicePump`, polling fences, so a readback
+  awaited during `Startup` completes while no frame runs.
+- **State.** The renderer keeps every GPU table and its free list, the resident models and textures, the VSM page
+  table and pool state, the probe clipmaps' scroll origins, the last frame's HZB and history textures and the compiled
+  pipelines in its own fields, replaced whole each frame as immutable collections of handles. Nothing of it is read by
+  another gem except through `FrameEvents` and the services it provides.
 - **Residency.** A model's clusters, field and captures are resident while any instance of it is in an open domain; a
   texture while a resident material names it. Uploads go at `UploadBudgetBytes` per frame through the staging ring,
-  largest first; the domain's preloader does not finish until everything it spawns is resident, so nothing it shows is
+  largest first; the domain's `WorldLoad` does not finish until everything it spawns is resident, so nothing it shows is
   ever missing. Per-cluster streaming and feedback-driven mip streaming are the second phase's additions and the tables
   are laid out so they slot in (a cluster page index per cluster range, a requested-mip per material slot).
-- **The preloader.** `PreloadAsync` loads models, materials and textures a domain's prefabs name and waits for their
-  captures; `ReadyAsync` renders the held world out of sight for the frames it takes the probes and pages to settle
-  (`SettleFrames`, 8 by default) and returns, so a domain appears whole and lit, never dark for a second and then
-  bright.
+- **Loading a domain.** In `WorldLoad` the renderer loads the models, materials and textures the domain's prefabs name
+  and waits for their captures; then it renders the held world out of sight for the frames it takes the probes and
+  pages to settle (`SettleFrames`, 8 by default) before returning, so a domain appears whole and lit, never dark for a
+  second and then bright.
 - **Failures.** A model that failed loads as the failure cube, a material that failed as the magenta `Failure`
   material, a shader that failed compiling keeps the last good one and shows a banner naming the file and line. Every
-  one is `Debugging.Error` once, and the frame goes on.
+  one is `Log.Error` once, and the frame goes on.
 - **Settings** cover quality (render scale, VSM pool and levels, probe counts, field clipmaps, trace distances, light
-  and shadow budgets), each read from the frame's snapshot, with presets `Toaster`, `Default`, `Ultra`. Debug views
-  as a setting: visibility ids, cluster level, overdraw, VSM pages and levels, field slices, cards, probes, the light
-  grid, each a `[branch]` in the output pass rather than a variant.
-- **Metrics.** Every top-level graph pass is a debug group the driver stamps; the `Magic.Gems.WorldRenderer` meter
-  reports each pass's GPU time, the visible cluster count, pages drawn, probes traced and bytes uploaded.
+  and shadow budgets), with presets `Toaster`, `Default`, `Ultra`. Core has no settings service yet; until it does
+  each gem keeps its knobs as constants, and the Vulkan gem turns validation on in a Debug build. Debug views come as a
+  setting: visibility ids, cluster level, overdraw, VSM pages and levels, field slices, cards, probes, the light grid,
+  each a `[branch]` in the output pass rather than a variant.
+- **Metrics.** Every pass is a debug group the provider stamps; `GpuTimings` reports each pass's GPU time, and the
+  renderer's meter adds the visible cluster count, pages drawn, probes traced and bytes uploaded.
 
 ## Alternatives considered
 
@@ -549,7 +559,7 @@ Line counts are estimates of C# and Slang.
 
 | Phase | Builds                                                                                                   | Checkpoint                                                                                                   | Size  |
 | ----- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ----- |
-| 0     | Core's `Contexts/Gpu`, `IGraphicsApi`, `VulkanGraphics`, `IShaderCompiler`, `SlangShaders`, `Core/` shaders, the feature dump | A compute gradient through the heap on screen on Windows, Linux and a Mac; the same headless on lavapipe  | 7k    |
+| 0     | Core's `Gpu/` and `Shaders/`, `IGraphicsApi`, `VulkanGraphics`, `IShaderCompiler`, `SlangShaders`, the `Core/` shaders, a `GpuChecks` gem | A compute gradient through the heap, read back and checked headless on lavapipe, and shown in the window on Windows, Linux and a Mac | 7k    |
 | 1     | `AssimpModels`, `MeshPreprocessor` clusters and DAG, the render graph, instance and cluster tables, culling, visibility, HZB, materials, GBuffer, a flat sun | 10,000 instances of a 1M-triangle model draw at a stable frame time at any distance; walking away pops nothing; the graph compile and the DAG build have tests | 9k |
 | 2     | Imposter captures as the last level, texture compression and the cache, failure stand-ins               | A forest of 100,000 trees to the horizon; a broken model is a cube, a broken material magenta                  | 3k    |
 | 3     | Virtual shadow maps for the sun: page marking, allocation, caching, cluster draw into pages, sampling    | A fence shadow sharp at 2 m and a ridge's shadow sharp at 2 km in one view; a still scene draws zero pages     | 4k    |

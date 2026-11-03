@@ -1,56 +1,64 @@
-// The heap: every buffer, texture and sampler the GPU made, which a shader reaches through the id its handle holds
-// (C#'s GpuBuffer, GpuTexture and GpuSampler), held in a reference that says what it is: BufferRef for bytes,
-// ArrayRef<T> for rows of T, TextureRef and its kin for textures, SamplerRef for a sampler. A shader binds nothing: it
-// is handed references among its constants and reads and writes through them, and its pass lists what it reads and
-// writes (GpuComputePass.Reads and Writes), which the GPU waits for.
+// The heap: every buffer, texture and sampler the GPU provider made, reached by the id its handle holds (C#'s
+// GpuBuffer, GpuTexture and GpuSampler). A shader declares no resource of its own: it is handed references among its
+// constants and reads and writes through them. A reference's id is clamped to the heap's size before use, as a GPU may
+// fetch a descriptor before it knows a branch around the fetch is not taken.
 //
-// A reference indexes the heap non-uniformly, so it may differ from lane to lane. A texture reference keeps its index
-// inside the heap, as a texture may be none (TextureNone) and a GPU may fetch the descriptor before it knows that a
-// branch skipping the read is not taken. A buffer holds what it holds laid out as C# packs a struct (scalar): a row is
-// the same bytes on both sides. A texture a pass writes is laid out to be written in that pass and read in a pass
-// after, so no pass reads and writes the same texture.
-
+// A buffer holds bytes laid out as C# packs a struct: 32-bit scalars and their vectors at their natural alignment,
+// so a row is the same bytes on both sides. A texture is read sampled through its whole mip chain, or loaded and
+// stored one level at a time as a storage image: level n of texture t is storage slot t * LevelsPerTexture + n.
 module "Core/Heap";
 
-// How many levels each texture has room for in the arrays of levels, a texture's level at its id times this plus the
-// level: VulkanHeap.LevelsPerTexture.
-static const uint LevelsPerTexture = 16u;
-
-// The most textures the heap holds: VulkanHeap.WantedTextures.
-static const uint HeapTextures = 8192u;
+// The most of each the heap holds: VulkanHeap's constants.
+public static const uint HeapBuffers = 16384u;
+public static const uint HeapTextures = 4096u;
+public static const uint HeapSamplers = 256u;
+public static const uint LevelsPerTexture = 16u;
 
 [[vk::binding(0, 0)]] RWByteAddressBuffer heapBuffers[];
-[[vk::binding(1, 0)]] Texture2D heapTextures[];
-[[vk::binding(3, 0)]] TextureCube heapCubes[];
-[[vk::binding(4, 0)]] Texture3D heapVolumes[];
-[[vk::binding(5, 0)]] Texture2D<uint> heapUintTextures[];
-[[vk::binding(6, 0)]] [[vk::image_format("unknown")]] RWTexture2D<float4> heapLevels[];
-[[vk::binding(7, 0)]] [[vk::image_format("unknown")]] RWTexture2DArray<float4> heapArrayLevels[];
-[[vk::binding(8, 0)]] [[vk::image_format("unknown")]] RWTexture3D<float4> heapVolumeLevels[];
+[[vk::binding(1, 0)]] Texture2D<float4> heapTextures2D[];
+[[vk::binding(2, 0)]] Texture2DArray<float4> heapTextures2DArray[];
+[[vk::binding(3, 0)]] TextureCube<float4> heapCubes[];
+[[vk::binding(4, 0)]] Texture3D<float4> heapTextures3D[];
+[[vk::binding(5, 0)]] Texture2D<uint> heapUintTextures2D[];
+[[vk::binding(6, 0)]] [[vk::image_format("unknown")]] RWTexture2D<float4> heapStorage2D[];
+[[vk::binding(7, 0)]] [[vk::image_format("unknown")]] RWTexture2DArray<float4> heapStorage2DArray[];
+[[vk::binding(8, 0)]] [[vk::image_format("unknown")]] RWTexture3D<float4> heapStorage3D[];
+[[vk::binding(9, 0)]] [[vk::image_format("unknown")]] RWTexture2D<uint> heapUintStorage2D[];
 [[vk::binding(10, 0)]] SamplerState heapSamplers[];
 
+uint ClampBufferId(uint id) { return min(id, HeapBuffers - 1u); }
+uint ClampTextureId(uint id) { return min(id, HeapTextures - 1u); }
+uint ClampSamplerId(uint id) { return min(id, HeapSamplers - 1u); }
+uint ClampStorageSlot(uint id, uint level) { return (ClampTextureId(id) * LevelsPerTexture) + min(level, LevelsPerTexture - 1u); }
+
 // A buffer of bytes, read and written at byte offsets: what holds words of more than one kind, as counts and the
-// arguments of indirect passes.
+// arguments of indirect passes do.
 public struct BufferRef
 {
     public uint id;
 
     public T Load<T>(uint offset)
     {
-        return heapBuffers[NonUniformResourceIndex(id)].Load<T>(offset);
+        return heapBuffers[NonUniformResourceIndex(ClampBufferId(id))].Load<T>(offset);
     }
 
     public void Store<T>(uint offset, T value)
     {
-        heapBuffers[NonUniformResourceIndex(id)].Store<T>(offset, value);
+        heapBuffers[NonUniformResourceIndex(ClampBufferId(id))].Store<T>(offset, value);
     }
 
-    // Adds value to the word at offset in one step no other lane's add splits, and hands back the word before it.
+    // Adds value to the word at offset, no other lane's add splitting it, and hands back the word as it was.
     public uint InterlockedAdd(uint offset, uint value)
     {
         uint before;
-        heapBuffers[NonUniformResourceIndex(id)].InterlockedAdd(offset, value, before);
+        heapBuffers[NonUniformResourceIndex(ClampBufferId(id))].InterlockedAdd(offset, value, before);
         return before;
+    }
+
+    // Keeps the greater of value and the word at offset.
+    public void InterlockedMax(uint offset, uint value)
+    {
+        heapBuffers[NonUniformResourceIndex(ClampBufferId(id))].InterlockedMax(offset, value);
     }
 
     // How many bytes the buffer holds.
@@ -59,7 +67,7 @@ public struct BufferRef
         get
         {
             uint bytes;
-            heapBuffers[NonUniformResourceIndex(id)].GetDimensions(bytes);
+            heapBuffers[NonUniformResourceIndex(ClampBufferId(id))].GetDimensions(bytes);
             return bytes;
         }
     }
@@ -72,8 +80,8 @@ public struct ArrayRef<T>
 
     public __subscript(uint index) -> T
     {
-        get { return heapBuffers[NonUniformResourceIndex(id)].Load<T>(index * sizeof(T)); }
-        [nonmutating] set { heapBuffers[NonUniformResourceIndex(id)].Store<T>(index * sizeof(T), newValue); }
+        get { return heapBuffers[NonUniformResourceIndex(ClampBufferId(id))].Load<T>(index * sizeof(T)); }
+        [nonmutating] set { heapBuffers[NonUniformResourceIndex(ClampBufferId(id))].Store<T>(index * sizeof(T), newValue); }
     }
 
     // How many whole rows the buffer holds.
@@ -82,246 +90,192 @@ public struct ArrayRef<T>
         get
         {
             uint bytes;
-            heapBuffers[NonUniformResourceIndex(id)].GetDimensions(bytes);
+            heapBuffers[NonUniformResourceIndex(ClampBufferId(id))].GetDimensions(bytes);
             return bytes / sizeof(T);
         }
     }
 }
 
-public extension ArrayRef<uint>
-{
-    // Adds value to the row at index in one step no other lane's add splits, and hands back the row before it.
-    public uint InterlockedAdd(uint index, uint value)
-    {
-        uint before;
-        heapBuffers[NonUniformResourceIndex(id)].InterlockedAdd(index * 4u, value, before);
-        return before;
-    }
-
-    // The row at index as the atomics of every group of the dispatch so far left it, which a plain load may not see.
-    public uint LoadAtomic(uint index)
-    {
-        return InterlockedAdd(index, 0u);
-    }
-
-    // Stores value at index as an atomic, which another group's LoadAtomic sees.
-    public void StoreAtomic(uint index, uint value)
-    {
-        uint before;
-        heapBuffers[NonUniformResourceIndex(id)].InterlockedExchange(index * 4u, value, before);
-    }
-
-    // Keeps the least, the most, or the bits of both, of the row at index and value, in one step no other lane splits.
-    public void InterlockedMin(uint index, uint value)
-    {
-        heapBuffers[NonUniformResourceIndex(id)].InterlockedMin(index * 4u, value);
-    }
-
-    public void InterlockedMax(uint index, uint value)
-    {
-        heapBuffers[NonUniformResourceIndex(id)].InterlockedMax(index * 4u, value);
-    }
-
-    public void InterlockedOr(uint index, uint value)
-    {
-        heapBuffers[NonUniformResourceIndex(id)].InterlockedOr(index * 4u, value);
-    }
-}
-
-// A sampler: how a texture is filtered and addressed.
 public struct SamplerRef
 {
     public uint id;
+
+    public SamplerState Get() { return heapSamplers[NonUniformResourceIndex(ClampSamplerId(id))]; }
 }
 
-// A 2D texture of floats, every level: sampled or loaded, and each level written (GetLevel) by the pass it is laid out
-// for.
+// A 2D texture read through its mip chain, or one level at a time.
 public struct TextureRef
 {
     public uint id;
 
-    // Whether it names a texture rather than none: a texture still loading is none.
-    public property bool isValid
-    {
-        get { return id != 0xFFFFFFFFu; }
-    }
-
-    // With the derivatives of uv across the pixel: only outside a branch some lanes skip.
     public float4 Sample(SamplerRef sampler, float2 uv)
     {
-        return Texture().Sample(heapSamplers[NonUniformResourceIndex(sampler.id)], uv);
+        return heapTextures2D[NonUniformResourceIndex(ClampTextureId(id))].Sample(sampler.Get(), uv);
     }
 
     public float4 SampleLevel(SamplerRef sampler, float2 uv, float level)
     {
-        return Texture().SampleLevel(heapSamplers[NonUniformResourceIndex(sampler.id)], uv, level);
+        return heapTextures2D[NonUniformResourceIndex(ClampTextureId(id))].SampleLevel(sampler.Get(), uv, level);
     }
 
-    // With uv's own derivatives across the pixel, so a branch may hold it.
-    public float4 SampleGrad(SamplerRef sampler, float2 uv, float2 uvDdx, float2 uvDdy)
+    public float4 SampleGrad(SamplerRef sampler, float2 uv, float2 ddx, float2 ddy)
     {
-        return Texture().SampleGrad(heapSamplers[NonUniformResourceIndex(sampler.id)], uv, uvDdx, uvDdy);
+        return heapTextures2D[NonUniformResourceIndex(ClampTextureId(id))].SampleGrad(sampler.Get(), uv, ddx, ddy);
     }
 
-    public float4 Load(int2 texel, int level)
+    public float4 Load(uint2 texel, uint level)
     {
-        return Texture().Load(int3(texel, level));
+        return heapTextures2D[NonUniformResourceIndex(ClampTextureId(id))].Load(int3(texel, level));
     }
 
-    // A level's size, in texels.
+    // Texels across and down at a level.
     public uint2 GetSize(uint level)
     {
         uint width;
         uint height;
         uint levels;
-        Texture().GetDimensions(level, width, height, levels);
+        heapTextures2D[NonUniformResourceIndex(ClampTextureId(id))].GetDimensions(level, width, height, levels);
         return uint2(width, height);
     }
-
-    public LevelRef GetLevel(uint level)
-    {
-        return { min(id, HeapTextures - 1u) * LevelsPerTexture + level };
-    }
-
-    Texture2D Texture()
-    {
-        return heapTextures[NonUniformResourceIndex(min(id, HeapTextures - 1u))];
-    }
 }
 
-// No texture: what a material's texture is until one is named and loaded.
-public static const TextureRef TextureNone = { 0xFFFFFFFFu };
-
-// One level of a 2D texture of floats, read and written texel by texel.
-public struct LevelRef
-{
-    uint index;
-
-    public __subscript(uint2 texel) -> float4
-    {
-        get { return heapLevels[NonUniformResourceIndex(index)][texel]; }
-        [nonmutating] set { heapLevels[NonUniformResourceIndex(index)][texel] = newValue; }
-    }
-
-    // In texels.
-    public property uint2 size
-    {
-        get
-        {
-            uint width;
-            uint height;
-            heapLevels[NonUniformResourceIndex(index)].GetDimensions(width, height);
-            return uint2(width, height);
-        }
-    }
-}
-
-// A 2D texture of integers (r32_uint), loaded texel by texel: integers are never sampled.
+// A 2D texture of unsigned integers, loaded texel by texel: ids, counts, packed words.
 public struct UintTextureRef
 {
     public uint id;
 
-    public uint Load(int2 texel, int level)
+    public uint Load(uint2 texel, uint level)
     {
-        return heapUintTextures[NonUniformResourceIndex(min(id, HeapTextures - 1u))].Load(int3(texel, level));
+        return heapUintTextures2D[NonUniformResourceIndex(ClampTextureId(id))].Load(int3(texel, level));
     }
 }
 
-// A cube texture, every level, sampled along a direction, and each level's six faces written (GetLevel) as layers.
+public struct TextureArrayRef
+{
+    public uint id;
+
+    public float4 SampleLevel(SamplerRef sampler, float2 uv, uint layer, float level)
+    {
+        return heapTextures2DArray[NonUniformResourceIndex(ClampTextureId(id))].SampleLevel(sampler.Get(), float3(uv, layer), level);
+    }
+
+    public float4 Load(uint2 texel, uint layer, uint level)
+    {
+        return heapTextures2DArray[NonUniformResourceIndex(ClampTextureId(id))].Load(int4(texel, layer, level));
+    }
+}
+
 public struct CubeRef
 {
     public uint id;
 
     public float4 SampleLevel(SamplerRef sampler, float3 direction, float level)
     {
-        return Cube().SampleLevel(heapSamplers[NonUniformResourceIndex(sampler.id)], direction, level);
-    }
-
-    // A face's size at level 0, in texels, and how many levels it has.
-    public property uint3 size
-    {
-        get
-        {
-            uint width;
-            uint height;
-            uint levels;
-            Cube().GetDimensions(0u, width, height, levels);
-            return uint3(width, height, levels);
-        }
-    }
-
-    public FacesRef GetLevel(uint level)
-    {
-        return { min(id, HeapTextures - 1u) * LevelsPerTexture + level };
-    }
-
-    TextureCube Cube()
-    {
-        return heapCubes[NonUniformResourceIndex(min(id, HeapTextures - 1u))];
+        return heapCubes[NonUniformResourceIndex(ClampTextureId(id))].SampleLevel(sampler.Get(), direction, level);
     }
 }
 
-// One level of a cube's six faces, read and written texel by texel, the face (Core/Math's GetCubeDirection) the third
-// coordinate.
-public struct FacesRef
-{
-    uint index;
-
-    public __subscript(uint3 texel) -> float4
-    {
-        get { return heapArrayLevels[NonUniformResourceIndex(index)][texel]; }
-        [nonmutating] set { heapArrayLevels[NonUniformResourceIndex(index)][texel] = newValue; }
-    }
-
-    // A face's size in texels.
-    public property uint2 size
-    {
-        get
-        {
-            uint width;
-            uint height;
-            uint layers;
-            heapArrayLevels[NonUniformResourceIndex(index)].GetDimensions(width, height, layers);
-            return uint2(width, height);
-        }
-    }
-}
-
-// A 3D texture of floats, every level: sampled at a point, and each level written (GetLevel) by the pass it is laid out
-// for.
 public struct VolumeRef
 {
     public uint id;
 
     public float4 SampleLevel(SamplerRef sampler, float3 uvw, float level)
     {
-        return Volume().SampleLevel(heapSamplers[NonUniformResourceIndex(sampler.id)], uvw, level);
+        return heapTextures3D[NonUniformResourceIndex(ClampTextureId(id))].SampleLevel(sampler.Get(), uvw, level);
     }
 
-    public float4 Load(int3 texel, int level)
+    public float4 Load(uint3 texel, uint level)
     {
-        return Volume().Load(int4(texel, level));
-    }
-
-    public VolumeLevelRef GetLevel(uint level)
-    {
-        return { min(id, HeapTextures - 1u) * LevelsPerTexture + level };
-    }
-
-    Texture3D Volume()
-    {
-        return heapVolumes[NonUniformResourceIndex(min(id, HeapTextures - 1u))];
+        return heapTextures3D[NonUniformResourceIndex(ClampTextureId(id))].Load(int4(texel, level));
     }
 }
 
-// One level of a 3D texture of floats, read and written texel by texel.
-public struct VolumeLevelRef
+// One level of a 2D texture, written and read as a storage image.
+public struct StorageRef
 {
-    uint index;
+    public uint id;
+    public uint level;
 
-    public __subscript(uint3 texel) -> float4
+    public float4 Load(uint2 texel)
     {
-        get { return heapVolumeLevels[NonUniformResourceIndex(index)][texel]; }
-        [nonmutating] set { heapVolumeLevels[NonUniformResourceIndex(index)][texel] = newValue; }
+        return heapStorage2D[NonUniformResourceIndex(ClampStorageSlot(id, level))][texel];
+    }
+
+    public void Store(uint2 texel, float4 value)
+    {
+        heapStorage2D[NonUniformResourceIndex(ClampStorageSlot(id, level))][texel] = value;
+    }
+
+    public uint2 GetSize()
+    {
+        uint width;
+        uint height;
+        heapStorage2D[NonUniformResourceIndex(ClampStorageSlot(id, level))].GetDimensions(width, height);
+        return uint2(width, height);
+    }
+}
+
+// One level of a 2D texture of unsigned integers, written and read as a storage image, with atomics.
+public struct UintStorageRef
+{
+    public uint id;
+    public uint level;
+
+    public uint Load(uint2 texel)
+    {
+        return heapUintStorage2D[NonUniformResourceIndex(ClampStorageSlot(id, level))][texel];
+    }
+
+    public void Store(uint2 texel, uint value)
+    {
+        heapUintStorage2D[NonUniformResourceIndex(ClampStorageSlot(id, level))][texel] = value;
+    }
+
+    // Keeps the lesser of value and the texel: what a depth of the sun's pages is written with.
+    public void InterlockedMin(uint2 texel, uint value)
+    {
+        InterlockedMin(heapUintStorage2D[NonUniformResourceIndex(ClampStorageSlot(id, level))][texel], value);
+    }
+
+    public uint2 GetSize()
+    {
+        uint width;
+        uint height;
+        heapUintStorage2D[NonUniformResourceIndex(ClampStorageSlot(id, level))].GetDimensions(width, height);
+        return uint2(width, height);
+    }
+}
+
+// One level of a 2D array or cube texture as a storage image, a layer at a time.
+public struct StorageArrayRef
+{
+    public uint id;
+    public uint level;
+
+    public float4 Load(uint2 texel, uint layer)
+    {
+        return heapStorage2DArray[NonUniformResourceIndex(ClampStorageSlot(id, level))][uint3(texel, layer)];
+    }
+
+    public void Store(uint2 texel, uint layer, float4 value)
+    {
+        heapStorage2DArray[NonUniformResourceIndex(ClampStorageSlot(id, level))][uint3(texel, layer)] = value;
+    }
+}
+
+// One level of a 3D texture as a storage image.
+public struct StorageVolumeRef
+{
+    public uint id;
+    public uint level;
+
+    public float4 Load(uint3 texel)
+    {
+        return heapStorage3D[NonUniformResourceIndex(ClampStorageSlot(id, level))][texel];
+    }
+
+    public void Store(uint3 texel, float4 value)
+    {
+        heapStorage3D[NonUniformResourceIndex(ClampStorageSlot(id, level))][texel] = value;
     }
 }
