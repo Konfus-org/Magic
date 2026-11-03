@@ -1,6 +1,5 @@
 using System.Diagnostics;
-using Magic.GemAPI;
-using Magic.Runtime;
+using Magic.Events;
 using Magic.Worlds;
 
 namespace Magic.Pipelines;
@@ -10,7 +9,7 @@ namespace Magic.Pipelines;
 /// once the fixed steps are done, and sleeps until the next frame is due. A frame's pipeline may change the frame for those
 /// after it; a fixed step's is its own.
 /// </summary>
-internal sealed class NextFramePipeline(App app, World world, Events events, PipelineCoordinator pipelines)
+internal sealed class NextFramePipeline(App app, World world, EventCoordinator events, PipelineCoordinator pipelines)
     : IPipeline<AppLoop>,
         IPipeline<CoreState>
 {

@@ -7,8 +7,7 @@ using Magic.Assets.Types;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.GemAPI;
-using Magic.Runtime;
+using Magic.Gems;
 using Magic.Serialization;
 using Magic.Utils;
 

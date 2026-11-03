@@ -1,4 +1,4 @@
-using Magic.GemAPI;
+using Magic.Gems;
 
 namespace Magic.Pipelines;
 

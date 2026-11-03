@@ -1,7 +1,7 @@
 using System.Runtime.Loader;
 using Magic.Utils;
 
-namespace Magic.GemAPI;
+namespace Magic.Gems;
 
 /// <summary>
 /// A gem as loaded, and what ends with it. Disposing it ends the gem: its subscriptions (its place on the log when it

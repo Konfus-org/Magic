@@ -12,7 +12,7 @@ using Magic.Utils;
 using Magic.Worlds;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Magic.GemAPI;
+namespace Magic.Gems;
 
 /// <summary>
 /// The gems a project lists, found and registered with the services as their class and every interface they provide,

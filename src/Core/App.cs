@@ -2,14 +2,17 @@ using Magic.Assets.Pipeline;
 using Magic.Caching;
 using Magic.CommandLine;
 using Magic.Debugging;
+using Magic.Events;
 using Magic.Files;
-using Magic.GemAPI;
+using Magic.Gems;
 using Magic.Pipelines;
+using Magic.Platform;
+using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
 
-namespace Magic.Runtime;
+namespace Magic;
 
 /// <summary>
 /// The run: which project it runs and how, and whether it goes on. Commands change it, at launch and while it runs;
@@ -18,14 +21,14 @@ namespace Magic.Runtime;
 public sealed class App
 {
     private readonly IFileSystem _files;
-    private readonly Events _events;
+    private readonly EventCoordinator _events;
     private readonly Threads _threads;
     private readonly PipelineCoordinator _pipelines;
 
     /// <summary>
     /// Makes the app of one run and the commands that act on it.
     /// </summary>
-    internal App(IFileSystem files, Events events, Threads threads, PipelineCoordinator pipelines)
+    internal App(IFileSystem files, EventCoordinator events, Threads threads, PipelineCoordinator pipelines)
     {
         _files = files;
         _events = events;

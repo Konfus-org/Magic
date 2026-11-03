@@ -3,12 +3,12 @@ using Magic.Assets.Pipeline;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Pipelines;
-using Magic.Runtime;
+using Magic.Platform;
 using Magic.Utils;
 using Magic.Worlds;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Magic.GemAPI;
+namespace Magic.Gems;
 
 /// <summary>
 /// Makes the gems a <see cref="GemRegistry"/> registered, each after the gems it needs, and sets them up; ends them

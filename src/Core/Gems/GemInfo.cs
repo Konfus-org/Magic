@@ -1,6 +1,6 @@
 using Magic.Pipelines;
 
-namespace Magic.GemAPI;
+namespace Magic.Gems;
 
 /// <summary>
 /// A gem found and registered: what it is, what it provides and what it needs, before it is made.

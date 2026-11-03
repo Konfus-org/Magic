@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 using System.Reflection;
-using Magic.GemAPI;
+using Magic.Gems;
 using Magic.Threading;
 using Magic.Utils;
 

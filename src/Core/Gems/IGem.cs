@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using Magic.Pipelines;
 
-namespace Magic.GemAPI;
+namespace Magic.Gems;
 
 /// <summary>
 /// Marks a gem's one class, its plugin: Magic makes it after what its constructor takes. Each

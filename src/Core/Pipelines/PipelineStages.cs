@@ -3,8 +3,8 @@ using Magic.Assets;
 using Magic.Assets.Types;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.GemAPI;
-using Magic.Runtime;
+using Magic.Gems;
+using Magic.Projects;
 using Magic.Utils;
 using Magic.Worlds;
 

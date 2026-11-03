@@ -1,9 +1,8 @@
 using Magic.Assets.Pipeline;
 using Magic.Pipelines;
-using Magic.Runtime;
 using Magic.Worlds;
 
-namespace Magic.GemAPI;
+namespace Magic.Gems;
 
 /// <summary>
 /// The gems' side of a run: has what their constructors need made ready and makes them; at the end unloads them.

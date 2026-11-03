@@ -6,7 +6,7 @@ using Magic.Files;
 using Magic.Serialization;
 using Magic.Utils;
 
-namespace Magic.Runtime;
+namespace Magic.Projects;
 
 /// <summary>
 /// A project as its <c>.magic</c> file describes it.

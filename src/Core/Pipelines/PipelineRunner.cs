@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using Magic.Debugging;
-using Magic.GemAPI;
+using Magic.Gems;
 using Magic.Threading;
 using Magic.Utils;
 

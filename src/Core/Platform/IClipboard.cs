@@ -1,4 +1,4 @@
-namespace Magic.Runtime;
+namespace Magic.Platform;
 
 /// <summary>
 /// The OS's clipboard, which copy and paste go through. A platform gem provides it. Main thread.

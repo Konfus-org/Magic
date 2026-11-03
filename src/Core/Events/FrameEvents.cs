@@ -1,14 +1,14 @@
-namespace Magic.GemAPI;
+namespace Magic.Events;
 
 /// <summary>
-/// The messages published during the last frame, as this frame reads them (<see cref="Events"/>). Good for this frame
-/// only: the next frame's take reuses what they are read from.
+/// The messages published during the last frame, as this frame reads them (<see cref="EventCoordinator"/>). Good for
+/// this frame only: the next frame's take reuses what they are read from.
 /// </summary>
 public readonly record struct FrameEvents
 {
-    private readonly Events? _events;
+    private readonly EventCoordinator? _events;
 
-    internal FrameEvents(Events events) => _events = events;
+    internal FrameEvents(EventCoordinator events) => _events = events;
 
     /// <summary>
     /// No messages: what a fixed step reads, so one running several times a frame never hears a message twice.

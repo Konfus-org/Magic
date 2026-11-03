@@ -3,7 +3,7 @@ using System.Text.Json;
 using Magic.Caching;
 using Magic.Debugging;
 using Magic.Files;
-using Magic.GemAPI;
+using Magic.Gems;
 using Magic.Pipelines;
 using Magic.Utils;
 

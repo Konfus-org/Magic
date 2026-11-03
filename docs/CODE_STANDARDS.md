@@ -63,7 +63,7 @@ Write the engine as data flowing through functions, not objects calling each oth
 - What is awaited, such as `Startup`, is called on the main thread and may await. After an await of its own, it steps
   back with `await threads.Enter(EngineThread.Main)`.
 - Gems talk through message structs. Publish one from any thread and every gem reads it the next frame, from
-  `frame.Events` or through `Events.Watch`.
+  `frame.Events` or through `EventCoordinator.Watch`.
 - Async work a frame's pipeline starts arrives in a later frame: by a message, or by work posted with `Threads.Post`.
 - `Shutdown` and `Dispose` free what the gem started, once none of its work still runs on a worker.
 - A gem's csproj states its `Description`, `Version` and `Authors`. Nothing else does.
@@ -139,7 +139,7 @@ Write the engine as data flowing through functions, not objects calling each oth
 
 - A namespace is the project's root namespace (`Magic` for Core, `Magic.<Name>` otherwise) plus its folders.
 - Core is one project, `src/Core/Magic.Core.csproj`. Its root holds only what starts the process; every other type
-  goes in the folder of its area, such as `Assets` or `GemAPI`. A new area is a new folder, never a new project.
+  goes in the folder of its area, such as `Assets` or `Gems`. A new area is a new folder, never a new project.
 - A folder exists only once it holds something. Split a big one into a subfolder per area, never named like a type in
   it.
 - A gem is flat: every file at its root, in `Magic.<Gem>`. Its `Resources/` holds the assets and scripts only it uses.

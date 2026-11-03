@@ -1,5 +1,5 @@
 using Magic.Debugging;
-using Magic.GemAPI;
+using Magic.Gems;
 using Magic.Pipelines;
 
 namespace GemName;

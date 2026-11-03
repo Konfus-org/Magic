@@ -2,7 +2,7 @@ using System.CommandLine;
 using System.Linq;
 using Magic.Debugging;
 using Magic.Files;
-using Magic.Runtime;
+using Magic.Projects;
 using Magic.Utils;
 
 namespace Magic.CommandLine;

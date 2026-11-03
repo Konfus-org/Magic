@@ -4,7 +4,7 @@ using System.Linq;
 using System.Reflection;
 using Magic.Utils;
 
-namespace Magic.Runtime;
+namespace Magic.Gems;
 
 /// <summary>
 /// The code loaded for a run, Core's and each gem's, by the name of its types: how what a file names from code, such as a

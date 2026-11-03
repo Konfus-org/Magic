@@ -2,9 +2,10 @@ using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using Magic.Debugging;
+using Magic.Pipelines;
 using Magic.Utils;
 
-namespace Magic.GemAPI;
+namespace Magic.Events;
 
 /// <summary>
 /// Messages between gems, by type. Anything publishes one, from any thread, and every gem hears it the next frame:
@@ -12,7 +13,7 @@ namespace Magic.GemAPI;
 /// gem's pipeline. A message is a struct, and publishing, reading and watching allocate nothing once its
 /// type's buffers have grown.
 /// </summary>
-public sealed class Events
+public sealed class EventCoordinator
 {
     private readonly ConcurrentDictionary<Type, IEventQueue> _queues = new();
     private readonly Lock _adding = new();

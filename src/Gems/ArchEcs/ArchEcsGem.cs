@@ -5,7 +5,7 @@ using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using Arch.Core;
 using Magic.Ecs;
-using Magic.GemAPI;
+using Magic.Gems;
 using Magic.Pipelines;
 using Schedulers;
 using ArchEntity = Arch.Core.Entity;

@@ -1,7 +1,7 @@
 using Magic.Assets;
 using Magic.Assets.Types;
 
-namespace Magic.Runtime;
+namespace Magic.Platform;
 
 /// <summary>
 /// The window the game draws into, which a platform gem opens. Its title, icon and size are the main thread's, and a new

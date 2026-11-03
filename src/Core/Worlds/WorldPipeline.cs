@@ -7,7 +7,7 @@ using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Pipelines;
-using Magic.Runtime;
+using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
 

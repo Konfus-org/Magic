@@ -3,10 +3,10 @@ using System.Runtime;
 using Magic.Assets.Pipeline;
 using Magic.Caching;
 using Magic.Debugging;
+using Magic.Events;
 using Magic.Files;
-using Magic.GemAPI;
+using Magic.Gems;
 using Magic.Pipelines;
-using Magic.Runtime;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
@@ -43,7 +43,7 @@ internal static class Program
         while (true)
         {
             FileSystem files = new();
-            Events events = new();
+            EventCoordinator events = new();
             Threads threads = new();
             PipelineCoordinator pipelines = new(threads);
             App app = new(files, events, threads, pipelines);

@@ -1,6 +1,6 @@
-using Magic.Pipelines;
+using Magic.Events;
 
-namespace Magic.GemAPI;
+namespace Magic.Pipelines;
 
 /// <summary>
 /// One frame's clocks and messages, handed to every pipeline the frame runs.

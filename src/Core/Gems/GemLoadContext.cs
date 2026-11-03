@@ -6,7 +6,7 @@ using Magic.Debugging;
 using Magic.Files;
 using Magic.Utils;
 
-namespace Magic.GemAPI;
+namespace Magic.Gems;
 
 /// <summary>
 /// Where one gem's assemblies load: the gem and its NuGet and native dependencies, from its folder. Magic and the

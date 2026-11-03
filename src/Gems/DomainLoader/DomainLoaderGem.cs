@@ -4,7 +4,7 @@ using System.IO;
 using Magic.Assets;
 using Magic.Assets.Pipeline;
 using Magic.Assets.Types;
-using Magic.GemAPI;
+using Magic.Gems;
 using Magic.Utils;
 
 namespace DomainLoader;
