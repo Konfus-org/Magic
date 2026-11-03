@@ -38,8 +38,8 @@ internal static class Program
     {
         Log.Verbose($"Command line args: {string.Join(", ", commandLine)}");
 
-        // One pass per run, all new for it: a typed command that asks for another project or mode ends the run, and the
-        // next starts anew from the command line and the commands like it.
+        // One pass per run, all new for it: a typed command that asks for another project or mode, or a change to a gem's
+        // code, ends the run, and the next starts anew from the command line and the commands like it.
         while (true)
         {
             FileSystem files = new();

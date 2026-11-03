@@ -109,7 +109,11 @@ internal sealed class GemRegistry
     private static Result<GemInfo> Find(IFileSystem files, string name)
     {
         string path = files.Combine(AppContext.BaseDirectory, "Gems", name, name + ".dll");
-        Result<Assembly> loaded = LoadAssembly(files, path, name);
+        if (!files.FileExists(path))
+            return Result.Failure($"Gem {name} was not found: there is no {path}.");
+
+        GemLoadContext context = new(path, files);
+        Result<Assembly> loaded = LoadAssembly(context, path, name);
         if (!loaded.Ok)
             return Result.Failure(loaded.Error);
 
@@ -148,7 +152,8 @@ internal sealed class GemRegistry
         string description = assembly.GetCustomAttribute<AssemblyDescriptionAttribute>()?.Description ?? string.Empty;
         Version version = assembly.GetName().Version ?? new Version(1, 0, 0);
 
-        string resources = AssetPipeline.GetResources(files, assembly, files.GetParent(path));
+        string folder = files.GetParent(path);
+        string resources = AssetPipeline.GetResources(files, assembly, folder);
         bool hasResources = files.DirectoryExists(resources);
 
         return Result.Success(
@@ -162,7 +167,9 @@ internal sealed class GemRegistry
                 reads,
                 joins,
                 [],
-                hasResources ? resources : null
+                hasResources ? resources : null,
+                folder,
+                context
             )
         );
     }
@@ -207,16 +214,13 @@ internal sealed class GemRegistry
     }
 
     /// <summary>
-    /// The assembly at <paramref name="path"/>, loaded from its file into a <see cref="GemLoadContext"/> of its own.
+    /// The assembly at <paramref name="path"/>, loaded from its file into <paramref name="context"/>.
     /// </summary>
-    private static Result<Assembly> LoadAssembly(IFileSystem files, string path, string name)
+    private static Result<Assembly> LoadAssembly(GemLoadContext context, string path, string name)
     {
-        if (!files.FileExists(path))
-            return Result.Failure($"Gem {name} was not found: there is no {path}.");
-
         try
         {
-            Result<Assembly> loaded = new GemLoadContext(path, files).LoadFromBytes(path);
+            Result<Assembly> loaded = context.LoadFromBytes(path);
 
             return loaded.Ok ? loaded : Result.Failure($"Gem {name} could not be loaded from {path}: {loaded.Error}");
         }

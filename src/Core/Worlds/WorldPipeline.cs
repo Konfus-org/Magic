@@ -14,15 +14,16 @@ using Magic.Utils;
 namespace Magic.Worlds;
 
 /// <summary>
-/// The world's side of a run: how content comes and goes, and what the world does on its own. It opens the entry point,
-/// without waiting for it, as frames must run while it loads and <see cref="Startup"/> holds them back until it ends, and
-/// changes for what the assets say changed.
+/// The world's side of a run: how content comes and goes, and what the world does on its own. It puts back the saved world
+/// <paramref name="kept"/> or opens the entry point, without waiting for it, as frames must run while it loads and
+/// <see cref="Startup"/> holds them back until it ends, and changes for what the assets say changed.
 /// </summary>
 internal sealed class WorldPipeline(
     World world,
     AssetDatabase assets,
     Threads threads,
     Project project,
+    Handle<WorldState> kept,
     PipelineCoordinator pipelines
 )
     : IPipeline<Startup>,
@@ -42,7 +43,7 @@ internal sealed class WorldPipeline(
 
     public ValueTask<Startup> RunAsync(Startup state, CancellationToken cancel)
     {
-        OpenEntryPointAsync(cancel).FireAndForget();
+        FillAsync(cancel).FireAndForget();
 
         return ValueTask.FromResult(state);
     }
@@ -288,6 +289,24 @@ internal sealed class WorldPipeline(
         changes.Destroy(entities.AsSpan());
         _entities.Run(changes, cancel);
         _entities.Return(changes);
+    }
+
+    /// <summary>
+    /// Puts back the saved world the last run kept; the entry point opens when there is none or it doesn't load, which is an
+    /// error.
+    /// </summary>
+    private async Task FillAsync(CancellationToken cancel)
+    {
+        if (kept != Handle<WorldState>.None)
+        {
+            Result restored = await world.RestoreAsync(kept, null, cancel).ConfigureAwait(false);
+            if (restored.Ok)
+                return;
+
+            Log.Error($"The world goes back to the entry point: the saved world does not load: {restored.Error}");
+        }
+
+        await OpenEntryPointAsync(cancel).ConfigureAwait(false);
     }
 
     /// <summary>

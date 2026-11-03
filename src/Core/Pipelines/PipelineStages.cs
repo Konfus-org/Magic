@@ -27,6 +27,11 @@ internal readonly record struct GemsFound(GemRegistry Registry);
 internal readonly record struct AppLoop;
 
 /// <summary>
+/// After the last frame, with the gems still whole, before <see cref="Shutdown"/>. Awaited, as <see cref="Startup"/> is.
+/// </summary>
+internal readonly record struct RunEnding;
+
+/// <summary>
 /// Last of a run: everything after <see cref="Shutdown"/>.
 /// </summary>
 internal readonly record struct AppEnd;

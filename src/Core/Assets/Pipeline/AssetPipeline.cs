@@ -40,11 +40,12 @@ internal sealed class AssetPipeline(
         assembly.GetMetadata(ResourcesKey) ?? files.Combine(folder, "Resources");
 
     /// <summary>
-    /// The project's folder comes first, as the first winning a path two directories have.
+    /// The project's folder comes first, as the first winning a path two directories have, then what the last run kept.
     /// </summary>
     public ValueTask<AppStart> RunAsync(AppStart state, CancellationToken cancel)
     {
         AddAssetDirectory(files.GetParent(state.Project.Path));
+        AddAssetDirectory(caches.KeptFolder);
         AddAssetTypes(typeof(AssetDatabase).Assembly);
 
         return ValueTask.FromResult(state);

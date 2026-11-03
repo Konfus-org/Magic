@@ -1,0 +1,195 @@
+using System.Diagnostics.CodeAnalysis;
+using Magic.Input;
+using static SdlPlatform.SDL_GamepadButton;
+using static SdlPlatform.SDL_Scancode;
+using static SdlPlatform.SDL3;
+
+namespace SdlPlatform;
+
+/// <summary>
+/// SDL's keys and buttons as Magic's <see cref="Control"/>s; what Magic does not name is null.
+/// </summary>
+[SuppressMessage(
+    "Style",
+    "IDE0072:Add missing cases",
+    Justification = "SDL names far more keys and buttons than Magic; the rest map to nothing on purpose."
+)]
+internal static class SdlControlExtensions
+{
+    extension(SDL_Scancode scancode)
+    {
+        internal Control? Control =>
+            scancode switch
+            {
+                SDL_SCANCODE_A => Control.KeyA,
+                SDL_SCANCODE_B => Control.KeyB,
+                SDL_SCANCODE_C => Control.KeyC,
+                SDL_SCANCODE_D => Control.KeyD,
+                SDL_SCANCODE_E => Control.KeyE,
+                SDL_SCANCODE_F => Control.KeyF,
+                SDL_SCANCODE_G => Control.KeyG,
+                SDL_SCANCODE_H => Control.KeyH,
+                SDL_SCANCODE_I => Control.KeyI,
+                SDL_SCANCODE_J => Control.KeyJ,
+                SDL_SCANCODE_K => Control.KeyK,
+                SDL_SCANCODE_L => Control.KeyL,
+                SDL_SCANCODE_M => Control.KeyM,
+                SDL_SCANCODE_N => Control.KeyN,
+                SDL_SCANCODE_O => Control.KeyO,
+                SDL_SCANCODE_P => Control.KeyP,
+                SDL_SCANCODE_Q => Control.KeyQ,
+                SDL_SCANCODE_R => Control.KeyR,
+                SDL_SCANCODE_S => Control.KeyS,
+                SDL_SCANCODE_T => Control.KeyT,
+                SDL_SCANCODE_U => Control.KeyU,
+                SDL_SCANCODE_V => Control.KeyV,
+                SDL_SCANCODE_W => Control.KeyW,
+                SDL_SCANCODE_X => Control.KeyX,
+                SDL_SCANCODE_Y => Control.KeyY,
+                SDL_SCANCODE_Z => Control.KeyZ,
+                SDL_SCANCODE_0 => Control.Key0,
+                SDL_SCANCODE_1 => Control.Key1,
+                SDL_SCANCODE_2 => Control.Key2,
+                SDL_SCANCODE_3 => Control.Key3,
+                SDL_SCANCODE_4 => Control.Key4,
+                SDL_SCANCODE_5 => Control.Key5,
+                SDL_SCANCODE_6 => Control.Key6,
+                SDL_SCANCODE_7 => Control.Key7,
+                SDL_SCANCODE_8 => Control.Key8,
+                SDL_SCANCODE_9 => Control.Key9,
+                SDL_SCANCODE_RETURN => Control.KeyEnter,
+                SDL_SCANCODE_ESCAPE => Control.KeyEscape,
+                SDL_SCANCODE_BACKSPACE => Control.KeyBackspace,
+                SDL_SCANCODE_TAB => Control.KeyTab,
+                SDL_SCANCODE_SPACE => Control.KeySpace,
+                SDL_SCANCODE_MINUS => Control.KeyMinus,
+                SDL_SCANCODE_EQUALS => Control.KeyEquals,
+                SDL_SCANCODE_LEFTBRACKET => Control.KeyLeftBracket,
+                SDL_SCANCODE_RIGHTBRACKET => Control.KeyRightBracket,
+                SDL_SCANCODE_BACKSLASH => Control.KeyBackslash,
+                SDL_SCANCODE_SEMICOLON => Control.KeySemicolon,
+                SDL_SCANCODE_APOSTROPHE => Control.KeyApostrophe,
+                SDL_SCANCODE_GRAVE => Control.KeyGrave,
+                SDL_SCANCODE_COMMA => Control.KeyComma,
+                SDL_SCANCODE_PERIOD => Control.KeyPeriod,
+                SDL_SCANCODE_SLASH => Control.KeySlash,
+                SDL_SCANCODE_NONUSBACKSLASH => Control.KeyNonUsBackslash,
+                SDL_SCANCODE_NONUSHASH => Control.KeyNonUsHash,
+                SDL_SCANCODE_CAPSLOCK => Control.KeyCapsLock,
+                SDL_SCANCODE_F1 => Control.KeyF1,
+                SDL_SCANCODE_F2 => Control.KeyF2,
+                SDL_SCANCODE_F3 => Control.KeyF3,
+                SDL_SCANCODE_F4 => Control.KeyF4,
+                SDL_SCANCODE_F5 => Control.KeyF5,
+                SDL_SCANCODE_F6 => Control.KeyF6,
+                SDL_SCANCODE_F7 => Control.KeyF7,
+                SDL_SCANCODE_F8 => Control.KeyF8,
+                SDL_SCANCODE_F9 => Control.KeyF9,
+                SDL_SCANCODE_F10 => Control.KeyF10,
+                SDL_SCANCODE_F11 => Control.KeyF11,
+                SDL_SCANCODE_F12 => Control.KeyF12,
+                SDL_SCANCODE_F13 => Control.KeyF13,
+                SDL_SCANCODE_F14 => Control.KeyF14,
+                SDL_SCANCODE_F15 => Control.KeyF15,
+                SDL_SCANCODE_F16 => Control.KeyF16,
+                SDL_SCANCODE_F17 => Control.KeyF17,
+                SDL_SCANCODE_F18 => Control.KeyF18,
+                SDL_SCANCODE_F19 => Control.KeyF19,
+                SDL_SCANCODE_F20 => Control.KeyF20,
+                SDL_SCANCODE_F21 => Control.KeyF21,
+                SDL_SCANCODE_F22 => Control.KeyF22,
+                SDL_SCANCODE_F23 => Control.KeyF23,
+                SDL_SCANCODE_F24 => Control.KeyF24,
+                SDL_SCANCODE_PRINTSCREEN => Control.KeyPrintScreen,
+                SDL_SCANCODE_SCROLLLOCK => Control.KeyScrollLock,
+                SDL_SCANCODE_PAUSE => Control.KeyPause,
+                SDL_SCANCODE_INSERT => Control.KeyInsert,
+                SDL_SCANCODE_DELETE => Control.KeyDelete,
+                SDL_SCANCODE_HOME => Control.KeyHome,
+                SDL_SCANCODE_END => Control.KeyEnd,
+                SDL_SCANCODE_PAGEUP => Control.KeyPageUp,
+                SDL_SCANCODE_PAGEDOWN => Control.KeyPageDown,
+                SDL_SCANCODE_LEFT => Control.KeyLeft,
+                SDL_SCANCODE_RIGHT => Control.KeyRight,
+                SDL_SCANCODE_UP => Control.KeyUp,
+                SDL_SCANCODE_DOWN => Control.KeyDown,
+                SDL_SCANCODE_NUMLOCKCLEAR => Control.KeyNumLock,
+                SDL_SCANCODE_KP_0 => Control.KeyNumpad0,
+                SDL_SCANCODE_KP_1 => Control.KeyNumpad1,
+                SDL_SCANCODE_KP_2 => Control.KeyNumpad2,
+                SDL_SCANCODE_KP_3 => Control.KeyNumpad3,
+                SDL_SCANCODE_KP_4 => Control.KeyNumpad4,
+                SDL_SCANCODE_KP_5 => Control.KeyNumpad5,
+                SDL_SCANCODE_KP_6 => Control.KeyNumpad6,
+                SDL_SCANCODE_KP_7 => Control.KeyNumpad7,
+                SDL_SCANCODE_KP_8 => Control.KeyNumpad8,
+                SDL_SCANCODE_KP_9 => Control.KeyNumpad9,
+                SDL_SCANCODE_KP_DIVIDE => Control.KeyNumpadDivide,
+                SDL_SCANCODE_KP_MULTIPLY => Control.KeyNumpadMultiply,
+                SDL_SCANCODE_KP_MINUS => Control.KeyNumpadMinus,
+                SDL_SCANCODE_KP_PLUS => Control.KeyNumpadPlus,
+                SDL_SCANCODE_KP_ENTER => Control.KeyNumpadEnter,
+                SDL_SCANCODE_KP_PERIOD => Control.KeyNumpadPeriod,
+                SDL_SCANCODE_KP_EQUALS => Control.KeyNumpadEquals,
+                SDL_SCANCODE_APPLICATION => Control.KeyMenu,
+                SDL_SCANCODE_LCTRL => Control.KeyLeftCtrl,
+                SDL_SCANCODE_LSHIFT => Control.KeyLeftShift,
+                SDL_SCANCODE_LALT => Control.KeyLeftAlt,
+                SDL_SCANCODE_LGUI => Control.KeyLeftSuper,
+                SDL_SCANCODE_RCTRL => Control.KeyRightCtrl,
+                SDL_SCANCODE_RSHIFT => Control.KeyRightShift,
+                SDL_SCANCODE_RALT => Control.KeyRightAlt,
+                SDL_SCANCODE_RGUI => Control.KeyRightSuper,
+                _ => null,
+            };
+    }
+
+    extension(SDL_GamepadButton button)
+    {
+        internal Control? Control =>
+            button switch
+            {
+                SDL_GAMEPAD_BUTTON_SOUTH => Control.GamepadSouth,
+                SDL_GAMEPAD_BUTTON_EAST => Control.GamepadEast,
+                SDL_GAMEPAD_BUTTON_WEST => Control.GamepadWest,
+                SDL_GAMEPAD_BUTTON_NORTH => Control.GamepadNorth,
+                SDL_GAMEPAD_BUTTON_BACK => Control.GamepadBack,
+                SDL_GAMEPAD_BUTTON_GUIDE => Control.GamepadGuide,
+                SDL_GAMEPAD_BUTTON_START => Control.GamepadStart,
+                SDL_GAMEPAD_BUTTON_LEFT_STICK => Control.GamepadLeftStick,
+                SDL_GAMEPAD_BUTTON_RIGHT_STICK => Control.GamepadRightStick,
+                SDL_GAMEPAD_BUTTON_LEFT_SHOULDER => Control.GamepadLeftShoulder,
+                SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER => Control.GamepadRightShoulder,
+                SDL_GAMEPAD_BUTTON_DPAD_UP => Control.GamepadDPadUp,
+                SDL_GAMEPAD_BUTTON_DPAD_DOWN => Control.GamepadDPadDown,
+                SDL_GAMEPAD_BUTTON_DPAD_LEFT => Control.GamepadDPadLeft,
+                SDL_GAMEPAD_BUTTON_DPAD_RIGHT => Control.GamepadDPadRight,
+                SDL_GAMEPAD_BUTTON_MISC1 => Control.GamepadMisc1,
+                SDL_GAMEPAD_BUTTON_MISC2 => Control.GamepadMisc2,
+                SDL_GAMEPAD_BUTTON_MISC3 => Control.GamepadMisc3,
+                SDL_GAMEPAD_BUTTON_MISC4 => Control.GamepadMisc4,
+                SDL_GAMEPAD_BUTTON_MISC5 => Control.GamepadMisc5,
+                SDL_GAMEPAD_BUTTON_MISC6 => Control.GamepadMisc6,
+                SDL_GAMEPAD_BUTTON_LEFT_PADDLE1 => Control.GamepadLeftPaddle1,
+                SDL_GAMEPAD_BUTTON_LEFT_PADDLE2 => Control.GamepadLeftPaddle2,
+                SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1 => Control.GamepadRightPaddle1,
+                SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2 => Control.GamepadRightPaddle2,
+                SDL_GAMEPAD_BUTTON_TOUCHPAD => Control.GamepadTouchpad,
+                _ => null,
+            };
+    }
+
+    /// <summary>
+    /// The control a mouse button event's button, SDL's button number, is.
+    /// </summary>
+    internal static Control? ToMouseControl(byte button) =>
+        button switch
+        {
+            SDL_BUTTON_LEFT => Control.MouseLeft,
+            SDL_BUTTON_MIDDLE => Control.MouseMiddle,
+            SDL_BUTTON_RIGHT => Control.MouseRight,
+            SDL_BUTTON_X1 => Control.MouseBack,
+            SDL_BUTTON_X2 => Control.MouseForward,
+            _ => null,
+        };
+}

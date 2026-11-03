@@ -55,6 +55,11 @@ public sealed class Caches
     }
 
     /// <summary>
+    /// Where this user's assets made by a run for the next one go: an asset directory once it exists.
+    /// </summary>
+    internal string KeptFolder => _files.Combine(_userCacheFolder, "Kept");
+
+    /// <summary>
     /// What is cached of <paramref name="key"/> as a <typeparamref name="T"/>, made from <paramref name="version"/>:
     /// what the project brings, else what the machine keeps; why not when neither holds it, or when what they hold was
     /// made from another version, or by another <see cref="ICache{T}.Version"/>.

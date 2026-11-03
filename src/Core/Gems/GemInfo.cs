@@ -1,3 +1,4 @@
+using System.Runtime.Loader;
 using Magic.Pipelines;
 
 namespace Magic.Gems;
@@ -15,6 +16,11 @@ namespace Magic.Gems;
 /// <param name="Joins">The states of the pipelines it joins, one for each <see cref="IPipeline{TState}"/> it implements.</param>
 /// <param name="Needs">The names of the registered gems its constructor asks for.</param>
 /// <param name="Resources">The folder of its own assets; null when it has none.</param>
+/// <param name="Folder">The folder its assemblies load from.</param>
+/// <param name="Context">
+/// Where its assemblies load, held from the moment they do: nothing else keeps it alive, and once collected it would start
+/// unloading the gem.
+/// </param>
 internal sealed record GemInfo(
     string Name,
     string Author,
@@ -25,5 +31,7 @@ internal sealed record GemInfo(
     IReadOnlyList<Type> Reads,
     IReadOnlyList<Type> Joins,
     IReadOnlyList<string> Needs,
-    string? Resources
+    string? Resources,
+    string Folder,
+    AssemblyLoadContext Context
 );
