@@ -19,9 +19,10 @@ public readonly record struct CoreState
 
     internal double LastSec { get; init; }
 
-    internal double? PausedAtSec { get; init; }
-
-    internal double? PausedDeltaSec { get; init; }
+    /// <summary>
+    /// Seconds the simulation has run.
+    /// </summary>
+    internal double SimSec { get; init; }
 
     /// <summary>
     /// Seconds of fixed steps that ran before this frame's.

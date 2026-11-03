@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json.Serialization;
 
 namespace Magic.Ecs.Components;
 
@@ -7,6 +8,7 @@ namespace Magic.Ecs.Components;
 /// each once, a free slot <see cref="Tag.None"/>.
 /// </summary>
 [InlineArray(Capacity)]
+[JsonConverter(typeof(TagsJsonConverter))]
 public struct Tags : IComponent, IEquatable<Tags>
 {
     public const int Capacity = 8;

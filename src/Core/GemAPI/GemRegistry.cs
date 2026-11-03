@@ -5,9 +5,11 @@ using System.Linq;
 using System.Reflection;
 using Magic.Assets.Pipeline;
 using Magic.Debugging;
+using Magic.Ecs;
 using Magic.Files;
 using Magic.Pipelines;
 using Magic.Utils;
+using Magic.Worlds;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Magic.GemAPI;
@@ -22,17 +24,11 @@ internal sealed class GemRegistry
 
     /// <summary>
     /// Finds the <paramref name="gemsToLoad"/> beside Magic and registers each with <paramref name="services"/>, which
-    /// already holds what the host provides, and its <c>Resources/</c> and asset types with <paramref name="assets"/>,
-    /// to be indexed before any gem is made. A name listed twice, the wrong version, or an interface already provided
+    /// already holds what the host provides. A name listed twice, the wrong version, or an interface already provided
     /// is refused. Each gem is made by the provider built from <paramref name="services"/>, once: asked for again after
     /// it failed, it throws.
     /// </summary>
-    public GemRegistry(
-        ServiceCollection services,
-        IFileSystem files,
-        ImmutableArray<string> gemsToLoad,
-        AssetManager assets
-    )
+    public GemRegistry(ServiceCollection services, IFileSystem files, ImmutableArray<string> gemsToLoad)
     {
         if (gemsToLoad.Any())
             Log.Info($"Loading {string.Join(", ", gemsToLoad)}.");
@@ -89,10 +85,6 @@ internal sealed class GemRegistry
                 services.AddSingleton(contract, provider => provider.GetRequiredService(gem.Type));
             }
 
-            if (gem.Resources is not null)
-                assets.AddAssetDirectory(gem.Resources);
-
-            assets.AddAssetTypes(gem.Type.Assembly);
             registered.Add(gem);
         }
 
@@ -156,7 +148,7 @@ internal sealed class GemRegistry
         string description = assembly.GetCustomAttribute<AssemblyDescriptionAttribute>()?.Description ?? string.Empty;
         Version version = assembly.GetName().Version ?? new Version(1, 0, 0);
 
-        string resources = AssetManager.GetResources(files, assembly, files.GetParent(path));
+        string resources = AssetPipeline.GetResources(files, assembly, files.GetParent(path));
         bool hasResources = files.DirectoryExists(resources);
 
         return Result.Success(
@@ -190,6 +182,10 @@ internal sealed class GemRegistry
                 providers[contract] = gem.Name;
             }
         }
+
+        // A gem that takes the world needs what the world is made from.
+        if (providers.TryGetValue(typeof(IEcs), out string? ecs))
+            providers[typeof(World)] = ecs;
 
         List<GemInfo> withNeeds = [];
         foreach (GemInfo gem in gems)

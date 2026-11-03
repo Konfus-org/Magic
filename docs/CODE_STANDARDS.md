@@ -6,7 +6,12 @@ and old code catches up when you touch it.
 
 ## How we write code
 
-Write the engine as data flowing through functions, not objects calling each other.
+Write the engine as data flowing through functions, not objects calling each other. Everything is one of four things:
+
+- **Data:** plain values, such as `Domain`, `Prefab` and `EntitiesChangeList`.
+- **Databases:** one place that holds state and does little else, such as the assets' database and the ECS's columns.
+- **Pipelines:** where the work happens, once a frame over a batch.
+- **Services:** immediate calls where that's the normal thing, such as `world.Create` and `assets.Find`.
 
 - **Nothing glued in.** Just about everything is a gem that can be swapped out.
 - **Pipelines, not webs.** Data moves A → B → C. Each step takes values and returns values, and the whole flow reads
@@ -42,6 +47,17 @@ Write the engine as data flowing through functions, not objects calling each oth
   `IServiceProvider`.
 - A pipeline takes its state and hands it on, changed or not. It runs after the gems it needs, then in the order the
   project lists them. [`PipelineStages.cs`](../src/Core/Pipelines/PipelineStages.cs) has the states Core runs.
+- Any pipeline runs either way, and the caller picks: `pipelines.Get<MyState>().Run(state)` runs it now, on the main
+  thread, and `.Defer(state)`, from any thread, runs it after the frame's fixed steps. What joins can't tell which. For
+  a change list, `pipelines.Get<MyList>().Deferred` is the list to push onto; the runner holds it, runs it and clears it.
+- A change to a database is pushed onto a change list, whose pipeline acts on it and says what came of it, as
+  `EntitiesChangeList` and `AssetsChangeList` do. A service's calls push onto its own, as `assets.Add` does. Push for
+  bulk work. Work over a list costs a walk per run, so a call
+  that runs one at once is for the odd change, not a hot path.
+- Core's own work is its root pipelines, each doing one area's work at each point of a run. `App.Run` lists them. A
+  dedicated pipeline is for a substantial piece of work, not each step: a step is a method.
+- A pipeline that can't take a run because of what its caller is doing throws `PipelineRefusedException`, which goes to
+  the caller.
 - What a frame runs is on the main thread and returns finished, with `ValueTask.FromResult`. A gem whose pipeline throws
   or returns unfinished is logged and leaves every pipeline.
 - What is awaited, such as `Startup`, is called on the main thread and may await. After an await of its own, it steps
@@ -177,7 +193,7 @@ built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
 
 ### Naming
 
-- A name reads well as `Class.Member(arguments)`: `AssetManager.Find<Texture>(path)`, `App.Exit()`. Action first,
+- A name reads well as `Class.Member(arguments)`: `AssetDatabase.Find<Texture>(path)`, `App.Exit()`. Action first,
   subject second (`ReadDomain`), naming what it acts on even if that's longer. If it doesn't make sense without its
   summary (`Process()`, `_scratch`), rename it.
 - Each verb means one thing:
@@ -244,7 +260,7 @@ All code runs on Windows, Linux and macOS.
 
 - **Paths.** Build them with `IFileSystem.Combine` and split them with `IFileSystem.GetParent`; never touch separators.
   `Path.GetExtension`, `Path.GetFileName*` and `Path.ChangeExtension` are fine. No drive letters, absolute paths or
-  checks for `..`. An asset path is relative to its root and uses `/`; only `AssetManager` turns it into an OS path.
+  checks for `..`. An asset path is relative to its root and uses `/`; only `AssetDatabase` turns it into an OS path.
 - **Case.** File names in code, assets, `#include`s, csproj and `.meta` files match the disk exactly. Two files never
   differ only by case.
 - **Disk.** All disk access goes through `IFileSystem`, never `File` or `Directory`; only `Debugging` is exempt. Engine

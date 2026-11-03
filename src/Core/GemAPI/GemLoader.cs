@@ -1,7 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
 using Magic.Assets.Pipeline;
 using Magic.Debugging;
+using Magic.Ecs;
 using Magic.Pipelines;
+using Magic.Worlds;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Magic.GemAPI;
@@ -27,8 +29,9 @@ internal static class GemLoader
     public static IReadOnlyList<LoadedGem> Load(
         IServiceProvider provider,
         GemRegistry registry,
-        AssetManager assets,
-        PipelineCoordinator pipelines
+        AssetDatabase assets,
+        PipelineCoordinator pipelines,
+        World world
     )
     {
         List<LoadedGem> loaded = [];
@@ -47,6 +50,9 @@ internal static class GemLoader
                 Log.Error($"Gem {gem.Name} was not made: {why}");
                 continue;
             }
+
+            if (made is IEcs ecs)
+                world.Ecs = ecs;
 
             LoadedGem setUp = new(made, gem);
             loaded.Add(setUp);

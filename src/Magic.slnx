@@ -5,7 +5,10 @@
   </Folder>
   <Folder Name="/Gems/">
     <Project Path="Gems/ArchEcs/ArchEcs.csproj" />
+    <Project Path="Gems/DomainLoader/DomainLoader.csproj" />
     <Project Path="Gems/Hello/Hello.csproj" />
+    <Project Path="Gems/PrefabLoader/PrefabLoader.csproj" />
+    <Project Path="Gems/WorldLoader/WorldLoader.csproj" />
   </Folder>
   <Folder Name="/Docs/">
     <File Path="../AGENTS.md" />

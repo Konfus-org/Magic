@@ -8,6 +8,7 @@ using Magic.Pipelines;
 using Magic.Runtime;
 using Magic.Threading;
 using Magic.Utils;
+using Magic.Worlds;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Magic;
@@ -68,12 +69,14 @@ internal static class Program
 
             // Setup services that require a project
             Caches caches = new(files, project.Name, files.GetParent(project.Path));
-            using AssetManager assets = new(files, caches, pipelines);
+            using AssetDatabase assets = new(files, pipelines);
+            using World world = new(assets, threads, pipelines);
             services.AddSingleton(caches);
+            services.AddSingleton(pipelines);
             services.AddSingleton(assets);
 
             // Run the application
-            Result ended = app.Run(services, assets);
+            Result ended = app.Run(services, assets, caches, world);
             if (!ended.Ok)
             {
                 Log.Critical(ended.Error);

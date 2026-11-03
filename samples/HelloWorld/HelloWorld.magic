@@ -1,1 +1,1 @@
-{ "name": "HelloWorld", "gems": ["Hello", "ArchEcs"] }
+{ "name": "HelloWorld", "gems": ["Hello", "ArchEcs", "PrefabLoader", "DomainLoader", "WorldLoader"], "entryPoint": { "id": 100001 } }

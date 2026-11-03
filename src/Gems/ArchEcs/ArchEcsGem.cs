@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using Arch.Core;
 using Magic.Ecs;
 using Magic.GemAPI;
+using Magic.Pipelines;
 using Schedulers;
 using ArchEntity = Arch.Core.Entity;
 using ArchWorld = Arch.Core.World;
@@ -20,8 +21,12 @@ namespace ArchEcs;
 /// (a dead entity, a structural change during a loop, a call from another thread) and throws instead. It is public
 /// because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class ArchEcsGem : IGem, IEcs, IDisposable
+public sealed class ArchEcsGem : IGem, IEcs, IPipeline<EntitiesChangeList>, IDisposable
 {
+    private const string CannotChangeInLoop =
+        "An entity's components cannot change during a query's loop or a run: push what to change onto the pipeline's "
+        + "Deferred, or apply a list of your own after.";
+
     private readonly ArchWorld _world;
 
     /// <summary>
@@ -90,6 +95,52 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
         return Unsafe.BitCast<ArchEntity, Entity>(_world.Create());
     }
 
+    public Entity Create(ReadOnlySpan<IComponent> components)
+    {
+        ThrowIfCannotChange();
+        ComponentType[] types = new ComponentType[components.Length];
+        object[] values = new object[components.Length];
+        for (int i = 0; i < components.Length; i++)
+        {
+            types[i] = GetComponentType(components[i].GetType());
+            values[i] = components[i];
+        }
+
+        ArchEntity created = _world.Create(types);
+        _world.SetRange(created, values);
+
+        return Unsafe.BitCast<ArchEntity, Entity>(created);
+    }
+
+    public IComponent[] GetComponents(Entity entity)
+    {
+        object?[] held = _world.GetAllComponents(GetAlive(entity));
+        IComponent[] components = new IComponent[held.Length];
+        for (int i = 0; i < held.Length; i++)
+        {
+            components[i] =
+                held[i] as IComponent
+                ?? throw new InvalidOperationException(
+                    $"{entity} holds a {held[i]?.GetType().Name ?? "null"}, which is no component."
+                );
+        }
+
+        return components;
+    }
+
+    /// <summary>
+    /// Makes what was pushed, for the gems after it.
+    /// </summary>
+    public ValueTask<EntitiesChangeList> RunAsync(EntitiesChangeList state, CancellationToken cancel)
+    {
+        if (_openLoops > 0)
+            throw new PipelineRefusedException(CannotChangeInLoop);
+
+        state.Apply(this);
+
+        return ValueTask.FromResult(state);
+    }
+
     public void Create<T1>(ReadOnlySpan<T1> first, Span<Entity> created)
         where T1 : unmanaged, IComponent
     {
@@ -150,6 +201,25 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
 
         ThrowIfCannotChange();
         _world.Add(alive, component);
+    }
+
+    public void Set(Entity entity, ReadOnlySpan<IComponent> components)
+    {
+        ThrowIfNotWorldThread();
+        ArchEntity alive = GetAlive(entity);
+        foreach (IComponent component in components)
+        {
+            object[] value = [component];
+            if (_world.Has(alive, GetComponentType(component.GetType())))
+            {
+                // Not structural, so it is fine inside a loop.
+                _world.SetRange(alive, value);
+                continue;
+            }
+
+            ThrowIfCannotChange();
+            _world.AddRange(alive, value);
+        }
     }
 
     public ref T Get<T>(Entity entity)
@@ -236,6 +306,22 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
         MemoryMarshal.Cast<ArchEntity, Entity>(chunk.Entities.AsSpan(0, chunk.Count));
 
     private static Span<T> GetComponents<T>(Chunk chunk) => chunk.GetArray<T>().AsSpan(0, chunk.Count);
+
+    /// <summary>
+    /// The ECS's type of <paramref name="type"/>, a component known only as the program runs, from its typed registration
+    /// so a struct is measured as the typed calls measure it.
+    /// </summary>
+    private static ComponentType GetComponentType(Type type)
+    {
+        if (ComponentRegistry.TryGet(type, out ComponentType registered))
+            return registered;
+
+        return
+            typeof(Component<>).MakeGenericType(type).GetField(nameof(Component<int>.ComponentType))?.GetValue(null)
+                is ComponentType found
+            ? found
+            : throw new InvalidOperationException($"The ECS has no type for {type.Name}.");
+    }
 
     private IEnumerable<TChunk> GetWalk<TChunk>(in QueryDescription description, Func<Chunk, TChunk> cut)
         where TChunk : allows ref struct
@@ -328,10 +414,7 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
         if (_openLoops == 0)
             return;
 
-        throw new InvalidOperationException(
-            "An entity's components cannot change during a query's loop or a run: record what to change in an "
-                + "EntityChanges, and apply it after."
-        );
+        throw new InvalidOperationException(CannotChangeInLoop);
     }
 
     /// <summary>

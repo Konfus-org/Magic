@@ -27,5 +27,23 @@
       Private="false"
       SkipGetTargetFrameworkProperties="true"
     />
+    <ProjectReference
+      Include="$(MagicRoot)src/Gems/PrefabLoader/PrefabLoader.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      SkipGetTargetFrameworkProperties="true"
+    />
+    <ProjectReference
+      Include="$(MagicRoot)src/Gems/DomainLoader/DomainLoader.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      SkipGetTargetFrameworkProperties="true"
+    />
+    <ProjectReference
+      Include="$(MagicRoot)src/Gems/WorldLoader/WorldLoader.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      SkipGetTargetFrameworkProperties="true"
+    />
   </ItemGroup>
 </Project>
