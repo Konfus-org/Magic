@@ -312,6 +312,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
             || !core.drawIndirectFirstInstance
             || !core.fillModeNonSolid
             || !core.fragmentStoresAndAtomics
+            || !core.shaderClipDistance
             || !core.shaderStorageImageReadWithoutFormat
             || !core.shaderStorageImageWriteWithoutFormat
             || !core.textureCompressionBC
@@ -528,6 +529,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
                 drawIndirectFirstInstance = true,
                 fillModeNonSolid = true,
                 fragmentStoresAndAtomics = true,
+                shaderClipDistance = true,
                 shaderStorageImageReadWithoutFormat = true,
                 shaderStorageImageWriteWithoutFormat = true,
                 textureCompressionBC = true,

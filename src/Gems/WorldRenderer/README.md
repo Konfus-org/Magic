@@ -20,5 +20,9 @@ model reader, the mesh preprocessor and the texture reader.
   threshold that picks the level of detail, and last frame's depth pyramid, draws the visible ones into a
   visibility buffer, retests what the old pyramid hid against the new one and draws those too. The visibility
   buffer resolves per pixel through the material contract into the GBuffer, which the sun lights.
+- The sun's shadow is a virtual shadow map: a clipmap of levels of pages around the camera, each level's texels
+  twice the last's. The depth buffer marks the pages its pixels need at the level their footprint picks, pages come
+  from a pool when first marked and go back when no longer marked, an instance that moves invalidates the pages under
+  it, and only invalid pages are drawn, by the cluster path into one pass over the pool; a still scene draws none.
 - The passes are the `Shaders/WorldRenderer/` modules in the gem's `Resources`; they build on the shader library
   (`src/Resources/Shaders/README.md`).

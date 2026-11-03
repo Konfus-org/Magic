@@ -78,3 +78,17 @@ public FrameConstants GetFrame() { return LoadConstants<FrameConstants>(); }
 
 // A world position relative to the camera.
 public float3 Relative(FrameConstants frame, float3 worldPosition) { return worldPosition - frame.cameraPosition.xyz; }
+
+// The camera-relative position a pixel's reversed depth puts it at, from its texture coordinates.
+public float3 ReconstructRelative(FrameConstants frame, float2 uv, float depth)
+{
+    float4 clip = float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0);
+    float4 relative = mul(clip, frame.inverseViewProjection);
+    return relative.xyz / relative.w;
+}
+
+// The world position a pixel's reversed depth puts it at.
+public float3 ReconstructWorld(FrameConstants frame, float2 uv, float depth)
+{
+    return ReconstructRelative(frame, uv, depth) + frame.cameraPosition.xyz;
+}

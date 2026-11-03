@@ -61,6 +61,7 @@ public sealed class WorldRendererGem(
     private readonly RendererPipelines _pipelines = new(gpu, shaders, assets);
     private readonly InstanceTable _instances = new(gpu);
     private readonly CaptureTable _captures = new(gpu);
+    private readonly SunShadows _shadows = new(gpu);
     private readonly GpuBuffer[] _cellConstants = new GpuBuffer[CaptureCellCount];
     private MaterialTable? _materials;
     private GpuBuffer _constants;
@@ -86,6 +87,7 @@ public sealed class WorldRendererGem(
         _pools.Dispose();
         _instances.Dispose();
         _captures.Dispose();
+        _shadows.Dispose();
         foreach (
             GpuBuffer buffer in (ReadOnlySpan<GpuBuffer>)
                 [
@@ -137,6 +139,7 @@ public sealed class WorldRendererGem(
                     _materials.Create,
                     _instances.Create,
                     _captures.Create,
+                    _shadows.Create,
                     CreateBuffers,
                     () => _cellTargets.Resize(GpuCapture.CellSize, GpuCapture.CellSize, _graph),
                 ]
@@ -245,12 +248,21 @@ public sealed class WorldRendererGem(
 
         // The frame's tables.
         RenderCamera camera = _world.Camera ?? new RenderCamera(new Transform(), 60, 0.05f);
+        RenderSun sun = _world.Sun ?? new RenderSun(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One);
         int instanceCount = UpdateInstances();
         _graph.BeginTransferPass("Upload frame");
         _captures.Upload(_graph);
         _instances.Upload(_graph);
-        UploadConstants(_constants, GetFrameConstants(camera, state.Frame.Index, instanceCount));
+        UploadConstants(_constants, GetFrameConstants(camera, sun, state.Frame.Index, instanceCount));
         ResetCounts();
+        _shadows.Prepare(
+            _graph,
+            camera.Transform.Position,
+            sun.Direction,
+            2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360) / _targets.Height,
+            _instances.Changes
+        );
+        _instances.ClearChanges();
         _graph.EndPass();
 
         RenderView view = new(_constants, _instances.Buffer, instanceCount, _targets);
@@ -266,6 +278,7 @@ public sealed class WorldRendererGem(
             countOffset: 8
         );
         RecordHzb();
+        _shadows.Record(_graph, _pipelines, _constants, _instances.Buffer, instanceCount, _pools, _targets);
         RecordResolve(view, "Resolve materials");
         RecordShade();
 
@@ -508,12 +521,11 @@ public sealed class WorldRendererGem(
     /// <summary>
     /// The main view's constants: the camera, the sun and the frame's resources.
     /// </summary>
-    private FrameConstants GetFrameConstants(RenderCamera camera, uint frameIndex, int instanceCount)
+    private FrameConstants GetFrameConstants(RenderCamera camera, RenderSun sun, uint frameIndex, int instanceCount)
     {
         float aspect = (float)_targets.Width / _targets.Height;
         Matrix4x4.Invert(Matrix4x4.CreateFromQuaternion(camera.Transform.Rotation), out Matrix4x4 view);
         Matrix4x4 projection = CreatePerspective(camera.FieldOfView, aspect, camera.Near);
-        RenderSun sun = _world.Sun ?? new RenderSun(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One);
         FrameConstants frame = GetViewConstants(
             view,
             projection,
@@ -819,12 +831,14 @@ public sealed class WorldRendererGem(
         _graph.BeginComputePass("Shade");
         _graph.Use(_constants, GpuAccess.ShaderRead);
         _graph.Use(_targets.Visibility, GpuAccess.ShaderRead);
+        _graph.Use(_targets.Depth, GpuAccess.ShaderRead);
         _graph.Use(_targets.GBufferNormal, GpuAccess.ShaderRead);
         _graph.Use(_targets.GBufferBase, GpuAccess.ShaderRead);
         _graph.Use(_targets.GBufferSurface, GpuAccess.ShaderRead);
         _graph.Use(_targets.Output, GpuAccess.ShaderWrite);
+        _shadows.UseForSampling(_graph);
         _graph.Recorder.BindPipeline(_pipelines.ShadeFlat);
-        _graph.Recorder.PushConstants(new GpuConstants(_constants.Id));
+        _graph.Recorder.PushConstants(new GpuConstants(_constants.Id, _shadows.Constants.Id));
         _graph.Recorder.Dispatch(Groups(_targets.Width), Groups(_targets.Height));
         _graph.EndPass();
     }

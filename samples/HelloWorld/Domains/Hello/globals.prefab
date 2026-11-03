@@ -22,6 +22,13 @@
             }
         },
         {
+            "name": "Ground",
+            "components": {
+                "Transform": { "scale": { "x": 12, "y": 1, "z": 12 } },
+                "Renderer": { "model": { "id": 519 }, "materials": [ { "id": 12045873320119837722 } ] }
+            }
+        },
+        {
             "name": "Question",
             "components": {
                 "Transform": { "position": { "x": 0, "y": 1, "z": 0 }, "rotation": { "x": 0, "y": 1, "z": 0, "w": 0 } },

@@ -44,8 +44,18 @@ public float GetMaxScale(float4x4 world)
 // A point of the model in the world.
 public float3 ToWorld(float4x4 world, float3 point) { return mul(float4(point, 1.0), world).xyz; }
 
-// A direction of the model in the camera-relative world, unit.
+// A direction of the model in the world, unit: what a tangent or a view direction turns by.
 public float3 ToWorldDirection(float4x4 world, float3 direction)
 {
     return normalize(mul(direction, float3x3(world[0].xyz, world[1].xyz, world[2].xyz)));
+}
+
+// A normal of the model in the world, unit: turned by the cofactors of the world's axes, so it stays perpendicular
+// to the surface however unevenly the instance is scaled.
+public float3 ToWorldNormal(float4x4 world, float3 normal)
+{
+    float3 x = world[0].xyz;
+    float3 y = world[1].xyz;
+    float3 z = world[2].xyz;
+    return normalize(normal.x * cross(y, z) + normal.y * cross(z, x) + normal.z * cross(x, y));
 }

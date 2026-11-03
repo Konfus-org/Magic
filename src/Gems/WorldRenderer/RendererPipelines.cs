@@ -29,6 +29,22 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
 
     public GpuPipeline CaptureCell { get; private set; }
 
+    public GpuPipeline ShadowMarkPages { get; private set; }
+
+    public GpuPipeline ShadowInvalidatePages { get; private set; }
+
+    public GpuPipeline ShadowFreePages { get; private set; }
+
+    public GpuPipeline ShadowAllocatePages { get; private set; }
+
+    public GpuPipeline ShadowClearPages { get; private set; }
+
+    public GpuPipeline ShadowFinishPages { get; private set; }
+
+    public GpuPipeline ShadowCull { get; private set; }
+
+    public GpuPipeline DrawShadow { get; private set; }
+
     public uint CullThreads { get; private set; }
 
     public uint TileSize { get; private set; }
@@ -37,7 +53,22 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
     {
         foreach (
             GpuPipeline pipeline in (ReadOnlySpan<GpuPipeline>)
-                [CullClusters, DrawVisibility, BuildHzb, ResolveStandard, ShadeFlat, CaptureCell]
+                [
+                    CullClusters,
+                    DrawVisibility,
+                    BuildHzb,
+                    ResolveStandard,
+                    ShadeFlat,
+                    CaptureCell,
+                    ShadowMarkPages,
+                    ShadowInvalidatePages,
+                    ShadowFreePages,
+                    ShadowAllocatePages,
+                    ShadowClearPages,
+                    ShadowFinishPages,
+                    ShadowCull,
+                    DrawShadow,
+                ]
         )
         {
             if (!pipeline.IsNone)
@@ -66,6 +97,15 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             },
             Entry("ShadeFlat", "ShadeFlat", ShaderStage.Compute),
             Entry("CaptureCell", "CaptureCell", ShaderStage.Compute),
+            Entry("ShadowPages", "ShadowMarkPages", ShaderStage.Compute),
+            Entry("ShadowPages", "ShadowInvalidatePages", ShaderStage.Compute),
+            Entry("ShadowPages", "ShadowFreePages", ShaderStage.Compute),
+            Entry("ShadowPages", "ShadowAllocatePages", ShaderStage.Compute),
+            Entry("ShadowPages", "ShadowClearPages", ShaderStage.Compute),
+            Entry("ShadowPages", "ShadowFinishPages", ShaderStage.Compute),
+            Entry("ShadowCull", "ShadowCull", ShaderStage.Compute),
+            Entry("DrawShadow", "DrawShadowVertex", ShaderStage.Vertex),
+            Entry("DrawShadow", "DrawShadowPixel", ShaderStage.Pixel),
         ];
         foreach (ShaderEntry entry in entries)
         {
@@ -141,11 +181,65 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             return Result.Failure(capture.Error);
 
         CaptureCell = capture.Value;
+        (string Name, int Index)[] shadowEntries =
+        [
+            ("Shadow mark pages", 7),
+            ("Shadow invalidate pages", 8),
+            ("Shadow free pages", 9),
+            ("Shadow allocate pages", 10),
+            ("Shadow clear pages", 11),
+            ("Shadow finish pages", 12),
+            ("Shadow cull", 13),
+        ];
+        GpuPipeline[] shadowPipelines = new GpuPipeline[shadowEntries.Length];
+        for (int i = 0; i < shadowEntries.Length; i++)
+        {
+            Result<GpuPipeline> made = Compute(compiled[shadowEntries[i].Index], shadowEntries[i].Name);
+            if (!made.Ok)
+                return Result.Failure(made.Error);
+
+            shadowPipelines[i] = made.Value;
+        }
+
+        (
+            ShadowMarkPages,
+            ShadowInvalidatePages,
+            ShadowFreePages,
+            ShadowAllocatePages,
+            ShadowClearPages,
+            ShadowFinishPages,
+            ShadowCull
+        ) = (
+            shadowPipelines[0],
+            shadowPipelines[1],
+            shadowPipelines[2],
+            shadowPipelines[3],
+            shadowPipelines[4],
+            shadowPipelines[5],
+            shadowPipelines[6]
+        );
+        Result<GpuPipeline> drawShadow = gpu.CreatePipeline(
+            new GraphicsPipelineDescription
+            {
+                VertexSpirv = compiled[14].Spirv,
+                VertexEntryPoint = compiled[14].EntryPoint,
+                PixelSpirv = compiled[15].Spirv,
+                PixelEntryPoint = compiled[15].EntryPoint,
+                Cull = CullMode.None,
+                Name = "Draw shadow pages",
+            }
+        );
+        if (!drawShadow.Ok)
+            return Result.Failure($"the shadow pipeline was not built: {drawShadow.Error}");
+
+        DrawShadow = drawShadow.Value;
         TileSize = compiled[5].GroupSizeX;
         bool areTiled =
             compiled[3].GroupSizeX == TileSize
             && compiled[4].GroupSizeX == TileSize
             && compiled[6].GroupSizeX == TileSize
+            && compiled[7].GroupSizeX == TileSize
+            && compiled[11].GroupSizeX == TileSize
             && TileSize > 0;
         if (!areTiled || CullThreads == 0)
             return Result.Failure("the compute entries reported no group size, or the full-screen ones differ.");

@@ -23,7 +23,8 @@ public static const uint LevelsPerTexture = 16u;
 [[vk::binding(6, 0)]] [[vk::image_format("unknown")]] RWTexture2D<float4> heapStorage2D[];
 [[vk::binding(7, 0)]] [[vk::image_format("unknown")]] RWTexture2DArray<float4> heapStorage2DArray[];
 [[vk::binding(8, 0)]] [[vk::image_format("unknown")]] RWTexture3D<float4> heapStorage3D[];
-[[vk::binding(9, 0)]] [[vk::image_format("unknown")]] RWTexture2D<uint> heapUintStorage2D[];
+// Declared R32 so the atomics on it are allowed: every uint storage texture is that format.
+[[vk::binding(9, 0)]] [[vk::image_format("r32ui")]] RWTexture2D<uint> heapUintStorage2D[];
 [[vk::binding(10, 0)]] SamplerState heapSamplers[];
 
 uint ClampBufferId(uint id) { return min(id, HeapBuffers - 1u); }
@@ -59,6 +60,12 @@ public struct BufferRef
     public void InterlockedMax(uint offset, uint value)
     {
         heapBuffers[NonUniformResourceIndex(ClampBufferId(id))].InterlockedMax(offset, value);
+    }
+
+    // Sets the bits of value in the word at offset.
+    public void InterlockedOr(uint offset, uint value)
+    {
+        heapBuffers[NonUniformResourceIndex(ClampBufferId(id))].InterlockedOr(offset, value);
     }
 
     // How many bytes the buffer holds.

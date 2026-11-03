@@ -65,10 +65,7 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
         TextureRef normal = { capture.normal };
         SamplerRef sampler = { frame.captureSampler };
         float3 modelNormal = DecodeOctahedral(normal.SampleLevel(sampler, atlasUv, 0.0).xy * 2.0 - 1.0);
-        surface = EvaluateImposter(
-            albedo.SampleLevel(sampler, atlasUv, 0.0),
-            ToWorldDirection(instance.world, modelNormal)
-        );
+        surface = EvaluateImposter(albedo.SampleLevel(sampler, atlasUv, 0.0), ToWorldNormal(instance.world, modelNormal));
     }
     else
     {
@@ -89,7 +86,7 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
 
         SurfaceInputs inputs;
         inputs.position = Interpolate(p0, p1, p2, bary.lambda);
-        inputs.normal = ToWorldDirection(instance.world, Interpolate(v0.normal, v1.normal, v2.normal, bary.lambda));
+        inputs.normal = ToWorldNormal(instance.world, Interpolate(v0.normal, v1.normal, v2.normal, bary.lambda));
         inputs.tangent = ToWorldDirection(
             instance.world,
             Interpolate(v0.tangent, v1.tangent, v2.tangent, bary.lambda)

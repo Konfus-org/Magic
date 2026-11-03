@@ -23,6 +23,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
     private readonly Dictionary<Entity, int> _slotOf = [];
     private readonly Stack<int> _free = new();
     private readonly List<int> _dirtySlots = [];
+    private readonly List<DirtyInstance> _changes = [];
     private uint _frame;
     private bool _isFullLogged;
 
@@ -32,6 +33,11 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
     /// One past the last slot in use: how many rows the cull walks.
     /// </summary>
     public int Count { get; private set; }
+
+    /// <summary>
+    /// The instances that changed since <see cref="ClearChanges"/>: the spheres they had and have.
+    /// </summary>
+    public ReadOnlySpan<DirtyInstance> Changes => CollectionsMarshal.AsSpan(_changes);
 
     public void Dispose()
     {
@@ -56,6 +62,8 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
 
         return Result.Success();
     }
+
+    public void ClearChanges() => _changes.Clear();
 
     /// <summary>
     /// Starts a frame's rows: every entity set before <see cref="End"/> keeps its slot, the others lose theirs.
@@ -88,6 +96,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
         if (_rows[slot] == row)
             return;
 
+        RecordChange(_rows[slot], row);
         _rows[slot] = row;
         MarkDirty(slot);
     }
@@ -105,6 +114,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
             _slotOf.Remove(_entityOf[slot]);
             _isUsed[slot] = false;
             _free.Push(slot);
+            RecordChange(_rows[slot], default);
             _rows[slot] = default;
             MarkDirty(slot);
         }
@@ -157,6 +167,17 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
 
         return true;
     }
+
+    private void RecordChange(in GpuInstance before, in GpuInstance after) =>
+        _changes.Add(
+            new DirtyInstance
+            {
+                OldCenter = before.BoundsCenter,
+                OldRadius = before.ClusterCount == 0 ? 0 : before.BoundsRadius,
+                NewCenter = after.BoundsCenter,
+                NewRadius = after.ClusterCount == 0 ? 0 : after.BoundsRadius,
+            }
+        );
 
     private void MarkDirty(int slot)
     {

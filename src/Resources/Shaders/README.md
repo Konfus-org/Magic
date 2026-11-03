@@ -12,6 +12,7 @@ compiler loads a module and its imports from the assets, so a game's `Shaders/` 
 - `Surface/` is what a material is handed for a pixel and what it gives back.
 - `Material/` is the material contract, `IMaterial`, and the materials every project has: the standard one, the one
   a broken asset is drawn with, and what an imposter's pixel is made of.
+- `Shadow/` is the sun's virtual shadow map: its tables, how a page is found, and how a receiver samples it.
 - A contract between shaders is an interface, `I` plus a noun, and a pass that works with any implementation is
   generic over it. A game adds a material, a sky, a light or a post effect by implementing the contract in a module of
   its own and naming it in the asset that uses it.

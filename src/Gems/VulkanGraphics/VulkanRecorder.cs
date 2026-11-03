@@ -261,6 +261,12 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
             };
         }
 
+        if (targets.Colors.Length == 0 && targets.Depth is null)
+        {
+            width = (uint)targets.Width;
+            height = (uint)targets.Height;
+        }
+
         if (width == 0 || height == 0)
         {
             Log.Error($"The pass {pass.Name} draws into nothing.");

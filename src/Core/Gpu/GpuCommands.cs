@@ -130,7 +130,9 @@ public readonly record struct GpuDepthTarget
 }
 
 /// <summary>
-/// What a draw pass draws into: up to 8 colour targets of one size, and a depth target or none.
+/// What a draw pass draws into: up to 8 colour targets of one size, and a depth target or none; or nothing, for a
+/// pass whose pixel shader writes through the heap, which then draws over <see cref="Width"/> by
+/// <see cref="Height"/> pixels.
 /// </summary>
 public readonly record struct GpuRenderTargets
 {
@@ -139,6 +141,10 @@ public readonly record struct GpuRenderTargets
     public ImmutableArray<GpuColorTarget> Colors { get; init; } = [];
 
     public GpuDepthTarget? Depth { get; init; }
+
+    public int Width { get; init; }
+
+    public int Height { get; init; }
 }
 
 /// <summary>
