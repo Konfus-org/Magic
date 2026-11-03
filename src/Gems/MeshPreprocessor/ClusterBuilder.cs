@@ -60,6 +60,7 @@ internal static unsafe class ClusterBuilder
 
         (Vector3 center, float radius) = GetSphere(vertices);
         AddImposter(clusters, center, radius);
+        DistanceField field = DistanceFieldBuilder.Build(model);
 
         return new MeshDerived
         {
@@ -68,6 +69,10 @@ internal static unsafe class ClusterBuilder
             Clusters = [.. clusters],
             BoundsCenter = center,
             BoundsRadius = radius,
+            Field = field.Voxels,
+            FieldOrigin = field.Origin,
+            FieldVoxel = field.Voxel,
+            FieldBand = field.Band,
         };
     }
 

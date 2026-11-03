@@ -28,7 +28,9 @@ public struct LightingConstants
     public uint hasSky;
     // What the tonemap scales the HDR picture by.
     public float exposure;
-    public float padding0;
+    // What the output shows instead of the picture: 0 the picture, 1 the field at every surface, 2 the field two
+    // voxels above every surface.
+    public uint debugView;
     public float padding1;
     public float padding2;
 }

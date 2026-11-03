@@ -42,6 +42,18 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
 
     public GpuPipeline Tonemap { get; private set; }
 
+    public GpuPipeline FieldWriteModel { get; private set; }
+
+    public GpuPipeline FieldScroll { get; private set; }
+
+    public GpuPipeline FieldInvalidate { get; private set; }
+
+    public GpuPipeline FieldCollect { get; private set; }
+
+    public GpuPipeline FieldList { get; private set; }
+
+    public GpuPipeline FieldUpdate { get; private set; }
+
     public GpuPipeline CaptureCell { get; private set; }
 
     public GpuPipeline ShadowMarkPages { get; private set; }
@@ -82,6 +94,12 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
                     FogIntegrate,
                     ShadeLighting,
                     Tonemap,
+                    FieldWriteModel,
+                    FieldScroll,
+                    FieldInvalidate,
+                    FieldCollect,
+                    FieldList,
+                    FieldUpdate,
                     ShadowMarkPages,
                     ShadowInvalidatePages,
                     ShadowFreePages,
@@ -145,6 +163,12 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             {
                 TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere")],
             },
+            Entry("Field", "FieldWriteModel", ShaderStage.Compute),
+            Entry("Field", "FieldScroll", ShaderStage.Compute),
+            Entry("Field", "FieldInvalidate", ShaderStage.Compute),
+            Entry("Field", "FieldCollect", ShaderStage.Compute),
+            Entry("Field", "FieldList", ShaderStage.Compute),
+            Entry("Field", "FieldUpdate", ShaderStage.Compute),
         ];
         foreach (ShaderEntry entry in entries)
         {
@@ -300,6 +324,33 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             lightingPipelines[4],
             lightingPipelines[5],
             lightingPipelines[6]
+        );
+        (string Name, int Index)[] fieldEntries =
+        [
+            ("Field write model", 23),
+            ("Field scroll", 24),
+            ("Field invalidate", 25),
+            ("Field collect", 26),
+            ("Field list", 27),
+            ("Field update", 28),
+        ];
+        GpuPipeline[] fieldPipelines = new GpuPipeline[fieldEntries.Length];
+        for (int i = 0; i < fieldEntries.Length; i++)
+        {
+            Result<GpuPipeline> made = Compute(compiled[fieldEntries[i].Index], fieldEntries[i].Name);
+            if (!made.Ok)
+                return Result.Failure(made.Error);
+
+            fieldPipelines[i] = made.Value;
+        }
+
+        (FieldWriteModel, FieldScroll, FieldInvalidate, FieldCollect, FieldList, FieldUpdate) = (
+            fieldPipelines[0],
+            fieldPipelines[1],
+            fieldPipelines[2],
+            fieldPipelines[3],
+            fieldPipelines[4],
+            fieldPipelines[5]
         );
         TileSize = compiled[5].GroupSizeX;
         bool areTiled =

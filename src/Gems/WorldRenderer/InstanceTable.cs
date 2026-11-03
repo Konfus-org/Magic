@@ -96,7 +96,9 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
         if (_rows[slot] == row)
             return;
 
-        RecordChange(_rows[slot], row);
+        if (IsMoved(_rows[slot], row))
+            RecordChange(_rows[slot], row);
+
         _rows[slot] = row;
         MarkDirty(slot);
     }
@@ -153,6 +155,20 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
         }
 
         _dirtySlots.Clear();
+    }
+
+    /// <summary>
+    /// Whether the rows place their geometry differently: what the shadows and the field must redo.
+    /// </summary>
+    private static bool IsMoved(in GpuInstance before, in GpuInstance after)
+    {
+        bool wasDrawn = before.ClusterCount > 0;
+        bool isDrawn = after.ClusterCount > 0;
+
+        return before.World != after.World
+            || before.BoundsCenter != after.BoundsCenter
+            || before.BoundsRadius != after.BoundsRadius
+            || wasDrawn != isDrawn;
     }
 
     private bool TryAllocate(out int slot)

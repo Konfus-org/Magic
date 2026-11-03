@@ -309,13 +309,13 @@ there fall back to the distance field.
 Every world trace that is not a screen trace walks a signed distance field. Nothing leaks through it because it is the
 real geometry, not a grid of radiance.
 
-- **Mesh distance fields** come from the preprocessor: a narrow-band SDF per model in bricks of 8³ voxels at a
-  resolution the model's size picks (16³ to 128³ cells across the bounds), sign by generalised winding number so open
-  meshes still have an inside. Stored in the cache with the clusters.
-- **The global distance field** is 4 clipmaps of 128³ voxels around the camera (0.2 m to 1.6 m per voxel by default),
-  each a `R8_SNORM` 3D texture of distance in voxel units. A compute pass updates the bricks instances touched since
-  last frame, taking the min over the mesh fields of the instances overlapping each brick through a coarse grid of
-  instance lists. A still world updates nothing; the camera moving scrolls the clipmaps and fills the new slab.
+- **Mesh distance fields** come from the preprocessor: a narrow-band SDF per model, 32³ voxels across the bounds
+  with a band of 4 voxels, the sign within the band from the nearest triangle's pseudo-normal and beyond it from ray
+  parity, so open meshes still have an inside. Stored in the cache with the clusters.
+- **The global distance field** is 4 clipmaps of 128³ voxels around the camera (0.25 m to 2 m per voxel), each a
+  `R8_SNORM` 3D texture of distance in band units, in bricks of 16³ voxels. A compute pass updates the bricks instances
+  touched since last frame, taking the min over the mesh fields of the instances listed for each brick. A still world
+  updates nothing; the camera moving scrolls the clipmaps and fills the new slab.
 - **Translucent instances** are left out of the field and voxelised instead into a transmittance volume, a
   `R8G8B8A8` clipmap the rays attenuate through, so light reaches a probe behind a window and arrives tinted.
 - **`IWorldTracer`** has two implementations: sphere tracing the global field with a cone for soft contact, and

@@ -138,6 +138,22 @@ internal sealed class Cli
     }
 
     /// <summary>
+    /// Publishes a setting, <c>Key=value</c>, for the gem its key names.
+    /// </summary>
+    private void Set(string setting)
+    {
+        int equals = setting.IndexOf('=', StringComparison.Ordinal);
+        if (equals <= 0)
+        {
+            Log.Error($"set takes Key=value, not '{setting}'.");
+
+            return;
+        }
+
+        _events.Publish(new SettingChanged(setting[..equals].Trim(), setting[(equals + 1)..].Trim()));
+    }
+
+    /// <summary>
     /// Holds the lines after this one until <paramref name="until"/> frames have passed, or, for <c>loaded</c>, until
     /// the world has content and is not loading.
     /// </summary>
@@ -204,6 +220,14 @@ internal sealed class Cli
                         string path = _files.Combine(AppContext.BaseDirectory, "Screenshots", $"{name}.png");
                         _events.Publish(new ScreenshotRequested(path));
                     }),
+                },
+                new Command("set", "Sets a gem's setting for the run, as Key=value, which the gem the key names reads")
+                {
+                    Arguments =
+                    {
+                        new Argument<string>("setting") { Description = "The key and the value, as Key=value" },
+                    },
+                    Action = new CliCommand(cmds => Set(cmds.GetRequiredValue<string>("setting"))),
                 },
                 new Command("wait", "Holds the lines after it for a number of frames, or until the world has loaded")
                 {

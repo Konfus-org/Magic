@@ -26,6 +26,9 @@
     <File Path="../docs/CODE_STANDARDS.md" />
     <File Path="../docs/CONTRIBUTING.md" />
   </Folder>
+  <Folder Name="/Tests/">
+    <Project Path="../tests/MeshPreprocessor.Tests/MeshPreprocessor.Tests.csproj" />
+  </Folder>
   <Folder Name="/Samples/">
     <File Path="../samples/README.md" />
   </Folder>

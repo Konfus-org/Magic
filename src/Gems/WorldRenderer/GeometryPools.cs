@@ -17,8 +17,13 @@ namespace WorldRenderer;
 /// then it is not drawn, and one that could not be made is drawn as the failure model. Pools are filled from the
 /// start and never compacted: a model stays resident for the run.
 /// </summary>
-internal sealed class GeometryPools(IGraphicsApi gpu, IMeshPreprocessor meshes, AssetDatabase assets, Threads threads)
-    : IDisposable
+internal sealed class GeometryPools(
+    IGraphicsApi gpu,
+    IMeshPreprocessor meshes,
+    AssetDatabase assets,
+    Threads threads,
+    DistanceField distanceField
+) : IDisposable
 {
     public const int VertexCapacity = 1 << 20;
     public const int IndexCapacity = 1 << 22;
@@ -38,8 +43,14 @@ internal sealed class GeometryPools(IGraphicsApi gpu, IMeshPreprocessor meshes, 
 
     public GpuBuffer Clusters { get; private set; }
 
+    /// <summary>
+    /// The global distance field, which every resident model's field joins.
+    /// </summary>
+    public DistanceField Field { get; } = distanceField;
+
     public void Dispose()
     {
+        Field.Dispose();
         if (!Vertices.IsNone)
             gpu.Destroy(Vertices);
 
@@ -211,7 +222,8 @@ internal sealed class GeometryPools(IGraphicsApi gpu, IMeshPreprocessor meshes, 
             (uint)_clusterCount,
             (uint)made.Clusters.Length,
             made.BoundsCenter,
-            made.BoundsRadius
+            made.BoundsRadius,
+            FieldSlot: made.Field.IsDefaultOrEmpty ? 0 : Field.Add(made)
         );
         _vertexCount += made.Vertices.Length;
         _indexCount += made.Indices.Length;
@@ -237,7 +249,8 @@ internal sealed class GeometryPools(IGraphicsApi gpu, IMeshPreprocessor meshes, 
 
 /// <summary>
 /// Where a model is in the pools, and the sphere around it in its own frame; <paramref name="IsFailure"/> when it
-/// stands in for a model that could not be made, to be drawn as a failure.
+/// stands in for a model that could not be made, to be drawn as a failure; <paramref name="FieldSlot"/> its field's
+/// slot in the atlas plus one, 0 for none.
 /// </summary>
 internal readonly record struct ResidentModel(
     uint VertexOffset,
@@ -246,5 +259,6 @@ internal readonly record struct ResidentModel(
     uint ClusterCount,
     Vector3 BoundsCenter,
     float BoundsRadius,
-    bool IsFailure = false
+    bool IsFailure = false,
+    uint FieldSlot = 0
 );

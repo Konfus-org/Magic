@@ -29,5 +29,10 @@ model reader, the mesh preprocessor and the texture reader.
   facing the sun lands near white. The sky entity's material names the sky, which draws the sky, colours the sun
   through the air and lights the ground from above; the fog entity fills the froxels with air the sun, through its
   pages, and the lights scatter towards the camera. The picture is lit in HDR and tonemapped to the output.
+- The world is also kept as a signed distance field: every model's field, made by the preprocessor, goes into an atlas
+  as it arrives, and four clipmaps of bricks around the camera are made again from the instances over them only where
+  the camera moved or an instance changed. The strongest lights of a pixel's froxel trace cones through the field for
+  their shadow. `set WorldRenderer.debug=field` in the console shows the field at every surface instead of the
+  picture; `set WorldRenderer.debug=none` shows the picture again.
 - The passes are the `Shaders/WorldRenderer/` modules in the gem's `Resources`; they build on the shader library
   (`src/Resources/Shaders/README.md`).

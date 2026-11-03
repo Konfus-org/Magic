@@ -1,6 +1,7 @@
-// The GBuffer lit into the HDR picture: the sun through its pages, the lights of the pixel's froxel, the sky's light
-// on the surface, and the air in front of it; the sky itself where nothing was drawn, from the sky the entry is
-// specialised to. The pass header's x is the frame's constants, y the shadow constants and z the lighting constants.
+// The GBuffer lit into the HDR picture: the sun through its pages, the lights of the pixel's froxel, the strongest
+// of them shadowed by cones through the distance field, the sky's light on the surface, and the air in front of it;
+// the sky itself where nothing was drawn, from the sky the entry is specialised to. The pass header's x is the
+// frame's constants, y the shadow constants, z the lighting constants and w the field constants.
 module "WorldRenderer/ShadeLighting";
 
 import Core.Heap;
@@ -10,11 +11,17 @@ import Core.Math;
 import Core.Pack;
 import Scene.Lights;
 import Scene.Lighting;
+import Scene.Field;
 import Surface.Brdf;
 import Light.Lights;
 import Shadow.Virtual;
 import Sky.ISky;
 import Fog.Froxels;
+import Trace.IWorldTracer;
+import Trace.DistanceField;
+
+// How many of a pixel's lights are shadowed through the field: the strongest, the rest unshadowed.
+static const uint TracedLights = 4u;
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
@@ -68,13 +75,64 @@ void ShadeLighting<S : ISky>(uint3 thread : SV_DispatchThreadID)
         float visible = SampleSunShadow(shadow, world, normal, viewDepth);
         color = Evaluate(brdf, normal, viewDirection, frame.sunDirection.xyz) * sunIlluminance * visible;
 
+        // Every light of the froxel, the strongest few kept aside to be shadowed through the field.
         uint froxel = GetFroxelIndex(GetFroxel(frame, thread.xy, viewDepth));
         uint count = GetFroxelLightCount(lighting.froxelLists, froxel);
+        float3 tracedLight[TracedLights];
+        float3 tracedDirection[TracedLights];
+        float tracedDistance[TracedLights];
+        float tracedCone[TracedLights];
+        float tracedStrength[TracedLights];
+        for (uint t = 0u; t < TracedLights; t++)
+        {
+            tracedLight[t] = float3(0.0);
+            tracedDirection[t] = float3(0.0, 1.0, 0.0);
+            tracedDistance[t] = 0.0;
+            tracedCone[t] = 0.0;
+            tracedStrength[t] = -1.0;
+        }
+
         for (uint i = 0u; i < count; i++)
         {
             GpuLight light = LoadLight(lighting.lights, GetFroxelLight(lighting.froxelLists, froxel, i));
             LightSample sample = SampleLight(light, world, normal);
-            color += Evaluate(brdf, normal, viewDirection, sample.direction) * sample.irradiance;
+            float3 lit = Evaluate(brdf, normal, viewDirection, sample.direction) * sample.irradiance;
+            float strength = dot(lit, float3(0.2126, 0.7152, 0.0722));
+            uint weakest = 0u;
+            for (uint t = 1u; t < TracedLights; t++)
+            {
+                if (tracedStrength[t] < tracedStrength[weakest])
+                    weakest = t;
+            }
+
+            if (strength > tracedStrength[weakest])
+            {
+                color += tracedStrength[weakest] > 0.0 ? tracedLight[weakest] : float3(0.0);
+                tracedLight[weakest] = lit;
+                tracedDirection[weakest] = sample.direction;
+                tracedDistance[weakest] = distance(light.position, world);
+                tracedCone[weakest] = max(light.radius, 0.05) / max(tracedDistance[weakest], 0.1);
+                tracedStrength[weakest] = strength;
+            }
+            else
+            {
+                color += lit;
+            }
+        }
+
+        uint fieldLevel;
+        FieldConstants fieldConstants = GetFieldConstants();
+        SampleField(fieldConstants, world, fieldLevel);
+        float start = fieldConstants.voxelSizes[fieldLevel] * 1.5;
+        for (uint t = 0u; t < TracedLights; t++)
+        {
+            if (tracedStrength[t] <= 0.0)
+                continue;
+
+            Ray ray = { world + normal * start, tracedDirection[t] };
+            TraceLimits limits = { start, max(tracedDistance[t] - start, start), tracedCone[t] };
+            TraceHit hit = DistanceFieldTracer.Trace(ray, limits);
+            color += tracedLight[t] * hit.visibility;
         }
 
         float3 ambient = hasSky ? S.GetAmbient(sky, normal) : lighting.sunIlluminance.rgb * 0.1 * (0.5 + 0.5 * normal.y);

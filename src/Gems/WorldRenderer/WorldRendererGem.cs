@@ -8,6 +8,7 @@ using Magic.Assets.Types;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
+using Magic.Events;
 using Magic.Files;
 using Magic.Gems;
 using Magic.Gpu;
@@ -59,7 +60,7 @@ public sealed class WorldRendererGem(
 
     private readonly RenderGraph _graph = new(gpu);
     private readonly RenderWorld _world = new();
-    private readonly GeometryPools _pools = new(gpu, meshes, assets, threads);
+    private readonly GeometryPools _pools = new(gpu, meshes, assets, threads, new DistanceField(gpu));
     private readonly TextureTable _textures = new(gpu, assets, threads);
     private readonly FrameTargets _targets = new(gpu);
     private readonly FrameTargets _cellTargets = new(gpu);
@@ -81,6 +82,7 @@ public sealed class WorldRendererGem(
     private GpuSampler _captureSampler;
     private bool _isReady;
     private bool _hasHzb;
+    private DebugView _debugView;
 
     public void Dispose()
     {
@@ -148,6 +150,7 @@ public sealed class WorldRendererGem(
                     _captures.Create,
                     _shadows.Create,
                     _lighting.Create,
+                    _pools.Field.Create,
                     CreateBuffers,
                     () => _cellTargets.Resize(GpuCapture.CellSize, GpuCapture.CellSize, _graph),
                 ]
@@ -284,6 +287,19 @@ public sealed class WorldRendererGem(
             _world.HasSky |= chunk.Entities.Length > 0;
         }
 
+        foreach (SettingChanged setting in state.Frame.Events.Get<SettingChanged>())
+        {
+            if (setting.Key != "WorldRenderer.debug")
+                continue;
+
+            if (Enum.TryParse(setting.Value, ignoreCase: true, out DebugView view))
+                _debugView = view;
+            else
+                Log.Error(
+                    $"{setting.Key} takes {string.Join(", ", Enum.GetNames<DebugView>())}, not '{setting.Value}'."
+                );
+        }
+
         return ValueTask.FromResult(state);
     }
 
@@ -342,9 +358,18 @@ public sealed class WorldRendererGem(
             2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360) / _targets.Height,
             _instances.Changes
         );
+        _lighting.Prepare(_graph, _world, camera, sun, _targets, _debugView);
+        _pools.Field.Prepare(
+            _graph,
+            _pipelines,
+            _constants,
+            camera.Transform.Position,
+            _instances.Changes,
+            instanceCount
+        );
         _instances.ClearChanges();
-        _lighting.Prepare(_graph, _world, camera, sun, _targets);
         _graph.EndPass();
+        _pools.Field.Record(_graph, _pipelines, _constants, _instances.Buffer);
         _lighting.RecordTables(_graph, _pipelines, _constants, _shadows);
 
         RenderView view = new(_constants, _instances.Buffer, instanceCount, _targets);
@@ -362,7 +387,7 @@ public sealed class WorldRendererGem(
         RecordHzb();
         _shadows.Record(_graph, _pipelines, _constants, _instances.Buffer, instanceCount, _pools, _targets);
         RecordResolve(view, "Resolve materials");
-        _lighting.RecordShading(_graph, _pipelines, _constants, _shadows, _targets);
+        _lighting.RecordShading(_graph, _pipelines, _constants, _shadows, _pools.Field, _targets);
 
         GpuTexture target = gpu.WindowTarget;
         if (!target.IsNone)
@@ -569,6 +594,7 @@ public sealed class WorldRendererGem(
             }
 
             Matrix4x4 world = instance.Transform.Matrix;
+            Matrix4x4.Invert(world, out Matrix4x4 inverseWorld);
             Vector3 scale = instance.Transform.Scale;
             float maxScale = Math.Max(Math.Abs(scale.X), Math.Max(Math.Abs(scale.Y), Math.Abs(scale.Z)));
             uint capture = isSettled ? _captures.Get(instance.Model.Id, resident, materialRows) : 0;
@@ -577,11 +603,13 @@ public sealed class WorldRendererGem(
                 new GpuInstance
                 {
                     World = world,
+                    InverseWorld = inverseWorld,
                     PreviousWorld = world,
                     BoundsCenter = Vector3.Transform(resident.BoundsCenter, world),
                     BoundsRadius = resident.BoundsRadius * maxScale,
                     ClusterOffset = resident.ClusterOffset,
                     ClusterCount = resident.ClusterCount,
+                    Flags = resident.FieldSlot,
                     Capture = capture,
                     Material0 = materialRows[0],
                     Material1 = materialRows[1],
@@ -718,6 +746,7 @@ public sealed class WorldRendererGem(
         GpuInstance instance = new()
         {
             World = Matrix4x4.Identity,
+            InverseWorld = Matrix4x4.Identity,
             PreviousWorld = Matrix4x4.Identity,
             BoundsCenter = resident.BoundsCenter,
             BoundsRadius = resident.BoundsRadius,

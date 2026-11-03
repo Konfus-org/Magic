@@ -24,10 +24,12 @@ public sealed class MeshPreprocessorGem(AssetDatabase assets, Caches caches)
         IMeshPreprocessor,
         ICache<MeshDerived>
 {
+    private const int HeaderBytes = 52;
+
     /// <summary>
     /// Raised when the bytes written change shape, or the hierarchy is built otherwise.
     /// </summary>
-    public int Version => 6;
+    public int Version => 7;
 
     public async Task<Result<MeshDerived>> GetAsync(
         Handle<Model> model,
@@ -68,7 +70,7 @@ public sealed class MeshPreprocessorGem(AssetDatabase assets, Caches caches)
 
     public void Write(MeshDerived value, IBufferWriter<byte> bytes)
     {
-        Span<byte> header = bytes.GetSpan(28);
+        Span<byte> header = bytes.GetSpan(HeaderBytes);
         BinaryPrimitives.WriteInt32LittleEndian(header, value.Vertices.Length);
         BinaryPrimitives.WriteInt32LittleEndian(header[4..], value.Indices.Length);
         BinaryPrimitives.WriteInt32LittleEndian(header[8..], value.Clusters.Length);
@@ -76,15 +78,22 @@ public sealed class MeshPreprocessorGem(AssetDatabase assets, Caches caches)
         BinaryPrimitives.WriteSingleLittleEndian(header[16..], value.BoundsCenter.Y);
         BinaryPrimitives.WriteSingleLittleEndian(header[20..], value.BoundsCenter.Z);
         BinaryPrimitives.WriteSingleLittleEndian(header[24..], value.BoundsRadius);
-        bytes.Advance(28);
+        BinaryPrimitives.WriteSingleLittleEndian(header[28..], value.FieldOrigin.X);
+        BinaryPrimitives.WriteSingleLittleEndian(header[32..], value.FieldOrigin.Y);
+        BinaryPrimitives.WriteSingleLittleEndian(header[36..], value.FieldOrigin.Z);
+        BinaryPrimitives.WriteSingleLittleEndian(header[40..], value.FieldVoxel);
+        BinaryPrimitives.WriteSingleLittleEndian(header[44..], value.FieldBand);
+        BinaryPrimitives.WriteInt32LittleEndian(header[48..], value.Field.Length);
+        bytes.Advance(HeaderBytes);
         bytes.Write(MemoryMarshal.AsBytes(value.Vertices.AsSpan()));
         bytes.Write(MemoryMarshal.AsBytes(value.Indices.AsSpan()));
         bytes.Write(MemoryMarshal.AsBytes(value.Clusters.AsSpan()));
+        bytes.Write(value.Field.AsSpan());
     }
 
     public Result<MeshDerived> Read(ReadOnlySpan<byte> bytes)
     {
-        if (bytes.Length < 28)
+        if (bytes.Length < HeaderBytes)
             return Result.Failure("the entry is cut short.");
 
         int vertexCount = BinaryPrimitives.ReadInt32LittleEndian(bytes);
@@ -96,12 +105,21 @@ public sealed class MeshPreprocessorGem(AssetDatabase assets, Caches caches)
             BinaryPrimitives.ReadSingleLittleEndian(bytes[20..])
         );
         float radius = BinaryPrimitives.ReadSingleLittleEndian(bytes[24..]);
-        bytes = bytes[28..];
+        Vector3 fieldOrigin = new(
+            BinaryPrimitives.ReadSingleLittleEndian(bytes[28..]),
+            BinaryPrimitives.ReadSingleLittleEndian(bytes[32..]),
+            BinaryPrimitives.ReadSingleLittleEndian(bytes[36..])
+        );
+        float fieldVoxel = BinaryPrimitives.ReadSingleLittleEndian(bytes[40..]);
+        float fieldBand = BinaryPrimitives.ReadSingleLittleEndian(bytes[44..]);
+        int fieldBytes = BinaryPrimitives.ReadInt32LittleEndian(bytes[48..]);
+        bytes = bytes[HeaderBytes..];
         long needed =
             ((long)vertexCount * GpuVertex.Bytes)
             + ((long)indexCount * sizeof(uint))
-            + ((long)clusterCount * GpuCluster.Bytes);
-        if (vertexCount < 0 || indexCount < 0 || clusterCount < 0 || bytes.Length < needed)
+            + ((long)clusterCount * GpuCluster.Bytes)
+            + fieldBytes;
+        if (vertexCount < 0 || indexCount < 0 || clusterCount < 0 || fieldBytes < 0 || bytes.Length < needed)
             return Result.Failure("the entry is cut short.");
 
         ImmutableArray<GpuVertex> vertices =
@@ -116,6 +134,9 @@ public sealed class MeshPreprocessorGem(AssetDatabase assets, Caches caches)
             .. MemoryMarshal.Cast<byte, GpuCluster>(bytes[..(clusterCount * GpuCluster.Bytes)]),
         ];
 
+        bytes = bytes[(clusterCount * GpuCluster.Bytes)..];
+        ImmutableArray<byte> field = [.. bytes[..fieldBytes]];
+
         return Result.Success(
             new MeshDerived
             {
@@ -124,6 +145,10 @@ public sealed class MeshPreprocessorGem(AssetDatabase assets, Caches caches)
                 Clusters = clusters,
                 BoundsCenter = center,
                 BoundsRadius = radius,
+                Field = field,
+                FieldOrigin = fieldOrigin,
+                FieldVoxel = fieldVoxel,
+                FieldBand = fieldBand,
             }
         );
     }

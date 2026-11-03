@@ -5,19 +5,24 @@ using Magic.Shaders;
 namespace Magic.Rendering;
 
 /// <summary>
-/// An instance as the GPU reads it from the instance table, 192 bytes: the twin of <c>Scene/Instances.slang</c>'s,
+/// An instance as the GPU reads it from the instance table, 256 bytes: the twin of <c>Scene/Instances.slang</c>'s,
 /// in the world; the GPU takes the camera's position off a position once transformed.
 /// </summary>
 [ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public record struct GpuInstance
 {
-    public const int Bytes = 192;
+    public const int Bytes = 256;
 
     /// <summary>
     /// The model's frame to the world, row-major, as <see cref="Matrix4x4"/> is.
     /// </summary>
     public Matrix4x4 World;
+
+    /// <summary>
+    /// The world to the model's frame.
+    /// </summary>
+    public Matrix4x4 InverseWorld;
 
     /// <summary>
     /// <see cref="World"/> as it was last frame, for motion.
@@ -38,6 +43,9 @@ public record struct GpuInstance
 
     public uint ClusterCount;
 
+    /// <summary>
+    /// The model's field's slot in the atlas plus one; 0 while it has none.
+    /// </summary>
     public uint Flags;
 
     /// <summary>

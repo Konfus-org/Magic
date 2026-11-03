@@ -12,6 +12,8 @@
   </PropertyGroup>
   <ItemGroup>
     <AssemblyMetadata Include="Magic.Author" Value="$(Authors)" />
+    <!-- The tests drive the builders directly. -->
+    <InternalsVisibleTo Include="MeshPreprocessor.Tests" />
   </ItemGroup>
   <ItemGroup>
     <NativeLibrary

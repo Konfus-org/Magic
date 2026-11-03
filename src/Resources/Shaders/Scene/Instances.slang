@@ -1,4 +1,4 @@
-// The instance table: everything drawn this frame, C#'s GpuInstance, 192 bytes each, in the world; a position goes
+// The instance table: everything drawn this frame, C#'s GpuInstance, 256 bytes each, in the world; a position goes
 // camera-relative once transformed (Core/Frame's Relative).
 module "Scene/Instances";
 
@@ -8,8 +8,10 @@ public static const uint MaterialSlots = 8u;
 
 public struct GpuInstance
 {
-    // The model's frame to the world, row-major, for row vectors.
+    // The model's frame to the world, row-major, for row vectors, the world to the model's frame, and the model's
+    // frame to the world last frame.
     public float4x4 world;
+    public float4x4 inverseWorld;
     public float4x4 previousWorld;
     // The sphere around the instance in the world.
     public float3 boundsCenter;
@@ -17,6 +19,7 @@ public struct GpuInstance
     // The instance's clusters in the cluster pool.
     public uint clusterOffset;
     public uint clusterCount;
+    // The model's field's slot in the atlas plus one; 0 while it has none.
     public uint flags;
     // The capture table's row the imposter draws with; 0 while there is none, and the imposter is not drawn.
     public uint capture;
@@ -39,6 +42,16 @@ public float GetMaxScale(float4x4 world)
     float3 y = float3(world[1][0], world[1][1], world[1][2]);
     float3 z = float3(world[2][0], world[2][1], world[2][2]);
     return sqrt(max(dot(x, x), max(dot(y, y), dot(z, z))));
+}
+
+// The least a world matrix scales a length by: the shortest of its axes, what a distance in the model is at least
+// in the world.
+public float GetMinScale(float4x4 world)
+{
+    float3 x = float3(world[0][0], world[0][1], world[0][2]);
+    float3 y = float3(world[1][0], world[1][1], world[1][2]);
+    float3 z = float3(world[2][0], world[2][1], world[2][2]);
+    return sqrt(min(dot(x, x), min(dot(y, y), dot(z, z))));
 }
 
 // A point of the model in the world.

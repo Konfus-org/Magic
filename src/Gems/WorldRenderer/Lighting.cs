@@ -125,7 +125,14 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
     /// <summary>
     /// The frame's lights and constants uploaded and the froxel lists emptied, in a transfer pass the caller opened.
     /// </summary>
-    public void Prepare(RenderGraph graph, RenderWorld world, RenderCamera camera, RenderSun sun, FrameTargets targets)
+    public void Prepare(
+        RenderGraph graph,
+        RenderWorld world,
+        RenderCamera camera,
+        RenderSun sun,
+        FrameTargets targets,
+        DebugView debugView
+    )
     {
         _lightCount = Math.Min(world.Lights.Count, MaxLights);
         world.Lights.CopyTo(0, _lights, 0, _lightCount);
@@ -167,6 +174,7 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
             Hdr = targets.Hdr.Id,
             HasSky = _hasSky ? 1u : 0u,
             Exposure = sun.Exposure,
+            DebugView = (uint)debugView,
         };
         GpuUpload upload = gpu.BeginUpload(LightingConstants.Bytes);
         MemoryMarshal.Write(upload.Bytes, in constants);
@@ -240,10 +248,11 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
         RendererPipelines pipelines,
         GpuBuffer frameConstants,
         SunShadows shadows,
+        DistanceField field,
         FrameTargets targets
     )
     {
-        GpuConstants header = new(frameConstants.Id, shadows.Constants.Id, Constants.Id);
+        GpuConstants header = new(frameConstants.Id, shadows.Constants.Id, Constants.Id, field.Constants.Id);
         if (_hasFog)
         {
             graph.BeginComputePass("Fog: inject");
@@ -291,6 +300,7 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
         graph.Use(targets.GBufferSurface, GpuAccess.ShaderRead);
         graph.Use(targets.Hdr, GpuAccess.ShaderWrite);
         shadows.UseForSampling(graph);
+        field.UseForSampling(graph);
         graph.Recorder.BindPipeline(pipelines.ShadeLighting);
         graph.Recorder.PushConstants(header);
         graph.Recorder.Dispatch(Groups(targets.Width, pipelines.TileSize), Groups(targets.Height, pipelines.TileSize));
@@ -300,7 +310,10 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
         graph.Use(frameConstants, GpuAccess.ShaderRead);
         graph.Use(Constants, GpuAccess.ShaderRead);
         graph.Use(targets.Hdr, GpuAccess.ShaderRead);
+        graph.Use(targets.Depth, GpuAccess.ShaderRead);
+        graph.Use(targets.Visibility, GpuAccess.ShaderRead);
         graph.Use(targets.Output, GpuAccess.ShaderWrite);
+        field.UseForSampling(graph);
         graph.Recorder.BindPipeline(pipelines.Tonemap);
         graph.Recorder.PushConstants(header);
         graph.Recorder.Dispatch(Groups(targets.Width, pipelines.TileSize), Groups(targets.Height, pipelines.TileSize));

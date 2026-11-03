@@ -46,11 +46,34 @@ internal record struct LightingConstants
 
     public float Exposure;
 
-    public float Padding0;
+    /// <summary>
+    /// What the output shows instead of the picture: a <see cref="DebugView"/>.
+    /// </summary>
+    public uint DebugView;
 
     public float Padding1;
 
     public float Padding2;
+}
+
+/// <summary>
+/// What the output can show instead of the picture, set with <c>set WorldRenderer.debug=&lt;view&gt;</c>.
+/// </summary>
+internal enum DebugView : uint
+{
+    None,
+
+    /// <summary>
+    /// The global distance field at every surface: green where it is zero there, as it should be, red where it reads
+    /// outside and blue inside, the more the farther.
+    /// </summary>
+    Field,
+
+    /// <summary>
+    /// The global distance field two voxels above every surface along its normal: green where it reads that
+    /// distance, red where it reads farther out and blue farther in, the more the farther.
+    /// </summary>
+    FieldAbove,
 }
 
 /// <summary>
