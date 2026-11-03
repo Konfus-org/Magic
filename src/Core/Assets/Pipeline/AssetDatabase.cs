@@ -222,7 +222,8 @@ public sealed class AssetDatabase : IDisposable
     /// <summary>
     /// The ids of what <paramref name="asset"/> depends on, as its file and theirs name them, down to
     /// <paramref name="levels"/> levels: 1 for what it names itself, <see cref="AllLevels"/> for everything under it.
-    /// Found without loading any of them; or why one could not be read.
+    /// Found by reading the file of a type Core reads, and by loading an asset of a type a gem reads; or why one could not
+    /// be read.
     /// </summary>
     public Task<Result<ImmutableArray<ulong>>> FindDependenciesAsync<TAsset>(
         Handle<TAsset> asset,
@@ -235,8 +236,8 @@ public sealed class AssetDatabase : IDisposable
     /// <summary>
     /// The ids of what depends on <paramref name="asset"/>, as the files under the asset directories name it, up to
     /// <paramref name="levels"/> levels: 1 for what names it itself, <see cref="AllLevels"/> for everything above it.
-    /// Found without loading any of them, reading every asset's file the first time it is asked; one that cannot be
-    /// read is taken to depend on nothing.
+    /// Found the first time it is asked by going through every asset: reading the file of a type Core reads, and loading
+    /// an asset of a type a gem reads. One that cannot be read is taken to depend on nothing.
     /// </summary>
     public Task<ImmutableArray<ulong>> FindDependentsAsync<TAsset>(
         Handle<TAsset> asset,
