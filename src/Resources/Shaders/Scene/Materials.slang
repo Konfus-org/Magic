@@ -4,16 +4,20 @@ module "Scene/Materials";
 
 import Core.Heap;
 
+// Which material contract a row is drawn with.
+public static const uint MaterialKindStandard = 0u;
+public static const uint MaterialKindFailure = 1u;
+
 public struct GpuMaterial
 {
     public float4 baseColor;
     public float3 emissive;
     public float roughness;
     public float metalness;
-    // The heap id of the base colour texture; 0 for none.
+    // The heap ids of the base colour texture and the sampler it is read with; 0 for none.
     public uint baseColorTexture;
-    public uint flags;
-    public uint padding;
+    public uint baseColorSampler;
+    public uint kind;
 }
 
 public GpuMaterial LoadMaterial(uint table, uint row)

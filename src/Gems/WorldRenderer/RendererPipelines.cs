@@ -27,6 +27,8 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
 
     public GpuPipeline ShadeFlat { get; private set; }
 
+    public GpuPipeline CaptureCell { get; private set; }
+
     public uint CullThreads { get; private set; }
 
     public uint TileSize { get; private set; }
@@ -35,7 +37,7 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
     {
         foreach (
             GpuPipeline pipeline in (ReadOnlySpan<GpuPipeline>)
-                [CullClusters, DrawVisibility, BuildHzb, ResolveStandard, ShadeFlat]
+                [CullClusters, DrawVisibility, BuildHzb, ResolveStandard, ShadeFlat, CaptureCell]
         )
         {
             if (!pipeline.IsNone)
@@ -63,6 +65,7 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
                 TypeArguments = [new ShaderTypeArgument(standard, "Standard")],
             },
             Entry("ShadeFlat", "ShadeFlat", ShaderStage.Compute),
+            Entry("CaptureCell", "CaptureCell", ShaderStage.Compute),
         ];
         foreach (ShaderEntry entry in entries)
         {
@@ -133,8 +136,17 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             return Result.Failure(shade.Error);
 
         ShadeFlat = shade.Value;
+        Result<GpuPipeline> capture = Compute(compiled[6], "Capture cell");
+        if (!capture.Ok)
+            return Result.Failure(capture.Error);
+
+        CaptureCell = capture.Value;
         TileSize = compiled[5].GroupSizeX;
-        bool areTiled = compiled[3].GroupSizeX == TileSize && compiled[4].GroupSizeX == TileSize && TileSize > 0;
+        bool areTiled =
+            compiled[3].GroupSizeX == TileSize
+            && compiled[4].GroupSizeX == TileSize
+            && compiled[6].GroupSizeX == TileSize
+            && TileSize > 0;
         if (!areTiled || CullThreads == 0)
             return Result.Failure("the compute entries reported no group size, or the full-screen ones differ.");
 

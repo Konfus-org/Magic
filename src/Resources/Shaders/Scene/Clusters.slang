@@ -8,6 +8,9 @@ import Core.Pack;
 
 public static const uint MaxClusterTriangles = 128u;
 
+// The material slot of the imposter cluster, the one above a model's roots: a quad with no vertices of its own.
+public static const uint ImposterSlot = 0xFFFFFFFFu;
+
 public struct GpuCluster
 {
     // The sphere around the cluster's triangles, in the model's frame.
@@ -39,6 +42,8 @@ public GpuCluster LoadCluster(uint pool, uint index)
     ArrayRef<GpuCluster> clusters = { pool };
     return clusters[index];
 }
+
+public bool IsImposter(GpuCluster cluster) { return cluster.materialSlot == ImposterSlot; }
 
 public float3 GetConeAxis(GpuCluster cluster) { return DecodeUnitVector(cluster.coneAxis); }
 

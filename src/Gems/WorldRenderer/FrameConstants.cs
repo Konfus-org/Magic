@@ -12,7 +12,12 @@ namespace WorldRenderer;
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct FrameConstants
 {
-    public const int Bytes = 528;
+    public const int Bytes = 544;
+
+    /// <summary>
+    /// The cone cull is off: the view is orthographic, as a capture's is, so no one point is the camera.
+    /// </summary>
+    public const uint FlagNoConeCull = 1;
 
     public Matrix4x4 View;
 
@@ -39,6 +44,8 @@ internal record struct FrameConstants
     public Vector4 SunRadiance;
 
     public Vector4 SkyRadiance;
+
+    public Vector4 CameraPosition;
 
     public uint Width;
 
@@ -98,9 +105,9 @@ internal record struct FrameConstants
 
     public uint Output;
 
-    public uint Padding1;
+    public uint Flags;
 
-    public uint Padding2;
+    public uint Captures;
 
-    public uint Padding3;
+    public uint CaptureSampler;
 }

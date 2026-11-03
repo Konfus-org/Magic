@@ -14,7 +14,8 @@ namespace WorldRenderer;
 /// <summary>
 /// The three pools every drawn model lives in, vertices, indices and clusters, and which models are in them. A model
 /// asked for is made by the preprocessor on a worker and copied into the pools in the next frame's upload pass; until
-/// then it is not drawn. Pools are filled from the start and never compacted: a model stays resident for the run.
+/// then it is not drawn, and one that could not be made is drawn as the failure model. Pools are filled from the
+/// start and never compacted: a model stays resident for the run.
 /// </summary>
 internal sealed class GeometryPools(IGraphicsApi gpu, IMeshPreprocessor meshes, AssetDatabase assets, Threads threads)
     : IDisposable
@@ -25,6 +26,7 @@ internal sealed class GeometryPools(IGraphicsApi gpu, IMeshPreprocessor meshes, 
 
     private readonly Dictionary<ulong, ResidentModel> _resident = [];
     private readonly HashSet<ulong> _asked = [];
+    private readonly HashSet<ulong> _failed = [];
     private readonly List<(MeshDerived Derived, ResidentModel Where)> _arrived = [];
     private int _vertexCount;
     private int _indexCount;
@@ -91,11 +93,20 @@ internal sealed class GeometryPools(IGraphicsApi gpu, IMeshPreprocessor meshes, 
     }
 
     /// <summary>
-    /// Where the model is in the pools, or null while it is being made or when it could not be; the first ask starts
-    /// making it.
+    /// Where the model is in the pools, or null while it is being made; the first ask starts making it. A model that
+    /// could not be made is the failure model, marked so.
     /// </summary>
     public ResidentModel? Get(Handle<Model> model)
     {
+        if (_failed.Contains(model.Id))
+        {
+            Handle<Model> failure = assets.GetFailure<Model, Model>();
+            if (failure == Handle<Model>.None || _failed.Contains(failure.Id))
+                return null;
+
+            return Get(failure) is { } stand ? stand with { IsFailure = true } : null;
+        }
+
         if (_resident.TryGetValue(model.Id, out ResidentModel resident))
             return resident;
 
@@ -175,7 +186,8 @@ internal sealed class GeometryPools(IGraphicsApi gpu, IMeshPreprocessor meshes, 
         string name = assets.GetPath(model) ?? $"model {model.Id}";
         if (!derived.Ok)
         {
-            Log.Error($"{name} is not drawn: {derived.Error}");
+            Log.Error($"{name} is drawn as the failure model: {derived.Error}");
+            _failed.Add(model.Id);
 
             return;
         }
@@ -187,7 +199,8 @@ internal sealed class GeometryPools(IGraphicsApi gpu, IMeshPreprocessor meshes, 
             && _clusterCount + made.Clusters.Length <= ClusterCapacity;
         if (!fits)
         {
-            Log.Error($"{name} is not drawn: the geometry pools are full.");
+            Log.Error($"{name} is drawn as the failure model: the geometry pools are full.");
+            _failed.Add(model.Id);
 
             return;
         }
@@ -223,7 +236,8 @@ internal sealed class GeometryPools(IGraphicsApi gpu, IMeshPreprocessor meshes, 
 }
 
 /// <summary>
-/// Where a model is in the pools, and the sphere around it in its own frame.
+/// Where a model is in the pools, and the sphere around it in its own frame; <paramref name="IsFailure"/> when it
+/// stands in for a model that could not be made, to be drawn as a failure.
 /// </summary>
 internal readonly record struct ResidentModel(
     uint VertexOffset,
@@ -231,5 +245,6 @@ internal readonly record struct ResidentModel(
     uint ClusterOffset,
     uint ClusterCount,
     Vector3 BoundsCenter,
-    float BoundsRadius
+    float BoundsRadius,
+    bool IsFailure = false
 );

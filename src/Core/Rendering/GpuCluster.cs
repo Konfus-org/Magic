@@ -23,6 +23,12 @@ public record struct GpuCluster
     public const int MaxTriangles = 128;
 
     /// <summary>
+    /// The material slot of the imposter cluster, the one above a model's roots: a quad facing the camera around
+    /// the instance's sphere, drawn with the instance's capture, with no vertices of its own.
+    /// </summary>
+    public const uint ImposterSlot = uint.MaxValue;
+
+    /// <summary>
     /// The sphere around the cluster's triangles, in the model's frame.
     /// </summary>
     public Vector3 Center;

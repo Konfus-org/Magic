@@ -23,12 +23,15 @@ void CullClusters(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
     PassHeader header = GetPassHeader();
     if (header.y == ModeInstances)
     {
-        uint instanceIndex = group.x;
+        uint instanceIndex = (group.y * CullGroupsPerRow) + group.x;
         if (instanceIndex >= frame.instanceCount)
             return;
 
         GpuInstance instance = LoadInstance(frame.instances, instanceIndex);
-        if (instance.clusterCount == 0u || !IsSphereInFrustum(frame, instance.boundsCenter, instance.boundsRadius))
+        bool isInView =
+            instance.clusterCount != 0u
+            && IsSphereInFrustum(frame, Relative(frame, instance.boundsCenter), instance.boundsRadius);
+        if (!isInView)
             return;
 
         for (uint i = local.x; i < instance.clusterCount; i += 64u)
@@ -54,24 +57,28 @@ void CullClusters(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
 void Test(FrameConstants frame, uint instanceIndex, GpuInstance instance, uint clusterIndex, bool isRetest)
 {
     GpuCluster cluster = LoadCluster(frame.clusters, clusterIndex);
+    bool isImposter = IsImposter(cluster);
+    if (isImposter && instance.capture == 0u)
+        return;
+
     float scale = GetMaxScale(instance.world);
-    float3 center = ToWorld(instance.world, cluster.center);
+    float3 center = Relative(frame, ToWorld(instance.world, cluster.center));
     float radius = cluster.radius * scale;
     if (!IsSphereInFrustum(frame, center, radius))
         return;
 
     // The cut: drawn where its parent group would show its error and this cluster's group would not, each error
     // projected over its group's sphere, so a cluster and its children decide the same way about the same group.
-    float3 parentCenter = ToWorld(instance.world, cluster.parentCenter);
+    float3 parentCenter = Relative(frame, ToWorld(instance.world, cluster.parentCenter));
     float parentError = ProjectError(frame, parentCenter, cluster.parentRadius * scale, cluster.parentError * scale);
-    float3 detailCenter = ToWorld(instance.world, cluster.detailCenter);
+    float3 detailCenter = Relative(frame, ToWorld(instance.world, cluster.detailCenter));
     float error = ProjectError(frame, detailCenter, cluster.detailRadius * scale, cluster.error * scale);
     if (!(parentError > frame.errorThreshold && error <= frame.errorThreshold))
         return;
 
     // The cone: culled when the camera is behind every triangle's plane, the sphere widening the cone to be sure.
     float cutoff = GetConeCutoff(cluster);
-    if (cutoff < 1.0)
+    if (cutoff < 1.0 && !isImposter && (frame.flags & FrameFlagNoConeCull) == 0u)
     {
         float3 axis = ToWorldDirection(instance.world, GetConeAxis(cluster));
         float distance = length(center);

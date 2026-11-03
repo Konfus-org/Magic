@@ -1,11 +1,15 @@
 using System.CommandLine;
 using System.Globalization;
 using System.Linq;
+using Magic.Assets;
+using Magic.Assets.Pipeline;
+using Magic.Assets.Types;
 using Magic.Debugging;
 using Magic.Events;
 using Magic.Files;
 using Magic.Images;
 using Magic.Projects;
+using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
 
@@ -29,6 +33,7 @@ internal sealed class Cli
     private readonly RootCommand _commands;
     private int _waitFrames;
     private bool _isWaitingForWorld;
+    private bool _isOpeningDomain;
 
     public Cli(App app, IFileSystem files, EventCoordinator events)
     {
@@ -39,9 +44,14 @@ internal sealed class Cli
     }
 
     /// <summary>
-    /// The run's world, which <c>wait loaded</c> watches; none before a run.
+    /// The run's world, which <c>wait loaded</c> watches and <c>open</c> opens a domain in; none before a run.
     /// </summary>
     internal World? World { get; set; }
+
+    /// <summary>
+    /// The run's assets, which <c>open</c> finds a domain in; none before a run.
+    /// </summary>
+    internal AssetDatabase? Assets { get; set; }
 
     /// <summary>
     /// Executes the commands Magic was launched with, then the typed lines that ended earlier runs, or says why the
@@ -100,7 +110,7 @@ internal sealed class Cli
 
         if (_isWaitingForWorld)
         {
-            if (World is not { } world || world.IsLoading || world.Contents.IsEmpty)
+            if (_isOpeningDomain || World is not { } world || world.IsLoading || world.Contents.IsEmpty)
                 return;
 
             _isWaitingForWorld = false;
@@ -156,7 +166,10 @@ internal sealed class Cli
         {
             Subcommands =
             {
-                new Command("open", "Opens the project at the given path and runs it, ending the run of any other")
+                new Command(
+                    "open",
+                    "Opens the project at the given path and runs it, ending the run of any other; or, for a .domain, opens that domain in place of the world"
+                )
                 {
                     Arguments = { new Argument<string>("project") { Description = "The .magic file to run" } },
                     Action = new CliCommand(cmds => Open(cmds.GetRequiredValue<string>("project"))),
@@ -253,6 +266,13 @@ internal sealed class Cli
     /// </summary>
     private void Open(string path)
     {
+        if (path.EndsWith(".domain", StringComparison.OrdinalIgnoreCase))
+        {
+            OpenDomainAsync(path).FireAndForget();
+
+            return;
+        }
+
         Result<Project> project = Project.Load(path, _files);
         if (!project.Ok)
         {
@@ -261,5 +281,40 @@ internal sealed class Cli
         }
 
         _app.Project = project.Value;
+    }
+
+    /// <summary>
+    /// Opens the domain at <paramref name="path"/> in place of the world, holding <c>wait loaded</c> meanwhile.
+    /// </summary>
+    private async Task OpenDomainAsync(string path)
+    {
+        if (World is not { } world || Assets is not { } assets)
+        {
+            Log.Error($"No project is running to open {path} in.");
+
+            return;
+        }
+
+        Handle<Domain> domain = assets.Find<Domain>(path);
+        if (domain == Handle<Domain>.None)
+        {
+            Log.Error($"There is no domain at {path}.");
+
+            return;
+        }
+
+        _isOpeningDomain = true;
+        try
+        {
+            Result<WorldContent> opened = await world
+                .OpenAsync(domain, DomainOpenMode.Replace, null, CancellationToken.None)
+                .ConfigureAwait(false);
+            if (!opened.Ok)
+                Log.Error($"{path} did not open: {opened.Error}");
+        }
+        finally
+        {
+            _isOpeningDomain = false;
+        }
     }
 }

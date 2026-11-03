@@ -104,6 +104,7 @@ public interface IGraphicsApi
   screenshot command reads back.
 
 The Vulkan 1.3 features the gem requires and checks at device pick: `dynamicRendering`, `synchronization2`,
+`shaderDemoteToHelperInvocation` (a pixel shader's `discard`),
 `descriptorIndexing` with update-after-bind and partially bound, `bufferDeviceAddress`, `drawIndirectCount`,
 `shaderDrawParameters`, `samplerFilterMinmax` where present, 32-bit image atomics on `R32_UINT`, `timelineSemaphore`,
 `multiDrawIndirect`, `fillModeNonSolid` (debug views). Optional and probed: `VK_EXT_mesh_shader`,

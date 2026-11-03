@@ -344,8 +344,13 @@ internal sealed unsafe class VulkanDevice : IDisposable
             return Result.Failure($"{name} lacks a Vulkan 1.2 feature the renderer needs: the bindless heap.");
         }
 
-        if (!features13.dynamicRendering || !features13.synchronization2 || !features13.maintenance4)
-            return Result.Failure($"{name} lacks dynamic rendering or synchronization2.");
+        bool has13 =
+            features13.dynamicRendering
+            && features13.synchronization2
+            && features13.maintenance4
+            && features13.shaderDemoteToHelperInvocation;
+        if (!has13)
+            return Result.Failure($"{name} lacks dynamic rendering, synchronization2 or demote to helper invocation.");
 
         uint queueFamily = FindQueueFamily(device);
         if (queueFamily == uint.MaxValue)
@@ -489,6 +494,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
             dynamicRendering = true,
             synchronization2 = true,
             maintenance4 = true,
+            shaderDemoteToHelperInvocation = true,
         };
         VkPhysicalDeviceVulkan12Features features12 = new()
         {

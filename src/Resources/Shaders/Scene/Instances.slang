@@ -1,5 +1,5 @@
-// The instance table: everything drawn this frame, C#'s GpuInstance, 192 bytes each, its transforms relative to the
-// camera, so a position near the camera has its precision wherever the camera is.
+// The instance table: everything drawn this frame, C#'s GpuInstance, 192 bytes each, in the world; a position goes
+// camera-relative once transformed (Core/Frame's Relative).
 module "Scene/Instances";
 
 import Core.Heap;
@@ -8,17 +8,18 @@ public static const uint MaterialSlots = 8u;
 
 public struct GpuInstance
 {
-    // The model's frame to the camera-relative world, row-major, for row vectors.
+    // The model's frame to the world, row-major, for row vectors.
     public float4x4 world;
     public float4x4 previousWorld;
-    // The sphere around the instance in the camera-relative world.
+    // The sphere around the instance in the world.
     public float3 boundsCenter;
     public float boundsRadius;
     // The instance's clusters in the cluster pool.
     public uint clusterOffset;
     public uint clusterCount;
     public uint flags;
-    public uint padding;
+    // The capture table's row the imposter draws with; 0 while there is none, and the imposter is not drawn.
+    public uint capture;
     // The material table's row for each slot.
     public uint materials[MaterialSlots];
 }
@@ -40,7 +41,7 @@ public float GetMaxScale(float4x4 world)
     return sqrt(max(dot(x, x), max(dot(y, y), dot(z, z))));
 }
 
-// A point of the model in the camera-relative world.
+// A point of the model in the world.
 public float3 ToWorld(float4x4 world, float3 point) { return mul(float4(point, 1.0), world).xyz; }
 
 // A direction of the model in the camera-relative world, unit.

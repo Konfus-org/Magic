@@ -87,5 +87,17 @@
       Private="false"
       SkipGetTargetFrameworkProperties="true"
     />
+    <ProjectReference
+      Include="$(MagicRoot)src/Gems/Textures/Textures.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      SkipGetTargetFrameworkProperties="true"
+    />
+    <ProjectReference
+      Include="$(MagicRoot)src/Gems/Forest/Forest.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      SkipGetTargetFrameworkProperties="true"
+    />
   </ItemGroup>
 </Project>

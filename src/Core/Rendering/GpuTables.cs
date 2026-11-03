@@ -5,8 +5,8 @@ using Magic.Shaders;
 namespace Magic.Rendering;
 
 /// <summary>
-/// An instance as the GPU reads it from the instance table, 192 bytes: the twin of <c>Scene/Instances.slang</c>'s.
-/// Positions are relative to the camera, the camera's own translation taken off on the CPU in double precision.
+/// An instance as the GPU reads it from the instance table, 192 bytes: the twin of <c>Scene/Instances.slang</c>'s,
+/// in the world; the GPU takes the camera's position off a position once transformed.
 /// </summary>
 [ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
@@ -15,7 +15,7 @@ public record struct GpuInstance
     public const int Bytes = 192;
 
     /// <summary>
-    /// The model's frame to the camera-relative world, row-major, as <see cref="Matrix4x4"/> is.
+    /// The model's frame to the world, row-major, as <see cref="Matrix4x4"/> is.
     /// </summary>
     public Matrix4x4 World;
 
@@ -25,7 +25,7 @@ public record struct GpuInstance
     public Matrix4x4 PreviousWorld;
 
     /// <summary>
-    /// The sphere around the instance in the camera-relative world.
+    /// The sphere around the instance in the world.
     /// </summary>
     public Vector3 BoundsCenter;
 
@@ -40,7 +40,10 @@ public record struct GpuInstance
 
     public uint Flags;
 
-    public uint Padding;
+    /// <summary>
+    /// The capture table's row the imposter draws with; 0 while there is none.
+    /// </summary>
+    public uint Capture;
 
     /// <summary>
     /// The material table's row for each of the instance's 8 slots.
@@ -80,11 +83,54 @@ public record struct GpuMaterial
     public float Metalness;
 
     /// <summary>
-    /// The heap id of the base colour texture; 0 for none.
+    /// The heap ids of the base colour texture and the sampler it is read with; 0 for none.
     /// </summary>
     public uint BaseColorTexture;
 
-    public uint Flags;
+    public uint BaseColorSampler;
+
+    /// <summary>
+    /// Which material contract the row is drawn with: a <see cref="MaterialKind"/>.
+    /// </summary>
+    public uint Kind;
+}
+
+/// <summary>
+/// Which material contract a <see cref="GpuMaterial"/> row is drawn with.
+/// </summary>
+public enum MaterialKind : uint
+{
+    Standard,
+
+    /// <summary>
+    /// The magenta a broken material, shader or texture is drawn as.
+    /// </summary>
+    Failure,
+}
+
+/// <summary>
+/// A capture as the GPU reads it from the capture table, 16 bytes: the twin of <c>Scene/Captures.slang</c>'s. The heap
+/// ids of the atlases a model and its materials were captured into from <see cref="Cells"/> by <see cref="Cells"/>
+/// directions, each cell <see cref="CellSize"/> texels square: albedo with coverage in its alpha, the normal in the
+/// model's frame, and the reversed depth.
+/// </summary>
+[ShaderStruct]
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public record struct GpuCapture
+{
+    public const int Bytes = 16;
+
+    public const int Cells = 8;
+
+    public const int CellSize = 64;
+
+    public const int AtlasSize = Cells * CellSize;
+
+    public uint Albedo;
+
+    public uint Normal;
+
+    public uint Depth;
 
     public uint Padding;
 }

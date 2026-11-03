@@ -12,15 +12,22 @@ using Magic.Utils;
 namespace WorldRenderer;
 
 /// <summary>
-/// The material table: a row per material drawn, made from the asset's params as it arrives, row 0 the default a
-/// material is drawn with until then. The whole table is uploaded again in the frame after a row changes.
+/// The material table: a row per material drawn, made from the asset's params as it arrives and made again as the
+/// textures it names arrive; row 0 the default a material is drawn with until then. A material that does not load,
+/// names the failure shader or a texture that does not load is drawn as the failure kind. The whole table is
+/// uploaded again in the frame after a row changes.
 /// </summary>
-internal sealed class MaterialTable(IGraphicsApi gpu, AssetDatabase assets, Threads threads) : IDisposable
+internal sealed class MaterialTable(IGraphicsApi gpu, AssetDatabase assets, TextureTable textures, Threads threads)
+    : IDisposable
 {
     public const int Capacity = 4096;
 
+    private const string FailureShader = "Shaders/Material/Failure.slang";
+
     private readonly GpuMaterial[] _rows = new GpuMaterial[Capacity];
+    private readonly Material?[] _assets = new Material?[Capacity];
     private readonly Dictionary<ulong, uint> _rowOf = [];
+    private readonly HashSet<uint> _waiting = [];
     private int _count = 1;
     private bool _isDirty = true;
 
@@ -79,6 +86,26 @@ internal sealed class MaterialTable(IGraphicsApi gpu, AssetDatabase assets, Thre
     }
 
     /// <summary>
+    /// Whether the row waits on nothing more: its asset and its textures have arrived or failed.
+    /// </summary>
+    public bool IsSettled(uint row) => row == 0 || (_assets[row] is not null && !_waiting.Contains(row));
+
+    /// <summary>
+    /// Makes again the rows whose textures were loading, once a frame.
+    /// </summary>
+    public void Refresh()
+    {
+        if (_waiting.Count == 0)
+            return;
+
+        uint[] waiting = [.. _waiting];
+        foreach (uint row in waiting)
+        {
+            Rebuild(row);
+        }
+    }
+
+    /// <summary>
     /// Copies the rows into the table, in the frame's upload pass, when any changed.
     /// </summary>
     public void Upload(RenderGraph graph)
@@ -96,27 +123,68 @@ internal sealed class MaterialTable(IGraphicsApi gpu, AssetDatabase assets, Thre
 
     private static GpuMaterial GetDefault() => new() { BaseColor = new Vector4(0.8f, 0.8f, 0.8f, 1), Roughness = 0.6f };
 
+    private static GpuMaterial GetFailure() =>
+        new()
+        {
+            BaseColor = new Vector4(1, 0, 1, 1),
+            Roughness = 1,
+            Kind = (uint)MaterialKind.Failure,
+        };
+
     /// <summary>
-    /// The row a material's params make: "color", "roughness", "metalness" and "emissive", each the default when
-    /// left out.
+    /// The row a material's params make: "color", "roughness", "metalness", "emissive" and the "colorMap" texture,
+    /// each the default when left out; the failure row when a texture failed, and the default while one loads.
     /// </summary>
-    private static GpuMaterial ToRow(Material material)
+    private void Rebuild(uint row)
     {
-        MaterialParamDictionary parameters = material.Visuals.Params;
-        GpuMaterial row = GetDefault();
+        if (_assets[row] is not { } material)
+            return;
+
+        MaterialVisuals visuals = material.Visuals;
+        GpuMaterial made = visuals.Shader == assets.Find<Shader>(FailureShader) ? GetFailure() : GetDefault();
+        MaterialParamDictionary parameters = visuals.Params;
         if (parameters.TryGetValue("color", out MaterialParam? color))
-            row.BaseColor = new Vector4(color.R, color.G, color.B, color.A);
+            made.BaseColor = new Vector4(color.R, color.G, color.B, color.A);
 
         if (parameters.TryGetValue("roughness", out MaterialParam? roughness))
-            row.Roughness = roughness.X;
+            made.Roughness = roughness.X;
 
         if (parameters.TryGetValue("metalness", out MaterialParam? metalness))
-            row.Metalness = metalness.X;
+            made.Metalness = metalness.X;
 
         if (parameters.TryGetValue("emissive", out MaterialParam? emissive))
-            row.Emissive = new Vector3(emissive.R, emissive.G, emissive.B);
+            made.Emissive = new Vector3(emissive.R, emissive.G, emissive.B);
 
-        return row;
+        bool isWaiting = false;
+        if (parameters.TryGetValue("colorMap", out MaterialParam? colorMap) && colorMap.Texture != Handle<Texture>.None)
+        {
+            switch (textures.Get(colorMap.Texture, out uint texture, out uint sampler))
+            {
+                case TextureState.Ready:
+                    made.BaseColorTexture = texture;
+                    made.BaseColorSampler = sampler;
+                    break;
+                case TextureState.Failed:
+                    made = GetFailure();
+                    break;
+                case TextureState.Loading:
+                    isWaiting = true;
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(row), "not a texture state");
+            }
+        }
+
+        if (isWaiting)
+            _waiting.Add(row);
+        else
+            _waiting.Remove(row);
+
+        if (_rows[row] == made)
+            return;
+
+        _rows[row] = made;
+        _isDirty = true;
     }
 
     private async Task LoadAsync(Handle<Material> material, uint row)
@@ -125,12 +193,17 @@ internal sealed class MaterialTable(IGraphicsApi gpu, AssetDatabase assets, Thre
         await threads.Enter(EngineThread.Main);
         if (!loaded.Ok)
         {
-            Log.Error($"{assets.GetPath(material)} is drawn as the default material: {loaded.Error}");
+            Log.Error($"{assets.GetPath(material)} is drawn as a failure: {loaded.Error}");
+            _assets[row] = new Material
+            {
+                Visuals = new MaterialVisuals { Shader = assets.Find<Shader>(FailureShader) },
+            };
+            Rebuild(row);
 
             return;
         }
 
-        _rows[row] = ToRow(loaded.Value);
-        _isDirty = true;
+        _assets[row] = loaded.Value;
+        Rebuild(row);
     }
 }

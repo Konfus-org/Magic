@@ -34,6 +34,9 @@ public static const uint CountVisibleList = 12u;
 public static const uint RetestGroups = 0u;
 public static const uint RetestThreads = 64u;
 
+// The instance cull's groups go along x up to this many and then down y, as a GPU takes no more along one axis.
+public static const uint CullGroupsPerRow = 65535u;
+
 // A visibility id: the visible list's row and the triangle in it; 0 is no surface.
 public uint EncodeVisibilityId(uint visibleIndex, uint triangle) { return ((visibleIndex + 1u) << 7u) | (triangle & 127u); }
 

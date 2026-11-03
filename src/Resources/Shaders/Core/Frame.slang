@@ -23,6 +23,10 @@ public struct FrameConstants
     public float4 sunRadiance;
     public float4 skyRadiance;
 
+    // Where the camera is in the world: what every world position has taken off it before it is used, so positions
+    // keep their precision near the camera wherever it is.
+    public float4 cameraPosition;
+
     public uint width;
     public uint height;
     public uint hzbLevels;
@@ -61,9 +65,16 @@ public struct FrameConstants
     public uint gbufferBase;
     public uint gbufferSurface;
     public uint output;
-    public uint padding1;
-    public uint padding2;
-    public uint padding3;
+    // FrameFlags bits.
+    public uint flags;
+    public uint captures;
+    public uint captureSampler;
 }
 
+// The cone cull is off: the view is orthographic, as a capture's is, so no one point is the camera.
+public static const uint FrameFlagNoConeCull = 1u;
+
 public FrameConstants GetFrame() { return LoadConstants<FrameConstants>(); }
+
+// A world position relative to the camera.
+public float3 Relative(FrameConstants frame, float3 worldPosition) { return worldPosition - frame.cameraPosition.xyz; }

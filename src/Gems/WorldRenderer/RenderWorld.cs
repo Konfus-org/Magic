@@ -1,6 +1,7 @@
 using System.Numerics;
 using Magic.Assets;
 using Magic.Assets.Types;
+using Magic.Ecs;
 using Magic.Ecs.Components;
 
 namespace WorldRenderer;
@@ -26,7 +27,12 @@ internal sealed class RenderWorld
     }
 }
 
-internal readonly record struct RenderInstance(Handle<Model> Model, MaterialSlots Materials, Transform Transform);
+internal readonly record struct RenderInstance(
+    Entity Entity,
+    Handle<Model> Model,
+    MaterialSlots Materials,
+    Transform Transform
+);
 
 /// <param name="Transform">Where the camera is and which way it looks.</param>
 /// <param name="FieldOfView">Vertical, in degrees.</param>

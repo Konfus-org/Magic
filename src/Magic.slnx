@@ -8,11 +8,13 @@
     <Project Path="Gems/AssimpModels/AssimpModels.csproj" />
     <Project Path="Gems/MeshPreprocessor/MeshPreprocessor.csproj" />
     <Project Path="Gems/DomainLoader/DomainLoader.csproj" />
+    <Project Path="Gems/Forest/Forest.csproj" />
     <Project Path="Gems/GpuChecks/GpuChecks.csproj" />
     <Project Path="Gems/Hello/Hello.csproj" />
     <Project Path="Gems/PrefabLoader/PrefabLoader.csproj" />
     <Project Path="Gems/SdlPlatform/SdlPlatform.csproj" />
     <Project Path="Gems/SlangShaders/SlangShaders.csproj" />
+    <Project Path="Gems/Textures/Textures.csproj" />
     <Project Path="Gems/VulkanGraphics/VulkanGraphics.csproj" />
     <Project Path="Gems/WorldLoader/WorldLoader.csproj" />
     <Project Path="Gems/WorldRenderer/WorldRenderer.csproj" />

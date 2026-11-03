@@ -1,0 +1,25 @@
+{
+    "entities": [
+        {
+            "name": "Camera",
+            "components": {
+                "Transform": { "position": { "x": 0, "y": 7, "z": -990 }, "rotation": { "x": 0.0523, "y": 0, "z": 0, "w": 0.9986 } },
+                "Camera": {}
+            }
+        },
+        {
+            "name": "Sun",
+            "components": {
+                "Transform": { "rotation": { "x": 0.41554, "y": 0.2661, "z": -0.12854, "w": 0.86023 } },
+                "DirectionalLight": { "mode": "sun", "color": { "r": 1, "g": 0.96, "b": 0.9 }, "intensity": 3 }
+            }
+        },
+        {
+            "name": "Ground",
+            "components": {
+                "Transform": { "scale": { "x": 2200, "y": 1, "z": 2200 } },
+                "Renderer": { "model": { "id": 519 }, "materials": [ { "id": 100203 } ] }
+            }
+        }
+    ]
+}

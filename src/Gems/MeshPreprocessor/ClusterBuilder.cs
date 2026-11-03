@@ -37,6 +37,11 @@ internal static unsafe class ClusterBuilder
     /// </summary>
     private const float CreaseAngle = MathF.PI / 4;
 
+    /// <summary>
+    /// The imposter's error as a fraction of the model's radius: about the parallax between two of its captures.
+    /// </summary>
+    private const float ImposterErrorFraction = 0.03f;
+
     public static MeshDerived Build(Model model)
     {
         ImmutableArray<GpuVertex>.Builder vertices = ImmutableArray.CreateBuilder<GpuVertex>();
@@ -54,6 +59,7 @@ internal static unsafe class ClusterBuilder
         }
 
         (Vector3 center, float radius) = GetSphere(vertices);
+        AddImposter(clusters, center, radius);
 
         return new MeshDerived
         {
@@ -63,6 +69,50 @@ internal static unsafe class ClusterBuilder
             BoundsCenter = center,
             BoundsRadius = radius,
         };
+    }
+
+    /// <summary>
+    /// The cluster above every root: the imposter, a quad the renderer draws from the model's captures, with the
+    /// model's sphere and an error no root's is above, so the cut reaches it last.
+    /// </summary>
+    private static void AddImposter(List<GpuCluster> clusters, Vector3 center, float radius)
+    {
+        float error = radius * ImposterErrorFraction;
+        foreach (GpuCluster cluster in clusters)
+        {
+            if (float.IsPositiveInfinity(cluster.ParentError))
+                error = Math.Max(error, cluster.Error);
+        }
+
+        for (int i = 0; i < clusters.Count; i++)
+        {
+            GpuCluster cluster = clusters[i];
+            if (!float.IsPositiveInfinity(cluster.ParentError))
+                continue;
+
+            cluster.ParentError = error;
+            cluster.ParentCenter = center;
+            cluster.ParentRadius = radius;
+            clusters[i] = cluster;
+        }
+
+        clusters.Add(
+            new GpuCluster
+            {
+                Center = center,
+                Radius = radius,
+                ParentCenter = center,
+                ParentRadius = radius,
+                DetailCenter = center,
+                DetailRadius = radius,
+                Error = error,
+                ParentError = float.PositiveInfinity,
+                TriangleCount = 2,
+                ConeAxis = Packing.EncodeUnitVector(Vector3.UnitY),
+                ConeCutoff = Packing.EncodeSnorm16(1),
+                MaterialSlot = GpuCluster.ImposterSlot,
+            }
+        );
     }
 
     /// <summary>

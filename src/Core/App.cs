@@ -135,6 +135,7 @@ public sealed class App
         _pipelines.Join(new GemPipeline(gems, provider, this, assets, world, _pipelines));
         _pipelines.Join(new CodePipeline(this, world, caches, _files));
         Cli.World = world;
+        Cli.Assets = assets;
         _pipelines.Join(new WorldPipeline(world, assets, _threads, project, CodePipeline.Kept, _pipelines));
         _pipelines.Join(new NextFramePipeline(this, world, _events, _pipelines));
 
