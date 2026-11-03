@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json.Serialization;
 using Magic.Assets;
 using Magic.Assets.Types;
 
@@ -26,6 +27,7 @@ public record struct Renderer : IComponent
 /// <see cref="Capacity"/> of them, inline so the component stays plain unmanaged data, indexed, an empty slot none.
 /// </summary>
 [InlineArray(Capacity)]
+[JsonConverter(typeof(MaterialSlotsJsonConverter))]
 public struct MaterialSlots : IEquatable<MaterialSlots>
 {
     public const int Capacity = 8;

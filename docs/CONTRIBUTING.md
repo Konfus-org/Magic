@@ -1,5 +1,7 @@
 # Contributing
 
+Read the docs, make a branch off `dev`, do the work, test it, run validation, and open a pull request back to `dev`.
+
 - Follow the [Code of Conduct](CODE_OF_CONDUCT.md) in every space of the project.
 - Code follows the [Code Standards](CODE_STANDARDS.md), tests follow [Tests](../tests/README.md), and docs follow the
   [documentation rules](../AGENTS.md#documentation-rules).

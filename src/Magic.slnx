@@ -5,14 +5,16 @@
   </Folder>
   <Folder Name="/Gems/">
     <Project Path="Gems/ArchEcs/ArchEcs.csproj" />
+    <Project Path="Gems/DomainLoader/DomainLoader.csproj" />
     <Project Path="Gems/Hello/Hello.csproj" />
+    <Project Path="Gems/PrefabLoader/PrefabLoader.csproj" />
+    <Project Path="Gems/WorldLoader/WorldLoader.csproj" />
   </Folder>
   <Folder Name="/Docs/">
     <File Path="../AGENTS.md" />
     <File Path="../docs/CODE_OF_CONDUCT.md" />
     <File Path="../docs/CODE_STANDARDS.md" />
     <File Path="../docs/CONTRIBUTING.md" />
-    <File Path="../docs/PLAN.md" />
   </Folder>
   <Folder Name="/Samples/">
     <File Path="../samples/README.md" />

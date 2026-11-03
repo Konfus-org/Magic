@@ -1,16 +1,35 @@
+using System.Collections.Immutable;
+using System.Numerics;
+using Magic.Ecs.Components;
+
 namespace Magic.Assets.Types;
 
 /// <summary>
-/// A piece of the world that opens as one: a <c>.domain</c> file in a folder of its own, beside the prefabs it spawns,
-/// every one in the folder: the cells, named <c>x_y_z.prefab</c>, each at its corner, and any other, such as
-/// <c>globals.prefab</c>, at the domain's origin. The file is this class as JSON: <c>{ "cellSize": 64 }</c>.
+/// A piece of the world that opens as one: its chunks, evenly sized and placed by where they are, and any other prefabs. A
+/// gem reads its files.
 /// </summary>
-[AssetFormat(AssetFileFormat.Json)]
 public sealed class Domain : IAsset<Domain>
 {
     /// <summary>
-    /// Metres a cell covers on each axis: cell <c>x_y_z</c> spans <c>[x * size, (x + 1) * size)</c>, and the positions
-    /// in it are relative to its corner, <c>(x, y, z) * size</c>.
+    /// Metres a chunk covers on each axis: a chunk's positions are relative to its corner.
     /// </summary>
-    public float CellSize { get; set; } = 64;
+    public const float ChunkSize = 128;
+
+    public ImmutableArray<Chunk> Chunks { get; init; } = [];
+
+    /// <summary>
+    /// The prefabs that are no chunk, at the domain's origin.
+    /// </summary>
+    public ImmutableArray<Handle<Prefab>> Globals { get; init; } = [];
+}
+
+/// <summary>
+/// One chunk of a <see cref="Domain"/>: which, counted in chunks along each axis, and what it holds.
+/// </summary>
+public readonly record struct Chunk(int X, int Y, int Z, Handle<Prefab> Prefab)
+{
+    /// <summary>
+    /// Where its corner is.
+    /// </summary>
+    public Transform At => new() { Position = new Vector3(X, Y, Z) * Domain.ChunkSize };
 }

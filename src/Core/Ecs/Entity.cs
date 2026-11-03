@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+using Magic.Ecs.Components;
+
 namespace Magic.Ecs;
 
 /// <summary>
@@ -8,4 +11,5 @@ namespace Magic.Ecs;
 /// <param name="EcsWorld">Which of the ECS gem's own worlds it lives in, kept for its layout.</param>
 /// <param name="Version">How many entities have had its slot, so a handle to a destroyed entity is never taken for
 /// the one in its slot now.</param>
+[JsonConverter(typeof(EntityJsonConverter))]
 public readonly record struct Entity(int Id, int EcsWorld, int Version);

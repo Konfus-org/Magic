@@ -2,7 +2,7 @@
 // says what broke, breathing on a slow sine so it is never mistaken for a real material. Magenta is a shader, red an
 // asset that did not load. Its kind is set by the failure materials, Materials/Failures/<Type>.mat, each named for the
 // type of the asset that broke, which a renderer draws in a broken material's place
-// (AssetManager.GetFailure<Material, Texture>).
+// (AssetDatabase.GetFailure<Material, Texture>).
 //
 //   1  Shader   solid magenta       the material does not load, or its surface does not compile
 //   2  Texture  red/black checker   a texture the material samples does not load

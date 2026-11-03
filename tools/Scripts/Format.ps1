@@ -10,10 +10,12 @@ passes, in this order: the member-order fix (tools/Analyzers, MG0001) through do
 anything else is measured; the code-style fixes through dotnet format, except the few that need a person's judgment,
 which the build still reports; and CSharpier, which decides every line break, indent and blank line from
 .editorconfig's [*] block and is what the build checks (Directory.Build.props). CSharpier is the local dotnet tool
-.config/dotnet-tools.json pins, restored before its pass. The first two read the code as the last build left it and
-build nothing. A fourth pass builds the solution and removes each project or package reference ReferenceTrimmer says
-nothing uses (Directory.Packages.props) from its project file. tools/Scripts/AgentTaskComplete.ps1 runs this first, so
-an agent's change is formatted before it is validated. Runs from any current directory.
+.config/dotnet-tools.json pins, restored before its pass. The first builds the analyzer it runs, and the first two read
+the rest of the code as the last build left it. A fourth pass builds the solution and removes each project or package
+reference ReferenceTrimmer says nothing uses (Directory.Packages.props) from its project file. A project that fails
+that build holds back those built on it, so a reference only they leave unused is removed on the next run.
+tools/Scripts/AgentTaskComplete.ps1 runs this first, so an agent's change is formatted before it is validated. Runs
+from any current directory.
 
 .PARAMETER All
 Formats every file in the repository rather than the changed ones.
@@ -38,6 +40,7 @@ $env:MSBUILDDISABLENODEREUSE = '1'
 
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $solution = Join-Path (Join-Path $root 'src') 'Magic.slnx'
+$analyzer = Join-Path $root 'tools/Analyzers/Magic.Analyzers/Magic.Analyzers.csproj'
 
 # dotnet format takes the C# files to touch; CSharpier takes every changed file it formats, or the repository.
 $common = @('--verbosity', 'normal')
@@ -61,7 +64,14 @@ if (-not $All) {
 $judged = 'IDE0010', 'IDE0072', 'IDE0035', 'IDE0051', 'IDE0052', 'IDE0059', 'IDE0060', 'IDE1006'
 
 $passes = @(
-    @{ Name = 'Order'; Run = { dotnet format analyzers $solution --diagnostics MG0001 @common } }
+    @{
+        Name = 'Order'
+        Run = {
+            # dotnet format runs the analyzer the last build left; with none, it fixes nothing and still exits 0.
+            dotnet build $analyzer -tl:off -nologo -v:q
+            if ($LASTEXITCODE -eq 0) { dotnet format analyzers $solution --diagnostics MG0001 @common }
+        }
+    }
     @{ Name = 'Style'; Run = { dotnet format style $solution --no-restore --exclude-diagnostics $judged @common } }
     @{
         Name = 'CSharpier'
@@ -73,11 +83,11 @@ $passes = @(
     @{
         Name = 'References'
         Run = {
-            # Built with every warning a warning, so each project builds and reports what it doesn't use, ReferenceTrimmer's
-            # RT0002 (a project) and RT0003 (a package); whatever else fails is the build's to report, not this pass's.
+            # As strict as any build, so a project that fails stays out of date and fails the next build too. A project
+            # reports what it doesn't use as it compiles, ReferenceTrimmer's RT0002 (a project) and RT0003 (a package);
+            # whatever else fails is the build's to report, not this pass's.
             $found = @(
-                dotnet build $solution -tl:off -nologo -v:q -p:TreatWarningsAsErrors=false `
-                    -p:MSBuildTreatWarningsAsErrors=false 2>&1 |
+                dotnet build $solution -tl:off -nologo -v:q 2>&1 |
                     ForEach-Object { "$_" } |
                     Select-String -Pattern 'RT000[23]: (ProjectReference|PackageReference) (\S+) can be removed \[(.+?\.csproj)' |
                     ForEach-Object { $_.Matches[0] } |
