@@ -525,6 +525,15 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
         );
     }
 
+    /// <summary>
+    /// Whether shaders or draws reach the texture through a view, which a texture only copied has none of.
+    /// </summary>
+    private static bool HasViews(in TextureDescription description) =>
+        (
+            description.Usage
+            & (TextureUsages.Sampled | TextureUsages.Storage | TextureUsages.ColorTarget | TextureUsages.DepthTarget)
+        ) != 0;
+
     private static VkImageAspectFlags GetAspect(in TextureDescription description) =>
         description.Format.IsDepth ? VkImageAspectFlags.Depth : VkImageAspectFlags.Color;
 
@@ -555,7 +564,9 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
                 device.Api.vkDestroyImageView(view);
         }
 
-        device.Api.vkDestroyImageView(texture.View);
+        if (texture.View.IsNotNull)
+            device.Api.vkDestroyImageView(texture.View);
+
         if (texture.IsWindow)
             return;
 
@@ -629,6 +640,25 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
         }
 
         device.Api.vkBindImageMemory(image, memory.Value, 0);
+        // A texture only copied to and from has no view to make: Vulkan refuses one, and nothing reads it through one.
+        if (!HasViews(description))
+        {
+            VkImageLayout[] viewless = new VkImageLayout[description.Levels];
+            Array.Fill(viewless, VkImageLayout.Undefined);
+
+            return Result.Success(
+                new VulkanTexture
+                {
+                    Image = image,
+                    Memory = memory.Value,
+                    Description = description,
+                    View = VkImageView.Null,
+                    LevelViews = [],
+                    Layouts = viewless,
+                }
+            );
+        }
+
         Result<VkImageView> view = MakeView(image, description, 0, description.Levels);
         if (!view.Ok)
         {

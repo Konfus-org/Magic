@@ -2,8 +2,10 @@ using Magic.Assets;
 using Magic.Assets.Pipeline;
 using Magic.Assets.Types;
 using Magic.Debugging;
+using Magic.Files;
 using Magic.Gems;
 using Magic.Gpu;
+using Magic.Images;
 using Magic.Pipelines;
 using Magic.Shaders;
 using Magic.Threading;
@@ -14,22 +16,30 @@ namespace GpuChecks;
 /// <summary>
 /// Proves the GPU provider and the shader compiler work together, with no renderer yet: as the run starts, a compute
 /// entry fills a texture with a gradient through the heap, the texture is read back and its corners checked, and
-/// each is an error under --fail-on-error when wrong. With a window, the gradient is shown in it every frame. It is
-/// public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
+/// each is an error under --fail-on-error when wrong. Every frame after, the gradient is stretched over a frame the
+/// size of a window, shown in the window when there is one, and saved as a PNG when the console asks for a
+/// screenshot. It is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists
+/// the gem.
 /// </summary>
-public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, AssetDatabase assets, Threads threads)
-    : IGem,
-        IPipeline<Startup>,
-        IPipeline<Render>,
-        IDisposable
+public sealed class GpuChecksGem(
+    IGraphicsApi gpu,
+    IShaderCompiler shaders,
+    AssetDatabase assets,
+    IFileSystem files,
+    Threads threads
+) : IGem, IPipeline<Startup>, IPipeline<Render>, IDisposable
 {
     private const int Size = 256;
+    private const int FrameWidth = 1280;
+    private const int FrameHeight = 720;
     private const string ShaderPath = "Shaders/Checks/Gradient.slang";
 
     private readonly GpuCommandRecorder _recorder = new();
     private GpuPipeline _pipeline;
     private GpuTexture _gradient;
+    private GpuTexture _frame;
     private GpuBuffer _readback;
+    private GpuBuffer _frameReadback;
     private uint _groupsX;
     private uint _groupsY;
 
@@ -41,8 +51,14 @@ public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, Asse
         if (!_gradient.IsNone)
             gpu.Destroy(_gradient);
 
+        if (!_frame.IsNone)
+            gpu.Destroy(_frame);
+
         if (!_readback.IsNone)
             gpu.Destroy(_readback);
+
+        if (!_frameReadback.IsNone)
+            gpu.Destroy(_frameReadback);
     }
 
     /// <summary>
@@ -94,9 +110,20 @@ public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, Asse
         if (!TryCreateResources(compiled.Value))
             return state;
 
-        RecordGradient(copyToReadback: true);
+        RecordGradient();
+        _recorder.BeginTransferPass("Read gradient back");
+        _recorder.Transition(_gradient, GpuAccess.ShaderWrite, GpuAccess.CopySource);
+        _recorder.Transition(_readback, GpuAccess.None, GpuAccess.CopyDestination);
+        _recorder.CopyTextureToBuffer(_gradient, 0, 0, _readback, 0);
+        _recorder.Transition(_readback, GpuAccess.CopyDestination, GpuAccess.HostRead);
+        _recorder.EndPass();
         gpu.Submit(_recorder.Finish());
-        Result<ReadOnlyMemory<byte>> pixels = await gpu.ReadBackAsync(_readback, 0, Size * Size * 4, cancel)
+        Result<ReadOnlyMemory<byte>> pixels = await gpu.ReadBackAsync(
+                _readback,
+                0,
+                Size * Size * 4,
+                CancellationToken.None
+            )
             .ConfigureAwait(false);
         await threads.Enter(EngineThread.Main);
         if (!pixels.Ok)
@@ -112,22 +139,46 @@ public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, Asse
     }
 
     /// <summary>
-    /// Shows the gradient in the window, computed again each frame.
+    /// Draws the frame: the gradient computed again and stretched over the frame, the frame shown in the window, and
+    /// copied out for a screenshot when one was asked for.
     /// </summary>
     public ValueTask<Render> RunAsync(Render state, CancellationToken cancel)
     {
-        GpuTexture window = gpu.WindowTarget;
-        if (window.IsNone || _pipeline.IsNone)
+        if (_pipeline.IsNone)
             return ValueTask.FromResult(state);
 
-        RecordGradient(copyToReadback: false);
-        _recorder.BeginTransferPass("Show gradient");
+        RecordGradient();
+        _recorder.BeginTransferPass("Stretch gradient over the frame");
         _recorder.Transition(_gradient, GpuAccess.ShaderWrite, GpuAccess.CopySource);
-        _recorder.Transition(window, GpuAccess.None, GpuAccess.CopyDestination);
-        _recorder.BlitTexture(_gradient, window);
-        _recorder.Transition(window, GpuAccess.CopyDestination, GpuAccess.Present);
+        _recorder.Transition(_frame, GpuAccess.None, GpuAccess.CopyDestination);
+        _recorder.BlitTexture(_gradient, _frame);
         _recorder.EndPass();
+
+        GpuTexture window = gpu.WindowTarget;
+        if (!window.IsNone)
+        {
+            _recorder.BeginTransferPass("Show frame");
+            _recorder.Transition(_frame, GpuAccess.CopyDestination, GpuAccess.CopySource);
+            _recorder.Transition(window, GpuAccess.None, GpuAccess.CopyDestination);
+            _recorder.BlitTexture(_frame, window);
+            _recorder.EndPass();
+        }
+
+        // One readback buffer, so one screenshot a frame: the last asked for.
+        ReadOnlySpan<ScreenshotRequested> requests = state.Frame.Events.Get<ScreenshotRequested>();
+        if (requests.Length > 0)
+        {
+            _recorder.BeginTransferPass("Read frame back");
+            _recorder.Transition(_frame, GpuAccess.CopyDestination, GpuAccess.CopySource);
+            _recorder.Transition(_frameReadback, GpuAccess.None, GpuAccess.CopyDestination);
+            _recorder.CopyTextureToBuffer(_frame, 0, 0, _frameReadback, 0);
+            _recorder.Transition(_frameReadback, GpuAccess.CopyDestination, GpuAccess.HostRead);
+            _recorder.EndPass();
+        }
+
         gpu.Submit(_recorder.Finish());
+        if (requests.Length > 0)
+            SaveScreenshotAsync(requests[^1].Path).FireAndForget();
 
         return ValueTask.FromResult(state);
     }
@@ -209,6 +260,24 @@ public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, Asse
         }
 
         _gradient = gradient.Value;
+        Result<GpuTexture> frame = gpu.CreateTexture(
+            new TextureDescription
+            {
+                Width = FrameWidth,
+                Height = FrameHeight,
+                Format = GpuFormat.R8G8B8A8Unorm,
+                Usage = TextureUsages.CopyDestination | TextureUsages.CopySource,
+                Name = "Frame",
+            }
+        );
+        if (!frame.Ok)
+        {
+            Log.Error($"GPU check: the frame texture was not made: {frame.Error}");
+
+            return false;
+        }
+
+        _frame = frame.Value;
         Result<GpuBuffer> readback = gpu.CreateBuffer(
             new BufferDescription
             {
@@ -225,14 +294,30 @@ public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, Asse
         }
 
         _readback = readback.Value;
+        Result<GpuBuffer> frameReadback = gpu.CreateBuffer(
+            new BufferDescription
+            {
+                Bytes = FrameWidth * FrameHeight * 4,
+                Usage = BufferUsages.Readback,
+                Name = "Frame readback",
+            }
+        );
+        if (!frameReadback.Ok)
+        {
+            Log.Error($"GPU check: the frame readback buffer was not made: {frameReadback.Error}");
+
+            return false;
+        }
+
+        _frameReadback = frameReadback.Value;
 
         return true;
     }
 
     /// <summary>
-    /// Records the gradient's dispatch, and the copy into the readback buffer when asked.
+    /// Records the gradient's dispatch into the gradient texture.
     /// </summary>
-    private void RecordGradient(bool copyToReadback)
+    private void RecordGradient()
     {
         _recorder.BeginComputePass("Fill gradient");
         _recorder.Transition(_gradient, GpuAccess.None, GpuAccess.ShaderWrite);
@@ -240,14 +325,40 @@ public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, Asse
         _recorder.PushConstants(new GpuConstants(_gradient.Id, Size, Size));
         _recorder.Dispatch(_groupsX, _groupsY);
         _recorder.EndPass();
-        if (!copyToReadback)
-            return;
+    }
 
-        _recorder.BeginTransferPass("Read gradient back");
-        _recorder.Transition(_gradient, GpuAccess.ShaderWrite, GpuAccess.CopySource);
-        _recorder.Transition(_readback, GpuAccess.None, GpuAccess.CopyDestination);
-        _recorder.CopyTextureToBuffer(_gradient, 0, 0, _readback, 0);
-        _recorder.Transition(_readback, GpuAccess.CopyDestination, GpuAccess.HostRead);
-        _recorder.EndPass();
+    /// <summary>
+    /// Writes the frame read back this frame to <paramref name="path"/> once the GPU is done with it.
+    /// </summary>
+    private async Task SaveScreenshotAsync(string path)
+    {
+        Result<ReadOnlyMemory<byte>> pixels = await gpu.ReadBackAsync(
+                _frameReadback,
+                0,
+                FrameWidth * FrameHeight * 4,
+                CancellationToken.None
+            )
+            .ConfigureAwait(false);
+        if (!pixels.Ok)
+        {
+            Log.Error($"The screenshot could not be read back: {pixels.Error}");
+
+            return;
+        }
+
+        byte[] png = Png.Encode(FrameWidth, FrameHeight, pixels.Value.Span);
+        Result made = files.CreateDirectory(files.GetParent(path));
+        if (!made.Ok)
+        {
+            Log.Error($"The screenshot's folder could not be made: {made.Error}");
+
+            return;
+        }
+
+        Result written = await files.WriteAsync(path, png, CancellationToken.None).ConfigureAwait(false);
+        if (written.Ok)
+            Log.Info($"Screenshot: {path}");
+        else
+            Log.Error($"The screenshot could not be written: {written.Error}");
     }
 }

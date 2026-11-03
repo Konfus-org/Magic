@@ -34,7 +34,7 @@ public sealed class App
         _events = events;
         _threads = threads;
         _pipelines = pipelines;
-        Cli = new(this, files);
+        Cli = new(this, files, events);
     }
 
     /// <summary>

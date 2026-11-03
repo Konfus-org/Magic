@@ -1,7 +1,10 @@
 using System.CommandLine;
+using System.Globalization;
 using System.Linq;
 using Magic.Debugging;
+using Magic.Events;
 using Magic.Files;
+using Magic.Images;
 using Magic.Projects;
 using Magic.Utils;
 
@@ -21,12 +24,14 @@ internal sealed class Cli
 
     private readonly App _app;
     private readonly IFileSystem _files;
+    private readonly EventCoordinator _events;
     private readonly RootCommand _commands;
 
-    public Cli(App app, IFileSystem files)
+    public Cli(App app, IFileSystem files, EventCoordinator events)
     {
         _app = app;
         _files = files;
+        _events = events;
         _commands = CreateCommands();
     }
 
@@ -134,6 +139,15 @@ internal sealed class Cli
                         );
                         if (!created.Ok)
                             Log.Error($"Couldn't make {name} from {template}: {created.Error}");
+                    }),
+                },
+                new Command("screenshot", "Saves what the next frame draws as a PNG under Screenshots/ beside Magic")
+                {
+                    Action = new CliCommand(cmds =>
+                    {
+                        string name = DateTime.Now.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture);
+                        string path = _files.Combine(AppContext.BaseDirectory, "Screenshots", $"{name}.png");
+                        _events.Publish(new ScreenshotRequested(path));
                     }),
                 },
                 new Command("exit", "Ends the run and exits")
