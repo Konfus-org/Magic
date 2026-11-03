@@ -58,9 +58,13 @@ internal static class GemLoader
             if (made is IEcs ecs)
                 world.Ecs = ecs;
 
+            if (made is IWorldStateWriter writer)
+                world.Writer = writer;
+
             LoadedGem setUp = new(made, gem);
             loaded.Add(setUp);
-            if (made is IWindow window)
+            // The gem is an IWindow in any mode, but a headless run has no window.
+            if (made is IWindow window && !app.IsHeadless)
             {
                 app.Window = window;
 

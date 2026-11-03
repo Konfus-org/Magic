@@ -87,8 +87,8 @@ public sealed class App
     public bool IsPaused { get; set; }
 
     /// <summary>
-    /// Whether the current run goes on: <see cref="Run"/> begins it; <see cref="Exit"/>, or a new project or mode, ends
-    /// it.
+    /// Whether the current run goes on: <see cref="Run"/> begins it; <see cref="Exit"/>, <see cref="Restart"/>, or a new
+    /// project or mode, ends it.
     /// </summary>
     public bool IsRunning { get; private set; }
 
@@ -114,10 +114,16 @@ public sealed class App
     }
 
     /// <summary>
+    /// Ends the run, and Magic runs the project again with everything made anew.
+    /// </summary>
+    internal void Restart() => IsRunning = false;
+
+    /// <summary>
     /// Runs the app's project with what the host provides: its root pipelines join, then <see cref="AppStart"/> makes the
     /// gems, <see cref="Startup"/> takes it to the first frame, <see cref="AppLoop"/> runs the frames until the commands ask
-    /// to exit or for another project or mode, <see cref="Shutdown"/> follows the last frame, and <see cref="AppEnd"/> ends
-    /// it. Fails when no project is open, and at the first error under --fail-on-error.
+    /// to exit or for another project or mode, or a gem's code changes, <see cref="RunEnding"/> and <see cref="Shutdown"/>
+    /// follow the last frame, and <see cref="AppEnd"/> ends it. Fails when no project is open, and at the first error under
+    /// --fail-on-error.
     /// </summary>
     internal Result Run(IServiceProvider provider, GemRegistry gems, AssetDatabase assets, Caches caches, World world)
     {
@@ -127,24 +133,30 @@ public sealed class App
         _pipelines.Join(new ServicePumpPipeline(_threads, Cli));
         _pipelines.Join(new AssetPipeline(assets, _files, caches, _pipelines));
         _pipelines.Join(new GemPipeline(gems, provider, this, assets, world, _pipelines));
-        _pipelines.Join(new WorldPipeline(world, assets, _threads, project, _pipelines));
+        _pipelines.Join(new CodePipeline(this, world, caches, _files));
+        _pipelines.Join(new WorldPipeline(world, assets, _threads, project, CodePipeline.Kept, _pipelines));
         _pipelines.Join(new NextFramePipeline(this, world, _events, _pipelines));
 
         Log.Info($"Running {project.Name} in {(IsHeadless ? "headless" : "GUI")} mode.");
         IsRunning = true;
 
-        // TODO(KONFUS): pump the GUI like the terminal; until there is one, a run with a window exits at once.
-        if (!IsHeadless)
-            Exit();
-
         using CancellationTokenSource stopping = new();
         _pipelines.Get<AppStart>().Run(new AppStart(project), stopping.Token);
+        if (!IsHeadless && Window is null)
+        {
+            Log.Warn(
+                $"{project.Name} has no gem that provides a window, so the run is exiting. List one, or use --headless."
+            );
+            Exit();
+        }
+
         PumpUntil(
             _pipelines.Get<Startup>().RunOnMainAsync(new Startup(project), null, stopping.Token).AsTask(),
             stopping
         );
         _pipelines.Get<AppLoop>().Run(default, stopping.Token);
         stopping.Cancel();
+        PumpUntil(_pipelines.Get<RunEnding>().RunOnMainAsync(default, null, default).AsTask(), stopping);
         PumpUntil(
             _pipelines.Get<Shutdown>().RunOnMainInReverseAsync(new Shutdown(IsExiting), null, default).AsTask(),
             stopping
@@ -167,7 +179,7 @@ public sealed class App
     private void PumpUntil(Task running, CancellationTokenSource stopping)
     {
         running.FireAndForget();
-        PipelineRunner<ServicePump> pump = _pipelines.Get<ServicePump>();
+        PipelineRunner<ServicePump> pump = _pipelines.Get<ServicePump>(); // TODO(Konfus): why do we do this here? Does it belong elsewhere?
         while (!running.IsCompleted)
         {
             pump.Run(default, stopping.Token);
