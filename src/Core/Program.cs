@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Runtime;
 using Magic.Assets.Pipeline;
 using Magic.Caching;
@@ -74,9 +75,20 @@ internal static class Program
             services.AddSingleton(caches);
             services.AddSingleton(pipelines);
             services.AddSingleton(assets);
+            services.AddSingleton(world);
+
+            // Find the gems the project lists, which join the services
+            GemRegistry gems = new(services, files, project.Gems);
+            services.AddSingleton(
+                new Assemblies([typeof(App).Assembly, .. gems.Gems.Select(gem => gem.Type.Assembly)])
+            );
+
+            // Never disposed, since its singletons are the gems, which AppEnd unloads.
+            services.MakeReadOnly();
+            IServiceProvider provider = services.BuildServiceProvider();
 
             // Run the application
-            Result ended = app.Run(services, assets, caches, world);
+            Result ended = app.Run(provider, gems, assets, caches, world);
             if (!ended.Ok)
             {
                 Log.Critical(ended.Error);

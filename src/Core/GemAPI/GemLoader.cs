@@ -3,6 +3,8 @@ using Magic.Assets.Pipeline;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Pipelines;
+using Magic.Runtime;
+using Magic.Utils;
 using Magic.Worlds;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -16,9 +18,10 @@ internal static class GemLoader
 {
     /// <summary>
     /// Makes the gems in <paramref name="registry"/> through <paramref name="provider"/>, which was built from the
-    /// services they were registered with, and sets each up: on the log when it is a sink, reading for
-    /// <paramref name="assets"/> the asset types it reads, and in the <paramref name="pipelines"/> it joins, so they run
-    /// in the order the gems are made. The gems made, in dependency order. End them with
+    /// services they were registered with, and sets each up: <paramref name="app"/>'s window for as long as it lasts when
+    /// it provides one, on the log when it is a sink, reading for <paramref name="assets"/> the asset types it reads, and in
+    /// the <paramref name="pipelines"/> it joins, so they run in the order the gems are made. The gems made, in dependency
+    /// order. End them with
     /// <see cref="Unload"/>, which also frees the gems' assemblies once nothing holds the provider.
     /// </summary>
     [SuppressMessage(
@@ -29,6 +32,7 @@ internal static class GemLoader
     public static IReadOnlyList<LoadedGem> Load(
         IServiceProvider provider,
         GemRegistry registry,
+        App app,
         AssetDatabase assets,
         PipelineCoordinator pipelines,
         World world
@@ -56,6 +60,14 @@ internal static class GemLoader
 
             LoadedGem setUp = new(made, gem);
             loaded.Add(setUp);
+            if (made is IWindow window)
+            {
+                app.Window = window;
+
+                // The window is the gem, which can't unload while the app holds it.
+                setUp.Subscriptions.Add(new Subscription(() => app.Window = null));
+            }
+
             if (made is ILogSink sink)
                 setUp.Subscriptions.Add(Log.Register(sink));
 

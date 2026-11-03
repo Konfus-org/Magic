@@ -8,7 +8,6 @@ using Magic.Pipelines;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Magic.Runtime;
 
@@ -112,18 +111,19 @@ public sealed class App
     }
 
     /// <summary>
-    /// Runs the app's project with what the host provides: its root pipelines join, then <see cref="AppStart"/> takes it to
-    /// the first frame, <see cref="AppLoop"/> runs the frames until the commands ask to exit or for another project or mode,
-    /// and <see cref="AppEnd"/> ends it. Fails when no project is open, and at the first error under --fail-on-error.
+    /// Runs the app's project with what the host provides: its root pipelines join, then <see cref="AppStart"/> makes the
+    /// gems, <see cref="Startup"/> takes it to the first frame, <see cref="AppLoop"/> runs the frames until the commands ask
+    /// to exit or for another project or mode, <see cref="Shutdown"/> follows the last frame, and <see cref="AppEnd"/> ends
+    /// it. Fails when no project is open, and at the first error under --fail-on-error.
     /// </summary>
-    internal Result Run(ServiceCollection services, AssetDatabase assets, Caches caches, World world)
+    internal Result Run(IServiceProvider provider, GemRegistry gems, AssetDatabase assets, Caches caches, World world)
     {
         if (Project is not { } project)
             return Result.Failure("No project is open.");
 
         _pipelines.Join(new ServicePumpPipeline(_threads, Cli));
         _pipelines.Join(new AssetPipeline(assets, _files, caches, _pipelines));
-        _pipelines.Join(new GemPipeline(this, services, _files, assets, world, _pipelines));
+        _pipelines.Join(new GemPipeline(gems, provider, this, assets, world, _pipelines));
         _pipelines.Join(new WorldPipeline(world, assets, _threads, project, _pipelines));
         _pipelines.Join(new NextFramePipeline(this, world, _events, _pipelines));
 
@@ -135,10 +135,18 @@ public sealed class App
             Exit();
 
         using CancellationTokenSource stopping = new();
-        _pipelines.Get<AppStart>().Run(new AppStart(project, stopping), stopping.Token);
+        _pipelines.Get<AppStart>().Run(new AppStart(project), stopping.Token);
+        PumpUntil(
+            _pipelines.Get<Startup>().RunOnMainAsync(new Startup(project), null, stopping.Token).AsTask(),
+            stopping
+        );
         _pipelines.Get<AppLoop>().Run(default, stopping.Token);
         stopping.Cancel();
-        _pipelines.Get<AppEnd>().Run(new AppEnd(stopping, IsExiting));
+        PumpUntil(
+            _pipelines.Get<Shutdown>().RunOnMainInReverseAsync(new Shutdown(IsExiting), null, default).AsTask(),
+            stopping
+        );
+        _pipelines.Get<AppEnd>().Run(default);
 
         if (HasFailed)
             return Result.Failure($"Exiting with code 2 due to logged errors. Error count: {Log.ErrorCount}");
@@ -146,5 +154,24 @@ public sealed class App
         Log.Info($"Closed {project.Name} and {(IsExiting ? "exiting" : "restarting")}.");
 
         return Result.Success();
+    }
+
+    /// <summary>
+    /// Keeps the services going until <paramref name="running"/>, an awaited pipeline outside the frames, has ended, as what
+    /// it awaits needs them, cancelling <paramref name="stopping"/> once the run is to end. The one wait on the main thread:
+    /// no frame is due meanwhile, and this is what keeps the rest going.
+    /// </summary>
+    private void PumpUntil(Task running, CancellationTokenSource stopping)
+    {
+        running.FireAndForget();
+        PipelineRunner<ServicePump> pump = _pipelines.Get<ServicePump>();
+        while (!running.IsCompleted)
+        {
+            pump.Run(default, stopping.Token);
+            if (!IsRunning)
+                stopping.Cancel();
+
+            Thread.Sleep(1);
+        }
     }
 }

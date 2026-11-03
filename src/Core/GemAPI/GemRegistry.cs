@@ -277,6 +277,10 @@ internal sealed class GemRegistry
         {
             foreach (ServiceDescriptor service in services)
             {
+                // The world proxies what a gem provides, so it provides nothing itself.
+                if (service.ImplementationInstance is World)
+                    continue;
+
                 // A gem is registered as its class before its interfaces, so the class is what is found.
                 Type provider = service.ImplementationInstance?.GetType() ?? service.ServiceType;
                 if (provider.IsAssignableTo(contract))

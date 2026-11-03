@@ -11,9 +11,9 @@ using Magic.Worlds;
 namespace Magic.Pipelines;
 
 /// <summary>
-/// First of a run: everything up to the first frame.
+/// First of a run: everything up to <see cref="Startup"/>.
 /// </summary>
-internal readonly record struct AppStart(Project Project, CancellationTokenSource Stopping);
+internal readonly record struct AppStart(Project Project);
 
 /// <summary>
 /// While <see cref="AppStart"/> runs: the gems were found and aren't yet made, so what must be there for their constructors
@@ -27,9 +27,9 @@ internal readonly record struct GemsFound(GemRegistry Registry);
 internal readonly record struct AppLoop;
 
 /// <summary>
-/// Last of a run: everything after the last frame.
+/// Last of a run: everything after <see cref="Shutdown"/>.
 /// </summary>
-internal readonly record struct AppEnd(CancellationTokenSource Stopping, bool IsExiting);
+internal readonly record struct AppEnd;
 
 /// <summary>
 /// Once, every gem made, before the first frame. Awaited: frames don't run until every one has ended, though what it
