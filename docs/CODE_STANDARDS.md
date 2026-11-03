@@ -6,62 +6,72 @@ and old code catches up when you touch it.
 
 ## How we write code
 
-Write the engine as data flowing through functions, not objects calling each other.
+Write the engine as data flowing through functions, not objects calling each other. Everything is one of four things:
 
+- **Data:** plain values, such as `Domain`, `Prefab` and `EntitiesChangeList`.
+- **Databases:** one place that holds state and does little else, such as the assets' database and the ECS's columns.
+- **Pipelines:** where the work happens, once a frame over a batch.
+- **Services:** immediate calls where that's the normal thing, such as `world.Create` and `assets.Find`.
+
+- **Nothing glued in.** Just about everything is a gem that can be swapped out.
 - **Pipelines, not webs.** Data moves A → B → C. Each step takes values and returns values, and the whole flow reads
   top to bottom in one place. No events firing into handlers that fire more events.
 - **Stateless by default.** A function takes what it needs and returns a result.
-- **Functions over objects.** Records, plain data and static functions. No class hierarchies, virtual methods or
-  objects that guard their own fields.
-- **Async for anything slow.** Work that can take longer than a frame is an `Async` method with progress and
-  cancellation. The frame never waits on it; it picks up the result in a later frame.
-- **Shallow.** Flat methods, flat folders, short call chains. If you have to step through five layers to find what
-  happens, flatten it.
-- **Small.** Make the smallest change that works. No abstraction before a second real use, and no guessing at edge
-  cases.
+- **Testable.** Each piece is modular, can be tested on its own, and is easy to debug.
+- **Functions over objects.** Records, plain data and static functions. No objects that guard their own fields.
+- **Composition over inheritance.** When using inheritance, keep it shallow.
+- **Async for anything slow.** Work that can take longer than a frame is an `Async` method.
+- **Shallow.** Flat methods, flat folders, short call chains.
+- **Simple and small.** No abstraction before a second real use, and no guessing at edge cases.
 
 ## Ground rules
 
-- Reuse what exists. When two places do the same thing, one function does it. No helper with a single caller.
+- When two places do the same thing, one function does it. No helper with a single caller.
 - Delete dead code instead of commenting it out. No unused private or internal member, parameter or overload. Public
   API a gem or game could use stays without a caller.
-- Leave the code you touch cleaner without changing what it does, and keep the cleanup apart from the fix.
 - Use a known pattern only for the problem it solves, and name it in a comment (a pool, a fold).
 - These rules come first, then .NET's Framework Design Guidelines. Use current C# and .NET, and one word for one thing
   across the code base.
 - Managed dependencies come from NuGet. A package with a known vulnerability, direct or transitive, fails the restore.
-- Native libraries are built from source or downloaded as their author publishes them
-  ([Native libraries](../src/Gems/README.md#native-libraries)). No third-party wrapper, package, binary or
-  copied code. Hand-write a binding only where the generator can't, and say so in the gem's README.
+- Native libraries are built from source or downloaded as their author publishes them. No third-party wrapper, package,
+  binary or copied code. Hand-write a binding only where the generator can't, and say so in the gem's README.
 - No keys, tokens or passwords in code, configuration or workflows. CI reads its own from the repository's secrets.
-- Everything runs on every platform Magic targets ([Cross platform](#cross-platform)).
 
-## Gems and the frame
+## Gems, pipelines and services
 
-- A gem is an `internal sealed` class implementing `IGem` and the Core interfaces it provides.
-- Its constructor takes everything it depends on, settings included. Nothing asks a container for a service later;
-  only code that builds objects from constructors takes `IServiceProvider`.
-- `Step` and `FixedStep` run on the main thread: the state and `FrameInput` go in, the next state and a `GemOutput`
-  come out.
-- The constructor, `Render` and `Stop` run on the render thread. `Render` draws from the frame's `FrameOutput` and
-  returns the next render state, which holds the gem's GPU resources.
-- The two threads share nothing. What the main thread makes reaches the render thread only through `FrameOutput`.
-- Gems talk through message structs. Publish one from any thread and every gem reads it in the next frame's
-  `FrameInput`. No callbacks, events or watchers.
-- Async work a `Step` starts arrives in a later `FrameInput`, or its task sits in the state record and `Step` checks
-  `IsCompleted`.
-- A gem reads its settings from the frame's snapshot, so changes reach it between frames. Mark a setting it reads only
-  at start `[RequireRestart]`.
-- A gem gets the command line and project file from Core's `App`, never by reading them itself.
-- `Stop` frees what the gem started, once none of its work still runs on a worker.
+- A gem is a plugin: a decoupled, hot-reloadable, modular piece of logic that a project adds or replaces to meet its
+  needs. It is a `public sealed` class implementing `IGem`, an `IPipeline<TState>` for each pipeline it joins, and the
+  Core interfaces it provides.
+- A service is what you call. A pipeline is work the engine runs, in the order it's told.
+- A gem's constructor takes everything it depends on. Only code that builds objects from constructors takes
+  `IServiceProvider`.
+- A pipeline takes its state and hands it on, changed or not. It runs after the gems it needs, then in the order the
+  project lists them. [`PipelineStages.cs`](../src/Core/Pipelines/PipelineStages.cs) has the states Core runs.
+- Any pipeline runs either way, and the caller picks: `pipelines.Get<MyState>().Run(state)` runs it now, on the main
+  thread, and `.Defer(state)`, from any thread, runs it after the frame's fixed steps. What joins can't tell which. For
+  a change list, `pipelines.Get<MyList>().Deferred` is the list to push onto; the runner holds it, runs it and clears it.
+- A change to a database is pushed onto a change list, whose pipeline acts on it and says what came of it, as
+  `EntitiesChangeList` and `AssetsChangeList` do. A service's calls push onto its own, as `assets.Add` does. Push for
+  bulk work. Work over a list costs a walk per run, so a call
+  that runs one at once is for the odd change, not a hot path.
+- Core's own work is its root pipelines, each doing one area's work at each point of a run. `App.Run` lists them. A
+  dedicated pipeline is for a substantial piece of work, not each step: a step is a method.
+- A pipeline that can't take a run because of what its caller is doing throws `PipelineRefusedException`, which goes to
+  the caller.
+- What a frame runs is on the main thread and returns finished, with `ValueTask.FromResult`. A gem whose pipeline throws
+  or returns unfinished is logged and leaves every pipeline.
+- What is awaited, such as `Startup`, is called on the main thread and may await. After an await of its own, it steps
+  back with `await threads.Enter(EngineThread.Main)`.
+- Gems talk through message structs. Publish one from any thread and every gem reads it the next frame, from
+  `frame.Events` or through `EventCoordinator.Watch`.
+- Async work a frame's pipeline starts arrives in a later frame: by a message, or by work posted with `Threads.Post`.
+- `Shutdown` and `Dispose` free what the gem started, once none of its work still runs on a worker.
 - A gem's csproj states its `Description`, `Version` and `Authors`. Nothing else does.
 - Gems depend on Core's interfaces, never on each other.
-- A component is an unmanaged struct with public fields that implements `IComponent`, and nothing else.
-- Work over many entities is a system, or an `IParallelSystem` for heavy work. Register it on the ECS and keep the
-  `Subscription` it returns.
-- A script is a `.cs` asset whose class, named like the file, is an `IScript`: an `IBehavior` for one entity, or a
-  system script for many. Its constructor takes its `Entity` first if it uses it, then services. Its values are public
-  `{ get; set; }` properties, and `Start()` runs once they're set.
+- A component is an unmanaged struct with public fields that implements `IComponent`, and members for what follows from
+  those fields.
+- Work over many entities is a system: a function over chunks a gem calls from its pipeline, through `IEcs.Query` on its
+  own thread or `IEcs.Run` on the ECS's workers.
 - A game is its assets and scripts, never a gem.
 
 ## Async
@@ -77,31 +87,31 @@ Write the engine as data flowing through functions, not objects calling each oth
 
 - A method returning `Task` or `ValueTask` ends in `Async`, private ones too, and nothing else does. Its synchronous
   twin drops the suffix and is written synchronously, never as a wait on the async one.
-- Every `await` has `.ConfigureAwait(false)`, except in tests.
+- Every `await` has `.ConfigureAwait(false)`, except `await threads.Enter(...)`, which has none, and in tests.
 - Await every task, keep it to check later, or call `.FireAndForget()`. Never drop it or discard it with `_ =`. No
   `async void`.
 - Cancellation ends the task with `OperationCanceledException`, never a failed `Result`.
 - Nothing blocks the main or render thread: no `.Result`, `.Wait()` or `.GetAwaiter().GetResult()`, and no waiting on
   the other engine thread. The one allowed wait is at a boundary where every thread it could hold up has ended, with a
   comment saying so.
-- A worker hands an engine thread data (a message, a `Channel<T>`, a value written whole), never work. No locks on
-  collections two threads share.
-- Background work is a task. `Threads` is for the engine's own threads and work that lasts the whole run.
+- A worker hands an engine thread data (a message, a `Channel<T>`, a value written whole) or work
+  (`Threads.Post`). No locks on collections two threads share.
+- Background work is a task. `Threads` is for the engine's own threads.
 - A timeout is the caller's, through a linked token source.
 
 ## Failures and null
 
 - Return a `Result` for anything content or the machine can break: I/O, import, compile, readback.
-- Broken content logs `Debugging.Error` and shows a visible stand-in; it never stops the frame. What still works, only
-  worse, logs `Debugging.Warn`.
+- Broken content logs `Log.Error` and shows a visible stand-in; it never stops the frame. What still works, only
+  worse, logs `Log.Warn`.
 - Throw only for a programmer's mistake or a gem that can't exist (no GPU): `ArgumentException`,
   `InvalidOperationException` or `NotSupportedException`, never `Exception` itself. Use the throw helpers
   (`ArgumentNullException.ThrowIfNull`, `ObjectDisposedException.ThrowIf` and their siblings).
 - Never catch and drop. Log what you catch with what failed and on what, or `throw;`. Catch `Exception` only where one
-  failure mustn't stop the run (a gem's hook, a loader, a forgotten task); elsewhere catch what you expect or filter
+  failure mustn't stop the run (a gem's pipeline, a loader, a forgotten task); elsewhere catch what you expect or filter
   with `when`.
-- A log line says what happened and to what, once. Anything that repeats every frame is `Debugging.Verbose` or a metric.
-- `Debugging.Assert` is for impossible state and ends the process with a crash file.
+- A log line says what happened and to what, once. Anything that repeats every frame is `Log.Verbose` or a metric.
+- `Assert` is for impossible state and ends the process with a crash file.
 - No null-forgiving `!` (MG0002); it and every nullable warning fail the build. Don't make what is always there nullable: pass it
   in, make it `required`, or group the optional parts into one object.
 - Handle a missing value where you read it, with a guard clause, `is not { } value`, `??` or a `throw` saying what's
@@ -113,7 +123,6 @@ Write the engine as data flowing through functions, not objects calling each oth
 - Nothing that runs every frame uses LINQ, closures or string formatting. Use plain loops and delegates made once.
 - Pass `Span<T>` and `ReadOnlySpan<T>`, not array slices. A type that must stay on the stack is a `ref struct`.
 - Return `ValueTask` from a method that usually finishes synchronously.
-- Loading and building run as tasks and hand their results to the main thread in one batch.
 - Call frequent native functions through function pointers (`delegate*`).
 
 ## Structure
@@ -121,7 +130,7 @@ Write the engine as data flowing through functions, not objects calling each oth
 ### Visibility
 
 - Public is only for what a gem or game script uses. Everything else is `internal` or private. Container and host
-  plumbing are never public, and nothing is public for a test's sake ([Tests](../tests/README.md)).
+  plumbing are never public, and nothing is public for a test's sake.
 - A type only one gem uses lives in that gem, internal. Core holds the types gems share.
 - Add an interface only to swap a gem or to reach outside the process (disk, GPU, window), never for a test.
 - No type that only forwards calls to another.
@@ -130,7 +139,7 @@ Write the engine as data flowing through functions, not objects calling each oth
 
 - A namespace is the project's root namespace (`Magic` for Core, `Magic.<Name>` otherwise) plus its folders.
 - Core is one project, `src/Core/Magic.Core.csproj`. Its root holds only what starts the process; every other type
-  goes in the folder of its area, such as `Assets` or `GemAPI`. A new area is a new folder, never a new project.
+  goes in the folder of its area, such as `Assets` or `Gems`. A new area is a new folder, never a new project.
 - A folder exists only once it holds something. Split a big one into a subfolder per area, never named like a type in
   it.
 - A gem is flat: every file at its root, in `Magic.<Gem>`. Its `Resources/` holds the assets and scripts only it uses.
@@ -184,7 +193,7 @@ built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
 
 ### Naming
 
-- A name reads well as `Class.Member(arguments)`: `Assets.Find<Texture>(path)`, `App.Quit(reason)`. Action first,
+- A name reads well as `Class.Member(arguments)`: `AssetDatabase.Find<Texture>(path)`, `App.Exit()`. Action first,
   subject second (`ReadDomain`), naming what it acts on even if that's longer. If it doesn't make sense without its
   summary (`Process()`, `_scratch`), rename it.
 - Each verb means one thing:
@@ -195,13 +204,13 @@ built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
   - `Register` hands something to a service and returns the `Subscription` that takes it back. `Add` and `Remove`
     belong to collections.
   - `Is`, `Has` and `Can` return a bool.
-- Hooks and entry points keep general verbs: `Step`, `Render`, `Start`, `Run`.
+- Pipelines and entry points keep general verbs: `Run`, `Start`.
 - A method that returns a value is never a bare noun (`Amount`, `RowOf`).
 - A number that's a time ends in its unit (`FixedStepSec`, `_settleMs`). A `TimeSpan` doesn't (`_settleTime`).
 - No single-letter names except loop counters, `x`/`y`/`z` and formula coefficients. `ctx`, `sb`, `dt` and `ex` are
   fine. A local keeps one meaning and never shadows a type.
 - A reusable buffer has one purpose and is named for it.
-- Keep .NET's idioms: static factories (`Result.Success`), fluent builders, immediate-mode widgets (`IDebugUI.Button`).
+- Keep .NET's idioms: static factories (`Result.Success`), fluent builders.
 - Test methods read as the sentence they check.
 
 ### Comments
@@ -241,8 +250,8 @@ built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
 - A compute pass has no implicit derivatives. Code it may run takes them as inputs, as `SurfaceInputs` and
   `SkyInputs` do.
 - Few variants: a generic for what changes the pipeline, a `[branch]` on a draw-wide value for the rest.
-- The BRDF, lights and their units, and the shading models live once in the shared
-  [shader library](../src/Resources/Shaders/README.md). Every renderer shades with them.
+- The BRDF, lights and their units, and the shading models live once in the shared shader library in
+  `src/Resources/Shaders/`. Every renderer shades with them.
 - Write a technique from its paper and name the paper in a comment. No third-party shader code.
 
 ## Cross platform
@@ -251,7 +260,7 @@ All code runs on Windows, Linux and macOS.
 
 - **Paths.** Build them with `IFileSystem.Combine` and split them with `IFileSystem.GetParent`; never touch separators.
   `Path.GetExtension`, `Path.GetFileName*` and `Path.ChangeExtension` are fine. No drive letters, absolute paths or
-  checks for `..`. An asset path is relative to its root and uses `/`; only Core's `Assets` turns it into an OS path.
+  checks for `..`. An asset path is relative to its root and uses `/`; only `AssetDatabase` turns it into an OS path.
 - **Case.** File names in code, assets, `#include`s, csproj and `.meta` files match the disk exactly. Two files never
   differ only by case.
 - **Disk.** All disk access goes through `IFileSystem`, never `File` or `Directory`; only `Debugging` is exempt. Engine

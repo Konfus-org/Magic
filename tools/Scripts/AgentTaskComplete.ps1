@@ -7,7 +7,7 @@ change can affect needs, then a stamp of the exact state it validated, which a g
 -Change says what the change can affect, and so what must run to show it works (AGENTS.md, Finish). Docs is a change
 no compiler reads as code, such as Markdown, comments and docstrings: the build holds it, as it checks a docstring's
 XML and what it refers to. Code is any change to what runs, a refactor among them, as a rename can break a lookup by
-name that only a run finds: the tests run too, and the samples headless through every one of their domains. Visual is
+name that only a run finds: the tests run too, and the sample project headless. Visual is
 any change that can alter what is drawn: the samples run with a window through every domain instead, which load and
 render as the headless run does, ending in a screenshot of each to open and look at.
 
@@ -19,7 +19,7 @@ checkout finds the stamp its branch's worktree wrote. A stamp keeps its level an
 stamped at the level asked for or a higher one is not validated again, so a run after a rebase that brought in
 nothing ends at once. The script ends with the screenshots' paths, one of each domain: open each and look at it. It
 also points git at the repository's hooks (.githooks) when the clone has no hooks path, so every commit's subject gets
-its type and scope.
+its type.
 
 With -Hook it is a guard instead, for a tool hook that runs it before a command that commits or merges, with the
 hook's input as JSON on stdin. A git commit passes when the checkout's state has a stamp, and a
@@ -85,7 +85,7 @@ function ConvertTo-Native([string] $path) {
 
 if (-not $Hook) {
     $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-    # The repository's hooks, which start a commit's subject with its type and scope. The setting is the clone's, so
+    # The repository's hooks, which start a commit's subject with its type. The setting is the clone's, so
     # every worktree has them once one run set it.
     if (-not (& git -C $root config core.hooksPath)) { & git -C $root config core.hooksPath .githooks }
     # How thoroughly each level validates, and the Validate steps it runs.

@@ -7,8 +7,8 @@ namespace Magic.Serialization;
 
 /// <summary>
 /// The one JSON dialect, for whatever reads a file: camelCase keys matched exactly, enums by their names in snake_case
-/// (<c>"clamp"</c>, <c>"masked"</c>), comments and trailing commas allowed, public fields read as properties are, a
-/// float that is infinite or not a number written and read as <c>"Infinity"</c>, <c>"-Infinity"</c> or <c>"NaN"</c>,
+/// (<c>"clamp"</c>, <c>"masked"</c>), comments and trailing commas allowed, public fields read as properties are,
+/// a property with no setter left out as it is written, a float that is infinite or not a number written and read as <c>"Infinity"</c>, <c>"-Infinity"</c> or <c>"NaN"</c>,
 /// and a key the type does not have, a null where it allows none, or a missing required constructor parameter refused,
 /// so a misspelt or broken file fails loudly. Safe from any thread.
 /// </summary>
@@ -96,6 +96,7 @@ public static class Json
             RespectNullableAnnotations = true,
             RespectRequiredConstructorParameters = true,
             IncludeFields = true,
+            IgnoreReadOnlyProperties = true,
             NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals,
             Converters = { new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower) },
         };

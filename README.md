@@ -1,7 +1,7 @@
 # Magic
 
-Magic is a plugin-driven game engine written in C#. It is being actively developed, [the plan](docs/PLAN.md) says
-where it is going. Today it is the `Magic` program, its log and asserts, and the build rules.
+Magic is a plugin-driven game engine written in C#, in active development. Today it is the `Magic` program, its assets,
+its pipelines and the build rules.
 
 ## Requirements
 
@@ -36,7 +36,7 @@ src/Core/        the engine: the Magic program and everything it is built from
 src/Gems/        the plugins that come with Magic, each built to Gems/<Name>/ beside it
 samples/         the sample projects, which show and test Magic
 tools/           the scripts and the analyzers; nothing here ships
-docs/            the plan, how to contribute and the code standards
+docs/            how to contribute and the code standards
 Build/           build output, not in git
 ```
 

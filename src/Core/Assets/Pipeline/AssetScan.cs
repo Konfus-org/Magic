@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Reflection;
 using System.Text.Json.Nodes;
@@ -12,6 +13,11 @@ namespace Magic.Assets.Pipeline;
 internal static class AssetScan
 {
     /// <summary>
+    /// Whether each struct holds anything a handle could be in, worked out once.
+    /// </summary>
+    private static readonly ConcurrentDictionary<Type, bool> _canHoldHandle = new();
+
+    /// <summary>
     /// The ids of every <see cref="Handle{T}"/> in <paramref name="asset"/>, but none's, each once.
     /// </summary>
     public static ImmutableArray<ulong> FindHandles(object asset)
@@ -21,6 +27,41 @@ internal static class AssetScan
         Visit(asset, found, seen);
 
         return [.. found];
+    }
+
+    private static Type? GetElementType(Type type)
+    {
+        if (type.IsArray)
+            return type.GetElementType();
+
+        foreach (Type contract in type.GetInterfaces())
+        {
+            if (contract.IsGenericType && contract.GetGenericTypeDefinition() == typeof(IEnumerable<>))
+                return contract.GetGenericArguments()[0];
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Whether a value of <paramref name="type"/> can hold a handle: anything that may refer to other objects can.
+    /// </summary>
+    private static bool CanHoldHandle(Type type)
+    {
+        if (type.IsPrimitive || type.IsEnum || type.IsPointer || type == typeof(decimal) || type == typeof(string))
+            return false;
+
+        if (!type.IsValueType || (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Handle<>)))
+            return true;
+
+        return _canHoldHandle.GetOrAdd(
+            type,
+            static found =>
+                Array.Exists(
+                    found.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance),
+                    field => CanHoldHandle(field.FieldType)
+                )
+        );
     }
 
     /// <summary>
@@ -50,6 +91,10 @@ internal static class AssetScan
 
         if (value is IEnumerable items)
         {
+            // An image's pixels or a mesh's vertices can't hold one, and would be boxed one by one to find that out.
+            if (GetElementType(type) is { } element && !CanHoldHandle(element))
+                return;
+
             foreach (object? item in items)
             {
                 Visit(item is DictionaryEntry entry ? entry.Value : item, found, seen);

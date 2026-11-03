@@ -17,6 +17,8 @@ or package reference nothing compiled uses, which the build otherwise refuses.
 - Fixes that would delete, invent or rename code are left to you. The build still reports them.
 - A reference needed by something other than the code, such as a package that only adds build steps, says
   `TreatAsUsed="true"`, and is kept.
+- A project that fails its build holds back those built on it, so a reference only they leave unused is removed on
+  the next run.
 - After it moves statics, check that no static initializer reads a static declared below it, which would still be
   unset.
 

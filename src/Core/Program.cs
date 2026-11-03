@@ -1,13 +1,15 @@
-using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using System.Runtime;
 using Magic.Assets.Pipeline;
 using Magic.Caching;
-using Magic.CommandLine;
 using Magic.Debugging;
+using Magic.Events;
 using Magic.Files;
-using Magic.GemAPI;
-using Magic.Runtime;
+using Magic.Gems;
+using Magic.Pipelines;
+using Magic.Threading;
 using Magic.Utils;
+using Magic.Worlds;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Magic;
@@ -40,9 +42,21 @@ internal static class Program
         // next starts anew from the command line and the commands like it.
         while (true)
         {
+            FileSystem files = new();
+            EventCoordinator events = new();
+            Threads threads = new();
+            PipelineCoordinator pipelines = new(threads);
+            App app = new(files, events, threads, pipelines);
+
+            // Setup required core services
             ServiceCollection services = [];
-            (App app, IFileSystem files, Events events) = RegisterRequiredServices(services);
-            Result ran = Cli.Run(app, files, commandLine);
+            services.AddSingleton(app);
+            services.AddSingleton<IFileSystem>(files);
+            services.AddSingleton(events);
+            services.AddSingleton(threads);
+
+            // Runs initial arguments
+            Result ran = app.Cli.Execute(commandLine);
             if (!ran.Ok)
             {
                 Log.Critical($"Couldn't run the command line: {ran.Error}");
@@ -54,8 +68,27 @@ internal static class Program
             if (app.IsExiting || app.Project is not { } project)
                 return Log.ErrorCount == 0 ? 0 : 1;
 
-            using AssetManager assets = RegisterProjectServices(services, files, project);
-            Result ended = app.Run(services, files, assets, events);
+            // Setup services that require a project
+            Caches caches = new(files, project.Name, files.GetParent(project.Path));
+            using AssetDatabase assets = new(files, pipelines);
+            using World world = new(assets, threads, pipelines);
+            services.AddSingleton(caches);
+            services.AddSingleton(pipelines);
+            services.AddSingleton(assets);
+            services.AddSingleton(world);
+
+            // Find the gems the project lists, which join the services
+            GemRegistry gems = new(services, files, project.Gems);
+            services.AddSingleton(
+                new Assemblies([typeof(App).Assembly, .. gems.Gems.Select(gem => gem.Type.Assembly)])
+            );
+
+            // Never disposed, since its singletons are the gems, which AppEnd unloads.
+            services.MakeReadOnly();
+            IServiceProvider provider = services.BuildServiceProvider();
+
+            // Run the application
+            Result ended = app.Run(provider, gems, assets, caches, world);
             if (!ended.Ok)
             {
                 Log.Critical(ended.Error);
@@ -65,40 +98,5 @@ internal static class Program
             if (app.IsExiting)
                 return 0;
         }
-    }
-
-    /// <summary>
-    /// Makes and registers with <paramref name="services"/> what Magic provides a run before it knows the project, all
-    /// new for it: the app, the file system and the gems' messages.
-    /// </summary>
-    private static (App App, IFileSystem Files, Events Events) RegisterRequiredServices(ServiceCollection services)
-    {
-        App app = new();
-        FileSystem files = new();
-        Events events = new();
-        services.AddSingleton(app);
-        services.AddSingleton<IFileSystem>(files);
-        services.AddSingleton(events);
-
-        return (app, files, events);
-    }
-
-    /// <summary>
-    /// Makes and registers with <paramref name="services"/> what Magic provides a run of <paramref name="project"/>: its
-    /// caches and the assets, which the caller ends with the run.
-    /// </summary>
-    [SuppressMessage(
-        "Reliability",
-        "CA2000:Dispose objects before losing scope",
-        Justification = "The assets go to the caller, which ends them with the run."
-    )]
-    private static AssetManager RegisterProjectServices(ServiceCollection services, IFileSystem files, Project project)
-    {
-        Caches caches = new(files, project.Name, files.GetParent(project.Path));
-        AssetManager assets = new(files, caches);
-        services.AddSingleton(caches);
-        services.AddSingleton(assets);
-
-        return assets;
     }
 }

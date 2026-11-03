@@ -1,0 +1,18 @@
+{
+    "entities": [
+        {
+            "name": "Spawn",
+            "tags": [ "spawn" ],
+            "components": {
+                "Transform": { "position": { "x": 0, "y": 1, "z": 0 } }
+            }
+        },
+        {
+            "name": "Camera",
+            "components": {
+                "Transform": { "position": { "x": 0, "y": 2, "z": -4 } },
+                "Camera": {}
+            }
+        }
+    ]
+}

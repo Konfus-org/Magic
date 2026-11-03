@@ -17,7 +17,7 @@ namespace Magic.Ecs;
 /// <para>
 /// Changing which components an entity has (<see cref="Create()"/>, <see cref="Destroy"/>, <see cref="Remove{T}"/>, or
 /// <see cref="Set{T}"/> of one it lacks) moves it between columns, so it throws during a query's loop or a run: record
-/// it in an <see cref="EntityChanges"/>, and apply that after. Every call but <see cref="IsAlive"/> and
+/// it in an <see cref="EntitiesChangeList"/>, and apply that after. Every call but <see cref="IsAlive"/> and
 /// <see cref="Has{T}"/> throws for an entity that is not alive.
 /// </para>
 /// </summary>
@@ -27,6 +27,12 @@ public interface IEcs
     /// A new entity, with no components.
     /// </summary>
     Entity Create();
+
+    /// <summary>
+    /// A new entity with <paramref name="components"/>, each of its own type: what a file or a save made, known only as
+    /// the program runs. It boxes; a batch <see cref="Create{T1}"/> is for what is built in bulk.
+    /// </summary>
+    Entity Create(ReadOnlySpan<IComponent> components);
 
     /// <summary>
     /// One new entity per element of <paramref name="first"/>, each with the component at its index, written into
@@ -52,10 +58,21 @@ public interface IEcs
     bool IsAlive(Entity entity);
 
     /// <summary>
+    /// Copies of every component the entity has, boxed.
+    /// </summary>
+    IComponent[] GetComponents(Entity entity);
+
+    /// <summary>
     /// Gives the entity <paramref name="component"/>, or overwrites the one it has.
     /// </summary>
     void Set<T>(Entity entity, in T component)
         where T : unmanaged, IComponent;
+
+    /// <summary>
+    /// Gives the entity each of <paramref name="components"/>, each of its own type, or overwrites the one it has. It
+    /// boxes, as making one from them does.
+    /// </summary>
+    void Set(Entity entity, ReadOnlySpan<IComponent> components);
 
     /// <summary>
     /// The entity's component by reference, so a write goes straight into storage. Good until the entity's components

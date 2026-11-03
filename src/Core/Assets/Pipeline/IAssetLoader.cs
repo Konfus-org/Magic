@@ -5,7 +5,7 @@ namespace Magic.Assets.Pipeline;
 
 /// <summary>
 /// Reads the files of one asset type: an importer, turning a file format on disk into what the engine works with. A
-/// gem provides one for its format by implementing it; the host hands it to <see cref="AssetManager"/> as the gem is
+/// gem provides one for its format by implementing it; the host hands it to <see cref="AssetDatabase"/> as the gem is
 /// made, and takes it back as the gem ends. One loader reads a type. A type marked <see cref="AssetFormatAttribute"/> is read
 /// by Core itself. A loader that is also an <see cref="Caching.ICache{T}"/> has what it loads cached by the asset's id and
 /// version, and isn't asked again until the file or its <c>.meta</c> changes.
@@ -22,7 +22,7 @@ public interface IAssetLoader<T>
     /// <summary>
     /// The asset <paramref name="file"/> holds, or why it is not one. What it is made from, such as the textures a
     /// font's atlas or the prefabs a prefab places, it loads with
-    /// <see cref="AssetManager.LoadAsync{T}(Handle{T}, ulong, IProgress{LoadProgress}?, CancellationToken)"/>, naming
+    /// <see cref="AssetDatabase.LoadAsync{T}(Handle{T}, ulong, IProgress{LoadProgress}?, CancellationToken)"/>, naming
     /// <paramref name="file"/>'s id as the dependent, so the asset is made again when one of them changes. On a worker,
     /// for several files at once.
     /// </summary>
