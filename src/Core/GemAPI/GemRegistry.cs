@@ -216,7 +216,9 @@ internal sealed class GemRegistry
 
         try
         {
-            return Result.Success(new GemLoadContext(path, files).LoadFromAssemblyPath(path));
+            Result<Assembly> loaded = new GemLoadContext(path, files).LoadFromBytes(path);
+
+            return loaded.Ok ? loaded : Result.Failure($"Gem {name} could not be loaded from {path}: {loaded.Error}");
         }
         catch (Exception ex) when (ex is BadImageFormatException or FileLoadException or IOException)
         {

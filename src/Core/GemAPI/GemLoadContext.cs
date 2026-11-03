@@ -12,8 +12,9 @@ namespace Magic.GemAPI;
 /// Where one gem's assemblies load: the gem and its NuGet and native dependencies, from its folder. Magic and the
 /// framework come from the host, so every gem shares one <see cref="IGem"/>, and two gems can carry different versions
 /// of one package. A native library is found through the gem's dependency file, else under its
-/// <c>runtimes/&lt;rid&gt;/native/</c>. It is collectible: it unloads once nothing refers to the gem's types, or
-/// once <see cref="AssemblyLoadContext.Unload"/> is called, and its assemblies are freed after that.
+/// <c>runtimes/&lt;rid&gt;/native/</c>. Managed assemblies are read into memory, so a build can replace their files while
+/// the gem runs. It is collectible: it unloads once nothing refers to the gem's types, or once
+/// <see cref="AssemblyLoadContext.Unload"/> is called, and its assemblies are freed after that.
 /// </summary>
 internal sealed class GemLoadContext : AssemblyLoadContext
 {
@@ -39,8 +40,39 @@ internal sealed class GemLoadContext : AssemblyLoadContext
         Unloading += LogUnloaded;
     }
 
-    protected override Assembly? Load(AssemblyName assemblyName) =>
-        _resolver.ResolveAssemblyToPath(assemblyName) is { } path ? LoadFromAssemblyPath(path) : null;
+    /// <summary>
+    /// The assembly at <paramref name="path"/>, with its symbols when they are beside it, read into memory; or why its file
+    /// could not be read.
+    /// </summary>
+    internal Result<Assembly> LoadFromBytes(string path)
+    {
+        Result<byte[]> assembly = _files.ReadBytes(path);
+        if (!assembly.Ok)
+            return Result.Failure(assembly.Error);
+
+        using MemoryStream image = new(assembly.Value);
+        Result<byte[]> symbols = _files.ReadBytes(Path.ChangeExtension(path, ".pdb"));
+        if (!symbols.Ok)
+            return Result.Success(LoadFromStream(image));
+
+        using MemoryStream pdb = new(symbols.Value);
+
+        return Result.Success(LoadFromStream(image, pdb));
+    }
+
+    protected override Assembly? Load(AssemblyName assemblyName)
+    {
+        if (_resolver.ResolveAssemblyToPath(assemblyName) is not { } path)
+            return null;
+
+        Result<Assembly> loaded = LoadFromBytes(path);
+        if (loaded.Ok)
+            return loaded.Value;
+
+        Log.Error($"{path} could not be loaded: {loaded.Error}");
+
+        return null;
+    }
 
     protected override nint LoadUnmanagedDll(string unmanagedDllName)
     {
