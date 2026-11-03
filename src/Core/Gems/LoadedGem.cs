@@ -10,16 +10,12 @@ namespace Magic.Gems;
 /// </summary>
 internal sealed class LoadedGem : IDisposable
 {
-    /// <summary>
-    /// The gem's load context, held so it lives as long as the gem is in use: nothing else keeps it alive, and once
-    /// collected it would start unloading the gem while it still runs.
-    /// </summary>
-    private readonly AssemblyLoadContext? _context;
+    private readonly AssemblyLoadContext _context;
     private bool _isDisposed;
 
     internal LoadedGem(IGem gem, GemInfo info)
     {
-        _context = AssemblyLoadContext.GetLoadContext(gem.GetType().Assembly);
+        _context = info.Context;
         Gem = gem;
         Name = info.Name;
         Version = info.Version;
@@ -53,6 +49,6 @@ internal sealed class LoadedGem : IDisposable
         _isDisposed = true;
         Subscriptions.Dispose();
         (Gem as IDisposable)?.Dispose();
-        _context?.Unload();
+        _context.Unload();
     }
 }
