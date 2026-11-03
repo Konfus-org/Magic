@@ -11,6 +11,7 @@
     <Project Path="Gems/Forest/Forest.csproj" />
     <Project Path="Gems/GpuChecks/GpuChecks.csproj" />
     <Project Path="Gems/Hello/Hello.csproj" />
+    <Project Path="Gems/Lights/Lights.csproj" />
     <Project Path="Gems/PrefabLoader/PrefabLoader.csproj" />
     <Project Path="Gems/SdlPlatform/SdlPlatform.csproj" />
     <Project Path="Gems/SlangShaders/SlangShaders.csproj" />

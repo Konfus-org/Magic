@@ -1,0 +1,36 @@
+// What the lighting passes share beyond the frame: the sun above the air, the viewer's height, the air, the light
+// table and its froxel lists, the sky's tables and the fog volumes, C#'s LightingConstants, in the buffer whose heap
+// id is the pass header's z.
+module "Scene/Lighting";
+
+import Core.Heap;
+import Core.Pass;
+import Fog.Froxels;
+
+public struct LightingConstants
+{
+    // Colour times intensity, in lux, before the air.
+    public float4 sunIlluminance;
+    // Metres above the ground in x.
+    public float4 cameraAltitude;
+    public FogConstants fog;
+    public uint lights;
+    public uint lightCount;
+    public uint froxelLists;
+    public uint transmittanceLut;
+    public uint multiScatteringLut;
+    public uint skyViewLut;
+    public uint lutSampler;
+    public uint fogScattering;
+    public uint fogIntegrated;
+    public uint fogSampler;
+    public uint hdr;
+    public uint hasSky;
+    // What the tonemap scales the HDR picture by.
+    public float exposure;
+    public float padding0;
+    public float padding1;
+    public float padding2;
+}
+
+public LightingConstants GetLighting() { return LoadConstants<LightingConstants>(GetPassHeader().z); }

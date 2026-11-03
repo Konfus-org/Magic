@@ -52,6 +52,11 @@ public sealed class WorldRendererGem(
     private const float ErrorThresholdPixels = 1;
     private const float SkyBrightness = 0.3f;
 
+    /// <summary>
+    /// What a surface facing the sun lands at in the picture before the tonemap, with no meter yet.
+    /// </summary>
+    private const float ExposureAtSun = 4;
+
     private readonly RenderGraph _graph = new(gpu);
     private readonly RenderWorld _world = new();
     private readonly GeometryPools _pools = new(gpu, meshes, assets, threads);
@@ -62,6 +67,7 @@ public sealed class WorldRendererGem(
     private readonly InstanceTable _instances = new(gpu);
     private readonly CaptureTable _captures = new(gpu);
     private readonly SunShadows _shadows = new(gpu);
+    private readonly Lighting _lighting = new(gpu);
     private readonly GpuBuffer[] _cellConstants = new GpuBuffer[CaptureCellCount];
     private MaterialTable? _materials;
     private GpuBuffer _constants;
@@ -88,6 +94,7 @@ public sealed class WorldRendererGem(
         _instances.Dispose();
         _captures.Dispose();
         _shadows.Dispose();
+        _lighting.Dispose();
         foreach (
             GpuBuffer buffer in (ReadOnlySpan<GpuBuffer>)
                 [
@@ -140,6 +147,7 @@ public sealed class WorldRendererGem(
                     _instances.Create,
                     _captures.Create,
                     _shadows.Create,
+                    _lighting.Create,
                     CreateBuffers,
                     () => _cellTargets.Resize(GpuCapture.CellSize, GpuCapture.CellSize, _graph),
                 ]
@@ -197,11 +205,83 @@ public sealed class WorldRendererGem(
             {
                 DirectionalLight light = chunk.Second[i];
                 Vector3 towards = -Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, chunk.First[i].Rotation));
-                float exposure = light.Intensity > 0 ? 1 / light.Intensity : 0;
-                Vector3 radiance =
-                    new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity * exposure;
-                _world.Sun = new RenderSun(towards, radiance);
+                Vector3 illuminance = new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity;
+                float exposure = light.Intensity > 0 ? ExposureAtSun / light.Intensity : 1;
+                _world.Sun = new RenderSun(towards, illuminance, exposure);
             }
+        }
+
+        foreach (EcsChunk<Transform, PointLight> chunk in ecs.Query<Transform, PointLight>())
+        {
+            for (int i = 0; i < chunk.Entities.Length; i++)
+            {
+                PointLight light = chunk.Second[i];
+                _world.Lights.Add(
+                    new GpuLight
+                    {
+                        Position = chunk.First[i].Position,
+                        Range = light.Reach,
+                        Direction = Vector3.UnitZ,
+                        Radius = light.Radius,
+                        Radiance = new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity,
+                        Type = GpuLight.Point,
+                    }
+                );
+            }
+        }
+
+        foreach (EcsChunk<Transform, SpotLight> chunk in ecs.Query<Transform, SpotLight>())
+        {
+            for (int i = 0; i < chunk.Entities.Length; i++)
+            {
+                SpotLight light = chunk.Second[i];
+                _world.Lights.Add(
+                    new GpuLight
+                    {
+                        Position = chunk.First[i].Position,
+                        Range = light.Reach,
+                        Direction = Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, chunk.First[i].Rotation)),
+                        Radius = light.Radius,
+                        Radiance = new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity,
+                        Type = GpuLight.Spot,
+                        CosOuter = MathF.Cos(light.OuterAngle * MathF.PI / 180),
+                        CosInner = MathF.Cos(light.FadeAngle * MathF.PI / 180),
+                    }
+                );
+            }
+        }
+
+        foreach (EcsChunk<Transform, RectLight> chunk in ecs.Query<Transform, RectLight>())
+        {
+            for (int i = 0; i < chunk.Entities.Length; i++)
+            {
+                RectLight light = chunk.Second[i];
+                Transform at = chunk.First[i];
+                _world.Lights.Add(
+                    new GpuLight
+                    {
+                        Position = at.Position,
+                        Range = light.Reach,
+                        Direction = Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, at.Rotation)),
+                        Radius = 0.01f,
+                        Radiance = new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity,
+                        Type = GpuLight.Rect,
+                        Width = light.Width * Math.Abs(at.Scale.X),
+                        Height = light.Height * Math.Abs(at.Scale.Y),
+                    }
+                );
+            }
+        }
+
+        foreach (EcsChunk<Fog> chunk in ecs.Query<Fog>())
+        {
+            if (chunk.Entities.Length > 0 && _world.Fog is null)
+                _world.Fog = chunk.First[0];
+        }
+
+        foreach (EcsChunk<Sky> chunk in ecs.Query<Sky>())
+        {
+            _world.HasSky |= chunk.Entities.Length > 0;
         }
 
         return ValueTask.FromResult(state);
@@ -248,7 +328,7 @@ public sealed class WorldRendererGem(
 
         // The frame's tables.
         RenderCamera camera = _world.Camera ?? new RenderCamera(new Transform(), 60, 0.05f);
-        RenderSun sun = _world.Sun ?? new RenderSun(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One);
+        RenderSun sun = _world.Sun ?? new RenderSun(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One, 1);
         int instanceCount = UpdateInstances();
         _graph.BeginTransferPass("Upload frame");
         _captures.Upload(_graph);
@@ -263,7 +343,9 @@ public sealed class WorldRendererGem(
             _instances.Changes
         );
         _instances.ClearChanges();
+        _lighting.Prepare(_graph, _world, camera, sun, _targets);
         _graph.EndPass();
+        _lighting.RecordTables(_graph, _pipelines, _constants, _shadows);
 
         RenderView view = new(_constants, _instances.Buffer, instanceCount, _targets);
         RecordCull(view, "Cull clusters", mode: 0);
@@ -280,7 +362,7 @@ public sealed class WorldRendererGem(
         RecordHzb();
         _shadows.Record(_graph, _pipelines, _constants, _instances.Buffer, instanceCount, _pools, _targets);
         RecordResolve(view, "Resolve materials");
-        RecordShade();
+        _lighting.RecordShading(_graph, _pipelines, _constants, _shadows, _targets);
 
         GpuTexture target = gpu.WindowTarget;
         if (!target.IsNone)
@@ -823,23 +905,6 @@ public sealed class WorldRendererGem(
         _graph.Recorder.BindPipeline(_pipelines.ResolveStandard);
         _graph.Recorder.PushConstants(new GpuConstants(view.Constants.Id));
         _graph.Recorder.Dispatch(Groups(view.Targets.Width), Groups(view.Targets.Height));
-        _graph.EndPass();
-    }
-
-    private void RecordShade()
-    {
-        _graph.BeginComputePass("Shade");
-        _graph.Use(_constants, GpuAccess.ShaderRead);
-        _graph.Use(_targets.Visibility, GpuAccess.ShaderRead);
-        _graph.Use(_targets.Depth, GpuAccess.ShaderRead);
-        _graph.Use(_targets.GBufferNormal, GpuAccess.ShaderRead);
-        _graph.Use(_targets.GBufferBase, GpuAccess.ShaderRead);
-        _graph.Use(_targets.GBufferSurface, GpuAccess.ShaderRead);
-        _graph.Use(_targets.Output, GpuAccess.ShaderWrite);
-        _shadows.UseForSampling(_graph);
-        _graph.Recorder.BindPipeline(_pipelines.ShadeFlat);
-        _graph.Recorder.PushConstants(new GpuConstants(_constants.Id, _shadows.Constants.Id));
-        _graph.Recorder.Dispatch(Groups(_targets.Width), Groups(_targets.Height));
         _graph.EndPass();
     }
 

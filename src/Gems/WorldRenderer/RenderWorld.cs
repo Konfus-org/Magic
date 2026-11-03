@@ -15,15 +15,24 @@ internal sealed class RenderWorld
 {
     public List<RenderInstance> Instances { get; } = [];
 
+    public List<GpuLight> Lights { get; } = [];
+
     public RenderCamera? Camera { get; set; }
 
     public RenderSun? Sun { get; set; }
 
+    public Fog? Fog { get; set; }
+
+    public bool HasSky { get; set; }
+
     public void Clear()
     {
         Instances.Clear();
+        Lights.Clear();
         Camera = null;
         Sun = null;
+        Fog = null;
+        HasSky = false;
     }
 }
 
@@ -40,5 +49,6 @@ internal readonly record struct RenderInstance(
 internal readonly record struct RenderCamera(Transform Transform, float FieldOfView, float Near);
 
 /// <param name="Direction">Towards the sun, unit.</param>
-/// <param name="Radiance">The sun's colour at the output's exposure.</param>
-internal readonly record struct RenderSun(Vector3 Direction, Vector3 Radiance);
+/// <param name="Radiance">The sun's colour times its intensity, in lux, above the air.</param>
+/// <param name="Exposure">What the tonemap scales the picture by, so the sun's light lands near 1.</param>
+internal readonly record struct RenderSun(Vector3 Direction, Vector3 Radiance, float Exposure);

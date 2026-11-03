@@ -15,6 +15,12 @@
             }
         },
         {
+            "name": "Sky",
+            "components": {
+                "Sky": { "material": { "id": 4569236087865836549 } }
+            }
+        },
+        {
             "name": "Sun",
             "components": {
                 "Transform": { "rotation": { "x": 0.41554, "y": 0.2661, "z": -0.12854, "w": 0.86023 } },

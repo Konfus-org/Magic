@@ -24,5 +24,10 @@ model reader, the mesh preprocessor and the texture reader.
   twice the last's. The depth buffer marks the pages its pixels need at the level their footprint picks, pages come
   from a pool when first marked and go back when no longer marked, an instance that moves invalidates the pages under
   it, and only invalid pages are drawn, by the cluster path into one pass over the pool; a still scene draws none.
+- Every point, spot and rect light is binned into the froxels of the view it reaches, and a pixel loops over its
+  froxel's lights alone, in physical units: lux for the sun, candela for the rest, with the exposure set so a surface
+  facing the sun lands near white. The sky entity's material names the sky, which draws the sky, colours the sun
+  through the air and lights the ground from above; the fog entity fills the froxels with air the sun, through its
+  pages, and the lights scatter towards the camera. The picture is lit in HDR and tonemapped to the output.
 - The passes are the `Shaders/WorldRenderer/` modules in the gem's `Resources`; they build on the shader library
   (`src/Resources/Shaders/README.md`).

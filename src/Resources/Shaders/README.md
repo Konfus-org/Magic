@@ -13,6 +13,10 @@ compiler loads a module and its imports from the assets, so a game's `Shaders/` 
 - `Material/` is the material contract, `IMaterial`, and the materials every project has: the standard one, the one
   a broken asset is drawn with, and what an imposter's pixel is made of.
 - `Shadow/` is the sun's virtual shadow map: its tables, how a page is found, and how a receiver samples it.
+- `Light/` is what a local light gives a point: a point, spot or rect light's direction and irradiance there.
+- `Sky/` is the sky contract, `ISky`, and the Earth's atmosphere, which gives the sky, the sun's colour through the
+  air and the sky's light on the ground from three tables made each frame.
+- `Fog/` is the air as a grid of froxels over the view: what each scatters and how the grid is read.
 - A contract between shaders is an interface, `I` plus a noun, and a pass that works with any implementation is
   generic over it. A game adds a material, a sky, a light or a post effect by implementing the contract in a module of
   its own and naming it in the asset that uses it.

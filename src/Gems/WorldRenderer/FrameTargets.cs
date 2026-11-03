@@ -29,6 +29,8 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
 
     public GpuTexture GBufferSurface { get; private set; }
 
+    public GpuTexture Hdr { get; private set; }
+
     public GpuTexture Output { get; private set; }
 
     public GpuBuffer Readback { get; private set; }
@@ -75,6 +77,11 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
             GpuFormat.R8G8B8A8Unorm,
             TextureUsages.Storage | TextureUsages.Sampled
         );
+        Result<GpuTexture> hdr = Make(
+            "HDR",
+            GpuFormat.R16G16B16A16Sfloat,
+            TextureUsages.Storage | TextureUsages.Sampled
+        );
         Result<GpuTexture> output = Make(
             "Output",
             GpuFormat.R8G8B8A8Unorm,
@@ -90,7 +97,7 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
         );
         foreach (
             Result<GpuTexture> made in (ReadOnlySpan<Result<GpuTexture>>)
-                [visibility, depth, hzb, normal, baseColor, surface, output]
+                [visibility, depth, hzb, normal, baseColor, surface, hdr, output]
         )
         {
             if (!made.Ok)
@@ -106,6 +113,7 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
         GBufferNormal = normal.Value;
         GBufferBase = baseColor.Value;
         GBufferSurface = surface.Value;
+        Hdr = hdr.Value;
         Output = output.Value;
         Readback = readback.Value;
 
@@ -129,7 +137,7 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
     {
         foreach (
             GpuTexture texture in (ReadOnlySpan<GpuTexture>)
-                [Visibility, Depth, Hzb, GBufferNormal, GBufferBase, GBufferSurface, Output]
+                [Visibility, Depth, Hzb, GBufferNormal, GBufferBase, GBufferSurface, Hdr, Output]
         )
         {
             if (texture.IsNone)
@@ -151,6 +159,7 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
         GBufferNormal = GpuTexture.None;
         GBufferBase = GpuTexture.None;
         GBufferSurface = GpuTexture.None;
+        Hdr = GpuTexture.None;
         Output = GpuTexture.None;
         Readback = GpuBuffer.None;
         Width = 0;

@@ -16,6 +16,7 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
 {
     private const string Folder = "Shaders/WorldRenderer/";
     private const string StandardMaterial = "Shaders/Material/Standard.slang";
+    private const string AtmosphereSky = "Shaders/Sky/Atmosphere.slang";
 
     public GpuPipeline CullClusters { get; private set; }
 
@@ -25,7 +26,21 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
 
     public GpuPipeline ResolveStandard { get; private set; }
 
-    public GpuPipeline ShadeFlat { get; private set; }
+    public GpuPipeline SkyTransmittance { get; private set; }
+
+    public GpuPipeline SkyMultiScattering { get; private set; }
+
+    public GpuPipeline SkyView { get; private set; }
+
+    public GpuPipeline BinLights { get; private set; }
+
+    public GpuPipeline FogInject { get; private set; }
+
+    public GpuPipeline FogIntegrate { get; private set; }
+
+    public GpuPipeline ShadeLighting { get; private set; }
+
+    public GpuPipeline Tonemap { get; private set; }
 
     public GpuPipeline CaptureCell { get; private set; }
 
@@ -58,8 +73,15 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
                     DrawVisibility,
                     BuildHzb,
                     ResolveStandard,
-                    ShadeFlat,
                     CaptureCell,
+                    SkyTransmittance,
+                    SkyMultiScattering,
+                    SkyView,
+                    BinLights,
+                    FogInject,
+                    FogIntegrate,
+                    ShadeLighting,
+                    Tonemap,
                     ShadowMarkPages,
                     ShadowInvalidatePages,
                     ShadowFreePages,
@@ -85,6 +107,10 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
         if (standard == Handle<Shader>.None)
             return Result.Failure($"there is no {StandardMaterial}.");
 
+        Handle<Shader> atmosphere = assets.Find<Shader>(AtmosphereSky);
+        if (atmosphere == Handle<Shader>.None)
+            return Result.Failure($"there is no {AtmosphereSky}.");
+
         ImmutableArray<ShaderEntry> entries =
         [
             Entry("CullClusters", "CullClusters", ShaderStage.Compute),
@@ -95,7 +121,7 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             {
                 TypeArguments = [new ShaderTypeArgument(standard, "Standard")],
             },
-            Entry("ShadeFlat", "ShadeFlat", ShaderStage.Compute),
+            Entry("Tonemap", "Tonemap", ShaderStage.Compute),
             Entry("CaptureCell", "CaptureCell", ShaderStage.Compute),
             Entry("ShadowPages", "ShadowMarkPages", ShaderStage.Compute),
             Entry("ShadowPages", "ShadowInvalidatePages", ShaderStage.Compute),
@@ -106,6 +132,19 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             Entry("ShadowCull", "ShadowCull", ShaderStage.Compute),
             Entry("DrawShadow", "DrawShadowVertex", ShaderStage.Vertex),
             Entry("DrawShadow", "DrawShadowPixel", ShaderStage.Pixel),
+            Entry("SkyLuts", "SkyTransmittance", ShaderStage.Compute),
+            Entry("SkyLuts", "SkyMultiScattering", ShaderStage.Compute),
+            Entry("SkyLuts", "SkyView", ShaderStage.Compute),
+            Entry("BinLights", "BinLights", ShaderStage.Compute),
+            Entry("Fog", "FogInject", ShaderStage.Compute) with
+            {
+                TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere")],
+            },
+            Entry("Fog", "FogIntegrate", ShaderStage.Compute),
+            Entry("ShadeLighting", "ShadeLighting", ShaderStage.Compute) with
+            {
+                TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere")],
+            },
         ];
         foreach (ShaderEntry entry in entries)
         {
@@ -171,11 +210,11 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             return Result.Failure(resolve.Error);
 
         ResolveStandard = resolve.Value;
-        Result<GpuPipeline> shade = Compute(compiled[5], "Shade flat");
-        if (!shade.Ok)
-            return Result.Failure(shade.Error);
+        Result<GpuPipeline> tonemap = Compute(compiled[5], "Tonemap");
+        if (!tonemap.Ok)
+            return Result.Failure(tonemap.Error);
 
-        ShadeFlat = shade.Value;
+        Tonemap = tonemap.Value;
         Result<GpuPipeline> capture = Compute(compiled[6], "Capture cell");
         if (!capture.Ok)
             return Result.Failure(capture.Error);
@@ -233,6 +272,35 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             return Result.Failure($"the shadow pipeline was not built: {drawShadow.Error}");
 
         DrawShadow = drawShadow.Value;
+        (string Name, int Index)[] lightingEntries =
+        [
+            ("Sky transmittance", 16),
+            ("Sky multi-scattering", 17),
+            ("Sky view", 18),
+            ("Bin lights", 19),
+            ("Fog inject", 20),
+            ("Fog integrate", 21),
+            ("Shade", 22),
+        ];
+        GpuPipeline[] lightingPipelines = new GpuPipeline[lightingEntries.Length];
+        for (int i = 0; i < lightingEntries.Length; i++)
+        {
+            Result<GpuPipeline> made = Compute(compiled[lightingEntries[i].Index], lightingEntries[i].Name);
+            if (!made.Ok)
+                return Result.Failure(made.Error);
+
+            lightingPipelines[i] = made.Value;
+        }
+
+        (SkyTransmittance, SkyMultiScattering, SkyView, BinLights, FogInject, FogIntegrate, ShadeLighting) = (
+            lightingPipelines[0],
+            lightingPipelines[1],
+            lightingPipelines[2],
+            lightingPipelines[3],
+            lightingPipelines[4],
+            lightingPipelines[5],
+            lightingPipelines[6]
+        );
         TileSize = compiled[5].GroupSizeX;
         bool areTiled =
             compiled[3].GroupSizeX == TileSize
@@ -240,6 +308,7 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             && compiled[6].GroupSizeX == TileSize
             && compiled[7].GroupSizeX == TileSize
             && compiled[11].GroupSizeX == TileSize
+            && compiled[22].GroupSizeX == TileSize
             && TileSize > 0;
         if (!areTiled || CullThreads == 0)
             return Result.Failure("the compute entries reported no group size, or the full-screen ones differ.");

@@ -22,3 +22,10 @@ public T LoadConstants<T>()
     BufferRef buffer = { pass.x };
     return buffer.Load<T>(0u);
 }
+
+// A constants struct C# wrote at the start of the buffer with that heap id, as a header's other words name one.
+public T LoadConstants<T>(uint id)
+{
+    BufferRef buffer = { id };
+    return buffer.Load<T>(0u);
+}

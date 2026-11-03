@@ -1,1 +1,1 @@
-{ "name": "HelloWorld", "gems": ["SdlPlatform", "VulkanGraphics", "SlangShaders", "GpuChecks", "ArchEcs", "AssimpModels", "MeshPreprocessor", "Textures", "WorldRenderer", "Hello", "Forest", "PrefabLoader", "DomainLoader", "WorldLoader"], "entryPoint": { "id": 100001 } }
+{ "name": "HelloWorld", "gems": ["SdlPlatform", "VulkanGraphics", "SlangShaders", "GpuChecks", "ArchEcs", "AssimpModels", "MeshPreprocessor", "Textures", "WorldRenderer", "Hello", "Forest", "Lights", "PrefabLoader", "DomainLoader", "WorldLoader"], "entryPoint": { "id": 100001 } }

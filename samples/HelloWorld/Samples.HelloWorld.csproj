@@ -99,5 +99,11 @@
       Private="false"
       SkipGetTargetFrameworkProperties="true"
     />
+    <ProjectReference
+      Include="$(MagicRoot)src/Gems/Lights/Lights.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      SkipGetTargetFrameworkProperties="true"
+    />
   </ItemGroup>
 </Project>
