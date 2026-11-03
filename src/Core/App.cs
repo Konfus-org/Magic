@@ -121,8 +121,9 @@ public sealed class App
     /// <summary>
     /// Runs the app's project with what the host provides: its root pipelines join, then <see cref="AppStart"/> makes the
     /// gems, <see cref="Startup"/> takes it to the first frame, <see cref="AppLoop"/> runs the frames until the commands ask
-    /// to exit or for another project or mode, or a gem's code changes, <see cref="Shutdown"/> follows the last frame, and
-    /// <see cref="AppEnd"/> ends it. Fails when no project is open, and at the first error under --fail-on-error.
+    /// to exit or for another project or mode, or a gem's code changes, <see cref="RunEnding"/> and <see cref="Shutdown"/>
+    /// follow the last frame, and <see cref="AppEnd"/> ends it. Fails when no project is open, and at the first error under
+    /// --fail-on-error.
     /// </summary>
     internal Result Run(IServiceProvider provider, GemRegistry gems, AssetDatabase assets, Caches caches, World world)
     {
@@ -132,8 +133,8 @@ public sealed class App
         _pipelines.Join(new ServicePumpPipeline(_threads, Cli));
         _pipelines.Join(new AssetPipeline(assets, _files, caches, _pipelines));
         _pipelines.Join(new GemPipeline(gems, provider, this, assets, world, _pipelines));
-        _pipelines.Join(new CodePipeline(this, _files));
-        _pipelines.Join(new WorldPipeline(world, assets, _threads, project, _pipelines));
+        _pipelines.Join(new CodePipeline(this, world, caches, _files));
+        _pipelines.Join(new WorldPipeline(world, assets, _threads, project, CodePipeline.Kept, _pipelines));
         _pipelines.Join(new NextFramePipeline(this, world, _events, _pipelines));
 
         Log.Info($"Running {project.Name} in {(IsHeadless ? "headless" : "GUI")} mode.");
@@ -155,6 +156,7 @@ public sealed class App
         );
         _pipelines.Get<AppLoop>().Run(default, stopping.Token);
         stopping.Cancel();
+        PumpUntil(_pipelines.Get<RunEnding>().RunOnMainAsync(default, null, default).AsTask(), stopping);
         PumpUntil(
             _pipelines.Get<Shutdown>().RunOnMainInReverseAsync(new Shutdown(IsExiting), null, default).AsTask(),
             stopping

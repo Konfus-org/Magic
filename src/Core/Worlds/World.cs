@@ -86,6 +86,11 @@ public sealed class World : IEcs, IDisposable
         set => _ecs = value;
     }
 
+    /// <summary>
+    /// The gem that writes saved worlds, from when it is made; none when no gem the project lists does.
+    /// </summary>
+    internal IWorldStateWriter? Writer { get; set; }
+
     public void Dispose() => _changing.Dispose();
 
     /// <summary>
