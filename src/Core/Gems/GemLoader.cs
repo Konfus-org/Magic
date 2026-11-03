@@ -60,7 +60,8 @@ internal static class GemLoader
 
             LoadedGem setUp = new(made, gem);
             loaded.Add(setUp);
-            if (made is IWindow window)
+            // The gem is an IWindow in any mode, but a headless run has no window.
+            if (made is IWindow window && !app.IsHeadless)
             {
                 app.Window = window;
 

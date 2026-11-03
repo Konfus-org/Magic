@@ -139,12 +139,16 @@ public sealed class App
         Log.Info($"Running {project.Name} in {(IsHeadless ? "headless" : "GUI")} mode.");
         IsRunning = true;
 
-        // TODO(KONFUS): pump the GUI like the terminal; until there is one, a run with a window exits at once.
-        if (!IsHeadless)
-            Exit();
-
         using CancellationTokenSource stopping = new();
         _pipelines.Get<AppStart>().Run(new AppStart(project), stopping.Token);
+        if (!IsHeadless && Window is null)
+        {
+            Log.Warn(
+                $"{project.Name} has no gem that provides a window, so the run is exiting. List one, or use --headless."
+            );
+            Exit();
+        }
+
         PumpUntil(
             _pipelines.Get<Startup>().RunOnMainAsync(new Startup(project), null, stopping.Token).AsTask(),
             stopping
