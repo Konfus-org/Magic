@@ -1,7 +1,7 @@
 using Magic.CommandLine;
 using Magic.Threading;
 
-namespace Magic.Pipelines;
+namespace Magic.Pipes;
 
 /// <summary>
 /// Keeps the services going, before each frame and while none run: runs what was posted to the main thread, and the awaited

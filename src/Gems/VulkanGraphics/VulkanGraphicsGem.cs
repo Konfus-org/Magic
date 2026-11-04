@@ -2,7 +2,7 @@ using Magic;
 using Magic.Debugging;
 using Magic.Gems;
 using Magic.Gpu;
-using Magic.Pipelines;
+using Magic.Pipes;
 using Magic.Platform;
 using Magic.Threading;
 using Magic.Utils;

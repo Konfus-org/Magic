@@ -2,7 +2,7 @@ using Magic.Assets;
 using Magic.Projects;
 using Magic.Worlds;
 
-namespace Magic.Pipelines;
+namespace Magic.Pipes;
 
 /// <summary>
 /// First of a run, before the first frame: the assets indexed, the gems made, the world filling. <paramref name="KeptWorld"/>

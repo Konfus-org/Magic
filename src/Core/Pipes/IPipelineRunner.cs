@@ -1,4 +1,4 @@
-namespace Magic.Pipelines;
+namespace Magic.Pipes;
 
 /// <summary>
 /// The pipelines the coordinator holds as one kind, whatever their state: type erasure over

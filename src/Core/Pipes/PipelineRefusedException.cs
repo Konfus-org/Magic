@@ -1,4 +1,4 @@
-namespace Magic.Pipelines;
+namespace Magic.Pipes;
 
 /// <summary>
 /// A pipeline can't take this run because of what the caller is doing, not because anything is wrong with it: thrown from

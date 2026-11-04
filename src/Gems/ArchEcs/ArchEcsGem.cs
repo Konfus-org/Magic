@@ -7,6 +7,7 @@ using Arch.Core;
 using Magic.Ecs;
 using Magic.Gems;
 using Magic.Pipelines;
+using Magic.Pipes;
 using Schedulers;
 using ArchEntity = Arch.Core.Entity;
 using ArchWorld = Arch.Core.World;

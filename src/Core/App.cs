@@ -10,6 +10,7 @@ using Magic.Events;
 using Magic.Files;
 using Magic.Gems;
 using Magic.Pipelines;
+using Magic.Pipes;
 using Magic.Platform;
 using Magic.Projects;
 using Magic.Threading;
@@ -164,7 +165,7 @@ public sealed class App
         Handle<WorldState> kept = _keptWorld is null ? Handle<WorldState>.None : _keptWorld.GetAwaiter().GetResult();
         Threads threads = new();
         EventCoordinator events = new();
-        PipelineCoordinator pipelines = new(threads);
+        Pipelines.Pipelines pipelines = new(threads);
         Caches caches = new(_files, project.Name, _files.GetParent(project.Path));
         using AssetDatabase assets = new(_files, pipelines, caches, project);
         using World world = new(assets, threads, pipelines);
@@ -181,6 +182,8 @@ public sealed class App
         services.AddSingleton(caches);
         services.AddSingleton(assets);
         services.AddSingleton(world);
+
+        // TODO(Konfus): stand up services then tell registry to Register.
         using GemRegistry registry = new(services, _files, assets, project.Gems);
         services.AddSingleton(
             new Assemblies([typeof(App).Assembly, .. registry.Gems.Select(gem => gem.Type.Assembly)])
@@ -249,7 +252,7 @@ public sealed class App
     private void RunFrames(
         World world,
         EventCoordinator events,
-        PipelineCoordinator pipelines,
+        Pipelines.Pipelines pipelines,
         CancellationToken cancel
     )
     {

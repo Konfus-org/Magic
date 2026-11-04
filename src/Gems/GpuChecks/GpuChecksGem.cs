@@ -4,7 +4,7 @@ using Magic.Assets.Types;
 using Magic.Debugging;
 using Magic.Gems;
 using Magic.Gpu;
-using Magic.Pipelines;
+using Magic.Pipes;
 using Magic.Shaders;
 using Magic.Threading;
 using Magic.Utils;

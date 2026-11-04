@@ -6,7 +6,7 @@ using Magic.Assets.Types;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Pipelines;
+using Magic.Pipes;
 using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
@@ -14,19 +14,19 @@ using Magic.Utils;
 namespace Magic.Worlds;
 
 /// <summary>
-/// The world's side of a run: how content comes and goes, and what the world does on its own. As the run starts it puts
-/// back the saved world the last run kept, or opens the entry point, without waiting for it, as frames run while it
-/// loads; as the run ends for a restart it keeps the world for the next; and it changes for what the assets say changed.
+/// The world's side of a run: how content comes and goes, and what the world does on its own. It puts back the saved world
+/// <paramref name="kept"/> or opens the entry point, without waiting for it, as frames must run while it loads and
+/// <see cref="Startup"/> holds them back until it ends, and changes for what the assets say changed.
 /// </summary>
 internal sealed class WorldPipeline(
     World world,
     AssetDatabase assets,
     Threads threads,
     Project project,
-    PipelineCoordinator pipelines
+    Handle<WorldState> kept,
+    Pipelines pipelines
 )
-    : IPipeline<AppStart>,
-        IPipeline<AppEnd>,
+    : IPipeline<Startup>,
         IPipeline<AssetsChangeList>,
         IPipeline<WorldOpen>,
         IPipeline<WorldLoad>,
@@ -39,31 +39,13 @@ internal sealed class WorldPipeline(
     /// </summary>
     private const ulong NoContent = 0;
 
-    public ValueTask<AppStart> RunAsync(AppStart state, CancellationToken cancel)
+    private readonly PipelineRunner<EntitiesChangeList> _entities = pipelines.Get<EntitiesChangeList>();
+
+    public ValueTask<Startup> RunAsync(Startup state, CancellationToken cancel)
     {
-        FillAsync(state.KeptWorld, cancel).FireAndForget();
+        FillAsync(cancel).FireAndForget();
 
         return ValueTask.FromResult(state);
-    }
-
-    /// <summary>
-    /// Keeps the world for the next run when the app restarts with it whole: saved now, on the main thread, and written
-    /// down where the next run's assets find it, which goes on as this run ends. A world still arriving isn't kept: the
-    /// next run opens the entry point.
-    /// </summary>
-    public ValueTask<AppEnd> RunAsync(AppEnd state, CancellationToken cancel)
-    {
-        if (state.IsExiting || world.IsLoading || world.Contents.IsEmpty)
-            return ValueTask.FromResult(state);
-
-        if (!assets.CanWrite<WorldState>())
-        {
-            Log.Warn("The world goes back to the entry point: no gem the project lists writes saved worlds.");
-
-            return ValueTask.FromResult(state);
-        }
-
-        return ValueTask.FromResult(state with { KeptWorld = KeepAsync(world.Save(), cancel) });
     }
 
     public ValueTask<AssetsChangeList> RunAsync(AssetsChangeList state, CancellationToken cancel)
@@ -132,14 +114,13 @@ internal sealed class WorldPipeline(
 
     /// <summary>
     /// Destroys the entities of what leaves. <see cref="WorldUnload"/> runs last first, so this, Core's, runs once every gem
-    /// has let go of them, on the main thread again, wherever the last gem's ended.
+    /// has let go of them.
     /// </summary>
-    public async ValueTask<WorldUnload> RunAsync(WorldUnload state, CancellationToken cancel)
+    public ValueTask<WorldUnload> RunAsync(WorldUnload state, CancellationToken cancel)
     {
-        await threads.Enter(EngineThread.Main);
         DestroyEntities(state.Leaving, cancel);
 
-        return state;
+        return ValueTask.FromResult(state);
     }
 
     /// <summary>
@@ -293,28 +274,28 @@ internal sealed class WorldPipeline(
 
     private ImmutableArray<Entity> MakeEntities(ImmutableArray<EntityTemplate> entities, CancellationToken cancel)
     {
-        EntitiesChangeList changes = world.RentList();
+        EntitiesChangeList changes = _entities.Rent();
         changes.Create(entities.AsSpan());
-        pipelines.Run(changes, cancel);
+        _entities.Run(changes, cancel);
         ImmutableArray<Entity> made = [.. changes.Created];
-        world.ReturnList(changes);
+        _entities.Return(changes);
 
         return made;
     }
 
     private void DestroyEntities(ImmutableArray<Entity> entities, CancellationToken cancel)
     {
-        EntitiesChangeList changes = world.RentList();
+        EntitiesChangeList changes = _entities.Rent();
         changes.Destroy(entities.AsSpan());
-        pipelines.Run(changes, cancel);
-        world.ReturnList(changes);
+        _entities.Run(changes, cancel);
+        _entities.Return(changes);
     }
 
     /// <summary>
-    /// Puts back the saved world the last run kept; the entry point opens when there is none or it doesn't load, which is
-    /// an error.
+    /// Puts back the saved world the last run kept; the entry point opens when there is none or it doesn't load, which is an
+    /// error.
     /// </summary>
-    private async Task FillAsync(Handle<WorldState> kept, CancellationToken cancel)
+    private async Task FillAsync(CancellationToken cancel)
     {
         if (kept != Handle<WorldState>.None)
         {
@@ -326,27 +307,6 @@ internal sealed class WorldPipeline(
         }
 
         await OpenEntryPointAsync(cancel).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// The saved world <paramref name="saved"/> written down where the next run's assets find it; none, which is logged,
-    /// when it can't be.
-    /// </summary>
-    private async Task<Handle<WorldState>> KeepAsync(WorldState saved, CancellationToken cancel)
-    {
-        Result<Handle<WorldState>> written = await assets
-            .WriteAsync(saved, "Reload.world", null, cancel)
-            .ConfigureAwait(false);
-        if (!written.Ok)
-        {
-            Log.Error($"The world goes back to the entry point: it could not be written: {written.Error}");
-
-            return Handle<WorldState>.None;
-        }
-
-        Log.Info($"Kept the world: {saved.Entities.Length} entities in {saved.Contents.Length} contents.");
-
-        return written.Value;
     }
 
     /// <summary>

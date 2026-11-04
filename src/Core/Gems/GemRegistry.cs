@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -8,7 +7,7 @@ using Magic.Assets.Pipeline;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Files;
-using Magic.Pipelines;
+using Magic.Pipes;
 using Magic.Utils;
 using Magic.Worlds;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,42 +15,21 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Magic.Gems;
 
 /// <summary>
-/// The gems a project lists: found and registered with the services as their class and every interface they provide,
-/// their assets registered with the asset database, and their folders watched for a build; then, as each is made, held
-/// until the registry is disposed, which ends the gems last made first. A gem that can't be found or registered is
-/// logged, and the others go on without it.
+/// The gems a project lists, found and registered with the services as their class and every interface they provide,
+/// but not yet made. A gem that can't be found or registered is logged, and the others go on without it.
 /// </summary>
-internal sealed class GemRegistry : IDisposable
+internal sealed class GemRegistry
 {
-    private readonly AssetDatabase _assets;
     private readonly Dictionary<string, GemInfo> _byName;
-    private readonly List<LoadedGem> _loaded = [];
-    private readonly Subscriptions _watches = [];
-
-    /// <summary>
-    /// The gems' asset directories and types, registered for as long as the registry lasts.
-    /// </summary>
-    private readonly Subscriptions _registered = [];
-
-    /// <summary>
-    /// When a watch last saw a build write a gem's files, 0 when none has: written whole from the watches' threads.
-    /// </summary>
-    private long _buildTimestamp;
 
     /// <summary>
     /// Finds the <paramref name="gemsToLoad"/> beside Magic and registers each with <paramref name="services"/>, which
-    /// already holds what the host provides, and its assets with <paramref name="assets"/>. A name listed twice, the
-    /// wrong version, or an interface already provided is refused. Each gem is made by the provider built from
-    /// <paramref name="services"/>, once: asked for again after it failed, it throws.
+    /// already holds what the host provides. A name listed twice, the wrong version, or an interface already provided
+    /// is refused. Each gem is made by the provider built from <paramref name="services"/>, once: asked for again after
+    /// it failed, it throws.
     /// </summary>
-    public GemRegistry(
-        ServiceCollection services,
-        IFileSystem files,
-        AssetDatabase assets,
-        ImmutableArray<string> gemsToLoad
-    )
+    public GemRegistry(ServiceCollection services, IFileSystem files, ImmutableArray<string> gemsToLoad)
     {
-        _assets = assets;
         if (gemsToLoad.Any())
             Log.Info($"Loading {string.Join(", ", gemsToLoad)}.");
 
@@ -107,11 +85,6 @@ internal sealed class GemRegistry : IDisposable
                 services.AddSingleton(contract, provider => provider.GetRequiredService(gem.Type));
             }
 
-            if (gem.Resources is not null)
-                _registered.Add(assets.Register(gem.Resources));
-
-            _registered.Add(assets.Register(gem.Type.Assembly));
-            Watch(files, gem);
             registered.Add(gem);
         }
 
@@ -123,45 +96,6 @@ internal sealed class GemRegistry : IDisposable
     /// The gems registered, in the order the project lists them.
     /// </summary>
     public IReadOnlyList<GemInfo> Gems { get; }
-
-    /// <summary>
-    /// The gems made, in the order they were.
-    /// </summary>
-    public IReadOnlyList<LoadedGem> Loaded => _loaded;
-
-    /// <summary>
-    /// When a build last wrote one of the gems' files, as <see cref="Stopwatch.GetTimestamp"/> counts; 0 when none has.
-    /// </summary>
-    public long BuildTimestamp => Volatile.Read(ref _buildTimestamp);
-
-    /// <summary>
-    /// Ends the gems, last made first, so no gem outlives one it was made after, then the watches on their folders.
-    /// </summary>
-    public void Dispose()
-    {
-        for (int i = _loaded.Count - 1; i >= 0; i--)
-        {
-            Log.Info($"Unloading {_loaded[i].Name}.");
-            _loaded[i].Dispose();
-        }
-
-        _loaded.Clear();
-        _watches.Dispose();
-        _registered.Dispose();
-    }
-
-    /// <summary>
-    /// Holds <paramref name="gem"/>, just made as <paramref name="info"/> describes it, until the registry is disposed,
-    /// and has it read and write the asset types it is a loader or writer of until it ends: what holds it.
-    /// </summary>
-    public LoadedGem Add(IGem gem, GemInfo info)
-    {
-        LoadedGem loaded = new(gem, info);
-        _loaded.Add(loaded);
-        loaded.Subscriptions.Add(_assets.Register(gem));
-
-        return loaded;
-    }
 
     /// <summary>
     /// The gem registered as <paramref name="name"/>; null when there is none.
@@ -200,23 +134,17 @@ internal sealed class GemRegistry : IDisposable
             return Result.Failure($"Gem {name}: {gem.Name} must have one public constructor; it has {constructors}.");
 
         // What the host takes itself isn't provided, so any number of gems can be sinks, the assets say which gem reads
-        // or writes a type, and only the engine runs a pipeline.
+        // a type, and only the engine runs a pipeline.
         List<Type> provides = [];
+        List<Type> reads = [];
+        List<Type> joins = [];
         foreach (Type contract in gem.GetInterfaces())
         {
-            if (
-                contract.IsGenericType
-                && (
-                    contract.GetGenericTypeDefinition() == typeof(IAssetLoader<>)
-                    || contract.GetGenericTypeDefinition() == typeof(IAssetWriter<>)
-                    || contract.GetGenericTypeDefinition() == typeof(IPipeline<>)
-                )
-            )
-            {
-                continue;
-            }
-
-            if (contract != typeof(IGem) && contract != typeof(IDisposable) && contract != typeof(ILogSink))
+            if (contract.IsGenericType && contract.GetGenericTypeDefinition() == typeof(IAssetLoader<>))
+                reads.Add(contract.GetGenericArguments()[0]);
+            else if (contract.IsGenericType && contract.GetGenericTypeDefinition() == typeof(IPipeline<>))
+                joins.Add(contract.GetGenericArguments()[0]);
+            else if (contract != typeof(IGem) && contract != typeof(IDisposable) && contract != typeof(ILogSink))
                 provides.Add(contract);
         }
 
@@ -225,7 +153,7 @@ internal sealed class GemRegistry : IDisposable
         Version version = assembly.GetName().Version ?? new Version(1, 0, 0);
 
         string folder = files.GetParent(path);
-        string resources = AssetDatabase.GetResources(files, assembly, folder);
+        string resources = AssetPipeline.GetResources(files, assembly, folder);
         bool hasResources = files.DirectoryExists(resources);
 
         return Result.Success(
@@ -236,6 +164,8 @@ internal sealed class GemRegistry : IDisposable
                 version,
                 gem,
                 provides,
+                reads,
+                joins,
                 [],
                 hasResources ? resources : null,
                 folder,
@@ -379,27 +309,4 @@ internal sealed class GemRegistry : IDisposable
 
         return $"{name}<{string.Join(", ", Array.ConvertAll(type.GetGenericArguments(), GetName))}>";
     }
-
-    /// <summary>
-    /// Watches <paramref name="gem"/>'s folder for a build, so the run restarts with the new code once it has settled.
-    /// </summary>
-    private void Watch(IFileSystem files, GemInfo gem)
-    {
-        Result<IFileWatcher> watched = files.Watch(gem.Folder, "*.dll");
-        if (!watched.Ok)
-        {
-            Log.Warn($"Gem {gem.Name} is not watched, so a build of it won't restart the run: {watched.Error}");
-
-            return;
-        }
-
-        IFileWatcher watcher = watched.Value;
-        watcher.Created += (_, _) => Touch();
-        watcher.Changed += (_, _) => Touch();
-        watcher.Deleted += (_, _) => Touch();
-        watcher.Renamed += (_, _) => Touch();
-        _watches.Add(new Subscription(watcher.Dispose));
-    }
-
-    private void Touch() => Volatile.Write(ref _buildTimestamp, Stopwatch.GetTimestamp());
 }

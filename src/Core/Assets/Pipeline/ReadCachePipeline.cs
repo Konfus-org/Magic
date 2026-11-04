@@ -1,5 +1,5 @@
 using Magic.Caching;
-using Magic.Pipelines;
+using Magic.Pipes;
 using Magic.Utils;
 
 namespace Magic.Assets.Pipeline;

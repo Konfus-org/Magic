@@ -13,7 +13,7 @@ using Magic.Files;
 using Magic.Gems;
 using Magic.Gpu;
 using Magic.Images;
-using Magic.Pipelines;
+using Magic.Pipes;
 using Magic.Rendering;
 using Magic.Shaders;
 using Magic.Threading;

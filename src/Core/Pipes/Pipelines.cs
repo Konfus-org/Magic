@@ -10,12 +10,12 @@ namespace Magic.Pipelines;
 /// that state's type now, on the main thread, and <c>RunAsync</c> awaited, on any. One nothing registered for runs nothing.
 /// Register what joins a pipeline (<see cref="Register"/>) and dispose the subscription to take it out again. Any thread.
 /// </summary>
-public sealed class PipelineCoordinator
+public sealed class Pipelines
 {
     private readonly ConcurrentDictionary<Type, IPipelineRunner> _runners = new();
     private readonly Threads _threads;
 
-    internal PipelineCoordinator(Threads threads) => _threads = threads;
+    internal Pipelines(Threads threads) => _threads = threads;
 
     /// <summary>
     /// Adds <paramref name="pipeline"/> to the pipeline over each state it implements an <see cref="IPipeline{TState}"/>
@@ -25,8 +25,8 @@ public sealed class PipelineCoordinator
     {
         ArgumentNullException.ThrowIfNull(pipeline);
         MethodInfo add =
-            typeof(PipelineCoordinator).GetMethod(nameof(Add), BindingFlags.NonPublic | BindingFlags.Instance)
-            ?? throw new InvalidOperationException($"{nameof(PipelineCoordinator)} has no {nameof(Add)}.");
+            typeof(Pipelines).GetMethod(nameof(Add), BindingFlags.NonPublic | BindingFlags.Instance)
+            ?? throw new InvalidOperationException($"{nameof(Pipelines)} has no {nameof(Add)}.");
         foreach (Type contract in pipeline.GetType().GetInterfaces())
         {
             if (contract.IsGenericType && contract.GetGenericTypeDefinition() == typeof(IPipeline<>))

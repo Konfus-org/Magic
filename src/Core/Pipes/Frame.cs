@@ -1,6 +1,7 @@
 using Magic.Events;
+using Magic.Pipelines;
 
-namespace Magic.Pipelines;
+namespace Magic.Pipes;
 
 /// <summary>
 /// One frame's clocks and messages, handed to every hook the frame runs.

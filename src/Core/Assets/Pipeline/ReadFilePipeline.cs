@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 using Magic.Files;
-using Magic.Pipelines;
+using Magic.Pipes;
 using Magic.Utils;
 
 namespace Magic.Assets.Pipeline;

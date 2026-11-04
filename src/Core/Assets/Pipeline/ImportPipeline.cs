@@ -2,7 +2,7 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Magic.Pipelines;
+using Magic.Pipes;
 using Magic.Serialization;
 using Magic.Utils;
 

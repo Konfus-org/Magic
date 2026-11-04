@@ -5,7 +5,7 @@ using Magic.Assets.Types;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Pipelines;
+using Magic.Pipes;
 using Magic.Threading;
 using Magic.Utils;
 
@@ -14,9 +14,9 @@ namespace Magic.Worlds;
 /// <summary>
 /// The game world: what is in it, the one place to load content into it, and the way to its entities. Every entity call
 /// goes to the ECS a gem provides, and what changes which entities there are, or which components they have, runs the
-/// pipeline over an <see cref="EntitiesChangeList"/> at once; for bulk work, fill a list of your own and
-/// <see cref="Apply"/> it. What loads or unloads runs its pipeline, one change at a time, and where an entity came from
-/// is on it (<see cref="Origin"/>). Entity calls are for the main thread; the others, any.
+/// pipeline over an <see cref="EntitiesChangeList"/> at once; for bulk work, push onto that pipeline's <c>Deferred</c>.
+/// What loads or unloads runs its pipeline, one change at a time, and where an entity came from is on it
+/// (<see cref="Origin"/>). Entity calls are for the main thread; the others, any.
 /// </summary>
 public sealed class World : IEcs, IDisposable
 {
@@ -24,12 +24,9 @@ public sealed class World : IEcs, IDisposable
 
     private readonly Threads _threads;
 
-    private readonly PipelineCoordinator _pipelines;
+    private readonly Pipelines _pipelines;
 
-    /// <summary>
-    /// Change lists not in use, so a call needn't allocate one: a pool. Main thread.
-    /// </summary>
-    private readonly Stack<EntitiesChangeList> _spares = new();
+    private readonly PipelineRunner<EntitiesChangeList> _entities;
 
     /// <summary>
     /// Held for a change, so changes run one at a time.
@@ -43,11 +40,12 @@ public sealed class World : IEcs, IDisposable
     /// </summary>
     private IEcs _ecs = new NoEcs();
 
-    internal World(AssetDatabase assets, Threads threads, PipelineCoordinator pipelines)
+    internal World(AssetDatabase assets, Threads threads, Pipelines pipelines)
     {
         _assets = assets;
         _threads = threads;
         _pipelines = pipelines;
+        _entities = pipelines.Get<EntitiesChangeList>();
     }
 
     /// <summary>
@@ -88,6 +86,11 @@ public sealed class World : IEcs, IDisposable
         set => _ecs = value;
     }
 
+    /// <summary>
+    /// The gem that writes saved worlds, from when it is made; none when no gem the project lists does.
+    /// </summary>
+    internal IWorldStateWriter? Writer { get; set; }
+
     public void Dispose() => _changing.Dispose();
 
     /// <summary>
@@ -102,7 +105,14 @@ public sealed class World : IEcs, IDisposable
     )
     {
         WorldOpen open = new(domain, mode, new WorldContent(GetNextContentId(), domain), [], progress, string.Empty);
-        await RunLoadingAsync(async () => open = await _pipelines.RunAsync(open, cancel).ConfigureAwait(false), cancel)
+        await RunLoadingAsync(
+                async () =>
+                    open = await _pipelines
+                        .Get<WorldOpen>()
+                        .RunOnMainAsync(open, progress, cancel)
+                        .ConfigureAwait(false),
+                cancel
+            )
             .ConfigureAwait(false);
 
         return open.Error.Length > 0
@@ -173,15 +183,16 @@ public sealed class World : IEcs, IDisposable
     {
         EntitiesChangeList changes = RentList();
         changes.Create([new EntityTemplate(makeGlobal ? WorldEntities.WithGlobalTag(components) : [.. components])]);
-        _pipelines.Run(changes);
+        _entities.Run(changes);
         Entity created = changes.Created[0];
-        ReturnList(changes);
+        _entities.Return(changes);
 
         return created;
     }
 
     /// <summary>
-    /// The world as data, as <see cref="Save"/> reads it, once no other change is running.
+    /// The world as data: what is in it, every entity with its components, and its pause and time scale, as of one moment
+    /// on the main thread.
     /// </summary>
     public async Task<WorldState> SaveAsync(CancellationToken cancel)
     {
@@ -189,7 +200,13 @@ public sealed class World : IEcs, IDisposable
         await ChangeAsync(
                 () =>
                 {
-                    saved = Save();
+                    saved = new WorldState
+                    {
+                        Contents = Contents,
+                        Entities = HasEcs ? WorldEntities.GetTemplates(this) : [],
+                        IsPaused = IsPaused,
+                        TimeScale = TimeScale,
+                    };
 
                     return Task.CompletedTask;
                 },
@@ -209,7 +226,11 @@ public sealed class World : IEcs, IDisposable
         ArgumentNullException.ThrowIfNull(state);
 
         return RunLoadingAsync(
-            async () => await _pipelines.RunAsync(new WorldRestore(state, progress), cancel).ConfigureAwait(false),
+            async () =>
+                await _pipelines
+                    .Get<WorldRestore>()
+                    .RunOnMainAsync(new WorldRestore(state, progress), progress, cancel)
+                    .ConfigureAwait(false),
             cancel
         );
     }
@@ -240,7 +261,7 @@ public sealed class World : IEcs, IDisposable
     {
         ArgumentNullException.ThrowIfNull(changes);
         ThrowIfNoEcs();
-        _pipelines.Run(changes);
+        _entities.Run(changes);
         changes.Clear();
     }
 
@@ -254,9 +275,9 @@ public sealed class World : IEcs, IDisposable
         WorldEntities.ThrowIfNoRoom(first.Length, created);
         EntitiesChangeList changes = RentList();
         changes.Create(first);
-        _pipelines.Run(changes);
+        _entities.Run(changes);
         changes.Created.CopyTo(created);
-        ReturnList(changes);
+        _entities.Return(changes);
     }
 
     /// <inheritdoc/>
@@ -267,9 +288,9 @@ public sealed class World : IEcs, IDisposable
         WorldEntities.ThrowIfNoRoom(first.Length, created);
         EntitiesChangeList changes = RentList();
         changes.Create(first, second);
-        _pipelines.Run(changes);
+        _entities.Run(changes);
         changes.Created.CopyTo(created);
-        ReturnList(changes);
+        _entities.Return(changes);
     }
 
     /// <inheritdoc/>
@@ -389,19 +410,6 @@ public sealed class World : IEcs, IDisposable
         where T3 : unmanaged, IComponent
         where T4 : unmanaged, IComponent => _ecs.Run(in state, run);
 
-    /// <summary>
-    /// The world as data: what is in it, every entity with its components, and its pause and time scale, as of now. Main
-    /// thread, with no change running: <see cref="SaveAsync"/> waits for that; the run's end has it.
-    /// </summary>
-    internal WorldState Save() =>
-        new()
-        {
-            Contents = Contents,
-            Entities = HasEcs ? WorldEntities.GetTemplates(this) : [],
-            IsPaused = IsPaused,
-            TimeScale = TimeScale,
-        };
-
     internal ulong GetNextContentId() => Interlocked.Increment(ref _lastContentId);
 
     /// <summary>
@@ -453,6 +461,7 @@ public sealed class World : IEcs, IDisposable
         where T : IAsset<T>
     {
         WorldSpawn<T> spawn = await _pipelines
+            .Get<WorldSpawn<T>>()
             .RunAsync(new WorldSpawn<T>(asset, at, default), cancel)
             .ConfigureAwait(false);
 
@@ -469,7 +478,10 @@ public sealed class World : IEcs, IDisposable
         CancellationToken cancel
     )
     {
-        await _pipelines.RunReversedAsync(new WorldUnload(content, leaving, progress), cancel).ConfigureAwait(false);
+        await _pipelines
+            .Get<WorldUnload>()
+            .RunOnMainInReverseAsync(new WorldUnload(content, leaving, progress), progress, cancel)
+            .ConfigureAwait(false);
         await _threads.Enter(EngineThread.Main);
     }
 
@@ -484,7 +496,8 @@ public sealed class World : IEcs, IDisposable
     )
     {
         WorldLoad done = await _pipelines
-            .RunAsync(new WorldLoad(content, coming, [], progress), cancel)
+            .Get<WorldLoad>()
+            .RunOnMainAsync(new WorldLoad(content, coming, [], progress), progress, cancel)
             .ConfigureAwait(false);
         await _threads.Enter(EngineThread.Main);
 
@@ -513,26 +526,6 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// A list to run now, the caller's until <see cref="ReturnList"/>; with no ECS nothing would make what is on it, so
-    /// it throws.
-    /// </summary>
-    internal EntitiesChangeList RentList()
-    {
-        ThrowIfNoEcs();
-
-        return _spares.TryPop(out EntitiesChangeList? spare) ? spare : new EntitiesChangeList();
-    }
-
-    /// <summary>
-    /// Empties <paramref name="changes"/> and keeps it for the next to rent.
-    /// </summary>
-    internal void ReturnList(EntitiesChangeList changes)
-    {
-        changes.Clear();
-        _spares.Push(changes);
-    }
-
-    /// <summary>
     /// Runs <paramref name="change"/> as a change, which may set <see cref="IsLoading"/>, and ends with it unset.
     /// </summary>
     private Task RunLoadingAsync(Func<Task> change, CancellationToken cancel) =>
@@ -554,10 +547,20 @@ public sealed class World : IEcs, IDisposable
     private string GetName(WorldContent content) =>
         content.Domain == Handle<Domain>.None ? $"content {content.Id}" : _assets.GetPath(content.Domain) ?? "a domain";
 
+    /// <summary>
+    /// A list to run now; with no ECS nothing would make what is on it, so it throws.
+    /// </summary>
+    private EntitiesChangeList RentList()
+    {
+        ThrowIfNoEcs();
+
+        return _entities.Rent();
+    }
+
     private void RunList(EntitiesChangeList changes)
     {
-        _pipelines.Run(changes);
-        ReturnList(changes);
+        _entities.Run(changes);
+        _entities.Return(changes);
     }
 
     private void ThrowIfNoEcs()

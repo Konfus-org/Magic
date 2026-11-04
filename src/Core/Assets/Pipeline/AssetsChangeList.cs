@@ -14,7 +14,7 @@ public readonly record struct AssetLoaded(ulong Id, object Asset);
 /// <summary>
 /// What was asked of the assets and what came of it: the state of the pipeline that changes them, which runs between frames
 /// when there is any. Core's own act on what was asked, through <see cref="AssetDatabase"/>'s calls, from any thread. A gem
-/// that joins by implementing <see cref="Pipelines.IPipeline{TState}"/> of it reads <see cref="Reloaded"/> and
+/// that joins by implementing <see cref="Pipes.IPipeline{TState}"/> of it reads <see cref="Reloaded"/> and
 /// <see cref="IsReindexed"/>.
 /// </summary>
 public sealed class AssetsChangeList
@@ -186,10 +186,6 @@ internal sealed record AssetRequested(
 internal sealed record AssetLoaderAdded(Type Type, object Loader) : AssetChange;
 
 internal sealed record AssetLoaderRemoved(Type Type, object Loader) : AssetChange;
-
-internal sealed record AssetWriterAdded(Type Type, object Writer) : AssetChange;
-
-internal sealed record AssetWriterRemoved(Type Type, object Writer) : AssetChange;
 
 /// <summary>
 /// A gem made <paramref name="Asset"/> and hands it out as asset <paramref name="Id"/>.

@@ -6,7 +6,7 @@ using System.Text.Json;
 using Magic.Caching;
 using Magic.Debugging;
 using Magic.Files;
-using Magic.Pipelines;
+using Magic.Pipes;
 using Magic.Projects;
 using Magic.Serialization;
 using Magic.Threading;
@@ -58,7 +58,7 @@ public sealed class AssetDatabase : IDisposable
     /// </summary>
     private const string ResourcesKey = "Magic.Resources";
 
-    private readonly PipelineCoordinator _pipelines;
+    private readonly Pipelines _pipelines;
     private readonly Caches _caches;
 
     /// <summary>
@@ -90,7 +90,7 @@ public sealed class AssetDatabase : IDisposable
     /// The assets of <paramref name="project"/>, with the project's folder first, then the folder the last run kept the
     /// world in, and Core's own asset types; a gem's come as it is found, and Magic's built-in folder last.
     /// </summary>
-    internal AssetDatabase(IFileSystem files, PipelineCoordinator pipelines, Caches caches, Project project)
+    internal AssetDatabase(IFileSystem files, Pipelines pipelines, Caches caches, Project project)
     {
         Files = files;
         _pipelines = pipelines;

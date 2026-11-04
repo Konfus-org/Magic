@@ -1,6 +1,6 @@
 using Magic.Debugging;
 using Magic.Gems;
-using Magic.Pipelines;
+using Magic.Pipes;
 
 namespace Hello;
 

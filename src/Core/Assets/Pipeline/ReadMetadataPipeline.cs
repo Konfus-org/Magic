@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using System.Reflection;
 using System.Text.Json;
-using Magic.Pipelines;
+using Magic.Pipes;
 using Magic.Serialization;
 using Magic.Utils;
 

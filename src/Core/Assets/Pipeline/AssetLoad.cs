@@ -6,7 +6,7 @@ namespace Magic.Assets.Pipeline;
 /// <summary>
 /// The state of the pipeline that loads one <typeparamref name="T"/>, run on a worker, for several assets at once: the
 /// asset's file as far as it has been read, and what was made of it. A gem joins by implementing
-/// <see cref="Pipelines.IPipeline{TState}"/> of it, to see or change every <typeparamref name="T"/> as it is loaded, cache
+/// <see cref="Pipes.IPipeline{TState}"/> of it, to see or change every <typeparamref name="T"/> as it is loaded, cache
 /// hits included, after Magic has made it. Keep nothing per load in the gem.
 /// </summary>
 public readonly record struct AssetLoad<T>

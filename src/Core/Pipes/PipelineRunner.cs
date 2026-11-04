@@ -3,13 +3,13 @@ using Magic.Debugging;
 using Magic.Gems;
 using Magic.Threading;
 
-namespace Magic.Pipelines;
+namespace Magic.Pipes;
 
 /// <summary>
 /// The pipeline over <typeparamref name="TState"/> as a whole: what registered for it, in order, Core's first, then each
 /// gem's as it is made, and the walk over them. What one of Core's throws is a bug in Core, and isn't caught.
 /// </summary>
-internal sealed class PipelineRunner<TState>(PipelineCoordinator pipelines, Threads threads) : IPipelineRunner
+internal sealed class PipelineRunner<TState>(Pipelines pipelines, Threads threads) : IPipelineRunner
 {
     /// <summary>
     /// Replaced whole on the main thread, and read whole on any, so a run walks them as they were when it began.

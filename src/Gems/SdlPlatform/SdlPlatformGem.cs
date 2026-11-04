@@ -8,7 +8,7 @@ using Magic.Assets.Types;
 using Magic.Debugging;
 using Magic.Gems;
 using Magic.Input;
-using Magic.Pipelines;
+using Magic.Pipes;
 using Magic.Platform;
 using Magic.Threading;
 using Magic.Utils;
