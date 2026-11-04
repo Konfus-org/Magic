@@ -587,6 +587,7 @@ Line counts are estimates of C# and Slang.
 | 8     | Translucency: MBOIT, refraction, the glass shadow pool, the transmittance volume                         | Stained glass colours the floor; a probe behind a window is lit; overlapping panes resolve without sorting       | 3k    |
 | 9     | Post: TAAU, exposure, bloom, fused effects, tonemap, the pipeline asset, presets, debug views, the preloader's settle, `--bake` | Every sample domain screenshots; a custom pipeline script with an outline pass; `Toaster` on lavapipe headless | 4k |
 | 10    | Optional paths: mesh shaders, ray-query tracer, skinning pre-pass, cluster streaming, mip streaming       | Same pictures, faster on GPUs that have the features; an animated model                                         | 5k    |
+| 11    | Crisp GI on the software path: a sloppy root in place of the imposter, six-sided cards with their own radiosity, finer fields, probes in every 8 pixels with shared rays and screen occlusion, motion vectors, reflections at a preset stride | The question mark bleeds red onto its ground; the Lights room's walls and ceiling carry the bounce of the sun strip with no tile or band to see; a mirror floor is sharp and a rough one smooth | 3k |
 
 Of phase 10, the ray-query tracer is built: a bottom-level structure over each model's leaf clusters, a top-level one
 over the instances, and the trace passes specialised to it where the GPU has ray queries. The mesh shader path,
