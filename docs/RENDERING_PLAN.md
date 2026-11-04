@@ -372,11 +372,13 @@ card, and the floor at your feet reads that probe.
 ### Reflections
 
 Per pixel with roughness under the rough-specular threshold: a ray sampled from the GGX lobe (one per pixel per
-frame, blue-noise), a screen trace through the HZB, then a field trace, the hit shaded from the surface cache, a miss
-from the world probes and the sky. The result is denoised with a spatiotemporal filter in the reflection's own
-history (reprojected by the hit's virtual position, so a moving mirror keeps its image stable) and the GGX variance
-drives the spatial radius. Nothing a mirror shows is limited to what is on screen: turn away from a lake and the house
-behind you is still in it, from its cards.
+frame on the quality preset, one for every two pixels across on the others), a screen trace through the HZB, then a
+field trace, the hit shaded from the surface cache, a miss from the world probes and the sky. The rays around a
+pixel are gathered over a reach the roughness sets, none for a mirror, each weighed by how near its surface is to
+the pixel's and how near what it hit is to what the pixel's own ray hit, so a mirror stays sharp and a rough floor
+smooth; then blended with last frame's at the surface's velocity, held within what the neighbours see. Nothing a
+mirror shows is limited to what is on screen: turn away from a lake and the house behind you is still in it, from
+its cards.
 
 ### Lighting
 

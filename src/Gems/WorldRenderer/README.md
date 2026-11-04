@@ -46,9 +46,10 @@ model reader, the mesh preprocessor and the texture reader.
   the world probes hold at every surface and `set WorldRenderer.debug=occlusion` the occlusion.
 - Every pixel's surface carries where it was on last frame's screen, from where its instance and the camera were,
   and everything that blends with last frame reads it there; `set WorldRenderer.debug=velocity` shows the move.
-- A smooth surface mirrors the world: a ray a pixel at half the output, drawn from the surface's lobe, traces the
-  screen, then the field, then the world probes, so a floor shows the wall behind the camera; the rays are gathered
-  over a reach the roughness sets and blended with last frame's, held within what the neighbours see.
+- A smooth surface mirrors the world: a ray a pixel, one for every two across on the lower presets, drawn from the
+  surface's lobe, traces the screen, then the field, then the world probes, so a floor shows the wall behind the
+  camera; the rays are gathered over a reach the roughness sets, none for a mirror, each weighed by how near what
+  it hit is to what the pixel's own hit, and blended with last frame's, held within what the neighbours see.
   `set WorldRenderer.debug=reflections` shows the reflections alone.
 - A material that names the glass shader is drawn after the lighting, forward, in any order: the panes' absorbance
   and the moments of their depths are added up first, then each pane's light, the sun through its pages and the
@@ -60,7 +61,7 @@ model reader, the mesh preprocessor and the texture reader.
   held within what the neighbours show. The exposure is metered from a histogram of the picture, the brightest of it
   blooms, and the final pass runs the camera's effects, up to four shaders implementing the pixel effect contract
   named in its `PostProcessing`, and tonemaps with AgX. `set WorldRenderer.preset=toaster`, `balanced` or `quality`
-  sets the share, how many cards are lit a frame and whether reflections are traced.
+  sets the share, how many cards are lit a frame, whether reflections are traced and at how many pixels a ray.
 - On a GPU that traces rays, every model's leaf clusters go into an acceleration structure as it arrives and the
   instances into one over them, built again when any changes, and the probes, the reflections and the lights'
   shadows trace through them instead of the distance field, landing exactly on the triangles that are drawn.

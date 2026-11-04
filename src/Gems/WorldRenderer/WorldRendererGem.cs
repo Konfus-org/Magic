@@ -357,7 +357,7 @@ public sealed class WorldRendererGem(
                 if (RendererPreset.TryParse(setting.Value, out RendererPreset preset))
                 {
                     _preset = preset;
-                    _gi.Configure(preset.SlotsPerFrame, preset.HasReflections);
+                    _gi.Configure(preset.SlotsPerFrame, preset.HasReflections, preset.ReflectionStride);
                 }
                 else
                 {
@@ -398,6 +398,7 @@ public sealed class WorldRendererGem(
             || _targets.Height != height
             || _targets.OutputWidth != outputWidth
             || _targets.OutputHeight != outputHeight
+            || _gi.NeedsResize
         )
         {
             Result resized = _targets.Resize(width, height, outputWidth, outputHeight, _graph);

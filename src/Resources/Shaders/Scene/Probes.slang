@@ -85,7 +85,8 @@ public struct GiConstants
     // The short-range occlusion at every pixel, as searched and as blurred.
     public uint occlusionRaw;
     public uint occlusion;
-    public uint padding0;
+    // Pixels across each reflection ray stands for: 1 or 2.
+    public uint reflectionStride;
     public uint padding1;
     public uint padding2;
 }

@@ -1,7 +1,8 @@
-// The sharp reflections: a ray a pixel at half the output, drawn from the GGX lobe of the surface, along the screen,
-// then through the field, then into the world probes; the rays gathered for every pixel over a reach the roughness
-// sets; and that blended with last frame's, reprojected, clamped to what this frame saw nearby. The pass header's x
-// is the frame's constants, y the shadow constants, z the lighting constants and w the field constants.
+// The sharp reflections: a ray a pixel, or one for every two pixels across, drawn from the GGX lobe of the surface,
+// along the screen, then through the field, then into the world probes; the rays gathered for every pixel over a
+// reach the roughness sets, each weighed by how near its surface and what it hit are to the pixel's own; and that
+// blended with last frame's, reprojected, clamped to what this frame saw nearby. The pass header's x is the
+// frame's constants, y the shadow constants, z the lighting constants and w the field constants.
 module "WorldRenderer/Reflections";
 
 import Core.Heap;
@@ -47,7 +48,7 @@ bool LoadSurface(FrameConstants frame, uint2 pixel, out float3 world, out float3
     return true;
 }
 
-// Each half-resolution texel traces one ray for one of its four pixels, a different one each frame.
+// Each texel of the traced table traces one ray for one of the pixels it stands for, a different one each frame.
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void ReflectionTrace<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThreadID)
@@ -61,7 +62,7 @@ void ReflectionTrace<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThrea
     if (any(thread.xy >= size))
         return;
 
-    uint2 pixel = min((thread.xy * 2u) + uint2(gi.frameIndex & 1u, (gi.frameIndex >> 1u) & 1u), uint2(frame.width, frame.height) - 1u);
+    uint2 pixel = min((thread.xy * gi.reflectionStride) + GetStridePixel(gi), uint2(frame.width, frame.height) - 1u);
     float3 world;
     float3 normal;
     float roughness;
@@ -116,8 +117,15 @@ void ReflectionTrace<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThrea
     traced.Store(thread.xy, float4(radiance, hitDistance));
 }
 
-// Each pixel gathers the rays traced around it, over a reach that grows with its roughness, weighed by how close
-// their surfaces are to its own.
+// The pixel of each stride's square a ray is traced for this frame.
+uint2 GetStridePixel(GiConstants gi)
+{
+    return gi.reflectionStride == 1u ? uint2(0u) : uint2(gi.frameIndex & 1u, (gi.frameIndex >> 1u) & 1u);
+}
+
+// Each pixel gathers the rays traced around it, over a reach that grows with its roughness, none for a mirror,
+// weighed by how close their surfaces are to its own and how near what they hit is to what its own ray hit, so a
+// mirror stays sharp and a rough floor smooth.
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void ReflectionResolve(uint3 thread : SV_DispatchThreadID)
@@ -142,10 +150,11 @@ void ReflectionResolve(uint3 thread : SV_DispatchThreadID)
 
     TextureRef traced = { gi.reflectionTraced };
     TextureRef depthTexture = { frame.depth };
-    int2 halfSize = int2(traced.GetSize(0u));
-    int2 center = int2(thread.xy) / 2;
-    int reach = 2 + int(round(roughness * 3.0));
+    int2 tracedSize = int2(traced.GetSize(0u));
+    int2 center = clamp(int2(thread.xy / gi.reflectionStride), int2(0), tracedSize - 1);
+    int reach = int(round(roughness * 6.0));
     float viewDepth = ToViewDepth(depth, frame.near);
+    float4 own = traced.Load(uint2(center), 0u);
     float4 sum = float4(0.0);
     float weightSum = 0.0;
     for (int y = -reach; y <= reach; y++)
@@ -153,19 +162,21 @@ void ReflectionResolve(uint3 thread : SV_DispatchThreadID)
         for (int x = -reach; x <= reach; x++)
         {
             int2 texel = center + int2(x, y);
-            if (any(texel < 0) || any(texel >= halfSize))
+            if (any(texel < 0) || any(texel >= tracedSize))
                 continue;
 
             float4 sample = traced.Load(uint2(texel), 0u);
             if (sample.w < 0.0)
                 continue;
 
-            // The pixel the ray was traced for, this frame: how far its surface is from this one.
-            uint2 sourcePixel = min((uint2(texel) * 2u) + uint2(gi.frameIndex & 1u, (gi.frameIndex >> 1u) & 1u), size - 1u);
+            // The pixel the ray was traced for, this frame: how far its surface is from this one, and how far what
+            // its ray hit is from what this pixel's own ray hit.
+            uint2 sourcePixel = min((uint2(texel) * gi.reflectionStride) + GetStridePixel(gi), size - 1u);
             float sourceDepth = ToViewDepth(depthTexture.Load(sourcePixel, 0u).x, frame.near);
             float closeness = saturate(1.0 - abs(sourceDepth - viewDepth) / (0.05 * viewDepth + 0.05));
+            float sameHit = own.w < 0.0 ? 1.0 : saturate(1.0 - abs(sample.w - own.w) / (0.5 * own.w + 0.1));
             float falloff = exp(-float(x * x + y * y) / float(reach * reach + 1));
-            float weight = closeness * falloff;
+            float weight = closeness * lerp(sameHit, 1.0, roughness) * falloff;
             sum += float4(sample.rgb, sample.w) * weight;
             weightSum += weight;
         }

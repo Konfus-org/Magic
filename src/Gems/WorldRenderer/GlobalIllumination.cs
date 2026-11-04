@@ -52,6 +52,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
     private readonly uint[] _batch = new uint[MaxSlotsPerFrame];
     private int _slotsPerFrame = MaxSlotsPerFrame;
     private bool _hasReflections = true;
+    private int _reflectionStride = 1;
     private readonly GpuTexture[] _screenFiltered = new GpuTexture[2];
     private readonly GpuTexture[] _reflections = new GpuTexture[2];
     private GpuTexture _reflectionTraced;
@@ -82,6 +83,11 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
     private bool _isTableReady;
 
     public GpuBuffer Constants { get; private set; }
+
+    /// <summary>
+    /// Whether the screen tables must be made again before the next frame, as the reflections' stride changed.
+    /// </summary>
+    public bool NeedsResize { get; private set; }
 
     public void Dispose()
     {
@@ -195,12 +201,16 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
     }
 
     /// <summary>
-    /// How much a frame does: the cards lit a frame, and whether the sharp reflections are traced at all.
+    /// How much a frame does: the cards lit a frame, whether the sharp reflections are traced at all, and the pixels
+    /// across each reflection ray stands for, 1 or 2.
     /// </summary>
-    public void Configure(int slotsPerFrame, bool hasReflections)
+    public void Configure(int slotsPerFrame, bool hasReflections, int reflectionStride)
     {
         _slotsPerFrame = Math.Clamp(slotsPerFrame, 1, MaxSlotsPerFrame);
         _hasReflections = hasReflections;
+        int stride = Math.Clamp(reflectionStride, 1, 2);
+        NeedsResize |= stride != _reflectionStride;
+        _reflectionStride = stride;
     }
 
     /// <summary>
@@ -209,6 +219,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
     public Result Resize(int width, int height, RenderGraph graph)
     {
         Destroy(graph);
+        NeedsResize = false;
         _screenProbesX = (width + ScreenTile - 1) / ScreenTile;
         _screenProbesY = (height + ScreenTile - 1) / ScreenTile;
         int count = _screenProbesX * _screenProbesY;
@@ -262,8 +273,8 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         _screenIrradiance = irradiance.Value;
         Result<GpuTexture> reflectionTraced = Make(
             "Reflections traced",
-            (width + 1) / 2,
-            (height + 1) / 2,
+            (width + _reflectionStride - 1) / _reflectionStride,
+            (height + _reflectionStride - 1) / _reflectionStride,
             GpuFormat.R16G16B16A16Sfloat
         );
         Result<GpuTexture> reflectionResolved = Make(
@@ -385,6 +396,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
             HasReflections = _hasReflections ? 1u : 0u,
             OcclusionRaw = _occlusionRaw.Id,
             Occlusion = _occlusion.Id,
+            ReflectionStride = (uint)_reflectionStride,
         };
         for (int level = 0; level < ProbeLevels; level++)
         {
@@ -626,7 +638,10 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         translucency.UseForSampling(graph);
         graph.Recorder.BindPipeline(usesRayQuery ? pipelines.ReflectionTraceRayQuery : pipelines.ReflectionTrace);
         graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(Groups((targets.Width + 1) / 2, 8), Groups((targets.Height + 1) / 2, 8));
+        graph.Recorder.Dispatch(
+            Groups((targets.Width + _reflectionStride - 1) / _reflectionStride, 8),
+            Groups((targets.Height + _reflectionStride - 1) / _reflectionStride, 8)
+        );
         graph.EndPass();
 
         graph.BeginComputePass("Reflections: resolve");
@@ -921,7 +936,7 @@ internal record struct GiConstants
 
     public uint Occlusion;
 
-    public uint Padding0;
+    public uint ReflectionStride;
 
     public uint Padding1;
 
