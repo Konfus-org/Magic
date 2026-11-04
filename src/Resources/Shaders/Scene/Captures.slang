@@ -34,12 +34,3 @@ public float3 GetCaptureDirection(uint2 cell)
     float2 flat = ((float2(cell) + 0.5) / float(CaptureCells)) * 2.0 - 1.0;
     return DecodeOctahedral(flat);
 }
-
-// Where in an atlas a point of the quad, quadUv in [0, 1]² from its top left, is read for a model seen from
-// modelDirection, the cell nearest that direction.
-public float2 GetCaptureUv(float3 modelDirection, float2 quadUv)
-{
-    float2 flat = EncodeOctahedral(modelDirection) * 0.5 + 0.5;
-    uint2 cell = min(uint2(flat * float(CaptureCells)), CaptureCells - 1u);
-    return (float2(cell) + saturate(quadUv)) / float(CaptureCells);
-}

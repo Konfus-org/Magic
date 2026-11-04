@@ -236,7 +236,7 @@ internal sealed class GeometryPools(
         List<TriangleGeometry> geometries = [];
         foreach (GpuCluster cluster in made.Clusters)
         {
-            if (cluster.Error != 0 || cluster.MaterialSlot == GpuCluster.ImposterSlot)
+            if (cluster.Error != 0)
                 continue;
 
             geometries.Add(
@@ -282,7 +282,7 @@ internal sealed class GeometryPools(
         for (int i = 0; i < derived.Clusters.Length; i++)
         {
             GpuCluster cluster = derived.Clusters[i];
-            if (cluster.Error == 0 && cluster.MaterialSlot != GpuCluster.ImposterSlot)
+            if (cluster.Error == 0)
                 leaves.Add(where.ClusterOffset + (uint)i);
         }
 
@@ -344,18 +344,14 @@ internal sealed class GeometryPools(
         _resident[model.Id] = where;
         _arrived.Add((made, where));
         int leafTriangles = 0;
-        int roots = 0;
         foreach (GpuCluster cluster in made.Clusters)
         {
             if (cluster.Error == 0)
                 leafTriangles += (int)cluster.TriangleCount;
-
-            if (float.IsPositiveInfinity(cluster.ParentError))
-                roots++;
         }
 
         Log.Info(
-            $"{name}: {made.Vertices.Length} vertices, {made.Indices.Length / 3} triangles in {made.Clusters.Length} clusters, {leafTriangles} in the leaves, {roots} roots."
+            $"{name}: {made.Vertices.Length} vertices, {made.Indices.Length / 3} triangles in {made.Clusters.Length} clusters, {leafTriangles} in the leaves."
         );
     }
 }

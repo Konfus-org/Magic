@@ -9,7 +9,7 @@ namespace Magic.Rendering;
 /// <c>Scene/Clusters.slang</c>'s. Its triangles are a run of the index pool; its vertices are wherever those indices
 /// point in the vertex pool. The cut through the hierarchy is decided per cluster, with no walk: a cluster is drawn
 /// when its parent's error projects above the threshold and its own at or below it. A leaf's error is 0 and a
-/// root's parent error is infinite, so some level always draws.
+/// root's parent error is the model's diameter, so some level draws until the whole model is under the threshold.
 /// </summary>
 [ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
@@ -21,12 +21,6 @@ public record struct GpuCluster
     /// The most triangles a cluster holds, and the most vertices.
     /// </summary>
     public const int MaxTriangles = 128;
-
-    /// <summary>
-    /// The material slot of the imposter cluster, the one above a model's roots: a quad facing the camera around
-    /// the instance's sphere, drawn with the instance's capture, with no vertices of its own.
-    /// </summary>
-    public const uint ImposterSlot = uint.MaxValue;
 
     /// <summary>
     /// The sphere around the cluster's triangles, in the model's frame.
@@ -57,7 +51,7 @@ public record struct GpuCluster
     public float Error;
 
     /// <summary>
-    /// The error of the group that replaces the cluster and its siblings; infinite for a root.
+    /// The error of the group that replaces the cluster and its siblings; the model's diameter for a root.
     /// </summary>
     public float ParentError;
 

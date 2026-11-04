@@ -8,9 +8,6 @@ import Core.Pack;
 
 public static const uint MaxClusterTriangles = 128u;
 
-// The material slot of the imposter cluster, the one above a model's roots: a quad with no vertices of its own.
-public static const uint ImposterSlot = 0xFFFFFFFFu;
-
 public struct GpuCluster
 {
     // The sphere around the cluster's triangles, in the model's frame.
@@ -26,7 +23,7 @@ public struct GpuCluster
     public float detailRadius;
     // How far, in metres, the cluster's surface may be from the original's: 0 for a leaf.
     public float error;
-    // The error of the group that replaces this cluster and its siblings; infinite for a root.
+    // The error of the group that replaces this cluster and its siblings; the model's diameter for a root.
     public float parentError;
     public uint indexOffset;
     public uint triangleCount;
@@ -42,8 +39,6 @@ public GpuCluster LoadCluster(uint pool, uint index)
     ArrayRef<GpuCluster> clusters = { pool };
     return clusters[index];
 }
-
-public bool IsImposter(GpuCluster cluster) { return cluster.materialSlot == ImposterSlot; }
 
 public float3 GetConeAxis(GpuCluster cluster) { return DecodeUnitVector(cluster.coneAxis); }
 

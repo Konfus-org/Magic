@@ -11,7 +11,7 @@ four places, every slow thing an `Async` method, results slow to make in the cac
 | Requirement                                     | How                                                                                                                           |
 | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | GPU driven                                      | The CPU uploads tables; the GPU culls instances and clusters, picks detail, builds its own draw lists and draws them           |
-| Infinite draw distance, no pop in               | A continuous cluster hierarchy picked by screen error, an imposter as its last level, reverse float depth, camera relative     |
+| Infinite draw distance, no pop in               | A continuous cluster hierarchy picked by screen error down to a root of a dozen triangles, reverse float depth, camera relative |
 | Sharp shadows that cast forever                 | Virtual shadow maps: a clipmap of pages for the sun, cube pages for local lights, pages cached between frames                   |
 | Dark interiors, no bleeding                     | Distance-field traced global illumination with a surface cache; occlusion is a real trace, never an interpolated guess          |
 | Light through glass                             | A translucent page layer in the shadow maps and a transmittance volume the GI rays walk through                               |
@@ -22,7 +22,7 @@ four places, every slow thing an `Async` method, results slow to make in the cac
 | Easy to extend                                  | A material, a light, a sky, a post effect and a world tracer are each a Slang interface; the frame is a pipeline asset         |
 | Vulkan apart from the pipeline                  | `IGraphicsApi` is handles, descriptions and a command list value; the renderer never sees a Vulkan type                        |
 | Cross platform                                  | Vulkan 1.3 as MoltenVK and KosmicKrisp expose it is the baseline; mesh shaders and ray queries are optional paths              |
-| Auto-generated derived data                     | A post-processor on `Model` makes clusters, cards, imposters and distance fields into the cache, keyed by the asset's version   |
+| Auto-generated derived data                     | A post-processor on `Model` makes clusters and distance fields into the cache, keyed by the asset's version; cards at runtime  |
 
 Two things this plan refuses. **No lighting is baked**: the cache holds geometry-derived data only (clusters, distance
 fields, card placements, imposter captures of albedo and normal), and a static scene lit twice from two different
@@ -121,7 +121,7 @@ Slang, one module per file, read through the heap, generic over the contracts. T
 Core/      Heap, Frame, Math, Color, Pack, Sampling, Random, Wave
 Scene/     Instances, Clusters, Vertices, Materials, Lights, Cameras, Views (the GPU tables and how to read them)
 Surface/   ISurface, SurfaceInputs, SurfaceOutputs, Brdf, ShadingModels
-Material/  IMaterial, Standard, Imposter, Failure
+Material/  IMaterial, Standard, Glass, Failure
 Light/     ILight, Directional, Point, Spot, Rect (LTC), Units
 Shadow/    IShadow, Virtual, DistanceField
 Sky/       ISky, Atmosphere, Procedural
@@ -206,10 +206,11 @@ Every model draws as clusters of up to 128 triangles and 128 vertices in a hiera
   max with the children, and the bounding sphere the error applies to. This is the DAG from Karis, "Nanite: A Deep
   Dive", 2021; the cut through it is chosen per cluster with no knowledge of its neighbours, so neighbouring clusters
   at different levels never crack because their shared border was locked when either was made.
-- **The root** is a handful of clusters, and above it sits one imposter cluster: a camera-facing quad whose material
-  samples the model's octahedral capture atlas (albedo, normal, depth from 8×8 directions). It is picked by the same
-  error metric as any other level, so the switch happens when the projected error is below a pixel, and it is lit at
-  runtime like any surface. Forests, cities and debris fields at the horizon are one quad each.
+- **The root** is the last level simplified once more without regard to its topology (`meshopt_simplifySloppy`) down
+  to a dozen triangles, the one level the ordinary simplifier cannot reach. Its parent error is the model's
+  diameter, so the same error test that picks every other level draws the root until the whole model is under a
+  pixel, and then nothing. Forests, cities and debris fields at the horizon are a dozen triangles each until they
+  are smaller than a pixel.
 - **Vertices** are quantised per model: positions as 16-bit in the model's bounds, normals and tangents octahedral
   16-bit, UVs 16-bit, in one buffer per model that the cluster table indexes. A cluster is 128 bytes of header: vertex
   offset, triangle offset, counts, bounds, LOD error, parent error, cone for backface culling.
@@ -229,8 +230,8 @@ Every model draws as clusters of up to 128 triangles and 128 vertices in a hiera
    visible this frame is missed, and nothing that was hidden last frame and still is costs a pixel.
 
 The threshold is one pixel of projected error at the output resolution, scaled by a quality setting. There is no
-distance cull and no size cull: a thing stops drawing only when its coarsest level, the imposter, is itself smaller
-than a pixel after supersampling, and then it was not visible.
+distance cull and no size cull as such: a thing stops drawing when its diameter, the root's parent error, projects
+under the threshold, and then it was not visible.
 
 **The visibility buffer** is `R32_UINT`: 25 bits of index into the frame's visible-cluster list and 7 bits of triangle
 index, plus the hardware depth. The visible-cluster list holds instance and cluster ids, so one load gives the
@@ -512,7 +513,7 @@ constructor. The renderer fits that shape:
 | Visibility buffer + GBuffer      | Classic deferred                                   | Materials in the raster pass fight the cluster path's one pipeline, and quad overdraw on small triangles |
 |                                  | Forward+                                           | Every material carries the whole lighting loop, and no visibility pass to drive the shadow page marks |
 | Cluster DAG, hardware raster     | A compute software rasteriser (Nanite's)           | Needs 64-bit image atomics, absent on the Mac baseline; the detail test keeps triangles pixel-sized    |
-| Imposters as the DAG's last level | Distance culling, HLOD groups                      | Culling pops; HLOD is authoring; a quad per instance costs nothing and stays correct               |
+| A sloppy root under a pixel       | Imposter quads, distance culling, HLOD groups      | An imposter is a second representation to capture and keep right; culling pops; HLOD is authoring  |
 | Moment-based OIT                 | Sorted per instance, depth peeling, linked lists   | Sorting fails on interleaved glass, peeling is a pass per layer, lists are unbounded memory           |
 | An own render graph              | A NuGet render graph                               | None exists over our own `IGraphicsApi`; the compile is 600 lines of pure code we can test             |
 | TAAU                             | MSAA, FXAA                                         | Neither converges a stochastic frame; MSAA is wasted on a visibility buffer                             |
@@ -567,7 +568,7 @@ Line counts are estimates of C# and Slang.
 | ----- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ----- |
 | 0     | Core's `Gpu/` and `Shaders/`, `IGraphicsApi`, `VulkanGraphics`, `IShaderCompiler`, `SlangShaders`, the `Core/` shaders, a `GpuChecks` gem | A compute gradient through the heap, read back and checked headless on lavapipe, and shown in the window on Windows, Linux and a Mac | 7k    |
 | 1     | `AssimpModels`, `MeshPreprocessor` clusters and DAG, the render graph, instance and cluster tables, culling, visibility, HZB, materials, GBuffer, a flat sun | 10,000 instances of a 1M-triangle model draw at a stable frame time at any distance; walking away pops nothing; the graph compile and the DAG build have tests | 9k |
-| 2     | Imposter captures as the last level, texture compression and the cache, failure stand-ins               | A forest of 100,000 trees to the horizon; a broken model is a cube, a broken material magenta                  | 3k    |
+| 2     | A sloppy root as the last level, captures for the cards, texture compression and the cache, failure stand-ins | A forest of 100,000 trees to the horizon; a broken model is a cube, a broken material magenta            | 3k    |
 | 3     | Virtual shadow maps for the sun: page marking, allocation, caching, cluster draw into pages, sampling    | A fence shadow sharp at 2 m and a ridge's shadow sharp at 2 km in one view; a still scene draws zero pages     | 4k    |
 | 4     | Lights: clustered lists, physical units, local VSMs, rect lights, the atmosphere sky, volumetric fog     | The Lights sample at a thousand lights; dusk from the atmosphere; a shaft through a window into fog           | 4k    |
 | 5     | The distance field: mesh fields in the preprocessor, the global clipmaps, the cone shadow, `IWorldTracer` | Field shadows for the lights past the VSM budget; a field slice debug view; the mesh field has a test on a cube | 3k |

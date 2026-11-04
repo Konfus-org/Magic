@@ -14,8 +14,7 @@ model reader, the mesh preprocessor and the texture reader.
 - Every instance keeps its row of the instance table from frame to frame, so a still scene uploads nothing; the
   camera's position is taken off on the GPU.
 - Once a model and its materials are resident, the renderer captures them from 64 directions into atlases of albedo,
-  normal and depth; from far enough that the whole model is under the error threshold, the instance draws as one
-  quad facing the camera, read from the capture nearest its direction and lit like any surface.
+  normal and depth, what the global illumination reads where a ray lands on the model.
 - Every frame, the GPU culls each instance's clusters against the frustum, their normal cones, the pixel error
   threshold that picks the level of detail, and last frame's depth pyramid, draws the visible ones into a
   visibility buffer, retests what the old pyramid hid against the new one and draws those too. The visibility

@@ -10,9 +10,12 @@ namespace MeshPreprocessor;
 /// <summary>
 /// Builds a model's cluster hierarchy, the DAG of Karis, "Nanite: A Deep Dive", 2021: the leaves are clusters of
 /// its triangles; each level above groups neighbouring clusters, simplifies the group's triangles to about half with
-/// the group's border locked, and clusters the result, until one group is left or nothing simplifies further. Every
+/// the group's border locked, and clusters the result, until one group is left or nothing simplifies further; the
+/// last level is the root, the whole mesh simplified without regard to its topology down to a few triangles. Every
 /// cluster records its own error and its parent group's, each no less than its children's, so the cut through the
-/// hierarchy is decided per cluster on the GPU. Pure functions over arrays, which a test drives with a known mesh.
+/// hierarchy is decided per cluster on the GPU; a root's parent error is the model's diameter, so a model stops
+/// drawing when the whole of it is under the threshold. Pure functions over arrays, which a test drives with a
+/// known mesh.
 /// </summary>
 internal static unsafe class ClusterBuilder
 {
@@ -38,9 +41,9 @@ internal static unsafe class ClusterBuilder
     private const float CreaseAngle = MathF.PI / 4;
 
     /// <summary>
-    /// The imposter's error as a fraction of the model's radius: about the parallax between two of its captures.
+    /// The most triangles a mesh's root holds: what a model draws as when it is a few pixels across.
     /// </summary>
-    private const float ImposterErrorFraction = 0.03f;
+    internal const int RootTriangles = 12;
 
     public static MeshDerived Build(Model model)
     {
@@ -59,7 +62,7 @@ internal static unsafe class ClusterBuilder
         }
 
         (Vector3 center, float radius) = GetSphere(vertices);
-        AddImposter(clusters, center, radius);
+        SetRootParents(clusters, center, radius);
         DistanceField field = DistanceFieldBuilder.Build(model);
 
         return new MeshDerived
@@ -77,16 +80,15 @@ internal static unsafe class ClusterBuilder
     }
 
     /// <summary>
-    /// The cluster above every root: the imposter, a quad the renderer draws from the model's captures, with the
-    /// model's sphere and an error no root's is above, so the cut reaches it last.
+    /// Every root's parent: the model's sphere, widened to hold the roots' own, at the error of its diameter, so a
+    /// root draws until the whole model projects under the threshold, and then nothing does.
     /// </summary>
-    private static void AddImposter(List<GpuCluster> clusters, Vector3 center, float radius)
+    private static void SetRootParents(List<GpuCluster> clusters, Vector3 center, float radius)
     {
-        float error = radius * ImposterErrorFraction;
         foreach (GpuCluster cluster in clusters)
         {
             if (float.IsPositiveInfinity(cluster.ParentError))
-                error = Math.Max(error, cluster.Error);
+                radius = Math.Max(radius, Vector3.Distance(center, cluster.DetailCenter) + cluster.DetailRadius);
         }
 
         for (int i = 0; i < clusters.Count; i++)
@@ -95,29 +97,11 @@ internal static unsafe class ClusterBuilder
             if (!float.IsPositiveInfinity(cluster.ParentError))
                 continue;
 
-            cluster.ParentError = error;
+            cluster.ParentError = 2 * radius;
             cluster.ParentCenter = center;
             cluster.ParentRadius = radius;
             clusters[i] = cluster;
         }
-
-        clusters.Add(
-            new GpuCluster
-            {
-                Center = center,
-                Radius = radius,
-                ParentCenter = center,
-                ParentRadius = radius,
-                DetailCenter = center,
-                DetailRadius = radius,
-                Error = error,
-                ParentError = float.PositiveInfinity,
-                TriangleCount = 2,
-                ConeAxis = Packing.EncodeUnitVector(Vector3.UnitY),
-                ConeCutoff = Packing.EncodeSnorm16(1),
-                MaterialSlot = GpuCluster.ImposterSlot,
-            }
-        );
     }
 
     /// <summary>
@@ -191,6 +175,96 @@ internal static unsafe class ClusterBuilder
             Emit(parents, indices, clusters);
             level = parents;
         }
+
+        List<Level> root = BuildRoot(
+            level,
+            mesh,
+            positions,
+            canonical,
+            vertexCount,
+            scale,
+            vertices,
+            clusters,
+            firstOfLevel
+        );
+        if (root.Count > 0)
+            Emit(root, indices, clusters);
+    }
+
+    /// <summary>
+    /// The root above the last level: the level's triangles simplified without regard to their topology down to
+    /// <see cref="RootTriangles"/>, as one cluster, with the level's clusters as its children; none when the level is
+    /// already that small.
+    /// </summary>
+    private static List<Level> BuildRoot(
+        List<Level> level,
+        Mesh mesh,
+        float[] positions,
+        uint[] canonical,
+        int vertexCount,
+        float scale,
+        ImmutableArray<GpuVertex>.Builder vertices,
+        List<GpuCluster> clusters,
+        int firstOfLevel
+    )
+    {
+        List<uint> merged = [];
+        float childError = 0;
+        foreach (Level cluster in level)
+        {
+            merged.AddRange(cluster.Indices);
+            childError = Math.Max(childError, cluster.Error);
+        }
+
+        if (merged.Count <= RootTriangles * 3)
+            return [];
+
+        (uint[] simplified, float error) = SimplifySloppy(merged.ToArray(), positions, canonical, vertexCount, scale);
+        if (simplified.Length == 0 || simplified.Length >= merged.Count)
+            return [];
+
+        float rootError = Math.Max(error, childError);
+        List<int> members = [];
+        for (int i = 0; i < level.Count; i++)
+        {
+            members.Add(i);
+        }
+
+        (Vector3 center, float radius) = GetGroupSphere(members, clusters, firstOfLevel);
+        foreach (int member in members)
+        {
+            GpuCluster child = clusters[firstOfLevel + member];
+            child.ParentError = rootError;
+            child.ParentCenter = center;
+            child.ParentRadius = radius;
+            clusters[firstOfLevel + member] = child;
+        }
+
+        Dictionary<(uint, uint, uint), (uint, uint, uint)> copies = CopyVertices(
+            mesh,
+            simplified,
+            positions,
+            canonical,
+            vertices
+        );
+        List<Level> root = [];
+        foreach (Level cluster in Clusterize(simplified, positions, vertexCount, rootError, mesh.MaterialSlot))
+        {
+            cluster.DetailCenter = center;
+            cluster.DetailRadius = radius;
+            cluster.PoolIndices = new uint[cluster.Indices.Length];
+            for (int i = 0; i + 2 < cluster.Indices.Length; i += 3)
+            {
+                (uint a, uint b, uint c) = copies[(cluster.Indices[i], cluster.Indices[i + 1], cluster.Indices[i + 2])];
+                cluster.PoolIndices[i] = a;
+                cluster.PoolIndices[i + 1] = b;
+                cluster.PoolIndices[i + 2] = c;
+            }
+
+            root.Add(cluster);
+        }
+
+        return root;
     }
 
     /// <summary>
@@ -374,6 +448,48 @@ internal static unsafe class ClusterBuilder
                 target,
                 float.MaxValue,
                 (uint)(meshopt_SimplifyLockBorder | meshopt_SimplifySparse),
+                &error
+            );
+        }
+
+        return (destination.AsSpan(0, (int)count).ToArray(), error * scale);
+    }
+
+    /// <summary>
+    /// The triangles simplified to <see cref="RootTriangles"/> with no regard to their topology, and the error that
+    /// cost in the mesh's units: what the ordinary simplifier cannot reach.
+    /// </summary>
+    private static (uint[] Indices, float Error) SimplifySloppy(
+        uint[] indices,
+        float[] positions,
+        uint[] canonical,
+        int vertexCount,
+        float scale
+    )
+    {
+        uint[] welded = new uint[indices.Length];
+        for (int i = 0; i < indices.Length; i++)
+        {
+            welded[i] = canonical[indices[i]];
+        }
+
+        uint[] destination = new uint[indices.Length];
+        float error;
+        nuint count;
+        fixed (uint* d = destination)
+        fixed (uint* i = welded)
+        fixed (float* p = positions)
+        {
+            count = meshopt_simplifySloppy(
+                d,
+                i,
+                (nuint)indices.Length,
+                p,
+                (nuint)vertexCount,
+                3 * sizeof(float),
+                null,
+                (nuint)(RootTriangles * 3),
+                float.MaxValue,
                 &error
             );
         }

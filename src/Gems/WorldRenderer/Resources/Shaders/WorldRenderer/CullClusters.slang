@@ -58,10 +58,6 @@ void CullClusters(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
 void Test(FrameConstants frame, uint instanceIndex, GpuInstance instance, uint clusterIndex, bool isRetest)
 {
     GpuCluster cluster = LoadCluster(frame.clusters, clusterIndex);
-    bool isImposter = IsImposter(cluster);
-    if (isImposter && instance.capture == 0u)
-        return;
-
     float scale = GetMaxScale(instance.world);
     float3 center = Relative(frame, ToWorld(instance.world, cluster.center));
     float radius = cluster.radius * scale;
@@ -79,7 +75,7 @@ void Test(FrameConstants frame, uint instanceIndex, GpuInstance instance, uint c
 
     // The cone: culled when the camera is behind every triangle's plane, the sphere widening the cone to be sure.
     float cutoff = GetConeCutoff(cluster);
-    if (cutoff < 1.0 && !isImposter && (frame.flags & FrameFlagNoConeCull) == 0u)
+    if (cutoff < 1.0 && (frame.flags & FrameFlagNoConeCull) == 0u)
     {
         float3 axis = ToWorldDirection(instance.world, GetConeAxis(cluster));
         float distance = length(center);
@@ -114,7 +110,7 @@ void Test(FrameConstants frame, uint instanceIndex, GpuInstance instance, uint c
     visible[listIndex] = entry;
 
     // A translucent cluster waits for the lighting in its own draws instead of the visibility buffer's.
-    bool isTranslucent = !isImposter && LoadMaterial(frame.materials, GetMaterial(instance, cluster.materialSlot)).kind == MaterialKindGlass;
+    bool isTranslucent = LoadMaterial(frame.materials, GetMaterial(instance, cluster.materialSlot)).kind == MaterialKindGlass;
     uint countOffset = isTranslucent ? CountTranslucentDraws : (isRetest ? CountRetestDraws : CountVisibleDraws);
     uint drawOffset = isTranslucent ? 2u * frame.maxVisibleClusters : (isRetest ? frame.maxVisibleClusters : 0u);
     uint drawIndex = counts.InterlockedAdd(countOffset, 1u);

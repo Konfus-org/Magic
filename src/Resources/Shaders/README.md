@@ -7,11 +7,10 @@ compiler loads a module and its imports from the assets, so a game's `Shaders/` 
 - `Core/` is what every module needs: the heap every resource is read through (`Heap`), what a pass is handed
   (`Pass`), what a frame is handed (`Frame`), numbers, colour, packing, sampling and hashing.
 - `Scene/` is the GPU tables and how to read them: the instance table, the pools of vertices, indices and clusters,
-  the material table, the capture table and the imposter quad drawn from it, what the cull leaves for the draw and
-  the resolve, and the cull's tests.
+  the material table, the capture table, what the cull leaves for the draw and the resolve, and the cull's tests.
 - `Surface/` is what a material is handed for a pixel and what it gives back.
 - `Material/` is the material contract, `IMaterial`, and the materials every project has: the standard one, the one
-  a broken asset is drawn with, and what an imposter's pixel is made of.
+  a broken asset is drawn with, and glass.
 - `Shadow/` is the sun's virtual shadow map: its tables, how a page is found, and how a receiver samples it.
 - `Light/` is what a local light gives a point: a point, spot or rect light's direction and irradiance there.
 - `Sky/` is the sky contract, `ISky`, and the Earth's atmosphere, which gives the sky, the sun's colour through the

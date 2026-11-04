@@ -32,7 +32,7 @@ void ShadowCull(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
     {
         uint clusterIndex = instance.clusterOffset + i;
         GpuCluster cluster = LoadCluster(frame.clusters, clusterIndex);
-        if (IsImposter(cluster) || LoadMaterial(frame.materials, GetMaterial(instance, cluster.materialSlot)).kind == MaterialKindGlass)
+        if (LoadMaterial(frame.materials, GetMaterial(instance, cluster.materialSlot)).kind == MaterialKindGlass)
             continue;
 
         float2 light = ToLight(shadow, ToWorld(instance.world, cluster.center)).xy;
