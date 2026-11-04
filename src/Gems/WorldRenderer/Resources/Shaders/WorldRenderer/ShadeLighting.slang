@@ -1,8 +1,8 @@
 // The GBuffer lit into the HDR picture: the sun through its pages, the lights of the pixel's froxel, the strongest
-// of them shadowed through the tracer the entry is specialised to, the indirect light from the screen probes around the pixel,
-// and the air in front of it; the sky itself where nothing was drawn, from the sky the entry is specialised to. The
-// pass header's x is the frame's constants, y the shadow constants, z the lighting constants and w the field
-// constants.
+// of them shadowed through the tracer the entry is specialised to, the indirect light from the screen probes around
+// the pixel, and the air in front of it; the sky itself where nothing was drawn, from the sky the entry is
+// specialised to. The pass header's x is the frame's constants, y the shadow constants, z the lighting constants and
+// w the field constants.
 module "WorldRenderer/ShadeLighting";
 
 import Core.Heap;
@@ -44,10 +44,9 @@ bool SampleScreenProbes(GiConstants gi, uint2 pixel, float3 world, float3 normal
     float weightSum = 0.0;
     for (int ring = 0; ring < 2 && weightSum < 1e-3; ring++)
     {
-        int reach = ring == 0 ? 0 : 1;
-        for (int y = -reach; y < 2 + reach; y++)
+        for (int y = -ring; y < 2 + ring; y++)
         {
-            for (int x = -reach; x < 2 + reach; x++)
+            for (int x = -ring; x < 2 + ring; x++)
             {
                 int2 at = base + int2(x, y);
                 if (any(at < 0) || any(at > last))
@@ -96,7 +95,7 @@ void ShadeLighting<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThreadI
     SkyInputs sky;
     sky.viewDirection = -viewDirection;
     sky.sunDirection = frame.sunDirection.xyz;
-    sky.withSun = true;
+    sky.hasSunDisc = true;
     sky.sunIlluminance = lighting.sunIlluminance.rgb;
     sky.altitude = lighting.cameraAltitude.x;
     sky.transmittanceLut = lighting.transmittanceLut;
@@ -262,9 +261,7 @@ void ShadeLighting<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThreadI
         }
     }
 
-    // The views of a factor rather than a light are shown as they are, with no air before them.
-    bool isFactorView = lighting.debugView == 6u || lighting.debugView == 7u || lighting.debugView >= 9u;
-    if (lighting.fog.isPresent != 0u && !isFactorView)
+    if (lighting.fog.isPresent != 0u && !IsFactorView(lighting.debugView))
     {
         VolumeRef integrated = { lighting.fogIntegrated };
         SamplerRef sampler = { lighting.fogSampler };

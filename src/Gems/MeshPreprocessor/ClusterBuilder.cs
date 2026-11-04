@@ -193,7 +193,7 @@ internal static unsafe class ClusterBuilder
 
     /// <summary>
     /// The root above the last level: the level's triangles simplified without regard to their topology down to
-    /// <see cref="RootTriangles"/>, as one cluster, with the level's clusters as its children; none when the level is
+    /// <see cref="RootTriangles"/>, clustered, with the level's clusters as its children; none when the level is
     /// already that small.
     /// </summary>
     private static List<Level> BuildRoot(
@@ -208,63 +208,33 @@ internal static unsafe class ClusterBuilder
         int firstOfLevel
     )
     {
+        List<int> members = [];
         List<uint> merged = [];
         float childError = 0;
-        foreach (Level cluster in level)
+        for (int i = 0; i < level.Count; i++)
         {
-            merged.AddRange(cluster.Indices);
-            childError = Math.Max(childError, cluster.Error);
+            members.Add(i);
+            merged.AddRange(level[i].Indices);
+            childError = Math.Max(childError, level[i].Error);
         }
 
         if (merged.Count <= RootTriangles * 3)
             return [];
 
-        (uint[] simplified, float error) = SimplifySloppy(merged.ToArray(), positions, canonical, vertexCount, scale);
+        (uint[] simplified, float error) = Simplify(
+            merged.ToArray(),
+            positions,
+            canonical,
+            vertexCount,
+            scale,
+            RootTriangles * 3,
+            isSloppy: true
+        );
         if (simplified.Length == 0 || simplified.Length >= merged.Count)
             return [];
 
-        float rootError = Math.Max(error, childError);
-        List<int> members = [];
-        for (int i = 0; i < level.Count; i++)
-        {
-            members.Add(i);
-        }
-
-        (Vector3 center, float radius) = GetGroupSphere(members, clusters, firstOfLevel);
-        foreach (int member in members)
-        {
-            GpuCluster child = clusters[firstOfLevel + member];
-            child.ParentError = rootError;
-            child.ParentCenter = center;
-            child.ParentRadius = radius;
-            clusters[firstOfLevel + member] = child;
-        }
-
-        Dictionary<(uint, uint, uint), (uint, uint, uint)> copies = CopyVertices(
-            mesh,
-            simplified,
-            positions,
-            canonical,
-            vertices
-        );
-        List<Level> root = [];
-        foreach (Level cluster in Clusterize(simplified, positions, vertexCount, rootError, mesh.MaterialSlot))
-        {
-            cluster.DetailCenter = center;
-            cluster.DetailRadius = radius;
-            cluster.PoolIndices = new uint[cluster.Indices.Length];
-            for (int i = 0; i + 2 < cluster.Indices.Length; i += 3)
-            {
-                (uint a, uint b, uint c) = copies[(cluster.Indices[i], cluster.Indices[i + 1], cluster.Indices[i + 2])];
-                cluster.PoolIndices[i] = a;
-                cluster.PoolIndices[i + 1] = b;
-                cluster.PoolIndices[i + 2] = c;
-            }
-
-            root.Add(cluster);
-        }
-
-        return root;
+        Group root = SetParent(members, Math.Max(error, childError), simplified, clusters, firstOfLevel);
+        return AddLevel([root], mesh, positions, canonical, vertexCount, vertices);
     }
 
     /// <summary>
@@ -293,8 +263,7 @@ internal static unsafe class ClusterBuilder
 
         // Every group simplified first, so the level's vertex copies take their normals from the whole level: a
         // vertex on the border of two groups then shades the same on both sides.
-        List<(uint[] Simplified, float Error, Vector3 Center, float Radius)> made = [];
-        List<uint> levelTriangles = [];
+        List<Group> made = [];
         for (int group = 0; group < groupCount; group++)
         {
             List<int> members = [];
@@ -313,30 +282,68 @@ internal static unsafe class ClusterBuilder
             if (members.Count < 2)
                 continue;
 
-            (uint[] simplified, float error) = Simplify(merged.ToArray(), positions, canonical, vertexCount, scale);
+            (uint[] simplified, float error) = Simplify(
+                merged.ToArray(),
+                positions,
+                canonical,
+                vertexCount,
+                scale,
+                merged.Count / 2 / 3 * 3,
+                isSloppy: false
+            );
             if (simplified.Length > merged.Count * MinReduction)
                 continue;
 
-            // A parent's error is never below its children's, and its sphere holds theirs, so the cut never jumps
-            // back to finer detail as the camera moves.
-            float groupError = Math.Max(error, childError);
-            (Vector3 center, float radius) = GetGroupSphere(members, clusters, firstOfLevel);
-            foreach (int member in members)
-            {
-                GpuCluster child = clusters[firstOfLevel + member];
-                child.ParentError = groupError;
-                child.ParentCenter = center;
-                child.ParentRadius = radius;
-                clusters[firstOfLevel + member] = child;
-            }
-
-            made.Add((simplified, groupError, center, radius));
-            levelTriangles.AddRange(simplified);
+            made.Add(SetParent(members, Math.Max(error, childError), simplified, clusters, firstOfLevel));
         }
 
-        List<Level> parents = [];
-        if (made.Count == 0)
-            return parents;
+        return made.Count == 0 ? [] : AddLevel(made, mesh, positions, canonical, vertexCount, vertices);
+    }
+
+    /// <summary>
+    /// Writes a group's parent error and sphere into its members, and makes the group. A parent's error is never
+    /// below its children's, and its sphere holds theirs, so the cut never jumps back to finer detail as the camera
+    /// moves.
+    /// </summary>
+    private static Group SetParent(
+        List<int> members,
+        float error,
+        uint[] simplified,
+        List<GpuCluster> clusters,
+        int firstOfLevel
+    )
+    {
+        (Vector3 center, float radius) = GetGroupSphere(members, clusters, firstOfLevel);
+        foreach (int member in members)
+        {
+            GpuCluster child = clusters[firstOfLevel + member];
+            child.ParentError = error;
+            child.ParentCenter = center;
+            child.ParentRadius = radius;
+            clusters[firstOfLevel + member] = child;
+        }
+
+        return new Group(simplified, error, center, radius);
+    }
+
+    /// <summary>
+    /// The level the groups make: their vertices copied into the pool, once for the whole level, and each group's
+    /// triangles clustered, every cluster with the group's error and sphere and its triangles in the pool.
+    /// </summary>
+    private static List<Level> AddLevel(
+        List<Group> made,
+        Mesh mesh,
+        float[] positions,
+        uint[] canonical,
+        int vertexCount,
+        ImmutableArray<GpuVertex>.Builder vertices
+    )
+    {
+        List<uint> levelTriangles = [];
+        foreach (Group group in made)
+        {
+            levelTriangles.AddRange(group.Simplified);
+        }
 
         Dictionary<(uint, uint, uint), (uint, uint, uint)> copies = CopyVertices(
             mesh,
@@ -345,12 +352,15 @@ internal static unsafe class ClusterBuilder
             canonical,
             vertices
         );
-        foreach ((uint[] simplified, float groupError, Vector3 center, float radius) in made)
+        List<Level> parents = [];
+        foreach (Group group in made)
         {
-            foreach (Level parent in Clusterize(simplified, positions, vertexCount, groupError, mesh.MaterialSlot))
+            foreach (
+                Level parent in Clusterize(group.Simplified, positions, vertexCount, group.Error, mesh.MaterialSlot)
+            )
             {
-                parent.DetailCenter = center;
-                parent.DetailRadius = radius;
+                parent.DetailCenter = group.Center;
+                parent.DetailRadius = group.Radius;
                 parent.PoolIndices = new uint[parent.Indices.Length];
                 for (int i = 0; i + 2 < parent.Indices.Length; i += 3)
                 {
@@ -412,15 +422,18 @@ internal static unsafe class ClusterBuilder
     }
 
     /// <summary>
-    /// The triangles simplified to about half, their border locked so neighbouring groups keep meeting, and the
-    /// error that cost in the mesh's units.
+    /// The triangles simplified to at most a target count, and the error that cost in the mesh's units. The ordinary
+    /// simplifier keeps the border locked so neighbouring groups keep meeting; the sloppy one has no regard for the
+    /// topology and reaches what the ordinary one cannot.
     /// </summary>
     private static (uint[] Indices, float Error) Simplify(
         uint[] indices,
         float[] positions,
         uint[] canonical,
         int vertexCount,
-        float scale
+        float scale,
+        int targetIndices,
+        bool isSloppy
     )
     {
         // Simplified over the canonical vertices, so a seam in the attributes is not a border the simplifier keeps.
@@ -431,67 +444,37 @@ internal static unsafe class ClusterBuilder
         }
 
         uint[] destination = new uint[indices.Length];
-        nuint target = (nuint)(indices.Length / 2 / 3 * 3);
         float error;
         nuint count;
         fixed (uint* d = destination)
         fixed (uint* i = welded)
         fixed (float* p = positions)
         {
-            count = meshopt_simplify(
-                d,
-                i,
-                (nuint)indices.Length,
-                p,
-                (nuint)vertexCount,
-                3 * sizeof(float),
-                target,
-                float.MaxValue,
-                (uint)(meshopt_SimplifyLockBorder | meshopt_SimplifySparse),
-                &error
-            );
-        }
-
-        return (destination.AsSpan(0, (int)count).ToArray(), error * scale);
-    }
-
-    /// <summary>
-    /// The triangles simplified to <see cref="RootTriangles"/> with no regard to their topology, and the error that
-    /// cost in the mesh's units: what the ordinary simplifier cannot reach.
-    /// </summary>
-    private static (uint[] Indices, float Error) SimplifySloppy(
-        uint[] indices,
-        float[] positions,
-        uint[] canonical,
-        int vertexCount,
-        float scale
-    )
-    {
-        uint[] welded = new uint[indices.Length];
-        for (int i = 0; i < indices.Length; i++)
-        {
-            welded[i] = canonical[indices[i]];
-        }
-
-        uint[] destination = new uint[indices.Length];
-        float error;
-        nuint count;
-        fixed (uint* d = destination)
-        fixed (uint* i = welded)
-        fixed (float* p = positions)
-        {
-            count = meshopt_simplifySloppy(
-                d,
-                i,
-                (nuint)indices.Length,
-                p,
-                (nuint)vertexCount,
-                3 * sizeof(float),
-                null,
-                (nuint)(RootTriangles * 3),
-                float.MaxValue,
-                &error
-            );
+            count = isSloppy
+                ? meshopt_simplifySloppy(
+                    d,
+                    i,
+                    (nuint)indices.Length,
+                    p,
+                    (nuint)vertexCount,
+                    3 * sizeof(float),
+                    null,
+                    (nuint)targetIndices,
+                    float.MaxValue,
+                    &error
+                )
+                : meshopt_simplify(
+                    d,
+                    i,
+                    (nuint)indices.Length,
+                    p,
+                    (nuint)vertexCount,
+                    3 * sizeof(float),
+                    (nuint)targetIndices,
+                    float.MaxValue,
+                    (uint)(meshopt_SimplifyLockBorder | meshopt_SimplifySparse),
+                    &error
+                );
         }
 
         return (destination.AsSpan(0, (int)count).ToArray(), error * scale);
@@ -806,6 +789,12 @@ internal static unsafe class ClusterBuilder
     /// The faces around a vertex that share a normal: their unit normal when the group began, and the area-weighted
     /// sum of them all.
     /// </summary>
+    /// <summary>
+    /// A group of a level's clusters simplified into their parent's triangles, with the error and the sphere every
+    /// cluster made of them carries.
+    /// </summary>
+    private sealed record Group(uint[] Simplified, float Error, Vector3 Center, float Radius);
+
     private sealed class SmoothingGroup
     {
         public required Vector3 Unit { get; init; }

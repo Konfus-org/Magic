@@ -21,7 +21,7 @@ public struct GpuInstance
     public uint clusterCount;
     // The model's field's slot in the atlas plus one; 0 while it has none.
     public uint flags;
-    // The capture table's row the imposter draws with; 0 while there is none, and the imposter is not drawn.
+    // The card table's capture row, which names the instance's cards; 0 while there is none.
     public uint capture;
     // The material table's row for each slot.
     public uint materials[MaterialSlots];

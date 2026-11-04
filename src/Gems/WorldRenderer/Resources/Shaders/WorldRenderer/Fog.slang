@@ -38,7 +38,7 @@ void FogInject<S : ISky>(uint3 thread : SV_DispatchThreadID)
     SkyInputs sky;
     sky.viewDirection = view;
     sky.sunDirection = frame.sunDirection.xyz;
-    sky.withSun = false;
+    sky.hasSunDisc = false;
     sky.sunIlluminance = lighting.sunIlluminance.rgb;
     sky.altitude = lighting.cameraAltitude.x;
     sky.transmittanceLut = lighting.transmittanceLut;

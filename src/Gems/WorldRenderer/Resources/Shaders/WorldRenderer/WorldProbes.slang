@@ -1,9 +1,9 @@
 // The world probes kept up to date: each frame the probes whose cells moved with the windows, and those an
 // instance changed under, are marked new, a budget of probes is picked, the new ones and a share of the rest in
-// turn, and each picked probe traces its rays
-// through the tracer the entry is specialised to, shades what they land on from the surface cache and what they
-// miss from the sky, folds them into its spheres of radiance and distance, and convolves its irradiance. The pass header's x is the frame's
-// constants, y the shadow constants, z the lighting constants and w the field constants.
+// turn, and each picked probe traces its rays through the tracer the entry is specialised to, shades what they land
+// on from the surface cache and what they miss from the sky, folds them into its spheres of radiance and distance,
+// and convolves its irradiance. The pass header's x is the frame's constants, y the shadow constants, z the
+// lighting constants and w the field constants.
 module "WorldRenderer/WorldProbes";
 
 import Core.Heap;
@@ -139,7 +139,7 @@ void WorldProbeTrace<S : ISky, T : IWorldTracer>(uint3 group : SV_GroupID, uint3
 
     SkyInputs sky;
     sky.sunDirection = frame.sunDirection.xyz;
-    sky.withSun = false;
+    sky.hasSunDisc = false;
     sky.sunIlluminance = lighting.sunIlluminance.rgb;
     sky.altitude = lighting.cameraAltitude.x;
     sky.transmittanceLut = lighting.transmittanceLut;

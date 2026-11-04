@@ -45,7 +45,7 @@ Six gems, each talking to the others only through Core:
 | `SlangShaders`     | `IShaderCompiler`, `ICache<CompiledShader>`       | `Assets`, `Caches`, settings                                                | slang                    |
 | `AssimpModels`     | `IAssetLoader<Model>`                             | nothing                                                                     | assimp                   |
 | `MeshPreprocessor` | `ILoadPostProcessor<Model>`, `ICache<MeshDerived>` | `Assets`, `Caches`, `Threads`, settings                                     | meshoptimizer            |
-| `WorldRenderer`    | `IRendering`, `IPreloader`, `ICache<GpuCard>`, `ICache<GpuTexture>` | `IGraphicsApi`, `IShaderCompiler`, `Assets`, `Caches`, `World`, `Threads`, `App`, settings, `IWindow?`, `IScripts` | bc7enc |
+| `WorldRenderer`    | `IRendering`, `IPreloader`, `ICache<GpuTexture>` | `IGraphicsApi`, `IShaderCompiler`, `Assets`, `Caches`, `World`, `Threads`, `App`, settings, `IWindow?`, `IScripts` | bc7enc |
 | `SdlPlatform`      | already planned; the window and input             |                                                                             |                          |
 
 Core gains, in `Contexts/Gpu/` and `Contexts/Rendering/`, the plain data both sides share: handles, descriptions,
@@ -174,7 +174,7 @@ Shadows       VSM: mark pages from last depth → allocate → cull clusters per
 Visibility    cull instances → cull clusters, pick detail, test last HZB → raster R32 ids + reverse depth → HZB →
               retest what the old HZB hid, raster the rest
 Materials     classify 8×8 tiles by material → one resolve dispatch per material → GBuffer + motion vectors
-Surface cache direct light on the cards (all lights, VSM) → indirect on the cards from the radiance cache → lit atlas
+Surface cache direct light on the cards (all lights, VSM) → radiosity on the cards traced through the field → lit atlas
 GI            radiance-cache probes trace the field, shade from the cards → screen probes trace short, gather long →
               filter → integrate
 Reflections   screen trace → field trace with card lighting → probe fallback → denoise
@@ -211,9 +211,9 @@ Every model draws as clusters of up to 128 triangles and 128 vertices in a hiera
   diameter, so the same error test that picks every other level draws the root until the whole model is under a
   pixel, and then nothing. Forests, cities and debris fields at the horizon are a dozen triangles each until they
   are smaller than a pixel.
-- **Vertices** are quantised per model: positions as 16-bit in the model's bounds, normals and tangents octahedral
-  16-bit, UVs 16-bit, in one buffer per model that the cluster table indexes. A cluster is 128 bytes of header: vertex
-  offset, triangle offset, counts, bounds, LOD error, parent error, cone for backface culling.
+- **Vertices** are packed per model: positions as floats, normals and tangents octahedral 16-bit, UVs 16-bit, in
+  one buffer per model that the cluster table indexes. A cluster is 80 bytes of header: vertex offset, triangle
+  offset, counts, bounds, LOD error, parent error, cone for backface culling.
 
 **Culling** is two compute passes per view with an indirect draw between:
 
@@ -314,7 +314,7 @@ real geometry, not a grid of radiance.
   with a band of 4 voxels, the sign within the band from the nearest triangle's pseudo-normal and beyond it from ray
   parity, so open meshes still have an inside. Stored in the cache with the clusters.
 - **The global distance field** is 4 clipmaps of 128³ voxels around the camera (12.5 cm to 1 m per voxel), each a
-  `R8_SNORM` 3D texture of distance in band units, in bricks of 16³ voxels. A compute pass updates the bricks instances
+  `R8_SNORM` 3D texture of distance in band units, in bricks of 8³ voxels. A compute pass updates the bricks instances
   touched since last frame, taking the min over the mesh fields of the instances listed for each brick. A still world
   updates nothing; the camera moving scrolls the clipmaps and fills the new slab.
 - **Translucent instances** are left out of the field and listed instead as spheres with a tint, up to 64 a frame,
@@ -332,7 +332,7 @@ world gather from the cards along traced rays; probes on screen gather from the 
 rays; the integrator turns that into irradiance per pixel.
 
 - **The surface cache.** The cards are the six sides of a model's box, each the model drawn orthographically along
-  that axis into atlases of albedo, normal and depth, at the texels the model's size on screen earns (a texel per
+  that axis into atlases of albedo, normal and depth, at the texels its size in the world earns (a texel per
   decimetre, 8 to 128 across, the instance's scale bucketed by powers of two), so a surface facing any way has a
   side that saw it at the detail it shows. A pool of 160 lit slots goes to the instances that take most of the
   view; a slot holds the irradiance on the instance's cards at half their texels, a few slots lit a frame: the sun
@@ -421,15 +421,14 @@ through this so a release ships with the caches full.
 
 | From       | Made by            | Into the cache as   | Holds                                                                        |
 | ---------- | ------------------ | ------------------- | ---------------------------------------------------------------------------- |
-| `Model`    | `MeshPreprocessor` | `MeshDerived`       | quantised vertices, the cluster DAG, card placements, the mesh distance field |
-| `Model`    | `WorldRenderer`    | `GpuCard`           | the six cards' places in the card atlases, albedo, normal and depth              |
+| `Model`    | `MeshPreprocessor` | `MeshDerived`       | packed vertices, the cluster DAG, the mesh distance field |
 | `Texture`  | `WorldRenderer`    | `GpuTexture`        | BC7 (colour), BC5 (normals), BC4 (masks) with mips, through bc7enc           |
 | `Shader`   | `SlangShaders`     | `CompiledShader`    | SPIR-V per specialisation, reflection, the layout of every `[ShaderStruct]`   |
 | `Material` | `WorldRenderer`    | nothing             | a row in the material table, remade from the snapshot when the asset arrives  |
 
 Captures need a GPU, so they are made on the render thread when a model first loads, after its clusters are resident,
 through `Threads.PostAsync`; the preloader counts them as part of a domain's opening. Everything else runs on a worker.
-`MeshPreprocessor` is pure functions over arrays (clusterise, group, simplify, place cards, build the field) with a
+`MeshPreprocessor` is pure functions over arrays (clusterise, group, simplify, build the field) with a
 thin `ProcessAsync` around them, so each is a unit test with a known mesh.
 
 ## The pipeline asset

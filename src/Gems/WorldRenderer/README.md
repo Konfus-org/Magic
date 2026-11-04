@@ -14,7 +14,7 @@ model reader, the mesh preprocessor and the texture reader.
 - Every instance keeps its row of the instance table from frame to frame, so a still scene uploads nothing; the
   camera's position is taken off on the GPU.
 - Once a model and its materials are resident, the renderer draws its cards: the six sides of its box, each into
-  atlases of albedo, normal and depth at the texels its size on screen earns, what the global illumination reads
+  atlases of albedo, normal and depth at the texels its size in the world earns, what the global illumination reads
   where a ray lands on the model.
 - Every frame, the GPU culls each instance's clusters against the frustum, their normal cones, the pixel error
   threshold that picks the level of detail, and last frame's depth pyramid, draws the visible ones into a

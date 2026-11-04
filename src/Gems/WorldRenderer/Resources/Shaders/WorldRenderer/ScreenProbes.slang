@@ -1,8 +1,8 @@
 // The screen probes: one placed on the depth in each tile of pixels, each tracing a hemisphere of rays, first along
 // the screen's depth, then through the field, and ending in the world probes, with the rays given to the directions
 // last frame's probe found bright; each then blended with what last frame's probe at the same surface held,
-// filtered over its neighbours on the same plane, and summed into the irradiance at its surface. The pass header's x is the frame's constants, y the shadow constants, z the lighting
-// constants and w the field constants.
+// filtered over its neighbours on the same plane, and summed into the irradiance at its surface. The pass header's
+// x is the frame's constants, y the shadow constants, z the lighting constants and w the field constants.
 module "WorldRenderer/ScreenProbes";
 
 import Core.Heap;
@@ -105,7 +105,7 @@ float3 TraceProbeRay<S : ISky, T : IWorldTracer>(FrameConstants frame, LightingC
             SkyInputs sky;
             sky.viewDirection = direction;
             sky.sunDirection = frame.sunDirection.xyz;
-            sky.withSun = false;
+            sky.hasSunDisc = false;
             sky.sunIlluminance = lighting.sunIlluminance.rgb;
             sky.altitude = lighting.cameraAltitude.x;
             sky.transmittanceLut = lighting.transmittanceLut;
@@ -159,8 +159,6 @@ void ScreenProbeTrace<S : ISky, T : IWorldTracer>(uint3 group : SV_GroupID, uint
     }
 
     uint rays = total > 0.0 ? min(uint(round(historyLuminance[local.x] / total * float(ScreenProbeRays))), MaxRaysPerTexel) : 1u;
-    if (rays == 0u && !hasHistory)
-        rays = 1u;
 
     float3x3 basis = CreateBasis(probe.normal);
     uint level;

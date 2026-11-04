@@ -42,7 +42,8 @@ bool LoadCardSurface(FrameConstants frame, GpuInstance instance, GpuCard card, f
 {
     world = float3(0.0);
     normal = float3(0.0, 1.0, 0.0);
-    uint2 texel = card.origin + min(uint2(uv * float2(card.size)), card.size - 1u);
+    uint2 size = GetCardSize(card);
+    uint2 texel = GetCardOrigin(card) + min(uint2(uv * float2(size)), size - 1u);
     TextureRef albedoAtlas = { frame.cardAlbedo };
     TextureRef normalAtlas = { frame.cardNormal };
     TextureRef depthAtlas = { frame.cardDepth };
@@ -65,7 +66,7 @@ void LitCardLights(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
     LightingConstants lighting = GetLighting();
     GiConstants gi = LoadConstants<GiConstants>(lighting.gi);
     uint slot = GetBatchSlot(gi, group.x);
-    LitSlot litSlot = LoadLitSlot(gi, slot);
+    GpuLitSlot litSlot = LoadLitSlot(gi, slot);
     GpuInstance instance = LoadInstance(frame.instances, litSlot.instance);
     BufferRef lists = { gi.slotLights };
     uint listOffset = slot * (LitLightsPerSlot + 1u) * 4u;
@@ -100,7 +101,7 @@ void LitCardRadiosity<S : ISky, T : IWorldTracer>(uint3 group : SV_GroupID, uint
     FieldConstants field = GetFieldConstants();
     uint slot = GetBatchSlot(gi, group.z / CardsPerCapture);
     uint side = group.z % CardsPerCapture;
-    LitSlot litSlot = LoadLitSlot(gi, slot);
+    GpuLitSlot litSlot = LoadLitSlot(gi, slot);
     GpuInstance instance = LoadInstance(frame.instances, litSlot.instance);
     GpuCard card = LoadCard(frame.cards, (litSlot.capture * CardsPerCapture) + side);
     uint2 litSize = GetLitCardSize(card);
@@ -122,7 +123,7 @@ void LitCardRadiosity<S : ISky, T : IWorldTracer>(uint3 group : SV_GroupID, uint
 
     SkyInputs sky;
     sky.sunDirection = frame.sunDirection.xyz;
-    sky.withSun = false;
+    sky.hasSunDisc = false;
     sky.sunIlluminance = lighting.sunIlluminance.rgb;
     sky.altitude = lighting.cameraAltitude.x;
     sky.transmittanceLut = lighting.transmittanceLut;
@@ -182,7 +183,7 @@ void LitCardShade<S : ISky>(uint3 thread : SV_DispatchThreadID)
     GiConstants gi = LoadConstants<GiConstants>(lighting.gi);
     uint slot = GetBatchSlot(gi, thread.z / CardsPerCapture);
     uint side = thread.z % CardsPerCapture;
-    LitSlot litSlot = LoadLitSlot(gi, slot);
+    GpuLitSlot litSlot = LoadLitSlot(gi, slot);
     GpuInstance instance = LoadInstance(frame.instances, litSlot.instance);
     GpuCard card = LoadCard(frame.cards, (litSlot.capture * CardsPerCapture) + side);
     uint2 litSize = GetLitCardSize(card);
@@ -204,7 +205,7 @@ void LitCardShade<S : ISky>(uint3 thread : SV_DispatchThreadID)
     SkyInputs sky;
     sky.viewDirection = normal;
     sky.sunDirection = frame.sunDirection.xyz;
-    sky.withSun = false;
+    sky.hasSunDisc = false;
     sky.sunIlluminance = lighting.sunIlluminance.rgb;
     sky.altitude = lighting.cameraAltitude.x;
     sky.transmittanceLut = lighting.transmittanceLut;
@@ -233,7 +234,7 @@ void LitCardShade<S : ISky>(uint3 thread : SV_DispatchThreadID)
 
     // The tiles around the texel blended, kept within the card's own tiles.
     TextureRef radiosity = { gi.cardRadiosity };
-    SamplerRef sampler = { frame.cardSampler };
+    SamplerRef sampler = { frame.linearSampler };
     float2 tiles = ceil(float2(litSize) / float(LitTileTexels));
     float2 tile = clamp((float2(thread.xy) + 0.5) / float(LitTileTexels), float2(0.5), tiles - 0.5);
     float2 tileUv = (float2(litOrigin / LitTileTexels) + tile) / float(LitRadiosityTexels);

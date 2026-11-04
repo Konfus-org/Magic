@@ -14,7 +14,6 @@ import Scene.Culling;
 import Scene.Visibility;
 
 static const uint ModeInstances = 0u;
-static const uint ModeRetest = 1u;
 
 [shader("compute")]
 [numthreads(64, 1, 1)]

@@ -301,8 +301,7 @@ void PostFinal<E0 : IPixelEffect, E1 : IPixelEffect, E2 : IPixelEffect, E3 : IPi
     float2 uv = GetTexelCenterUv(thread.xy, size);
     float3 color = history.Load(thread.xy, 0u).rgb;
     // The views of a factor rather than a light are shown as they are: no bloom, exposure, effect or tonemap.
-    bool isFactorView = lighting.debugView == 6u || lighting.debugView == 7u || lighting.debugView >= 9u;
-    if (!isFactorView)
+    if (!IsFactorView(lighting.debugView))
     {
         color += bloom.SampleLevel(sampler, uv, 0.0).rgb * post.bloomStrength;
         color = max(color * exposure, 0.0);

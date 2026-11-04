@@ -113,7 +113,7 @@ internal record struct FrameConstants
 
     public uint Cards;
 
-    public uint CardSampler;
+    public uint LinearSampler;
 
     public Vector2 Jitter;
 
@@ -133,7 +133,7 @@ internal record struct FrameConstants
 
     public uint Velocity;
 
-    public uint Padding2;
+    public uint Padding1;
 
-    public uint Padding3;
+    public uint Padding2;
 }

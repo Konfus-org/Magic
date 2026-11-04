@@ -56,7 +56,8 @@ bool FindCard(FrameConstants frame, uint capture, float3 modelPoint, float3 mode
         if (any(at < 0.0) || any(at >= 1.0))
             continue;
 
-        uint2 texel = card.origin + min(uint2(at * float2(card.size)), card.size - 1u);
+        uint2 size = GetCardSize(card);
+        uint2 texel = GetCardOrigin(card) + min(uint2(at * float2(size)), size - 1u);
         float captured = depthAtlas.Load(texel, 0u).x;
         // Agreement within two texels across the card, five centimetres or the slack, whichever is most.
         float tolerance = max(max(2.0 * GetCardTexelWorld(card), 0.05), slack) / GetCardDepthRange(card);
@@ -87,7 +88,7 @@ public float3 ShadeInstancePoint(FrameConstants frame, GiConstants gi, uint inst
     float3 modelSlack = mul(float4(slack, 0.0, 0.0, 0.0), instance.inverseWorld).xyz;
     bool isSeen = FindCard(frame, instance.capture, modelPoint, modelNormal, length(modelSlack), cardIndex, uv);
     GpuCard card = LoadCard(frame.cards, cardIndex);
-    SamplerRef sampler = { frame.cardSampler };
+    SamplerRef sampler = { frame.linearSampler };
     TextureRef albedoAtlas = { frame.cardAlbedo };
     float3 albedo = albedoAtlas.SampleLevel(sampler, GetCardAtlasUv(card, uv), 0.0).rgb;
     uint slotPlusOne = GetLitSlot(gi, instanceIndex);

@@ -15,10 +15,10 @@ void CaptureCard(uint3 thread : SV_DispatchThreadID)
     FrameConstants frame = GetFrame();
     PassHeader header = GetPassHeader();
     GpuCard card = LoadCard(frame.cards, header.y);
-    if (any(thread.xy >= card.size))
+    if (any(thread.xy >= GetCardSize(card)))
         return;
 
-    uint2 texel = card.origin + thread.xy;
+    uint2 texel = GetCardOrigin(card) + thread.xy;
     StorageRef albedoAtlas = { frame.cardAlbedo, 0u };
     StorageRef normalAtlas = { frame.cardNormal, 0u };
     StorageRef depthAtlas = { frame.cardDepth, 0u };

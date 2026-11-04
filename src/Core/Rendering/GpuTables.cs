@@ -49,7 +49,7 @@ public record struct GpuInstance
     public uint Flags;
 
     /// <summary>
-    /// The capture table's row the imposter draws with; 0 while there is none.
+    /// The card table's capture row, which names the instance's cards; 0 while there is none.
     /// </summary>
     public uint Capture;
 

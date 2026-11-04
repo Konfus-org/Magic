@@ -61,11 +61,10 @@ void Occlusion(uint3 thread : SV_DispatchThreadID)
         return;
     }
 
-    // The radius on screen: what the metres cover at this depth, kept to a few pixels at least and a few tens at
-    // most, so the search is as cheap far away as near.
+    // The radius on screen: what the metres cover at this depth, kept between a few pixels and RadiusPixels, so the
+    // search is as cheap far away as near.
     float radius = clamp(RadiusMetres * frame.pixelsPerRadian / viewDepth, 3.0, RadiusPixels);
     float turn = ToUnitFloat(GetHash(thread.x + thread.y * 7919u)) * TwoPi / float(Directions);
-    float3 view = frame.view[2].xyz;
     float visible = 0.0;
     for (uint d = 0u; d < Directions; d++)
     {
@@ -90,7 +89,7 @@ void Occlusion(uint3 thread : SV_DispatchThreadID)
             if (distance < 1e-4)
                 continue;
 
-            // Only what is within the radius in metres counts, fading out towards it.
+            // Only what is within twice the radius in metres counts, fading out towards it.
             float falloff = saturate(1.0 - distance / (RadiusMetres * 2.0));
             float elevation = dot(toOther / distance, normal);
             horizon = max(horizon, elevation * falloff);

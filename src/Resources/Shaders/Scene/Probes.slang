@@ -1,8 +1,8 @@
 // The global illumination's tables, C#'s GiConstants: the lit cards and their radiosity, the world probes around
-// the camera, the screen probes over the view and the reflections, and how a direction maps to a probe's texels. A world probe keeps the sphere as an
-// octahedral map; a screen probe keeps the hemisphere above its surface as a square of cosine-distributed
-// directions, so the average of its texels times pi is the irradiance there. The constants' heap id is the
-// lighting constants' gi.
+// the camera, the screen probes over the view and the reflections, and how a direction maps to a probe's texels. A
+// world probe keeps the sphere as an octahedral map; a screen probe keeps the hemisphere above its surface as a
+// square of cosine-distributed directions, so the average of its texels times pi is the irradiance there. The
+// constants' heap id is the lighting constants' gi.
 module "Scene/Probes";
 
 import Core.Heap;
@@ -11,15 +11,14 @@ import Core.Pack;
 import Core.Sampling;
 import Scene.Cards;
 
-// The lit cards: a pool of slots, a slot an instance's six cards at half their texels, each texel the irradiance on
-// the surface there, a cell a card; and the radiosity beside it, a probe an 8 by 8 tile of lit texels, what the
-// tile's surface receives from around it.
+// The lit cards: a pool of slots, a slot an instance's six cards at half their texels, three across and two down,
+// each texel the irradiance on the surface there; and the radiosity beside it, a probe an 8 by 8 tile of lit
+// texels, what the tile's surface receives from around it.
 public static const uint LitPoolTexels = 2048u;
-public static const uint LitCardCell = CardMaxTexels / 2u;
-public static const uint LitSlotWidth = LitCardCell * 3u;
-public static const uint LitSlotHeight = LitCardCell * 2u;
+public static const uint LitCardTexels = CardMaxTexels / 2u;
+public static const uint LitSlotWidth = LitCardTexels * 3u;
+public static const uint LitSlotHeight = LitCardTexels * 2u;
 public static const uint LitSlotsPerRow = LitPoolTexels / LitSlotWidth;
-public static const uint LitSlots = LitSlotsPerRow * (LitPoolTexels / LitSlotHeight);
 public static const uint LitLightsPerSlot = 64u;
 public static const uint LitTileTexels = 8u;
 public static const uint LitRadiosityTexels = LitPoolTexels / LitTileTexels;
@@ -68,9 +67,7 @@ public struct GiConstants
     public uint screenIrradiance;
     public uint screenProbesX;
     public uint screenProbesY;
-    public uint litSlotCount;
     public uint slotBatch;
-    public uint slotsPerFrame;
     public uint probeBudget;
     public uint frameIndex;
     // Metres a probe's or a screen probe's ray goes at most.
@@ -87,18 +84,16 @@ public struct GiConstants
     public uint occlusion;
     // Pixels across each reflection ray stands for: 1 or 2.
     public uint reflectionStride;
-    public uint padding1;
-    public uint padding2;
 }
 
-// The screen probes and the reflections: the roughness a surface reflects sharply below, its own ray a pixel, and
-// the roughness from which the screen probes' radiance stands in.
+// The screen probes and the reflections: the roughness a surface reflects sharply below, with its own traced rays,
+// and the roughness from which the screen probes' radiance stands in.
 public static const float ReflectionRoughnessSharp = 0.4;
 public static const float ReflectionRoughnessLimit = 0.6;
 
-// A lit card's slot: the instance it lights, that instance's capture row, and how many times it was lit, 0 the
-// first time, when it holds nothing to blend with.
-public struct LitSlot
+// A lit card's slot, C#'s GpuLitSlot: the instance it lights, that instance's capture row, and how many times it was
+// lit, 0 the first time, when it holds nothing to blend with.
+public struct GpuLitSlot
 {
     public uint instance;
     public uint capture;
@@ -125,8 +120,6 @@ public struct ScreenProbe
     public float2 padding;
 }
 
-// --- Lit cards ---
-
 // The lit slot of an instance plus one; 0 while it has none.
 public uint GetLitSlot(GiConstants gi, uint instanceIndex)
 {
@@ -134,22 +127,26 @@ public uint GetLitSlot(GiConstants gi, uint instanceIndex)
     return slots[instanceIndex];
 }
 
-public LitSlot LoadLitSlot(GiConstants gi, uint slot)
+public GpuLitSlot LoadLitSlot(GiConstants gi, uint slot)
 {
-    ArrayRef<LitSlot> slots = { gi.slotInstances };
+    ArrayRef<GpuLitSlot> slots = { gi.slotInstances };
     return slots[slot];
 }
 
-// The texel at the top left of a slot in the pool, and of one of its cards' cells.
+// The texel at the top left of a slot in the pool.
 public uint2 GetLitSlotOrigin(uint slot)
 {
     return uint2(slot % LitSlotsPerRow, slot / LitSlotsPerRow) * uint2(LitSlotWidth, LitSlotHeight);
 }
 
-public uint2 GetLitCardOrigin(uint slot, uint side) { return GetLitSlotOrigin(slot) + uint2(side % 3u, side / 3u) * LitCardCell; }
+// The texel at the top left of one of a slot's cards.
+public uint2 GetLitCardOrigin(uint slot, uint side)
+{
+    return GetLitSlotOrigin(slot) + uint2(side % 3u, side / 3u) * LitCardTexels;
+}
 
 // A card's lit texels: half its own each way.
-public uint2 GetLitCardSize(GpuCard card) { return max((card.size + 1u) / 2u, 1u); }
+public uint2 GetLitCardSize(GpuCard card) { return max((GetCardSize(card) + 1u) / 2u, 1u); }
 
 // The pool's texture coordinates of a point of a card's lit texels, kept half a texel inside them.
 public float2 GetLitAtlasUv(uint slot, GpuCard card, float2 uv)
@@ -158,8 +155,6 @@ public float2 GetLitAtlasUv(uint slot, GpuCard card, float2 uv)
     float2 texel = clamp(uv * size, float2(0.5), size - 0.5);
     return (float2(GetLitCardOrigin(slot, card.axis)) + texel) / float(LitPoolTexels);
 }
-
-// --- World probes ---
 
 public ProbeState LoadProbeState(GiConstants gi, uint cell)
 {
@@ -340,8 +335,6 @@ public bool SampleWorldProbeIrradiance(GiConstants gi, float3 point, float3 norm
 {
     return SampleWorldProbes(gi, point, normal, true, irradiance);
 }
-
-// --- Screen probes ---
 
 // How alike two surfaces are: one when on one plane with one normal, zero when apart, as a probe is weighed for a
 // pixel or another probe.

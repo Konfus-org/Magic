@@ -14,7 +14,7 @@ public struct SkyInputs
     public float altitude;
     // Whether the sun's disc is in view: it is for what is seen, not for what a ray gathers for a surface, which
     // has the sun from its lighting already.
-    public bool withSun;
+    public bool hasSunDisc;
     // The heap ids and sampler of whatever the sky made ahead of the frame.
     public uint transmittanceLut;
     public uint multiScatteringLut;

@@ -73,7 +73,7 @@ public struct FrameConstants
     public uint flags;
     // The card table and the sampler the card atlases are read with.
     public uint cards;
-    public uint cardSampler;
+    public uint linearSampler;
 
     // Pixels the projection is shifted by this frame, for the resolve to take off, and the output's size, which the
     // picture is resolved into.
@@ -93,8 +93,8 @@ public struct FrameConstants
     // Where each pixel's surface was on last frame's screen: the move to there from its place now, in texture
     // coordinates, in xy, and its view depth then in z.
     public uint velocity;
+    public uint padding1;
     public uint padding2;
-    public uint padding3;
 }
 
 // The cone cull is off: the view is orthographic, as a capture's is, so no one point is the camera.

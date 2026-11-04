@@ -8,8 +8,8 @@ using Magic.Utils;
 namespace WorldRenderer;
 
 /// <summary>
-/// The card table: six cards per model, set of materials and size on screen, the sides of the model's box drawn
-/// orthographically into the card atlases at a resolution the model's size earns. A capture first asked for gets
+/// The card table: six cards per model, set of materials and scale in the world, the sides of the model's box
+/// drawn orthographically into the card atlases at a resolution that scale earns. A capture first asked for gets
 /// its rows and its places in the atlases and waits in line; the renderer draws the model into them side by side,
 /// and from then the row is handed to the instances that show it.
 /// </summary>
@@ -277,6 +277,7 @@ internal sealed class CardTable(IGraphicsApi gpu) : IDisposable
 
         public override int GetHashCode() => HashCode.Combine(_model, _materials, _bucket);
 
+        // FNV-1a over the material rows.
         private static ulong Hash(ReadOnlySpan<uint> materials)
         {
             ulong hash = 14695981039346656037;

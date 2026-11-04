@@ -11,10 +11,10 @@ namespace WorldRenderer;
 /// <summary>
 /// What lights the world indirectly: the lit cards, a pool of slots each holding the irradiance on an instance's
 /// cards, given to the instances that matter most to the view, with the radiosity each tile of a card receives
-/// traced beside them; the world probes, a clipmap of spheres of radiance around the
-/// camera that trace the field and read the cards; the screen probes, one a tile of pixels, that trace the screen
-/// and the field and end in the world probes; the sharp reflections, a ray a pixel at half the output; and the passes
-/// that keep each up to date, a budget of each a frame.
+/// traced beside them; the world probes, a clipmap of spheres of radiance around the camera that trace the field
+/// and read the cards; the screen probes, one a tile of pixels, that trace the screen and the field and end in the
+/// world probes; the short-range occlusion of every pixel; the sharp reflections, a ray every stride of pixels; and
+/// the passes that keep each up to date, a budget of each a frame.
 /// </summary>
 internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
 {
@@ -24,14 +24,16 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
     public const int ProbeBudget = 256;
 
     private const int LitPoolTexels = 2048;
-    private const int LitCardCell = GpuCard.MaxTexels / 2;
-    private const int LitSlotWidth = LitCardCell * 3;
-    private const int LitSlotHeight = LitCardCell * 2;
+    private const int LitCardTexels = GpuCard.MaxTexels / 2;
+    private const int LitSlotWidth = LitCardTexels * 3;
+    private const int LitSlotHeight = LitCardTexels * 2;
     private const int LitSlots = LitPoolTexels / LitSlotWidth * (LitPoolTexels / LitSlotHeight);
     private const int LitTileTexels = 8;
     private const int LitRadiosityTexels = LitPoolTexels / LitTileTexels;
     private const int LitLightsPerSlot = 64;
     private const int MaxSlotsPerFrame = 8;
+    private const int ProbeStateBytes = 16;
+    private const int ScreenProbeBytes = 48;
     private const int AssignPeriod = 16;
     private const int ProbeTexels = 16;
     private const int ProbeIrradianceTexels = 8;
@@ -43,7 +45,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
     private const float RayRange = 64;
 
     private readonly uint[] _slotOfInstance = new uint[InstanceTable.Capacity];
-    private readonly LitSlotRow[] _slots = new LitSlotRow[LitSlots];
+    private readonly GpuLitSlot[] _slots = new GpuLitSlot[LitSlots];
     private readonly bool[] _isSlotUsed = new bool[LitSlots];
     private readonly bool[] _isWanted = new bool[InstanceTable.Capacity];
     private readonly Stack<int> _freeSlots = new();
@@ -122,10 +124,10 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         [
             ("GI constants", GiConstants.Bytes),
             ("Lit slots of instances", (long)InstanceTable.Capacity * 4),
-            ("Lit slot instances", (long)LitSlots * LitSlotRow.Bytes),
+            ("Lit slot instances", (long)LitSlots * GpuLitSlot.Bytes),
             ("Lit slot batch", (long)MaxSlotsPerFrame * 4),
             ("Lit slot lights", (long)LitSlots * (LitLightsPerSlot + 1) * 4),
-            ("Probe states", (long)ProbeLevels * ProbesPerLevel * 16),
+            ("Probe states", (long)ProbeLevels * ProbesPerLevel * ProbeStateBytes),
             ("Probe list", (long)(1 + ProbeBudget) * 4),
         ];
         GpuBuffer[] made = new GpuBuffer[descriptions.Length];
@@ -248,7 +250,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
             Result<GpuBuffer> probes = gpu.CreateBuffer(
                 new BufferDescription
                 {
-                    Bytes = (long)count * 48,
+                    Bytes = (long)count * ScreenProbeBytes,
                     Usage = BufferUsages.Storage,
                     Name = $"Screen probes {i}",
                 }
@@ -382,9 +384,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
             ScreenIrradiance = _screenIrradiance.Id,
             ScreenProbesX = (uint)_screenProbesX,
             ScreenProbesY = (uint)_screenProbesY,
-            LitSlotCount = LitSlots,
             SlotBatch = _slotBatch.Id,
-            SlotsPerFrame = (uint)_batchCount,
             ProbeBudget = ProbeBudget,
             FrameIndex = frameIndex,
             RayRange = RayRange,
@@ -417,8 +417,8 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
     }
 
     /// <summary>
-    /// The cards, the world probes and the screen probes brought up to date, after the GBuffer, the depth pyramid
-    /// and the sun's pages, before the lighting reads them.
+    /// The lit cards, the world probes, the screen probes, the occlusion and the reflections brought up to date,
+    /// after the GBuffer, the depth pyramid and the sun's pages, before the lighting reads them.
     /// </summary>
     public void Record(
         RenderGraph graph,
@@ -467,7 +467,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
             translucency.UseForSampling(graph);
             graph.Recorder.BindPipeline(usesRayQuery ? pipelines.LitCardRadiosityRayQuery : pipelines.LitCardRadiosity);
             graph.Recorder.PushConstants(header);
-            graph.Recorder.Dispatch(LitCardCell / LitTileTexels, LitCardCell / LitTileTexels, batchCards);
+            graph.Recorder.Dispatch(LitCardTexels / LitTileTexels, LitCardTexels / LitTileTexels, batchCards);
             graph.EndPass();
 
             graph.BeginComputePass("GI: light cards");
@@ -485,7 +485,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
             translucency.UseForSampling(graph);
             graph.Recorder.BindPipeline(pipelines.LitCardShade);
             graph.Recorder.PushConstants(header);
-            graph.Recorder.Dispatch(LitCardCell / 8, LitCardCell / 8, batchCards);
+            graph.Recorder.Dispatch(Groups(LitCardTexels, 8), Groups(LitCardTexels, 8), batchCards);
             graph.EndPass();
         }
 
@@ -770,7 +770,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
 
             _isSlotUsed[slot] = true;
             _slotOfInstance[index] = (uint)slot + 1;
-            _slots[slot] = new LitSlotRow { Instance = (uint)index, Capture = instances[index].Capture };
+            _slots[slot] = new GpuLitSlot { Instance = (uint)index, Capture = instances[index].Capture };
             _pendingSlots.Enqueue((uint)slot);
             _areSlotsDirty = true;
         }
@@ -866,7 +866,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct GiConstants
 {
-    public const int Bytes = 232;
+    public const int Bytes = 224;
 
     public ProbeOrigins ProbeOrigins;
 
@@ -908,11 +908,7 @@ internal record struct GiConstants
 
     public uint ScreenProbesY;
 
-    public uint LitSlotCount;
-
     public uint SlotBatch;
-
-    public uint SlotsPerFrame;
 
     public uint ProbeBudget;
 
@@ -937,10 +933,6 @@ internal record struct GiConstants
     public uint Occlusion;
 
     public uint ReflectionStride;
-
-    public uint Padding1;
-
-    public uint Padding2;
 }
 
 /// <summary>
@@ -956,12 +948,12 @@ internal struct ProbeOrigins
 }
 
 /// <summary>
-/// A lit card's slot, the twin of <c>Scene/Probes.slang</c>'s LitSlot: the instance it lights, that instance's
-/// capture row, and how many times it was lit, 0 the first time.
+/// A lit card's slot, the twin of <c>Scene/Probes.slang</c>'s: the instance it lights, that instance's capture
+/// row, and how many times it was lit, 0 the first time.
 /// </summary>
 [ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
-internal record struct LitSlotRow
+internal record struct GpuLitSlot
 {
     public const int Bytes = 16;
 

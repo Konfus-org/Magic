@@ -23,7 +23,7 @@ namespace WorldRenderer;
 
 /// <summary>
 /// Draws the world. <c>Update</c> reads the renderers, the camera and the sun out of the entities into a copy;
-/// <c>Render</c> uploads what changed in the frame's tables, captures the models newly resident into their imposter
+/// <c>Render</c> uploads what changed in the frame's tables, captures the models newly resident into their card
 /// atlases, culls every instance's clusters on the GPU against the frustum, their cones, the pixel error threshold
 /// and last frame's depth pyramid, draws the visible ones into a visibility buffer, retests what the old pyramid hid
 /// against the new one, resolves every pixel's material into the GBuffer, lights it with the sun, shows it in the
@@ -88,7 +88,7 @@ public sealed class WorldRendererGem(
     private GpuBuffer _drawArguments;
     private GpuBuffer _retestList;
     private GpuSampler _sampler;
-    private GpuSampler _cardSampler;
+    private GpuSampler _linearSampler;
     private bool _isReady;
     private bool _hasHzb;
     private DebugView _debugView;
@@ -145,8 +145,8 @@ public sealed class WorldRendererGem(
         if (!_sampler.IsNone)
             gpu.Destroy(_sampler);
 
-        if (!_cardSampler.IsNone)
-            gpu.Destroy(_cardSampler);
+        if (!_linearSampler.IsNone)
+            gpu.Destroy(_linearSampler);
     }
 
     /// <summary>
@@ -418,7 +418,7 @@ public sealed class WorldRendererGem(
             _hasHzb = false;
         }
 
-        // What arrived: models into the pools, textures, material rows, capture rows.
+        // What arrived: models into the pools, textures, material rows.
         _materials.Refresh();
         _graph.BeginTransferPass("Upload arrivals");
         _pools.Upload(_graph);
@@ -667,13 +667,13 @@ public sealed class WorldRendererGem(
             return Result.Failure($"the default sampler was not made: {sampler.Error}");
 
         _sampler = sampler.Value;
-        Result<GpuSampler> captureSampler = gpu.CreateSampler(
+        Result<GpuSampler> linearSampler = gpu.CreateSampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, HasMipmapBlend = false }
         );
-        if (!captureSampler.Ok)
-            return Result.Failure($"the card sampler was not made: {captureSampler.Error}");
+        if (!linearSampler.Ok)
+            return Result.Failure($"the linear sampler was not made: {linearSampler.Error}");
 
-        _cardSampler = captureSampler.Value;
+        _linearSampler = linearSampler.Value;
         (string Name, long Bytes, BufferUsages Usage)[] descriptions =
         [
             ("Frame constants", FrameConstants.Bytes, BufferUsages.Storage),
@@ -807,7 +807,6 @@ public sealed class WorldRendererGem(
         }
 
         _instances.End();
-
         return _instances.Count;
     }
 
@@ -907,7 +906,7 @@ public sealed class WorldRendererGem(
             Velocity = targets.Velocity.Id,
             Output = targets.Output.Id,
             Cards = _cards.Buffer.Id,
-            CardSampler = _cardSampler.Id,
+            LinearSampler = _linearSampler.Id,
             CardAlbedo = _cards.Albedo.Id,
             CardNormal = _cards.Normal.Id,
             CardDepth = _cards.Depth.Id,
@@ -979,8 +978,7 @@ public sealed class WorldRendererGem(
             CardTable.GetBasis((uint)side, out Vector3 direction, out Vector3 right, out Vector3 up);
             Vector3 extents = CardTable.GetExtents(card, direction, right, up);
             Vector3 cameraPosition = card.Center + (direction * 2 * extents.Z);
-            Vector3 worldUp = Math.Abs(direction.Y) > 0.9f ? Vector3.UnitZ : Vector3.UnitY;
-            Matrix4x4 view = Matrix4x4.CreateLookAtLeftHanded(Vector3.Zero, -direction, worldUp);
+            Matrix4x4 view = Matrix4x4.CreateLookAtLeftHanded(Vector3.Zero, -direction, up);
             FrameConstants frame = GetViewConstants(
                 view,
                 CreateCardProjection(card.Width, card.Height, extents),

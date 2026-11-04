@@ -102,7 +102,7 @@ void ReflectionTrace<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThrea
             SkyInputs sky;
             sky.viewDirection = direction;
             sky.sunDirection = frame.sunDirection.xyz;
-            sky.withSun = false;
+            sky.hasSunDisc = false;
             sky.sunIlluminance = lighting.sunIlluminance.rgb;
             sky.altitude = lighting.cameraAltitude.x;
             sky.transmittanceLut = lighting.transmittanceLut;
@@ -177,7 +177,7 @@ void ReflectionResolve(uint3 thread : SV_DispatchThreadID)
             float sameHit = own.w < 0.0 ? 1.0 : saturate(1.0 - abs(sample.w - own.w) / (0.5 * own.w + 0.1));
             float falloff = exp(-float(x * x + y * y) / float(reach * reach + 1));
             float weight = closeness * lerp(sameHit, 1.0, roughness) * falloff;
-            sum += float4(sample.rgb, sample.w) * weight;
+            sum += sample * weight;
             weightSum += weight;
         }
     }
@@ -219,7 +219,7 @@ void ReflectionTemporal(uint3 thread : SV_DispatchThreadID)
     if (all(previousUv >= 0.0) && all(previousUv < 1.0))
     {
         TextureRef history = { gi.reflectionsPrevious };
-        SamplerRef sampler = { frame.cardSampler };
+        SamplerRef sampler = { frame.linearSampler };
         float4 held = history.SampleLevel(sampler, previousUv, 0.0);
         if (held.w > 0.0 && abs(held.w - velocity.z) < 0.05 * velocity.z)
         {
