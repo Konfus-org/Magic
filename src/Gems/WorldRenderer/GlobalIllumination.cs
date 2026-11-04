@@ -36,7 +36,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
     private const int ProbeTexels = 16;
     private const int ProbeIrradianceTexels = 8;
     private const int ProbesPerAtlasRow = 64;
-    private const int ScreenTile = 16;
+    private const int ScreenTile = 8;
     private const int ScreenTexels = 8;
     private const int Threads = 64;
     private const float FinestSpacing = 1;
@@ -56,6 +56,8 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
     private readonly GpuTexture[] _reflections = new GpuTexture[2];
     private GpuTexture _reflectionTraced;
     private GpuTexture _reflectionResolved;
+    private GpuTexture _occlusionRaw;
+    private GpuTexture _occlusion;
     private readonly GpuBuffer[] _screenProbes = new GpuBuffer[2];
     private GpuTexture _litPool;
     private GpuTexture _radiosity;
@@ -272,20 +274,24 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         );
         Result<GpuTexture> reflections0 = Make("Reflections 0", width, height, GpuFormat.R16G16B16A16Sfloat);
         Result<GpuTexture> reflections1 = Make("Reflections 1", width, height, GpuFormat.R16G16B16A16Sfloat);
+        Result<GpuTexture> occlusionRaw = Make("Occlusion searched", width, height, GpuFormat.R8Unorm);
+        Result<GpuTexture> occlusion = Make("Occlusion", width, height, GpuFormat.R8Unorm);
         foreach (
             Result<GpuTexture> texture in (ReadOnlySpan<Result<GpuTexture>>)
-                [reflectionTraced, reflectionResolved, reflections0, reflections1]
+                [reflectionTraced, reflectionResolved, reflections0, reflections1, occlusionRaw, occlusion]
         )
         {
             if (!texture.Ok)
-                return Result.Failure($"a reflection texture was not made: {texture.Error}");
+                return Result.Failure($"a screen texture was not made: {texture.Error}");
         }
 
-        (_reflectionTraced, _reflectionResolved, _reflections[0], _reflections[1]) = (
+        (_reflectionTraced, _reflectionResolved, _reflections[0], _reflections[1], _occlusionRaw, _occlusion) = (
             reflectionTraced.Value,
             reflectionResolved.Value,
             reflections0.Value,
-            reflections1.Value
+            reflections1.Value,
+            occlusionRaw.Value,
+            occlusion.Value
         );
 
         return Result.Success();
@@ -377,6 +383,8 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
             Reflections = _reflections[_current].Id,
             ReflectionsPrevious = _reflections[1 - _current].Id,
             HasReflections = _hasReflections ? 1u : 0u,
+            OcclusionRaw = _occlusionRaw.Id,
+            Occlusion = _occlusion.Id,
         };
         for (int level = 0; level < ProbeLevels; level++)
         {
@@ -558,6 +566,30 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         graph.Recorder.Dispatch(Groups(_screenProbesX * ScreenTexels, 8), Groups(_screenProbesY * ScreenTexels, 8));
         graph.EndPass();
 
+        graph.BeginComputePass("GI: occlusion");
+        graph.Use(frameConstants, GpuAccess.ShaderRead);
+        graph.Use(Constants, GpuAccess.ShaderRead);
+        graph.Use(lighting.Constants, GpuAccess.ShaderRead);
+        graph.Use(targets.Depth, GpuAccess.ShaderRead);
+        graph.Use(targets.GBufferNormal, GpuAccess.ShaderRead);
+        graph.Use(_occlusionRaw, GpuAccess.ShaderWrite);
+        graph.Recorder.BindPipeline(pipelines.Occlusion);
+        graph.Recorder.PushConstants(header);
+        graph.Recorder.Dispatch(Groups(targets.Width, 8), Groups(targets.Height, 8));
+        graph.EndPass();
+
+        graph.BeginComputePass("GI: blur occlusion");
+        graph.Use(frameConstants, GpuAccess.ShaderRead);
+        graph.Use(Constants, GpuAccess.ShaderRead);
+        graph.Use(lighting.Constants, GpuAccess.ShaderRead);
+        graph.Use(targets.Depth, GpuAccess.ShaderRead);
+        graph.Use(_occlusionRaw, GpuAccess.ShaderRead);
+        graph.Use(_occlusion, GpuAccess.ShaderWrite);
+        graph.Recorder.BindPipeline(pipelines.OcclusionBlur);
+        graph.Recorder.PushConstants(header);
+        graph.Recorder.Dispatch(Groups(targets.Width, 8), Groups(targets.Height, 8));
+        graph.EndPass();
+
         graph.BeginComputePass("GI: filter screen probes");
         graph.Use(Constants, GpuAccess.ShaderRead);
         graph.Use(lighting.Constants, GpuAccess.ShaderRead);
@@ -637,6 +669,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         graph.Use(_screenFiltered[_current], GpuAccess.ShaderRead);
         graph.Use(_screenIrradiance, GpuAccess.ShaderRead);
         graph.Use(_reflections[_current], GpuAccess.ShaderRead);
+        graph.Use(_occlusion, GpuAccess.ShaderRead);
         UseProbes(graph);
     }
 
@@ -772,6 +805,8 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
                     _reflectionResolved,
                     _reflections[0],
                     _reflections[1],
+                    _occlusionRaw,
+                    _occlusion,
                 ]
         )
         {
@@ -794,6 +829,8 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         _screenRadiance = default;
         _screenFiltered[0] = default;
         _screenFiltered[1] = default;
+        _occlusionRaw = default;
+        _occlusion = default;
         _reflectionTraced = default;
         _reflectionResolved = default;
         _reflections[0] = default;
@@ -811,7 +848,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct GiConstants
 {
-    public const int Bytes = 216;
+    public const int Bytes = 232;
 
     public ProbeOrigins ProbeOrigins;
 
@@ -877,7 +914,15 @@ internal record struct GiConstants
 
     public uint HasReflections;
 
+    public uint OcclusionRaw;
+
+    public uint Occlusion;
+
+    public uint Padding0;
+
     public uint Padding1;
+
+    public uint Padding2;
 }
 
 /// <summary>

@@ -117,6 +117,7 @@ void WorldProbeTrace<S : ISky, T : IWorldTracer>(uint3 group : SV_GroupID, uint3
 
     SkyInputs sky;
     sky.sunDirection = frame.sunDirection.xyz;
+    sky.withSun = false;
     sky.sunIlluminance = lighting.sunIlluminance.rgb;
     sky.altitude = lighting.cameraAltitude.x;
     sky.transmittanceLut = lighting.transmittanceLut;

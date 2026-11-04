@@ -116,6 +116,11 @@ internal enum DebugView : uint
     /// What a ray landing on every surface would read: the instance's lit card there.
     /// </summary>
     Cards,
+
+    /// <summary>
+    /// The short-range occlusion at every surface: white where the hemisphere above it is open.
+    /// </summary>
+    Occlusion,
 }
 
 /// <summary>

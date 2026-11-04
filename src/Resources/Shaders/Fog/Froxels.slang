@@ -29,15 +29,18 @@ public float GetFogSliceFraction(float viewDepth)
     return saturate(log(max(viewDepth, FogNear) / FogNear) / log(FogFar / FogNear));
 }
 
-// The camera-relative position at the centre of a froxel.
-public float3 GetFroxelCenter(FrameConstants frame, uint3 froxel)
+// The camera-relative position at a point of the grid, in froxels along each axis, fractions within one.
+public float3 GetFroxelPoint(FrameConstants frame, float3 froxel)
 {
-    float2 uv = (float2(froxel.xy) + 0.5) / float2(FogGrid.xy);
-    float depth = GetFogDepth((float(froxel.z) + 0.5) / float(FogGrid.z));
+    float2 uv = froxel.xy / float2(FogGrid.xy);
+    float depth = GetFogDepth(froxel.z / float(FogGrid.z));
     float3 ray = ReconstructRelative(frame, uv, 0.5);
     float3 forward = float3(frame.view[0][2], frame.view[1][2], frame.view[2][2]);
     return ray * (depth / max(dot(ray, forward), Epsilon));
 }
+
+// The camera-relative position at the centre of a froxel.
+public float3 GetFroxelCenter(FrameConstants frame, uint3 froxel) { return GetFroxelPoint(frame, float3(froxel) + 0.5); }
 
 // How thick the air is at a height, per metre.
 public float GetFogDensity(FogConstants fog, float height)

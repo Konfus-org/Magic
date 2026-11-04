@@ -151,6 +151,7 @@ ResolveOutputs TranslucentResolvePixel<M : IMaterial, S : ISky>(Varyings input)
     SkyInputs sky;
     sky.viewDirection = reflect(-viewDirection, normal);
     sky.sunDirection = frame.sunDirection.xyz;
+    sky.withSun = true;
     sky.sunIlluminance = lighting.sunIlluminance.rgb;
     sky.altitude = lighting.cameraAltitude.x;
     sky.transmittanceLut = lighting.transmittanceLut;

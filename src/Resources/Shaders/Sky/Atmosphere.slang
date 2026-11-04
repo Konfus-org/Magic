@@ -302,7 +302,7 @@ public struct Atmosphere : ISky
         float3 sky = skyView.SampleLevel(sampler, SkyViewUv(inputs.viewDirection, inputs.altitude * 0.001), 0.0).rgb;
         float3 color = sky * inputs.sunIlluminance;
         float r = GroundRadius + max(inputs.altitude * 0.001, 0.001);
-        if (dot(inputs.viewDirection, inputs.sunDirection) > SunCosRadius && !HitsGround(r, inputs.viewDirection.y))
+        if (inputs.withSun && dot(inputs.viewDirection, inputs.sunDirection) > SunCosRadius && !HitsGround(r, inputs.viewDirection.y))
         {
             // The disc: the sun's illuminance over its solid angle, dimmed by the air in the way.
             float3 through = LookupTransmittance(transmittance, sampler, r, inputs.viewDirection.y);

@@ -1,7 +1,7 @@
 // The screen probes: one placed on the depth in each tile of pixels, each tracing a hemisphere of rays, first along
-// the screen's depth, then through the field, and ending in the world probes; each then blended with what last
-// frame's probe at the same surface held, filtered over its neighbours on the same plane, and summed into the
-// irradiance at its surface. The pass header's x is the frame's constants, y the shadow constants, z the lighting
+// the screen's depth, then through the field, and ending in the world probes, with the rays given to the directions
+// last frame's probe found bright; each then blended with what last frame's probe at the same surface held,
+// filtered over its neighbours on the same plane, and summed into the irradiance at its surface. The pass header's x is the frame's constants, y the shadow constants, z the lighting
 // constants and w the field constants.
 module "WorldRenderer/ScreenProbes";
 
@@ -10,6 +10,7 @@ import Core.Pass;
 import Core.Frame;
 import Core.Math;
 import Core.Pack;
+import Core.Color;
 import Core.Random;
 import Core.Sampling;
 import Scene.Instances;
@@ -22,7 +23,9 @@ import Sky.ISky;
 import Trace.IWorldTracer;
 import Trace.DistanceField;
 
-static const float HistoryWeight = 0.85;
+static const float HistoryWeight = 0.9;
+// The most rays one texel of a probe traces, when its direction held most of what the probe saw last frame.
+static const uint MaxRaysPerTexel = 4u;
 
 // Each tile's probe placed at one of its pixels, a different one each frame, on the surface drawn there.
 [shader("compute")]
@@ -60,7 +63,64 @@ void ScreenProbePlace(uint3 thread : SV_DispatchThreadID)
     probes[GetScreenProbeIndex(gi, tile)] = probe;
 }
 
-// Each probe's texels traced: a ray each over the hemisphere, the screen, then the field, then the world probes.
+// Where last frame's probe at the same surface as a probe sits in the previous atlas; false when there is none.
+bool FindPreviousTile(FrameConstants frame, GiConstants gi, ScreenProbe probe, out uint2 previousTile)
+{
+    previousTile = uint2(0u);
+    float4 previousClip = mul(float4(probe.position - frame.previousCameraPosition.xyz, 1.0), frame.previousViewProjection);
+    if (previousClip.w <= frame.near)
+        return false;
+
+    float2 previousUv = float2(previousClip.x / previousClip.w * 0.5 + 0.5, 0.5 - previousClip.y / previousClip.w * 0.5);
+    if (any(previousUv < 0.0) || any(previousUv >= 1.0))
+        return false;
+
+    previousTile = min(uint2(previousUv * float2(frame.width, frame.height)) / ScreenProbeTile, uint2(gi.screenProbesX, gi.screenProbesY) - 1u);
+    ScreenProbe previous = LoadScreenProbe(gi.screenProbesPrevious, GetScreenProbeIndex(gi, previousTile));
+    if ((previous.flags & ScreenProbeFlagValid) == 0u)
+        return false;
+
+    return GetProbePlaneWeight(probe.position, probe.normal, probe.viewDepth, previous.position, previous.normal) > 0.0;
+}
+
+// One ray of a probe: along the screen, then the field, then the world probes, then the sky.
+float3 TraceProbeRay<S : ISky, T : IWorldTracer>(FrameConstants frame, LightingConstants lighting, GiConstants gi, FieldConstants field, ScreenProbe probe, float3 origin, float start, float3 direction)
+{
+    float3 radiance;
+    float reach;
+    if (!TraceScreenToSurface(frame, gi, probe.position + probe.normal * 0.02, direction, radiance, reach))
+    {
+        Ray ray = { origin, direction };
+        TraceLimits limits = { start, gi.rayRange, 0.0 };
+        TraceHit hit = T.Trace(ray, limits);
+        reach = min(hit.distance, gi.rayRange);
+        if (hit.isHit)
+        {
+            radiance = ShadeFieldHit(frame, field, gi, origin + direction * hit.distance, hit.normal, hit.instance);
+        }
+        else if (!SampleWorldProbeRadiance(gi, origin + direction * reach, direction, radiance))
+        {
+            SkyInputs sky;
+            sky.viewDirection = direction;
+            sky.sunDirection = frame.sunDirection.xyz;
+            sky.withSun = false;
+            sky.sunIlluminance = lighting.sunIlluminance.rgb;
+            sky.altitude = lighting.cameraAltitude.x;
+            sky.transmittanceLut = lighting.transmittanceLut;
+            sky.multiScatteringLut = lighting.multiScatteringLut;
+            sky.skyViewLut = lighting.skyViewLut;
+            sky.sampler = lighting.lutSampler;
+            radiance = lighting.hasSky != 0u ? S.Evaluate(sky) : frame.skyRadiance.rgb * lighting.sunIlluminance.r;
+        }
+    }
+
+    return radiance * GetGlassTransmittance(GetTranslucency(), origin, origin + direction * reach);
+}
+
+groupshared float historyLuminance[ScreenProbeRays];
+
+// Each probe's texels traced over the hemisphere, the rays shared out by what last frame's probe saw in each
+// direction: a texel that held much of the light traces several rays, one that held almost none keeps what it held.
 [shader("compute")]
 [numthreads(64, 1, 1)]
 void ScreenProbeTrace<S : ISky, T : IWorldTracer>(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
@@ -83,42 +143,42 @@ void ScreenProbeTrace<S : ISky, T : IWorldTracer>(uint3 group : SV_GroupID, uint
         return;
     }
 
+    // What the texel's direction held last frame, as its share of the probe's light.
+    TextureRef previousAtlas = { gi.screenRadiancePrevious };
+    uint2 previousTile;
+    bool hasHistory = FindPreviousTile(frame, gi, probe, previousTile);
+    float3 history = hasHistory ? previousAtlas.Load(GetScreenProbeOrigin(previousTile) + texel, 0u).rgb : float3(0.0);
+    historyLuminance[local.x] = hasHistory ? GetLuminance(history) : 1.0;
+    GroupMemoryBarrierWithGroupSync();
+    float total = 0.0;
+    for (uint i = 0u; i < ScreenProbeRays; i++)
+    {
+        total += historyLuminance[i];
+    }
+
+    uint rays = total > 0.0 ? min(uint(round(historyLuminance[local.x] / total * float(ScreenProbeRays))), MaxRaysPerTexel) : 1u;
+    if (rays == 0u && !hasHistory)
+        rays = 1u;
+
     float3x3 basis = CreateBasis(probe.normal);
-    float2 jitter = GetRandom(tile, gi.frameIndex, 1u + local.x).xy;
-    float3 direction = GetScreenProbeDirection(basis, texel, jitter);
     uint level;
     SampleField(field, probe.position, level);
     float start = field.voxelSizes[level] * 1.5;
     float3 origin = probe.position + probe.normal * start;
-
-    float3 radiance;
-    float reach;
-    if (!TraceScreenToSurface(frame, gi, probe.position + probe.normal * 0.02, direction, radiance, reach))
+    float3 radiance = history;
+    if (rays > 0u)
     {
-        Ray ray = { origin, direction };
-        TraceLimits limits = { start, gi.rayRange, 0.0 };
-        TraceHit hit = T.Trace(ray, limits);
-        reach = min(hit.distance, gi.rayRange);
-        if (hit.isHit)
+        radiance = float3(0.0);
+        for (uint r = 0u; r < rays; r++)
         {
-            radiance = ShadeFieldHit(frame, field, gi, origin + direction * hit.distance, hit.normal, hit.instance);
+            float2 jitter = GetRandom(tile, gi.frameIndex, 1u + local.x + r * ScreenProbeRays).xy;
+            float3 direction = GetScreenProbeDirection(basis, texel, jitter);
+            radiance += TraceProbeRay<S, T>(frame, lighting, gi, field, probe, origin, start, direction);
         }
-        else if (!SampleWorldProbeRadiance(gi, origin + direction * min(hit.distance, gi.rayRange), direction, radiance))
-        {
-            SkyInputs sky;
-            sky.viewDirection = direction;
-            sky.sunDirection = frame.sunDirection.xyz;
-            sky.sunIlluminance = lighting.sunIlluminance.rgb;
-            sky.altitude = lighting.cameraAltitude.x;
-            sky.transmittanceLut = lighting.transmittanceLut;
-            sky.multiScatteringLut = lighting.multiScatteringLut;
-            sky.skyViewLut = lighting.skyViewLut;
-            sky.sampler = lighting.lutSampler;
-            radiance = lighting.hasSky != 0u ? S.Evaluate(sky) : frame.skyRadiance.rgb * lighting.sunIlluminance.r;
-        }
+
+        radiance /= float(rays);
     }
 
-    radiance *= GetGlassTransmittance(GetTranslucency(), origin, origin + direction * reach);
     radianceAtlas.Store(atlasTexel, float4(radiance, 1.0));
 }
 

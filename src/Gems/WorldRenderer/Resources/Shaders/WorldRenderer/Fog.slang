@@ -38,6 +38,7 @@ void FogInject<S : ISky>(uint3 thread : SV_DispatchThreadID)
     SkyInputs sky;
     sky.viewDirection = view;
     sky.sunDirection = frame.sunDirection.xyz;
+    sky.withSun = false;
     sky.sunIlluminance = lighting.sunIlluminance.rgb;
     sky.altitude = lighting.cameraAltitude.x;
     sky.transmittanceLut = lighting.transmittanceLut;
@@ -47,9 +48,20 @@ void FogInject<S : ISky>(uint3 thread : SV_DispatchThreadID)
     float3 sunIlluminance = lighting.hasSky != 0u ? S.GetSunIlluminance(sky) : lighting.sunIlluminance.rgb;
     float3 ambient = lighting.hasSky != 0u ? S.GetAmbient(sky, float3(0.0, 1.0, 0.0)) : lighting.sunIlluminance.rgb * 0.1;
 
+    // The sun at eight points of the froxel, so a froxel on the edge of a shaft is lit by its share and the shaft
+    // keeps its shape, not the grid's.
     ShadowConstants shadow = LoadShadowConstants(GetPassHeader().y);
-    float viewDepth = dot(relative, float3(frame.view[0][2], frame.view[1][2], frame.view[2][2]));
-    float visible = SampleSunShadow(shadow, world, frame.sunDirection.xyz, viewDepth);
+    float3 forward = float3(frame.view[0][2], frame.view[1][2], frame.view[2][2]);
+    float viewDepth = dot(relative, forward);
+    float visible = 0.0;
+    for (uint i = 0u; i < 8u; i++)
+    {
+        float3 offset = float3((i & 1u) != 0u ? 0.75 : 0.25, (i & 2u) != 0u ? 0.75 : 0.25, (i & 4u) != 0u ? 0.75 : 0.25);
+        float3 point = GetFroxelPoint(frame, float3(thread) + offset);
+        visible += SampleSunShadow(shadow, point + frame.cameraPosition.xyz, frame.sunDirection.xyz, dot(point, forward));
+    }
+
+    visible /= 8.0;
     // The phase takes the cosine between the way the light travels and the way it is scattered, towards the camera.
     float3 light = sunIlluminance * visible * PhaseHenyeyGreenstein(-dot(view, frame.sunDirection.xyz), lighting.fog.anisotropy);
     light += ambient * (0.25 * InvPi);

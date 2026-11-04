@@ -349,16 +349,20 @@ rays; the integrator turns that into irradiance per pixel.
   shades hits from the surface cache and misses from the sky, and blends into its history. Visibility is stored with
   the radiance, so a probe inside a wall is never read from the room beside it (Majercik et al., "Dynamic Diffuse
   Global Illumination with Ray-Traced Irradiance Fields", 2019 for the Chebyshev test).
-- **Screen probes.** One probe per 16×16 pixel tile, placed on the depth at a jittered pixel of the tile, 64 rays each
-  over the hemisphere of its normal, cosine-distributed, so the average of its texels times pi is its irradiance. A
-  ray first traces the screen (the depth pyramid, a few steps, for contact detail), then the field up to the radiance
-  cache's range, and ends in the nearest world probes weighted by their visibility. Each probe's result is temporally
-  reprojected from last frame's probe at the same surface, then filtered spatially over neighbouring probes on the
-  same plane.
-- **Integration.** Per pixel, the four nearest screen probes are interpolated with plane and normal weights; the
-  diffuse comes from their irradiance, the rough specular from their radiance towards the reflection, and a short
-  cone up the normal through the field stops the one leak interpolation can still make at a contact. Sharp specular
-  has its own pass.
+- **Screen probes.** One probe per 8×8 pixel tile, placed on the depth at a jittered pixel of the tile, 64 texels
+  each over the hemisphere of its normal, cosine-distributed, so the average of its texels times pi is its
+  irradiance. The 64 rays are shared out by what last frame's probe at the same surface saw in each texel's
+  direction: a texel that held much of the light traces up to four rays, one that held almost none keeps what it
+  held, so a window or a lamp is sampled where it is and the rest is not wasted on the dark. A ray first traces the
+  screen (the depth pyramid, a few steps, for contact detail), then the field up to the radiance cache's range, and
+  ends in the nearest world probes weighted by their visibility; a ray that runs out of steps ends where it got to,
+  not at the sky. Each probe's result is temporally reprojected from last frame's probe at the same surface, then
+  filtered spatially over neighbouring probes on the same plane.
+- **Integration.** Per pixel, the four nearest screen probes are interpolated with plane and normal weights, or,
+  where none of them lies on the pixel's plane, the ring of probes around them by plane alone; the diffuse comes
+  from their irradiance, the rough specular from the irradiance too, and the short-range occlusion the depth around
+  the pixel shows (horizons searched in a few directions over a few pixels, blurred along the depth) stops the leak
+  interpolation can still make at a contact. Sharp specular has its own pass.
 
 Why interiors are dark: a probe inside a room traces 256 rays that all hit the room's walls in the field, and those
 walls' cards are lit only by what reaches them, which for a windowless room is nothing. Why the floor behind you

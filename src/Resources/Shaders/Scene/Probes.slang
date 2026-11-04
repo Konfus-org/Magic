@@ -37,7 +37,7 @@ public static const uint ProbeFlagValid = 1u;
 public static const uint ProbeFlagNew = 2u;
 
 // The screen probes: one a tile of pixels, a hemisphere of texels each.
-public static const uint ScreenProbeTile = 16u;
+public static const uint ScreenProbeTile = 8u;
 public static const uint ScreenProbeTexels = 8u;
 public static const uint ScreenProbeRays = ScreenProbeTexels * ScreenProbeTexels;
 public static const uint ScreenProbeFlagValid = 1u;
@@ -82,7 +82,12 @@ public struct GiConstants
     public uint reflectionsPrevious;
     // Whether the sharp reflections are traced this run.
     public uint hasReflections;
+    // The short-range occlusion at every pixel, as searched and as blurred.
+    public uint occlusionRaw;
+    public uint occlusion;
+    public uint padding0;
     public uint padding1;
+    public uint padding2;
 }
 
 // The screen probes and the reflections: the roughness a surface reflects sharply below, its own ray a pixel, and

@@ -101,6 +101,7 @@ void ReflectionTrace<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThrea
             SkyInputs sky;
             sky.viewDirection = direction;
             sky.sunDirection = frame.sunDirection.xyz;
+            sky.withSun = false;
             sky.sunIlluminance = lighting.sunIlluminance.rgb;
             sky.altitude = lighting.cameraAltitude.x;
             sky.transmittanceLut = lighting.transmittanceLut;

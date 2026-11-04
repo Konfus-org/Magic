@@ -38,11 +38,12 @@ model reader, the mesh preprocessor and the texture reader.
   picture; `set WorldRenderer.debug=none` shows the picture again.
 - Light bounces: the instances that take most of the view hold lit cards, the irradiance on their cards from the sun
   through its pages, the lights that reach them and the radiosity each tile of a card gathers through the field, a
-  few a frame; `set WorldRenderer.debug=cards` shows what a ray landing on every surface reads. World probes around the camera trace
-  the field and read the cards where their rays land, the sky where they miss; a screen probe in every tile of
-  pixels traces the screen, then the field, then reads the world probes, and the pixels read the probes around them
-  on their plane. A room with no window stays dark. `set WorldRenderer.debug=indirect` shows that light alone and
-  `set WorldRenderer.debug=probes` what the world probes hold at every surface.
+  few a frame; `set WorldRenderer.debug=cards` shows what a ray landing on every surface reads. World probes around
+  the camera trace the field and read the cards where their rays land, the sky where they miss; a screen probe in
+  every 8 by 8 pixels traces the screen, then the field, then reads the world probes, and the pixels read the probes
+  around them on their plane, darkened by the short-range occlusion the depth around them shows. A room with no
+  window stays dark. `set WorldRenderer.debug=indirect` shows that light alone, `set WorldRenderer.debug=probes` what
+  the world probes hold at every surface and `set WorldRenderer.debug=occlusion` the occlusion.
 - A smooth surface mirrors the world: a ray a pixel at half the output, drawn from the surface's lobe, traces the
   screen, then the field, then the world probes, so a floor shows the wall behind the camera; the rays are gathered
   over a reach the roughness sets and blended with last frame's, held within what the neighbours see.

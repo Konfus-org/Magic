@@ -16,9 +16,9 @@ import Scene.Probes;
 import Trace.IWorldTracer;
 
 // The card of a capture that saw a point from its surface's side: the side the normal faces most, or the one after
-// it where that side's depth disagrees with the point; false when neither saw it, with the first side's card and
-// place all the same.
-bool FindCard(FrameConstants frame, uint capture, float3 modelPoint, float3 modelNormal, out uint cardIndex, out float2 uv)
+// it where that side's depth disagrees with the point by more than the point's own slack; false when neither saw
+// it, with the first side's card and place all the same.
+bool FindCard(FrameConstants frame, uint capture, float3 modelPoint, float3 modelNormal, float slack, out uint cardIndex, out float2 uv)
 {
     uint best = 0u;
     uint second = 0u;
@@ -58,8 +58,8 @@ bool FindCard(FrameConstants frame, uint capture, float3 modelPoint, float3 mode
 
         uint2 texel = card.origin + min(uint2(at * float2(card.size)), card.size - 1u);
         float captured = depthAtlas.Load(texel, 0u).x;
-        // Agreement within two texels across the card, or five centimetres, whichever is more.
-        float tolerance = max(2.0 * GetCardTexelWorld(card), 0.05) / GetCardDepthRange(card);
+        // Agreement within two texels across the card, five centimetres or the slack, whichever is most.
+        float tolerance = max(max(2.0 * GetCardTexelWorld(card), 0.05), slack) / GetCardDepthRange(card);
         if (captured <= 0.0 || abs(captured - depth) > tolerance)
             continue;
 
@@ -71,9 +71,10 @@ bool FindCard(FrameConstants frame, uint capture, float3 modelPoint, float3 mode
     return false;
 }
 
-// What leaves a point of an instance's surface: the card's albedo under its lit irradiance where the instance has
-// a lit slot, under the fallback light where it has none, and nothing where it has no capture yet.
-public float3 ShadeInstancePoint(FrameConstants frame, GiConstants gi, uint instanceIndex, GpuInstance instance, float3 world, float3 normal)
+// What leaves a point of an instance's surface, known to within slack metres: the card's albedo under its lit
+// irradiance where the instance has a lit slot, under the fallback light where it has none, and nothing where it
+// has no capture yet.
+public float3 ShadeInstancePoint(FrameConstants frame, GiConstants gi, uint instanceIndex, GpuInstance instance, float3 world, float3 normal, float slack)
 {
     if (instance.capture == 0u)
         return float3(0.0);
@@ -83,7 +84,8 @@ public float3 ShadeInstancePoint(FrameConstants frame, GiConstants gi, uint inst
     float3 modelNormal = NormalizeSafe(mul(rotation, normal), float3(0.0, 1.0, 0.0));
     uint cardIndex;
     float2 uv;
-    bool isSeen = FindCard(frame, instance.capture, modelPoint, modelNormal, cardIndex, uv);
+    float3 modelSlack = mul(float4(slack, 0.0, 0.0, 0.0), instance.inverseWorld).xyz;
+    bool isSeen = FindCard(frame, instance.capture, modelPoint, modelNormal, length(modelSlack), cardIndex, uv);
     GpuCard card = LoadCard(frame.cards, cardIndex);
     SamplerRef sampler = { frame.cardSampler };
     TextureRef albedoAtlas = { frame.cardAlbedo };
@@ -197,7 +199,7 @@ public bool TraceScreenToSurface(FrameConstants frame, GiConstants gi, float3 or
         TextureRef normalTexture = { frame.gbufferNormal };
         float3 normal = DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0);
         float3 world = ReconstructWorld(frame, GetTexelCenterUv(pixel, size), sceneDepth);
-        radiance = ShadeInstancePoint(frame, gi, instanceIndex, instance, world, normal);
+        radiance = ShadeInstancePoint(frame, gi, instanceIndex, instance, world, normal, 0.0);
         hitDistance = t;
         return true;
     }
@@ -206,13 +208,16 @@ public bool TraceScreenToSurface(FrameConstants frame, GiConstants gi, float3 or
 }
 
 // What leaves a point a trace found: on the instance the tracer named, else on the nearest of the instances listed
-// for the point's brick.
+// for the point's brick. A point the field found is within a voxel of the surface, so that is its slack.
 public float3 ShadeFieldHit(FrameConstants frame, FieldConstants field, GiConstants gi, float3 world, float3 normal, uint instanceHint)
 {
     uint instanceIndex = instanceHint;
     if (instanceHint == TraceNoInstance && !FindFieldInstance(frame, field, world, instanceIndex))
         return float3(0.0);
 
+    uint level;
+    SampleField(field, world, level);
+    float slack = instanceHint == TraceNoInstance ? field.voxelSizes[level] : 0.0;
     GpuInstance instance = LoadInstance(frame.instances, instanceIndex);
-    return ShadeInstancePoint(frame, gi, instanceIndex, instance, world, normal);
+    return ShadeInstancePoint(frame, gi, instanceIndex, instance, world, normal, slack);
 }

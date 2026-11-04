@@ -122,6 +122,7 @@ void LitCardRadiosity<S : ISky, T : IWorldTracer>(uint3 group : SV_GroupID, uint
 
     SkyInputs sky;
     sky.sunDirection = frame.sunDirection.xyz;
+    sky.withSun = false;
     sky.sunIlluminance = lighting.sunIlluminance.rgb;
     sky.altitude = lighting.cameraAltitude.x;
     sky.transmittanceLut = lighting.transmittanceLut;
@@ -203,6 +204,7 @@ void LitCardShade<S : ISky>(uint3 thread : SV_DispatchThreadID)
     SkyInputs sky;
     sky.viewDirection = normal;
     sky.sunDirection = frame.sunDirection.xyz;
+    sky.withSun = false;
     sky.sunIlluminance = lighting.sunIlluminance.rgb;
     sky.altitude = lighting.cameraAltitude.x;
     sky.transmittanceLut = lighting.transmittanceLut;

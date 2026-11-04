@@ -1,6 +1,8 @@
 // Rays through the global distance field: sphere tracing, each step as long as the distance to the nearest surface
 // allows, with the cone's visibility narrowed by how close the surface came (Quilez, "Soft shadows in raymarched
-// SDFs", 2010). Its constants come from the buffer whose heap id is the pass header's w.
+// SDFs", 2010). A ray that runs out of steps, as one grazing along a wall does, ends where it got to, not at its
+// limit, so what reads the world there reads the world around the ray and not the sky. Its constants come from the
+// buffer whose heap id is the pass header's w.
 module "Trace/DistanceField";
 
 import Core.Heap;
@@ -42,6 +44,7 @@ public struct DistanceFieldTracer : IWorldTracer
             t += max(distance, voxel * 0.5);
         }
 
+        hit.distance = min(t, limits.end);
         return hit;
     }
 }

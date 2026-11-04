@@ -30,39 +30,43 @@ import Trace.DistanceField;
 // How many of a pixel's lights are shadowed through the field: the strongest, the rest unshadowed.
 static const uint TracedLights = 4u;
 
-// The four screen probes around a pixel on its plane: their irradiance, and their radiance towards a direction;
-// false when none lies on the plane.
-bool SampleScreenProbes(GiConstants gi, uint2 pixel, float3 world, float3 normal, float viewDepth, float3 direction, out float3 irradiance, out float3 reflected)
+// The screen probes around a pixel on its plane, the four nearest blended by distance, or, where none of those is
+// on the plane, the ring of tiles around them by plane alone: their irradiance; false when none lies on the plane.
+bool SampleScreenProbes(GiConstants gi, uint2 pixel, float3 world, float3 normal, float viewDepth, out float3 irradiance)
 {
     irradiance = float3(0.0);
-    reflected = float3(0.0);
     float2 tileSpace = ((float2(pixel) + 0.5) / float(ScreenProbeTile)) - 0.5;
     float2 floored = floor(tileSpace);
     float2 fraction = tileSpace - floored;
     int2 base = int2(floored);
     int2 last = int2(gi.screenProbesX, gi.screenProbesY) - 1;
-    TextureRef filtered = { gi.screenFiltered };
     ArrayRef<float4> irradianceTable = { gi.screenIrradiance };
     float weightSum = 0.0;
-    for (int y = 0; y < 2; y++)
+    for (int ring = 0; ring < 2 && weightSum < 1e-3; ring++)
     {
-        for (int x = 0; x < 2; x++)
+        int reach = ring == 0 ? 0 : 1;
+        for (int y = -reach; y < 2 + reach; y++)
         {
-            uint2 tile = uint2(clamp(base + int2(x, y), int2(0), last));
-            uint index = GetScreenProbeIndex(gi, tile);
-            ScreenProbe probe = LoadScreenProbe(gi.screenProbes, index);
-            if ((probe.flags & ScreenProbeFlagValid) == 0u)
-                continue;
+            for (int x = -reach; x < 2 + reach; x++)
+            {
+                int2 at = base + int2(x, y);
+                if (any(at < 0) || any(at > last))
+                    continue;
 
-            float bilinear = (x == 0 ? 1.0 - fraction.x : fraction.x) * (y == 0 ? 1.0 - fraction.y : fraction.y);
-            float weight = bilinear * GetProbePlaneWeight(world, normal, viewDepth, probe.position, probe.normal);
-            if (weight <= 0.0)
-                continue;
+                uint2 tile = uint2(at);
+                uint index = GetScreenProbeIndex(gi, tile);
+                ScreenProbe probe = LoadScreenProbe(gi.screenProbes, index);
+                if ((probe.flags & ScreenProbeFlagValid) == 0u)
+                    continue;
 
-            irradiance += irradianceTable[index].rgb * weight;
-            float2 texel = GetScreenProbeTexel(CreateBasis(probe.normal), direction);
-            reflected += SampleScreenProbe(filtered, GetScreenProbeOrigin(tile), texel) * weight;
-            weightSum += weight;
+                float bilinear = ring == 0 ? (x == 0 ? 1.0 - fraction.x : fraction.x) * (y == 0 ? 1.0 - fraction.y : fraction.y) : 1.0;
+                float weight = bilinear * GetProbePlaneWeight(world, normal, viewDepth, probe.position, probe.normal);
+                if (weight <= 0.0)
+                    continue;
+
+                irradiance += irradianceTable[index].rgb * weight;
+                weightSum += weight;
+            }
         }
     }
 
@@ -70,7 +74,6 @@ bool SampleScreenProbes(GiConstants gi, uint2 pixel, float3 world, float3 normal
         return false;
 
     irradiance /= weightSum;
-    reflected /= weightSum;
     return true;
 }
 
@@ -93,6 +96,7 @@ void ShadeLighting<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThreadI
     SkyInputs sky;
     sky.viewDirection = -viewDirection;
     sky.sunDirection = frame.sunDirection.xyz;
+    sky.withSun = true;
     sky.sunIlluminance = lighting.sunIlluminance.rgb;
     sky.altitude = lighting.cameraAltitude.x;
     sky.transmittanceLut = lighting.transmittanceLut;
@@ -187,31 +191,26 @@ void ShadeLighting<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThreadI
         }
 
         // The indirect light: the screen probes around the pixel, else the world probes, else the sky; the diffuse
-        // from their irradiance, the specular from their radiance towards the reflection, the rougher the surface
-        // the more of the irradiance instead; and a short cone up the normal through the field for what the probes
-        // cannot keep apart at a contact.
+        // from their irradiance, the specular from the sharp reflections where the surface is smooth enough for
+        // them and from the irradiance where it is not; and the short-range occlusion from the screen for what the
+        // probes cannot keep apart at a contact.
         GiConstants gi = LoadConstants<GiConstants>(lighting.gi);
-        float3 reflection = reflect(-viewDirection, normal);
         float3 irradiance;
-        float3 reflected;
-        if (!SampleScreenProbes(gi, thread.xy, world, normal, viewDepth, reflection, irradiance, reflected))
+        if (!SampleScreenProbes(gi, thread.xy, world, normal, viewDepth, irradiance))
         {
             if (!SampleWorldProbeIrradiance(gi, world + normal * start, normal, irradiance))
                 irradiance = hasSky ? S.GetAmbient(sky, normal) : lighting.sunIlluminance.rgb * 0.1 * (0.5 + 0.5 * normal.y);
-
-            reflected = irradiance * InvPi;
         }
 
-        Ray coneRay = { world + normal * start, normal };
-        TraceLimits coneLimits = { start, 1.0 + start, 0.5 };
-        float occlusion = lerp(0.4, 1.0, DistanceFieldTracer.Trace(coneRay, coneLimits).visibility);
+        TextureRef occlusionTexture = { gi.occlusion };
+        float occlusion = occlusionTexture.Load(thread.xy, 0u).x;
         float nDotV = max(dot(normal, viewDirection), 1e-4);
         float3 fresnel = brdf.f0 + (max(float3(1.0 - brdf.alpha), brdf.f0) - brdf.f0) * Pow5(1.0 - nDotV);
-        // The sharp reflections below the limit, the probes' radiance above it, the irradiance when rough.
+        // The sharp reflections below the limit, the irradiance above it.
         TextureRef reflections = { gi.reflections };
         float sharpness = gi.hasReflections != 0u ? 1.0 - smoothstep(ReflectionRoughnessSharp, ReflectionRoughnessLimit, surface.x) : 0.0;
         float3 reflectedSharp = reflections.Load(thread.xy, 0u).rgb;
-        float3 specular = lerp(lerp(reflected, irradiance * InvPi, saturate(surface.x * 2.0 - 0.5)), reflectedSharp, sharpness);
+        float3 specular = lerp(irradiance * InvPi, reflectedSharp, sharpness);
         float3 indirect = (brdf.diffuse * (1.0 - fresnel) * irradiance * InvPi + fresnel * (1.0 - brdf.alpha * 0.5) * specular) * (surface.z * occlusion);
         if (lighting.debugView == 3u)
         {
@@ -246,7 +245,11 @@ void ShadeLighting<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThreadI
             DecodeVisibilityId(visibility.Load(thread.xy, 0u), visibleIndex, triangle);
             ArrayRef<VisibleCluster> visible = { frame.visibleClusters };
             uint instanceIndex = visible[visibleIndex].instance;
-            color = ShadeInstancePoint(frame, gi, instanceIndex, LoadInstance(frame.instances, instanceIndex), world, normal);
+            color = ShadeInstancePoint(frame, gi, instanceIndex, LoadInstance(frame.instances, instanceIndex), world, normal, 0.0);
+        }
+        else if (lighting.debugView == 9u)
+        {
+            color = float3(occlusion) / max(lighting.exposure, Epsilon);
         }
         else
         {

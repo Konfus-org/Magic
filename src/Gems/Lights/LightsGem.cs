@@ -53,7 +53,7 @@ internal sealed class LightsGem(IEcs ecs, AssetDatabase assets) : IGem, IPipelin
                     0.5f + (0.5f * Scatter(light, 4)),
                     0.5f + (0.5f * Scatter(light, 5))
                 ),
-                Intensity = 250,
+                Intensity = 20,
                 Range = 3,
                 Radius = 0.05f,
             };

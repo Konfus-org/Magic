@@ -118,6 +118,10 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
 
     public GpuPipeline ReflectionTemporal { get; private set; }
 
+    public GpuPipeline Occlusion { get; private set; }
+
+    public GpuPipeline OcclusionBlur { get; private set; }
+
     /// <summary>
     /// The passes that trace, specialised to the ray-query tracer; none on a GPU that traces no rays.
     /// </summary>
@@ -192,6 +196,8 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
                     ReflectionTrace,
                     ReflectionResolve,
                     ReflectionTemporal,
+                    Occlusion,
+                    OcclusionBlur,
                     TranslucentMoments,
                     TranslucentResolve,
                     GlassShadow,
@@ -329,6 +335,8 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             Entry("Post", "PostBloomDown", ShaderStage.Compute),
             Entry("Post", "PostBloomUp", ShaderStage.Compute),
             GetFinalEntry([noEffect, noEffect, noEffect, noEffect]),
+            Entry("Occlusion", "Occlusion", ShaderStage.Compute),
+            Entry("Occlusion", "OcclusionBlur", ShaderStage.Compute),
         ];
         if (gpu.Features.HasRayQuery)
         {
@@ -550,6 +558,8 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             ("Trace reflections", 39),
             ("Resolve reflections", 40),
             ("Reproject reflections", 41),
+            ("Occlusion", 53),
+            ("Blur occlusion", 54),
         ];
         GpuPipeline[] giPipelines = new GpuPipeline[giEntries.Length];
         for (int i = 0; i < giEntries.Length; i++)
@@ -574,7 +584,9 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             ScreenProbeFilter,
             ReflectionTrace,
             ReflectionResolve,
-            ReflectionTemporal
+            ReflectionTemporal,
+            Occlusion,
+            OcclusionBlur
         ) = (
             giPipelines[0],
             giPipelines[1],
@@ -588,7 +600,9 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             giPipelines[9],
             giPipelines[10],
             giPipelines[11],
-            giPipelines[12]
+            giPipelines[12],
+            giPipelines[13],
+            giPipelines[14]
         );
         (string Name, int Vertex, int Pixel, GpuFormat[] Colors, bool HasDepth, BlendMode Blend)[] translucentEntries =
         [
@@ -670,15 +684,15 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             postPipelines[5],
             postPipelines[6]
         );
-        if (compiled.Length > 53)
+        if (compiled.Length > 55)
         {
             (string Name, int Index)[] rayQueryEntries =
             [
-                ("Shade with ray queries", 53),
-                ("Card radiosity with ray queries", 54),
-                ("Trace probes with ray queries", 55),
-                ("Trace screen probes with ray queries", 56),
-                ("Trace reflections with ray queries", 57),
+                ("Shade with ray queries", 55),
+                ("Card radiosity with ray queries", 56),
+                ("Trace probes with ray queries", 57),
+                ("Trace screen probes with ray queries", 58),
+                ("Trace reflections with ray queries", 59),
             ];
             GpuPipeline[] rayQueryPipelines = new GpuPipeline[rayQueryEntries.Length];
             for (int i = 0; i < rayQueryEntries.Length; i++)
