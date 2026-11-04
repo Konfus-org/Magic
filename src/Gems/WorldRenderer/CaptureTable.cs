@@ -95,6 +95,8 @@ internal sealed class CaptureTable(IGraphicsApi gpu) : IDisposable
             Albedo = albedo.Value.Id,
             Normal = normal.Value.Id,
             Depth = depth.Value.Id,
+            BoundsCenter = resident.BoundsCenter,
+            BoundsRadius = resident.BoundsRadius,
         };
         _rowOf[key] = row;
         _isDirty = true;

@@ -58,12 +58,18 @@ public sealed class WorldRendererGem(
     /// </summary>
     private const float ExposureAtSun = 4;
 
+    /// <summary>
+    /// What a surface with no lit card reflects, as a share of the sun: about what the sky gives a surface.
+    /// </summary>
+    private const float FallbackLight = 0.15f;
+
     private readonly RenderGraph _graph = new(gpu);
     private readonly RenderWorld _world = new();
     private readonly GeometryPools _pools = new(gpu, meshes, assets, threads, new DistanceField(gpu));
     private readonly TextureTable _textures = new(gpu, assets, threads);
     private readonly FrameTargets _targets = new(gpu);
     private readonly FrameTargets _cellTargets = new(gpu);
+    private readonly GlobalIllumination _gi = new(gpu);
     private readonly RendererPipelines _pipelines = new(gpu, shaders, assets);
     private readonly InstanceTable _instances = new(gpu);
     private readonly CaptureTable _captures = new(gpu);
@@ -83,6 +89,9 @@ public sealed class WorldRendererGem(
     private bool _isReady;
     private bool _hasHzb;
     private DebugView _debugView;
+    private Matrix4x4 _previousViewProjection;
+    private Vector4 _previousCameraPosition;
+    private bool _hasPreviousFrame;
 
     public void Dispose()
     {
@@ -97,6 +106,7 @@ public sealed class WorldRendererGem(
         _captures.Dispose();
         _shadows.Dispose();
         _lighting.Dispose();
+        _gi.Dispose();
         foreach (
             GpuBuffer buffer in (ReadOnlySpan<GpuBuffer>)
                 [
@@ -150,6 +160,7 @@ public sealed class WorldRendererGem(
                     _captures.Create,
                     _shadows.Create,
                     _lighting.Create,
+                    _gi.Create,
                     _pools.Field.Create,
                     CreateBuffers,
                     () => _cellTargets.Resize(GpuCapture.CellSize, GpuCapture.CellSize, _graph),
@@ -316,6 +327,9 @@ public sealed class WorldRendererGem(
         if (_targets.Width != width || _targets.Height != height)
         {
             Result resized = _targets.Resize(width, height, _graph);
+            if (resized.Ok)
+                resized = _gi.Resize(width, height, _graph);
+
             if (!resized.Ok)
             {
                 Log.Error($"The frame is not drawn: {resized.Error}");
@@ -358,7 +372,14 @@ public sealed class WorldRendererGem(
             2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360) / _targets.Height,
             _instances.Changes
         );
-        _lighting.Prepare(_graph, _world, camera, sun, _targets, _debugView);
+        _lighting.Prepare(_graph, _world, camera, sun, _targets, _debugView, _gi.Constants);
+        _gi.Prepare(
+            _graph,
+            _instances.Rows,
+            camera.Transform.Position,
+            state.Frame.Index,
+            sun.Radiance * FallbackLight
+        );
         _pools.Field.Prepare(
             _graph,
             _pipelines,
@@ -387,7 +408,19 @@ public sealed class WorldRendererGem(
         RecordHzb();
         _shadows.Record(_graph, _pipelines, _constants, _instances.Buffer, instanceCount, _pools, _targets);
         RecordResolve(view, "Resolve materials");
-        _lighting.RecordShading(_graph, _pipelines, _constants, _shadows, _pools.Field, _targets);
+        _gi.Record(
+            _graph,
+            _pipelines,
+            _constants,
+            _instances.Buffer,
+            _visibleClusters,
+            _shadows,
+            _lighting,
+            _pools.Field,
+            _captures,
+            _targets
+        );
+        _lighting.RecordShading(_graph, _pipelines, _constants, _shadows, _pools.Field, _gi, _targets);
 
         GpuTexture target = gpu.WindowTarget;
         if (!target.IsNone)
@@ -652,6 +685,17 @@ public sealed class WorldRendererGem(
         frame.PixelsPerRadian = _targets.Height / (2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360));
         frame.ErrorThreshold = ErrorThresholdPixels;
         frame.FrameIndex = frameIndex;
+        if (!_hasPreviousFrame)
+        {
+            _hasPreviousFrame = true;
+            _previousViewProjection = frame.ViewProjection;
+            _previousCameraPosition = frame.CameraPosition;
+        }
+
+        frame.PreviousViewProjection = _previousViewProjection;
+        frame.PreviousCameraPosition = _previousCameraPosition;
+        _previousViewProjection = frame.ViewProjection;
+        _previousCameraPosition = frame.CameraPosition;
 
         return frame;
     }

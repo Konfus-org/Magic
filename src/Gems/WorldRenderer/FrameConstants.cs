@@ -12,7 +12,7 @@ namespace WorldRenderer;
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct FrameConstants
 {
-    public const int Bytes = 544;
+    public const int Bytes = 624;
 
     /// <summary>
     /// The cone cull is off: the view is orthographic, as a capture's is, so no one point is the camera.
@@ -46,6 +46,10 @@ internal record struct FrameConstants
     public Vector4 SkyRadiance;
 
     public Vector4 CameraPosition;
+
+    public Matrix4x4 PreviousViewProjection;
+
+    public Vector4 PreviousCameraPosition;
 
     public uint Width;
 

@@ -330,29 +330,30 @@ with kajiya's temporal shape for the probes. The chain is: cards hold what every
 world gather from the cards along traced rays; probes on screen gather from the world probes and from their own short
 rays; the integrator turns that into irradiance per pixel.
 
-- **The surface cache.** The preprocessor places cards on each model: oriented boxes found by clustering the surface
-  by normal and position, up to 32 per model, so the inside walls of a room get cards facing into the room. At load
-  the renderer captures each card into an atlas, albedo, normal, emissive and depth, by drawing the model's clusters
-  that overlap the card's box with the box's near and far as clip planes; the capture is cached as a `GpuCapture`. At
-  runtime, for the instances near enough to matter (a budget by screen size and distance), the cards are lit each
-  frame: a direct pass with every light that reaches the card through its own clustered light list and the virtual
-  shadow maps, and an indirect pass that gathers from the radiance cache. The result is the final-lit atlas, what a
-  ray reads when it hits that instance.
-- **The radiance cache.** A clipmap of world probes (4 levels, 32³ probes, 1 m to 8 m apart), each an octahedral
-  16×16 map of radiance and a 16×16 map of hit distance. Each frame a budget of probes traces 256 rays through the
-  field, shades hits from the surface cache and misses from the sky, and blends into its history with a hysteresis
-  that drops when the probe's hit distances change. Visibility is stored with the radiance, so a probe inside a wall
-  is never read from the room beside it (Majercik et al., "Dynamic Diffuse Global Illumination with Ray-Traced
-  Irradiance Fields", 2019 for the Chebyshev test).
+- **The surface cache.** The cards are the imposter captures: the 64 cells of albedo, normal and depth a model is
+  captured into from every direction, so a surface facing any way has a cell that saw it. A pool of 256 lit slots
+  goes to the instances that take most of the view; a slot holds the instance's capture lit at half the texels, 8
+  slots lit a frame: a direct pass with the sun through the virtual shadow maps and every light whose reach touches
+  the instance, through a light list per slot, and the world probes' irradiance for the bounce. The result is the
+  final-lit card, what a ray reads when it lands on that instance: the cell that saw the surface from its normal's
+  side, where the cell's depth agrees with the point. An instance with no slot reads its capture's albedo under a
+  fallback light.
+- **The radiance cache.** A clipmap of world probes (4 levels, 16³ probes, 1 m to 8 m apart), each an octahedral
+  16×16 map of radiance, a 16×16 map of hit distance and its square, and an 8×8 map of irradiance. Each frame a
+  budget of 256 probes, the ones whose cells moved first and then each in turn, traces 256 rays through the field,
+  shades hits from the surface cache and misses from the sky, and blends into its history. Visibility is stored with
+  the radiance, so a probe inside a wall is never read from the room beside it (Majercik et al., "Dynamic Diffuse
+  Global Illumination with Ray-Traced Irradiance Fields", 2019 for the Chebyshev test).
 - **Screen probes.** One probe per 16×16 pixel tile, placed on the depth at a jittered pixel of the tile, 64 rays each
-  in an octahedral layout. A ray first traces the screen (the HZB, a few steps, for contact detail), then the field up
-  to the radiance cache's range, and ends in the nearest world probes weighted by their visibility. Each probe's
-  result is temporally reprojected from last frame's probes by world position and normal, then filtered spatially over
-  neighbouring probes that see the same plane.
-- **Integration.** Per pixel, the four nearest screen probes are interpolated with normal and depth weights and the
-  octahedral radiance is integrated against the diffuse lobe; a bent normal and a short-range occlusion from the
-  field (a 0.5 m cone) stop the one leak interpolation can still make at a contact. Rough specular comes from the same
-  probes integrated against the GGX lobe; sharp specular has its own pass.
+  over the hemisphere of its normal, cosine-distributed, so the average of its texels times pi is its irradiance. A
+  ray first traces the screen (the depth pyramid, a few steps, for contact detail), then the field up to the radiance
+  cache's range, and ends in the nearest world probes weighted by their visibility. Each probe's result is temporally
+  reprojected from last frame's probe at the same surface, then filtered spatially over neighbouring probes on the
+  same plane.
+- **Integration.** Per pixel, the four nearest screen probes are interpolated with plane and normal weights; the
+  diffuse comes from their irradiance, the rough specular from their radiance towards the reflection, and a short
+  cone up the normal through the field stops the one leak interpolation can still make at a contact. Sharp specular
+  has its own pass.
 
 Why interiors are dark: a probe inside a room traces 256 rays that all hit the room's walls in the field, and those
 walls' cards are lit only by what reaches them, which for a windowless room is nothing. Why the floor behind you

@@ -1,6 +1,6 @@
 // What the lighting passes share beyond the frame: the sun above the air, the viewer's height, the air, the light
-// table and its froxel lists, the sky's tables and the fog volumes, C#'s LightingConstants, in the buffer whose heap
-// id is the pass header's z.
+// table and its froxel lists, the sky's tables, the fog volumes and the global illumination's constants, C#'s
+// LightingConstants, in the buffer whose heap id is the pass header's z.
 module "Scene/Lighting";
 
 import Core.Heap;
@@ -31,7 +31,8 @@ public struct LightingConstants
     // What the output shows instead of the picture: 0 the picture, 1 the field at every surface, 2 the field two
     // voxels above every surface.
     public uint debugView;
-    public float padding1;
+    // The global illumination's constants, C#'s GiConstants.
+    public uint gi;
     public float padding2;
 }
 

@@ -51,7 +51,10 @@ internal record struct LightingConstants
     /// </summary>
     public uint DebugView;
 
-    public float Padding1;
+    /// <summary>
+    /// The global illumination's constants, a <see cref="GiConstants"/>.
+    /// </summary>
+    public uint Gi;
 
     public float Padding2;
 }
@@ -74,6 +77,16 @@ internal enum DebugView : uint
     /// distance, red where it reads farther out and blue farther in, the more the farther.
     /// </summary>
     FieldAbove,
+
+    /// <summary>
+    /// The indirect light alone: what the screen probes give every surface.
+    /// </summary>
+    Indirect,
+
+    /// <summary>
+    /// The world probes' irradiance at every surface, what a card or a ray's end reads.
+    /// </summary>
+    Probes,
 }
 
 /// <summary>

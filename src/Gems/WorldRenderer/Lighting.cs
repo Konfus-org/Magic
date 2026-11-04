@@ -10,8 +10,8 @@ namespace WorldRenderer;
 
 /// <summary>
 /// What lights the frame: the light table and the froxel lists the lights are binned into, the sky's three tables
-/// made each frame, the fog volumes, and the passes that fill them, light the GBuffer into the HDR picture and bring
-/// that to the output.
+/// made each frame, the fog volumes, and the passes that fill them, light the GBuffer into the HDR picture, with
+/// the global illumination's probes, and bring that to the output.
 /// </summary>
 internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
 {
@@ -131,7 +131,8 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
         RenderCamera camera,
         RenderSun sun,
         FrameTargets targets,
-        DebugView debugView
+        DebugView debugView,
+        GpuBuffer giConstants
     )
     {
         _lightCount = Math.Min(world.Lights.Count, MaxLights);
@@ -175,6 +176,7 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
             HasSky = _hasSky ? 1u : 0u,
             Exposure = sun.Exposure,
             DebugView = (uint)debugView,
+            Gi = giConstants.Id,
         };
         GpuUpload upload = gpu.BeginUpload(LightingConstants.Bytes);
         MemoryMarshal.Write(upload.Bytes, in constants);
@@ -182,6 +184,19 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
         graph.Recorder.CopyBuffer(upload.Buffer, upload.Offset, Constants, 0, LightingConstants.Bytes);
         graph.Use(_froxelLists, GpuAccess.CopyDestination);
         graph.Recorder.FillBuffer(_froxelLists, 0);
+    }
+
+    /// <summary>
+    /// Says a pass lights surfaces away from the view, as the global illumination's do: the light table and the
+    /// sky's tables, without the froxel lists.
+    /// </summary>
+    public void UseForCards(RenderGraph graph)
+    {
+        graph.Use(Constants, GpuAccess.ShaderRead);
+        graph.Use(_lightTable, GpuAccess.ShaderRead);
+        graph.Use(_transmittance, GpuAccess.ShaderRead);
+        graph.Use(_multiScattering, GpuAccess.ShaderRead);
+        graph.Use(_skyView, GpuAccess.ShaderRead);
     }
 
     /// <summary>
@@ -249,6 +264,7 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
         GpuBuffer frameConstants,
         SunShadows shadows,
         DistanceField field,
+        GlobalIllumination gi,
         FrameTargets targets
     )
     {
@@ -301,6 +317,7 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
         graph.Use(targets.Hdr, GpuAccess.ShaderWrite);
         shadows.UseForSampling(graph);
         field.UseForSampling(graph);
+        gi.UseForSampling(graph);
         graph.Recorder.BindPipeline(pipelines.ShadeLighting);
         graph.Recorder.PushConstants(header);
         graph.Recorder.Dispatch(Groups(targets.Width, pipelines.TileSize), Groups(targets.Height, pipelines.TileSize));

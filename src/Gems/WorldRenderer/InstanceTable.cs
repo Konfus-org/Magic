@@ -39,6 +39,11 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
     /// </summary>
     public ReadOnlySpan<DirtyInstance> Changes => CollectionsMarshal.AsSpan(_changes);
 
+    /// <summary>
+    /// The rows as the GPU reads them, by instance index; a freed slot's row draws nothing.
+    /// </summary>
+    public ReadOnlySpan<GpuInstance> Rows => _rows.AsSpan(0, Count);
+
     public void Dispose()
     {
         if (!Buffer.IsNone)

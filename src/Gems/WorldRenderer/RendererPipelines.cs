@@ -72,6 +72,24 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
 
     public GpuPipeline DrawShadow { get; private set; }
 
+    public GpuPipeline LitCardLights { get; private set; }
+
+    public GpuPipeline LitCardShade { get; private set; }
+
+    public GpuPipeline WorldProbeScroll { get; private set; }
+
+    public GpuPipeline WorldProbeSelect { get; private set; }
+
+    public GpuPipeline WorldProbeTrace { get; private set; }
+
+    public GpuPipeline ScreenProbePlace { get; private set; }
+
+    public GpuPipeline ScreenProbeTrace { get; private set; }
+
+    public GpuPipeline ScreenProbeTemporal { get; private set; }
+
+    public GpuPipeline ScreenProbeFilter { get; private set; }
+
     public uint CullThreads { get; private set; }
 
     public uint TileSize { get; private set; }
@@ -108,6 +126,15 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
                     ShadowFinishPages,
                     ShadowCull,
                     DrawShadow,
+                    LitCardLights,
+                    LitCardShade,
+                    WorldProbeScroll,
+                    WorldProbeSelect,
+                    WorldProbeTrace,
+                    ScreenProbePlace,
+                    ScreenProbeTrace,
+                    ScreenProbeTemporal,
+                    ScreenProbeFilter,
                 ]
         )
         {
@@ -169,6 +196,24 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             Entry("Field", "FieldCollect", ShaderStage.Compute),
             Entry("Field", "FieldList", ShaderStage.Compute),
             Entry("Field", "FieldUpdate", ShaderStage.Compute),
+            Entry("LitCards", "LitCardLights", ShaderStage.Compute),
+            Entry("LitCards", "LitCardShade", ShaderStage.Compute) with
+            {
+                TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere")],
+            },
+            Entry("WorldProbes", "WorldProbeScroll", ShaderStage.Compute),
+            Entry("WorldProbes", "WorldProbeSelect", ShaderStage.Compute),
+            Entry("WorldProbes", "WorldProbeTrace", ShaderStage.Compute) with
+            {
+                TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere")],
+            },
+            Entry("ScreenProbes", "ScreenProbePlace", ShaderStage.Compute),
+            Entry("ScreenProbes", "ScreenProbeTrace", ShaderStage.Compute) with
+            {
+                TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere")],
+            },
+            Entry("ScreenProbes", "ScreenProbeTemporal", ShaderStage.Compute),
+            Entry("ScreenProbes", "ScreenProbeFilter", ShaderStage.Compute),
         ];
         foreach (ShaderEntry entry in entries)
         {
@@ -351,6 +396,49 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             fieldPipelines[3],
             fieldPipelines[4],
             fieldPipelines[5]
+        );
+        (string Name, int Index)[] giEntries =
+        [
+            ("List card lights", 29),
+            ("Light cards", 30),
+            ("Scroll probes", 31),
+            ("Select probes", 32),
+            ("Trace probes", 33),
+            ("Place screen probes", 34),
+            ("Trace screen probes", 35),
+            ("Reproject screen probes", 36),
+            ("Filter screen probes", 37),
+        ];
+        GpuPipeline[] giPipelines = new GpuPipeline[giEntries.Length];
+        for (int i = 0; i < giEntries.Length; i++)
+        {
+            Result<GpuPipeline> made = Compute(compiled[giEntries[i].Index], giEntries[i].Name);
+            if (!made.Ok)
+                return Result.Failure(made.Error);
+
+            giPipelines[i] = made.Value;
+        }
+
+        (
+            LitCardLights,
+            LitCardShade,
+            WorldProbeScroll,
+            WorldProbeSelect,
+            WorldProbeTrace,
+            ScreenProbePlace,
+            ScreenProbeTrace,
+            ScreenProbeTemporal,
+            ScreenProbeFilter
+        ) = (
+            giPipelines[0],
+            giPipelines[1],
+            giPipelines[2],
+            giPipelines[3],
+            giPipelines[4],
+            giPipelines[5],
+            giPipelines[6],
+            giPipelines[7],
+            giPipelines[8]
         );
         TileSize = compiled[5].GroupSizeX;
         bool areTiled =

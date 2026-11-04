@@ -126,7 +126,7 @@ public enum MaterialKind : uint
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public record struct GpuCapture
 {
-    public const int Bytes = 16;
+    public const int Bytes = 32;
 
     public const int Cells = 8;
 
@@ -141,4 +141,11 @@ public record struct GpuCapture
     public uint Depth;
 
     public uint Padding;
+
+    /// <summary>
+    /// The sphere the model was captured around, in the model's frame.
+    /// </summary>
+    public Vector3 BoundsCenter;
+
+    public float BoundsRadius;
 }

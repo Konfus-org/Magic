@@ -27,6 +27,10 @@ public struct FrameConstants
     // keep their precision near the camera wherever it is.
     public float4 cameraPosition;
 
+    // Last frame's camera-relative world to clip and where the camera was, for what reprojects into last frame.
+    public float4x4 previousViewProjection;
+    public float4 previousCameraPosition;
+
     public uint width;
     public uint height;
     public uint hzbLevels;

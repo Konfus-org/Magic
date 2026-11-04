@@ -34,5 +34,11 @@ model reader, the mesh preprocessor and the texture reader.
   the camera moved or an instance changed. The strongest lights of a pixel's froxel trace cones through the field for
   their shadow. `set WorldRenderer.debug=field` in the console shows the field at every surface instead of the
   picture; `set WorldRenderer.debug=none` shows the picture again.
+- Light bounces: the instances that take most of the view hold lit cards, their captures lit by the sun through its
+  pages, the lights that reach them and the world probes, a few cards a frame; world probes around the camera trace
+  the field and read the cards where their rays land, the sky where they miss; a screen probe in every tile of
+  pixels traces the screen, then the field, then reads the world probes, and the pixels read the probes around them
+  on their plane. A room with no window stays dark. `set WorldRenderer.debug=indirect` shows that light alone and
+  `set WorldRenderer.debug=probes` what the world probes hold at every surface.
 - The passes are the `Shaders/WorldRenderer/` modules in the gem's `Resources`; they build on the shader library
   (`src/Resources/Shaders/README.md`).

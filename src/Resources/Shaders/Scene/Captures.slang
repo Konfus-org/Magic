@@ -17,6 +17,9 @@ public struct GpuCapture
     public uint normal;
     public uint depth;
     public uint padding;
+    // The sphere the model was captured around, in the model's frame.
+    public float3 boundsCenter;
+    public float boundsRadius;
 }
 
 public GpuCapture LoadCapture(uint table, uint row)
