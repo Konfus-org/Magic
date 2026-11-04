@@ -6,8 +6,9 @@ asks for a screenshot.
 To use it, list `WorldRenderer` in a project's `.magic` file after the GPU provider, the shader compiler, the ECS, the
 model reader, the mesh preprocessor and the texture reader.
 
-- `Update` reads the renderers, the camera that draws into the window and the first directional light out of the
-  entities. `Render` draws from that copy.
+- `Update` reads the renderers, the camera that draws into the window and the directional light out of the
+  entities: the sun while it is above the horizon, else the moon while it is, else the first there is. `Render`
+  draws from that copy.
 - A model is drawn once the preprocessor has made its clusters and they are in the geometry pools; the pools hold
   what fits and keep it for the run. A model that does not load is drawn as the failure model, a material that does
   not load, names the failure shader or a texture that does not load as the magenta failure material.

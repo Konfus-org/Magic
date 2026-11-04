@@ -249,15 +249,29 @@ public sealed class WorldRendererGem(
             }
         }
 
+        // The directional light the frame is lit by: the sun while it is up, else the moon while it is up, else the
+        // first there is.
+        int sunRank = -1;
         foreach (EcsChunk<Transform, DirectionalLight> chunk in ecs.Query<Transform, DirectionalLight>())
         {
-            for (int i = 0; i < chunk.Entities.Length && _world.Sun is null; i++)
+            for (int i = 0; i < chunk.Entities.Length; i++)
             {
                 DirectionalLight light = chunk.Second[i];
                 Vector3 towards = -Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, chunk.First[i].Rotation));
+                bool isUp = towards.Y > 0;
+                int rank = 0;
+                if (isUp && light.Mode == DirectionalLightMode.Sun)
+                    rank = 2;
+                else if (isUp && light.Mode == DirectionalLightMode.Moon)
+                    rank = 1;
+
+                if (rank <= sunRank)
+                    continue;
+
                 Vector3 illuminance = new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity;
                 float exposure = light.Intensity > 0 ? ExposureAtSun / light.Intensity : 1;
                 _world.Sun = new RenderSun(towards, illuminance, exposure);
+                sunRank = rank;
             }
         }
 
