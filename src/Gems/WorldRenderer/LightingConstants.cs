@@ -12,7 +12,7 @@ namespace WorldRenderer;
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct LightingConstants
 {
-    public const int Bytes = 128;
+    public const int Bytes = 132;
 
     public Vector4 SunIlluminance;
 
@@ -60,6 +60,11 @@ internal record struct LightingConstants
     /// The translucency's constants, a <see cref="TranslucencyConstants"/>.
     /// </summary>
     public uint Translucency;
+
+    /// <summary>
+    /// The post passes' constants, a <see cref="PostConstants"/>.
+    /// </summary>
+    public uint Post;
 }
 
 /// <summary>

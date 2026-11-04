@@ -33,6 +33,7 @@ internal sealed class Cli
     private readonly RootCommand _commands;
     private int _waitFrames;
     private bool _isWaitingForWorld;
+    private readonly Queue<string> _queued = new();
     private bool _isOpeningDomain;
 
     public Cli(App app, IFileSystem files, EventCoordinator events)
@@ -116,7 +117,7 @@ internal sealed class Cli
             _isWaitingForWorld = false;
         }
 
-        if (!Terminal.Pump(out string? line))
+        if (!_queued.TryDequeue(out string? line) && !Terminal.Pump(out line))
             return;
 
         Result ran = Execute(line);
@@ -151,6 +152,34 @@ internal sealed class Cli
         }
 
         _events.Publish(new SettingChanged(setting[..equals].Trim(), setting[(equals + 1)..].Trim()));
+    }
+
+    /// <summary>
+    /// Queues the lines that open every domain, wait for each to load and settle, and exit.
+    /// </summary>
+    private void Bake()
+    {
+        if (Assets is not { } assets)
+        {
+            Log.Error("No project is running to bake.");
+
+            return;
+        }
+
+        int domains = 0;
+        foreach (string path in assets.GetPathsUnder("Domains"))
+        {
+            if (!path.EndsWith(".domain", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            domains++;
+            _queued.Enqueue($"open {path}");
+            _queued.Enqueue("wait loaded");
+            _queued.Enqueue("wait 120");
+        }
+
+        Log.Info($"Baking {domains} domains.");
+        _queued.Enqueue("exit");
     }
 
     /// <summary>
@@ -220,6 +249,10 @@ internal sealed class Cli
                         string path = _files.Combine(AppContext.BaseDirectory, "Screenshots", $"{name}.png");
                         _events.Publish(new ScreenshotRequested(path));
                     }),
+                },
+                new Command("bake", "Opens every domain under Domains/ in turn, so their caches are made, then exits")
+                {
+                    Action = new CliCommand(cmds => Bake()),
                 },
                 new Command("set", "Sets a gem's setting for the run, as Key=value, which the gem the key names reads")
                 {

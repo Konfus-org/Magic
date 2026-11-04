@@ -32,6 +32,18 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
     public GpuTexture Hdr { get; private set; }
 
     /// <summary>
+    /// The HDR picture with the panes composed over it: what the post resolves.
+    /// </summary>
+    public GpuTexture Picture { get; private set; }
+
+    /// <summary>
+    /// The output's size, which the picture is resolved into: the window's, whatever the picture is drawn at.
+    /// </summary>
+    public int OutputWidth { get; private set; }
+
+    public int OutputHeight { get; private set; }
+
+    /// <summary>
     /// The translucent surfaces' power moments of depth, their absorbance by colour and in all, the light they add
     /// with its weight, and how far they bend the picture behind them.
     /// </summary>
@@ -52,11 +64,13 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
     /// <summary>
     /// Makes the targets at a size, the old ones destroyed and forgotten by the graph.
     /// </summary>
-    public Result Resize(int width, int height, RenderGraph graph)
+    public Result Resize(int width, int height, int outputWidth, int outputHeight, RenderGraph graph)
     {
         Destroy(graph);
         Width = width;
         Height = height;
+        OutputWidth = outputWidth;
+        OutputHeight = outputHeight;
         HzbLevels = TextureDescription.GetFullLevels(width, height);
         Result<GpuTexture> visibility = Make(
             "Visibility",
@@ -94,6 +108,11 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
             GpuFormat.R16G16B16A16Sfloat,
             TextureUsages.Storage | TextureUsages.Sampled
         );
+        Result<GpuTexture> picture = Make(
+            "Picture",
+            GpuFormat.R16G16B16A16Sfloat,
+            TextureUsages.Storage | TextureUsages.Sampled
+        );
         Result<GpuTexture> moments = Make(
             "Translucent moments",
             GpuFormat.R16G16B16A16Sfloat,
@@ -114,15 +133,20 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
             GpuFormat.R16G16Sfloat,
             TextureUsages.ColorTarget | TextureUsages.Sampled
         );
-        Result<GpuTexture> output = Make(
-            "Output",
-            GpuFormat.R8G8B8A8Unorm,
-            TextureUsages.Storage | TextureUsages.CopySource
+        Result<GpuTexture> output = gpu.CreateTexture(
+            new TextureDescription
+            {
+                Width = outputWidth,
+                Height = outputHeight,
+                Format = GpuFormat.R8G8B8A8Unorm,
+                Usage = TextureUsages.Storage | TextureUsages.CopySource,
+                Name = "Output",
+            }
         );
         Result<GpuBuffer> readback = gpu.CreateBuffer(
             new BufferDescription
             {
-                Bytes = (long)width * height * 4,
+                Bytes = (long)outputWidth * outputHeight * 4,
                 Usage = BufferUsages.Readback,
                 Name = "Output readback",
             }
@@ -159,6 +183,7 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
         GBufferBase = baseColor.Value;
         GBufferSurface = surface.Value;
         Hdr = hdr.Value;
+        Picture = picture.Value;
         Moments = moments.Value;
         OpticalDepth = opticalDepth.Value;
         Accumulation = accumulation.Value;
@@ -194,6 +219,7 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
                     GBufferBase,
                     GBufferSurface,
                     Hdr,
+                    Picture,
                     Moments,
                     OpticalDepth,
                     Accumulation,

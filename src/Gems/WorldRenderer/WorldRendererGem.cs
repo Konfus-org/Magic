@@ -71,7 +71,9 @@ public sealed class WorldRendererGem(
     private readonly FrameTargets _cellTargets = new(gpu);
     private readonly GlobalIllumination _gi = new(gpu);
     private readonly Translucency _translucency = new(gpu);
+    private RendererPreset _preset = RendererPreset.Quality;
     private readonly RendererPipelines _pipelines = new(gpu, shaders, assets);
+    private readonly Post _post = new(gpu);
     private readonly InstanceTable _instances = new(gpu);
     private readonly CaptureTable _captures = new(gpu);
     private readonly SunShadows _shadows = new(gpu);
@@ -109,6 +111,7 @@ public sealed class WorldRendererGem(
         _lighting.Dispose();
         _gi.Dispose();
         _translucency.Dispose();
+        _post.Dispose();
         foreach (
             GpuBuffer buffer in (ReadOnlySpan<GpuBuffer>)
                 [
@@ -164,9 +167,17 @@ public sealed class WorldRendererGem(
                     _lighting.Create,
                     _gi.Create,
                     _translucency.Create,
+                    _post.Create,
                     _pools.Field.Create,
                     CreateBuffers,
-                    () => _cellTargets.Resize(GpuCapture.CellSize, GpuCapture.CellSize, _graph),
+                    () =>
+                        _cellTargets.Resize(
+                            GpuCapture.CellSize,
+                            GpuCapture.CellSize,
+                            GpuCapture.CellSize,
+                            GpuCapture.CellSize,
+                            _graph
+                        ),
                 ]
         )
         {
@@ -213,6 +224,15 @@ public sealed class WorldRendererGem(
                 Camera camera = chunk.Second[i];
                 if (camera.Target.IsWindow)
                     _world.Camera = new RenderCamera(chunk.First[i], camera.FieldOfView, camera.Near);
+            }
+        }
+
+        foreach (EcsChunk<Camera, PostProcessing> chunk in ecs.Query<Camera, PostProcessing>())
+        {
+            for (int i = 0; i < chunk.Entities.Length; i++)
+            {
+                if (chunk.First[i].Target.IsWindow)
+                    _world.Post = chunk.Second[i];
             }
         }
 
@@ -303,6 +323,21 @@ public sealed class WorldRendererGem(
 
         foreach (SettingChanged setting in state.Frame.Events.Get<SettingChanged>())
         {
+            if (setting.Key == "WorldRenderer.preset")
+            {
+                if (RendererPreset.TryParse(setting.Value, out RendererPreset preset))
+                {
+                    _preset = preset;
+                    _gi.Configure(preset.SlotsPerFrame, preset.HasReflections);
+                }
+                else
+                {
+                    Log.Error($"{setting.Key} takes {RendererPreset.Names}, not '{setting.Value}'.");
+                }
+
+                continue;
+            }
+
             if (setting.Key != "WorldRenderer.debug")
                 continue;
 
@@ -325,13 +360,23 @@ public sealed class WorldRendererGem(
         if (!_isReady || _materials is null)
             return ValueTask.FromResult(state);
 
-        int width = app.Window is { Width: > 0, Height: > 0 } window ? window.Width : DefaultWidth;
-        int height = app.Window is { Width: > 0, Height: > 0 } sized ? sized.Height : DefaultHeight;
-        if (_targets.Width != width || _targets.Height != height)
+        int outputWidth = app.Window is { Width: > 0, Height: > 0 } window ? window.Width : DefaultWidth;
+        int outputHeight = app.Window is { Width: > 0, Height: > 0 } sized ? sized.Height : DefaultHeight;
+        int width = Math.Max((int)MathF.Round(outputWidth * _preset.Scale), 16);
+        int height = Math.Max((int)MathF.Round(outputHeight * _preset.Scale), 16);
+        if (
+            _targets.Width != width
+            || _targets.Height != height
+            || _targets.OutputWidth != outputWidth
+            || _targets.OutputHeight != outputHeight
+        )
         {
-            Result resized = _targets.Resize(width, height, _graph);
+            Result resized = _targets.Resize(width, height, outputWidth, outputHeight, _graph);
             if (resized.Ok)
                 resized = _gi.Resize(width, height, _graph);
+
+            if (resized.Ok)
+                resized = _post.Resize(outputWidth, outputHeight, _graph);
 
             if (!resized.Ok)
             {
@@ -375,8 +420,20 @@ public sealed class WorldRendererGem(
             2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360) / _targets.Height,
             _instances.Changes
         );
-        _lighting.Prepare(_graph, _world, camera, sun, _targets, _debugView, _gi.Constants, _translucency.Constants);
+        _lighting.Prepare(
+            _graph,
+            _world,
+            camera,
+            sun,
+            _targets,
+            _debugView,
+            _gi.Constants,
+            _translucency.Constants,
+            _post.Constants
+        );
         _translucency.Prepare(_graph, sun.Direction, camera.Transform.Position, _targets);
+        _post.Update(_pipelines, _world.Post, cancel);
+        _post.Prepare(_graph, _targets, _world.Post, (float)state.Frame.AppSec);
         _gi.Prepare(
             _graph,
             _instances.Rows,
@@ -444,7 +501,7 @@ public sealed class WorldRendererGem(
         );
         _lighting.RecordShading(_graph, _pipelines, _constants, _shadows, _pools.Field, _gi, _translucency, _targets);
         _translucency.RecordDraws(_graph, _pipelines, translucentDraws, _targets, _shadows, _lighting, _gi);
-        _lighting.RecordTonemap(_graph, _pipelines, _constants, _shadows, _pools.Field, _translucency, _targets);
+        _post.Record(_graph, _pipelines, _constants, _shadows, _lighting, _pools.Field, _translucency, _targets);
 
         GpuTexture target = gpu.WindowTarget;
         if (!target.IsNone)
@@ -472,7 +529,7 @@ public sealed class WorldRendererGem(
         gpu.Submit(_graph.Finish());
         _hasHzb = true;
         if (requests.Length > 0)
-            SaveScreenshotAsync(requests[^1].Path, width, height).FireAndForget();
+            SaveScreenshotAsync(requests[^1].Path, outputWidth, outputHeight).FireAndForget();
 
         return ValueTask.FromResult(state);
     }
@@ -546,6 +603,23 @@ public sealed class WorldRendererGem(
         n.Y += n.Y >= 0 ? -t : t;
 
         return Vector3.Normalize(n);
+    }
+
+    /// <summary>
+    /// The Halton sequence's term in a base, 0 to 1: a different one each frame that fills the pixel evenly.
+    /// </summary>
+    private static float GetHalton(uint index, uint radix)
+    {
+        float result = 0;
+        float fraction = 1f / radix;
+        while (index > 0)
+        {
+            result += fraction * (index % radix);
+            index /= radix;
+            fraction /= radix;
+        }
+
+        return result;
     }
 
     private Result CreateBuffers()
@@ -703,6 +777,10 @@ public sealed class WorldRendererGem(
         float aspect = (float)_targets.Width / _targets.Height;
         Matrix4x4.Invert(Matrix4x4.CreateFromQuaternion(camera.Transform.Rotation), out Matrix4x4 view);
         Matrix4x4 projection = CreatePerspective(camera.FieldOfView, aspect, camera.Near);
+        Matrix4x4 unjittered = view * projection;
+        Vector2 jitter = new(GetHalton(frameIndex + 1, 2) - 0.5f, GetHalton(frameIndex + 1, 3) - 0.5f);
+        projection.M31 = jitter.X * 2 / _targets.Width;
+        projection.M32 = -jitter.Y * 2 / _targets.Height;
         FrameConstants frame = GetViewConstants(
             view,
             projection,
@@ -719,16 +797,19 @@ public sealed class WorldRendererGem(
         frame.PixelsPerRadian = _targets.Height / (2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360));
         frame.ErrorThreshold = ErrorThresholdPixels;
         frame.FrameIndex = frameIndex;
+        frame.Jitter = jitter;
+        frame.OutputWidth = (uint)_targets.OutputWidth;
+        frame.OutputHeight = (uint)_targets.OutputHeight;
         if (!_hasPreviousFrame)
         {
             _hasPreviousFrame = true;
-            _previousViewProjection = frame.ViewProjection;
+            _previousViewProjection = unjittered;
             _previousCameraPosition = frame.CameraPosition;
         }
 
         frame.PreviousViewProjection = _previousViewProjection;
         frame.PreviousCameraPosition = _previousCameraPosition;
-        _previousViewProjection = frame.ViewProjection;
+        _previousViewProjection = unjittered;
         _previousCameraPosition = frame.CameraPosition;
 
         return frame;

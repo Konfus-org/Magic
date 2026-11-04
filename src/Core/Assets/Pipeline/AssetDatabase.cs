@@ -146,6 +146,25 @@ public sealed class AssetDatabase : IDisposable
         Snapshot.Index.ByFolder.TryGetValue(folder, out ImmutableArray<string> paths) ? paths : [];
 
     /// <summary>
+    /// The paths of the assets in <paramref name="folder"/> and every folder under it, as <see cref="Find{T}"/>
+    /// takes them.
+    /// </summary>
+    public ImmutableArray<string> GetPathsUnder(string folder)
+    {
+        ImmutableArray<string>.Builder paths = ImmutableArray.CreateBuilder<string>();
+        foreach ((string indexed, ImmutableArray<string> files) in Snapshot.Index.ByFolder)
+        {
+            bool isUnder =
+                indexed.Equals(folder, StringComparison.OrdinalIgnoreCase)
+                || indexed.StartsWith(folder + "/", StringComparison.OrdinalIgnoreCase);
+            if (isUnder)
+                paths.AddRange(files);
+        }
+
+        return paths.ToImmutable();
+    }
+
+    /// <summary>
     /// <see cref="GetPaths(string)"/>, as an <see cref="IAssetLoader{T}"/> reads it while making asset
     /// <paramref name="dependent"/> (<see cref="AssetFile.Id"/>), which is made again when a file in the folder changes.
     /// </summary>

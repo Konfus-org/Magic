@@ -10,7 +10,13 @@
                         "z": -8.5
                     }
                 },
-                "Camera": {}
+                "Camera": {},
+                "PostProcessing": {
+                    "effect0": {
+                        "id": 1700000000000283
+                    },
+                    "bloomStrength": 0.04
+                }
             }
         },
         {

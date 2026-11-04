@@ -24,6 +24,8 @@ compiler loads a module and its imports from the assets, so a game's `Shaders/` 
 - `Scene/Probes` is the global illumination's tables: the lit cards, the world probes and the screen probes, and how
   a direction maps to a probe's texels; `Scene/SurfaceCache` is what a ray reads where it lands, from the lit card of
   the instance there.
+- `Post/` is the post effect contract, `IPixelEffect`, the effect that does nothing and a vignette; `Scene/Post` is
+  what the post passes share.
 - A contract between shaders is an interface, `I` plus a noun, and a pass that works with any implementation is
   generic over it. A game adds a material, a sky, a light or a post effect by implementing the contract in a module of
   its own and naming it in the asset that uses it.

@@ -397,10 +397,10 @@ is attenuated by.
 
 TAAU first, so the frame can render at a scale under one and every stochastic term above (probes, reflections, soft
 shadows) converges in it; the jitter sequence and the history weight follow Karis, "High Quality Temporal
-Supersampling", 2014, with the motion vectors from the GBuffer and a disocclusion test from depth. Then a histogram
-exposure meter over the HDR image, bloom as a mip pyramid, the effects fused into one pass as
-`ApplyEffects<E0..En>` over the `IPixelEffect`s the camera's `PostProcessing` names, a tonemapper (AgX by default),
-and the overlay pass for other gems' draw lists. The window receives the picture in its composition's space.
+Supersampling", 2014, with the reprojection from depth and last frame's view and a disocclusion test from the
+depth the history kept. Then a histogram exposure meter over the resolved picture, bloom as a mip pyramid, the
+effects fused into one pass as `PostFinal<E0..E3>` over the `IPixelEffect`s the camera's `PostProcessing` names, and
+the AgX tonemap. The window receives the picture in its composition's space.
 
 ## Assets and what the import step makes
 
@@ -424,8 +424,9 @@ thin `ProcessAsync` around them, so each is a unit test with a known mesh.
 ## The pipeline asset
 
 `IRenderPipeline` is what the renderer runs each frame; the default is `Resources/Scripts/DefaultPipeline.cs`, a script
-asset the project's `.magic` or a camera can replace. A pipeline records passes into a render graph through the
-renderer's steps:
+asset the project's `.magic` or a camera can replace. Until script assets exist, the renderer runs the default order
+below with the `WorldRenderer.preset` setting choosing how much of it a frame does. A pipeline records passes into a
+render graph through the renderer's steps:
 
 ```csharp
 public sealed class DefaultPipeline : IRenderPipeline

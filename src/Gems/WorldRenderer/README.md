@@ -49,5 +49,13 @@ model reader, the mesh preprocessor and the texture reader.
   other panes, the lights of its froxel and the screen probes' reflection, weighed by what reaches it; the tonemap
   puts them over the picture, bent by their normals. The sun through the panes colours what is behind them, and a
   ray through them arrives tinted. Glass casts no sun shadow of its own and is left out of the distance field.
+- The picture is drawn at a share of the output and resolved into it over time: each frame's projection is shifted
+  by a jittered pixel, and the resolve blends the frame with last frame's picture reprojected onto the same surfaces,
+  held within what the neighbours show. The exposure is metered from a histogram of the picture, the brightest of it
+  blooms, and the final pass runs the camera's effects, up to four shaders implementing the pixel effect contract
+  named in its `PostProcessing`, and tonemaps with AgX. `set WorldRenderer.preset=toaster`, `balanced` or `quality`
+  sets the share, how many cards are lit a frame and whether reflections are traced.
+- `bake` in the console opens every domain under `Domains/` in turn and exits, so a release ships with the caches
+  full.
 - The passes are the `Shaders/WorldRenderer/` modules in the gem's `Resources`; they build on the shader library
   (`src/Resources/Shaders/README.md`).

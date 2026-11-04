@@ -26,7 +26,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
     private const int LitSlotTexels = 256;
     private const int LitPoolTexels = 4096;
     private const int LitLightsPerSlot = 64;
-    private const int SlotsPerFrame = 8;
+    private const int MaxSlotsPerFrame = 8;
     private const int AssignPeriod = 16;
     private const int ProbeTexels = 16;
     private const int ProbeIrradianceTexels = 8;
@@ -44,7 +44,9 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
     private readonly Stack<int> _freeSlots = new();
     private readonly Queue<uint> _pendingSlots = new();
     private readonly List<(float Importance, int Index)> _candidates = [];
-    private readonly uint[] _batch = new uint[SlotsPerFrame];
+    private readonly uint[] _batch = new uint[MaxSlotsPerFrame];
+    private int _slotsPerFrame = MaxSlotsPerFrame;
+    private bool _hasReflections = true;
     private readonly GpuTexture[] _screenFiltered = new GpuTexture[2];
     private readonly GpuTexture[] _reflections = new GpuTexture[2];
     private GpuTexture _reflectionTraced;
@@ -106,7 +108,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
             ("GI constants", GiConstants.Bytes),
             ("Lit slots of instances", (long)InstanceTable.Capacity * 4),
             ("Lit slot instances", (long)LitSlots * LitSlotRow.Bytes),
-            ("Lit slot batch", (long)SlotsPerFrame * 4),
+            ("Lit slot batch", (long)MaxSlotsPerFrame * 4),
             ("Lit slot lights", (long)LitSlots * (LitLightsPerSlot + 1) * 4),
             ("Probe states", (long)ProbeLevels * ProbesPerLevel * 16),
             ("Probe list", (long)(1 + ProbeBudget) * 4),
@@ -173,6 +175,15 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         );
 
         return Result.Success();
+    }
+
+    /// <summary>
+    /// How much a frame does: the cards lit a frame, and whether the sharp reflections are traced at all.
+    /// </summary>
+    public void Configure(int slotsPerFrame, bool hasReflections)
+    {
+        _slotsPerFrame = Math.Clamp(slotsPerFrame, 1, MaxSlotsPerFrame);
+        _hasReflections = hasReflections;
     }
 
     /// <summary>
@@ -339,6 +350,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
             ReflectionResolved = _reflectionResolved.Id,
             Reflections = _reflections[_current].Id,
             ReflectionsPrevious = _reflections[1 - _current].Id,
+            HasReflections = _hasReflections ? 1u : 0u,
         };
         for (int level = 0; level < ProbeLevels; level++)
         {
@@ -518,6 +530,9 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         graph.Recorder.Dispatch((uint)probeCount);
         graph.EndPass();
 
+        if (!_hasReflections)
+            return;
+
         graph.BeginComputePass("Reflections: trace");
         graph.Use(frameConstants, GpuAccess.ShaderRead);
         graph.Use(Constants, GpuAccess.ShaderRead);
@@ -674,13 +689,13 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
     private void PickBatch()
     {
         _batchCount = 0;
-        while (_batchCount < SlotsPerFrame && _pendingSlots.TryDequeue(out uint pending))
+        while (_batchCount < _slotsPerFrame && _pendingSlots.TryDequeue(out uint pending))
         {
             if (_isSlotUsed[pending])
                 _batch[_batchCount++] = pending;
         }
 
-        for (int tried = 0; tried < LitSlots && _batchCount < SlotsPerFrame; tried++)
+        for (int tried = 0; tried < LitSlots && _batchCount < _slotsPerFrame; tried++)
         {
             int slot = _cursor;
             _cursor = (_cursor + 1) % LitSlots;
@@ -818,7 +833,7 @@ internal record struct GiConstants
 
     public uint ReflectionsPrevious;
 
-    public uint Padding0;
+    public uint HasReflections;
 
     public uint Padding1;
 }

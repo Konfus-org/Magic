@@ -35,6 +35,8 @@ public struct LightingConstants
     public uint gi;
     // The translucency's constants, C#'s TranslucencyConstants.
     public uint translucency;
+    // The post passes' constants, C#'s PostConstants.
+    public uint post;
 }
 
 public LightingConstants GetLighting() { return LoadConstants<LightingConstants>(GetPassHeader().z); }

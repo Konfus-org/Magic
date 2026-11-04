@@ -18,6 +18,8 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
     private const string StandardMaterial = "Shaders/Material/Standard.slang";
     private const string AtmosphereSky = "Shaders/Sky/Atmosphere.slang";
     private const string GlassMaterial = "Shaders/Material/Glass.slang";
+    private const string NoEffect = "Shaders/Post/NoEffect.slang";
+    private const string PostModule = "Shaders/WorldRenderer/Post.slang";
 
     public GpuPipeline CullClusters { get; private set; }
 
@@ -41,7 +43,22 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
 
     public GpuPipeline ShadeLighting { get; private set; }
 
-    public GpuPipeline Tonemap { get; private set; }
+    public GpuPipeline PostCompose { get; private set; }
+
+    public GpuPipeline PostResolve { get; private set; }
+
+    public GpuPipeline PostHistogram { get; private set; }
+
+    public GpuPipeline PostExposure { get; private set; }
+
+    public GpuPipeline PostBloomDown { get; private set; }
+
+    public GpuPipeline PostBloomUp { get; private set; }
+
+    /// <summary>
+    /// The final pass with no effects: what a camera without any runs.
+    /// </summary>
+    public GpuPipeline PostFinal { get; private set; }
 
     public GpuPipeline FieldWriteModel { get; private set; }
 
@@ -124,7 +141,13 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
                     FogInject,
                     FogIntegrate,
                     ShadeLighting,
-                    Tonemap,
+                    PostCompose,
+                    PostResolve,
+                    PostHistogram,
+                    PostExposure,
+                    PostBloomDown,
+                    PostBloomUp,
+                    PostFinal,
                     FieldWriteModel,
                     FieldScroll,
                     FieldInvalidate,
@@ -179,6 +202,10 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
         if (glass == Handle<Shader>.None)
             return Result.Failure($"there is no {GlassMaterial}.");
 
+        Handle<Shader> noEffect = assets.Find<Shader>(NoEffect);
+        if (noEffect == Handle<Shader>.None)
+            return Result.Failure($"there is no {NoEffect}.");
+
         ImmutableArray<ShaderEntry> entries =
         [
             Entry("CullClusters", "CullClusters", ShaderStage.Compute),
@@ -189,7 +216,7 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             {
                 TypeArguments = [new ShaderTypeArgument(standard, "Standard")],
             },
-            Entry("Tonemap", "Tonemap", ShaderStage.Compute),
+            Entry("Post", "PostCompose", ShaderStage.Compute),
             Entry("CaptureCell", "CaptureCell", ShaderStage.Compute),
             Entry("ShadowPages", "ShadowMarkPages", ShaderStage.Compute),
             Entry("ShadowPages", "ShadowInvalidatePages", ShaderStage.Compute),
@@ -261,6 +288,12 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             {
                 TypeArguments = [new ShaderTypeArgument(glass, "Glass")],
             },
+            Entry("Post", "PostResolve", ShaderStage.Compute),
+            Entry("Post", "PostHistogram", ShaderStage.Compute),
+            Entry("Post", "PostExposure", ShaderStage.Compute),
+            Entry("Post", "PostBloomDown", ShaderStage.Compute),
+            Entry("Post", "PostBloomUp", ShaderStage.Compute),
+            GetFinalEntry([noEffect, noEffect, noEffect, noEffect]),
         ];
         foreach (ShaderEntry entry in entries)
         {
@@ -326,11 +359,6 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             return Result.Failure(resolve.Error);
 
         ResolveStandard = resolve.Value;
-        Result<GpuPipeline> tonemap = Compute(compiled[5], "Tonemap");
-        if (!tonemap.Ok)
-            return Result.Failure(tonemap.Error);
-
-        Tonemap = tonemap.Value;
         Result<GpuPipeline> capture = Compute(compiled[6], "Capture cell");
         if (!capture.Ok)
             return Result.Failure(capture.Error);
@@ -547,6 +575,35 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             translucentPipelines[1],
             translucentPipelines[2]
         );
+        (string Name, int Index)[] postEntries =
+        [
+            ("Post compose", 5),
+            ("Post resolve", 46),
+            ("Post histogram", 47),
+            ("Post exposure", 48),
+            ("Post bloom down", 49),
+            ("Post bloom up", 50),
+            ("Post final", 51),
+        ];
+        GpuPipeline[] postPipelines = new GpuPipeline[postEntries.Length];
+        for (int i = 0; i < postEntries.Length; i++)
+        {
+            Result<GpuPipeline> made = Compute(compiled[postEntries[i].Index], postEntries[i].Name);
+            if (!made.Ok)
+                return Result.Failure(made.Error);
+
+            postPipelines[i] = made.Value;
+        }
+
+        (PostCompose, PostResolve, PostHistogram, PostExposure, PostBloomDown, PostBloomUp, PostFinal) = (
+            postPipelines[0],
+            postPipelines[1],
+            postPipelines[2],
+            postPipelines[3],
+            postPipelines[4],
+            postPipelines[5],
+            postPipelines[6]
+        );
         TileSize = compiled[5].GroupSizeX;
         bool areTiled =
             compiled[3].GroupSizeX == TileSize
@@ -560,6 +617,48 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             return Result.Failure("the compute entries reported no group size, or the full-screen ones differ.");
 
         return Result.Success();
+    }
+
+    /// <summary>
+    /// Compiles the final post pass for a camera's effects, on a worker: an empty slot runs no effect, and a module's
+    /// effect is the struct named as its file is.
+    /// </summary>
+    public Task<Result<CompiledShader>> CompileFinalAsync(
+        ImmutableArray<Handle<Shader>> effects,
+        CancellationToken cancel
+    )
+    {
+        Handle<Shader> noEffect = assets.Find<Shader>(NoEffect);
+        Handle<Shader>[] slots = new Handle<Shader>[4];
+        for (int i = 0; i < slots.Length; i++)
+        {
+            slots[i] = i < effects.Length && effects[i] != Handle<Shader>.None ? effects[i] : noEffect;
+        }
+
+        return shaders.CompileAsync(GetFinalEntry(slots), null, cancel);
+    }
+
+    /// <summary>
+    /// A compute pipeline from a compiled entry, for a pass built after the start.
+    /// </summary>
+    public Result<GpuPipeline> CreateCompute(CompiledShader compiled, string name) => Compute(compiled, name);
+
+    private ShaderEntry GetFinalEntry(ReadOnlySpan<Handle<Shader>> effects)
+    {
+        ShaderTypeArgument[] arguments = new ShaderTypeArgument[effects.Length];
+        for (int i = 0; i < effects.Length; i++)
+        {
+            string type = System.IO.Path.GetFileNameWithoutExtension(assets.GetPath(effects[i]) ?? "NoEffect");
+            arguments[i] = new ShaderTypeArgument(effects[i], type);
+        }
+
+        return new ShaderEntry
+        {
+            Module = assets.Find<Shader>(PostModule),
+            Name = "PostFinal",
+            Stage = ShaderStage.Compute,
+            TypeArguments = [.. arguments],
+        };
     }
 
     private ShaderEntry Entry(string module, string name, ShaderStage stage) =>

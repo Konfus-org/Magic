@@ -73,6 +73,12 @@ public struct FrameConstants
     public uint flags;
     public uint captures;
     public uint captureSampler;
+
+    // Pixels the projection is shifted by this frame, for the resolve to take off, and the output's size, which the
+    // picture is resolved into.
+    public float2 jitter;
+    public uint outputWidth;
+    public uint outputHeight;
 }
 
 // The cone cull is off: the view is orthographic, as a capture's is, so no one point is the camera.

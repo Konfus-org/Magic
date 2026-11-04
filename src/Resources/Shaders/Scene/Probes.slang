@@ -74,7 +74,8 @@ public struct GiConstants
     public uint reflectionResolved;
     public uint reflections;
     public uint reflectionsPrevious;
-    public uint padding0;
+    // Whether the sharp reflections are traced this run.
+    public uint hasReflections;
     public uint padding1;
 }
 

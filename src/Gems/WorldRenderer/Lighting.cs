@@ -10,8 +10,8 @@ namespace WorldRenderer;
 
 /// <summary>
 /// What lights the frame: the light table and the froxel lists the lights are binned into, the sky's three tables
-/// made each frame, the fog volumes, and the passes that fill them, light the GBuffer into the HDR picture, with
-/// the global illumination's probes, and bring that to the output.
+/// made each frame, the fog volumes, and the passes that fill them and light the GBuffer into the HDR picture, with
+/// the global illumination's probes.
 /// </summary>
 internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
 {
@@ -133,7 +133,8 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
         FrameTargets targets,
         DebugView debugView,
         GpuBuffer giConstants,
-        GpuBuffer translucencyConstants
+        GpuBuffer translucencyConstants,
+        GpuBuffer postConstants
     )
     {
         _lightCount = Math.Min(world.Lights.Count, MaxLights);
@@ -179,6 +180,7 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
             DebugView = (uint)debugView,
             Gi = giConstants.Id,
             Translucency = translucencyConstants.Id,
+            Post = postConstants.Id,
         };
         GpuUpload upload = gpu.BeginUpload(LightingConstants.Bytes);
         MemoryMarshal.Write(upload.Bytes, in constants);
@@ -334,35 +336,6 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
         gi.UseForSampling(graph);
         translucency.UseForSampling(graph);
         graph.Recorder.BindPipeline(pipelines.ShadeLighting);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(Groups(targets.Width, pipelines.TileSize), Groups(targets.Height, pipelines.TileSize));
-        graph.EndPass();
-    }
-
-    /// <summary>
-    /// The HDR picture, with the panes over it, brought to the output.
-    /// </summary>
-    public void RecordTonemap(
-        RenderGraph graph,
-        RendererPipelines pipelines,
-        GpuBuffer frameConstants,
-        SunShadows shadows,
-        DistanceField field,
-        Translucency translucency,
-        FrameTargets targets
-    )
-    {
-        GpuConstants header = new(frameConstants.Id, shadows.Constants.Id, Constants.Id, field.Constants.Id);
-        graph.BeginComputePass("Tonemap");
-        graph.Use(frameConstants, GpuAccess.ShaderRead);
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(targets.Hdr, GpuAccess.ShaderRead);
-        graph.Use(targets.Depth, GpuAccess.ShaderRead);
-        graph.Use(targets.Visibility, GpuAccess.ShaderRead);
-        graph.Use(targets.Output, GpuAccess.ShaderWrite);
-        field.UseForSampling(graph);
-        translucency.UseForComposite(graph, targets);
-        graph.Recorder.BindPipeline(pipelines.Tonemap);
         graph.Recorder.PushConstants(header);
         graph.Recorder.Dispatch(Groups(targets.Width, pipelines.TileSize), Groups(targets.Height, pipelines.TileSize));
         graph.EndPass();

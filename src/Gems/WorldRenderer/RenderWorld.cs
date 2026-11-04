@@ -25,6 +25,11 @@ internal sealed class RenderWorld
 
     public bool HasSky { get; set; }
 
+    /// <summary>
+    /// What the camera does to its picture after the lighting; the defaults when it says nothing.
+    /// </summary>
+    public PostProcessing Post { get; set; }
+
     public void Clear()
     {
         Instances.Clear();
@@ -33,6 +38,7 @@ internal sealed class RenderWorld
         Sun = null;
         Fog = null;
         HasSky = false;
+        Post = new PostProcessing();
     }
 }
 
