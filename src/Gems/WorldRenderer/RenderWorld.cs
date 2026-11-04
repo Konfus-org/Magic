@@ -1,8 +1,8 @@
 using System.Numerics;
-using Magic.Assets;
-using Magic.Assets.Types;
 using Magic.Ecs;
 using Magic.Ecs.Components;
+using Magic.Files;
+using Magic.Files.Types;
 
 namespace WorldRenderer;
 

@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using System.Numerics;
-using Magic.Assets.Types;
 using Magic.Debugging;
+using Magic.Files.Types;
 using Magic.Rendering;
 using static MeshPreprocessor.meshoptimizer;
 

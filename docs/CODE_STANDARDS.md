@@ -10,12 +10,13 @@ Write the engine as data flowing through functions, not objects calling each oth
 
 - **Data:** plain values, such as `Domain`, `Prefab` and `EntitiesChangeList`.
 - **Databases:** one place that holds state and does little else, such as the assets' database and the ECS's columns.
-- **Pipelines:** where the work happens, over a batch, each stage handing the state on.
-- **Services:** immediate calls where that's the normal thing, such as `world.Create` and `assets.Find`.
+- **Services:** what you call, such as `world.Create` and `assets.Find`.
+- **Steps:** work done in an order, as named methods that take values and return values. `Program` and `ImportPipeline`
+  read this way.
 
 - **Nothing glued in.** Just about everything is a gem that can be swapped out.
-- **Pipelines, not webs.** Data moves A → B → C. Each step takes values and returns values, and the whole flow reads
-  top to bottom in one place. No events firing into handlers that fire more events.
+- **Direct calls, not webs.** Data moves A â†’ B â†’ C, and the whole flow reads top to bottom in one place. Call a thing by
+  its name, so go-to-definition and a stack trace lead to it. No events firing into handlers that fire more events.
 - **Stateless by default.** A function takes what it needs and returns a result.
 - **Testable.** Each piece is modular, can be tested on its own, and is easy to debug.
 - **Functions over objects.** Records, plain data and static functions. No objects that guard their own fields.
@@ -37,37 +38,26 @@ Write the engine as data flowing through functions, not objects calling each oth
   binary or copied code. Hand-write a binding only where the generator can't, and say so in the gem's README.
 - No keys, tokens or passwords in code, configuration or workflows. CI reads its own from the repository's secrets.
 
-## Gems, hooks, pipelines and services
+## Gems, hooks and services
 
 - A gem is a plugin: a decoupled, hot-reloadable, modular piece of logic that a project adds or replaces to meet its
-  needs. It is a `public sealed` class implementing `IGem`, the Core interfaces it provides, and an
-  `IPipeline<TState>` for each data pipeline it joins.
+  needs. It is a `public sealed` class implementing `IGem` and the Core interfaces it provides.
 - A gem's constructor takes everything it depends on and starts what the gem is; `Dispose` ends it. Only code that
   builds objects from constructors takes `IServiceProvider`. Gems are made in dependency order, then in the order the
   project lists them, and disposed in reverse.
 - A hook is what the engine calls on a gem each frame: `IGem`'s `Update`, `FixedUpdate`, `LateUpdate` and `Render`, in
   that order over the gems, on the main thread. A gem implements the ones it needs. One that throws in a hook is logged
-  and leaves every hook and pipeline.
-- A service is what you call. A pipeline is work over a state, run stage by stage, each taking the state as the one
-  before left it and handing it on, changed or not. Core's stages come first, then each gem's in the order the gems
-  were made. `pipelines.Run(state)` runs one now, on the main thread; `RunAsync` awaited, on any thread.
-- A pipeline holds no state of its own and knows no other pipeline: only the databases of its area and the
-  coordinator, to run a nested pipeline. What joins one does so with `Register`, and the subscription it returns takes
-  it out again.
-- Core's own work is its root pipelines, one per area, each doing that area's work at each point of a run:
-  [`PipelineStages.cs`](../src/Core/Pipelines/PipelineStages.cs) has the states, and `App.Run` runs them in order.
-  Those states are Core's alone; a gem reaches the frame through its hooks. A dedicated pipeline is for a substantial
-  piece of work, not each step: a step is a method.
-- The data pipelines a gem joins are the asset loads (`AssetLoad<T>`), the change lists (`EntitiesChangeList`,
-  `AssetsChangeList`) and the world's stages (`WorldLoad` and the others beside it). A change to a database is pushed
-  onto a change list, whose pipeline acts on it and says what came of it. A service's calls push onto its own, as
-  `assets.Add` does, or rent, run and return one, as `world.Create` does. Push for bulk work. Work over a list costs a
-  walk per run, so a call that runs one at once is for the odd change, not a hot path.
-- A pipeline that can't take a run because of what its caller is doing throws `PipelineRefusedException`, which goes to
-  the caller.
-- What is run now returns finished, with `ValueTask.FromResult`; a gem's stage that returns unfinished is logged and
-  the gem leaves every pipeline. What is awaited may await. A stage that needs the main thread after an await of its
-  own steps onto it with `await threads.Enter(EngineThread.Main)`; nothing hops threads for it.
+  and leaves every hook.
+- Where Core needs something from a gem, the gem implements an interface and Core calls it, as with `IEcs` and
+  `IAssetLoader<T>`. Add one when a gem first needs it.
+- A gem that keeps something for each entity compares what it holds with the entities each frame, adding what came and
+  dropping what went, as the renderer does. It needs no call when content loads or unloads.
+- `Program` sets a run up and owns its loop, calling each service's `Pump` in turn. `App` lasts the whole process; what a
+  run makes is new for it, and a restart keeps only the world, as JSON. A service starts in its constructor
+  and ends in `Dispose`, not with paired start and stop calls. A step is a method. A class of its own is for a substantial piece of work.
+- Push onto an `EntitiesChangeList` for bulk work, and run it with `world.Apply`. A single change is a call on `World`.
+- A method that needs the main thread after an await of its own steps onto it with
+  `await threads.Enter(EngineThread.Main)`; nothing hops threads for it.
 - Gems talk through message structs. Publish one from any thread and every gem reads it the next frame, from
   `frame.Events` or through `EventCoordinator.Watch`.
 - Async work a hook starts arrives in a later frame: by a message, or by work posted with `Threads.Post`. A gem that
@@ -146,7 +136,7 @@ Write the engine as data flowing through functions, not objects calling each oth
 
 - A namespace is the project's root namespace (`Magic` for Core, `Magic.<Name>` otherwise) plus its folders.
 - Core is one project, `src/Core/Magic.Core.csproj`. Its root holds only what starts the process; every other type
-  goes in the folder of its area, such as `Assets` or `Gems`. A new area is a new folder, never a new project.
+  goes in the folder of its area, such as `Files` or `Plugins`. A new area is a new folder, never a new project.
 - A folder exists only once it holds something. Split a big one into a subfolder per area, never named like a type in
   it.
 - A gem is flat: every file at its root, in `Magic.<Gem>`. Its `Resources/` holds the assets and scripts only it uses.
@@ -201,7 +191,7 @@ built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
 
 ### Naming
 
-- A name reads well as `Class.Member(arguments)`: `AssetDatabase.Find<Texture>(path)`, `App.Exit()`. Action first,
+- A name reads well as `Class.Member(arguments)`: `Assets.Find<Texture>(path)`, `App.Exit()`. Action first,
   subject second (`ReadDomain`), naming what it acts on even if that's longer. If it doesn't make sense without its
   summary (`Process()`, `_scratch`), rename it.
 - Each verb means one thing:
@@ -268,7 +258,7 @@ All code runs on Windows, Linux and macOS.
 
 - **Paths.** Build them with `IFileSystem.Combine` and split them with `IFileSystem.GetParent`; never touch separators.
   `Path.GetExtension`, `Path.GetFileName*` and `Path.ChangeExtension` are fine. No drive letters, absolute paths or
-  checks for `..`. An asset path is relative to its root and uses `/`; only `AssetDatabase` turns it into an OS path.
+  checks for `..`. An asset path is relative to its root and uses `/`; only `Assets` turns it into an OS path.
 - **Case.** File names in code, assets, `#include`s, csproj and `.meta` files match the disk exactly. Two files never
   differ only by case.
 - **Disk.** All disk access goes through `IFileSystem`, never `File` or `Directory`; only `Debugging` is exempt. Engine

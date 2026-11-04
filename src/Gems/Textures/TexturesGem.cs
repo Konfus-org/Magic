@@ -3,10 +3,10 @@ using System.Buffers.Binary;
 using System.Collections.Immutable;
 using BCnEncoder.Encoder;
 using BCnEncoder.Shared;
-using Magic.Assets.Pipeline;
-using Magic.Assets.Types;
 using Magic.Caching;
-using Magic.Gems;
+using Magic.Files.Pipeline;
+using Magic.Files.Types;
+using Magic.Plugins;
 using Magic.Utils;
 using StbImageSharp;
 

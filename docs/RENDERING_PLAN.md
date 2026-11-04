@@ -477,9 +477,9 @@ Extension points, from the cheapest up:
 
 ## Inside the engine
 
-Core runs one thread and a set of pipelines (`PipelineStages.cs`); a gem joins the stages it needs with
-`IPipeline<TStage>`, and the gems run in the order the project lists them, each after the gems it took in its
-constructor. The renderer fits that shape:
+Core runs one thread and calls each gem's hooks, in the order the project lists the gems, each after the gems it took in
+its constructor.
+The renderer fits that shape:
 
 - **Stages.** The GPU provider joins `Render` first, as it is made first: it waits for the frame two before, takes the
   window's image and resets the staging ring. The renderer joins `Update`, where it reads the ECS into a `RenderWorld`

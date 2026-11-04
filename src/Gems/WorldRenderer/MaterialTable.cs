@@ -1,9 +1,8 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Magic.Assets;
-using Magic.Assets.Pipeline;
-using Magic.Assets.Types;
 using Magic.Debugging;
+using Magic.Files;
+using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Threading;
@@ -17,7 +16,7 @@ namespace WorldRenderer;
 /// names the failure shader or a texture that does not load is drawn as the failure kind. The whole table is
 /// uploaded again in the frame after a row changes.
 /// </summary>
-internal sealed class MaterialTable(IGraphicsApi gpu, AssetDatabase assets, TextureTable textures, Threads threads)
+internal sealed class MaterialTable(IGraphicsApi gpu, Assets assets, TextureTable textures, Threads threads)
     : IDisposable
 {
     public const int Capacity = 4096;

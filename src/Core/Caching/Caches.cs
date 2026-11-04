@@ -4,6 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using Magic.Debugging;
 using Magic.Files;
+using Magic.Projects;
 using Magic.Utils;
 
 namespace Magic.Caching;
@@ -36,28 +37,31 @@ public sealed class Caches
 
     private readonly IFileSystem _files;
 
+    private readonly App _app;
+    private Project? _project;
+
+    internal Caches(IFileSystem files, App app)
+    {
+        _files = files;
+        _app = app;
+    }
+
     /// <summary>
     /// This user's cache folder for the project, a folder per type under it: read after the project's, and the one
     /// written.
     /// </summary>
-    private readonly string _userCacheFolder;
+    private string UserCacheFolder => _files.Combine(GetRoot(_files), Project.Name);
 
     /// <summary>
     /// The cache folder the project brings with it, a folder per type under it: read first and never written.
     /// </summary>
-    private readonly string _projectCacheFolder;
-
-    internal Caches(IFileSystem files, string projectName, string projectFolder)
-    {
-        _files = files;
-        _userCacheFolder = files.Combine(GetRoot(files), projectName);
-        _projectCacheFolder = files.Combine(projectFolder, "Cache");
-    }
+    private string ProjectCacheFolder => _files.Combine(_files.GetParent(Project.Path), "Cache");
 
     /// <summary>
-    /// Where the assets a run writes go, under the project's user cache: an asset directory of the project's.
+    /// The project this run's caches are for, as it was when first asked: another opened as the run ends is the next run's.
     /// </summary>
-    internal string WrittenAssetsFolder => _files.Combine(_userCacheFolder, "Assets");
+    private Project Project =>
+        _project ??= _app.Project ?? throw new InvalidOperationException("Nothing is cached until a project is open.");
 
     /// <summary>
     /// What is cached of <paramref name="key"/> as a <typeparamref name="T"/>, made from <paramref name="version"/>:
@@ -66,13 +70,12 @@ public sealed class Caches
     /// </summary>
     public async Task<Result<T>> ReadAsync<T>(ulong key, ulong version, ICache<T> cache, CancellationToken cancel)
     {
-        Result<T> fromProject = await ReadEntryAsync(GetEntryFile<T>(_projectCacheFolder, key), version, cache, cancel)
+        Result<T> fromProject = await ReadEntryAsync(GetEntryFile<T>(ProjectCacheFolder, key), version, cache, cancel)
             .ConfigureAwait(false);
 
         return fromProject.Ok
             ? fromProject
-            : await ReadEntryAsync(GetEntryFile<T>(_userCacheFolder, key), version, cache, cancel)
-                .ConfigureAwait(false);
+            : await ReadEntryAsync(GetEntryFile<T>(UserCacheFolder, key), version, cache, cancel).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -82,7 +85,7 @@ public sealed class Caches
     /// </summary>
     public async Task WriteAsync<T>(ulong key, ulong version, T value, ICache<T> cache, CancellationToken cancel)
     {
-        string file = GetEntryFile<T>(_userCacheFolder, key);
+        string file = GetEntryFile<T>(UserCacheFolder, key);
         Result written = await _files.WriteAsync(file, ToEntry(version, value, cache), cancel).ConfigureAwait(false);
         if (!written.Ok)
             Log.Warn($"{file} could not be written, so it is made again next time: {written.Error}");

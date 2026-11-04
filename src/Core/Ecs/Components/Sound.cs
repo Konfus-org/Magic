@@ -1,5 +1,5 @@
-using Magic.Assets;
-using Magic.Assets.Types;
+using Magic.Files;
+using Magic.Files.Types;
 
 namespace Magic.Ecs.Components;
 
@@ -40,7 +40,7 @@ public enum SoundSpace : byte
 }
 
 /// <summary>
-/// Plays an <see cref="Assets.Types.Audio"/>: in the world at its entity's <see cref="Transform"/>, heard from the
+/// Plays an <see cref="Files.Types.Audio"/>: in the world at its entity's <see cref="Transform"/>, heard from the
 /// player's camera, fading with distance and muffled and echoed by what is solid around it, or everywhere alike, for
 /// music and ambience. A new one, <c>{ "audio": { "id": 800 } }</c> in a file, plays the sound once, at full volume,
 /// in the world, heard at full volume within a metre and not at all past 25; <c>"isLooping": true</c> plays it without

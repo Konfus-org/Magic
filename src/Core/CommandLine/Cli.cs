@@ -2,12 +2,10 @@ using System.CommandLine;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
-using Magic.Assets;
-using Magic.Assets.Pipeline;
-using Magic.Assets.Types;
 using Magic.Debugging;
 using Magic.Events;
 using Magic.Files;
+using Magic.Files.Types;
 using Magic.Images;
 using Magic.Projects;
 using Magic.Threading;
@@ -24,6 +22,9 @@ internal sealed class Cli
 {
     private readonly App _app;
     private readonly IFileSystem _files;
+    private readonly EventCoordinator _events;
+    private readonly Assets _assets;
+    private readonly World _world;
     private readonly RootCommand _commands;
     private int _waitFrames;
 
@@ -35,27 +36,15 @@ internal sealed class Cli
     private readonly Queue<string> _queued = new();
     private bool _isOpeningDomain;
 
-    public Cli(App app, IFileSystem files)
+    public Cli(App app, IFileSystem files, EventCoordinator events, Assets assets, World world)
     {
         _app = app;
         _files = files;
+        _events = events;
+        _assets = assets;
+        _world = world;
         _commands = CreateCommands();
     }
-
-    /// <summary>
-    /// The run's messages, which <c>set</c> and <c>screenshot</c> publish to; none before a run.
-    /// </summary>
-    internal EventCoordinator? Events { get; set; }
-
-    /// <summary>
-    /// The run's world, which <c>wait loaded</c> watches and <c>open</c> opens a domain in; none before a run.
-    /// </summary>
-    internal World? World { get; set; }
-
-    /// <summary>
-    /// The run's assets, which <c>open</c> finds a domain in; none before a run.
-    /// </summary>
-    internal AssetDatabase? Assets { get; set; }
 
     /// <summary>
     /// Executes the commands Magic was launched with, or says why they didn't run. Only open runs a project; any other
@@ -116,7 +105,7 @@ internal sealed class Cli
 
         if (_isWaitingForWorld)
         {
-            if (_isOpeningDomain || World is not { } world || world.IsLoading || world.Contents.IsEmpty)
+            if (_isOpeningDomain || _world.IsLoading || _world.Contents.IsEmpty)
                 return;
 
             _isWaitingForWorld = false;
@@ -141,6 +130,19 @@ internal sealed class Cli
     }
 
     /// <summary>
+    /// Whether a project is open for a command that needs one to <paramref name="what"/>; it logs an error when none is.
+    /// </summary>
+    private bool IsProjectOpen(string what)
+    {
+        if (_app.Project is not null)
+            return true;
+
+        Log.Error($"No project is running to {what}.");
+
+        return false;
+    }
+
+    /// <summary>
     /// Publishes a setting, <c>Key=value</c>, for the gem its key names.
     /// </summary>
     private void Set(string setting)
@@ -153,14 +155,10 @@ internal sealed class Cli
             return;
         }
 
-        if (Events is not { } events)
-        {
-            Log.Error($"No project is running to set {setting} in.");
-
+        if (!IsProjectOpen($"set {setting} in"))
             return;
-        }
 
-        events.Publish(new SettingChanged(setting[..equals].Trim(), setting[(equals + 1)..].Trim()));
+        _events.Publish(new SettingChanged(setting[..equals].Trim(), setting[(equals + 1)..].Trim()));
     }
 
     /// <summary>
@@ -168,16 +166,12 @@ internal sealed class Cli
     /// </summary>
     private void Screenshot()
     {
-        if (Events is not { } events)
-        {
-            Log.Error("No project is running to screenshot.");
-
+        if (!IsProjectOpen("screenshot"))
             return;
-        }
 
         string name = DateTime.Now.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture);
         string path = _files.Combine(AppContext.BaseDirectory, "Screenshots", $"{name}.png");
-        events.Publish(new ScreenshotRequested(path));
+        _events.Publish(new ScreenshotRequested(path));
     }
 
     /// <summary>
@@ -185,15 +179,11 @@ internal sealed class Cli
     /// </summary>
     private void Bake()
     {
-        if (Assets is not { } assets)
-        {
-            Log.Error("No project is running to bake.");
-
+        if (!IsProjectOpen("bake"))
             return;
-        }
 
         int domains = 0;
-        foreach (string path in assets.GetPathsUnder("Domains"))
+        foreach (string path in _assets.GetPathsUnder("Domains"))
         {
             if (!path.EndsWith(".domain", StringComparison.OrdinalIgnoreCase))
                 continue;
@@ -381,14 +371,10 @@ internal sealed class Cli
     /// </summary>
     private async Task OpenDomainAsync(string path)
     {
-        if (World is not { } world || Assets is not { } assets)
-        {
-            Log.Error($"No project is running to open {path} in.");
-
+        if (!IsProjectOpen($"open {path} in"))
             return;
-        }
 
-        Handle<Domain> domain = assets.Find<Domain>(path);
+        Handle<Domain> domain = _assets.Find<Domain>(path);
         if (domain == Handle<Domain>.None)
         {
             Log.Error($"There is no domain at {path}.");
@@ -399,7 +385,7 @@ internal sealed class Cli
         _isOpeningDomain = true;
         try
         {
-            Result<WorldContent> opened = await world
+            Result<WorldContent> opened = await _world
                 .OpenAsync(domain, DomainOpenMode.Replace, null, CancellationToken.None)
                 .ConfigureAwait(false);
             if (!opened.Ok)

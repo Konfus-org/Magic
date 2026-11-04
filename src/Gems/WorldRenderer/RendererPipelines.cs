@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
-using Magic.Assets;
-using Magic.Assets.Pipeline;
-using Magic.Assets.Types;
+using Magic.Files;
+using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Shaders;
 using Magic.Utils;
@@ -12,7 +11,7 @@ namespace WorldRenderer;
 /// The renderer's pipelines: its entries compiled together as the run starts, and each built for the GPU. A compute
 /// entry's group size is what its dispatches are sized by.
 /// </summary>
-internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shaders, AssetDatabase assets) : IDisposable
+internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shaders, Assets assets) : IDisposable
 {
     private const string Folder = "Shaders/WorldRenderer/";
     private const string StandardMaterial = "Shaders/Material/Standard.slang";

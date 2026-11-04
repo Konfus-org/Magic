@@ -3,7 +3,7 @@ namespace Magic.Input;
 /// <summary>
 /// Every input device the player uses, read one way. A device is a set of controls, and every control has a value and
 /// is down, pressed or released like a button, so a key, a trigger and a stick axis are read alike and an action can
-/// be bound to any of them by name. The provider updates it in its <see cref="Gems.IGem.Update"/>, before the gems
+/// be bound to any of them by name. The provider updates it in its <see cref="Plugins.IGem.Update"/>, before the gems
 /// that take it, as they are made after it; it stays fixed for the rest of the frame. The main thread's: read it in
 /// Update, FixedUpdate or LateUpdate, and copy what Render needs.
 /// </summary>

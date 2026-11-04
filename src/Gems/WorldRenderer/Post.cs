@@ -1,9 +1,9 @@
 using System.Collections.Immutable;
 using System.Runtime.InteropServices;
-using Magic.Assets;
-using Magic.Assets.Types;
 using Magic.Debugging;
 using Magic.Ecs.Components;
+using Magic.Files;
+using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Shaders;

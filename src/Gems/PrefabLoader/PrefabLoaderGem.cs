@@ -1,13 +1,13 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Text.Json;
-using Magic.Assets;
-using Magic.Assets.Pipeline;
-using Magic.Assets.Types;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Gems;
+using Magic.Files;
+using Magic.Files.Pipeline;
+using Magic.Files.Types;
+using Magic.Plugins;
 using Magic.Serialization;
 using Magic.Utils;
 
@@ -19,7 +19,7 @@ namespace PrefabLoader;
 /// reads one is what that one is made from, so it is read again when one of them changes. It is public because nothing in
 /// its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class PrefabLoaderGem(AssetDatabase assets, Assemblies code) : IGem, IAssetLoader<Prefab>
+public sealed class PrefabLoaderGem(Assets assets, Assemblies code) : IGem, IAssetLoader<Prefab>
 {
     /// <summary>
     /// The components files name that could not be read, each said once. Read on workers.

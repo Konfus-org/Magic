@@ -1,9 +1,9 @@
 using System.Collections.Immutable;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Magic.Assets.Pipeline;
-using Magic.Assets.Types;
-using Magic.Gems;
+using Magic.Files.Pipeline;
+using Magic.Files.Types;
+using Magic.Plugins;
 using Magic.Utils;
 using static AssimpModels.aiPostProcessSteps;
 using static AssimpModels.assimp;

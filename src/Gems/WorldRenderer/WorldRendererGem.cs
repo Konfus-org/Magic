@@ -2,18 +2,15 @@ using System.Collections.Immutable;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Magic;
-using Magic.Assets;
-using Magic.Assets.Pipeline;
-using Magic.Assets.Types;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Events;
 using Magic.Files;
-using Magic.Gems;
+using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Images;
-using Magic.Pipes;
+using Magic.Plugins;
 using Magic.Rendering;
 using Magic.Shaders;
 using Magic.Threading;
@@ -33,7 +30,7 @@ namespace WorldRenderer;
 public sealed class WorldRendererGem(
     IGraphicsApi gpu,
     IShaderCompiler shaders,
-    AssetDatabase assets,
+    Assets assets,
     IMeshPreprocessor meshes,
     IEcs ecs,
     IFileSystem files,

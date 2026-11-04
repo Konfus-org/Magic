@@ -1,9 +1,8 @@
 using Magic;
 using Magic.Debugging;
-using Magic.Gems;
 using Magic.Gpu;
-using Magic.Pipes;
 using Magic.Platform;
+using Magic.Plugins;
 using Magic.Threading;
 using Magic.Utils;
 using Vortice.Vulkan;

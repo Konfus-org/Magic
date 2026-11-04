@@ -3,12 +3,11 @@ using System.Buffers.Binary;
 using System.Collections.Immutable;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Magic.Assets;
-using Magic.Assets.Pipeline;
-using Magic.Assets.Types;
 using Magic.Caching;
 using Magic.Debugging;
-using Magic.Gems;
+using Magic.Files;
+using Magic.Files.Types;
+using Magic.Plugins;
 using Magic.Rendering;
 using Magic.Utils;
 
@@ -19,10 +18,7 @@ namespace MeshPreprocessor;
 /// version, so a model is clustered once per change to its file. It is public because nothing in its assembly makes
 /// it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class MeshPreprocessorGem(AssetDatabase assets, Caches caches)
-    : IGem,
-        IMeshPreprocessor,
-        ICache<MeshDerived>
+public sealed class MeshPreprocessorGem(Assets assets, Caches caches) : IGem, IMeshPreprocessor, ICache<MeshDerived>
 {
     private const int HeaderBytes = 52;
 

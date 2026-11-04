@@ -5,9 +5,7 @@ using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using Arch.Core;
 using Magic.Ecs;
-using Magic.Gems;
-using Magic.Pipelines;
-using Magic.Pipes;
+using Magic.Plugins;
 using Schedulers;
 using ArchEntity = Arch.Core.Entity;
 using ArchWorld = Arch.Core.World;
@@ -22,7 +20,7 @@ namespace ArchEcs;
 /// (a dead entity, a structural change during a loop, a call from another thread) and throws instead. It is public
 /// because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class ArchEcsGem : IGem, IEcs, IPipeline<EntitiesChangeList>, IDisposable
+public sealed class ArchEcsGem : IGem, IEcs, IDisposable
 {
     private const string CannotChangeInLoop =
         "An entity's components cannot change during a query's loop or a run: fill a list of your own and apply it "
@@ -127,19 +125,6 @@ public sealed class ArchEcsGem : IGem, IEcs, IPipeline<EntitiesChangeList>, IDis
         }
 
         return components;
-    }
-
-    /// <summary>
-    /// Makes what was pushed, for the gems after it.
-    /// </summary>
-    public ValueTask<EntitiesChangeList> RunAsync(EntitiesChangeList state, CancellationToken cancel)
-    {
-        if (_openLoops > 0)
-            throw new PipelineRefusedException(CannotChangeInLoop);
-
-        state.Apply(this);
-
-        return ValueTask.FromResult(state);
     }
 
     public void Create<T1>(ReadOnlySpan<T1> first, Span<Entity> created)

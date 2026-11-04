@@ -1,7 +1,6 @@
-using Magic.Assets;
-using Magic.Assets.Pipeline;
-using Magic.Assets.Types;
 using Magic.Debugging;
+using Magic.Files;
+using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Threading;
@@ -23,7 +22,7 @@ internal enum TextureState : byte
 /// The textures the materials name, each read once, made on the GPU with every level and the sampler its asset asks
 /// for, and copied up in the frame after it arrives. A texture stays resident for the run.
 /// </summary>
-internal sealed class TextureTable(IGraphicsApi gpu, AssetDatabase assets, Threads threads) : IDisposable
+internal sealed class TextureTable(IGraphicsApi gpu, Assets assets, Threads threads) : IDisposable
 {
     private readonly Dictionary<ulong, Entry> _entries = [];
     private readonly Dictionary<(TextureFilter, TextureWrap), GpuSampler> _samplers = [];

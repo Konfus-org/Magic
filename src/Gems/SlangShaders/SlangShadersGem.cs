@@ -4,11 +4,10 @@ using System.Collections.Immutable;
 using System.IO.Hashing;
 using System.Text;
 using System.Text.RegularExpressions;
-using Magic.Assets;
-using Magic.Assets.Pipeline;
-using Magic.Assets.Types;
 using Magic.Caching;
-using Magic.Gems;
+using Magic.Files;
+using Magic.Files.Types;
+using Magic.Plugins;
 using Magic.Shaders;
 using Magic.Utils;
 
@@ -25,7 +24,7 @@ public sealed partial class SlangShadersGem : IGem, IShaderCompiler, ICache<Comp
     private const string ShadersFolder = "Shaders";
     private const string Extension = ".slang";
 
-    private readonly AssetDatabase _assets;
+    private readonly Assets _assets;
     private readonly Caches _caches;
 
     /// <summary>
@@ -35,7 +34,7 @@ public sealed partial class SlangShadersGem : IGem, IShaderCompiler, ICache<Comp
 
     private readonly nint _globalSession;
 
-    public SlangShadersGem(AssetDatabase assets, Caches caches)
+    public SlangShadersGem(Assets assets, Caches caches)
     {
         _assets = assets;
         _caches = caches;

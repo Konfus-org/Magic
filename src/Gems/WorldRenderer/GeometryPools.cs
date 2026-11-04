@@ -1,9 +1,8 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Magic.Assets;
-using Magic.Assets.Pipeline;
-using Magic.Assets.Types;
 using Magic.Debugging;
+using Magic.Files;
+using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Threading;
@@ -20,7 +19,7 @@ namespace WorldRenderer;
 internal sealed class GeometryPools(
     IGraphicsApi gpu,
     IMeshPreprocessor meshes,
-    AssetDatabase assets,
+    Assets assets,
     Threads threads,
     DistanceField distanceField
 ) : IDisposable

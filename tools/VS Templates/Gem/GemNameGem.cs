@@ -1,14 +1,13 @@
 using Magic.Debugging;
-using Magic.Gems;
-using Magic.Pipes;
+using Magic.Plugins;
 
 namespace GemName;
 
 /// <summary>
 /// The gem: the one class in its assembly that implements <see cref="IGem"/>. Magic makes it after whatever its
-/// constructor takes and calls the hooks it implements every frame. Each <see cref="IPipeline{TState}"/> it implements
-/// is a data pipeline it joins, and every other interface is what it provides to the gems made after it. It is public
-/// because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
+/// constructor takes and calls the hooks it implements every frame. Every other interface is what it provides to the gems
+/// made after it. It is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the
+/// gem.
 /// </summary>
 public sealed class GemNameGem : IGem
 {

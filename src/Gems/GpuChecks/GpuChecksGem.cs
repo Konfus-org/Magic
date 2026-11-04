@@ -1,10 +1,8 @@
-using Magic.Assets;
-using Magic.Assets.Pipeline;
-using Magic.Assets.Types;
 using Magic.Debugging;
-using Magic.Gems;
+using Magic.Files;
+using Magic.Files.Types;
 using Magic.Gpu;
-using Magic.Pipes;
+using Magic.Plugins;
 using Magic.Shaders;
 using Magic.Threading;
 using Magic.Utils;
@@ -18,7 +16,7 @@ namespace GpuChecks;
 /// <see cref="Render"/>; the compile and the readback wait on workers. It is public because nothing in its assembly
 /// makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, AssetDatabase assets) : IGem, IDisposable
+public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, Assets assets) : IGem, IDisposable
 {
     private const int Size = 256;
     private const string ShaderPath = "Shaders/Checks/Gradient.slang";

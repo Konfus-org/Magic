@@ -1,6 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Magic.Assets.Types;
+using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Shaders;
