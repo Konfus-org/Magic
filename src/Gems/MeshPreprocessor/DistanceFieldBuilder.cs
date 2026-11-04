@@ -25,7 +25,11 @@ internal static class DistanceFieldBuilder
     /// </summary>
     public const int Band = 4;
 
-    private const int Padding = 2;
+    /// <summary>
+    /// Voxels the field reaches beyond the mesh's bounds on each side: the band, so a ray reads a true distance all
+    /// the way in.
+    /// </summary>
+    private const int Padding = Band;
 
     public static DistanceField Build(Model model)
     {

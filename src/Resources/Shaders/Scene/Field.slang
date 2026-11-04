@@ -14,8 +14,8 @@ public static const uint FieldBricks = FieldVoxels / FieldBrickVoxels;
 public static const uint FieldBricksPerLevel = FieldBricks * FieldBricks * FieldBricks;
 public static const uint FieldInstancesPerBrick = 64u;
 public static const float FieldBandVoxels = 4.0;
-public static const uint FieldAtlasVoxels = 256u;
-public static const uint FieldModelVoxels = 32u;
+public static const uint FieldAtlasVoxels = 384u;
+public static const uint FieldModelVoxels = 64u;
 public static const uint FieldBrickDirty = 1u;
 
 public struct FieldConstants

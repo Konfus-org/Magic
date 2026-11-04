@@ -310,10 +310,10 @@ there fall back to the distance field.
 Every world trace that is not a screen trace walks a signed distance field. Nothing leaks through it because it is the
 real geometry, not a grid of radiance.
 
-- **Mesh distance fields** come from the preprocessor: a narrow-band SDF per model, 32³ voxels across the bounds
+- **Mesh distance fields** come from the preprocessor: a narrow-band SDF per model, 64³ voxels across the bounds
   with a band of 4 voxels, the sign within the band from the nearest triangle's pseudo-normal and beyond it from ray
   parity, so open meshes still have an inside. Stored in the cache with the clusters.
-- **The global distance field** is 4 clipmaps of 128³ voxels around the camera (0.25 m to 2 m per voxel), each a
+- **The global distance field** is 4 clipmaps of 128³ voxels around the camera (12.5 cm to 1 m per voxel), each a
   `R8_SNORM` 3D texture of distance in band units, in bricks of 16³ voxels. A compute pass updates the bricks instances
   touched since last frame, taking the min over the mesh fields of the instances listed for each brick. A still world
   updates nothing; the camera moving scrolls the clipmaps and fills the new slab.

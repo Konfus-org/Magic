@@ -23,12 +23,12 @@ internal sealed class DistanceField(IGraphicsApi gpu) : IDisposable
     public const int Bricks = Voxels / BrickVoxels;
     public const int BricksPerLevel = Bricks * Bricks * Bricks;
     public const int InstancesPerBrick = 64;
-    public const int AtlasVoxels = 256;
+    public const int AtlasVoxels = 384;
     public const int ModelVoxels = MeshDerived.FieldSize;
     public const int SlotsPerRow = AtlasVoxels / ModelVoxels;
     public const int ModelSlots = SlotsPerRow * SlotsPerRow * SlotsPerRow;
     public const int MaxDirtyBricks = 4096;
-    public const float FinestVoxel = 0.25f;
+    public const float FinestVoxel = 0.125f;
 
     private const int CountsBytes = 64;
     private const int DirtyArgumentsBytes = 12;

@@ -17,7 +17,7 @@ public sealed class MeshDerived
     /// <summary>
     /// Voxels across <see cref="Field"/> on each axis.
     /// </summary>
-    public const int FieldSize = 32;
+    public const int FieldSize = 64;
 
     public required ImmutableArray<GpuVertex> Vertices { get; init; }
 
