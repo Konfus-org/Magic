@@ -19,7 +19,7 @@ public enum MaterialType : byte
 }
 
 /// <summary>
-/// What a <see cref="Material"/> looks like: a surface shader (Shaders/Core/Surface.slang), values for the parameters
+/// What a <see cref="Material"/> looks like: a material shader, a module implementing the shader library's material contract, values for the parameters
 /// its struct declares, and how it is blended:
 /// <c>{ "shader": { "id": 10001 }, "params": { "roughness": { "x": 0.8 } } }</c>. Its params, how it is blended and
 /// its sides may be set while it is drawn, on the main thread, and are drawn so from the next frame; what is set holds

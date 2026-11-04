@@ -1,9 +1,17 @@
 using System.CommandLine;
+using System.Globalization;
 using System.Linq;
+using Magic.Assets;
+using Magic.Assets.Pipeline;
+using Magic.Assets.Types;
 using Magic.Debugging;
+using Magic.Events;
 using Magic.Files;
+using Magic.Images;
 using Magic.Projects;
+using Magic.Threading;
 using Magic.Utils;
+using Magic.Worlds;
 
 namespace Magic.CommandLine;
 
@@ -21,14 +29,30 @@ internal sealed class Cli
 
     private readonly App _app;
     private readonly IFileSystem _files;
+    private readonly EventCoordinator _events;
     private readonly RootCommand _commands;
+    private int _waitFrames;
+    private bool _isWaitingForWorld;
+    private readonly Queue<string> _queued = new();
+    private bool _isOpeningDomain;
 
-    public Cli(App app, IFileSystem files)
+    public Cli(App app, IFileSystem files, EventCoordinator events)
     {
         _app = app;
         _files = files;
+        _events = events;
         _commands = CreateCommands();
     }
+
+    /// <summary>
+    /// The run's world, which <c>wait loaded</c> watches and <c>open</c> opens a domain in; none before a run.
+    /// </summary>
+    internal World? World { get; set; }
+
+    /// <summary>
+    /// The run's assets, which <c>open</c> finds a domain in; none before a run.
+    /// </summary>
+    internal AssetDatabase? Assets { get; set; }
 
     /// <summary>
     /// Executes the commands Magic was launched with, then the typed lines that ended earlier runs, or says why the
@@ -78,7 +102,22 @@ internal sealed class Cli
     /// </summary>
     public void Pump()
     {
-        if (!Terminal.Pump(out string? line))
+        if (_waitFrames > 0)
+        {
+            _waitFrames--;
+
+            return;
+        }
+
+        if (_isWaitingForWorld)
+        {
+            if (_isOpeningDomain || World is not { } world || world.IsLoading || world.Contents.IsEmpty)
+                return;
+
+            _isWaitingForWorld = false;
+        }
+
+        if (!_queued.TryDequeue(out string? line) && !Terminal.Pump(out line))
             return;
 
         Result ran = Execute(line);
@@ -100,6 +139,69 @@ internal sealed class Cli
     }
 
     /// <summary>
+    /// Publishes a setting, <c>Key=value</c>, for the gem its key names.
+    /// </summary>
+    private void Set(string setting)
+    {
+        int equals = setting.IndexOf('=', StringComparison.Ordinal);
+        if (equals <= 0)
+        {
+            Log.Error($"set takes Key=value, not '{setting}'.");
+
+            return;
+        }
+
+        _events.Publish(new SettingChanged(setting[..equals].Trim(), setting[(equals + 1)..].Trim()));
+    }
+
+    /// <summary>
+    /// Queues the lines that open every domain, wait for each to load and settle, and exit.
+    /// </summary>
+    private void Bake()
+    {
+        if (Assets is not { } assets)
+        {
+            Log.Error("No project is running to bake.");
+
+            return;
+        }
+
+        int domains = 0;
+        foreach (string path in assets.GetPathsUnder("Domains"))
+        {
+            if (!path.EndsWith(".domain", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            domains++;
+            _queued.Enqueue($"open {path}");
+            _queued.Enqueue("wait loaded");
+            _queued.Enqueue("wait 120");
+        }
+
+        Log.Info($"Baking {domains} domains.");
+        _queued.Enqueue("exit");
+    }
+
+    /// <summary>
+    /// Holds the lines after this one until <paramref name="until"/> frames have passed, or, for <c>loaded</c>, until
+    /// the world has content and is not loading.
+    /// </summary>
+    private void Wait(string until)
+    {
+        if (until == "loaded")
+        {
+            _isWaitingForWorld = true;
+
+            return;
+        }
+
+        if (int.TryParse(until, NumberStyles.Integer, CultureInfo.InvariantCulture, out int frames))
+            _waitFrames = Math.Max(frames, 0);
+        else
+            Log.Error($"wait takes a number of frames or loaded, not '{until}'.");
+    }
+
+    /// <summary>
     /// The commands: verbs that act on the app or do a job of their own, and options that set how it runs, given before
     /// or after the verb.
     /// </summary>
@@ -109,7 +211,10 @@ internal sealed class Cli
         {
             Subcommands =
             {
-                new Command("open", "Opens the project at the given path and runs it, ending the run of any other")
+                new Command(
+                    "open",
+                    "Opens the project at the given path and runs it, ending the run of any other; or, for a .domain, opens that domain in place of the world"
+                )
                 {
                     Arguments = { new Argument<string>("project") { Description = "The .magic file to run" } },
                     Action = new CliCommand(cmds => Open(cmds.GetRequiredValue<string>("project"))),
@@ -135,6 +240,35 @@ internal sealed class Cli
                         if (!created.Ok)
                             Log.Error($"Couldn't make {name} from {template}: {created.Error}");
                     }),
+                },
+                new Command("screenshot", "Saves what the next frame draws as a PNG under Screenshots/ beside Magic")
+                {
+                    Action = new CliCommand(cmds =>
+                    {
+                        string name = DateTime.Now.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture);
+                        string path = _files.Combine(AppContext.BaseDirectory, "Screenshots", $"{name}.png");
+                        _events.Publish(new ScreenshotRequested(path));
+                    }),
+                },
+                new Command("bake", "Opens every domain under Domains/ in turn, so their caches are made, then exits")
+                {
+                    Action = new CliCommand(cmds => Bake()),
+                },
+                new Command("set", "Sets a gem's setting for the run, as Key=value, which the gem the key names reads")
+                {
+                    Arguments =
+                    {
+                        new Argument<string>("setting") { Description = "The key and the value, as Key=value" },
+                    },
+                    Action = new CliCommand(cmds => Set(cmds.GetRequiredValue<string>("setting"))),
+                },
+                new Command("wait", "Holds the lines after it for a number of frames, or until the world has loaded")
+                {
+                    Arguments =
+                    {
+                        new Argument<string>("until") { Description = "How many frames pass first, or loaded" },
+                    },
+                    Action = new CliCommand(cmds => Wait(cmds.GetRequiredValue<string>("until"))),
                 },
                 new Command("exit", "Ends the run and exits")
                 {
@@ -189,6 +323,13 @@ internal sealed class Cli
     /// </summary>
     private void Open(string path)
     {
+        if (path.EndsWith(".domain", StringComparison.OrdinalIgnoreCase))
+        {
+            OpenDomainAsync(path).FireAndForget();
+
+            return;
+        }
+
         Result<Project> project = Project.Load(path, _files);
         if (!project.Ok)
         {
@@ -197,5 +338,40 @@ internal sealed class Cli
         }
 
         _app.Project = project.Value;
+    }
+
+    /// <summary>
+    /// Opens the domain at <paramref name="path"/> in place of the world, holding <c>wait loaded</c> meanwhile.
+    /// </summary>
+    private async Task OpenDomainAsync(string path)
+    {
+        if (World is not { } world || Assets is not { } assets)
+        {
+            Log.Error($"No project is running to open {path} in.");
+
+            return;
+        }
+
+        Handle<Domain> domain = assets.Find<Domain>(path);
+        if (domain == Handle<Domain>.None)
+        {
+            Log.Error($"There is no domain at {path}.");
+
+            return;
+        }
+
+        _isOpeningDomain = true;
+        try
+        {
+            Result<WorldContent> opened = await world
+                .OpenAsync(domain, DomainOpenMode.Replace, null, CancellationToken.None)
+                .ConfigureAwait(false);
+            if (!opened.Ok)
+                Log.Error($"{path} did not open: {opened.Error}");
+        }
+        finally
+        {
+            _isOpeningDomain = false;
+        }
     }
 }

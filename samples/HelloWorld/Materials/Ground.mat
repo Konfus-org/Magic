@@ -1,0 +1,9 @@
+{
+    "visuals": {
+        "shader": { "id": 10001 },
+        "params": {
+            "color": { "r": 0.28, "g": 0.3, "b": 0.16, "a": 1 },
+            "roughness": { "x": 0.9 }
+        }
+    }
+}
