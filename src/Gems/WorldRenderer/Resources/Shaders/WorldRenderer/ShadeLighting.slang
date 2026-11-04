@@ -249,7 +249,12 @@ void ShadeLighting<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThreadI
         }
         else if (lighting.debugView == 9u)
         {
-            color = float3(occlusion) / max(lighting.exposure, Epsilon);
+            color = float3(occlusion);
+        }
+        else if (lighting.debugView == 10u)
+        {
+            TextureRef velocityTexture = { frame.velocity };
+            color = float3(abs(velocityTexture.Load(thread.xy, 0u).xy) * 10.0, 0.0);
         }
         else
         {
@@ -257,9 +262,9 @@ void ShadeLighting<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThreadI
         }
     }
 
-    // The shadow views are shown as they are, with no air before them.
-    bool isShadowView = lighting.debugView == 6u || lighting.debugView == 7u;
-    if (lighting.fog.isPresent != 0u && !isShadowView)
+    // The views of a factor rather than a light are shown as they are, with no air before them.
+    bool isFactorView = lighting.debugView == 6u || lighting.debugView == 7u || lighting.debugView >= 9u;
+    if (lighting.fog.isPresent != 0u && !isFactorView)
     {
         VolumeRef integrated = { lighting.fogIntegrated };
         SamplerRef sampler = { lighting.fogSampler };

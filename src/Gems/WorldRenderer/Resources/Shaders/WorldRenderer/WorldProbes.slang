@@ -1,5 +1,6 @@
-// The world probes kept up to date: each frame the probes whose cells moved with the windows are marked new, a
-// budget of probes is picked, the new ones and a share of the rest in turn, and each picked probe traces its rays
+// The world probes kept up to date: each frame the probes whose cells moved with the windows, and those an
+// instance changed under, are marked new, a budget of probes is picked, the new ones and a share of the rest in
+// turn, and each picked probe traces its rays
 // through the tracer the entry is specialised to, shades what they land on from the surface cache and what they
 // miss from the sky, folds them into its spheres of radiance and distance, and convolves its irradiance. The pass header's x is the frame's
 // constants, y the shadow constants, z the lighting constants and w the field constants.
@@ -15,14 +16,15 @@ import Scene.Field;
 import Scene.Probes;
 import Scene.SurfaceCache;
 import Scene.Translucency;
+import Shadow.Virtual;
 import Sky.ISky;
 import Trace.IWorldTracer;
 import Trace.DistanceField;
 
 // Frames between a probe's updates when nothing marks it new.
 static const uint ProbePeriod = 128u;
-// What a probe keeps of what it held when it updates.
-static const float ProbeHysteresis = 0.9;
+// What a probe keeps of what it held when it updates: it updates seldom, so not much.
+static const float ProbeHysteresis = 0.6;
 
 // Each cell whose window moved on takes the probe now at it and is marked new; the list of probes to update is
 // emptied.
@@ -57,18 +59,38 @@ void WorldProbeScroll(uint3 thread : SV_DispatchThreadID)
     states[cell] = state;
 }
 
-// Each new probe, and each probe whose turn it is, joins the list up to the budget.
+// Each new probe, each probe an instance changed under this frame, which starts afresh, and each probe whose turn
+// it is, joins the list up to the budget.
 [shader("compute")]
 [numthreads(64, 1, 1)]
 void WorldProbeSelect(uint3 thread : SV_DispatchThreadID)
 {
     LightingConstants lighting = GetLighting();
     GiConstants gi = LoadConstants<GiConstants>(lighting.gi);
+    FieldConstants field = GetFieldConstants();
     uint cell = thread.x;
     if (cell >= ProbeLevels * ProbesPerLevel)
         return;
 
-    ProbeState state = LoadProbeState(gi, cell);
+    ArrayRef<ProbeState> states = { gi.probeStates };
+    ProbeState state = states[cell];
+    uint level = cell / ProbesPerLevel;
+    float3 position = GetProbePosition(gi, level, state.world);
+    float reach = gi.probeSpacings[level];
+    ArrayRef<DirtyInstance> dirty = { field.dirtyInstances };
+    for (uint i = 0u; i < field.dirtyInstanceCount; i++)
+    {
+        DirtyInstance instance = dirty[i];
+        bool wasUnder = instance.oldRadius > 0.0 && distance(position, instance.oldCenter) < instance.oldRadius + reach;
+        bool isUnder = instance.newRadius > 0.0 && distance(position, instance.newCenter) < instance.newRadius + reach;
+        if (wasUnder || isUnder)
+        {
+            state.flags = ProbeFlagNew;
+            states[cell] = state;
+            break;
+        }
+    }
+
     bool isNew = (state.flags & ProbeFlagNew) != 0u;
     bool isDue = ((cell * 7u) + gi.frameIndex) % ProbePeriod == 0u;
     if (!isNew && !isDue)

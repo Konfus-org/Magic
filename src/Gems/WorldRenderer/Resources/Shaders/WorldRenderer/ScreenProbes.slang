@@ -47,31 +47,33 @@ void ScreenProbePlace(uint3 thread : SV_DispatchThreadID)
     probe.viewDepth = 0.0;
     probe.normal = float3(0.0, 1.0, 0.0);
     probe.flags = 0u;
+    probe.previousUv = float2(0.0);
+    probe.padding = float2(0.0);
     UintTextureRef visibility = { frame.visibility };
     if (visibility.Load(pixel, 0u) != 0u)
     {
         TextureRef depthTexture = { frame.depth };
         TextureRef normalTexture = { frame.gbufferNormal };
+        TextureRef velocityTexture = { frame.velocity };
         float depth = depthTexture.Load(pixel, 0u).x;
-        probe.position = ReconstructWorld(frame, GetTexelCenterUv(pixel, size), depth);
+        float2 uv = GetTexelCenterUv(pixel, size);
+        probe.position = ReconstructWorld(frame, uv, depth);
         probe.viewDepth = ToViewDepth(depth, frame.near);
         probe.normal = DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0);
         probe.flags = ScreenProbeFlagValid;
+        probe.previousUv = uv + velocityTexture.Load(pixel, 0u).xy;
     }
 
     ArrayRef<ScreenProbe> probes = { gi.screenProbes };
     probes[GetScreenProbeIndex(gi, tile)] = probe;
 }
 
-// Where last frame's probe at the same surface as a probe sits in the previous atlas; false when there is none.
+// Where last frame's probe at the same surface as a probe sits in the previous atlas, by where the probe's surface
+// was on last frame's screen; false when there is none.
 bool FindPreviousTile(FrameConstants frame, GiConstants gi, ScreenProbe probe, out uint2 previousTile)
 {
     previousTile = uint2(0u);
-    float4 previousClip = mul(float4(probe.position - frame.previousCameraPosition.xyz, 1.0), frame.previousViewProjection);
-    if (previousClip.w <= frame.near)
-        return false;
-
-    float2 previousUv = float2(previousClip.x / previousClip.w * 0.5 + 0.5, 0.5 - previousClip.y / previousClip.w * 0.5);
+    float2 previousUv = probe.previousUv;
     if (any(previousUv < 0.0) || any(previousUv >= 1.0))
         return false;
 
@@ -199,19 +201,11 @@ void ScreenProbeTemporal(uint3 thread : SV_DispatchThreadID)
     if ((probe.flags & ScreenProbeFlagValid) == 0u)
         return;
 
-    float4 previousClip = mul(float4(probe.position - frame.previousCameraPosition.xyz, 1.0), frame.previousViewProjection);
-    if (previousClip.w <= frame.near)
+    uint2 previousTile;
+    if (!FindPreviousTile(frame, gi, probe, previousTile))
         return;
 
-    float2 previousUv = float2(previousClip.x / previousClip.w * 0.5 + 0.5, 0.5 - previousClip.y / previousClip.w * 0.5);
-    if (any(previousUv < 0.0) || any(previousUv >= 1.0))
-        return;
-
-    uint2 previousTile = min(uint2(previousUv * float2(frame.width, frame.height)) / ScreenProbeTile, uint2(gi.screenProbesX, gi.screenProbesY) - 1u);
     ScreenProbe previous = LoadScreenProbe(gi.screenProbesPrevious, GetScreenProbeIndex(gi, previousTile));
-    if ((previous.flags & ScreenProbeFlagValid) == 0u)
-        return;
-
     float weight = GetProbePlaneWeight(probe.position, probe.normal, probe.viewDepth, previous.position, previous.normal) * HistoryWeight;
     if (weight <= 0.0)
         return;

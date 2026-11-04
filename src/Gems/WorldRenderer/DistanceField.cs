@@ -384,6 +384,15 @@ internal sealed class DistanceField(IGraphicsApi gpu) : IDisposable
         }
     }
 
+    /// <summary>
+    /// Says a pass reads the instances that changed this frame: what redoes its own tables under them.
+    /// </summary>
+    public void UseForChanges(RenderGraph graph)
+    {
+        graph.Use(Constants, GpuAccess.ShaderRead);
+        graph.Use(_dirtyInstances, GpuAccess.ShaderRead);
+    }
+
     private static uint Groups(int count) => (uint)((count + Threads - 1) / Threads);
 
     /// <summary>

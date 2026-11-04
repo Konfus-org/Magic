@@ -237,7 +237,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
             Result<GpuBuffer> probes = gpu.CreateBuffer(
                 new BufferDescription
                 {
-                    Bytes = (long)count * 32,
+                    Bytes = (long)count * 48,
                     Usage = BufferUsages.Storage,
                     Name = $"Screen probes {i}",
                 }
@@ -491,8 +491,9 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         graph.BeginComputePass("GI: select probes");
         graph.Use(Constants, GpuAccess.ShaderRead);
         graph.Use(lighting.Constants, GpuAccess.ShaderRead);
-        graph.Use(_probeStates, GpuAccess.ShaderRead);
+        graph.Use(_probeStates, GpuAccess.ShaderWrite);
         graph.Use(_probeList, GpuAccess.ShaderWrite);
+        field.UseForChanges(graph);
         graph.Recorder.BindPipeline(pipelines.WorldProbeSelect);
         graph.Recorder.PushConstants(header);
         graph.Recorder.Dispatch(Groups(cells));
@@ -525,6 +526,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         graph.Use(targets.Visibility, GpuAccess.ShaderRead);
         graph.Use(targets.Depth, GpuAccess.ShaderRead);
         graph.Use(targets.GBufferNormal, GpuAccess.ShaderRead);
+        graph.Use(targets.Velocity, GpuAccess.ShaderRead);
         graph.Use(_screenProbes[_current], GpuAccess.ShaderWrite);
         graph.Recorder.BindPipeline(pipelines.ScreenProbePlace);
         graph.Recorder.PushConstants(header);
@@ -650,6 +652,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         graph.Use(targets.Depth, GpuAccess.ShaderRead);
         graph.Use(targets.GBufferNormal, GpuAccess.ShaderRead);
         graph.Use(targets.GBufferSurface, GpuAccess.ShaderRead);
+        graph.Use(targets.Velocity, GpuAccess.ShaderRead);
         graph.Use(_reflectionResolved, GpuAccess.ShaderRead);
         graph.Use(_reflections[1 - _current], GpuAccess.ShaderRead);
         graph.Use(_reflections[_current], GpuAccess.ShaderWrite);

@@ -174,7 +174,8 @@ void ReflectionResolve(uint3 thread : SV_DispatchThreadID)
     resolved.Store(thread.xy, weightSum > 1e-4 ? sum / weightSum : float4(0.0));
 }
 
-// Each pixel's reflection blended with last frame's at the same surface, held within what its neighbours see now.
+// Each pixel's reflection blended with last frame's at the same surface, found by the surface's velocity, held
+// within what its neighbours see now.
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void ReflectionTemporal(uint3 thread : SV_DispatchThreadID)
@@ -201,32 +202,30 @@ void ReflectionTemporal(uint3 thread : SV_DispatchThreadID)
     float4 current = resolved.Load(thread.xy, 0u);
     float viewDepth = ToViewDepth(depth, frame.near);
     float3 result = current.rgb;
-    float4 previousClip = mul(float4(world - frame.previousCameraPosition.xyz, 1.0), frame.previousViewProjection);
-    if (previousClip.w > frame.near)
+    TextureRef velocityTexture = { frame.velocity };
+    float3 velocity = velocityTexture.Load(thread.xy, 0u).xyz;
+    float2 previousUv = GetTexelCenterUv(thread.xy, size) + velocity.xy;
+    if (all(previousUv >= 0.0) && all(previousUv < 1.0))
     {
-        float2 previousUv = float2(previousClip.x / previousClip.w * 0.5 + 0.5, 0.5 - previousClip.y / previousClip.w * 0.5);
-        if (all(previousUv >= 0.0) && all(previousUv < 1.0))
+        TextureRef history = { gi.reflectionsPrevious };
+        SamplerRef sampler = { frame.cardSampler };
+        float4 held = history.SampleLevel(sampler, previousUv, 0.0);
+        if (held.w > 0.0 && abs(held.w - velocity.z) < 0.05 * velocity.z)
         {
-            TextureRef history = { gi.reflectionsPrevious };
-            SamplerRef sampler = { frame.cardSampler };
-            float4 held = history.SampleLevel(sampler, previousUv, 0.0);
-            if (held.w > 0.0 && abs(held.w - previousClip.w) < 0.05 * previousClip.w)
+            float3 low = current.rgb;
+            float3 high = current.rgb;
+            for (int y = -1; y <= 1; y++)
             {
-                float3 low = current.rgb;
-                float3 high = current.rgb;
-                for (int y = -1; y <= 1; y++)
+                for (int x = -1; x <= 1; x++)
                 {
-                    for (int x = -1; x <= 1; x++)
-                    {
-                        uint2 texel = uint2(clamp(int2(thread.xy) + int2(x, y), int2(0), int2(size) - 1));
-                        float3 near = resolved.Load(texel, 0u).rgb;
-                        low = min(low, near);
-                        high = max(high, near);
-                    }
+                    uint2 texel = uint2(clamp(int2(thread.xy) + int2(x, y), int2(0), int2(size) - 1));
+                    float3 near = resolved.Load(texel, 0u).rgb;
+                    low = min(low, near);
+                    high = max(high, near);
                 }
-
-                result = lerp(current.rgb, clamp(held.rgb, low, high), HistoryWeight);
             }
+
+            result = lerp(current.rgb, clamp(held.rgb, low, high), HistoryWeight);
         }
     }
 

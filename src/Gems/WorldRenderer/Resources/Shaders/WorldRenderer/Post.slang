@@ -61,7 +61,8 @@ void PostCompose(uint3 thread : SV_DispatchThreadID)
 // --- Resolve ---
 
 // Each output pixel: the picture at its jittered place, blended with what last frame resolved at the same surface,
-// held within what its neighbours hold now; the resolved view depth kept beside it for next frame's test.
+// found by the surface's velocity, held within what its neighbours hold now; the resolved view depth kept beside it
+// for next frame's test.
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void PostResolve(uint3 thread : SV_DispatchThreadID)
@@ -95,23 +96,20 @@ void PostResolve(uint3 thread : SV_DispatchThreadID)
     }
 
     TextureRef depthTexture = { frame.depth };
+    TextureRef velocityTexture = { frame.velocity };
     float depth = depthTexture.Load(uint2(centre), 0u).x;
-    float3 relative = ReconstructRelative(frame, jittered, depth > 0.0 ? depth : 1e-6);
-    float viewDepth = mul(float4(relative, 1.0), frame.view).z;
+    float viewDepth = ToViewDepth(depth > 0.0 ? depth : 1e-6, frame.near);
+    float3 velocity = velocityTexture.Load(uint2(centre), 0u).xyz;
     float3 result = current;
-    float4 previousClip = mul(float4(relative + frame.cameraPosition.xyz - frame.previousCameraPosition.xyz, 1.0), frame.previousViewProjection);
-    if (previousClip.w > frame.near)
+    float2 previousUv = uv + velocity.xy;
+    if (all(previousUv >= 0.0) && all(previousUv < 1.0))
     {
-        float2 previousUv = float2(previousClip.x / previousClip.w * 0.5 + 0.5, 0.5 - previousClip.y / previousClip.w * 0.5);
-        if (all(previousUv >= 0.0) && all(previousUv < 1.0))
-        {
-            TextureRef history = { post.historyPrevious };
-            float4 held = history.SampleLevel(sampler, previousUv, 0.0);
-            bool isSky = depth <= 0.0;
-            bool isSame = isSky ? held.w <= 0.0 : (held.w > 0.0 && abs(held.w - previousClip.w) < 0.05 * previousClip.w);
-            if (isSame)
-                result = lerp(current, clamp(held.rgb, low, high), HistoryWeight);
-        }
+        TextureRef history = { post.historyPrevious };
+        float4 held = history.SampleLevel(sampler, previousUv, 0.0);
+        bool isSky = depth <= 0.0;
+        bool isSame = isSky ? held.w <= 0.0 : (held.w > 0.0 && abs(held.w - velocity.z) < 0.05 * velocity.z);
+        if (isSame)
+            result = lerp(current, clamp(held.rgb, low, high), HistoryWeight);
     }
 
     StorageRef output = { post.history, 0u };
@@ -302,9 +300,9 @@ void PostFinal<E0 : IPixelEffect, E1 : IPixelEffect, E2 : IPixelEffect, E3 : IPi
     float exposure = state.Load<float>(0u);
     float2 uv = GetTexelCenterUv(thread.xy, size);
     float3 color = history.Load(thread.xy, 0u).rgb;
-    // The shadow views are shown as they are: no bloom, exposure, effect or tonemap.
-    bool isShadowView = lighting.debugView == 6u || lighting.debugView == 7u;
-    if (!isShadowView)
+    // The views of a factor rather than a light are shown as they are: no bloom, exposure, effect or tonemap.
+    bool isFactorView = lighting.debugView == 6u || lighting.debugView == 7u || lighting.debugView >= 9u;
+    if (!isFactorView)
     {
         color += bloom.SampleLevel(sampler, uv, 0.0).rgb * post.bloomStrength;
         color = max(color * exposure, 0.0);

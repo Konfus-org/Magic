@@ -44,6 +44,8 @@ model reader, the mesh preprocessor and the texture reader.
   around them on their plane, darkened by the short-range occlusion the depth around them shows. A room with no
   window stays dark. `set WorldRenderer.debug=indirect` shows that light alone, `set WorldRenderer.debug=probes` what
   the world probes hold at every surface and `set WorldRenderer.debug=occlusion` the occlusion.
+- Every pixel's surface carries where it was on last frame's screen, from where its instance and the camera were,
+  and everything that blends with last frame reads it there; `set WorldRenderer.debug=velocity` shows the move.
 - A smooth surface mirrors the world: a ray a pixel at half the output, drawn from the surface's lobe, traces the
   screen, then the field, then the world probes, so a floor shows the wall behind the camera; the rays are gathered
   over a reach the roughness sets and blended with last frame's, held within what the neighbours see.

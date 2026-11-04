@@ -131,7 +131,7 @@ internal record struct FrameConstants
 
     public uint CardDepth;
 
-    public uint Padding1;
+    public uint Velocity;
 
     public uint Padding2;
 

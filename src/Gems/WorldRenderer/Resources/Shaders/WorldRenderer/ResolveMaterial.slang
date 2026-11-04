@@ -1,6 +1,8 @@
 // Every pixel of the visibility buffer to a surface: the id names the triangle, its three vertices give the pixel its
 // barycentrics and their derivatives, the attributes interpolate from them, and the material decides the surface,
-// written to the GBuffer: the one the entry is specialised to, or the failure material for a row of that kind.
+// written to the GBuffer: the one the entry is specialised to, or the failure material for a row of that kind. The
+// pixel's velocity is written beside it: where the surface was on last frame's screen, from where its instance was
+// and where the camera was; a pixel of sky moves with the camera alone.
 module "WorldRenderer/ResolveMaterial";
 
 import Core.Heap;
@@ -29,8 +31,16 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
     UintTextureRef visibility = { frame.visibility };
     uint visibleIndex;
     uint triangle;
+    float2 unjittered = GetTexelCenterUv(thread.xy, size) - frame.jitter.xy / float2(size);
+    StorageRef velocityTarget = { frame.velocity, 0u };
     if (!DecodeVisibilityId(visibility.Load(thread.xy, 0u), visibleIndex, triangle))
+    {
+        float3 far = ReconstructRelative(frame, unjittered, 1e-6);
+        float4 previousClip = mul(float4(far, 1.0), frame.previousViewProjection);
+        float2 previousUv = ToUv(previousClip.xy / max(previousClip.w, Epsilon));
+        velocityTarget.Store(thread.xy, float4(previousUv - unjittered, 0.0, 0.0));
         return;
+    }
 
     ArrayRef<VisibleCluster> visible = { frame.visibleClusters };
     VisibleCluster entry = visible[visibleIndex];
@@ -65,6 +75,12 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
     inputs.material = LoadMaterial(frame.materials, GetMaterial(instance, cluster.materialSlot));
     inputs.sampler = inputs.material.baseColorSampler != 0u ? inputs.material.baseColorSampler : frame.defaultSampler;
     SurfaceOutputs surface = inputs.material.kind == MaterialKindFailure ? Failure.Evaluate(inputs) : M.Evaluate(inputs);
+
+    float3 model = Interpolate(v0.position, v1.position, v2.position, bary.lambda);
+    float3 previous = ToWorld(instance.previousWorld, model) - frame.previousCameraPosition.xyz;
+    float4 previousClip = mul(float4(previous, 1.0), frame.previousViewProjection);
+    float2 previousUv = ToUv(previousClip.xy / max(previousClip.w, Epsilon));
+    velocityTarget.Store(thread.xy, float4(previousUv - unjittered, previousClip.w, 0.0));
 
     StorageRef normalTarget = { frame.gbufferNormal, 0u };
     StorageRef baseTarget = { frame.gbufferBase, 0u };

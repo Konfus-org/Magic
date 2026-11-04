@@ -121,6 +121,12 @@ internal enum DebugView : uint
     /// The short-range occlusion at every surface: white where the hemisphere above it is open.
     /// </summary>
     Occlusion,
+
+    /// <summary>
+    /// Where every pixel's surface was on last frame's screen: its move since, red across and green down, a tenth
+    /// of the screen at full.
+    /// </summary>
+    Velocity,
 }
 
 /// <summary>

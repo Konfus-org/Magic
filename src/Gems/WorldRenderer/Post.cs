@@ -255,6 +255,7 @@ internal sealed class Post(IGraphicsApi gpu) : IDisposable
         graph.Use(Constants, GpuAccess.ShaderRead);
         graph.Use(targets.Picture, GpuAccess.ShaderRead);
         graph.Use(targets.Depth, GpuAccess.ShaderRead);
+        graph.Use(targets.Velocity, GpuAccess.ShaderRead);
         graph.Use(_history[1 - _current], GpuAccess.ShaderRead);
         graph.Use(_history[_current], GpuAccess.ShaderWrite);
         graph.Recorder.BindPipeline(pipelines.PostResolve);

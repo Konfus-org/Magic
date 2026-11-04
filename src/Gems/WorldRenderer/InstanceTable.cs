@@ -82,11 +82,14 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
     public void Begin(uint frame) => _frame = frame;
 
     /// <summary>
-    /// The entity's row this frame, uploaded when it differs from the last.
+    /// The entity's row this frame, uploaded when it differs from the last; its previous world is what its row held
+    /// last frame, so a thing that moved carries where it was.
     /// </summary>
-    public void Set(Entity entity, in GpuInstance row, in InstanceExtra extra = default)
+    public void Set(Entity entity, in GpuInstance given, in InstanceExtra extra = default)
     {
-        if (!_slotOf.TryGetValue(entity, out int slot))
+        GpuInstance row = given;
+        bool isNew = !_slotOf.TryGetValue(entity, out int slot);
+        if (isNew)
         {
             if (!TryAllocate(out slot))
             {
@@ -103,6 +106,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
             _isUsed[slot] = true;
         }
 
+        row.PreviousWorld = isNew ? row.World : _rows[slot].World;
         _seen[slot] = _frame;
         _extras[slot] = extra;
         if (_rows[slot] == row)

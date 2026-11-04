@@ -112,13 +112,16 @@ public struct ProbeState
     public uint flags;
 }
 
-// A screen probe: where it sits, its surface's normal and its ScreenProbeFlag bits.
+// A screen probe: where it sits, its surface's normal, its ScreenProbeFlag bits, and where its surface was on last
+// frame's screen, in texture coordinates.
 public struct ScreenProbe
 {
     public float3 position;
     public float viewDepth;
     public float3 normal;
     public uint flags;
+    public float2 previousUv;
+    public float2 padding;
 }
 
 // --- Lit cards ---

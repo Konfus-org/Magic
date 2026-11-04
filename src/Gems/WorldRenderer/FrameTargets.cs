@@ -29,6 +29,12 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
 
     public GpuTexture GBufferSurface { get; private set; }
 
+    /// <summary>
+    /// Where each pixel's surface was on last frame's screen, as the move from its place now in texture
+    /// coordinates, and its view depth then.
+    /// </summary>
+    public GpuTexture Velocity { get; private set; }
+
     public GpuTexture Hdr { get; private set; }
 
     /// <summary>
@@ -103,6 +109,11 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
             GpuFormat.R8G8B8A8Unorm,
             TextureUsages.Storage | TextureUsages.Sampled
         );
+        Result<GpuTexture> velocity = Make(
+            "Velocity",
+            GpuFormat.R16G16B16A16Sfloat,
+            TextureUsages.Storage | TextureUsages.Sampled
+        );
         Result<GpuTexture> hdr = Make(
             "HDR",
             GpuFormat.R16G16B16A16Sfloat,
@@ -160,7 +171,9 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
                     normal,
                     baseColor,
                     surface,
+                    velocity,
                     hdr,
+                    picture,
                     moments,
                     opticalDepth,
                     accumulation,
@@ -182,6 +195,7 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
         GBufferNormal = normal.Value;
         GBufferBase = baseColor.Value;
         GBufferSurface = surface.Value;
+        Velocity = velocity.Value;
         Hdr = hdr.Value;
         Picture = picture.Value;
         Moments = moments.Value;
@@ -218,6 +232,7 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
                     GBufferNormal,
                     GBufferBase,
                     GBufferSurface,
+                    Velocity,
                     Hdr,
                     Picture,
                     Moments,
@@ -247,7 +262,13 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
         GBufferNormal = GpuTexture.None;
         GBufferBase = GpuTexture.None;
         GBufferSurface = GpuTexture.None;
+        Velocity = GpuTexture.None;
         Hdr = GpuTexture.None;
+        Picture = GpuTexture.None;
+        Moments = GpuTexture.None;
+        OpticalDepth = GpuTexture.None;
+        Accumulation = GpuTexture.None;
+        Offsets = GpuTexture.None;
         Output = GpuTexture.None;
         Readback = GpuBuffer.None;
         Width = 0;

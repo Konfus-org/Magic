@@ -786,7 +786,6 @@ public sealed class WorldRendererGem(
                 {
                     World = world,
                     InverseWorld = inverseWorld,
-                    PreviousWorld = world,
                     BoundsCenter = worldCenter,
                     BoundsRadius = worldRadius,
                     ClusterOffset = resident.ClusterOffset,
@@ -904,6 +903,7 @@ public sealed class WorldRendererGem(
             GBufferNormal = targets.GBufferNormal.Id,
             GBufferBase = targets.GBufferBase.Id,
             GBufferSurface = targets.GBufferSurface.Id,
+            Velocity = targets.Velocity.Id,
             Output = targets.Output.Id,
             Cards = _cards.Buffer.Id,
             CardSampler = _cardSampler.Id,
@@ -1129,6 +1129,7 @@ public sealed class WorldRendererGem(
         _graph.Use(view.Targets.GBufferNormal, GpuAccess.ShaderWrite);
         _graph.Use(view.Targets.GBufferBase, GpuAccess.ShaderWrite);
         _graph.Use(view.Targets.GBufferSurface, GpuAccess.ShaderWrite);
+        _graph.Use(view.Targets.Velocity, GpuAccess.ShaderWrite);
         _graph.Recorder.BindPipeline(_pipelines.ResolveStandard);
         _graph.Recorder.PushConstants(new GpuConstants(view.Constants.Id));
         _graph.Recorder.Dispatch(Groups(view.Targets.Width), Groups(view.Targets.Height));

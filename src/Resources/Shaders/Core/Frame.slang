@@ -90,7 +90,9 @@ public struct FrameConstants
     public uint cardAlbedo;
     public uint cardNormal;
     public uint cardDepth;
-    public uint padding1;
+    // Where each pixel's surface was on last frame's screen: the move to there from its place now, in texture
+    // coordinates, in xy, and its view depth then in z.
+    public uint velocity;
     public uint padding2;
     public uint padding3;
 }
