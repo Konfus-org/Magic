@@ -161,6 +161,11 @@ internal sealed record AssetSnapshot
     public ImmutableDictionary<Type, object> Loaders { get; init; } = [];
 
     /// <summary>
+    /// The gem that writes each asset type.
+    /// </summary>
+    public ImmutableDictionary<Type, object> Writers { get; init; } = [];
+
+    /// <summary>
     /// The defaults and failures found missing, each said once.
     /// </summary>
     public ImmutableHashSet<string> ReportedMissing { get; init; } =

@@ -24,20 +24,13 @@ namespace SdlPlatform;
 /// gamepads into <see cref="IInput"/>'s controls and typed text. Headless, it opens no window, keeps the clipboard's text
 /// to itself and reads gamepads only: keyboards and mice need a window to type and point into.
 /// <para>
-/// SDL's windows and events belong to the process's main thread, which everything here runs on:
-/// <see cref="ServicePump"/> turns SDL's events into changes as they come, and <see cref="BeginUpdate"/> applies them, so
-/// input stays fixed for the rest of a frame. It is public because nothing in its assembly makes it: Magic does, by
-/// reflection, when a project lists the gem.
+/// SDL's windows and events belong to the process's main thread, which everything here runs on: <see cref="Update"/>
+/// turns SDL's events into changes and applies them, before any gem that takes the input runs, as they are made after
+/// this one, so input stays fixed for the rest of a frame. It is public because nothing in its assembly makes it: Magic
+/// does, by reflection, when a project lists the gem.
 /// </para>
 /// </summary>
-public sealed class SdlPlatformGem
-    : IGem,
-        IWindow,
-        IClipboard,
-        IInput,
-        IPipeline<ServicePump>,
-        IPipeline<BeginUpdate>,
-        IDisposable
+public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposable
 {
     private const int InitialWidth = 1280;
     private const int InitialHeight = 720;
@@ -309,14 +302,99 @@ public sealed class SdlPlatformGem
     }
 
     /// <summary>
-    /// Turns SDL's events into changes for the next frame, so the window answers the OS while no frames run too.
+    /// Makes input this frame's: what happened last frame is over, SDL's events since are turned into changes and
+    /// applied, and sticks and triggers are read as they stand now, rather than added up from events.
+    /// </summary>
+    public unsafe void Update(in Frame frame)
+    {
+        for (int i = 0; i < _devices.Count; i++)
+        {
+            StartFrame(_devices[i].Kind, _controls[i]);
+        }
+
+        PollEvents();
+        _typed.Clear();
+        foreach (Change change in _changes)
+        {
+            Apply(change);
+        }
+
+        _changes.Clear();
+        _text = _typed.Length == 0 ? string.Empty : _typed.ToString();
+        foreach ((uint id, nint gamepad) in _gamepads)
+        {
+            ReadAxes(id, (SDL_Gamepad*)gamepad);
+        }
+    }
+
+    /// <summary>
+    /// What happened last frame is over: pressed and released clear, and a mouse's motion and wheel go back to 0.
+    /// </summary>
+    private static void StartFrame(DeviceKind kind, ControlState[] states)
+    {
+        for (int i = 0; i < states.Length; i++)
+        {
+            states[i] = states[i] with { WasPressed = false, WasReleased = false };
+        }
+
+        if (kind != DeviceKind.Mouse)
+            return;
+
+        states[Control.MouseMotionX.Index] = default;
+        states[Control.MouseMotionY.Index] = default;
+        states[Control.MouseWheelX.Index] = default;
+        states[Control.MouseWheelY.Index] = default;
+    }
+
+    /// <summary>
+    /// Gives a control a new value, and with it whether it went down or came up. Pressed and released only ever turn on
+    /// within a frame, so a tap between two frames shows as both.
+    /// </summary>
+    private static void SetState(ControlState[] states, Control control, float value)
+    {
+        ref ControlState state = ref states[control.Index];
+        bool isDown = MathF.Abs(value) >= 0.5f;
+        state = new ControlState(
+            value,
+            isDown,
+            state.WasPressed || (isDown && !state.IsDown),
+            state.WasReleased || (!isDown && state.IsDown)
+        );
+    }
+
+    /// <summary>
+    /// The clipboard's text, which SDL hands out as a copy that is freed once read.
+    /// </summary>
+    private static unsafe string ReadClipboard()
+    {
+        byte* text = SDL_GetClipboardText();
+        string value = CString.Read(text);
+        SDL_free(text);
+
+        return value;
+    }
+
+    /// <summary>
+    /// An SDL axis, -32768 to 32767, as -1 to 1: 0 inside the dead zone, and past it growing from 0 to 1 at full
+    /// deflection, so the zone's edge is no step. Triggers only reach the positive half.
+    /// </summary>
+    private static float ToStick(short value)
+    {
+        float raw = Math.Max(value / 32767f, -1f);
+        float past = MathF.Abs(raw) - StickDeadZone;
+
+        return past <= 0 ? 0 : MathF.CopySign(past / (1 - StickDeadZone), raw);
+    }
+
+    /// <summary>
+    /// Turns SDL's events since the last frame into changes, in the order they happened.
     /// </summary>
     [SuppressMessage(
         "Style",
         "IDE0010:Add missing cases",
         Justification = "SDL has far more events than the gem reads; the rest are ignored on purpose."
     )]
-    public unsafe ValueTask<ServicePump> RunAsync(ServicePump state, CancellationToken cancel)
+    private unsafe void PollEvents()
     {
         SDL_Event sdlEvent;
         while (SDL_PollEvent(&sdlEvent))
@@ -407,94 +485,6 @@ public sealed class SdlPlatformGem
                     break;
             }
         }
-
-        return ValueTask.FromResult(state);
-    }
-
-    /// <summary>
-    /// Makes input this frame's: what happened last frame is over, what the pump saw since applies, and sticks and triggers
-    /// are read as they stand now, rather than added up from events.
-    /// </summary>
-    public unsafe ValueTask<BeginUpdate> RunAsync(BeginUpdate state, CancellationToken cancel)
-    {
-        for (int i = 0; i < _devices.Count; i++)
-        {
-            StartFrame(_devices[i].Kind, _controls[i]);
-        }
-
-        _typed.Clear();
-        foreach (Change change in _changes)
-        {
-            Apply(change);
-        }
-
-        _changes.Clear();
-        _text = _typed.Length == 0 ? string.Empty : _typed.ToString();
-        foreach ((uint id, nint gamepad) in _gamepads)
-        {
-            ReadAxes(id, (SDL_Gamepad*)gamepad);
-        }
-
-        return ValueTask.FromResult(state);
-    }
-
-    /// <summary>
-    /// What happened last frame is over: pressed and released clear, and a mouse's motion and wheel go back to 0.
-    /// </summary>
-    private static void StartFrame(DeviceKind kind, ControlState[] states)
-    {
-        for (int i = 0; i < states.Length; i++)
-        {
-            states[i] = states[i] with { WasPressed = false, WasReleased = false };
-        }
-
-        if (kind != DeviceKind.Mouse)
-            return;
-
-        states[Control.MouseMotionX.Index] = default;
-        states[Control.MouseMotionY.Index] = default;
-        states[Control.MouseWheelX.Index] = default;
-        states[Control.MouseWheelY.Index] = default;
-    }
-
-    /// <summary>
-    /// Gives a control a new value, and with it whether it went down or came up. Pressed and released only ever turn on
-    /// within a frame, so a tap between two frames shows as both.
-    /// </summary>
-    private static void SetState(ControlState[] states, Control control, float value)
-    {
-        ref ControlState state = ref states[control.Index];
-        bool isDown = MathF.Abs(value) >= 0.5f;
-        state = new ControlState(
-            value,
-            isDown,
-            state.WasPressed || (isDown && !state.IsDown),
-            state.WasReleased || (!isDown && state.IsDown)
-        );
-    }
-
-    /// <summary>
-    /// The clipboard's text, which SDL hands out as a copy that is freed once read.
-    /// </summary>
-    private static unsafe string ReadClipboard()
-    {
-        byte* text = SDL_GetClipboardText();
-        string value = CString.Read(text);
-        SDL_free(text);
-
-        return value;
-    }
-
-    /// <summary>
-    /// An SDL axis, -32768 to 32767, as -1 to 1: 0 inside the dead zone, and past it growing from 0 to 1 at full
-    /// deflection, so the zone's edge is no step. Triggers only reach the positive half.
-    /// </summary>
-    private static float ToStick(short value)
-    {
-        float raw = Math.Max(value / 32767f, -1f);
-        float past = MathF.Abs(raw) - StickDeadZone;
-
-        return past <= 0 ? 0 : MathF.CopySign(past / (1 - StickDeadZone), raw);
     }
 
     /// <summary>

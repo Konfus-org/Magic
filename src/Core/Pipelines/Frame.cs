@@ -3,7 +3,7 @@ using Magic.Events;
 namespace Magic.Pipelines;
 
 /// <summary>
-/// One frame's clocks and messages, handed to every pipeline the frame runs.
+/// One frame's clocks and messages, handed to every hook the frame runs.
 /// </summary>
 public readonly record struct Frame
 {

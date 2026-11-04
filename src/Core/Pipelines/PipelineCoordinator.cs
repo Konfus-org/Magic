@@ -1,58 +1,29 @@
 using System.Collections.Concurrent;
 using System.Reflection;
-using Magic.Gems;
 using Magic.Threading;
 using Magic.Utils;
 
 namespace Magic.Pipelines;
 
 /// <summary>
-/// Every pipeline, by the type of its state. Ask for one and say how to run it: <c>pipelines.Get&lt;MyState&gt;().Run(state)</c>
-/// runs it now, and <c>.Defer(state)</c> at the frame's deferred point. One nothing joined runs nothing. Any thread.
+/// Every pipeline, by the type of its state, and the way to run one: <c>pipelines.Run(state)</c> runs the pipeline over
+/// that state's type now, on the main thread, and <c>RunAsync</c> awaited, on any. One nothing registered for runs nothing.
+/// Register what joins a pipeline (<see cref="Register"/>) and dispose the subscription to take it out again. Any thread.
 /// </summary>
 public sealed class PipelineCoordinator
 {
-    private readonly ConcurrentDictionary<Type, IPipelineRunner> _pipelines = new();
-
-    /// <summary>
-    /// One entry per state deferred, in the order they were, saying whose it is.
-    /// </summary>
-    private readonly ConcurrentQueue<IPipelineRunner> _deferred = new();
-
+    private readonly ConcurrentDictionary<Type, IPipelineRunner> _runners = new();
     private readonly Threads _threads;
 
     internal PipelineCoordinator(Threads threads) => _threads = threads;
 
-    public PipelineRunner<TState> Get<TState>() =>
-        (PipelineRunner<TState>)
-            _pipelines.GetOrAdd(
-                typeof(TState),
-                static (_, pipelines) => new PipelineRunner<TState>(pipelines, pipelines._threads),
-                this
-            );
-
     /// <summary>
-    /// Has <paramref name="gem"/> join the pipelines over <paramref name="states"/>, each an
-    /// <see cref="IPipeline{TState}"/> it implements, until the subscription is disposed. Main thread.
+    /// Adds <paramref name="pipeline"/> to the pipeline over each state it implements an <see cref="IPipeline{TState}"/>
+    /// of, last, until the subscription is disposed. Main thread.
     /// </summary>
-    internal Subscription Register(IGem gem, string name, IReadOnlyList<Type> states)
+    public Subscription Register(object pipeline)
     {
-        MethodInfo join =
-            typeof(PipelineCoordinator).GetMethod(nameof(AddGem), BindingFlags.NonPublic | BindingFlags.Instance)
-            ?? throw new InvalidOperationException($"{nameof(PipelineCoordinator)} has no {nameof(AddGem)}.");
-        foreach (Type state in states)
-        {
-            join.MakeGenericMethod(state).Invoke(this, [gem, name]);
-        }
-
-        return new Subscription(() => Remove(gem));
-    }
-
-    /// <summary>
-    /// Adds <paramref name="pipeline"/>, one of Core's, to every <see cref="IPipeline{TState}"/> it implements. Main thread.
-    /// </summary>
-    internal void Join(object pipeline)
-    {
+        ArgumentNullException.ThrowIfNull(pipeline);
         MethodInfo add =
             typeof(PipelineCoordinator).GetMethod(nameof(Add), BindingFlags.NonPublic | BindingFlags.Instance)
             ?? throw new InvalidOperationException($"{nameof(PipelineCoordinator)} has no {nameof(Add)}.");
@@ -61,37 +32,54 @@ public sealed class PipelineCoordinator
             if (contract.IsGenericType && contract.GetGenericTypeDefinition() == typeof(IPipeline<>))
                 add.MakeGenericMethod(contract.GetGenericArguments()[0]).Invoke(this, [pipeline]);
         }
+
+        return new Subscription(() => Remove(pipeline));
     }
 
     /// <summary>
-    /// Takes everything of <paramref name="gem"/> out of every pipeline. Main thread.
+    /// Runs the pipeline over <paramref name="state"/> now, each nested pipeline returning finished, and returns the state
+    /// as it ended. Main thread.
     /// </summary>
-    internal void Remove(IGem gem)
+    public TState Run<TState>(TState state, CancellationToken cancel = default) =>
+        GetRunner<TState>().Run(state, cancel);
+
+    /// <summary>
+    /// <see cref="Run{TState}(TState, CancellationToken)"/> over a state that carries nothing in.
+    /// </summary>
+    public TState Run<TState>(CancellationToken cancel = default)
+        where TState : struct => GetRunner<TState>().Run(default, cancel);
+
+    /// <summary>
+    /// Runs the pipeline over <paramref name="state"/> awaited, each nested pipeline once the one before it has ended, on
+    /// whichever thread that ended on. Any thread.
+    /// </summary>
+    public ValueTask<TState> RunAsync<TState>(TState state, CancellationToken cancel) =>
+        GetRunner<TState>().RunAsync(state, cancel);
+
+    /// <summary>
+    /// <see cref="RunAsync{TState}"/>, last first: for what takes apart what the forward order put together.
+    /// </summary>
+    public ValueTask<TState> RunReversedAsync<TState>(TState state, CancellationToken cancel) =>
+        GetRunner<TState>().RunReversedAsync(state, cancel);
+
+    /// <summary>
+    /// Takes <paramref name="pipeline"/> out of every pipeline. Main thread.
+    /// </summary>
+    internal void Remove(object pipeline)
     {
-        foreach (IPipelineRunner pipeline in _pipelines.Values)
+        foreach (IPipelineRunner runner in _runners.Values)
         {
-            pipeline.Remove(gem);
+            runner.Remove(pipeline);
         }
     }
 
-    /// <summary>
-    /// Notes that a state of <paramref name="runner"/>'s was deferred. Any thread.
-    /// </summary>
-    internal void AddDeferred(IPipelineRunner runner) => _deferred.Enqueue(runner);
+    private PipelineRunner<TState> GetRunner<TState>() =>
+        (PipelineRunner<TState>)
+            _runners.GetOrAdd(
+                typeof(TState),
+                static (_, pipelines) => new PipelineRunner<TState>(pipelines, pipelines._threads),
+                this
+            );
 
-    /// <summary>
-    /// Runs what was deferred, in the order it was. What is deferred meanwhile waits for the next time. Main thread.
-    /// </summary>
-    internal void RunDeferred(CancellationToken cancel)
-    {
-        for (int left = _deferred.Count; left > 0 && _deferred.TryDequeue(out IPipelineRunner? runner); left--)
-        {
-            runner.RunNextDeferred(cancel);
-        }
-    }
-
-    private void Add<TState>(object pipeline) =>
-        Get<TState>().Add((IPipeline<TState>)pipeline, pipeline.GetType().Name, null);
-
-    private void AddGem<TState>(IGem gem, string name) => Get<TState>().Add((IPipeline<TState>)gem, name, gem);
+    private void Add<TState>(object pipeline) => GetRunner<TState>().Add((IPipeline<TState>)pipeline);
 }

@@ -1,7 +1,14 @@
 using System.Collections.Immutable;
+using System.IO.Hashing;
 using System.Reflection;
+using System.Text;
+using System.Text.Json;
+using Magic.Caching;
+using Magic.Debugging;
 using Magic.Files;
 using Magic.Pipelines;
+using Magic.Projects;
+using Magic.Serialization;
 using Magic.Threading;
 using Magic.Utils;
 
@@ -14,9 +21,9 @@ namespace Magic.Assets.Pipeline;
 /// import settings its loader reads. An asset path is relative to its asset directory, with <c>/</c> between folders on
 /// every OS. Any thread.
 /// <para>
-/// Every asset directory is indexed before the first gem is made, so finding an asset works in a constructor; a load
-/// asked for before the first run of its pipeline, which comes once every gem is made, waits for it, as the gem that
-/// reads its type may be made after the one asking.
+/// Every asset directory is registered (<see cref="Register(string)"/>) and indexed (<see cref="Index"/>) before the
+/// first gem is made, so finding an asset works in a constructor; a load asked for before the first run of its pipeline,
+/// which comes once every gem is made, waits for it, as the gem that reads its type may be made after the one asking.
 /// </para>
 /// <para>
 /// Each file is loaded on a worker by the pipeline over an <see cref="AssetLoad{T}"/> of its type: read it, read its
@@ -25,9 +32,9 @@ namespace Magic.Assets.Pipeline;
 /// <see cref="AssetFormatAttribute"/>. What loaded is kept for the run.
 /// </para>
 /// <para>
-/// The asset directories are watched until the run ends. Once their changes settle, they are indexed again,
-/// and every asset loaded whose file changed, or that depends on one that did, is made again, each after its
-/// dependencies: <see cref="GetVersion{T}"/> then says so, and a load gets the new one. One that fails to load again
+/// The asset directories are watched from the index until the database is disposed. Once their changes settle, they are
+/// indexed again, and every asset loaded whose file changed, or that depends on one that did, is made again, each after
+/// its dependencies: <see cref="GetVersion{T}"/> then says so, and a load gets the new one. One that fails to load again
 /// keeps what loaded before.
 /// </para>
 /// <para>
@@ -43,12 +50,35 @@ public sealed class AssetDatabase : IDisposable
     /// </summary>
     public const int AllLevels = int.MaxValue;
 
+    private const string Sidecar = ".meta";
+
+    /// <summary>
+    /// The assembly metadata a build records the folder of its part's assets in, where it does not copy them beside it
+    /// (the root <c>Directory.Build.props</c>).
+    /// </summary>
+    private const string ResourcesKey = "Magic.Resources";
+
     private readonly PipelineCoordinator _pipelines;
+    private readonly Caches _caches;
+
+    /// <summary>
+    /// The asset directory the assets written through <see cref="WriteAsync{T}"/> go under: the project's, in its user
+    /// cache.
+    /// </summary>
+    private readonly string _written;
 
     /// <summary>
     /// Ends the loads on their way and the watching, as the assets are disposed.
     /// </summary>
     private readonly CancellationTokenSource _stopping = new();
+
+    private readonly Subscriptions _watches = [];
+
+    /// <summary>
+    /// What the database registered itself, for as long as it lasts: the project's and the kept folders, Core's own
+    /// asset types, and Magic's built-in folder.
+    /// </summary>
+    private readonly Subscriptions _registered = [];
 
     /// <summary>
     /// What is known: written on the main thread alone, by the pipeline over its change list and before its
@@ -56,12 +86,21 @@ public sealed class AssetDatabase : IDisposable
     /// </summary>
     private AssetSnapshot _snapshot = AssetSnapshot.Empty;
 
-    internal AssetDatabase(IFileSystem files, PipelineCoordinator pipelines)
+    /// <summary>
+    /// The assets of <paramref name="project"/>, with the project's folder first, then the folder the last run kept the
+    /// world in, and Core's own asset types; a gem's come as it is found, and Magic's built-in folder last.
+    /// </summary>
+    internal AssetDatabase(IFileSystem files, PipelineCoordinator pipelines, Caches caches, Project project)
     {
         Files = files;
         _pipelines = pipelines;
+        _caches = caches;
         Stopped = _stopping.Token;
-        BuiltIn = AssetPipeline.GetResources(files, typeof(AssetDatabase).Assembly, AppContext.BaseDirectory);
+        BuiltIn = GetResources(files, typeof(AssetDatabase).Assembly, AppContext.BaseDirectory);
+        _written = caches.WrittenAssetsFolder;
+        _registered.Add(Register(files.GetParent(project.Path)));
+        _registered.Add(Register(_written));
+        _registered.Add(Register(typeof(AssetDatabase).Assembly));
     }
 
     /// <summary>
@@ -91,11 +130,21 @@ public sealed class AssetDatabase : IDisposable
     internal CancellationToken Stopped { get; }
 
     /// <summary>
+    /// Where the part built as <paramref name="assembly"/> keeps its own assets: the folder its build recorded, its
+    /// source <c>Resources/</c>, which every build but a release does; else <c>Resources/</c> in
+    /// <paramref name="folder"/>, the assembly's, where a release copies them.
+    /// </summary>
+    public static string GetResources(IFileSystem files, Assembly assembly, string folder) =>
+        assembly.GetMetadata(ResourcesKey) ?? files.Combine(folder, "Resources");
+
+    /// <summary>
     /// Stops the loads on their way and the watching: the host's to call, at the end of the run, on its thread. A load
     /// still waited for ends cancelled.
     /// </summary>
     public void Dispose()
     {
+        _watches.Dispose();
+        _registered.Dispose();
         Changes.Close(Stopped);
         _stopping.Cancel();
         foreach (AssetEntry entry in _snapshot.Assets.Values)
@@ -333,16 +382,157 @@ public sealed class AssetDatabase : IDisposable
     }
 
     /// <summary>
-    /// Has <paramref name="gem"/> read each asset type it implements an <see cref="IAssetLoader{T}"/> of, until the
-    /// subscription is disposed, as the gem ends. A type another gem reads already stays that one's, and is an error.
+    /// Writes <paramref name="asset"/> as the asset at <paramref name="path"/>, an asset path under the project's cache,
+    /// through the <see cref="IAssetWriter{T}"/> a gem provides for its type, with the sidecar beside it that makes it
+    /// an asset, under an id the path decides, so the same path gives the same handle each time: that handle, or why
+    /// it was not written. The path ends in the writer's extension. The asset is found once the directory is indexed
+    /// again, or by the next run. Any thread.
     /// </summary>
-    internal Subscription AddLoader(object gem)
+    public async Task<Result<Handle<T>>> WriteAsync<T>(
+        T asset,
+        string path,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
+        where T : IAsset<T>
+    {
+        ArgumentNullException.ThrowIfNull(asset);
+        ArgumentNullException.ThrowIfNull(path);
+        if (Snapshot.Writers.GetValueOrDefault(typeof(T)) is not IAssetWriter<T> writer)
+            return Result.Failure($"no gem the project lists writes {typeof(T).Name}s.");
+
+        if (!path.EndsWith(writer.Extension, StringComparison.OrdinalIgnoreCase))
+            return Result.Failure($"a {typeof(T).Name}'s file ends in {writer.Extension}, not {path}.");
+
+        Result<ReadOnlyMemory<byte>> bytes = await writer.WriteAsync(asset, progress, cancel).ConfigureAwait(false);
+        if (!bytes.Ok)
+            return Result.Failure(bytes.Error);
+
+        string file = Files.Combine(_written, path);
+        Result written = await Files.WriteAsync(file, bytes.Value, cancel).ConfigureAwait(false);
+        if (!written.Ok)
+            return Result.Failure(written.Error);
+
+        ulong id = GetWrittenId(path);
+        Result<JsonElement> sidecar = Json.Write(
+            new Dictionary<string, object> { ["id"] = id, ["type"] = typeof(T).Name },
+            typeof(Dictionary<string, object>)
+        );
+        if (!sidecar.Ok)
+            return Result.Failure(sidecar.Error);
+
+        Result sidecarWritten = await Files
+            .WriteAsync(file + Sidecar, Encoding.UTF8.GetBytes(sidecar.Value.GetRawText()), cancel)
+            .ConfigureAwait(false);
+
+        return sidecarWritten.Ok ? Result.Success(new Handle<T>(id)) : Result.Failure(sidecarWritten.Error);
+    }
+
+    /// <summary>
+    /// Adds <paramref name="directory"/> to the asset directories, after those added before it, which win a path it
+    /// shares with them, until the subscription is disposed. One that does not exist, or is added already, is left out.
+    /// Before <see cref="Index"/>.
+    /// </summary>
+    internal Subscription Register(string directory)
+    {
+        directory = directory.TrimEnd('/', '\\');
+        if (!Files.DirectoryExists(directory))
+            return new Subscription(static () => { });
+
+        AssetSnapshot snapshot = Snapshot;
+        foreach (string added in snapshot.Directories)
+        {
+            if (string.Equals(added, directory, StringComparison.OrdinalIgnoreCase))
+                return new Subscription(static () => { });
+        }
+
+        Snapshot = snapshot with { Directories = snapshot.Directories.Add(directory) };
+
+        return new Subscription(() =>
+            Snapshot = Snapshot with { Directories = Snapshot.Directories.Remove(directory) }
+        );
+    }
+
+    /// <summary>
+    /// Adds the asset types <paramref name="assembly"/> declares, Magic's or a gem's, so a <c>.meta</c> can name them
+    /// and the assets can be crawled without knowing them, each with Core's own stages of its load pipeline, until the
+    /// subscription is disposed. A name another type has already stays that one's, and is an error.
+    /// </summary>
+    internal Subscription Register(Assembly assembly)
+    {
+        Subscriptions registered = [];
+        foreach (Type type in assembly.GetExportedTypes())
+        {
+            if (!type.IsClass || type.IsAbstract || !IsAssetType(type))
+                continue;
+
+            AssetSnapshot snapshot = Snapshot;
+            if (snapshot.Types.TryGetValue(type.Name, out AssetType? other))
+            {
+                Log.Error(
+                    $"{type.FullName} and {other.Type.FullName} are both asset types named {type.Name}, so a .meta's "
+                        + "\"type\" names the first."
+                );
+                continue;
+            }
+
+            if (
+                GetGeneric(typeof(AssetDatabase), nameof(RegisterLoadStages), type).Invoke(this, null)
+                is Subscription stages
+            )
+                registered.Add(stages);
+
+            AssetReader read = GetGeneric(typeof(AssetDatabase), nameof(RunLoadAsync), type)
+                .CreateDelegate<AssetReader>(this);
+            AssetBuiltInReader readBuiltIn = GetGeneric(typeof(AssetDatabase), nameof(ReadBuiltIn), type)
+                .CreateDelegate<AssetBuiltInReader>();
+            Snapshot = snapshot with { Types = snapshot.Types.Add(type.Name, new AssetType(type, read, readBuiltIn)) };
+            registered.Add(
+                new Subscription(() => Snapshot = Snapshot with { Types = Snapshot.Types.Remove(type.Name) })
+            );
+        }
+
+        return new Subscription(registered.Dispose);
+    }
+
+    /// <summary>
+    /// Reads what is under every registered directory, Magic's built-in one last, so the others win a path they share
+    /// with it, and watches them from then on, so a gem's constructor can find assets. Once, before the first gem is
+    /// made.
+    /// </summary>
+    internal void Index()
+    {
+        _registered.Add(Register(BuiltIn));
+
+        // Watched before they are read, so nothing written meanwhile is missed.
+        AssetSnapshot snapshot = Snapshot;
+        foreach (string directory in snapshot.Directories)
+        {
+            Watch(directory);
+        }
+
+        Snapshot = snapshot with { Index = AssetIndex.Create(Files, snapshot.Directories, BuiltIn) };
+        Log.Info($"Indexed {Snapshot.Index.ById.Count} assets under {snapshot.Directories.Length} folders.");
+    }
+
+    /// <summary>
+    /// Has <paramref name="gem"/> read each asset type it implements an <see cref="IAssetLoader{T}"/> of, and write each
+    /// it implements an <see cref="IAssetWriter{T}"/> of, until the subscription is disposed, as the gem ends. A type
+    /// another gem reads or writes already stays that one's, and is an error.
+    /// </summary>
+    internal Subscription Register(object gem)
     {
         List<Type> reads = [];
+        List<Type> writes = [];
         foreach (Type contract in gem.GetType().GetInterfaces())
         {
-            if (contract.IsGenericType && contract.GetGenericTypeDefinition() == typeof(IAssetLoader<>))
+            if (!contract.IsGenericType)
+                continue;
+
+            if (contract.GetGenericTypeDefinition() == typeof(IAssetLoader<>))
                 reads.Add(contract.GetGenericArguments()[0]);
+            else if (contract.GetGenericTypeDefinition() == typeof(IAssetWriter<>))
+                writes.Add(contract.GetGenericArguments()[0]);
         }
 
         foreach (Type type in reads)
@@ -350,11 +540,21 @@ public sealed class AssetDatabase : IDisposable
             Changes.Push(new AssetLoaderAdded(type, gem));
         }
 
+        foreach (Type type in writes)
+        {
+            Changes.Push(new AssetWriterAdded(type, gem));
+        }
+
         return new Subscription(() =>
         {
             foreach (Type type in reads)
             {
                 Changes.Push(new AssetLoaderRemoved(type, gem));
+            }
+
+            foreach (Type type in writes)
+            {
+                Changes.Push(new AssetWriterRemoved(type, gem));
             }
         });
     }
@@ -365,6 +565,12 @@ public sealed class AssetDatabase : IDisposable
     internal bool CanRead<T>()
         where T : IAsset<T> =>
         typeof(T).GetCustomAttribute<AssetFormatAttribute>() is not null || Snapshot.Loaders.ContainsKey(typeof(T));
+
+    /// <summary>
+    /// Whether a gem writes <typeparamref name="T"/>'s files. Known once its first run has come.
+    /// </summary>
+    internal bool CanWrite<T>()
+        where T : IAsset<T> => Snapshot.Writers.ContainsKey(typeof(T));
 
     /// <summary>
     /// Asset <paramref name="id"/> as <paramref name="type"/>, at once when it has loaded, else once its
@@ -428,12 +634,64 @@ public sealed class AssetDatabase : IDisposable
             Loader = loader as IAssetLoader<T>,
             Progress = progress,
         };
-        AssetLoad<T> done = await _pipelines.Get<AssetLoad<T>>().RunAsync(load, cancel).ConfigureAwait(false);
+        AssetLoad<T> done = await _pipelines.RunAsync(load, cancel).ConfigureAwait(false);
 
         return done.Asset is { Ok: true, Value: { } asset }
             ? new Made(Result.Success<object>(asset), done.Version, AssetScan.FindHandles(asset))
             : new Made(Result.Failure(done.Asset?.Error ?? $"{file.Path} made nothing."), done.Version);
     }
+
+    /// <summary>
+    /// <paramref name="bytes"/> read as a <typeparamref name="T"/> by Core itself, with its <c>.meta</c>'s
+    /// <paramref name="settings"/> read against the type first.
+    /// </summary>
+    private static Result<object> ReadBuiltIn<T>(ReadOnlyMemory<byte> bytes, JsonElement settings)
+        where T : IAsset<T>
+    {
+        Result<AssetMetadata> metadata = ReadMetadataPipeline<T>.Read(settings);
+        if (!metadata.Ok)
+            return Result.Failure(metadata.Error);
+
+        Result<T> read = ImportPipeline<T>.ReadBuiltIn(bytes, settings);
+
+        return read.Ok ? Result.Success<object>(read.Value) : Result.Failure(read.Error);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="type"/> implements <see cref="IAsset{TSelf}"/> of itself.
+    /// </summary>
+    private static bool IsAssetType(Type type)
+    {
+        foreach (Type contract in type.GetInterfaces())
+        {
+            if (
+                contract.IsGenericType
+                && contract.GetGenericTypeDefinition() == typeof(IAsset<>)
+                && contract.GetGenericArguments()[0] == type
+            )
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The id of an asset written at the asset path <paramref name="path"/>: the same for it each time, whatever the
+    /// case, and never none.
+    /// </summary>
+    private static ulong GetWrittenId(string path) =>
+        Math.Max(XxHash3.HashToUInt64(Encoding.UTF8.GetBytes(path.ToUpperInvariant())), 1);
+
+    /// <summary>
+    /// A generic method of <paramref name="owner"/>'s, <paramref name="name"/>, made for <paramref name="type"/>.
+    /// </summary>
+    private static MethodInfo GetGeneric(Type owner, string name, Type type) =>
+        (
+            owner.GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance)
+            ?? throw new InvalidOperationException($"{owner.Name} has no method {name}.")
+        ).MakeGenericMethod(type);
 
     /// <summary>
     /// Asset <paramref name="id"/>, at once when it has loaded, else once its pipeline has it loaded; asked for by asset
@@ -473,5 +731,64 @@ public sealed class AssetDatabase : IDisposable
         );
 
         return Handle<T>.None;
+    }
+
+    /// <summary>
+    /// Has Core's own stages make up the pipeline that loads a <typeparamref name="T"/>, ahead of any gem's, until the
+    /// subscription is disposed.
+    /// </summary>
+    private Subscription RegisterLoadStages<T>()
+        where T : IAsset<T>
+    {
+        Subscriptions stages =
+        [
+            _pipelines.Register(new ReadFilePipeline<T>(Files)),
+            _pipelines.Register(new ReadMetadataPipeline<T>()),
+            _pipelines.Register(new ReadCachePipeline<T>(_caches)),
+            _pipelines.Register(new ImportPipeline<T>()),
+            _pipelines.Register(new WriteCachePipeline<T>(_caches)),
+        ];
+
+        return new Subscription(stages.Dispose);
+    }
+
+    private void Watch(string directory)
+    {
+        Result<IFileWatcher> watched = Files.Watch(directory);
+        if (!watched.Ok)
+        {
+            Log.Warn(
+                $"The assets under {directory} are not watched, so a change there is not taken in: {watched.Error}"
+            );
+
+            return;
+        }
+
+        IFileWatcher watcher = watched.Value;
+        watcher.Created += (_, e) => Touch(directory, e.FullPath);
+        watcher.Changed += (_, e) => Touch(directory, e.FullPath);
+        watcher.Deleted += (_, e) => Touch(directory, e.FullPath);
+        watcher.Renamed += (_, e) =>
+        {
+            Touch(directory, e.OldFullPath);
+            Touch(directory, e.FullPath);
+        };
+        _watches.Add(new Subscription(watcher.Dispose));
+    }
+
+    /// <summary>
+    /// Hands what a watch saw at <paramref name="fullPath"/> under <paramref name="directory"/> to the change list, as a
+    /// path from the asset directory, a sidecar's change being its file's.
+    /// </summary>
+    private void Touch(string directory, string fullPath)
+    {
+        if (fullPath.Length <= directory.Length)
+            return;
+
+        string path = fullPath[(directory.Length + 1)..].Replace('\\', '/');
+        if (path.EndsWith(Sidecar, StringComparison.OrdinalIgnoreCase))
+            path = path[..^Sidecar.Length];
+
+        Changes.PushTouched(path);
     }
 }

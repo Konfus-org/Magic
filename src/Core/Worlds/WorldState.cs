@@ -6,7 +6,7 @@ namespace Magic.Worlds;
 
 /// <summary>
 /// The world as data (<see cref="World.SaveAsync"/>), which <see cref="World.RestoreAsync(WorldState, IProgress{Utils.LoadProgress}, CancellationToken)"/>
-/// puts back. An asset, so a saved world is a file a gem reads and writes (<see cref="IWorldStateWriter"/>).
+/// puts back. An asset, so a saved world is a file a gem reads and writes (<see cref="Assets.Pipeline.IAssetWriter{T}"/>).
 /// </summary>
 public sealed record WorldState : IAsset<WorldState>
 {

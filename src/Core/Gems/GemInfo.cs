@@ -1,5 +1,4 @@
 using System.Runtime.Loader;
-using Magic.Pipelines;
 
 namespace Magic.Gems;
 
@@ -12,8 +11,6 @@ namespace Magic.Gems;
 /// <param name="Version">Its version; 1.0.0 when its project says nothing.</param>
 /// <param name="Type">Its one <see cref="IGem"/> class.</param>
 /// <param name="Provides">The interfaces it provides to other gems.</param>
-/// <param name="Reads">The asset types it reads, one for each asset loader it implements.</param>
-/// <param name="Joins">The states of the pipelines it joins, one for each <see cref="IPipeline{TState}"/> it implements.</param>
 /// <param name="Needs">The names of the registered gems its constructor asks for.</param>
 /// <param name="Resources">The folder of its own assets; null when it has none.</param>
 /// <param name="Folder">The folder its assemblies load from.</param>
@@ -28,8 +25,6 @@ internal sealed record GemInfo(
     Version Version,
     Type Type,
     IReadOnlyList<Type> Provides,
-    IReadOnlyList<Type> Reads,
-    IReadOnlyList<Type> Joins,
     IReadOnlyList<string> Needs,
     string? Resources,
     string Folder,

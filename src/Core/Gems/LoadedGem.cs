@@ -4,8 +4,8 @@ using Magic.Utils;
 namespace Magic.Gems;
 
 /// <summary>
-/// A gem as loaded, and what ends with it. Disposing it ends the gem: its subscriptions (its place on the log when it
-/// is a sink, and whatever is registered for it later), then the gem itself, then its load context, which frees its
+/// A gem as made, and what ends with it. Disposing it ends the gem: its subscriptions (its place on the log when it is a
+/// sink, the asset types it reads, the pipelines it joined), then the gem itself, then its load context, which frees its
 /// assemblies once nothing refers to the gem.
 /// </summary>
 internal sealed class LoadedGem : IDisposable
@@ -18,9 +18,6 @@ internal sealed class LoadedGem : IDisposable
         _context = info.Context;
         Gem = gem;
         Name = info.Name;
-        Version = info.Version;
-        Author = info.Author;
-        Description = info.Description;
     }
 
     public IGem Gem { get; }
@@ -30,11 +27,10 @@ internal sealed class LoadedGem : IDisposable
     /// </summary>
     public string Name { get; }
 
-    public Version Version { get; }
-
-    public string Author { get; }
-
-    public string Description { get; }
+    /// <summary>
+    /// Whether the gem threw in a hook and left the frame for good: it is still disposed with the others.
+    /// </summary>
+    public bool HasLeft { get; set; }
 
     /// <summary>
     /// What ends with the gem; the host adds to it.

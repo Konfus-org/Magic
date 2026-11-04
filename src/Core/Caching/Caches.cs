@@ -55,9 +55,9 @@ public sealed class Caches
     }
 
     /// <summary>
-    /// Where this user's assets made by a run for the next one go: an asset directory once it exists.
+    /// Where the assets a run writes go, under the project's user cache: an asset directory of the project's.
     /// </summary>
-    internal string KeptFolder => _files.Combine(_userCacheFolder, "Kept");
+    internal string WrittenAssetsFolder => _files.Combine(_userCacheFolder, "Assets");
 
     /// <summary>
     /// What is cached of <paramref name="key"/> as a <typeparamref name="T"/>, made from <paramref name="version"/>:

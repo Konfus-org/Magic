@@ -12,15 +12,13 @@ using Magic.Utils;
 namespace GpuChecks;
 
 /// <summary>
-/// Proves the GPU provider and the shader compiler work together, before any renderer draws: as the run starts, a
-/// compute entry fills a texture with a gradient through the heap, the texture is read back and its corners checked,
-/// and each is an error under --fail-on-error when wrong. It is public because nothing in its assembly makes it:
-/// Magic does, by reflection, when a project lists the gem.
+/// Proves the GPU provider and the shader compiler work together, before any renderer draws: from the first frame, a
+/// compute entry is compiled, fills a texture with a gradient through the heap, the texture is read back and its
+/// corners checked, and each is an error under --fail-on-error when wrong. Every GPU call is made in the frame, from
+/// <see cref="Render"/>; the compile and the readback wait on workers. It is public because nothing in its assembly
+/// makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, AssetDatabase assets, Threads threads)
-    : IGem,
-        IPipeline<Startup>,
-        IDisposable
+public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, AssetDatabase assets) : IGem, IDisposable
 {
     private const int Size = 256;
     private const string ShaderPath = "Shaders/Checks/Gradient.slang";
@@ -31,9 +29,24 @@ public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, Asse
     private GpuBuffer _readback;
     private uint _groupsX;
     private uint _groupsY;
+    private bool _isStarted;
+    private bool _isRecorded;
+    private bool _isChecked;
 
+    /// <summary>
+    /// What the entry compiled into, written whole by the compile on its worker and taken by <see cref="Render"/>.
+    /// </summary>
+    private CompiledEntry? _compiled;
+
+    /// <summary>
+    /// A run that ends before the check has finished checked nothing, which is an error: a run that validates waits
+    /// for it.
+    /// </summary>
     public void Dispose()
     {
+        if (_isStarted && !_isChecked)
+            Log.Error("GPU check: the run ended before the check finished, so nothing was checked.");
+
         if (!_pipeline.IsNone)
             gpu.Destroy(_pipeline);
 
@@ -45,53 +58,61 @@ public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, Asse
     }
 
     /// <summary>
-    /// Compiles the entry, makes the texture, computes the gradient once and checks what came back. It runs to the end
-    /// even once the run was told to exit, as the validation types exit the moment the run starts: a check that stops
-    /// then checks nothing.
+    /// Starts compiling the entry on the first frame, once.
     /// </summary>
-    public async ValueTask<Startup> RunAsync(Startup state, CancellationToken cancel)
+    public void Update(in Frame frame)
     {
+        if (_isStarted)
+            return;
+
+        _isStarted = true;
         Handle<Shader> shader = assets.Find<Shader>(ShaderPath);
         if (shader == Handle<Shader>.None)
         {
             Log.Error($"GPU check: there is no {ShaderPath}.");
+            _isChecked = true;
 
-            return state;
+            return;
         }
 
-        Result<CompiledShader> compiled = await shaders
-            .CompileAsync(
-                new ShaderEntry
-                {
-                    Module = shader,
-                    Name = "FillGradient",
-                    Stage = ShaderStage.Compute,
-                },
-                null,
-                CancellationToken.None
-            )
-            .ConfigureAwait(false);
-        await threads.Enter(EngineThread.Main);
-        if (!compiled.Ok)
+        CompileAsync(shader).FireAndForget();
+    }
+
+    /// <summary>
+    /// Once the entry has compiled: makes the texture, computes the gradient and submits it, then reads it back and
+    /// checks it on a worker.
+    /// </summary>
+    public void Render(in Frame frame)
+    {
+        if (_isRecorded || Interlocked.Exchange(ref _compiled, null) is not { } compiled)
+            return;
+
+        _isRecorded = true;
+        if (!compiled.Result.Ok)
         {
-            Log.Error($"GPU check: the gradient shader did not compile: {compiled.Error}");
+            Log.Error($"GPU check: the gradient shader did not compile: {compiled.Result.Error}");
+            _isChecked = true;
 
-            return state;
+            return;
         }
 
-        if (compiled.Value.GroupSizeX == 0 || compiled.Value.GroupSizeY == 0)
+        CompiledShader entry = compiled.Result.Value;
+        if (entry.GroupSizeX == 0 || entry.GroupSizeY == 0)
         {
-            Log.Error(
-                $"GPU check: the compiler reported a group size of {compiled.Value.GroupSizeX} by {compiled.Value.GroupSizeY}."
-            );
+            Log.Error($"GPU check: the compiler reported a group size of {entry.GroupSizeX} by {entry.GroupSizeY}.");
+            _isChecked = true;
 
-            return state;
+            return;
         }
 
-        _groupsX = (Size + compiled.Value.GroupSizeX - 1) / compiled.Value.GroupSizeX;
-        _groupsY = (Size + compiled.Value.GroupSizeY - 1) / compiled.Value.GroupSizeY;
-        if (!TryCreateResources(compiled.Value))
-            return state;
+        _groupsX = (Size + entry.GroupSizeX - 1) / entry.GroupSizeX;
+        _groupsY = (Size + entry.GroupSizeY - 1) / entry.GroupSizeY;
+        if (!TryCreateResources(entry))
+        {
+            _isChecked = true;
+
+            return;
+        }
 
         RecordGradient();
         _recorder.BeginTransferPass("Read gradient back");
@@ -101,24 +122,7 @@ public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, Asse
         _recorder.Transition(_readback, GpuAccess.CopyDestination, GpuAccess.HostRead);
         _recorder.EndPass();
         gpu.Submit(_recorder.Finish());
-        Result<ReadOnlyMemory<byte>> pixels = await gpu.ReadBackAsync(
-                _readback,
-                0,
-                Size * Size * 4,
-                CancellationToken.None
-            )
-            .ConfigureAwait(false);
-        await threads.Enter(EngineThread.Main);
-        if (!pixels.Ok)
-        {
-            Log.Error($"GPU check: the gradient could not be read back: {pixels.Error}");
-
-            return state;
-        }
-
-        Check(pixels.Value.Span);
-
-        return state;
+        ReadBackAsync().FireAndForget();
     }
 
     /// <summary>
@@ -160,6 +164,53 @@ public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, Asse
 
         if (wrong == 0)
             Log.Info($"GPU check passed: a {Size} by {Size} gradient computed through the heap and read back.");
+    }
+
+    private async Task CompileAsync(Handle<Shader> shader)
+    {
+        Result<CompiledShader> compiled = await shaders
+            .CompileAsync(
+                new ShaderEntry
+                {
+                    Module = shader,
+                    Name = "FillGradient",
+                    Stage = ShaderStage.Compute,
+                },
+                null,
+                CancellationToken.None
+            )
+            .ConfigureAwait(false);
+        Interlocked.Exchange(ref _compiled, new CompiledEntry(compiled));
+    }
+
+    /// <summary>
+    /// Reads the gradient back once the GPU has computed it, and checks it. Checked once it has reported, right or
+    /// wrong.
+    /// </summary>
+    private async Task ReadBackAsync()
+    {
+        try
+        {
+            Result<ReadOnlyMemory<byte>> pixels = await gpu.ReadBackAsync(
+                    _readback,
+                    0,
+                    Size * Size * 4,
+                    CancellationToken.None
+                )
+                .ConfigureAwait(false);
+            if (!pixels.Ok)
+            {
+                Log.Error($"GPU check: the gradient could not be read back: {pixels.Error}");
+
+                return;
+            }
+
+            Check(pixels.Value.Span);
+        }
+        finally
+        {
+            _isChecked = true;
+        }
     }
 
     private bool TryCreateResources(CompiledShader compiled)
@@ -229,5 +280,13 @@ public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, Asse
         _recorder.PushConstants(new GpuConstants(_gradient.Id, Size, Size));
         _recorder.Dispatch(_groupsX, _groupsY);
         _recorder.EndPass();
+    }
+
+    /// <summary>
+    /// What the entry compiled into, boxed so it is written whole from the compile's worker.
+    /// </summary>
+    private sealed class CompiledEntry(Result<CompiledShader> result)
+    {
+        public Result<CompiledShader> Result { get; } = result;
     }
 }

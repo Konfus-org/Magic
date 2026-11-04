@@ -10,7 +10,7 @@ namespace Magic.Events;
 /// <summary>
 /// Messages between gems, by type. Anything publishes one, from any thread, and every gem hears it the next frame:
 /// read from that frame's <see cref="Frame.Events"/> in a hook, or handed to a watcher as the frame starts, before any
-/// gem's pipeline. A message is a struct, and publishing, reading and watching allocate nothing once its
+/// gem's hook. A message is a struct, and publishing, reading and watching allocate nothing once its
 /// type's buffers have grown.
 /// </summary>
 public sealed class EventCoordinator

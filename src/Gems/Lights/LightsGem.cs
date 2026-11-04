@@ -8,6 +8,7 @@ using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Gems;
 using Magic.Pipelines;
+using Magic.Worlds;
 
 namespace Lights;
 
@@ -60,7 +61,7 @@ internal sealed class LightsGem(IEcs ecs, AssetDatabase assets) : IGem, IPipelin
         }
 
         Entity[] created = new Entity[LightCount];
-        ecs.Create<Transform, PointLight>(transforms, points, created);
+        ecs.Create(transforms, points, created);
         Origin origin = new() { Domain = lights, Content = state.Content.Id };
         foreach (Entity entity in created)
         {

@@ -10,7 +10,7 @@ Write the engine as data flowing through functions, not objects calling each oth
 
 - **Data:** plain values, such as `Domain`, `Prefab` and `EntitiesChangeList`.
 - **Databases:** one place that holds state and does little else, such as the assets' database and the ECS's columns.
-- **Pipelines:** where the work happens, once a frame over a batch.
+- **Pipelines:** where the work happens, over a batch, each stage handing the state on.
 - **Services:** immediate calls where that's the normal thing, such as `world.Create` and `assets.Find`.
 
 - **Nothing glued in.** Just about everything is a gem that can be swapped out.
@@ -37,41 +37,48 @@ Write the engine as data flowing through functions, not objects calling each oth
   binary or copied code. Hand-write a binding only where the generator can't, and say so in the gem's README.
 - No keys, tokens or passwords in code, configuration or workflows. CI reads its own from the repository's secrets.
 
-## Gems, pipelines and services
+## Gems, hooks, pipelines and services
 
 - A gem is a plugin: a decoupled, hot-reloadable, modular piece of logic that a project adds or replaces to meet its
-  needs. It is a `public sealed` class implementing `IGem`, an `IPipeline<TState>` for each pipeline it joins, and the
-  Core interfaces it provides.
-- A service is what you call. A pipeline is work the engine runs, in the order it's told.
-- A gem's constructor takes everything it depends on. Only code that builds objects from constructors takes
-  `IServiceProvider`.
-- A pipeline takes its state and hands it on, changed or not. It runs after the gems it needs, then in the order the
-  project lists them. [`PipelineStages.cs`](../src/Core/Pipelines/PipelineStages.cs) has the states Core runs.
-- Any pipeline runs either way, and the caller picks: `pipelines.Get<MyState>().Run(state)` runs it now, on the main
-  thread, and `.Defer(state)`, from any thread, runs it after the frame's fixed steps. What joins can't tell which. For
-  a change list, `pipelines.Get<MyList>().Deferred` is the list to push onto; the runner holds it, runs it and clears it.
-- A change to a database is pushed onto a change list, whose pipeline acts on it and says what came of it, as
-  `EntitiesChangeList` and `AssetsChangeList` do. A service's calls push onto its own, as `assets.Add` does. Push for
-  bulk work. Work over a list costs a walk per run, so a call
-  that runs one at once is for the odd change, not a hot path.
-- Core's own work is its root pipelines, each doing one area's work at each point of a run. `App.Run` lists them. A
-  dedicated pipeline is for a substantial piece of work, not each step: a step is a method.
+  needs. It is a `public sealed` class implementing `IGem`, the Core interfaces it provides, and an
+  `IPipeline<TState>` for each data pipeline it joins.
+- A gem's constructor takes everything it depends on and starts what the gem is; `Dispose` ends it. Only code that
+  builds objects from constructors takes `IServiceProvider`. Gems are made in dependency order, then in the order the
+  project lists them, and disposed in reverse.
+- A hook is what the engine calls on a gem each frame: `IGem`'s `Update`, `FixedUpdate`, `LateUpdate` and `Render`, in
+  that order over the gems, on the main thread. A gem implements the ones it needs. One that throws in a hook is logged
+  and leaves every hook and pipeline.
+- A service is what you call. A pipeline is work over a state, run stage by stage, each taking the state as the one
+  before left it and handing it on, changed or not. Core's stages come first, then each gem's in the order the gems
+  were made. `pipelines.Run(state)` runs one now, on the main thread; `RunAsync` awaited, on any thread.
+- A pipeline holds no state of its own and knows no other pipeline: only the databases of its area and the
+  coordinator, to run a nested pipeline. What joins one does so with `Register`, and the subscription it returns takes
+  it out again.
+- Core's own work is its root pipelines, one per area, each doing that area's work at each point of a run:
+  [`PipelineStages.cs`](../src/Core/Pipelines/PipelineStages.cs) has the states, and `App.Run` runs them in order.
+  Those states are Core's alone; a gem reaches the frame through its hooks. A dedicated pipeline is for a substantial
+  piece of work, not each step: a step is a method.
+- The data pipelines a gem joins are the asset loads (`AssetLoad<T>`), the change lists (`EntitiesChangeList`,
+  `AssetsChangeList`) and the world's stages (`WorldLoad` and the others beside it). A change to a database is pushed
+  onto a change list, whose pipeline acts on it and says what came of it. A service's calls push onto its own, as
+  `assets.Add` does, or rent, run and return one, as `world.Create` does. Push for bulk work. Work over a list costs a
+  walk per run, so a call that runs one at once is for the odd change, not a hot path.
 - A pipeline that can't take a run because of what its caller is doing throws `PipelineRefusedException`, which goes to
   the caller.
-- What a frame runs is on the main thread and returns finished, with `ValueTask.FromResult`. A gem whose pipeline throws
-  or returns unfinished is logged and leaves every pipeline.
-- What is awaited, such as `Startup`, is called on the main thread and may await. After an await of its own, it steps
-  back with `await threads.Enter(EngineThread.Main)`.
+- What is run now returns finished, with `ValueTask.FromResult`; a gem's stage that returns unfinished is logged and
+  the gem leaves every pipeline. What is awaited may await. A stage that needs the main thread after an await of its
+  own steps onto it with `await threads.Enter(EngineThread.Main)`; nothing hops threads for it.
 - Gems talk through message structs. Publish one from any thread and every gem reads it the next frame, from
   `frame.Events` or through `EventCoordinator.Watch`.
-- Async work a frame's pipeline starts arrives in a later frame: by a message, or by work posted with `Threads.Post`.
-- `Shutdown` and `Dispose` free what the gem started, once none of its work still runs on a worker.
+- Async work a hook starts arrives in a later frame: by a message, or by work posted with `Threads.Post`. A gem that
+  needs slow setup starts it in its constructor and reads what came of it in a hook.
+- `Dispose` frees what the gem started, once none of its work still runs on a worker.
 - A gem's csproj states its `Description`, `Version` and `Authors`. Nothing else does.
 - Gems depend on Core's interfaces, never on each other.
 - A component is an unmanaged struct with public fields that implements `IComponent`, and members for what follows from
   those fields.
-- Work over many entities is a system: a function over chunks a gem calls from its pipeline, through `IEcs.Query` on its
-  own thread or `IEcs.Run` on the ECS's workers.
+- Work over many entities is a system: a function over chunks a gem calls from a hook, through `IEcs.Query` on its own
+  thread or `IEcs.Run` on the ECS's workers.
 - A game is its assets and scripts, never a gem.
 
 ## Async
@@ -108,8 +115,8 @@ Write the engine as data flowing through functions, not objects calling each oth
   `InvalidOperationException` or `NotSupportedException`, never `Exception` itself. Use the throw helpers
   (`ArgumentNullException.ThrowIfNull`, `ObjectDisposedException.ThrowIf` and their siblings).
 - Never catch and drop. Log what you catch with what failed and on what, or `throw;`. Catch `Exception` only where one
-  failure mustn't stop the run (a gem's pipeline, a loader, a forgotten task); elsewhere catch what you expect or filter
-  with `when`.
+  failure mustn't stop the run (a gem's hook or stage, a loader, a forgotten task); elsewhere catch what you expect or
+  filter with `when`.
 - A log line says what happened and to what, once. Anything that repeats every frame is `Log.Verbose` or a metric.
 - `Assert` is for impossible state and ends the process with a crash file.
 - No null-forgiving `!` (MG0002); it and every nullable warning fail the build. Don't make what is always there nullable: pass it
@@ -153,7 +160,8 @@ Write the engine as data flowing through functions, not objects calling each oth
 - An asset type holds what its users read: plain data, properties only, no JSON attributes, no file details, no I/O.
   Separate code reads it.
 - An asset type gems share is Core's. One only a gem reads is that gem's.
-- Reading a file format is its loader's one job; anything else known about an asset is found by Core.
+- Reading a file format is its loader's one job, and writing one its writer's; anything else known about an asset,
+  its sidecar included, is Core's.
 - An import setting is a property of the asset type, declared as one, never a settings type beside it.
 - A key the file must have is `required { get; init; }`. One with a default is `{ get; set; }`, the default as its
   initializer and nowhere else. What code sets, not the file, has no public setter.

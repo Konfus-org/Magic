@@ -8,6 +8,7 @@ using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Gems;
 using Magic.Pipelines;
+using Magic.Worlds;
 
 namespace Forest;
 
@@ -76,7 +77,7 @@ internal sealed class ForestGem(IEcs ecs, AssetDatabase assets) : IGem, IPipelin
         }
 
         Entity[] created = new Entity[count * 2];
-        ecs.Create<Transform, Renderer>(transforms, renderers, created);
+        ecs.Create(transforms, renderers, created);
         Origin origin = new() { Domain = forest, Content = state.Content.Id };
         foreach (Entity entity in created)
         {

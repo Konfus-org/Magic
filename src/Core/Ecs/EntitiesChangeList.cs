@@ -1,17 +1,16 @@
 using System.Runtime.InteropServices;
-using Magic.Pipelines;
 
 namespace Magic.Ecs;
 
 /// <summary>
 /// Changes to entities, pushed as data, and what came of them: the state of the pipeline that makes them, the one way
-/// entities change. Push onto <c>pipelines.Get&lt;EntitiesChangeList&gt;().Deferred</c> and they run once a frame, or run a
-/// list of your own at once with <c>world.Apply</c>, which is also how to change entities straight after a query's loop, where they can't change during
-/// it. The gem that provides the ECS makes them (<see cref="Apply"/>), and a gem after it reads <see cref="Created"/> and
+/// entities change. Fill a list of your own and run it at once with <c>world.Apply</c>, which is also how to change
+/// entities straight after a query's loop, where they can't change during it. The gem that provides the ECS makes them
+/// (<see cref="Apply"/>), and a gem after it reads <see cref="Created"/> and
 /// <see cref="Destroyed"/>. Pushing and making box nothing but what is boxed already, and one kept and reused allocates
 /// nothing once it has grown. Main thread.
 /// </summary>
-public sealed class EntitiesChangeList : IChangeList
+public sealed class EntitiesChangeList
 {
     private readonly List<Change> _changes = [];
 

@@ -39,7 +39,7 @@ public sealed class WorldRendererGem(
     IFileSystem files,
     Threads threads,
     App app
-) : IGem, IPipeline<Startup>, IPipeline<Update>, IPipeline<Render>, IDisposable
+) : IGem, IDisposable
 {
     private const int MaxVisibleClusters = 1 << 18;
     private const int CountsBytes = 64;
@@ -89,7 +89,13 @@ public sealed class WorldRendererGem(
     private GpuBuffer _retestList;
     private GpuSampler _sampler;
     private GpuSampler _linearSampler;
+    private bool _isStarting;
     private bool _isReady;
+
+    /// <summary>
+    /// What the passes compiled into, written whole by the compile on its worker and taken by <see cref="Render"/>.
+    /// </summary>
+    private CompiledPasses? _compiled;
     private bool _hasHzb;
     private DebugView _debugView;
     private Matrix4x4 _previousViewProjection;
@@ -150,71 +156,16 @@ public sealed class WorldRendererGem(
     }
 
     /// <summary>
-    /// Compiles the passes and makes the pools and tables. It runs to the end even once the run was told to exit, so
-    /// a run that only validates still finds a shader that does not compile.
+    /// Reads what the frame draws out of the entities, and starts compiling the passes on the first frame.
     /// </summary>
-    public async ValueTask<Startup> RunAsync(Startup state, CancellationToken cancel)
+    public void Update(in Frame frame)
     {
-        Result<ImmutableArray<CompiledShader>> compiled = await _pipelines
-            .CompileAsync(CancellationToken.None)
-            .ConfigureAwait(false);
-        await threads.Enter(EngineThread.Main);
-        if (!compiled.Ok)
+        if (!_isStarting)
         {
-            Log.Error($"The renderer draws nothing: {compiled.Error}");
-
-            return state;
+            _isStarting = true;
+            CompileAsync().FireAndForget();
         }
 
-        _materials = new MaterialTable(gpu, assets, _textures, threads);
-        Result made = _pipelines.Create(compiled.Value);
-        foreach (
-            Func<Result> step in (ReadOnlySpan<Func<Result>>)
-                [
-                    _pools.Create,
-                    _materials.Create,
-                    _instances.Create,
-                    _cards.Create,
-                    _shadows.Create,
-                    _lighting.Create,
-                    _gi.Create,
-                    _translucency.Create,
-                    _post.Create,
-                    () => _rayTracing?.Create() ?? Result.Success(),
-                    _pools.Field.Create,
-                    CreateBuffers,
-                    () =>
-                        _cardTargets.Resize(
-                            GpuCard.MaxTexels,
-                            GpuCard.MaxTexels,
-                            GpuCard.MaxTexels,
-                            GpuCard.MaxTexels,
-                            _graph
-                        ),
-                ]
-        )
-        {
-            if (made.Ok)
-                made = step();
-        }
-
-        if (!made.Ok)
-        {
-            Log.Error($"The renderer draws nothing: {made.Error}");
-
-            return state;
-        }
-
-        _isReady = true;
-
-        return state;
-    }
-
-    /// <summary>
-    /// Reads what the frame draws out of the entities.
-    /// </summary>
-    public ValueTask<Update> RunAsync(Update state, CancellationToken cancel)
-    {
         _world.Clear();
         foreach (EcsChunk<Transform, Renderer> chunk in ecs.Query<Transform, Renderer>())
         {
@@ -348,7 +299,7 @@ public sealed class WorldRendererGem(
             _world.HasSky |= chunk.Entities.Length > 0;
         }
 
-        foreach (SettingChanged setting in state.Frame.Events.Get<SettingChanged>())
+        foreach (SettingChanged setting in frame.Events.Get<SettingChanged>())
         {
             if (setting.Key == "WorldRenderer.tracer")
             {
@@ -391,17 +342,18 @@ public sealed class WorldRendererGem(
                     $"{setting.Key} takes {string.Join(", ", Enum.GetNames<DebugView>())}, not '{setting.Value}'."
                 );
         }
-
-        return ValueTask.FromResult(state);
     }
 
     /// <summary>
     /// Draws the frame and submits it.
     /// </summary>
-    public ValueTask<Render> RunAsync(Render state, CancellationToken cancel)
+    public void Render(in Frame frame)
     {
+        if (!_isReady && Interlocked.Exchange(ref _compiled, null) is { } compiled)
+            Start(compiled.Result);
+
         if (!_isReady || _materials is null)
-            return ValueTask.FromResult(state);
+            return;
 
         int outputWidth = app.Window is { Width: > 0, Height: > 0 } window ? window.Width : DefaultWidth;
         int outputHeight = app.Window is { Width: > 0, Height: > 0 } sized ? sized.Height : DefaultHeight;
@@ -426,7 +378,7 @@ public sealed class WorldRendererGem(
             {
                 Log.Error($"The frame is not drawn: {resized.Error}");
 
-                return ValueTask.FromResult(state);
+                return;
             }
 
             _hasHzb = false;
@@ -457,7 +409,7 @@ public sealed class WorldRendererGem(
         bool hasArrivals = _pools.HasArrivals;
         _instances.Upload(_graph);
         _rayTracing?.Prepare(_graph, _instances.Rows, _instances.Extras, hasArrivals || _instances.Changes.Length > 0);
-        UploadConstants(_constants, GetFrameConstants(camera, sun, state.Frame.Index, instanceCount));
+        UploadConstants(_constants, GetFrameConstants(camera, sun, frame.Index, instanceCount));
         ResetCounts();
         _shadows.Prepare(
             _graph,
@@ -478,15 +430,9 @@ public sealed class WorldRendererGem(
             _post.Constants
         );
         _translucency.Prepare(_graph, sun.Direction, camera.Transform.Position, _targets);
-        _post.Update(_pipelines, _world.Post, cancel);
-        _post.Prepare(_graph, _targets, _world.Post, (float)state.Frame.AppSec);
-        _gi.Prepare(
-            _graph,
-            _instances.Rows,
-            camera.Transform.Position,
-            state.Frame.Index,
-            sun.Radiance * FallbackLight
-        );
+        _post.Update(_pipelines, _world.Post, CancellationToken.None);
+        _post.Prepare(_graph, _targets, _world.Post, (float)frame.AppSec);
+        _gi.Prepare(_graph, _instances.Rows, camera.Transform.Position, frame.Index, sun.Radiance * FallbackLight);
         _pools.Field.Prepare(
             _graph,
             _pipelines,
@@ -575,7 +521,7 @@ public sealed class WorldRendererGem(
         }
 
         // One readback buffer, so one screenshot a frame: the last asked for.
-        ReadOnlySpan<ScreenshotRequested> requests = state.Frame.Events.Get<ScreenshotRequested>();
+        ReadOnlySpan<ScreenshotRequested> requests = frame.Events.Get<ScreenshotRequested>();
         if (requests.Length > 0)
         {
             _graph.BeginTransferPass("Read the output back");
@@ -590,8 +536,6 @@ public sealed class WorldRendererGem(
         _hasHzb = true;
         if (requests.Length > 0)
             SaveScreenshotAsync(requests[^1].Path, outputWidth, outputHeight).FireAndForget();
-
-        return ValueTask.FromResult(state);
     }
 
     /// <summary>
@@ -672,6 +616,72 @@ public sealed class WorldRendererGem(
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Compiles the passes on a worker, for <see cref="Render"/> to make the pipelines from.
+    /// </summary>
+    private async Task CompileAsync()
+    {
+        Result<ImmutableArray<CompiledShader>> compiled = await _pipelines
+            .CompileAsync(CancellationToken.None)
+            .ConfigureAwait(false);
+        Interlocked.Exchange(ref _compiled, new CompiledPasses(compiled));
+    }
+
+    /// <summary>
+    /// Makes the pipelines, the pools and the tables from what the passes compiled into, in the frame, once: a run that
+    /// ends before that draws nothing, and finds a shader that does not compile only if it runs long enough to.
+    /// </summary>
+    private void Start(Result<ImmutableArray<CompiledShader>> compiled)
+    {
+        if (!compiled.Ok)
+        {
+            Log.Error($"The renderer draws nothing: {compiled.Error}");
+
+            return;
+        }
+
+        _materials = new MaterialTable(gpu, assets, _textures, threads);
+        Result made = _pipelines.Create(compiled.Value);
+        foreach (
+            Func<Result> step in (ReadOnlySpan<Func<Result>>)
+                [
+                    _pools.Create,
+                    _materials.Create,
+                    _instances.Create,
+                    _cards.Create,
+                    _shadows.Create,
+                    _lighting.Create,
+                    _gi.Create,
+                    _translucency.Create,
+                    _post.Create,
+                    () => _rayTracing?.Create() ?? Result.Success(),
+                    _pools.Field.Create,
+                    CreateBuffers,
+                    () =>
+                        _cardTargets.Resize(
+                            GpuCard.MaxTexels,
+                            GpuCard.MaxTexels,
+                            GpuCard.MaxTexels,
+                            GpuCard.MaxTexels,
+                            _graph
+                        ),
+                ]
+        )
+        {
+            if (made.Ok)
+                made = step();
+        }
+
+        if (!made.Ok)
+        {
+            Log.Error($"The renderer draws nothing: {made.Error}");
+
+            return;
+        }
+
+        _isReady = true;
     }
 
     private Result CreateBuffers()
@@ -1195,4 +1205,12 @@ public sealed class WorldRendererGem(
         int InstanceCount,
         FrameTargets Targets
     );
+
+    /// <summary>
+    /// What the passes compiled into, boxed so it is written whole from the compile's worker.
+    /// </summary>
+    private sealed class CompiledPasses(Result<ImmutableArray<CompiledShader>> result)
+    {
+        public Result<ImmutableArray<CompiledShader>> Result { get; } = result;
+    }
 }

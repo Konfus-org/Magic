@@ -1,13 +1,10 @@
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Magic.Assets;
 using Magic.Assets.Pipeline;
 using Magic.Debugging;
 using Magic.Ecs;
-using Magic.Files;
 using Magic.Gems;
 using Magic.Serialization;
 using Magic.Utils;
@@ -20,14 +17,11 @@ namespace WorldLoader;
 /// its values as JSON, so it outlives the code that made it. It is public because nothing in its assembly makes it: Magic
 /// does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class WorldLoaderGem(IFileSystem files, Assemblies code)
-    : IGem,
-        IAssetLoader<WorldState>,
-        IWorldStateWriter
+public sealed class WorldLoaderGem(Assemblies code) : IGem, IAssetLoader<WorldState>, IAssetWriter<WorldState>
 {
-    private const string Sidecar = ".meta";
-
     public ImmutableArray<string> Extensions => [".world"];
+
+    public string Extension => ".world";
 
     /// <summary>
     /// A component no code declares, or whose values no longer fit it, is an error, logged once per type, and the entity goes
@@ -51,40 +45,18 @@ public sealed class WorldLoaderGem(IFileSystem files, Assemblies code)
         return Task.FromResult(Result.Success(state));
     }
 
-    public async Task<Result<Handle<WorldState>>> WriteAsync(
-        WorldState state,
-        string path,
+    public async Task<Result<ReadOnlyMemory<byte>>> WriteAsync(
+        WorldState asset,
         IProgress<LoadProgress>? progress,
         CancellationToken cancel
     )
     {
-        ArgumentNullException.ThrowIfNull(state);
-        ArgumentNullException.ThrowIfNull(path);
-        Result<JsonElement> json = await Task.Run(() => ToJson(state, progress, cancel), cancel).ConfigureAwait(false);
-        if (!json.Ok)
-            return Result.Failure(json.Error);
+        ArgumentNullException.ThrowIfNull(asset);
+        Result<JsonElement> json = await Task.Run(() => ToJson(asset, progress, cancel), cancel).ConfigureAwait(false);
 
-        Result written = await files
-            .WriteAsync(path, Encoding.UTF8.GetBytes(json.Value.GetRawText()), cancel)
-            .ConfigureAwait(false);
-        if (!written.Ok)
-            return Result.Failure(written.Error);
-
-        ulong id = GetId(path);
-        byte[] meta = Encoding.UTF8.GetBytes($$"""{ "id": {{id}}, "type": "{{nameof(WorldState)}}" }""");
-        Result metaWritten = await files.WriteAsync(path + Sidecar, meta, cancel).ConfigureAwait(false);
-
-        return metaWritten.Ok ? Result.Success(new Handle<WorldState>(id)) : Result.Failure(metaWritten.Error);
-    }
-
-    /// <summary>
-    /// The id of the file at <paramref name="path"/>, the same for it each time, and never none.
-    /// </summary>
-    private static ulong GetId(string path)
-    {
-        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(path.Replace('\\', '/').ToUpperInvariant()));
-
-        return Math.Max(BitConverter.ToUInt64(hash), 1);
+        return json.Ok
+            ? Result.Success<ReadOnlyMemory<byte>>(Encoding.UTF8.GetBytes(json.Value.GetRawText()))
+            : Result.Failure(json.Error);
     }
 
     private static Result<JsonElement> ToJson(

@@ -24,8 +24,8 @@ namespace ArchEcs;
 public sealed class ArchEcsGem : IGem, IEcs, IPipeline<EntitiesChangeList>, IDisposable
 {
     private const string CannotChangeInLoop =
-        "An entity's components cannot change during a query's loop or a run: push what to change onto the pipeline's "
-        + "Deferred, or apply a list of your own after.";
+        "An entity's components cannot change during a query's loop or a run: fill a list of your own and apply it "
+        + "after.";
 
     private readonly ArchWorld _world;
 

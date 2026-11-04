@@ -35,7 +35,7 @@ To run one step of Validate on its own:
 ```powershell
 dotnet build src/Magic.slnx
 dotnet test --solution src/Magic.slnx
-'exit' | Build/bin/Debug/Magic open samples/HelloWorld/HelloWorld.magic --headless --fail-on-error
+'wait loaded', 'wait 10s', 'exit' | Build/bin/Debug/Magic open samples/HelloWorld/HelloWorld.magic --headless --fail-on-error
 tools/Scripts/Screenshot.ps1 -Domains 'Domains/Audio/Audio.domain'
 ```
 

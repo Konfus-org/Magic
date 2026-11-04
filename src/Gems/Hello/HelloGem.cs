@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using Magic.Debugging;
 using Magic.Gems;
 using Magic.Pipelines;
@@ -7,21 +6,15 @@ namespace Hello;
 
 /// <summary>
 /// The gem: the one class in its assembly that implements <see cref="IGem"/>. Magic makes it after whatever its
-/// constructor takes. Each <see cref="IPipeline{TState}"/> it implements is a pipeline it joins, and every other
-/// interface is what it provides to the gems made after it.
+/// constructor takes and calls the hooks it implements every frame. Each <see cref="IPipeline{TState}"/> it implements
+/// is a data pipeline it joins, and every other interface is what it provides to the gems made after it. It is public
+/// because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-[SuppressMessage(
-    "Performance",
-    "CA1812:Avoid uninstantiated internal classes",
-    Justification = "Magic makes it by reflection when a project lists the gem."
-)]
-internal sealed class HelloGem : IGem, IPipeline<Update>
+public sealed class HelloGem : IGem
 {
-    public ValueTask<Update> RunAsync(Update state, CancellationToken cancel)
+    public void Update(in Frame frame)
     {
-        if (state.Frame.Index % 60 == 0)
-            Log.Info($"Hello is running, at frame {state.Frame.Index}.");
-
-        return ValueTask.FromResult(state);
+        if (frame.Index % 60 == 0)
+            Log.Info($"Hello is running, at frame {frame.Index}.");
     }
 }

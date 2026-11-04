@@ -22,6 +22,8 @@ internal static class AssetChanges
                 AssetRequested requested => Request(snapshot, requested, changes),
                 AssetLoaderAdded added => AddLoader(snapshot, added),
                 AssetLoaderRemoved removed => RemoveLoader(snapshot, removed),
+                AssetWriterAdded added => AddWriter(snapshot, added),
+                AssetWriterRemoved removed => RemoveWriter(snapshot, removed),
                 AssetAdded added => Add(snapshot, added),
                 BuiltInAssetMissing missing => ReportMissing(snapshot, missing),
                 AssetFolderListed listed => RecordFolder(snapshot, listed),
@@ -140,6 +142,32 @@ internal static class AssetChanges
             ? snapshot with
             {
                 Loaders = snapshot.Loaders.Remove(removed.Type),
+            }
+            : snapshot;
+
+    private static AssetSnapshot AddWriter(AssetSnapshot snapshot, AssetWriterAdded added)
+    {
+        if (snapshot.Writers.TryGetValue(added.Type, out object? writes))
+        {
+            Log.Error(
+                $"{added.Writer.GetType().Name} writes {added.Type.Name}s, which {writes.GetType().Name} writes already, "
+                    + "so it does not."
+            );
+
+            return snapshot;
+        }
+
+        return snapshot with
+        {
+            Writers = snapshot.Writers.Add(added.Type, added.Writer),
+        };
+    }
+
+    private static AssetSnapshot RemoveWriter(AssetSnapshot snapshot, AssetWriterRemoved removed) =>
+        snapshot.Writers.TryGetValue(removed.Type, out object? writes) && ReferenceEquals(writes, removed.Writer)
+            ? snapshot with
+            {
+                Writers = snapshot.Writers.Remove(removed.Type),
             }
             : snapshot;
 

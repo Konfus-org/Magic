@@ -187,6 +187,10 @@ internal sealed record AssetLoaderAdded(Type Type, object Loader) : AssetChange;
 
 internal sealed record AssetLoaderRemoved(Type Type, object Loader) : AssetChange;
 
+internal sealed record AssetWriterAdded(Type Type, object Writer) : AssetChange;
+
+internal sealed record AssetWriterRemoved(Type Type, object Writer) : AssetChange;
+
 /// <summary>
 /// A gem made <paramref name="Asset"/> and hands it out as asset <paramref name="Id"/>.
 /// </summary>
