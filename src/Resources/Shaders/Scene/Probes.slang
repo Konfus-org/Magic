@@ -1,5 +1,5 @@
-// The global illumination's tables, C#'s GiConstants: the lit cards, the world probes around the camera and the
-// screen probes over the view, and how a direction maps to a probe's texels. A world probe keeps the sphere as an
+// The global illumination's tables, C#'s GiConstants: the lit cards, the world probes around the camera, the
+// screen probes over the view and the reflections, and how a direction maps to a probe's texels. A world probe keeps the sphere as an
 // octahedral map; a screen probe keeps the hemisphere above its surface as a square of cosine-distributed
 // directions, so the average of its texels times pi is the irradiance there. The constants' heap id is the
 // lighting constants' gi.
@@ -70,9 +70,18 @@ public struct GiConstants
     // Metres a probe's or a screen probe's ray goes at most.
     public float rayRange;
     public uint screenFiltered;
+    public uint reflectionTraced;
+    public uint reflectionResolved;
+    public uint reflections;
+    public uint reflectionsPrevious;
     public uint padding0;
     public uint padding1;
 }
+
+// The screen probes and the reflections: the roughness a surface reflects sharply below, its own ray a pixel, and
+// the roughness from which the screen probes' radiance stands in.
+public static const float ReflectionRoughnessSharp = 0.4;
+public static const float ReflectionRoughnessLimit = 0.6;
 
 // A lit card's slot: the instance it lights and that instance's capture row.
 public struct LitSlot

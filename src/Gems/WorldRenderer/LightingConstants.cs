@@ -87,6 +87,11 @@ internal enum DebugView : uint
     /// The world probes' irradiance at every surface, what a card or a ray's end reads.
     /// </summary>
     Probes,
+
+    /// <summary>
+    /// The sharp reflections alone, before the surface's Fresnel: what a smooth surface mirrors.
+    /// </summary>
+    Reflections,
 }
 
 /// <summary>

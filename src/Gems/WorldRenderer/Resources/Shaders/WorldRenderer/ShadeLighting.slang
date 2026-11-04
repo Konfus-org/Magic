@@ -203,7 +203,11 @@ void ShadeLighting<S : ISky>(uint3 thread : SV_DispatchThreadID)
         float occlusion = lerp(0.4, 1.0, DistanceFieldTracer.Trace(coneRay, coneLimits).visibility);
         float nDotV = max(dot(normal, viewDirection), 1e-4);
         float3 fresnel = brdf.f0 + (max(float3(1.0 - brdf.alpha), brdf.f0) - brdf.f0) * Pow5(1.0 - nDotV);
-        float3 specular = lerp(reflected, irradiance * InvPi, saturate(surface.x * 2.0 - 0.5));
+        // The sharp reflections below the limit, the probes' radiance above it, the irradiance when rough.
+        TextureRef reflections = { gi.reflections };
+        float sharpness = 1.0 - smoothstep(ReflectionRoughnessSharp, ReflectionRoughnessLimit, surface.x);
+        float3 reflectedSharp = reflections.Load(thread.xy, 0u).rgb;
+        float3 specular = lerp(lerp(reflected, irradiance * InvPi, saturate(surface.x * 2.0 - 0.5)), reflectedSharp, sharpness);
         float3 indirect = (brdf.diffuse * (1.0 - fresnel) * irradiance * InvPi + fresnel * (1.0 - brdf.alpha * 0.5) * specular) * (surface.z * occlusion);
         if (lighting.debugView == 3u)
         {
@@ -213,6 +217,10 @@ void ShadeLighting<S : ISky>(uint3 thread : SV_DispatchThreadID)
         {
             float3 probes;
             color = SampleWorldProbeIrradiance(gi, world + normal * start, normal, probes) ? probes * InvPi : float3(1.0, 0.0, 1.0);
+        }
+        else if (lighting.debugView == 5u)
+        {
+            color = reflectedSharp;
         }
         else
         {

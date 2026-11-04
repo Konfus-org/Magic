@@ -12,7 +12,8 @@ namespace WorldRenderer;
 /// What lights the world indirectly: the lit cards, a pool of slots each holding an instance's capture lit, given
 /// to the instances that matter most to the view; the world probes, a clipmap of spheres of radiance around the
 /// camera that trace the field and read the cards; the screen probes, one a tile of pixels, that trace the screen
-/// and the field and end in the world probes; and the passes that keep each up to date, a budget of each a frame.
+/// and the field and end in the world probes; the sharp reflections, a ray a pixel at half the output; and the passes
+/// that keep each up to date, a budget of each a frame.
 /// </summary>
 internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
 {
@@ -45,6 +46,9 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
     private readonly List<(float Importance, int Index)> _candidates = [];
     private readonly uint[] _batch = new uint[SlotsPerFrame];
     private readonly GpuTexture[] _screenFiltered = new GpuTexture[2];
+    private readonly GpuTexture[] _reflections = new GpuTexture[2];
+    private GpuTexture _reflectionTraced;
+    private GpuTexture _reflectionResolved;
     private readonly GpuBuffer[] _screenProbes = new GpuBuffer[2];
     private GpuTexture _litPool;
     private GpuTexture _probeRadiance;
@@ -228,6 +232,35 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
             return Result.Failure($"the screen probe irradiance table was not made: {irradiance.Error}");
 
         _screenIrradiance = irradiance.Value;
+        Result<GpuTexture> reflectionTraced = Make(
+            "Reflections traced",
+            (width + 1) / 2,
+            (height + 1) / 2,
+            GpuFormat.R16G16B16A16Sfloat
+        );
+        Result<GpuTexture> reflectionResolved = Make(
+            "Reflections resolved",
+            width,
+            height,
+            GpuFormat.R16G16B16A16Sfloat
+        );
+        Result<GpuTexture> reflections0 = Make("Reflections 0", width, height, GpuFormat.R16G16B16A16Sfloat);
+        Result<GpuTexture> reflections1 = Make("Reflections 1", width, height, GpuFormat.R16G16B16A16Sfloat);
+        foreach (
+            Result<GpuTexture> texture in (ReadOnlySpan<Result<GpuTexture>>)
+                [reflectionTraced, reflectionResolved, reflections0, reflections1]
+        )
+        {
+            if (!texture.Ok)
+                return Result.Failure($"a reflection texture was not made: {texture.Error}");
+        }
+
+        (_reflectionTraced, _reflectionResolved, _reflections[0], _reflections[1]) = (
+            reflectionTraced.Value,
+            reflectionResolved.Value,
+            reflections0.Value,
+            reflections1.Value
+        );
 
         return Result.Success();
     }
@@ -302,6 +335,10 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
             FrameIndex = frameIndex,
             RayRange = RayRange,
             ScreenFiltered = _screenFiltered[_current].Id,
+            ReflectionTraced = _reflectionTraced.Id,
+            ReflectionResolved = _reflectionResolved.Id,
+            Reflections = _reflections[_current].Id,
+            ReflectionsPrevious = _reflections[1 - _current].Id,
         };
         for (int level = 0; level < ProbeLevels; level++)
         {
@@ -473,6 +510,59 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         graph.Recorder.PushConstants(header);
         graph.Recorder.Dispatch((uint)probeCount);
         graph.EndPass();
+
+        graph.BeginComputePass("Reflections: trace");
+        graph.Use(frameConstants, GpuAccess.ShaderRead);
+        graph.Use(Constants, GpuAccess.ShaderRead);
+        graph.Use(instances, GpuAccess.ShaderRead);
+        graph.Use(visibleClusters, GpuAccess.ShaderRead);
+        graph.Use(captures.Buffer, GpuAccess.ShaderRead);
+        graph.Use(targets.Visibility, GpuAccess.ShaderRead);
+        graph.Use(targets.Depth, GpuAccess.ShaderRead);
+        graph.Use(targets.GBufferNormal, GpuAccess.ShaderRead);
+        graph.Use(targets.GBufferSurface, GpuAccess.ShaderRead);
+        graph.Use(targets.Hzb, GpuAccess.ShaderRead, 0);
+        graph.Use(_reflectionTraced, GpuAccess.ShaderWrite);
+        UseCards(graph);
+        UseProbes(graph);
+        captures.UseAll(graph);
+        field.UseForSampling(graph);
+        lighting.UseForCards(graph);
+        graph.Recorder.BindPipeline(pipelines.ReflectionTrace);
+        graph.Recorder.PushConstants(header);
+        graph.Recorder.Dispatch(Groups((targets.Width + 1) / 2, 8), Groups((targets.Height + 1) / 2, 8));
+        graph.EndPass();
+
+        graph.BeginComputePass("Reflections: resolve");
+        graph.Use(frameConstants, GpuAccess.ShaderRead);
+        graph.Use(Constants, GpuAccess.ShaderRead);
+        graph.Use(lighting.Constants, GpuAccess.ShaderRead);
+        graph.Use(targets.Visibility, GpuAccess.ShaderRead);
+        graph.Use(targets.Depth, GpuAccess.ShaderRead);
+        graph.Use(targets.GBufferNormal, GpuAccess.ShaderRead);
+        graph.Use(targets.GBufferSurface, GpuAccess.ShaderRead);
+        graph.Use(_reflectionTraced, GpuAccess.ShaderRead);
+        graph.Use(_reflectionResolved, GpuAccess.ShaderWrite);
+        graph.Recorder.BindPipeline(pipelines.ReflectionResolve);
+        graph.Recorder.PushConstants(header);
+        graph.Recorder.Dispatch(Groups(targets.Width, 8), Groups(targets.Height, 8));
+        graph.EndPass();
+
+        graph.BeginComputePass("Reflections: reproject");
+        graph.Use(frameConstants, GpuAccess.ShaderRead);
+        graph.Use(Constants, GpuAccess.ShaderRead);
+        graph.Use(lighting.Constants, GpuAccess.ShaderRead);
+        graph.Use(targets.Visibility, GpuAccess.ShaderRead);
+        graph.Use(targets.Depth, GpuAccess.ShaderRead);
+        graph.Use(targets.GBufferNormal, GpuAccess.ShaderRead);
+        graph.Use(targets.GBufferSurface, GpuAccess.ShaderRead);
+        graph.Use(_reflectionResolved, GpuAccess.ShaderRead);
+        graph.Use(_reflections[1 - _current], GpuAccess.ShaderRead);
+        graph.Use(_reflections[_current], GpuAccess.ShaderWrite);
+        graph.Recorder.BindPipeline(pipelines.ReflectionTemporal);
+        graph.Recorder.PushConstants(header);
+        graph.Recorder.Dispatch(Groups(targets.Width, 8), Groups(targets.Height, 8));
+        graph.EndPass();
     }
 
     /// <summary>
@@ -484,6 +574,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         graph.Use(_screenProbes[_current], GpuAccess.ShaderRead);
         graph.Use(_screenFiltered[_current], GpuAccess.ShaderRead);
         graph.Use(_screenIrradiance, GpuAccess.ShaderRead);
+        graph.Use(_reflections[_current], GpuAccess.ShaderRead);
         UseProbes(graph);
     }
 
@@ -607,7 +698,16 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
     private void Destroy(RenderGraph? graph)
     {
         foreach (
-            GpuTexture texture in (ReadOnlySpan<GpuTexture>)[_screenRadiance, _screenFiltered[0], _screenFiltered[1]]
+            GpuTexture texture in (ReadOnlySpan<GpuTexture>)
+                [
+                    _screenRadiance,
+                    _screenFiltered[0],
+                    _screenFiltered[1],
+                    _reflectionTraced,
+                    _reflectionResolved,
+                    _reflections[0],
+                    _reflections[1],
+                ]
         )
         {
             if (texture.IsNone)
@@ -629,6 +729,10 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         _screenRadiance = default;
         _screenFiltered[0] = default;
         _screenFiltered[1] = default;
+        _reflectionTraced = default;
+        _reflectionResolved = default;
+        _reflections[0] = default;
+        _reflections[1] = default;
         _screenProbes[0] = default;
         _screenProbes[1] = default;
         _screenIrradiance = default;
@@ -642,7 +746,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct GiConstants
 {
-    public const int Bytes = 200;
+    public const int Bytes = 216;
 
     public ProbeOrigins ProbeOrigins;
 
@@ -697,6 +801,14 @@ internal record struct GiConstants
     public float RayRange;
 
     public uint ScreenFiltered;
+
+    public uint ReflectionTraced;
+
+    public uint ReflectionResolved;
+
+    public uint Reflections;
+
+    public uint ReflectionsPrevious;
 
     public uint Padding0;
 

@@ -40,5 +40,9 @@ model reader, the mesh preprocessor and the texture reader.
   pixels traces the screen, then the field, then reads the world probes, and the pixels read the probes around them
   on their plane. A room with no window stays dark. `set WorldRenderer.debug=indirect` shows that light alone and
   `set WorldRenderer.debug=probes` what the world probes hold at every surface.
+- A smooth surface mirrors the world: a ray a pixel at half the output, drawn from the surface's lobe, traces the
+  screen, then the field, then the world probes, so a floor shows the wall behind the camera; the rays are gathered
+  over a reach the roughness sets and blended with last frame's, held within what the neighbours see.
+  `set WorldRenderer.debug=reflections` shows the reflections alone.
 - The passes are the `Shaders/WorldRenderer/` modules in the gem's `Resources`; they build on the shader library
   (`src/Resources/Shaders/README.md`).

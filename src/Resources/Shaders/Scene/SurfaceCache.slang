@@ -1,6 +1,7 @@
 // What a ray reads where it lands: the surface cache. A point on an instance is looked up in the instance's lit
 // card, the capture cell that saw the surface from its normal's side, where the cell's depth agrees with the
-// point; a point the field found is first given to the nearest of the instances listed for its brick.
+// point; a point the field found is first given to the nearest of the instances listed for its brick; and a ray
+// marched along the screen's depth lands on the instance drawn there.
 module "Scene/SurfaceCache";
 
 import Core.Heap;
@@ -8,6 +9,7 @@ import Core.Frame;
 import Core.Math;
 import Core.Pack;
 import Scene.Instances;
+import Scene.Visibility;
 import Scene.Captures;
 import Scene.Field;
 import Scene.Probes;
@@ -147,6 +149,66 @@ public bool FindFieldInstance(FrameConstants frame, FieldConstants field, float3
         }
 
         return best < 1e30;
+    }
+
+    return false;
+}
+
+static const uint ScreenSteps = 12u;
+static const float ScreenReach = 3.0;
+
+// A ray marched along the screen's depth: true where it passes behind a drawn surface within its thickness, with
+// what that surface sends back along the ray and how far along the ray it was.
+public bool TraceScreenToSurface(FrameConstants frame, GiConstants gi, float3 origin, float3 direction, out float3 radiance, out float hitDistance)
+{
+    radiance = float3(0.0);
+    hitDistance = 0.0;
+    uint2 size = uint2(frame.width, frame.height);
+    TextureRef hzb = { frame.hzb };
+    float t = 0.05;
+    for (uint step = 0u; step < ScreenSteps; step++)
+    {
+        t *= 1.45;
+        if (t > ScreenReach)
+            return false;
+
+        float3 point = origin + direction * t;
+        float4 clip = mul(float4(Relative(frame, point), 1.0), frame.viewProjection);
+        if (clip.w <= frame.near)
+            return false;
+
+        float2 uv = float2(clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5);
+        if (any(uv < 0.0) || any(uv >= 1.0))
+            return false;
+
+        uint2 pixel = min(uint2(uv * float2(size)), size - 1u);
+        float sceneDepth = hzb.Load(pixel, 0u).x;
+        if (sceneDepth <= 0.0)
+            continue;
+
+        float rayDepth = clip.z / clip.w;
+        if (rayDepth >= sceneDepth)
+            continue;
+
+        float behind = ToViewDepth(rayDepth, frame.near) - ToViewDepth(sceneDepth, frame.near);
+        if (behind > 0.2 + 0.1 * t)
+            continue;
+
+        UintTextureRef visibility = { frame.visibility };
+        uint visibleIndex;
+        uint triangle;
+        if (!DecodeVisibilityId(visibility.Load(pixel, 0u), visibleIndex, triangle))
+            return false;
+
+        ArrayRef<VisibleCluster> visible = { frame.visibleClusters };
+        uint instanceIndex = visible[visibleIndex].instance;
+        GpuInstance instance = LoadInstance(frame.instances, instanceIndex);
+        TextureRef normalTexture = { frame.gbufferNormal };
+        float3 normal = DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0);
+        float3 world = ReconstructWorld(frame, GetTexelCenterUv(pixel, size), sceneDepth);
+        radiance = ShadeInstancePoint(frame, gi, instanceIndex, instance, world, normal, direction);
+        hitDistance = t;
+        return true;
     }
 
     return false;

@@ -13,7 +13,6 @@ import Core.Pack;
 import Core.Random;
 import Core.Sampling;
 import Scene.Instances;
-import Scene.Visibility;
 import Scene.Lighting;
 import Scene.Field;
 import Scene.Probes;
@@ -22,8 +21,6 @@ import Sky.ISky;
 import Trace.IWorldTracer;
 import Trace.DistanceField;
 
-static const uint ScreenSteps = 12u;
-static const float ScreenReach = 3.0;
 static const float HistoryWeight = 0.85;
 
 // Each tile's probe placed at one of its pixels, a different one each frame, on the surface drawn there.
@@ -62,61 +59,6 @@ void ScreenProbePlace(uint3 thread : SV_DispatchThreadID)
     probes[GetScreenProbeIndex(gi, tile)] = probe;
 }
 
-// A ray marched along the screen's depth: true where it passes behind a drawn surface within its thickness, with
-// what that surface sends back along the ray.
-bool TraceScreen(FrameConstants frame, GiConstants gi, float3 origin, float3 direction, out float3 radiance)
-{
-    radiance = float3(0.0);
-    uint2 size = uint2(frame.width, frame.height);
-    TextureRef hzb = { frame.hzb };
-    float t = 0.05;
-    for (uint step = 0u; step < ScreenSteps; step++)
-    {
-        t *= 1.45;
-        if (t > ScreenReach)
-            return false;
-
-        float3 point = origin + direction * t;
-        float4 clip = mul(float4(Relative(frame, point), 1.0), frame.viewProjection);
-        if (clip.w <= frame.near)
-            return false;
-
-        float2 uv = float2(clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5);
-        if (any(uv < 0.0) || any(uv >= 1.0))
-            return false;
-
-        uint2 pixel = min(uint2(uv * float2(size)), size - 1u);
-        float sceneDepth = hzb.Load(pixel, 0u).x;
-        if (sceneDepth <= 0.0)
-            continue;
-
-        float rayDepth = clip.z / clip.w;
-        if (rayDepth >= sceneDepth)
-            continue;
-
-        float behind = ToViewDepth(rayDepth, frame.near) - ToViewDepth(sceneDepth, frame.near);
-        if (behind > 0.2 + 0.1 * t)
-            continue;
-
-        UintTextureRef visibility = { frame.visibility };
-        uint visibleIndex;
-        uint triangle;
-        if (!DecodeVisibilityId(visibility.Load(pixel, 0u), visibleIndex, triangle))
-            return false;
-
-        ArrayRef<VisibleCluster> visible = { frame.visibleClusters };
-        uint instanceIndex = visible[visibleIndex].instance;
-        GpuInstance instance = LoadInstance(frame.instances, instanceIndex);
-        TextureRef normalTexture = { frame.gbufferNormal };
-        float3 normal = DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0);
-        float3 world = ReconstructWorld(frame, GetTexelCenterUv(pixel, size), sceneDepth);
-        radiance = ShadeInstancePoint(frame, gi, instanceIndex, instance, world, normal, direction);
-        return true;
-    }
-
-    return false;
-}
-
 // Each probe's texels traced: a ray each over the hemisphere, the screen, then the field, then the world probes.
 [shader("compute")]
 [numthreads(64, 1, 1)]
@@ -149,7 +91,8 @@ void ScreenProbeTrace<S : ISky>(uint3 group : SV_GroupID, uint3 local : SV_Group
     float3 origin = probe.position + probe.normal * start;
 
     float3 radiance;
-    if (!TraceScreen(frame, gi, probe.position + probe.normal * 0.02, direction, radiance))
+    float screenDistance;
+    if (!TraceScreenToSurface(frame, gi, probe.position + probe.normal * 0.02, direction, radiance, screenDistance))
     {
         Ray ray = { origin, direction };
         TraceLimits limits = { start, gi.rayRange, 0.0 };

@@ -56,6 +56,24 @@ public float3 Evaluate(Brdf brdf, float3 normal, float3 view, float3 light)
     return (brdf.diffuse * InvPi + specular) * nDotL;
 }
 
+// A microfacet normal the view sees, drawn from the GGX distribution of the visible ones (Heitz, "Sampling the GGX
+// Distribution of Visible Normals", 2018), in the frame whose z is the surface's normal.
+public float3 SampleGgxVisibleNormal(float3 viewLocal, float alpha, float2 xi)
+{
+    float3 stretched = normalize(float3(alpha * viewLocal.x, alpha * viewLocal.y, viewLocal.z));
+    float lengthSquared = stretched.x * stretched.x + stretched.y * stretched.y;
+    float3 tangent = lengthSquared > 0.0 ? float3(-stretched.y, stretched.x, 0.0) * rsqrt(lengthSquared) : float3(1.0, 0.0, 0.0);
+    float3 bitangent = cross(stretched, tangent);
+    float radius = sqrt(xi.x);
+    float phi = TwoPi * xi.y;
+    float p1 = radius * cos(phi);
+    float p2 = radius * sin(phi);
+    float s = 0.5 * (1.0 + stretched.z);
+    p2 = (1.0 - s) * sqrt(max(0.0, 1.0 - p1 * p1)) + s * p2;
+    float3 half = p1 * tangent + p2 * bitangent + sqrt(max(0.0, 1.0 - p1 * p1 - p2 * p2)) * stretched;
+    return normalize(float3(alpha * half.x, alpha * half.y, max(half.z, 0.0)));
+}
+
 // What the surface reflects of light from everywhere at once, as the sky's: the diffuse under the average Fresnel.
 public float3 EvaluateAmbient(Brdf brdf, float3 normal, float3 view)
 {

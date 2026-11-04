@@ -90,6 +90,12 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
 
     public GpuPipeline ScreenProbeFilter { get; private set; }
 
+    public GpuPipeline ReflectionTrace { get; private set; }
+
+    public GpuPipeline ReflectionResolve { get; private set; }
+
+    public GpuPipeline ReflectionTemporal { get; private set; }
+
     public uint CullThreads { get; private set; }
 
     public uint TileSize { get; private set; }
@@ -135,6 +141,9 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
                     ScreenProbeTrace,
                     ScreenProbeTemporal,
                     ScreenProbeFilter,
+                    ReflectionTrace,
+                    ReflectionResolve,
+                    ReflectionTemporal,
                 ]
         )
         {
@@ -214,6 +223,12 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             },
             Entry("ScreenProbes", "ScreenProbeTemporal", ShaderStage.Compute),
             Entry("ScreenProbes", "ScreenProbeFilter", ShaderStage.Compute),
+            Entry("Reflections", "ReflectionTrace", ShaderStage.Compute) with
+            {
+                TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere")],
+            },
+            Entry("Reflections", "ReflectionResolve", ShaderStage.Compute),
+            Entry("Reflections", "ReflectionTemporal", ShaderStage.Compute),
         ];
         foreach (ShaderEntry entry in entries)
         {
@@ -408,6 +423,9 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             ("Trace screen probes", 35),
             ("Reproject screen probes", 36),
             ("Filter screen probes", 37),
+            ("Trace reflections", 38),
+            ("Resolve reflections", 39),
+            ("Reproject reflections", 40),
         ];
         GpuPipeline[] giPipelines = new GpuPipeline[giEntries.Length];
         for (int i = 0; i < giEntries.Length; i++)
@@ -428,7 +446,10 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             ScreenProbePlace,
             ScreenProbeTrace,
             ScreenProbeTemporal,
-            ScreenProbeFilter
+            ScreenProbeFilter,
+            ReflectionTrace,
+            ReflectionResolve,
+            ReflectionTemporal
         ) = (
             giPipelines[0],
             giPipelines[1],
@@ -438,7 +459,10 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             giPipelines[5],
             giPipelines[6],
             giPipelines[7],
-            giPipelines[8]
+            giPipelines[8],
+            giPipelines[9],
+            giPipelines[10],
+            giPipelines[11]
         );
         TileSize = compiled[5].GroupSizeX;
         bool areTiled =
