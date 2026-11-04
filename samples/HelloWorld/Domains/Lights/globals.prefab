@@ -1,0 +1,485 @@
+{
+    "entities": [
+        {
+            "name": "Camera",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 2.2,
+                        "z": -8.5
+                    }
+                },
+                "Camera": {},
+                "PostProcessing": {
+                    "effect0": {
+                        "id": 1700000000000283
+                    },
+                    "bloomStrength": 0.04
+                }
+            }
+        },
+        {
+            "name": "Sun",
+            "components": {
+                "Transform": {
+                    "rotation": {
+                        "x": 0.0,
+                        "y": 0.99255,
+                        "z": -0.12187,
+                        "w": 0.0
+                    }
+                },
+                "DirectionalLight": {
+                    "mode": "sun",
+                    "color": {
+                        "r": 1,
+                        "g": 0.95,
+                        "b": 0.85
+                    },
+                    "intensity": 2000
+                }
+            }
+        },
+        {
+            "name": "Sky",
+            "components": {
+                "Sky": {
+                    "material": {
+                        "id": 4569236087865836549
+                    }
+                }
+            }
+        },
+        {
+            "name": "Fog",
+            "components": {
+                "Fog": {
+                    "density": 0.02,
+                    "halfHeight": 40,
+                    "anisotropy": 0.6
+                }
+            }
+        },
+        {
+            "name": "Floor",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "w": 1
+                    },
+                    "scale": {
+                        "x": 10,
+                        "y": 1,
+                        "z": 10
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 100204
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Ceiling",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 6,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": 1.0,
+                        "y": 0.0,
+                        "z": 0.0,
+                        "w": 0.0
+                    },
+                    "scale": {
+                        "x": 10,
+                        "y": 1,
+                        "z": 10
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 12045873320119837722
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Wall -X",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -10,
+                        "y": 3.0,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": -0.0,
+                        "y": -0.0,
+                        "z": -0.70711,
+                        "w": 0.70711
+                    },
+                    "scale": {
+                        "x": 6,
+                        "y": 1,
+                        "z": 10
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 12045873320119837722
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Wall +X",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 10,
+                        "y": 3.0,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": 0.0,
+                        "y": 0.0,
+                        "z": 0.70711,
+                        "w": 0.70711
+                    },
+                    "scale": {
+                        "x": 6,
+                        "y": 1,
+                        "z": 10
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 12045873320119837722
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Wall -Z",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 3.0,
+                        "z": -10
+                    },
+                    "rotation": {
+                        "x": 0.70711,
+                        "y": 0.0,
+                        "z": 0.0,
+                        "w": 0.70711
+                    },
+                    "scale": {
+                        "x": 10,
+                        "y": 1,
+                        "z": 6
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 12045873320119837722
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Window wall left",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -5.75,
+                        "y": 3.0,
+                        "z": 10
+                    },
+                    "rotation": {
+                        "x": -0.70711,
+                        "y": -0.0,
+                        "z": -0.0,
+                        "w": 0.70711
+                    },
+                    "scale": {
+                        "x": 4.25,
+                        "y": 1,
+                        "z": 6
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 12045873320119837722
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Window wall right",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 5.75,
+                        "y": 3.0,
+                        "z": 10
+                    },
+                    "rotation": {
+                        "x": -0.70711,
+                        "y": -0.0,
+                        "z": -0.0,
+                        "w": 0.70711
+                    },
+                    "scale": {
+                        "x": 4.25,
+                        "y": 1,
+                        "z": 6
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 12045873320119837722
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Window sill",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 1,
+                        "z": 10
+                    },
+                    "rotation": {
+                        "x": -0.70711,
+                        "y": -0.0,
+                        "z": -0.0,
+                        "w": 0.70711
+                    },
+                    "scale": {
+                        "x": 1.5,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 12045873320119837722
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Window head",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 5.25,
+                        "z": 10
+                    },
+                    "rotation": {
+                        "x": -0.70711,
+                        "y": -0.0,
+                        "z": -0.0,
+                        "w": 0.70711
+                    },
+                    "scale": {
+                        "x": 1.5,
+                        "y": 1,
+                        "z": 0.75
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 12045873320119837722
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Window pane",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 3.25,
+                        "z": 10
+                    },
+                    "rotation": {
+                        "x": -0.70711,
+                        "y": -0.0,
+                        "z": -0.0,
+                        "w": 0.70711
+                    },
+                    "scale": {
+                        "x": 1.5,
+                        "y": 1,
+                        "z": 1.25
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 100205
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Window pane red",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0.6,
+                        "y": 3.0,
+                        "z": 9.7
+                    },
+                    "rotation": {
+                        "x": -0.70711,
+                        "y": -0.0,
+                        "z": -0.0,
+                        "w": 0.70711
+                    },
+                    "scale": {
+                        "x": 0.7,
+                        "y": 1,
+                        "z": 0.7
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 100206
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Question",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -3,
+                        "y": 1,
+                        "z": 2
+                    },
+                    "rotation": {
+                        "x": 0,
+                        "y": 1,
+                        "z": 0,
+                        "w": 0
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 1529
+                    },
+                    "materials": [
+                        {
+                            "id": 714
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Panel",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 6,
+                        "y": 3,
+                        "z": 4
+                    },
+                    "rotation": {
+                        "x": -0.0,
+                        "y": -0.70711,
+                        "z": -0.0,
+                        "w": 0.70711
+                    }
+                },
+                "RectLight": {
+                    "color": {
+                        "r": 0.4,
+                        "g": 0.7,
+                        "b": 1
+                    },
+                    "intensity": 600,
+                    "width": 3,
+                    "height": 1.5,
+                    "range": 12
+                }
+            }
+        }
+    ]
+}

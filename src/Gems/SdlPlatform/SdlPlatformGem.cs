@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -10,6 +11,7 @@ using Magic.Input;
 using Magic.Pipelines;
 using Magic.Platform;
 using Magic.Threading;
+using Magic.Utils;
 using static SdlPlatform.SDL_EventType;
 using static SdlPlatform.SDL_GamepadAxis;
 using static SdlPlatform.SDL_MouseWheelDirection;
@@ -90,6 +92,11 @@ public sealed class SdlPlatformGem
     /// </summary>
     private readonly StringBuilder _typed = new();
 
+    /// <summary>
+    /// Whether the window opened with Vulkan, so it can give a surface.
+    /// </summary>
+    private readonly bool _hasVulkan;
+
     private string _title;
     private string _clipboard = string.Empty;
     private string _text = string.Empty;
@@ -112,14 +119,29 @@ public sealed class SdlPlatformGem
         if (app.IsHeadless)
             return;
 
+        // A window a GPU gem can draw into needs Vulkan at its opening; one without still opens on a machine with no
+        // Vulkan, for a project that draws nothing.
         fixed (byte* title = CString.ToBytes(_title))
         {
             _window = SDL_CreateWindow(
                 title,
                 InitialWidth,
                 InitialHeight,
-                SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+                SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_VULKAN
             );
+            _hasVulkan = _window != null;
+            if (_window == null)
+            {
+                Log.Warn(
+                    $"The window opens without Vulkan, so nothing can be drawn into it: {CString.Read(SDL_GetError())}"
+                );
+                _window = SDL_CreateWindow(
+                    title,
+                    InitialWidth,
+                    InitialHeight,
+                    SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+                );
+            }
         }
 
         if (_window == null)
@@ -131,6 +153,7 @@ public sealed class SdlPlatformGem
         }
 
         Id = SDL_GetWindowID(_window);
+        VulkanExtensions = _hasVulkan ? ReadVulkanExtensions() : [];
 
         // Typed characters come as text events only while text input is on: always, as a desktop has no on-screen
         // keyboard for it to bring up.
@@ -196,6 +219,8 @@ public sealed class SdlPlatformGem
     /// </summary>
     public uint Id { get; }
 
+    public ImmutableArray<string> VulkanExtensions { get; } = [];
+
     public ReadOnlySpan<InputDevice> Devices => CollectionsMarshal.AsSpan(_devices);
 
     /// <summary>
@@ -255,6 +280,19 @@ public sealed class SdlPlatformGem
 
             return index < 0 ? default : _controls[index][control.Index];
         }
+    }
+
+    public unsafe Result<ulong> CreateVulkanSurface(nint instance)
+    {
+        ThrowIfNotOnMain();
+        if (_window == null || !_hasVulkan)
+            return Result.Failure("the window opened without Vulkan.");
+
+        VkSurfaceKHR_T* surface;
+        if (!SDL_Vulkan_CreateSurface(_window, (VkInstance_T*)instance, null, &surface))
+            return Result.Failure($"SDL could not make a surface: {CString.Read(SDL_GetError())}");
+
+        return Result.Success((ulong)surface);
     }
 
     public unsafe void Dispose()
@@ -624,6 +662,29 @@ public sealed class SdlPlatformGem
             float value = ToStick(SDL_GetGamepadAxis(gamepad, axis));
             SetState(_controls[index], control, isY ? -value : value);
         }
+    }
+
+    /// <summary>
+    /// The instance extensions a surface on this window needs, as SDL lists them for this platform.
+    /// </summary>
+    private static unsafe ImmutableArray<string> ReadVulkanExtensions()
+    {
+        uint count;
+        byte** names = SDL_Vulkan_GetInstanceExtensions(&count);
+        if (names == null)
+        {
+            Log.Warn($"SDL lists no Vulkan extensions for the window: {CString.Read(SDL_GetError())}");
+
+            return [];
+        }
+
+        ImmutableArray<string>.Builder extensions = ImmutableArray.CreateBuilder<string>((int)count);
+        for (uint i = 0; i < count; i++)
+        {
+            extensions.Add(CString.Read(names[i]));
+        }
+
+        return extensions.MoveToImmutable();
     }
 
     /// <summary>

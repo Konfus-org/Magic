@@ -233,14 +233,14 @@ built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
     conversions, `Encode`/`Decode` for packing and `Create` for a struct it builds. A contract's work is `Evaluate`,
     `Shade` or `Apply`. `Pow2`, `Max3` and the like read as the intrinsics beside them.
   - A bool starts with `Is`, `Has` or `Can` (`IsHidden`, a field's in camel case: `isMirrored`).
-  - A contract is `I` plus a noun (`ISurface`), and what it's handed is the noun plus `Inputs` (`SurfaceInputs`). A
+  - A contract is `I` plus a noun (`IMaterial`), and what it's handed is the noun plus `Inputs` (`SurfaceInputs`). A
     struct shared with C# ends in `Constants`, or starts with `Gpu` for a table's row. A heap reference ends in `Ref`,
     stage-to-stage data in `Varyings`, a draw's outputs in `Targets`. A set of codes is an `enum`.
 - Put what a struct does on it as extensions (`instance.ToCameraRelative(position)`), so a struct shared with C# keeps
   only its fields. Return a struct rather than `out` parameters.
 - A struct C# reads or writes holds only 32-bit scalars, their vectors, row-major matrices, heap references and such
   structs. Mark its C# twin `[ShaderStruct]`; the renderer checks the two match when it starts.
-- A contract between shaders is an interface (`ISurface`, `ISky`, `ILight`, `IPixelEffect`), and a pass that works with
+- A contract between shaders is an interface (`IMaterial`, `ISky`, `ILight`, `IPixelEffect`), and a pass that works with
   any is generic over it.
 - Totals across a dispatch run in its last group (`IsLastGroup`), not in a one-group pass after it.
 - Use wave intrinsics only where the result can't depend on wave size (32 or 64) or the order is already arbitrary. No

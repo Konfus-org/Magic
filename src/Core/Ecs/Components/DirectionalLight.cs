@@ -19,17 +19,18 @@ public enum DirectionalLightMode : byte
     Sun,
 
     /// <summary>
-    /// The moon: the sky draws it, lit from the sun's side, so its phase follows from where the sun is, and its light
-    /// reaches the world through the sky's air and clouds. Its intensity is a full moon's, about 0.3 lux.
+    /// The moon: the sky draws it full, and its light reaches the world through the sky's air once the sun is below
+    /// the horizon. Its intensity is a full moon's, about 0.3 lux.
     /// </summary>
     Moon,
 }
 
 /// <summary>
 /// Light from infinitely far away, like the sun's, shining along its entity's +Z. <see cref="Intensity"/>, in lux,
-/// scales <see cref="Color"/>. Every one lights the world; its <see cref="Mode"/> says whether it is also the sun or
-/// the moon the world's sky draws, in its colour and along its direction, with a disc as wide as its entity's scale
-/// says, 1 as they look from the Earth. A sun or a moon below the horizon lights nothing, as the ground is in the way.
+/// scales <see cref="Color"/>. One lights the world at a time: the sun while it is above the horizon, else the moon
+/// while it is, else the first there is; its <see cref="Mode"/> says whether it is also the sun or the moon the
+/// world's sky draws, in its colour and along its direction, with a disc as wide as its entity's scale says, 1 as
+/// they look from the Earth.
 /// </summary>
 public record struct DirectionalLight : IComponent
 {

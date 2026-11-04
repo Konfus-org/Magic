@@ -1,5 +1,7 @@
+using System.Collections.Immutable;
 using Magic.Assets;
 using Magic.Assets.Types;
+using Magic.Utils;
 
 namespace Magic.Platform;
 
@@ -31,4 +33,16 @@ public interface IWindow
     /// What the platform knows the window by, 0 when there is none.
     /// </summary>
     uint Id { get; }
+
+    /// <summary>
+    /// The Vulkan instance extensions a surface on this window needs; none headless, or when the platform has no
+    /// Vulkan.
+    /// </summary>
+    ImmutableArray<string> VulkanExtensions { get; }
+
+    /// <summary>
+    /// A Vulkan surface on the window for <paramref name="instance"/>, a <c>VkInstance</c>, as a <c>VkSurfaceKHR</c>
+    /// the caller destroys; why not when the window has none to give. Main thread.
+    /// </summary>
+    Result<ulong> CreateVulkanSurface(nint instance);
 }

@@ -1,0 +1,73 @@
+# WorldRenderer
+
+Draws the world: every renderer's model, GPU-driven, lit by the sun, into the window, and to a PNG when the console
+asks for a screenshot.
+
+To use it, list `WorldRenderer` in a project's `.magic` file after the GPU provider, the shader compiler, the ECS, the
+model reader, the mesh preprocessor and the texture reader.
+
+- `Update` reads the renderers, the camera that draws into the window and the directional light out of the
+  entities: the sun while it is above the horizon, else the moon while it is, else the first there is. `Render`
+  draws from that copy.
+- A model is drawn once the preprocessor has made its clusters and they are in the geometry pools; the pools hold
+  what fits and keep it for the run. A model that does not load is drawn as the failure model, a material that does
+  not load, names the failure shader or a texture that does not load as the magenta failure material.
+- Every instance keeps its row of the instance table from frame to frame, so a still scene uploads nothing; the
+  camera's position is taken off on the GPU.
+- Once a model and its materials are resident, the renderer draws its cards: the six sides of its box, each into
+  atlases of albedo, normal and depth at the texels its size in the world earns, what the global illumination reads
+  where a ray lands on the model.
+- Every frame, the GPU culls each instance's clusters against the frustum, their normal cones, the pixel error
+  threshold that picks the level of detail, and last frame's depth pyramid, draws the visible ones into a
+  visibility buffer, retests what the old pyramid hid against the new one and draws those too. The visibility
+  buffer resolves per pixel through the material contract into the GBuffer, which the sun lights.
+- The sun's shadow is a virtual shadow map: a clipmap of levels of pages around the camera, each level's texels
+  twice the last's. The depth buffer marks the pages its pixels need at the level their footprint picks, pages come
+  from a pool when first marked and go back when no longer marked, an instance that moves invalidates the pages under
+  it, and only invalid pages are drawn, by the cluster path into one pass over the pool; a still scene draws none.
+  `set WorldRenderer.debug=sun` shows how lit by the sun every surface is through the pages alone, tinted blue the
+  coarser the level that answered, magenta where none had a page.
+- Every point, spot and rect light is binned into the froxels of the view it reaches, and a pixel loops over its
+  froxel's lights alone, in physical units: lux for the sun, candela for the rest, with the exposure set so a surface
+  facing the sun lands near white. The sky entity's material names the sky, which draws the sky, colours the sun
+  through the air and lights the ground from above; the fog entity fills the froxels with air the sun, through its
+  pages, and the lights scatter towards the camera. The picture is lit in HDR and tonemapped to the output.
+- The world is also kept as a signed distance field: every model's field, made by the preprocessor, goes into an atlas
+  as it arrives, and four clipmaps of bricks around the camera are made again from the instances over them only where
+  the camera moved or an instance changed. The strongest lights of a pixel's froxel trace cones through the field for
+  their shadow. `set WorldRenderer.debug=field` in the console shows the field at every surface instead of the
+  picture; `set WorldRenderer.debug=none` shows the picture again.
+- Light bounces: the instances that take most of the view hold lit cards, the irradiance on their cards from the sun
+  through its pages, the lights that reach them and the radiosity each tile of a card gathers through the field, a
+  few a frame; `set WorldRenderer.debug=cards` shows what a ray landing on every surface reads. World probes around
+  the camera trace the field and read the cards where their rays land, the sky where they miss; a screen probe in
+  every 8 by 8 pixels traces the screen, then the field, then reads the world probes, and the pixels read the probes
+  around them on their plane, darkened by the short-range occlusion the depth around them shows. A room with no
+  window stays dark. `set WorldRenderer.debug=indirect` shows that light alone, `set WorldRenderer.debug=probes` what
+  the world probes hold at every surface and `set WorldRenderer.debug=occlusion` the occlusion.
+- Every pixel's surface carries where it was on last frame's screen, from where its instance and the camera were,
+  and everything that blends with last frame reads it there; `set WorldRenderer.debug=velocity` shows the move.
+- A smooth surface mirrors the world: a ray a pixel, one for every two across on the lower presets, drawn from the
+  surface's lobe, traces the screen, then the field, then the world probes, so a floor shows the wall behind the
+  camera; the rays are gathered over a reach the roughness sets, none for a mirror, each weighed by how near what
+  it hit is to what the pixel's own hit, and blended with last frame's, held within what the neighbours see.
+  `set WorldRenderer.debug=reflections` shows the reflections alone.
+- A material that names the glass shader is drawn after the lighting, forward, in any order: the panes' absorbance
+  and the moments of their depths are added up first, then each pane's light, the sun through its pages and the
+  other panes, the lights of its froxel and the screen probes' reflection, weighed by what reaches it; the tonemap
+  puts them over the picture, bent by their normals. The sun through the panes colours what is behind them, and a
+  ray through them arrives tinted. Glass casts no sun shadow of its own and is left out of the distance field.
+- The picture is drawn at a share of the output and resolved into it over time: each frame's projection is shifted
+  by a jittered pixel, and the resolve blends the frame with last frame's picture reprojected onto the same surfaces,
+  held within what the neighbours show. The exposure is metered from a histogram of the picture, the brightest of it
+  blooms, and the final pass runs the camera's effects, up to four shaders implementing the pixel effect contract
+  named in its `PostProcessing`, and tonemaps with AgX. `set WorldRenderer.preset=toaster`, `balanced` or `quality`
+  sets the share, how many cards are lit a frame, whether reflections are traced and at how many pixels a ray.
+- On a GPU that traces rays, every model's leaf clusters go into an acceleration structure as it arrives and the
+  instances into one over them, built again when any changes, and the probes, the reflections and the lights'
+  shadows trace through them instead of the distance field, landing exactly on the triangles that are drawn.
+  `set WorldRenderer.tracer=field` traces through the field instead; `rayquery` goes back.
+- `bake` in the console opens every domain under `Domains/` in turn and exits, so a release ships with the caches
+  full.
+- The passes are the `Shaders/WorldRenderer/` modules in the gem's `Resources`; they build on the shader library
+  (`src/Resources/Shaders/README.md`).

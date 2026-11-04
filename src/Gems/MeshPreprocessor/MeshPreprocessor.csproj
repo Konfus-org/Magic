@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A gem: Magic loads it from Gems/MeshPreprocessor/MeshPreprocessor.dll when a project lists MeshPreprocessor. -->
+  <PropertyGroup>
+    <!-- Shown beside the gem as Magic starts it. -->
+    <Description>Makes what the renderer draws a model as, the cluster hierarchy, into the cache: provides IMeshPreprocessor.</Description>
+    <Version>1.0.0</Version>
+    <Authors>Konfus</Authors>
+    <!-- Copies the gem's own NuGet dependencies next to it, where its load context finds them. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <!-- meshoptimizer is a C API over arrays. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="Magic.Author" Value="$(Authors)" />
+    <!-- The tests drive the builders directly. -->
+    <InternalsVisibleTo Include="MeshPreprocessor.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <NativeLibrary
+      Include="meshoptimizer"
+      Repository="https://github.com/zeux/meshoptimizer"
+      Tag="v1.3"
+      CMakeOptions="-DMESHOPT_BUILD_SHARED_LIBS=ON;-DMESHOPT_INSTALL=ON"
+      Headers="src/meshoptimizer.h"
+      IncludePath="src"
+    />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its interfaces. -->
+    <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" Private="false" />
+  </ItemGroup>
+</Project>

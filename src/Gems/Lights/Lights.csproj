@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A gem: Magic loads it from Gems/Lights/Lights.dll when a project lists Lights. -->
+  <PropertyGroup>
+    <!-- Shown beside the gem as Magic starts it. -->
+    <Description>Fills the Lights domain's room with a thousand lights when it opens: what the renderer lights through its froxels.</Description>
+    <Version>1.0.0</Version>
+    <Authors>Konfus</Authors>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="Magic.Author" Value="$(Authors)" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its interfaces. -->
+    <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" Private="false" />
+  </ItemGroup>
+</Project>
