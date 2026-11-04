@@ -1,7 +1,7 @@
 // The world probes kept up to date: each frame the probes whose cells moved with the windows are marked new, a
 // budget of probes is picked, the new ones and a share of the rest in turn, and each picked probe traces its rays
-// through the field, shades what they land on from the surface cache and what they miss from the sky, folds them
-// into its spheres of radiance and distance, and convolves its irradiance. The pass header's x is the frame's
+// through the tracer the entry is specialised to, shades what they land on from the surface cache and what they
+// miss from the sky, folds them into its spheres of radiance and distance, and convolves its irradiance. The pass header's x is the frame's
 // constants, y the shadow constants, z the lighting constants and w the field constants.
 module "WorldRenderer/WorldProbes";
 
@@ -99,7 +99,7 @@ float3 GetProbeRay(uint i, uint frame, uint cell)
 // Each listed probe traces its rays, folds them into its spheres and convolves its irradiance.
 [shader("compute")]
 [numthreads(256, 1, 1)]
-void WorldProbeTrace<S : ISky>(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
+void WorldProbeTrace<S : ISky, T : IWorldTracer>(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
 {
     FrameConstants frame = GetFrame();
     LightingConstants lighting = GetLighting();
@@ -136,10 +136,10 @@ void WorldProbeTrace<S : ISky>(uint3 group : SV_GroupID, uint3 local : SV_GroupT
     {
         Ray traced = { position, direction };
         TraceLimits limits = { 0.0, gi.rayRange, 0.0 };
-        TraceHit hit = DistanceFieldTracer.Trace(traced, limits);
+        TraceHit hit = T.Trace(traced, limits);
         if (hit.isHit)
         {
-            radiance = ShadeFieldHit(frame, field, gi, position + direction * hit.distance, hit.normal, direction);
+            radiance = ShadeFieldHit(frame, field, gi, position + direction * hit.distance, hit.normal, direction, hit.instance);
             hitDistance = hit.distance;
         }
         else

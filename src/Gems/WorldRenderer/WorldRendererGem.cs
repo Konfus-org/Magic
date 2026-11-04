@@ -71,6 +71,7 @@ public sealed class WorldRendererGem(
     private readonly FrameTargets _cellTargets = new(gpu);
     private readonly GlobalIllumination _gi = new(gpu);
     private readonly Translucency _translucency = new(gpu);
+    private readonly RayTracing? _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu) : null;
     private RendererPreset _preset = RendererPreset.Quality;
     private readonly RendererPipelines _pipelines = new(gpu, shaders, assets);
     private readonly Post _post = new(gpu);
@@ -96,6 +97,17 @@ public sealed class WorldRendererGem(
     private Vector4 _previousCameraPosition;
     private bool _hasPreviousFrame;
 
+    /// <summary>
+    /// Whether the run asks to trace through the GPU's acceleration structures, which it does by default where it
+    /// can; <c>set WorldRenderer.tracer=field</c> turns it off.
+    /// </summary>
+    private bool WantsRayQuery { get; set; } = gpu.Features.HasRayQuery;
+
+    /// <summary>
+    /// Whether the frame traces through the GPU's acceleration structures: asked for, and there is one to trace.
+    /// </summary>
+    private bool UsesRayQuery => WantsRayQuery && _rayTracing is { Acceleration.IsNone: false };
+
     public void Dispose()
     {
         _graph.Clear();
@@ -112,6 +124,7 @@ public sealed class WorldRendererGem(
         _gi.Dispose();
         _translucency.Dispose();
         _post.Dispose();
+        _rayTracing?.Dispose();
         foreach (
             GpuBuffer buffer in (ReadOnlySpan<GpuBuffer>)
                 [
@@ -168,6 +181,7 @@ public sealed class WorldRendererGem(
                     _gi.Create,
                     _translucency.Create,
                     _post.Create,
+                    () => _rayTracing?.Create() ?? Result.Success(),
                     _pools.Field.Create,
                     CreateBuffers,
                     () =>
@@ -323,6 +337,22 @@ public sealed class WorldRendererGem(
 
         foreach (SettingChanged setting in state.Frame.Events.Get<SettingChanged>())
         {
+            if (setting.Key == "WorldRenderer.tracer")
+            {
+                if (setting.Value.Equals("field", StringComparison.OrdinalIgnoreCase))
+                    WantsRayQuery = false;
+                else if (
+                    setting.Value.Equals("rayquery", StringComparison.OrdinalIgnoreCase) && _rayTracing is not null
+                )
+                    WantsRayQuery = true;
+                else
+                    Log.Error(
+                        $"{setting.Key} takes field or, on a GPU that traces rays, rayquery, not '{setting.Value}'."
+                    );
+
+                continue;
+            }
+
             if (setting.Key == "WorldRenderer.preset")
             {
                 if (RendererPreset.TryParse(setting.Value, out RendererPreset preset))
@@ -410,7 +440,9 @@ public sealed class WorldRendererGem(
         int instanceCount = UpdateInstances();
         _graph.BeginTransferPass("Upload frame");
         _captures.Upload(_graph);
+        bool hasArrivals = _pools.HasArrivals;
         _instances.Upload(_graph);
+        _rayTracing?.Prepare(_graph, _instances.Rows, _instances.Extras, hasArrivals || _instances.Changes.Length > 0);
         UploadConstants(_constants, GetFrameConstants(camera, sun, state.Frame.Index, instanceCount));
         ResetCounts();
         _shadows.Prepare(
@@ -497,9 +529,20 @@ public sealed class WorldRendererGem(
             _pools.Field,
             _translucency,
             _captures,
-            _targets
+            _targets,
+            UsesRayQuery
         );
-        _lighting.RecordShading(_graph, _pipelines, _constants, _shadows, _pools.Field, _gi, _translucency, _targets);
+        _lighting.RecordShading(
+            _graph,
+            _pipelines,
+            _constants,
+            _shadows,
+            _pools.Field,
+            _gi,
+            _translucency,
+            _targets,
+            UsesRayQuery
+        );
         _translucency.RecordDraws(_graph, _pipelines, translucentDraws, _targets, _shadows, _lighting, _gi);
         _post.Record(_graph, _pipelines, _constants, _shadows, _lighting, _pools.Field, _translucency, _targets);
 
@@ -739,6 +782,10 @@ public sealed class WorldRendererGem(
                 _translucency.Add(worldCenter, worldRadius, Vector3.One - (first.BaseColor.W * (Vector3.One - color)));
             }
 
+            InstanceExtra extra =
+                isGlass || resident.Acceleration.IsNone
+                    ? default
+                    : new InstanceExtra(gpu.GetAddress(resident.Acceleration), resident.LeafOffset);
             _instances.Set(
                 instance.Entity,
                 new GpuInstance
@@ -760,7 +807,8 @@ public sealed class WorldRendererGem(
                     Material5 = materialRows[5],
                     Material6 = materialRows[6],
                     Material7 = materialRows[7],
-                }
+                },
+                extra
             );
         }
 
@@ -800,6 +848,8 @@ public sealed class WorldRendererGem(
         frame.Jitter = jitter;
         frame.OutputWidth = (uint)_targets.OutputWidth;
         frame.OutputHeight = (uint)_targets.OutputHeight;
+        frame.Acceleration = _rayTracing?.Acceleration.Id ?? 0;
+        frame.LeafClusters = _pools.LeafClusters.Id;
         if (!_hasPreviousFrame)
         {
             _hasPreviousFrame = true;

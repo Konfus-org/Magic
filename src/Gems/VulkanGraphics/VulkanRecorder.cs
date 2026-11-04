@@ -503,9 +503,74 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
             case GpuCommandKind.Timestamp:
                 frame.WriteTimestamp(device, command.Label, passIndex);
                 break;
+            case GpuCommandKind.BuildAcceleration:
+                if (resources.GetAcceleration(command.Id) is { } acceleration)
+                    Build(cmd, acceleration, command.X);
+                else
+                    Log.Warn($"Acceleration structure {command.Id} is gone and is not built.");
+
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(command), command.Kind, "There is no such command.");
         }
+    }
+
+    /// <summary>
+    /// Builds an acceleration structure between two barriers over everything: the copies that filled what it is
+    /// built over land first, and whatever traces through it afterwards waits for it.
+    /// </summary>
+    private void Build(VkCommandBuffer cmd, VulkanAcceleration acceleration, uint instanceCount)
+    {
+        VkMemoryBarrier2 before = new()
+        {
+            srcStageMask = VkPipelineStageFlags2.AllCommands,
+            srcAccessMask = VkAccessFlags2.MemoryWrite | VkAccessFlags2.MemoryRead,
+            dstStageMask = VkPipelineStageFlags2.AccelerationStructureBuildKHR,
+            dstAccessMask =
+                VkAccessFlags2.AccelerationStructureReadKHR
+                | VkAccessFlags2.AccelerationStructureWriteKHR
+                | VkAccessFlags2.ShaderRead,
+        };
+        VkDependencyInfo beforeInfo = new() { memoryBarrierCount = 1, pMemoryBarriers = &before };
+        device.Api.vkCmdPipelineBarrier2(cmd, &beforeInfo);
+
+        int count = acceleration.Geometries.Length;
+        VkAccelerationStructureBuildRangeInfoKHR[] ranges = new VkAccelerationStructureBuildRangeInfoKHR[count];
+        for (int i = 0; i < count; i++)
+        {
+            uint primitives =
+                acceleration.Type == VkAccelerationStructureTypeKHR.TopLevel
+                    ? Math.Min(instanceCount, acceleration.PrimitiveCounts[i])
+                    : acceleration.PrimitiveCounts[i];
+            ranges[i] = new VkAccelerationStructureBuildRangeInfoKHR { primitiveCount = primitives };
+        }
+
+        fixed (VkAccelerationStructureGeometryKHR* geometries = acceleration.Geometries)
+        fixed (VkAccelerationStructureBuildRangeInfoKHR* rangesPointer = ranges)
+        {
+            VkAccelerationStructureBuildGeometryInfoKHR info = new()
+            {
+                type = acceleration.Type,
+                flags = VkBuildAccelerationStructureFlagsKHR.PreferFastTrace,
+                mode = VkBuildAccelerationStructureModeKHR.Build,
+                dstAccelerationStructure = acceleration.Handle,
+                geometryCount = (uint)count,
+                pGeometries = geometries,
+                scratchData = new VkDeviceOrHostAddressKHR { deviceAddress = acceleration.Scratch.Address },
+            };
+            VkAccelerationStructureBuildRangeInfoKHR* rangesList = rangesPointer;
+            device.Api.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &info, &rangesList);
+        }
+
+        VkMemoryBarrier2 after = new()
+        {
+            srcStageMask = VkPipelineStageFlags2.AccelerationStructureBuildKHR,
+            srcAccessMask = VkAccessFlags2.AccelerationStructureWriteKHR,
+            dstStageMask = VkPipelineStageFlags2.AllCommands,
+            dstAccessMask = VkAccessFlags2.AccelerationStructureReadKHR | VkAccessFlags2.ShaderRead,
+        };
+        VkDependencyInfo afterInfo = new() { memoryBarrierCount = 1, pMemoryBarriers = &after };
+        device.Api.vkCmdPipelineBarrier2(cmd, &afterInfo);
     }
 
     private void Clear(VkCommandBuffer cmd, VulkanTexture texture, in GpuConstants constants)

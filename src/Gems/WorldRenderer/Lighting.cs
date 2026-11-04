@@ -281,7 +281,8 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
         DistanceField field,
         GlobalIllumination gi,
         Translucency translucency,
-        FrameTargets targets
+        FrameTargets targets,
+        bool usesRayQuery
     )
     {
         GpuConstants header = new(frameConstants.Id, shadows.Constants.Id, Constants.Id, field.Constants.Id);
@@ -335,7 +336,7 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
         field.UseForSampling(graph);
         gi.UseForSampling(graph);
         translucency.UseForSampling(graph);
-        graph.Recorder.BindPipeline(pipelines.ShadeLighting);
+        graph.Recorder.BindPipeline(usesRayQuery ? pipelines.ShadeLightingRayQuery : pipelines.ShadeLighting);
         graph.Recorder.PushConstants(header);
         graph.Recorder.Dispatch(Groups(targets.Width, pipelines.TileSize), Groups(targets.Height, pipelines.TileSize));
         graph.EndPass();

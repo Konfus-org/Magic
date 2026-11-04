@@ -50,7 +50,7 @@ bool LoadSurface(FrameConstants frame, uint2 pixel, out float3 world, out float3
 // Each half-resolution texel traces one ray for one of its four pixels, a different one each frame.
 [shader("compute")]
 [numthreads(8, 8, 1)]
-void ReflectionTrace<S : ISky>(uint3 thread : SV_DispatchThreadID)
+void ReflectionTrace<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThreadID)
 {
     FrameConstants frame = GetFrame();
     LightingConstants lighting = GetLighting();
@@ -90,11 +90,11 @@ void ReflectionTrace<S : ISky>(uint3 thread : SV_DispatchThreadID)
     {
         Ray ray = { origin, direction };
         TraceLimits limits = { start, gi.rayRange, 0.0 };
-        TraceHit hit = DistanceFieldTracer.Trace(ray, limits);
+        TraceHit hit = T.Trace(ray, limits);
         hitDistance = hit.distance;
         if (hit.isHit)
         {
-            radiance = ShadeFieldHit(frame, field, gi, origin + direction * hit.distance, hit.normal, direction);
+            radiance = ShadeFieldHit(frame, field, gi, origin + direction * hit.distance, hit.normal, direction, hit.instance);
         }
         else if (!SampleWorldProbeRadiance(gi, origin + direction * min(hit.distance, gi.rayRange), direction, radiance))
         {

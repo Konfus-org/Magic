@@ -21,6 +21,11 @@ internal sealed unsafe class VulkanHeap : IDisposable
     public const uint Samplers = 256;
 
     /// <summary>
+    /// The most acceleration structures the heap holds, on a GPU that traces rays.
+    /// </summary>
+    public const uint Accelerations = 256;
+
+    /// <summary>
     /// Mip levels each texture has room for in the storage arrays: level n of texture t is at t * this + n.
     /// </summary>
     public const uint LevelsPerTexture = 16;
@@ -46,15 +51,17 @@ internal sealed unsafe class VulkanHeap : IDisposable
     private const uint Storage3DBinding = 8;
     private const uint UintStorage2DBinding = 9;
     private const uint SamplerBinding = 10;
+    private const uint AccelerationBinding = 11;
 
     private readonly VkDeviceApi _api;
     private readonly VkDescriptorSetLayout _layout;
     private readonly VkDescriptorPool _pool;
 
-    public VulkanHeap(VkDeviceApi api)
+    public VulkanHeap(VkDeviceApi api, bool hasAcceleration)
     {
         _api = api;
         uint levels = Textures * LevelsPerTexture;
+        // The acceleration structures join only when the GPU traces rays, as their descriptor type needs its extension.
         Span<VkDescriptorSetLayoutBinding> bindings =
         [
             Binding(BufferBinding, VkDescriptorType.StorageBuffer, Buffers),
@@ -68,7 +75,11 @@ internal sealed unsafe class VulkanHeap : IDisposable
             Binding(Storage3DBinding, VkDescriptorType.StorageImage, levels),
             Binding(UintStorage2DBinding, VkDescriptorType.StorageImage, levels),
             Binding(SamplerBinding, VkDescriptorType.Sampler, Samplers),
+            Binding(AccelerationBinding, VkDescriptorType.AccelerationStructureKHR, Accelerations),
         ];
+        if (!hasAcceleration)
+            bindings = bindings[..^1];
+
         Span<VkDescriptorBindingFlags> flags = stackalloc VkDescriptorBindingFlags[bindings.Length];
         flags.Fill(
             VkDescriptorBindingFlags.UpdateAfterBind
@@ -99,7 +110,11 @@ internal sealed unsafe class VulkanHeap : IDisposable
             new(VkDescriptorType.SampledImage, Textures * 5),
             new(VkDescriptorType.StorageImage, levels * 4),
             new(VkDescriptorType.Sampler, Samplers),
+            new(VkDescriptorType.AccelerationStructureKHR, Accelerations),
         ];
+        if (!hasAcceleration)
+            sizes = sizes[..^1];
+
         fixed (VkDescriptorPoolSize* sizesPointer = sizes)
         {
             VkDescriptorPoolCreateInfo poolInfo = new()
@@ -155,6 +170,28 @@ internal sealed unsafe class VulkanHeap : IDisposable
         _api.vkDestroyPipelineLayout(PipelineLayout);
         _api.vkDestroyDescriptorPool(_pool);
         _api.vkDestroyDescriptorSetLayout(_layout);
+    }
+
+    /// <summary>
+    /// Puts an acceleration structure where shaders trace through it.
+    /// </summary>
+    public void WriteAcceleration(uint id, VkAccelerationStructureKHR acceleration)
+    {
+        VkWriteDescriptorSetAccelerationStructureKHR info = new()
+        {
+            accelerationStructureCount = 1,
+            pAccelerationStructures = &acceleration,
+        };
+        VkWriteDescriptorSet write = new()
+        {
+            pNext = &info,
+            dstSet = Set,
+            dstBinding = AccelerationBinding,
+            dstArrayElement = id,
+            descriptorCount = 1,
+            descriptorType = VkDescriptorType.AccelerationStructureKHR,
+        };
+        _api.vkUpdateDescriptorSets(1, &write, 0, null);
     }
 
     public void WriteBuffer(uint id, VkBuffer buffer, ulong bytes)

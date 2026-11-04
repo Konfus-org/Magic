@@ -125,7 +125,8 @@ internal sealed unsafe class VulkanFrames : IDisposable
                     $"The staging ring could not grow to {wanted} bytes: {grown.Error}"
                 );
 
-            frame.Trash.Add(Trash.Of(frame.StagingId, frame.Staging));
+            // The old ring leaves the heap now, so shutdown frees it once, with the frame's trash.
+            frame.Trash.Add(Trash.Of(frame.StagingId, _resources.RemoveBuffer(frame.StagingId) ?? frame.Staging));
             frame.Staging = grown.Value;
             frame.StagingId = Register(grown.Value);
             offset = 0;
@@ -211,7 +212,8 @@ internal sealed unsafe class VulkanFrames : IDisposable
         VulkanBuffer? Buffer,
         VulkanTexture? Texture,
         VkSampler Sampler,
-        VulkanPipeline? Pipeline
+        VulkanPipeline? Pipeline,
+        VulkanAcceleration? Acceleration = null
     )
     {
         public static Trash Of(uint id, VulkanBuffer buffer) => new(id, buffer, null, VkSampler.Null, null);
@@ -222,6 +224,9 @@ internal sealed unsafe class VulkanFrames : IDisposable
 
         public static Trash Of(uint id, VulkanPipeline pipeline) => new(id, null, null, VkSampler.Null, pipeline);
 
+        public static Trash Of(uint id, VulkanAcceleration acceleration) =>
+            new(id, null, null, VkSampler.Null, null, acceleration);
+
         public void Free(VulkanResources resources)
         {
             if (Buffer is not null)
@@ -230,6 +235,8 @@ internal sealed unsafe class VulkanFrames : IDisposable
                 resources.Free(Id, Texture);
             else if (Pipeline is not null)
                 resources.Free(Id, Pipeline);
+            else if (Acceleration is not null)
+                resources.Free(Id, Acceleration);
             else if (Sampler.IsNotNull)
                 resources.Free(Id, Sampler);
         }

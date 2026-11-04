@@ -13,6 +13,7 @@ public static const uint HeapBuffers = 16384u;
 public static const uint HeapTextures = 4096u;
 public static const uint HeapSamplers = 256u;
 public static const uint LevelsPerTexture = 16u;
+public static const uint HeapAccelerations = 256u;
 
 [[vk::binding(0, 0)]] RWByteAddressBuffer heapBuffers[];
 [[vk::binding(1, 0)]] Texture2D<float4> heapTextures2D[];
@@ -26,10 +27,13 @@ public static const uint LevelsPerTexture = 16u;
 // Declared R32 so the atomics on it are allowed: every uint storage texture is that format.
 [[vk::binding(9, 0)]] [[vk::image_format("r32ui")]] RWTexture2D<uint> heapUintStorage2D[];
 [[vk::binding(10, 0)]] SamplerState heapSamplers[];
+// Only on a GPU that traces rays; a shader that traces is only built there.
+[[vk::binding(11, 0)]] RaytracingAccelerationStructure heapAccelerations[];
 
 uint ClampBufferId(uint id) { return min(id, HeapBuffers - 1u); }
 uint ClampTextureId(uint id) { return min(id, HeapTextures - 1u); }
 uint ClampSamplerId(uint id) { return min(id, HeapSamplers - 1u); }
+uint ClampAccelerationId(uint id) { return min(id, HeapAccelerations - 1u); }
 uint ClampStorageSlot(uint id, uint level) { return (ClampTextureId(id) * LevelsPerTexture) + min(level, LevelsPerTexture - 1u); }
 
 // A buffer of bytes, read and written at byte offsets: what holds words of more than one kind, as counts and the
@@ -285,4 +289,12 @@ public struct StorageVolumeRef
     {
         heapStorage3D[NonUniformResourceIndex(ClampStorageSlot(id, level))][texel] = value;
     }
+}
+
+// An acceleration structure of the heap, traced through by a ray query.
+public struct AccelerationRef
+{
+    public uint id;
+
+    public RaytracingAccelerationStructure Get() { return heapAccelerations[NonUniformResourceIndex(ClampAccelerationId(id))]; }
 }

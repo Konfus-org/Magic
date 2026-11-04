@@ -26,7 +26,11 @@ public struct TraceHit
     public float3 normal;
     // How much of the cone got through, 1 where nothing was near it: a soft shadow's visibility.
     public float visibility;
+    // The instance hit, when the tracer knows it; TraceNoInstance when it does not.
+    public uint instance;
 }
+
+public static const uint TraceNoInstance = 0xFFFFFFFFu;
 
 public interface IWorldTracer
 {

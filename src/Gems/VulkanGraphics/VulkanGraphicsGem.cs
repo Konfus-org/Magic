@@ -34,7 +34,7 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IPipeline<ServicePum
         _threads = threads;
         IWindow? drawn = app.IsHeadless ? null : window;
         _device = new VulkanDevice(drawn, wantsValidation: IsDebugBuild);
-        _heap = new VulkanHeap(_device.Api);
+        _heap = new VulkanHeap(_device.Api, _device.Features.HasRayQuery);
         _resources = new VulkanResources(_device, _heap);
         _frames = new VulkanFrames(_device, _resources);
         _recorder = new VulkanRecorder(_device, _resources, _heap);
@@ -139,6 +139,29 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IPipeline<ServicePum
         ThrowIfNotOnMain();
         if (_resources.RemovePipeline(pipeline.Id) is { } removed)
             _frames.Current.Trash.Add(VulkanFrames.Trash.Of(pipeline.Id, removed));
+    }
+
+    public Result<GpuAcceleration> CreateAcceleration(in BottomLevelDescription description)
+    {
+        ThrowIfNotOnMain();
+
+        return _resources.CreateAcceleration(description);
+    }
+
+    public Result<GpuAcceleration> CreateAcceleration(in TopLevelDescription description)
+    {
+        ThrowIfNotOnMain();
+
+        return _resources.CreateAcceleration(description);
+    }
+
+    public ulong GetAddress(GpuAcceleration acceleration) => _resources.GetAcceleration(acceleration.Id)?.Address ?? 0;
+
+    public void Destroy(GpuAcceleration acceleration)
+    {
+        ThrowIfNotOnMain();
+        if (_resources.RemoveAcceleration(acceleration.Id) is { } removed)
+            _frames.Current.Trash.Add(VulkanFrames.Trash.Of(acceleration.Id, removed));
     }
 
     public GpuUpload BeginUpload(int bytes)

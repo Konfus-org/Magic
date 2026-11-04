@@ -79,6 +79,13 @@ public struct FrameConstants
     public float2 jitter;
     public uint outputWidth;
     public uint outputHeight;
+
+    // On a GPU that traces rays: the top-level acceleration structure over the instances, 0 when none, and the
+    // table of leaf clusters its instances' geometries name.
+    public uint acceleration;
+    public uint leafClusters;
+    public uint padding1;
+    public uint padding2;
 }
 
 // The cone cull is off: the view is orthographic, as a capture's is, so no one point is the camera.

@@ -20,6 +20,35 @@ internal sealed unsafe class VulkanBuffer
     /// Where the CPU reads or writes it; null for device memory.
     /// </summary>
     public byte* Mapped { get; init; }
+
+    /// <summary>
+    /// Its device address, for what reads it by address, as the acceleration structure builds do; 0 when none.
+    /// </summary>
+    public ulong Address { get; init; }
+}
+
+/// <summary>
+/// An acceleration structure as Vulkan holds it: the structure in its buffer, the scratch its builds use, what it is
+/// built over, and its address.
+/// </summary>
+internal sealed unsafe class VulkanAcceleration
+{
+    public required VkAccelerationStructureKHR Handle { get; init; }
+
+    public required VulkanBuffer Buffer { get; init; }
+
+    public required VulkanBuffer Scratch { get; init; }
+
+    public required VkAccelerationStructureTypeKHR Type { get; init; }
+
+    /// <summary>
+    /// The geometries built over: a bottom-level structure's triangles, or a top-level one's instances.
+    /// </summary>
+    public required VkAccelerationStructureGeometryKHR[] Geometries { get; init; }
+
+    public required uint[] PrimitiveCounts { get; init; }
+
+    public required ulong Address { get; init; }
 }
 
 /// <summary>
@@ -64,6 +93,9 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     private readonly VulkanBuffer?[] _buffers = new VulkanBuffer?[VulkanHeap.Buffers];
     private readonly VulkanTexture?[] _textures = new VulkanTexture?[VulkanHeap.Textures];
     private readonly VkSampler[] _samplers = new VkSampler[VulkanHeap.Samplers];
+    private readonly VulkanAcceleration?[] _accelerations = new VulkanAcceleration?[VulkanHeap.Accelerations];
+    private readonly Stack<uint> _freeAccelerations = new();
+    private uint _nextAcceleration = 1;
     private readonly List<VulkanPipeline?> _pipelines = [null];
     private readonly Stack<uint> _freeBuffers = new();
     private readonly Stack<uint> _freeTextures = new();
@@ -94,6 +126,12 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
                 device.Api.vkDestroySampler(_samplers[id]);
         }
 
+        for (uint id = 1; id < _nextAcceleration; id++)
+        {
+            if (_accelerations[id] is { } acceleration)
+                Free(acceleration);
+        }
+
         foreach (VulkanPipeline? pipeline in _pipelines)
         {
             if (pipeline is not null)
@@ -106,6 +144,117 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     public VulkanTexture? GetTexture(uint id) => id < _textures.Length ? _textures[id] : null;
 
     public VulkanPipeline? GetPipeline(uint id) => id < _pipelines.Count ? _pipelines[(int)id] : null;
+
+    public VulkanAcceleration? GetAcceleration(uint id) => id < _accelerations.Length ? _accelerations[id] : null;
+
+    /// <summary>
+    /// A bottom-level acceleration structure over triangles of the heap's buffers, sized for them and put in the
+    /// heap, to be built by the recorder.
+    /// </summary>
+    public Result<GpuAcceleration> CreateAcceleration(in BottomLevelDescription description)
+    {
+        if (description.Geometries.IsDefaultOrEmpty)
+            return Result.Failure("an acceleration structure over no geometry cannot be made.");
+
+        VkAccelerationStructureGeometryKHR[] geometries = new VkAccelerationStructureGeometryKHR[
+            description.Geometries.Length
+        ];
+        uint[] counts = new uint[description.Geometries.Length];
+        for (int i = 0; i < geometries.Length; i++)
+        {
+            TriangleGeometry triangles = description.Geometries[i];
+            if (
+                GetBuffer(triangles.Vertices.Id) is not { } vertices
+                || GetBuffer(triangles.Indices.Id) is not { } indices
+            )
+                return Result.Failure("an acceleration structure's buffers are gone.");
+
+            geometries[i] = new VkAccelerationStructureGeometryKHR
+            {
+                geometryType = VkGeometryTypeKHR.Triangles,
+                flags = VkGeometryFlagsKHR.Opaque,
+                geometry = new VkAccelerationStructureGeometryDataKHR
+                {
+                    triangles = new VkAccelerationStructureGeometryTrianglesDataKHR
+                    {
+                        vertexFormat = VkFormat.R32G32B32Sfloat,
+                        vertexData = new VkDeviceOrHostAddressConstKHR
+                        {
+                            deviceAddress = vertices.Address + triangles.VertexOffset,
+                        },
+                        vertexStride = triangles.VertexStride,
+                        maxVertex = triangles.VertexCount - 1,
+                        indexType = VkIndexType.Uint32,
+                        indexData = new VkDeviceOrHostAddressConstKHR
+                        {
+                            deviceAddress = indices.Address + triangles.IndexOffset,
+                        },
+                    },
+                },
+            };
+            counts[i] = triangles.TriangleCount;
+        }
+
+        return MakeAcceleration(VkAccelerationStructureTypeKHR.BottomLevel, geometries, counts, description.Name);
+    }
+
+    /// <summary>
+    /// A top-level acceleration structure over instances read from a buffer, sized for the most it may hold and
+    /// put in the heap, to be built by the recorder.
+    /// </summary>
+    public Result<GpuAcceleration> CreateAcceleration(in TopLevelDescription description)
+    {
+        if (description.MaxInstances <= 0)
+            return Result.Failure("an acceleration structure over no instances cannot be made.");
+
+        if (GetBuffer(description.Instances.Id) is not { } instances)
+            return Result.Failure("an acceleration structure's instance buffer is gone.");
+
+        VkAccelerationStructureGeometryKHR[] geometries =
+        [
+            new()
+            {
+                geometryType = VkGeometryTypeKHR.Instances,
+                geometry = new VkAccelerationStructureGeometryDataKHR
+                {
+                    instances = new VkAccelerationStructureGeometryInstancesDataKHR
+                    {
+                        arrayOfPointers = false,
+                        data = new VkDeviceOrHostAddressConstKHR { deviceAddress = instances.Address },
+                    },
+                },
+            },
+        ];
+
+        return MakeAcceleration(
+            VkAccelerationStructureTypeKHR.TopLevel,
+            geometries,
+            [(uint)description.MaxInstances],
+            description.Name
+        );
+    }
+
+    /// <summary>
+    /// Takes an acceleration structure out of the heap and hands it back, for the frames that still use it to free.
+    /// </summary>
+    public VulkanAcceleration? RemoveAcceleration(uint id)
+    {
+        if (id == 0 || id >= _accelerations.Length || _accelerations[id] is not { } acceleration)
+            return null;
+
+        _accelerations[id] = null;
+
+        return acceleration;
+    }
+
+    /// <summary>
+    /// Frees what <see cref="RemoveAcceleration"/> handed back, once no frame uses it, and lets its id be taken again.
+    /// </summary>
+    public void Free(uint id, VulkanAcceleration acceleration)
+    {
+        Free(acceleration);
+        _freeAccelerations.Push(id);
+    }
 
     public Result<GpuBuffer> CreateBuffer(in BufferDescription description)
     {
@@ -464,7 +613,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
         VkBufferCreateInfo createInfo = new()
         {
             size = (ulong)description.Bytes,
-            usage = description.Usage.ToVulkan(),
+            usage = description.Usage.ToVulkan(device.Features.HasRayQuery),
             sharingMode = VkSharingMode.Exclusive,
         };
         VkResult result = device.Api.vkCreateBuffer(&createInfo, out VkBuffer buffer);
@@ -488,7 +637,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             requirements,
             wanted,
             fallback,
-            description.Usage.HasFlag(BufferUsages.Storage)
+            description.Usage.HasFlag(BufferUsages.Storage) || description.Usage.HasFlag(BufferUsages.Acceleration)
         );
         if (!memory.Ok)
         {
@@ -498,6 +647,13 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
         }
 
         device.Api.vkBindBufferMemory(buffer, memory.Value, 0);
+        ulong address = 0;
+        if (description.Usage.HasFlag(BufferUsages.Storage) || description.Usage.HasFlag(BufferUsages.Acceleration))
+        {
+            VkBufferDeviceAddressInfo addressInfo = new() { buffer = buffer };
+            address = device.Api.vkGetBufferDeviceAddress(&addressInfo);
+        }
+
         byte* mapped = null;
         if (isHost)
         {
@@ -521,6 +677,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
                 Memory = memory.Value,
                 Description = description,
                 Mapped = mapped,
+                Address = address,
             }
         );
     }
@@ -554,6 +711,119 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     {
         device.Api.vkDestroyBuffer(buffer.Buffer);
         device.Api.vkFreeMemory(buffer.Memory);
+    }
+
+    /// <summary>
+    /// An acceleration structure of a type over geometries, sized by the driver, with its buffer and scratch made
+    /// and its place in the heap taken.
+    /// </summary>
+    private Result<GpuAcceleration> MakeAcceleration(
+        VkAccelerationStructureTypeKHR type,
+        VkAccelerationStructureGeometryKHR[] geometries,
+        uint[] counts,
+        string name
+    )
+    {
+        if (!device.Features.HasRayQuery)
+            return Result.Failure("the GPU traces no rays.");
+
+        if (!TryTakeId(_freeAccelerations, ref _nextAcceleration, VulkanHeap.Accelerations, out uint id))
+            return Result.Failure($"the heap holds its {VulkanHeap.Accelerations} acceleration structures already.");
+
+        VkAccelerationStructureBuildSizesInfoKHR sizes;
+        fixed (VkAccelerationStructureGeometryKHR* geometriesPointer = geometries)
+        fixed (uint* countsPointer = counts)
+        {
+            VkAccelerationStructureBuildGeometryInfoKHR buildInfo = new()
+            {
+                type = type,
+                flags = VkBuildAccelerationStructureFlagsKHR.PreferFastTrace,
+                mode = VkBuildAccelerationStructureModeKHR.Build,
+                geometryCount = (uint)geometries.Length,
+                pGeometries = geometriesPointer,
+            };
+            sizes = new VkAccelerationStructureBuildSizesInfoKHR();
+            device.Api.vkGetAccelerationStructureBuildSizesKHR(
+                VkAccelerationStructureBuildTypeKHR.Device,
+                &buildInfo,
+                countsPointer,
+                &sizes
+            );
+        }
+
+        Result<VulkanBuffer> buffer = MakeBuffer(
+            new BufferDescription
+            {
+                Bytes = (long)sizes.accelerationStructureSize,
+                Usage = BufferUsages.Acceleration,
+                Name = name,
+            }
+        );
+        Result<VulkanBuffer> scratch = MakeBuffer(
+            new BufferDescription
+            {
+                Bytes = (long)Math.Max(sizes.buildScratchSize, 256),
+                Usage = BufferUsages.Storage,
+                Name = $"{name} scratch",
+            }
+        );
+        if (!buffer.Ok || !scratch.Ok)
+        {
+            if (buffer.Ok)
+                Free(buffer.Value);
+
+            if (scratch.Ok)
+                Free(scratch.Value);
+
+            _freeAccelerations.Push(id);
+
+            return Result.Failure($"{name} was not made: {buffer.Error}{scratch.Error}");
+        }
+
+        VkAccelerationStructureCreateInfoKHR createInfo = new()
+        {
+            buffer = buffer.Value.Buffer,
+            offset = 0,
+            size = sizes.accelerationStructureSize,
+            type = type,
+        };
+        VkAccelerationStructureKHR handle;
+        VkResult result = device.Api.vkCreateAccelerationStructureKHR(&createInfo, null, &handle);
+        if (result != VkResult.Success)
+        {
+            Free(buffer.Value);
+            Free(scratch.Value);
+            _freeAccelerations.Push(id);
+
+            return Result.Failure($"Vulkan could not make {name}: {result}.");
+        }
+
+        VkAccelerationStructureDeviceAddressInfoKHR addressInfo = new() { accelerationStructure = handle };
+        ulong address = device.Api.vkGetAccelerationStructureDeviceAddressKHR(&addressInfo);
+        _accelerations[id] = new VulkanAcceleration
+        {
+            Handle = handle,
+            Buffer = buffer.Value,
+            Scratch = scratch.Value,
+            Type = type,
+            Geometries = geometries,
+            PrimitiveCounts = counts,
+            Address = address,
+        };
+        // Only a top-level structure is traced through; a bottom-level one is reached by its address.
+        if (type == VkAccelerationStructureTypeKHR.TopLevel)
+            heap.WriteAcceleration(id, handle);
+
+        Name(VkObjectType.AccelerationStructureKHR, handle.Handle, name);
+
+        return Result.Success(new GpuAcceleration(id));
+    }
+
+    private void Free(VulkanAcceleration acceleration)
+    {
+        device.Api.vkDestroyAccelerationStructureKHR(acceleration.Handle, null);
+        Free(acceleration.Buffer);
+        Free(acceleration.Scratch);
     }
 
     private void Free(VulkanTexture texture)

@@ -90,6 +90,21 @@ public sealed class GpuCommandRecorder
     public void PushConstants(in GpuConstants constants) =>
         Add(new() { Kind = GpuCommandKind.PushConstants, Constants = constants });
 
+    /// <summary>
+    /// Builds an acceleration structure: a bottom-level one over its triangles, a top-level one over the first
+    /// <paramref name="instanceCount"/> instances of its instance buffer. The build waits for every command before
+    /// it and every command after waits for the build.
+    /// </summary>
+    public void BuildAcceleration(GpuAcceleration acceleration, uint instanceCount = 0) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.BuildAcceleration,
+                Id = acceleration.Id,
+                X = instanceCount,
+            }
+        );
+
     public void Dispatch(uint groupsX, uint groupsY = 1, uint groupsZ = 1) =>
         Add(
             new()

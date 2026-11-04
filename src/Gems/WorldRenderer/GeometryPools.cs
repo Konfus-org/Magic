@@ -36,12 +36,24 @@ internal sealed class GeometryPools(
     private int _vertexCount;
     private int _indexCount;
     private int _clusterCount;
+    private int _leafCount;
 
     public GpuBuffer Vertices { get; private set; }
 
     public GpuBuffer Indices { get; private set; }
 
     public GpuBuffer Clusters { get; private set; }
+
+    /// <summary>
+    /// The leaf clusters of every resident model, in the order its acceleration structure's geometries name them;
+    /// none on a GPU that traces no rays.
+    /// </summary>
+    public GpuBuffer LeafClusters { get; private set; }
+
+    /// <summary>
+    /// Whether a model arrived since the last frame: what rebuilds the instances' acceleration structure.
+    /// </summary>
+    public bool HasArrivals => _arrived.Count > 0;
 
     /// <summary>
     /// The global distance field, which every resident model's field joins.
@@ -51,6 +63,15 @@ internal sealed class GeometryPools(
     public void Dispose()
     {
         Field.Dispose();
+        foreach (ResidentModel resident in _resident.Values)
+        {
+            if (!resident.Acceleration.IsNone)
+                gpu.Destroy(resident.Acceleration);
+        }
+
+        if (!LeafClusters.IsNone)
+            gpu.Destroy(LeafClusters);
+
         if (!Vertices.IsNone)
             gpu.Destroy(Vertices);
 
@@ -99,6 +120,21 @@ internal sealed class GeometryPools(
             return Result.Failure($"the cluster pool was not made: {clusters.Error}");
 
         Clusters = clusters.Value;
+        if (gpu.Features.HasRayQuery)
+        {
+            Result<GpuBuffer> leaves = gpu.CreateBuffer(
+                new BufferDescription
+                {
+                    Bytes = (long)ClusterCapacity * sizeof(uint),
+                    Usage = BufferUsages.Storage,
+                    Name = "Leaf clusters",
+                }
+            );
+            if (!leaves.Ok)
+                return Result.Failure($"the leaf cluster table was not made: {leaves.Error}");
+
+            LeafClusters = leaves.Value;
+        }
 
         return Result.Success();
     }
@@ -185,9 +221,83 @@ internal sealed class GeometryPools(
                 (ulong)where.ClusterOffset * GpuCluster.Bytes,
                 (ulong)clusterBytes
             );
+            UploadLeaves(graph, derived, where);
         }
 
         _arrived.Clear();
+    }
+
+    /// <summary>
+    /// The model's acceleration structure over its leaf clusters, a geometry each, and the leaves counted into the
+    /// leaf table; none when the structure could not be made.
+    /// </summary>
+    private GpuAcceleration MakeAcceleration(string name, MeshDerived made, ResidentModel where)
+    {
+        List<TriangleGeometry> geometries = [];
+        foreach (GpuCluster cluster in made.Clusters)
+        {
+            if (cluster.Error != 0 || cluster.MaterialSlot == GpuCluster.ImposterSlot)
+                continue;
+
+            geometries.Add(
+                new TriangleGeometry(
+                    Vertices,
+                    0,
+                    GpuVertex.Bytes,
+                    VertexCapacity,
+                    Indices,
+                    (ulong)(where.IndexOffset + cluster.IndexOffset) * sizeof(uint),
+                    cluster.TriangleCount
+                )
+            );
+        }
+
+        if (geometries.Count == 0 || _leafCount + geometries.Count > ClusterCapacity)
+            return GpuAcceleration.None;
+
+        Result<GpuAcceleration> made2 = gpu.CreateAcceleration(
+            new BottomLevelDescription { Geometries = [.. geometries], Name = $"{name} acceleration" }
+        );
+        if (!made2.Ok)
+        {
+            Log.Warn($"{name} is traced through the field alone: {made2.Error}");
+
+            return GpuAcceleration.None;
+        }
+
+        _leafCount += geometries.Count;
+
+        return made2.Value;
+    }
+
+    /// <summary>
+    /// The model's leaf clusters into the leaf table and its acceleration structure built, after its pools landed.
+    /// </summary>
+    private void UploadLeaves(RenderGraph graph, MeshDerived derived, ResidentModel where)
+    {
+        if (where.Acceleration.IsNone)
+            return;
+
+        List<uint> leaves = [];
+        for (int i = 0; i < derived.Clusters.Length; i++)
+        {
+            GpuCluster cluster = derived.Clusters[i];
+            if (cluster.Error == 0 && cluster.MaterialSlot != GpuCluster.ImposterSlot)
+                leaves.Add(where.ClusterOffset + (uint)i);
+        }
+
+        int bytes = leaves.Count * sizeof(uint);
+        GpuUpload upload = gpu.BeginUpload(bytes);
+        MemoryMarshal.AsBytes(CollectionsMarshal.AsSpan(leaves)).CopyTo(upload.Bytes);
+        graph.Use(LeafClusters, GpuAccess.CopyDestination);
+        graph.Recorder.CopyBuffer(
+            upload.Buffer,
+            upload.Offset,
+            LeafClusters,
+            (ulong)where.LeafOffset * sizeof(uint),
+            (ulong)bytes
+        );
+        graph.Recorder.BuildAcceleration(where.Acceleration);
     }
 
     private async Task LoadAsync(Handle<Model> model)
@@ -225,6 +335,9 @@ internal sealed class GeometryPools(
             made.BoundsRadius,
             FieldSlot: made.Field.IsDefaultOrEmpty ? 0 : Field.Add(made)
         );
+        if (gpu.Features.HasRayQuery)
+            where = where with { LeafOffset = (uint)_leafCount, Acceleration = MakeAcceleration(name, made, where) };
+
         _vertexCount += made.Vertices.Length;
         _indexCount += made.Indices.Length;
         _clusterCount += made.Clusters.Length;
@@ -260,5 +373,7 @@ internal readonly record struct ResidentModel(
     Vector3 BoundsCenter,
     float BoundsRadius,
     bool IsFailure = false,
-    uint FieldSlot = 0
+    uint FieldSlot = 0,
+    uint LeafOffset = 0,
+    GpuAcceleration Acceleration = default
 );

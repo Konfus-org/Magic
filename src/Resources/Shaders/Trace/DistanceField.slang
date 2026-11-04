@@ -21,6 +21,7 @@ public struct DistanceFieldTracer : IWorldTracer
         hit.distance = limits.end;
         hit.normal = float3(0.0, 1.0, 0.0);
         hit.visibility = 1.0;
+        hit.instance = TraceNoInstance;
         float t = limits.start;
         for (uint i = 0u; i < 64u && t < limits.end; i++)
         {

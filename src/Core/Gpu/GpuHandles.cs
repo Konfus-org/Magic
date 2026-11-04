@@ -23,6 +23,18 @@ public readonly record struct GpuTexture(uint Id)
 }
 
 /// <summary>
+/// An acceleration structure of the heap, for the GPUs that trace rays: a model's triangles, or the instances of
+/// such, as <see cref="IGraphicsApi.CreateAcceleration(in BottomLevelDescription)"/> and its top-level twin make
+/// them. Shaders reach it by the id.
+/// </summary>
+public readonly record struct GpuAcceleration(uint Id)
+{
+    public static GpuAcceleration None => default;
+
+    public bool IsNone => Id == 0;
+}
+
+/// <summary>
 /// A sampler the GPU provider made, by its place in the bindless heap. <see cref="None"/> is no sampler.
 /// </summary>
 public readonly record struct GpuSampler(uint Id)

@@ -1,5 +1,5 @@
 // The GBuffer lit into the HDR picture: the sun through its pages, the lights of the pixel's froxel, the strongest
-// of them shadowed by cones through the distance field, the indirect light from the screen probes around the pixel,
+// of them shadowed through the tracer the entry is specialised to, the indirect light from the screen probes around the pixel,
 // and the air in front of it; the sky itself where nothing was drawn, from the sky the entry is specialised to. The
 // pass header's x is the frame's constants, y the shadow constants, z the lighting constants and w the field
 // constants.
@@ -73,7 +73,7 @@ bool SampleScreenProbes(GiConstants gi, uint2 pixel, float3 world, float3 normal
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
-void ShadeLighting<S : ISky>(uint3 thread : SV_DispatchThreadID)
+void ShadeLighting<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThreadID)
 {
     FrameConstants frame = GetFrame();
     LightingConstants lighting = GetLighting();
@@ -179,7 +179,7 @@ void ShadeLighting<S : ISky>(uint3 thread : SV_DispatchThreadID)
 
             Ray ray = { world + normal * start, tracedDirection[t] };
             TraceLimits limits = { start, max(tracedDistance[t] - start, start), tracedCone[t] };
-            TraceHit hit = DistanceFieldTracer.Trace(ray, limits);
+            TraceHit hit = T.Trace(ray, limits);
             color += tracedLight[t] * hit.visibility;
         }
 

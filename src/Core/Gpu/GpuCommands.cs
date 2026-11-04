@@ -189,6 +189,7 @@ public enum GpuCommandKind : byte
     FillBuffer,
     ClearTexture,
     Timestamp,
+    BuildAcceleration,
 }
 
 /// <summary>

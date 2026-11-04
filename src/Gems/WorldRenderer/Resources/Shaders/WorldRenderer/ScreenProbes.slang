@@ -63,7 +63,7 @@ void ScreenProbePlace(uint3 thread : SV_DispatchThreadID)
 // Each probe's texels traced: a ray each over the hemisphere, the screen, then the field, then the world probes.
 [shader("compute")]
 [numthreads(64, 1, 1)]
-void ScreenProbeTrace<S : ISky>(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
+void ScreenProbeTrace<S : ISky, T : IWorldTracer>(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
 {
     FrameConstants frame = GetFrame();
     LightingConstants lighting = GetLighting();
@@ -97,11 +97,11 @@ void ScreenProbeTrace<S : ISky>(uint3 group : SV_GroupID, uint3 local : SV_Group
     {
         Ray ray = { origin, direction };
         TraceLimits limits = { start, gi.rayRange, 0.0 };
-        TraceHit hit = DistanceFieldTracer.Trace(ray, limits);
+        TraceHit hit = T.Trace(ray, limits);
         reach = min(hit.distance, gi.rayRange);
         if (hit.isHit)
         {
-            radiance = ShadeFieldHit(frame, field, gi, origin + direction * hit.distance, hit.normal, direction);
+            radiance = ShadeFieldHit(frame, field, gi, origin + direction * hit.distance, hit.normal, direction, hit.instance);
         }
         else if (!SampleWorldProbeRadiance(gi, origin + direction * min(hit.distance, gi.rayRange), direction, radiance))
         {

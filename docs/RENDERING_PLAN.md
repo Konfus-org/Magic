@@ -577,6 +577,12 @@ Line counts are estimates of C# and Slang.
 | 9     | Post: TAAU, exposure, bloom, fused effects, tonemap, the pipeline asset, presets, debug views, the preloader's settle, `--bake` | Every sample domain screenshots; a custom pipeline script with an outline pass; `Toaster` on lavapipe headless | 4k |
 | 10    | Optional paths: mesh shaders, ray-query tracer, skinning pre-pass, cluster streaming, mip streaming       | Same pictures, faster on GPUs that have the features; an animated model                                         | 5k    |
 
+Of phase 10, the ray-query tracer is built: a bottom-level structure over each model's leaf clusters, a top-level one
+over the instances, and the trace passes specialised to it where the GPU has ray queries. The mesh shader path,
+the skinning pre-pass and the streaming of clusters and mips are not: the first saves only the vertex fetch the
+vertex-pull path already keeps cheap, the second waits for skinned models in the loader, and the pools and the
+textures hold what the samples need.
+
 Phases 1 to 4 and 5 to 8 are each sequential within and may run as two tracks after phase 1, since the field and the
 GI chain touch nothing in the shadow and light chain but the GBuffer they read.
 

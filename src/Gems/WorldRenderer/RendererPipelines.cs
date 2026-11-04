@@ -19,6 +19,8 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
     private const string AtmosphereSky = "Shaders/Sky/Atmosphere.slang";
     private const string GlassMaterial = "Shaders/Material/Glass.slang";
     private const string NoEffect = "Shaders/Post/NoEffect.slang";
+    private const string FieldTracer = "Shaders/Trace/DistanceField.slang";
+    private const string RayQueryTracer = "Shaders/Trace/RayQuery.slang";
     private const string PostModule = "Shaders/WorldRenderer/Post.slang";
 
     public GpuPipeline CullClusters { get; private set; }
@@ -114,6 +116,17 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
 
     public GpuPipeline ReflectionTemporal { get; private set; }
 
+    /// <summary>
+    /// The passes that trace, specialised to the ray-query tracer; none on a GPU that traces no rays.
+    /// </summary>
+    public GpuPipeline ShadeLightingRayQuery { get; private set; }
+
+    public GpuPipeline WorldProbeTraceRayQuery { get; private set; }
+
+    public GpuPipeline ScreenProbeTraceRayQuery { get; private set; }
+
+    public GpuPipeline ReflectionTraceRayQuery { get; private set; }
+
     public GpuPipeline TranslucentMoments { get; private set; }
 
     public GpuPipeline TranslucentResolve { get; private set; }
@@ -177,6 +190,10 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
                     TranslucentMoments,
                     TranslucentResolve,
                     GlassShadow,
+                    ShadeLightingRayQuery,
+                    WorldProbeTraceRayQuery,
+                    ScreenProbeTraceRayQuery,
+                    ReflectionTraceRayQuery,
                 ]
         )
         {
@@ -205,6 +222,14 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
         Handle<Shader> noEffect = assets.Find<Shader>(NoEffect);
         if (noEffect == Handle<Shader>.None)
             return Result.Failure($"there is no {NoEffect}.");
+
+        Handle<Shader> fieldTracer = assets.Find<Shader>(FieldTracer);
+        Handle<Shader> rayQueryTracer = assets.Find<Shader>(RayQueryTracer);
+        if (fieldTracer == Handle<Shader>.None || rayQueryTracer == Handle<Shader>.None)
+            return Result.Failure($"there is no {FieldTracer} or {RayQueryTracer}.");
+
+        ShaderTypeArgument field = new(fieldTracer, "DistanceFieldTracer");
+        ShaderTypeArgument rayQuery = new(rayQueryTracer, "RayQueryTracer");
 
         ImmutableArray<ShaderEntry> entries =
         [
@@ -238,7 +263,7 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             Entry("Fog", "FogIntegrate", ShaderStage.Compute),
             Entry("ShadeLighting", "ShadeLighting", ShaderStage.Compute) with
             {
-                TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere")],
+                TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere"), field],
             },
             Entry("Field", "FieldWriteModel", ShaderStage.Compute),
             Entry("Field", "FieldScroll", ShaderStage.Compute),
@@ -255,18 +280,18 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             Entry("WorldProbes", "WorldProbeSelect", ShaderStage.Compute),
             Entry("WorldProbes", "WorldProbeTrace", ShaderStage.Compute) with
             {
-                TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere")],
+                TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere"), field],
             },
             Entry("ScreenProbes", "ScreenProbePlace", ShaderStage.Compute),
             Entry("ScreenProbes", "ScreenProbeTrace", ShaderStage.Compute) with
             {
-                TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere")],
+                TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere"), field],
             },
             Entry("ScreenProbes", "ScreenProbeTemporal", ShaderStage.Compute),
             Entry("ScreenProbes", "ScreenProbeFilter", ShaderStage.Compute),
             Entry("Reflections", "ReflectionTrace", ShaderStage.Compute) with
             {
-                TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere")],
+                TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere"), field],
             },
             Entry("Reflections", "ReflectionResolve", ShaderStage.Compute),
             Entry("Reflections", "ReflectionTemporal", ShaderStage.Compute),
@@ -295,6 +320,30 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             Entry("Post", "PostBloomUp", ShaderStage.Compute),
             GetFinalEntry([noEffect, noEffect, noEffect, noEffect]),
         ];
+        if (gpu.Features.HasRayQuery)
+        {
+            entries =
+            [
+                .. entries,
+                Entry("ShadeLighting", "ShadeLighting", ShaderStage.Compute) with
+                {
+                    TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere"), rayQuery],
+                },
+                Entry("WorldProbes", "WorldProbeTrace", ShaderStage.Compute) with
+                {
+                    TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere"), rayQuery],
+                },
+                Entry("ScreenProbes", "ScreenProbeTrace", ShaderStage.Compute) with
+                {
+                    TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere"), rayQuery],
+                },
+                Entry("Reflections", "ReflectionTrace", ShaderStage.Compute) with
+                {
+                    TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere"), rayQuery],
+                },
+            ];
+        }
+
         foreach (ShaderEntry entry in entries)
         {
             if (entry.Module == Handle<Shader>.None)
@@ -604,6 +653,33 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             postPipelines[5],
             postPipelines[6]
         );
+        if (compiled.Length > 52)
+        {
+            (string Name, int Index)[] rayQueryEntries =
+            [
+                ("Shade with ray queries", 52),
+                ("Trace probes with ray queries", 53),
+                ("Trace screen probes with ray queries", 54),
+                ("Trace reflections with ray queries", 55),
+            ];
+            GpuPipeline[] rayQueryPipelines = new GpuPipeline[rayQueryEntries.Length];
+            for (int i = 0; i < rayQueryEntries.Length; i++)
+            {
+                Result<GpuPipeline> made = Compute(compiled[rayQueryEntries[i].Index], rayQueryEntries[i].Name);
+                if (!made.Ok)
+                    return Result.Failure(made.Error);
+
+                rayQueryPipelines[i] = made.Value;
+            }
+
+            (ShadeLightingRayQuery, WorldProbeTraceRayQuery, ScreenProbeTraceRayQuery, ReflectionTraceRayQuery) = (
+                rayQueryPipelines[0],
+                rayQueryPipelines[1],
+                rayQueryPipelines[2],
+                rayQueryPipelines[3]
+            );
+        }
+
         TileSize = compiled[5].GroupSizeX;
         bool areTiled =
             compiled[3].GroupSizeX == TileSize

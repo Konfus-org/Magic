@@ -59,12 +59,19 @@ internal static class VulkanTranslate
     /// </summary>
     public static GpuFormat ToGpu(this VkFormat format) => _windowFormats.GetValueOrDefault(format, GpuFormat.Unknown);
 
-    public static VkBufferUsageFlags ToVulkan(this BufferUsages usage)
+    public static VkBufferUsageFlags ToVulkan(this BufferUsages usage, bool hasAcceleration)
     {
         // Every buffer may be copied either way, so uploads and readbacks need nothing of their own.
         VkBufferUsageFlags flags = VkBufferUsageFlags.TransferSrc | VkBufferUsageFlags.TransferDst;
         if (usage.HasFlag(BufferUsages.Storage))
             flags |= VkBufferUsageFlags.StorageBuffer | VkBufferUsageFlags.ShaderDeviceAddress;
+
+        // A storage buffer may hold the triangles or the instances an acceleration structure is built from.
+        if (usage.HasFlag(BufferUsages.Storage) && hasAcceleration)
+            flags |= VkBufferUsageFlags.AccelerationStructureBuildInputReadOnlyKHR;
+
+        if (usage.HasFlag(BufferUsages.Acceleration))
+            flags |= VkBufferUsageFlags.AccelerationStructureStorageKHR | VkBufferUsageFlags.ShaderDeviceAddress;
 
         if (usage.HasFlag(BufferUsages.Index))
             flags |= VkBufferUsageFlags.IndexBuffer;

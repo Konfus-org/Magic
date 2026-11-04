@@ -368,7 +368,8 @@ internal sealed unsafe class VulkanDevice : IDisposable
             && extensions.Contains(AccelerationStructureExtension)
             && extensions.Contains(DeferredHostOperationsExtension)
             && rayQuery.rayQuery
-            && acceleration.accelerationStructure;
+            && acceleration.accelerationStructure
+            && acceleration.descriptorBindingAccelerationStructureUpdateAfterBind;
 
         return Result.Success(
             new Pick
@@ -489,7 +490,11 @@ internal sealed unsafe class VulkanDevice : IDisposable
         using NativeStrings extensionNames = new(extensions);
         VkPhysicalDeviceMeshShaderFeaturesEXT mesh = new() { meshShader = true, taskShader = true };
         VkPhysicalDeviceRayQueryFeaturesKHR rayQuery = new() { rayQuery = true };
-        VkPhysicalDeviceAccelerationStructureFeaturesKHR acceleration = new() { accelerationStructure = true };
+        VkPhysicalDeviceAccelerationStructureFeaturesKHR acceleration = new()
+        {
+            accelerationStructure = true,
+            descriptorBindingAccelerationStructureUpdateAfterBind = true,
+        };
         VkPhysicalDeviceVulkan13Features features13 = new()
         {
             dynamicRendering = true,

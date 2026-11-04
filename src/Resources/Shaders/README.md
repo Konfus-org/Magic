@@ -19,8 +19,8 @@ compiler loads a module and its imports from the assets, so a game's `Shaders/` 
 - `Fog/` is the air as a grid of froxels over the view: what each scatters and how the grid is read.
 - `Scene/Field` is the global distance field's tables: the atlas of model fields, the clipmaps of bricks around the
   camera, and how a point's distance and normal are read from them.
-- `Trace/` is the tracing contract, `IWorldTracer`, and the tracer that marches cones through the distance field for
-  the visibility between two points.
+- `Trace/` is the tracing contract, `IWorldTracer`, the tracer that marches cones through the distance field for the
+  visibility between two points, and the one that asks the GPU's own acceleration structures, where it has them.
 - `Scene/Probes` is the global illumination's tables: the lit cards, the world probes and the screen probes, and how
   a direction maps to a probe's texels; `Scene/SurfaceCache` is what a ray reads where it lands, from the lit card of
   the instance there.

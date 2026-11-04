@@ -13,6 +13,7 @@ import Scene.Visibility;
 import Scene.Captures;
 import Scene.Field;
 import Scene.Probes;
+import Trace.IWorldTracer;
 
 // The axes of a capture cell's view, as the renderer sets them up: towards the viewer along direction, the view
 // looking back along it.
@@ -214,11 +215,12 @@ public bool TraceScreenToSurface(FrameConstants frame, GiConstants gi, float3 or
     return false;
 }
 
-// What leaves a point the field found, towards a ray that arrived along a direction.
-public float3 ShadeFieldHit(FrameConstants frame, FieldConstants field, GiConstants gi, float3 world, float3 normal, float3 rayDirection)
+// What leaves a point a trace found, towards a ray that arrived along a direction: on the instance the tracer
+// named, else on the nearest of the instances listed for the point's brick.
+public float3 ShadeFieldHit(FrameConstants frame, FieldConstants field, GiConstants gi, float3 world, float3 normal, float3 rayDirection, uint instanceHint)
 {
-    uint instanceIndex;
-    if (!FindFieldInstance(frame, field, world, instanceIndex))
+    uint instanceIndex = instanceHint;
+    if (instanceHint == TraceNoInstance && !FindFieldInstance(frame, field, world, instanceIndex))
         return float3(0.0);
 
     GpuInstance instance = LoadInstance(frame.instances, instanceIndex);

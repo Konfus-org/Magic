@@ -16,6 +16,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
     public const int Capacity = 1 << 18;
 
     private readonly GpuInstance[] _rows = new GpuInstance[Capacity];
+    private readonly InstanceExtra[] _extras = new InstanceExtra[Capacity];
     private readonly Entity[] _entityOf = new Entity[Capacity];
     private readonly bool[] _isUsed = new bool[Capacity];
     private readonly bool[] _isDirty = new bool[Capacity];
@@ -43,6 +44,11 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
     /// The rows as the GPU reads them, by instance index; a freed slot's row draws nothing.
     /// </summary>
     public ReadOnlySpan<GpuInstance> Rows => _rows.AsSpan(0, Count);
+
+    /// <summary>
+    /// What the CPU keeps beside each row, by instance index.
+    /// </summary>
+    public ReadOnlySpan<InstanceExtra> Extras => _extras.AsSpan(0, Count);
 
     public void Dispose()
     {
@@ -78,7 +84,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
     /// <summary>
     /// The entity's row this frame, uploaded when it differs from the last.
     /// </summary>
-    public void Set(Entity entity, in GpuInstance row)
+    public void Set(Entity entity, in GpuInstance row, in InstanceExtra extra = default)
     {
         if (!_slotOf.TryGetValue(entity, out int slot))
         {
@@ -98,6 +104,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
         }
 
         _seen[slot] = _frame;
+        _extras[slot] = extra;
         if (_rows[slot] == row)
             return;
 
@@ -123,6 +130,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
             _free.Push(slot);
             RecordChange(_rows[slot], default);
             _rows[slot] = default;
+            _extras[slot] = default;
             MarkDirty(slot);
         }
     }

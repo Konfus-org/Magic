@@ -385,7 +385,8 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         DistanceField field,
         Translucency translucency,
         CaptureTable captures,
-        FrameTargets targets
+        FrameTargets targets,
+        bool usesRayQuery
     )
     {
         GpuConstants header = new(frameConstants.Id, shadows.Constants.Id, lighting.Constants.Id, field.Constants.Id);
@@ -463,7 +464,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         field.UseForSampling(graph);
         lighting.UseForCards(graph);
         translucency.UseForSampling(graph);
-        graph.Recorder.BindPipeline(pipelines.WorldProbeTrace);
+        graph.Recorder.BindPipeline(usesRayQuery ? pipelines.WorldProbeTraceRayQuery : pipelines.WorldProbeTrace);
         graph.Recorder.PushConstants(header);
         graph.Recorder.Dispatch(ProbeBudget);
         graph.EndPass();
@@ -500,7 +501,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         field.UseForSampling(graph);
         lighting.UseForCards(graph);
         translucency.UseForSampling(graph);
-        graph.Recorder.BindPipeline(pipelines.ScreenProbeTrace);
+        graph.Recorder.BindPipeline(usesRayQuery ? pipelines.ScreenProbeTraceRayQuery : pipelines.ScreenProbeTrace);
         graph.Recorder.PushConstants(header);
         graph.Recorder.Dispatch((uint)probeCount);
         graph.EndPass();
@@ -551,7 +552,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         field.UseForSampling(graph);
         lighting.UseForCards(graph);
         translucency.UseForSampling(graph);
-        graph.Recorder.BindPipeline(pipelines.ReflectionTrace);
+        graph.Recorder.BindPipeline(usesRayQuery ? pipelines.ReflectionTraceRayQuery : pipelines.ReflectionTrace);
         graph.Recorder.PushConstants(header);
         graph.Recorder.Dispatch(Groups((targets.Width + 1) / 2, 8), Groups((targets.Height + 1) / 2, 8));
         graph.EndPass();

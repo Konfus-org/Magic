@@ -32,6 +32,12 @@ public enum BufferUsages : byte
     /// Copied into and read by the CPU through <see cref="IGraphicsApi.ReadBackAsync"/>: host memory the GPU writes.
     /// </summary>
     Readback = 1 << 4,
+
+    /// <summary>
+    /// Holds an acceleration structure: what <see cref="IGraphicsApi.CreateAcceleration(in BottomLevelDescription)"/>
+    /// makes for itself.
+    /// </summary>
+    Acceleration = 1 << 5,
 }
 
 /// <summary>

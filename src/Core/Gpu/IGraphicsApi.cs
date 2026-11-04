@@ -41,6 +41,23 @@ public interface IGraphicsApi
     /// <summary>
     /// Frees a resource once no frame in flight uses it. The handle is gone at once.
     /// </summary>
+    /// <summary>
+    /// A bottom-level acceleration structure over triangles of the heap's buffers, built by
+    /// <see cref="GpuCommandRecorder.BuildAcceleration"/>; only when <see cref="GpuFeatures.HasRayQuery"/>.
+    /// </summary>
+    Result<GpuAcceleration> CreateAcceleration(in BottomLevelDescription description);
+
+    /// <summary>
+    /// A top-level acceleration structure over instances of bottom-level ones, built from its instance buffer by
+    /// <see cref="GpuCommandRecorder.BuildAcceleration"/>; only when <see cref="GpuFeatures.HasRayQuery"/>.
+    /// </summary>
+    Result<GpuAcceleration> CreateAcceleration(in TopLevelDescription description);
+
+    /// <summary>
+    /// The device address of a bottom-level acceleration structure: what an instance of it refers to it by.
+    /// </summary>
+    ulong GetAddress(GpuAcceleration acceleration);
+
     void Destroy(GpuBuffer buffer);
 
     void Destroy(GpuTexture texture);
@@ -48,6 +65,8 @@ public interface IGraphicsApi
     void Destroy(GpuSampler sampler);
 
     void Destroy(GpuPipeline pipeline);
+
+    void Destroy(GpuAcceleration acceleration);
 
     /// <summary>
     /// Room for <paramref name="bytes"/> in this frame's staging ring, to fill and copy from in this frame's commands.

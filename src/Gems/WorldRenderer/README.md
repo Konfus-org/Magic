@@ -55,6 +55,10 @@ model reader, the mesh preprocessor and the texture reader.
   blooms, and the final pass runs the camera's effects, up to four shaders implementing the pixel effect contract
   named in its `PostProcessing`, and tonemaps with AgX. `set WorldRenderer.preset=toaster`, `balanced` or `quality`
   sets the share, how many cards are lit a frame and whether reflections are traced.
+- On a GPU that traces rays, every model's leaf clusters go into an acceleration structure as it arrives and the
+  instances into one over them, built again when any changes, and the probes, the reflections and the lights'
+  shadows trace through them instead of the distance field, landing exactly on the triangles that are drawn.
+  `set WorldRenderer.tracer=field` traces through the field instead; `rayquery` goes back.
 - `bake` in the console opens every domain under `Domains/` in turn and exits, so a release ships with the caches
   full.
 - The passes are the `Shaders/WorldRenderer/` modules in the gem's `Resources`; they build on the shader library
