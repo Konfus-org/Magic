@@ -17,6 +17,7 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
     private const string Folder = "Shaders/WorldRenderer/";
     private const string StandardMaterial = "Shaders/Material/Standard.slang";
     private const string AtmosphereSky = "Shaders/Sky/Atmosphere.slang";
+    private const string GlassMaterial = "Shaders/Material/Glass.slang";
 
     public GpuPipeline CullClusters { get; private set; }
 
@@ -96,6 +97,12 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
 
     public GpuPipeline ReflectionTemporal { get; private set; }
 
+    public GpuPipeline TranslucentMoments { get; private set; }
+
+    public GpuPipeline TranslucentResolve { get; private set; }
+
+    public GpuPipeline GlassShadow { get; private set; }
+
     public uint CullThreads { get; private set; }
 
     public uint TileSize { get; private set; }
@@ -144,6 +151,9 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
                     ReflectionTrace,
                     ReflectionResolve,
                     ReflectionTemporal,
+                    TranslucentMoments,
+                    TranslucentResolve,
+                    GlassShadow,
                 ]
         )
         {
@@ -164,6 +174,10 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
         Handle<Shader> atmosphere = assets.Find<Shader>(AtmosphereSky);
         if (atmosphere == Handle<Shader>.None)
             return Result.Failure($"there is no {AtmosphereSky}.");
+
+        Handle<Shader> glass = assets.Find<Shader>(GlassMaterial);
+        if (glass == Handle<Shader>.None)
+            return Result.Failure($"there is no {GlassMaterial}.");
 
         ImmutableArray<ShaderEntry> entries =
         [
@@ -229,6 +243,24 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             },
             Entry("Reflections", "ReflectionResolve", ShaderStage.Compute),
             Entry("Reflections", "ReflectionTemporal", ShaderStage.Compute),
+            Entry("DrawTranslucent", "DrawTranslucentVertex", ShaderStage.Vertex),
+            Entry("DrawTranslucent", "TranslucentMomentsPixel", ShaderStage.Pixel) with
+            {
+                TypeArguments = [new ShaderTypeArgument(glass, "Glass")],
+            },
+            Entry("DrawTranslucent", "TranslucentResolvePixel", ShaderStage.Pixel) with
+            {
+                TypeArguments =
+                [
+                    new ShaderTypeArgument(glass, "Glass"),
+                    new ShaderTypeArgument(atmosphere, "Atmosphere"),
+                ],
+            },
+            Entry("DrawTranslucent", "GlassShadowVertex", ShaderStage.Vertex),
+            Entry("DrawTranslucent", "GlassShadowPixel", ShaderStage.Pixel) with
+            {
+                TypeArguments = [new ShaderTypeArgument(glass, "Glass")],
+            },
         ];
         foreach (ShaderEntry entry in entries)
         {
@@ -463,6 +495,57 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             giPipelines[9],
             giPipelines[10],
             giPipelines[11]
+        );
+        (string Name, int Vertex, int Pixel, GpuFormat[] Colors, bool HasDepth, BlendMode Blend)[] translucentEntries =
+        [
+            (
+                "Translucent moments",
+                41,
+                42,
+                [GpuFormat.R16G16B16A16Sfloat, GpuFormat.R16G16B16A16Sfloat],
+                true,
+                BlendMode.Additive
+            ),
+            (
+                "Translucent resolve",
+                41,
+                43,
+                [GpuFormat.R16G16B16A16Sfloat, GpuFormat.R16G16Sfloat],
+                true,
+                BlendMode.Additive
+            ),
+            ("Glass shadow", 44, 45, [GpuFormat.R16G16B16A16Sfloat], false, BlendMode.Multiply),
+        ];
+        GpuPipeline[] translucentPipelines = new GpuPipeline[translucentEntries.Length];
+        for (int i = 0; i < translucentEntries.Length; i++)
+        {
+            (string name, int vertex, int pixel, GpuFormat[] colors, bool hasDepth, BlendMode blend) =
+                translucentEntries[i];
+            Result<GpuPipeline> made = gpu.CreatePipeline(
+                new GraphicsPipelineDescription
+                {
+                    VertexSpirv = compiled[vertex].Spirv,
+                    VertexEntryPoint = compiled[vertex].EntryPoint,
+                    PixelSpirv = compiled[pixel].Spirv,
+                    PixelEntryPoint = compiled[pixel].EntryPoint,
+                    ColorFormats = [.. colors],
+                    DepthFormat = hasDepth ? GpuFormat.D32Sfloat : default,
+                    Depth = hasDepth ? DepthMode.TestOnly : DepthMode.None,
+                    Blend = blend,
+                    Cull = CullMode.None,
+                    Name = name,
+                }
+            );
+            if (!made.Ok)
+                return Result.Failure($"the {name} pipeline was not built: {made.Error}");
+
+            translucentPipelines[i] = made.Value;
+        }
+
+        (TranslucentMoments, TranslucentResolve, GlassShadow) = (
+            translucentPipelines[0],
+            translucentPipelines[1],
+            translucentPipelines[2]
         );
         TileSize = compiled[5].GroupSizeX;
         bool areTiled =

@@ -29,6 +29,8 @@ public static const uint CountVisibleDraws = 0u;
 public static const uint CountRetest = 4u;
 public static const uint CountRetestDraws = 8u;
 public static const uint CountVisibleList = 12u;
+// The draws of the translucent clusters, after the lighting, at twice the visible clusters into the draw arguments.
+public static const uint CountTranslucentDraws = 16u;
 
 // The retest arguments buffer: the groups of the retest dispatch, then 1 and 1.
 public static const uint RetestGroups = 0u;

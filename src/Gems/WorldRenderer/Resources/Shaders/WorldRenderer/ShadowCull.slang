@@ -7,6 +7,7 @@ import Core.Heap;
 import Core.Pass;
 import Core.Frame;
 import Scene.Instances;
+import Scene.Materials;
 import Scene.Clusters;
 import Scene.Visibility;
 import Shadow.Virtual;
@@ -31,7 +32,7 @@ void ShadowCull(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
     {
         uint clusterIndex = instance.clusterOffset + i;
         GpuCluster cluster = LoadCluster(frame.clusters, clusterIndex);
-        if (IsImposter(cluster))
+        if (IsImposter(cluster) || LoadMaterial(frame.materials, GetMaterial(instance, cluster.materialSlot)).kind == MaterialKindGlass)
             continue;
 
         float2 light = ToLight(shadow, ToWorld(instance.world, cluster.center)).xy;

@@ -33,7 +33,8 @@ public struct LightingConstants
     public uint debugView;
     // The global illumination's constants, C#'s GiConstants.
     public uint gi;
-    public float padding2;
+    // The translucency's constants, C#'s TranslucencyConstants.
+    public uint translucency;
 }
 
 public LightingConstants GetLighting() { return LoadConstants<LightingConstants>(GetPassHeader().z); }

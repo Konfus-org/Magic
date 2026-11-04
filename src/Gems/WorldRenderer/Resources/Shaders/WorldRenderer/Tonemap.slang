@@ -11,6 +11,7 @@ import Core.Color;
 import Core.Pack;
 import Scene.Lighting;
 import Scene.Field;
+import Scene.Translucency;
 import Trace.DistanceField;
 
 [shader("compute")]
@@ -23,8 +24,27 @@ void Tonemap(uint3 thread : SV_DispatchThreadID)
     if (any(thread.xy >= size))
         return;
 
+    // The panes in front of the pixel: the picture behind them, bent, through their colour, plus their own light.
     TextureRef hdr = { lighting.hdr };
-    float3 color = max(hdr.Load(thread.xy, 0u).rgb * lighting.exposure, 0.0);
+    TranslucencyConstants translucency = GetTranslucency();
+    TextureRef optical = { translucency.opticalDepth };
+    float4 absorbance = translucency.hasTranslucent != 0u ? optical.Load(thread.xy, 0u) : float4(0.0);
+    float3 color;
+    if (absorbance.w > 0.0)
+    {
+        TextureRef accumulation = { translucency.accumulation };
+        TextureRef offsets = { translucency.offsets };
+        float4 added = accumulation.Load(thread.xy, 0u);
+        float2 offset = offsets.Load(thread.xy, 0u).xy / max(added.w, 1e-4);
+        uint2 behind = uint2(clamp(int2(thread.xy) + int2(offset * float2(size)), int2(0), int2(size) - 1));
+        color = hdr.Load(behind, 0u).rgb * exp(-absorbance.rgb) + added.rgb;
+    }
+    else
+    {
+        color = hdr.Load(thread.xy, 0u).rgb;
+    }
+
+    color = max(color * lighting.exposure, 0.0);
     color = color / (1.0 + color);
     if (lighting.debugView == 1u || lighting.debugView == 2u)
     {

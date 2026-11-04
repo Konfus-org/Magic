@@ -70,6 +70,7 @@ public sealed class WorldRendererGem(
     private readonly FrameTargets _targets = new(gpu);
     private readonly FrameTargets _cellTargets = new(gpu);
     private readonly GlobalIllumination _gi = new(gpu);
+    private readonly Translucency _translucency = new(gpu);
     private readonly RendererPipelines _pipelines = new(gpu, shaders, assets);
     private readonly InstanceTable _instances = new(gpu);
     private readonly CaptureTable _captures = new(gpu);
@@ -107,6 +108,7 @@ public sealed class WorldRendererGem(
         _shadows.Dispose();
         _lighting.Dispose();
         _gi.Dispose();
+        _translucency.Dispose();
         foreach (
             GpuBuffer buffer in (ReadOnlySpan<GpuBuffer>)
                 [
@@ -161,6 +163,7 @@ public sealed class WorldRendererGem(
                     _shadows.Create,
                     _lighting.Create,
                     _gi.Create,
+                    _translucency.Create,
                     _pools.Field.Create,
                     CreateBuffers,
                     () => _cellTargets.Resize(GpuCapture.CellSize, GpuCapture.CellSize, _graph),
@@ -372,7 +375,8 @@ public sealed class WorldRendererGem(
             2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360) / _targets.Height,
             _instances.Changes
         );
-        _lighting.Prepare(_graph, _world, camera, sun, _targets, _debugView, _gi.Constants);
+        _lighting.Prepare(_graph, _world, camera, sun, _targets, _debugView, _gi.Constants, _translucency.Constants);
+        _translucency.Prepare(_graph, sun.Direction, camera.Transform.Position, _targets);
         _gi.Prepare(
             _graph,
             _instances.Rows,
@@ -406,6 +410,23 @@ public sealed class WorldRendererGem(
             countOffset: 8
         );
         RecordHzb();
+        DrawList translucentDraws = new(
+            new GpuConstants(_constants.Id, _shadows.Constants.Id, _lighting.Constants.Id, _pools.Field.Constants.Id),
+            _constants,
+            _instances.Buffer,
+            _drawArguments,
+            (ulong)MaxVisibleClusters * 2 * DrawArgumentsBytes,
+            _counts,
+            16,
+            MaxVisibleClusters,
+            DrawArgumentsBytes,
+            _pools.Vertices,
+            _pools.Indices,
+            _pools.Clusters,
+            _materials.Buffer,
+            _visibleClusters
+        );
+        _translucency.RecordShadow(_graph, _pipelines, translucentDraws);
         _shadows.Record(_graph, _pipelines, _constants, _instances.Buffer, instanceCount, _pools, _targets);
         RecordResolve(view, "Resolve materials");
         _gi.Record(
@@ -417,10 +438,13 @@ public sealed class WorldRendererGem(
             _shadows,
             _lighting,
             _pools.Field,
+            _translucency,
             _captures,
             _targets
         );
-        _lighting.RecordShading(_graph, _pipelines, _constants, _shadows, _pools.Field, _gi, _targets);
+        _lighting.RecordShading(_graph, _pipelines, _constants, _shadows, _pools.Field, _gi, _translucency, _targets);
+        _translucency.RecordDraws(_graph, _pipelines, translucentDraws, _targets, _shadows, _lighting, _gi);
+        _lighting.RecordTonemap(_graph, _pipelines, _constants, _shadows, _pools.Field, _translucency, _targets);
 
         GpuTexture target = gpu.WindowTarget;
         if (!target.IsNone)
@@ -547,7 +571,7 @@ public sealed class WorldRendererGem(
             ("Visible clusters", (long)MaxVisibleClusters * 8, BufferUsages.Storage),
             (
                 "Draw arguments",
-                (long)MaxVisibleClusters * 2 * DrawArgumentsBytes,
+                (long)MaxVisibleClusters * 3 * DrawArgumentsBytes,
                 BufferUsages.Storage | BufferUsages.Indirect
             ),
             ("Retest list", (long)MaxVisibleClusters * 8, BufferUsages.Storage),
@@ -631,6 +655,16 @@ public sealed class WorldRendererGem(
             Vector3 scale = instance.Transform.Scale;
             float maxScale = Math.Max(Math.Abs(scale.X), Math.Max(Math.Abs(scale.Y), Math.Abs(scale.Z)));
             uint capture = isSettled ? _captures.Get(instance.Model.Id, resident, materialRows) : 0;
+            Vector3 worldCenter = Vector3.Transform(resident.BoundsCenter, world);
+            float worldRadius = resident.BoundsRadius * maxScale;
+            GpuMaterial first = _materials.Get(materialRows[0]);
+            bool isGlass = first.Kind == (uint)MaterialKind.Glass;
+            if (isGlass)
+            {
+                Vector3 color = new(first.BaseColor.X, first.BaseColor.Y, first.BaseColor.Z);
+                _translucency.Add(worldCenter, worldRadius, Vector3.One - (first.BaseColor.W * (Vector3.One - color)));
+            }
+
             _instances.Set(
                 instance.Entity,
                 new GpuInstance
@@ -638,11 +672,11 @@ public sealed class WorldRendererGem(
                     World = world,
                     InverseWorld = inverseWorld,
                     PreviousWorld = world,
-                    BoundsCenter = Vector3.Transform(resident.BoundsCenter, world),
-                    BoundsRadius = resident.BoundsRadius * maxScale,
+                    BoundsCenter = worldCenter,
+                    BoundsRadius = worldRadius,
                     ClusterOffset = resident.ClusterOffset,
                     ClusterCount = resident.ClusterCount,
-                    Flags = resident.FieldSlot,
+                    Flags = isGlass ? 0 : resident.FieldSlot,
                     Capture = capture,
                     Material0 = materialRows[0],
                     Material1 = materialRows[1],

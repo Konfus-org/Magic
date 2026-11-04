@@ -15,6 +15,7 @@ import Scene.Lights;
 import Scene.Lighting;
 import Scene.Probes;
 import Scene.SurfaceCache;
+import Scene.Translucency;
 import Light.Lights;
 import Shadow.Virtual;
 import Sky.ISky;
@@ -113,8 +114,8 @@ void LitCardShade<S : ISky>(uint3 thread : SV_DispatchThreadID)
     ShadowConstants shadow = LoadShadowConstants(GetPassHeader().y);
     float3 sunIlluminance = hasSky ? S.GetSunIlluminance(sky) : lighting.sunIlluminance.rgb;
     float viewDepth = max(distance(world, frame.cameraPosition.xyz), frame.near);
-    float visible = SampleSunShadow(shadow, world, normal, viewDepth);
-    float3 irradiance = sunIlluminance * (visible * saturate(dot(normal, frame.sunDirection.xyz)));
+    float3 sunVisible = SampleSunShadow(shadow, world, normal, viewDepth) * GetGlassShadow(GetTranslucency(), world);
+    float3 irradiance = sunIlluminance * sunVisible * saturate(dot(normal, frame.sunDirection.xyz));
 
     BufferRef lists = { gi.slotLights };
     uint listOffset = slot * (LitLightsPerSlot + 1u) * 4u;

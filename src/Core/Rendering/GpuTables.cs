@@ -114,6 +114,11 @@ public enum MaterialKind : uint
     /// The magenta a broken material, shader or texture is drawn as.
     /// </summary>
     Failure,
+
+    /// <summary>
+    /// Drawn after the lighting, forward, letting the picture behind through its colour.
+    /// </summary>
+    Glass,
 }
 
 /// <summary>

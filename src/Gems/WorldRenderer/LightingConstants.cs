@@ -56,7 +56,10 @@ internal record struct LightingConstants
     /// </summary>
     public uint Gi;
 
-    public float Padding2;
+    /// <summary>
+    /// The translucency's constants, a <see cref="TranslucencyConstants"/>.
+    /// </summary>
+    public uint Translucency;
 }
 
 /// <summary>
@@ -92,6 +95,11 @@ internal enum DebugView : uint
     /// The sharp reflections alone, before the surface's Fresnel: what a smooth surface mirrors.
     /// </summary>
     Reflections,
+
+    /// <summary>
+    /// The sun's colour through the glass at every surface: white where no pane is in the way.
+    /// </summary>
+    GlassShadow,
 }
 
 /// <summary>

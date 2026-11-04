@@ -7,6 +7,7 @@ import Core.Heap;
 // Which material contract a row is drawn with.
 public static const uint MaterialKindStandard = 0u;
 public static const uint MaterialKindFailure = 1u;
+public static const uint MaterialKindGlass = 2u;
 
 public struct GpuMaterial
 {

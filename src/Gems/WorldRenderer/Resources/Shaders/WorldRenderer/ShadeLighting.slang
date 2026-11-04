@@ -13,6 +13,7 @@ import Core.Pack;
 import Core.Sampling;
 import Scene.Lights;
 import Scene.Probes;
+import Scene.Translucency;
 import Scene.Lighting;
 import Scene.Field;
 import Surface.Brdf;
@@ -119,8 +120,8 @@ void ShadeLighting<S : ISky>(uint3 thread : SV_DispatchThreadID)
 
         ShadowConstants shadow = LoadShadowConstants(GetPassHeader().y);
         float3 sunIlluminance = hasSky ? S.GetSunIlluminance(sky) : lighting.sunIlluminance.rgb;
-        float visible = SampleSunShadow(shadow, world, normal, viewDepth);
-        color = Evaluate(brdf, normal, viewDirection, frame.sunDirection.xyz) * sunIlluminance * visible;
+        float3 sunVisible = SampleSunShadow(shadow, world, normal, viewDepth) * GetGlassShadow(GetTranslucency(), world);
+        color = Evaluate(brdf, normal, viewDirection, frame.sunDirection.xyz) * sunIlluminance * sunVisible;
 
         // Every light of the froxel, the strongest few kept aside to be shadowed through the field.
         uint froxel = GetFroxelIndex(GetFroxel(frame, thread.xy, viewDepth));
@@ -221,6 +222,11 @@ void ShadeLighting<S : ISky>(uint3 thread : SV_DispatchThreadID)
         else if (lighting.debugView == 5u)
         {
             color = reflectedSharp;
+        }
+        else if (lighting.debugView == 6u)
+        {
+            // Shown as it is: what the tonemap's exposure would scale away.
+            color = GetGlassShadow(GetTranslucency(), world) / max(lighting.exposure, Epsilon);
         }
         else
         {

@@ -8,6 +8,7 @@ import Core.Heap;
 import Core.Pass;
 import Core.Frame;
 import Scene.Instances;
+import Scene.Materials;
 import Scene.Clusters;
 import Scene.Culling;
 import Scene.Visibility;
@@ -112,8 +113,12 @@ void Test(FrameConstants frame, uint instanceIndex, GpuInstance instance, uint c
     VisibleCluster entry = { instanceIndex, clusterIndex };
     visible[listIndex] = entry;
 
-    uint drawIndex = counts.InterlockedAdd(isRetest ? CountRetestDraws : CountVisibleDraws, 1u);
+    // A translucent cluster waits for the lighting in its own draws instead of the visibility buffer's.
+    bool isTranslucent = !isImposter && LoadMaterial(frame.materials, GetMaterial(instance, cluster.materialSlot)).kind == MaterialKindGlass;
+    uint countOffset = isTranslucent ? CountTranslucentDraws : (isRetest ? CountRetestDraws : CountVisibleDraws);
+    uint drawOffset = isTranslucent ? 2u * frame.maxVisibleClusters : (isRetest ? frame.maxVisibleClusters : 0u);
+    uint drawIndex = counts.InterlockedAdd(countOffset, 1u);
     ArrayRef<DrawArguments> draws = { frame.drawArguments };
     DrawArguments arguments = { cluster.triangleCount * 3u, 1u, 0u, listIndex };
-    draws[(isRetest ? frame.maxVisibleClusters : 0u) + drawIndex] = arguments;
+    draws[drawOffset + drawIndex] = arguments;
 }

@@ -371,6 +371,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         SunShadows shadows,
         Lighting lighting,
         DistanceField field,
+        Translucency translucency,
         CaptureTable captures,
         FrameTargets targets
     )
@@ -386,6 +387,8 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
             graph.Use(_slotInstances, GpuAccess.ShaderRead);
             graph.Use(_slotLights, GpuAccess.ShaderWrite);
             lighting.UseForCards(graph);
+            translucency.UseForSampling(graph);
+            translucency.UseForSampling(graph);
             graph.Recorder.BindPipeline(pipelines.LitCardLights);
             graph.Recorder.PushConstants(header);
             graph.Recorder.Dispatch((uint)_batchCount);
@@ -404,6 +407,8 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
             captures.UseAll(graph);
             shadows.UseForSampling(graph);
             lighting.UseForCards(graph);
+            translucency.UseForSampling(graph);
+            translucency.UseForSampling(graph);
             graph.Recorder.BindPipeline(pipelines.LitCardShade);
             graph.Recorder.PushConstants(header);
             graph.Recorder.Dispatch(LitSlotTexels / 8, LitSlotTexels / 8, (uint)_batchCount);
@@ -445,6 +450,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         captures.UseAll(graph);
         field.UseForSampling(graph);
         lighting.UseForCards(graph);
+        translucency.UseForSampling(graph);
         graph.Recorder.BindPipeline(pipelines.WorldProbeTrace);
         graph.Recorder.PushConstants(header);
         graph.Recorder.Dispatch(ProbeBudget);
@@ -481,6 +487,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         captures.UseAll(graph);
         field.UseForSampling(graph);
         lighting.UseForCards(graph);
+        translucency.UseForSampling(graph);
         graph.Recorder.BindPipeline(pipelines.ScreenProbeTrace);
         graph.Recorder.PushConstants(header);
         graph.Recorder.Dispatch((uint)probeCount);
@@ -528,6 +535,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         captures.UseAll(graph);
         field.UseForSampling(graph);
         lighting.UseForCards(graph);
+        translucency.UseForSampling(graph);
         graph.Recorder.BindPipeline(pipelines.ReflectionTrace);
         graph.Recorder.PushConstants(header);
         graph.Recorder.Dispatch(Groups((targets.Width + 1) / 2, 8), Groups((targets.Height + 1) / 2, 8));

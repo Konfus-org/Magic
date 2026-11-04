@@ -44,5 +44,10 @@ model reader, the mesh preprocessor and the texture reader.
   screen, then the field, then the world probes, so a floor shows the wall behind the camera; the rays are gathered
   over a reach the roughness sets and blended with last frame's, held within what the neighbours see.
   `set WorldRenderer.debug=reflections` shows the reflections alone.
+- A material that names the glass shader is drawn after the lighting, forward, in any order: the panes' absorbance
+  and the moments of their depths are added up first, then each pane's light, the sun through its pages and the
+  other panes, the lights of its froxel and the screen probes' reflection, weighed by what reaches it; the tonemap
+  puts them over the picture, bent by their normals. The sun through the panes colours what is behind them, and a
+  ray through them arrives tinted. Glass casts no sun shadow of its own and is left out of the distance field.
 - The passes are the `Shaders/WorldRenderer/` modules in the gem's `Resources`; they build on the shader library
   (`src/Resources/Shaders/README.md`).

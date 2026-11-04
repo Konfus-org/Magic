@@ -15,6 +15,7 @@ import Scene.Lighting;
 import Scene.Field;
 import Scene.Probes;
 import Scene.SurfaceCache;
+import Scene.Translucency;
 import Surface.Brdf;
 import Sky.ISky;
 import Trace.IWorldTracer;
@@ -110,6 +111,7 @@ void ReflectionTrace<S : ISky>(uint3 thread : SV_DispatchThreadID)
         }
     }
 
+    radiance *= GetGlassTransmittance(GetTranslucency(), origin, origin + direction * min(hitDistance, gi.rayRange));
     traced.Store(thread.xy, float4(radiance, hitDistance));
 }
 

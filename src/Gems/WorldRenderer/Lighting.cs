@@ -132,7 +132,8 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
         RenderSun sun,
         FrameTargets targets,
         DebugView debugView,
-        GpuBuffer giConstants
+        GpuBuffer giConstants,
+        GpuBuffer translucencyConstants
     )
     {
         _lightCount = Math.Min(world.Lights.Count, MaxLights);
@@ -177,6 +178,7 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
             Exposure = sun.Exposure,
             DebugView = (uint)debugView,
             Gi = giConstants.Id,
+            Translucency = translucencyConstants.Id,
         };
         GpuUpload upload = gpu.BeginUpload(LightingConstants.Bytes);
         MemoryMarshal.Write(upload.Bytes, in constants);
@@ -197,6 +199,17 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
         graph.Use(_transmittance, GpuAccess.ShaderRead);
         graph.Use(_multiScattering, GpuAccess.ShaderRead);
         graph.Use(_skyView, GpuAccess.ShaderRead);
+    }
+
+    /// <summary>
+    /// Says a pass lights surfaces in the view, as the translucent one does: the light table, its froxel lists, the
+    /// sky's tables and the air.
+    /// </summary>
+    public void UseForShading(RenderGraph graph)
+    {
+        UseForCards(graph);
+        graph.Use(_froxelLists, GpuAccess.ShaderRead);
+        graph.Use(_fogIntegrated, GpuAccess.ShaderRead);
     }
 
     /// <summary>
@@ -256,7 +269,7 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
     }
 
     /// <summary>
-    /// The air, then the GBuffer lit into the HDR picture and that brought to the output, after the sun's pages.
+    /// The air, then the GBuffer lit into the HDR picture, after the sun's pages.
     /// </summary>
     public void RecordShading(
         RenderGraph graph,
@@ -265,6 +278,7 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
         SunShadows shadows,
         DistanceField field,
         GlobalIllumination gi,
+        Translucency translucency,
         FrameTargets targets
     )
     {
@@ -318,11 +332,27 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
         shadows.UseForSampling(graph);
         field.UseForSampling(graph);
         gi.UseForSampling(graph);
+        translucency.UseForSampling(graph);
         graph.Recorder.BindPipeline(pipelines.ShadeLighting);
         graph.Recorder.PushConstants(header);
         graph.Recorder.Dispatch(Groups(targets.Width, pipelines.TileSize), Groups(targets.Height, pipelines.TileSize));
         graph.EndPass();
+    }
 
+    /// <summary>
+    /// The HDR picture, with the panes over it, brought to the output.
+    /// </summary>
+    public void RecordTonemap(
+        RenderGraph graph,
+        RendererPipelines pipelines,
+        GpuBuffer frameConstants,
+        SunShadows shadows,
+        DistanceField field,
+        Translucency translucency,
+        FrameTargets targets
+    )
+    {
+        GpuConstants header = new(frameConstants.Id, shadows.Constants.Id, Constants.Id, field.Constants.Id);
         graph.BeginComputePass("Tonemap");
         graph.Use(frameConstants, GpuAccess.ShaderRead);
         graph.Use(Constants, GpuAccess.ShaderRead);
@@ -331,6 +361,7 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
         graph.Use(targets.Visibility, GpuAccess.ShaderRead);
         graph.Use(targets.Output, GpuAccess.ShaderWrite);
         field.UseForSampling(graph);
+        translucency.UseForComposite(graph, targets);
         graph.Recorder.BindPipeline(pipelines.Tonemap);
         graph.Recorder.PushConstants(header);
         graph.Recorder.Dispatch(Groups(targets.Width, pipelines.TileSize), Groups(targets.Height, pipelines.TileSize));

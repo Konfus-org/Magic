@@ -14,6 +14,7 @@ import Scene.Lighting;
 import Scene.Field;
 import Scene.Probes;
 import Scene.SurfaceCache;
+import Scene.Translucency;
 import Sky.ISky;
 import Trace.IWorldTracer;
 import Trace.DistanceField;
@@ -149,7 +150,7 @@ void WorldProbeTrace<S : ISky>(uint3 group : SV_GroupID, uint3 local : SV_GroupT
         }
     }
 
-    rayRadiance[ray] = radiance;
+    rayRadiance[ray] = radiance * GetGlassTransmittance(GetTranslucency(), position, position + direction * hitDistance);
     rayDistance[ray] = hitDistance;
     GroupMemoryBarrierWithGroupSync();
 

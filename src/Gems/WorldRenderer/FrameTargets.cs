@@ -31,6 +31,18 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
 
     public GpuTexture Hdr { get; private set; }
 
+    /// <summary>
+    /// The translucent surfaces' power moments of depth, their absorbance by colour and in all, the light they add
+    /// with its weight, and how far they bend the picture behind them.
+    /// </summary>
+    public GpuTexture Moments { get; private set; }
+
+    public GpuTexture OpticalDepth { get; private set; }
+
+    public GpuTexture Accumulation { get; private set; }
+
+    public GpuTexture Offsets { get; private set; }
+
     public GpuTexture Output { get; private set; }
 
     public GpuBuffer Readback { get; private set; }
@@ -82,6 +94,26 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
             GpuFormat.R16G16B16A16Sfloat,
             TextureUsages.Storage | TextureUsages.Sampled
         );
+        Result<GpuTexture> moments = Make(
+            "Translucent moments",
+            GpuFormat.R16G16B16A16Sfloat,
+            TextureUsages.ColorTarget | TextureUsages.Sampled
+        );
+        Result<GpuTexture> opticalDepth = Make(
+            "Translucent absorbance",
+            GpuFormat.R16G16B16A16Sfloat,
+            TextureUsages.ColorTarget | TextureUsages.Sampled
+        );
+        Result<GpuTexture> accumulation = Make(
+            "Translucent light",
+            GpuFormat.R16G16B16A16Sfloat,
+            TextureUsages.ColorTarget | TextureUsages.Sampled
+        );
+        Result<GpuTexture> offsets = Make(
+            "Translucent offsets",
+            GpuFormat.R16G16Sfloat,
+            TextureUsages.ColorTarget | TextureUsages.Sampled
+        );
         Result<GpuTexture> output = Make(
             "Output",
             GpuFormat.R8G8B8A8Unorm,
@@ -97,7 +129,20 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
         );
         foreach (
             Result<GpuTexture> made in (ReadOnlySpan<Result<GpuTexture>>)
-                [visibility, depth, hzb, normal, baseColor, surface, hdr, output]
+                [
+                    visibility,
+                    depth,
+                    hzb,
+                    normal,
+                    baseColor,
+                    surface,
+                    hdr,
+                    moments,
+                    opticalDepth,
+                    accumulation,
+                    offsets,
+                    output,
+                ]
         )
         {
             if (!made.Ok)
@@ -114,6 +159,10 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
         GBufferBase = baseColor.Value;
         GBufferSurface = surface.Value;
         Hdr = hdr.Value;
+        Moments = moments.Value;
+        OpticalDepth = opticalDepth.Value;
+        Accumulation = accumulation.Value;
+        Offsets = offsets.Value;
         Output = output.Value;
         Readback = readback.Value;
 
@@ -137,7 +186,20 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
     {
         foreach (
             GpuTexture texture in (ReadOnlySpan<GpuTexture>)
-                [Visibility, Depth, Hzb, GBufferNormal, GBufferBase, GBufferSurface, Hdr, Output]
+                [
+                    Visibility,
+                    Depth,
+                    Hzb,
+                    GBufferNormal,
+                    GBufferBase,
+                    GBufferSurface,
+                    Hdr,
+                    Moments,
+                    OpticalDepth,
+                    Accumulation,
+                    Offsets,
+                    Output,
+                ]
         )
         {
             if (texture.IsNone)

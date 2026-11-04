@@ -17,6 +17,7 @@ import Scene.Lighting;
 import Scene.Field;
 import Scene.Probes;
 import Scene.SurfaceCache;
+import Scene.Translucency;
 import Sky.ISky;
 import Trace.IWorldTracer;
 import Trace.DistanceField;
@@ -91,12 +92,13 @@ void ScreenProbeTrace<S : ISky>(uint3 group : SV_GroupID, uint3 local : SV_Group
     float3 origin = probe.position + probe.normal * start;
 
     float3 radiance;
-    float screenDistance;
-    if (!TraceScreenToSurface(frame, gi, probe.position + probe.normal * 0.02, direction, radiance, screenDistance))
+    float reach;
+    if (!TraceScreenToSurface(frame, gi, probe.position + probe.normal * 0.02, direction, radiance, reach))
     {
         Ray ray = { origin, direction };
         TraceLimits limits = { start, gi.rayRange, 0.0 };
         TraceHit hit = DistanceFieldTracer.Trace(ray, limits);
+        reach = min(hit.distance, gi.rayRange);
         if (hit.isHit)
         {
             radiance = ShadeFieldHit(frame, field, gi, origin + direction * hit.distance, hit.normal, direction);
@@ -116,6 +118,7 @@ void ScreenProbeTrace<S : ISky>(uint3 group : SV_GroupID, uint3 local : SV_Group
         }
     }
 
+    radiance *= GetGlassTransmittance(GetTranslucency(), origin, origin + direction * reach);
     radianceAtlas.Store(atlasTexel, float4(radiance, 1.0));
 }
 

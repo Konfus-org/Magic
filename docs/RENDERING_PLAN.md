@@ -316,8 +316,8 @@ real geometry, not a grid of radiance.
   `R8_SNORM` 3D texture of distance in band units, in bricks of 16³ voxels. A compute pass updates the bricks instances
   touched since last frame, taking the min over the mesh fields of the instances listed for each brick. A still world
   updates nothing; the camera moving scrolls the clipmaps and fills the new slab.
-- **Translucent instances** are left out of the field and voxelised instead into a transmittance volume, a
-  `R8G8B8A8` clipmap the rays attenuate through, so light reaches a probe behind a window and arrives tinted.
+- **Translucent instances** are left out of the field and listed instead as spheres with a tint, up to 64 a frame,
+  that the rays attenuate through, so light reaches a probe behind a window and arrives tinted.
 - **`IWorldTracer`** has two implementations: sphere tracing the global field with a cone for soft contact, and
   `RayQuery` against acceleration structures the driver builds from the clusters when the feature exists. A trace
   returns a hit position, a normal from the field's gradient, and the instance it most likely hit through the
@@ -385,12 +385,13 @@ The lighting pass writes HDR `R16G16B16A16_SFLOAT`.
 ### Translucency
 
 Translucent clusters are culled with the opaque ones but drawn after lighting, forward, in a pass that is generic over
-`IMaterial` and shades with the same lights, shadows, probes and reflection fallback. The order problem is solved
-without sorting by moment-based order-independent transparency (Münstermann et al., 2018): a first draw accumulates four
-power moments of depth per pixel, a second draw resolves each fragment's transmittance from the moments and blends.
-Refraction samples the HDR image at an offset from the surface's normal and the index of refraction; it is the one
-screen-space term in the frame, and its miss falls back to the world probes. Colour the glass casts on the world is
-the shadow pools' job above, and light arriving through it at a probe is the transmittance volume's.
+`IMaterial` and shades with the same lights, shadows and probes. The order problem is solved without sorting by
+moment-based order-independent transparency (Münstermann et al., 2018): a first draw accumulates four power moments of
+depth per pixel, with the absorbance by colour, a second draw resolves each fragment's transmittance from the moments
+and adds its light and how far it bends the picture, and the tonemap puts the sum over the picture behind, read at the
+bend. Colour the glass casts on the world is the sun's glass shadow, one orthographic map around the camera the panes
+multiply their tints into, and light arriving through it at a probe is the glass list's, the panes as spheres a ray
+is attenuated by.
 
 ### Post
 
