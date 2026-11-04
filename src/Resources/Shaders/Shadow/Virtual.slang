@@ -109,10 +109,12 @@ public float GetPageWorld(ShadowConstants shadow, uint level)
 public float GetFootprint(ShadowConstants shadow, float viewDepth) { return viewDepth * shadow.footprintPerMetre; }
 
 // The level whose texel is no larger than a receiver's footprint, so a shadow is as sharp as the screen shows it.
+// The level whose texel is the first no smaller than a footprint: a texel a pixel or two, never under one, so the
+// pool holds a view's pages.
 public uint GetLevel(ShadowConstants shadow, float footprint)
 {
     float level = log2(max(footprint / shadow.baseTexel, 1.0));
-    return min(uint(floor(level)), shadow.levels - 1u);
+    return min(uint(ceil(level)), shadow.levels - 1u);
 }
 
 // The page, counted on the light's plane, a point of it is in at a level.
@@ -140,14 +142,16 @@ public uint GetCell(ShadowConstants shadow, uint level, int2 page)
     return (level * shadow.tableWidth * shadow.tableWidth) + GetLocalCell(shadow, page);
 }
 
-public uint PackPage(int2 page) { return (uint(page.x) & 0xFFFFu) | ((uint(page.y) & 0xFFFFu) << 16u); }
+// A page as a word: the low 15 bits of each of its coordinates under a set top bit, so no page packs to
+// ShadowNoRequest or to 0.
+public uint PackPage(int2 page) { return 0x80000000u | (uint(page.x) & 0x7FFFu) | ((uint(page.y) & 0x7FFFu) << 15u); }
 
 // The page a packed entry names, which is within the level's window.
 public int2 UnpackPage(ShadowConstants shadow, uint level, uint packed)
 {
     int2 origin = shadow.windows[level].xy;
-    int2 low = int2(int(packed & 0xFFFFu), int(packed >> 16u));
-    return origin + ((low - origin) & 0xFFFF);
+    int2 low = int2(int(packed & 0x7FFFu), int((packed >> 15u) & 0x7FFFu));
+    return origin + ((low - origin) & 0x7FFF);
 }
 
 public uint GetPhysical(uint2 entry) { return (entry.x & 0xFFFFu) - 1u; }
@@ -169,23 +173,38 @@ public uint ToDepthKey(float z)
     return (bits & 0x80000000u) != 0u ? ~bits : bits | 0x80000000u;
 }
 
+// The depth a key holds; a cleared texel, which holds no depth, reads as the farthest.
 public float FromDepthKey(uint key)
 {
+    if (key == ShadowClearKey)
+        return 1e30;
+
     return asfloat((key & 0x80000000u) != 0u ? key & 0x7FFFFFFFu : ~key);
 }
 
 // How lit by the sun a receiver is, 0 to 1: its depth against the page's at the level its footprint asks for, or the
-// nearest coarser level that has one, filtered over 3 by 3 texels. So a surface does not shadow itself, the receiver
-// is first moved along its normal by more the more it slants from the sun, and the page's depth is given a bias
-// that grows with the slant too.
+// nearest coarser level that has one, filtered over 3 by 3 texels. So a surface does not shadow itself, each texel
+// is compared with the receiver's own plane at that texel rather than with the receiver's point, and the receiver
+// is first moved a texel across the light along its normal; both are a texel's worth, so a shadow's edge stays
+// where it is from one level to the next.
 public float SampleSunShadow(ShadowConstants shadow, float3 world, float3 normal, float viewDepth)
 {
+    uint levelUsed;
+    return SampleSunShadow(shadow, world, normal, viewDepth, levelUsed);
+}
+
+// As above, saying which level answered: the level count when none had a page for the receiver.
+public float SampleSunShadow(ShadowConstants shadow, float3 world, float3 normal, float viewDepth, out uint levelUsed)
+{
+    levelUsed = shadow.levels;
     uint level = GetLevel(shadow, GetFootprint(shadow, viewDepth));
-    float cosine = saturate(dot(normal, -shadow.lightZ.xyz));
-    float sine = sqrt(saturate(1.0 - cosine * cosine));
-    float slant = min(sine / max(cosine, 0.1), 8.0);
-    float levelTexel = GetTexelWorld(shadow, level);
-    float3 light = ToLight(shadow, world + normal * (levelTexel * (1.0 + 2.0 * sine)));
+    float3 towards = -shadow.lightZ.xyz;
+    float3 across = normal - towards * dot(normal, towards);
+    float3 light = ToLight(shadow, world + across * GetTexelWorld(shadow, level));
+    float3 lightNormal = ToLight(shadow, normal);
+    // The receiver's plane in the light's frame: how its depth changes across the map, bounded where it is edge-on.
+    float facing = abs(lightNormal.z) < 0.05 ? (lightNormal.z < 0.0 ? -0.05 : 0.05) : lightNormal.z;
+    float2 slope = clamp(-lightNormal.xy / facing, -8.0, 8.0);
     ArrayRef<uint2> table = { shadow.pageTable };
     UintTextureRef pool = { shadow.pool };
     for (uint l = level; l < shadow.levels; l++)
@@ -202,7 +221,8 @@ public float SampleSunShadow(ShadowConstants shadow, float3 world, float3 normal
         float2 uv = (light.xy - float2(page) * pageWorld) / pageWorld;
         float2 texel = float2(uv.x, 1.0 - uv.y) * float(shadow.pageTexels);
         uint2 origin = GetPoolOrigin(shadow, GetPhysical(entry));
-        float bias = GetTexelWorld(shadow, l) * (2.0 + 2.0 * slant);
+        float texelWorld = GetTexelWorld(shadow, l);
+        float bias = texelWorld * 1.5;
         float lit = 0.0;
         int last = int(shadow.pageTexels) - 1;
         for (int y = -1; y <= 1; y++)
@@ -211,10 +231,14 @@ public float SampleSunShadow(ShadowConstants shadow, float3 world, float3 normal
             {
                 int2 at = clamp(int2(texel) + int2(x, y), int2(0), int2(last));
                 float occluder = FromDepthKey(pool.Load(origin + uint2(at), 0u));
-                lit += light.z <= occluder + bias ? 1.0 : 0.0;
+                // The texel's centre is up to a texel and a half from the receiver's place: the plane's depth there.
+                float2 offset = (float2(at) + 0.5 - texel) * float2(1.0, -1.0) * texelWorld;
+                float receiver = light.z + dot(slope, offset);
+                lit += receiver <= occluder + bias ? 1.0 : 0.0;
             }
         }
 
+        levelUsed = l;
         return lit / 9.0;
     }
 

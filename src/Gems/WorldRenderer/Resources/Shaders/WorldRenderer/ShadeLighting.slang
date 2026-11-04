@@ -225,8 +225,15 @@ void ShadeLighting<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThreadI
         }
         else if (lighting.debugView == 6u)
         {
-            // Shown as it is: what the tonemap's exposure would scale away.
-            color = GetGlassShadow(GetTranslucency(), world) / max(lighting.exposure, Epsilon);
+            color = GetGlassShadow(GetTranslucency(), world);
+        }
+        else if (lighting.debugView == 7u)
+        {
+            // How lit by the sun, through its pages alone; magenta where no level had a page, and the level that
+            // answered as a tint of blue, the deeper the coarser.
+            uint levelUsed;
+            float sun = SampleSunShadow(shadow, world, normal, viewDepth, levelUsed);
+            color = levelUsed >= shadow.levels ? float3(1.0, 0.0, 1.0) : lerp(float3(sun), float3(0.0, 0.0, 1.0), float(levelUsed) / float(shadow.levels));
         }
         else
         {
@@ -234,7 +241,8 @@ void ShadeLighting<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThreadI
         }
     }
 
-    if (lighting.fog.isPresent != 0u)
+    // The shadow views are shown as they are, with no air before them.
+    if (lighting.fog.isPresent != 0u && lighting.debugView < 6u)
     {
         VolumeRef integrated = { lighting.fogIntegrated };
         SamplerRef sampler = { lighting.fogSampler };

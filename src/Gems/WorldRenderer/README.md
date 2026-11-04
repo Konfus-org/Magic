@@ -24,6 +24,8 @@ model reader, the mesh preprocessor and the texture reader.
   twice the last's. The depth buffer marks the pages its pixels need at the level their footprint picks, pages come
   from a pool when first marked and go back when no longer marked, an instance that moves invalidates the pages under
   it, and only invalid pages are drawn, by the cluster path into one pass over the pool; a still scene draws none.
+  `set WorldRenderer.debug=sun` shows how lit by the sun every surface is through the pages alone, tinted blue the
+  coarser the level that answered, magenta where none had a page.
 - Every point, spot and rect light is binned into the froxels of the view it reaches, and a pixel loops over its
   froxel's lights alone, in physical units: lux for the sun, candela for the rest, with the exposure set so a surface
   facing the sun lands near white. The sky entity's material names the sky, which draws the sky, colours the sun

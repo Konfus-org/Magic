@@ -29,7 +29,7 @@ public sealed class MeshPreprocessorGem(AssetDatabase assets, Caches caches)
     /// <summary>
     /// Raised when the bytes written change shape, or the hierarchy is built otherwise.
     /// </summary>
-    public int Version => 7;
+    public int Version => 8;
 
     public async Task<Result<MeshDerived>> GetAsync(
         Handle<Model> model,

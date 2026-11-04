@@ -302,20 +302,24 @@ void PostFinal<E0 : IPixelEffect, E1 : IPixelEffect, E2 : IPixelEffect, E3 : IPi
     float exposure = state.Load<float>(0u);
     float2 uv = GetTexelCenterUv(thread.xy, size);
     float3 color = history.Load(thread.xy, 0u).rgb;
-    color += bloom.SampleLevel(sampler, uv, 0.0).rgb * post.bloomStrength;
-    color = max(color * exposure, 0.0);
+    // The shadow views are shown as they are: no bloom, exposure, effect or tonemap.
+    if (lighting.debugView < 6u)
+    {
+        color += bloom.SampleLevel(sampler, uv, 0.0).rgb * post.bloomStrength;
+        color = max(color * exposure, 0.0);
 
-    PixelEffectInputs inputs;
-    inputs.uv = uv;
-    inputs.pixel = thread.xy;
-    inputs.size = size;
-    inputs.exposure = exposure;
-    inputs.time = post.time;
-    color = E0.Apply(color, inputs);
-    color = E1.Apply(color, inputs);
-    color = E2.Apply(color, inputs);
-    color = E3.Apply(color, inputs);
-    color = Agx(color);
+        PixelEffectInputs inputs;
+        inputs.uv = uv;
+        inputs.pixel = thread.xy;
+        inputs.size = size;
+        inputs.exposure = exposure;
+        inputs.time = post.time;
+        color = E0.Apply(color, inputs);
+        color = E1.Apply(color, inputs);
+        color = E2.Apply(color, inputs);
+        color = E3.Apply(color, inputs);
+        color = Agx(color);
+    }
 
     if (lighting.debugView == 1u || lighting.debugView == 2u)
     {

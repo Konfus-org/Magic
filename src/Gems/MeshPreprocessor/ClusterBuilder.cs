@@ -217,7 +217,10 @@ internal static unsafe class ClusterBuilder
             groupCount = Math.Max(groupCount, group + 1);
         }
 
-        List<Level> parents = [];
+        // Every group simplified first, so the level's vertex copies take their normals from the whole level: a
+        // vertex on the border of two groups then shades the same on both sides.
+        List<(uint[] Simplified, float Error, Vector3 Center, float Radius)> made = [];
+        List<uint> levelTriangles = [];
         for (int group = 0; group < groupCount; group++)
         {
             List<int> members = [];
@@ -253,12 +256,23 @@ internal static unsafe class ClusterBuilder
                 clusters[firstOfLevel + member] = child;
             }
 
-            Dictionary<(uint, uint, uint), (uint, uint, uint)> copies = CopyVertices(
-                mesh,
-                simplified,
-                positions,
-                vertices
-            );
+            made.Add((simplified, groupError, center, radius));
+            levelTriangles.AddRange(simplified);
+        }
+
+        List<Level> parents = [];
+        if (made.Count == 0)
+            return parents;
+
+        Dictionary<(uint, uint, uint), (uint, uint, uint)> copies = CopyVertices(
+            mesh,
+            levelTriangles.ToArray(),
+            positions,
+            canonical,
+            vertices
+        );
+        foreach ((uint[] simplified, float groupError, Vector3 center, float radius) in made)
+        {
             foreach (Level parent in Clusterize(simplified, positions, vertexCount, groupError, mesh.MaterialSlot))
             {
                 parent.DetailCenter = center;
@@ -490,12 +504,14 @@ internal static unsafe class ClusterBuilder
     /// <summary>
     /// Copies of the vertices the simplified triangles use, appended to the pool, with normals from those triangles
     /// alone: a vertex has one copy per smoothing group of its faces, those within <see cref="CreaseAngle"/> of each
-    /// other, so a hard edge stays hard. By each triangle of the mesh's indices, the pool indices of its corners.
+    /// other, so a hard edge stays hard; the faces are gathered by position, so the vertices split along a seam
+    /// shade alike. By each triangle of the mesh's indices, the pool indices of its corners.
     /// </summary>
     private static Dictionary<(uint, uint, uint), (uint, uint, uint)> CopyVertices(
         Mesh mesh,
         uint[] simplified,
         float[] positions,
+        uint[] canonical,
         ImmutableArray<GpuVertex>.Builder vertices
     )
     {
@@ -516,7 +532,7 @@ internal static unsafe class ClusterBuilder
             Vector3 unit = face.LengthSquared() > 0 ? Vector3.Normalize(face) : Vector3.UnitY;
             for (int corner = 0; corner < 3; corner++)
             {
-                uint vertex = simplified[(t * 3) + corner];
+                uint vertex = canonical[simplified[(t * 3) + corner]];
                 if (!groupsOf.TryGetValue(vertex, out List<SmoothingGroup>? groups))
                 {
                     groups = [];
@@ -544,7 +560,7 @@ internal static unsafe class ClusterBuilder
             if (!poolOf.TryGetValue(key, out uint pool))
             {
                 Vertex vertex = source[(int)key.vertex];
-                Vector3 sum = groupsOf[key.vertex][key.group].Sum;
+                Vector3 sum = groupsOf[canonical[key.vertex]][key.group].Sum;
                 if (sum.LengthSquared() > 0)
                     vertex.Normal = Vector3.Normalize(sum);
 

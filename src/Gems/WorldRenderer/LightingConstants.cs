@@ -105,6 +105,12 @@ internal enum DebugView : uint
     /// The sun's colour through the glass at every surface: white where no pane is in the way.
     /// </summary>
     GlassShadow,
+
+    /// <summary>
+    /// How lit by the sun every surface is through the sun's pages alone: white in the sun, black in shadow,
+    /// tinted blue the coarser the level that answered, magenta where no level had a page.
+    /// </summary>
+    Sun,
 }
 
 /// <summary>

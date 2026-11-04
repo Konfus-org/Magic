@@ -171,7 +171,8 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
     }
 
     /// <summary>
-    /// Whether the rows place their geometry differently: what the shadows and the field must redo.
+    /// Whether the rows place their geometry differently, or put a different thing there, as when a material
+    /// turns out to be glass once it arrives: what the shadows and the field must redo.
     /// </summary>
     private static bool IsMoved(in GpuInstance before, in GpuInstance after)
     {
@@ -181,6 +182,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
         return before.World != after.World
             || before.BoundsCenter != after.BoundsCenter
             || before.BoundsRadius != after.BoundsRadius
+            || before.Flags != after.Flags
             || wasDrawn != isDrawn;
     }
 
