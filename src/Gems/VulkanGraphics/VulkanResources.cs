@@ -550,10 +550,14 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     }
 
     /// <summary>
-    /// Frees what <see cref="RemoveBuffer"/> handed back, once no frame uses it, and lets its id be taken again.
+    /// Frees a buffer once no frame uses it, and lets its id be taken again: one <see cref="RemoveBuffer"/> handed
+    /// back, or one still in the heap under that id, which leaves it now.
     /// </summary>
     public void Free(uint id, VulkanBuffer buffer)
     {
+        if (id < _buffers.Length && ReferenceEquals(_buffers[id], buffer))
+            _buffers[id] = null;
+
         Free(buffer);
         _freeBuffers.Push(id);
     }

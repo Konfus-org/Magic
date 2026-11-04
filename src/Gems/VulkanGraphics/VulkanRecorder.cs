@@ -68,6 +68,14 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
             : new VkImageSubresourceRange(aspect, (uint)level, 1, 0, layers);
     }
 
+    /// <summary>
+    /// Says a copy was not recorded: one of what it names has left the heap, so what it would have moved is lost.
+    /// </summary>
+    private static void LogMissing(string kind, in GpuCommand command) =>
+        Log.Error(
+            $"A {kind} of {command.Size} bytes from {command.Id} to {command.Id2} names a resource that has left the heap."
+        );
+
     private static VkImageSubresourceLayers GetLayers(VulkanTexture texture, uint level, uint layer) =>
         new(texture.Description.Format.IsDepth ? VkImageAspectFlags.Depth : VkImageAspectFlags.Color, level, layer, 1);
 
@@ -396,6 +404,8 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
                     };
                     api.vkCmdCopyBuffer(cmd, source.Buffer, destination.Buffer, 1, &region);
                 }
+                else
+                    LogMissing("CopyBuffer", command);
 
                 break;
             case GpuCommandKind.CopyBufferToTexture:
@@ -416,6 +426,8 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
                         &region
                     );
                 }
+                else
+                    LogMissing("CopyBufferToTexture", command);
 
                 break;
             case GpuCommandKind.CopyTextureToBuffer:
@@ -436,6 +448,8 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
                         &region
                     );
                 }
+                else
+                    LogMissing("CopyTextureToBuffer", command);
 
                 break;
             case GpuCommandKind.CopyTexture:
@@ -457,6 +471,8 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
                         &region
                     );
                 }
+                else
+                    LogMissing("CopyTexture", command);
 
                 break;
             case GpuCommandKind.BlitTexture:

@@ -125,8 +125,9 @@ internal sealed unsafe class VulkanFrames : IDisposable
                     $"The staging ring could not grow to {wanted} bytes: {grown.Error}"
                 );
 
-            // The old ring leaves the heap now, so shutdown frees it once, with the frame's trash.
-            frame.Trash.Add(Trash.Of(frame.StagingId, _resources.RemoveBuffer(frame.StagingId) ?? frame.Staging));
+            // The old ring stays in the heap until the frame has run: the copies recorded so far name it by its id
+            // when the frame's commands are translated at submit.
+            frame.Trash.Add(Trash.Of(frame.StagingId, frame.Staging));
             frame.Staging = grown.Value;
             frame.StagingId = Register(grown.Value);
             offset = 0;
