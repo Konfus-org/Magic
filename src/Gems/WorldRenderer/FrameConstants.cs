@@ -12,7 +12,7 @@ namespace WorldRenderer;
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct FrameConstants
 {
-    public const int Bytes = 656;
+    public const int Bytes = 672;
 
     /// <summary>
     /// The cone cull is off: the view is orthographic, as a capture's is, so no one point is the camera.
@@ -111,9 +111,9 @@ internal record struct FrameConstants
 
     public uint Flags;
 
-    public uint Captures;
+    public uint Cards;
 
-    public uint CaptureSampler;
+    public uint CardSampler;
 
     public Vector2 Jitter;
 
@@ -125,7 +125,15 @@ internal record struct FrameConstants
 
     public uint LeafClusters;
 
+    public uint CardAlbedo;
+
+    public uint CardNormal;
+
+    public uint CardDepth;
+
     public uint Padding1;
 
     public uint Padding2;
+
+    public uint Padding3;
 }

@@ -94,7 +94,7 @@ void ReflectionTrace<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThrea
         hitDistance = hit.distance;
         if (hit.isHit)
         {
-            radiance = ShadeFieldHit(frame, field, gi, origin + direction * hit.distance, hit.normal, direction, hit.instance);
+            radiance = ShadeFieldHit(frame, field, gi, origin + direction * hit.distance, hit.normal, hit.instance);
         }
         else if (!SampleWorldProbeRadiance(gi, origin + direction * min(hit.distance, gi.rayRange), direction, radiance))
         {
@@ -207,7 +207,7 @@ void ReflectionTemporal(uint3 thread : SV_DispatchThreadID)
         if (all(previousUv >= 0.0) && all(previousUv < 1.0))
         {
             TextureRef history = { gi.reflectionsPrevious };
-            SamplerRef sampler = { frame.captureSampler };
+            SamplerRef sampler = { frame.cardSampler };
             float4 held = history.SampleLevel(sampler, previousUv, 0.0);
             if (held.w > 0.0 && abs(held.w - previousClip.w) < 0.05 * previousClip.w)
             {

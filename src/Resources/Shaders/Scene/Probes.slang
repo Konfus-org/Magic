@@ -1,5 +1,5 @@
-// The global illumination's tables, C#'s GiConstants: the lit cards, the world probes around the camera, the
-// screen probes over the view and the reflections, and how a direction maps to a probe's texels. A world probe keeps the sphere as an
+// The global illumination's tables, C#'s GiConstants: the lit cards and their radiosity, the world probes around
+// the camera, the screen probes over the view and the reflections, and how a direction maps to a probe's texels. A world probe keeps the sphere as an
 // octahedral map; a screen probe keeps the hemisphere above its surface as a square of cosine-distributed
 // directions, so the average of its texels times pi is the irradiance there. The constants' heap id is the
 // lighting constants' gi.
@@ -9,14 +9,20 @@ import Core.Heap;
 import Core.Math;
 import Core.Pack;
 import Core.Sampling;
+import Scene.Cards;
 
-// The lit cards: a pool of slots, a slot an instance's capture lit, each cell of the capture at half the texels.
-public static const uint LitSlotTexels = 256u;
-public static const uint LitCellTexels = 32u;
-public static const uint LitPoolTexels = 4096u;
-public static const uint LitSlotsPerRow = LitPoolTexels / LitSlotTexels;
-public static const uint LitSlots = LitSlotsPerRow * LitSlotsPerRow;
+// The lit cards: a pool of slots, a slot an instance's six cards at half their texels, each texel the irradiance on
+// the surface there, a cell a card; and the radiosity beside it, a probe an 8 by 8 tile of lit texels, what the
+// tile's surface receives from around it.
+public static const uint LitPoolTexels = 2048u;
+public static const uint LitCardCell = CardMaxTexels / 2u;
+public static const uint LitSlotWidth = LitCardCell * 3u;
+public static const uint LitSlotHeight = LitCardCell * 2u;
+public static const uint LitSlotsPerRow = LitPoolTexels / LitSlotWidth;
+public static const uint LitSlots = LitSlotsPerRow * (LitPoolTexels / LitSlotHeight);
 public static const uint LitLightsPerSlot = 64u;
+public static const uint LitTileTexels = 8u;
+public static const uint LitRadiosityTexels = LitPoolTexels / LitTileTexels;
 
 // The world probes: a clipmap of levels of probes around the camera, each level's probes twice as far apart as the
 // last's, kept as a sphere of radiance, a sphere of distances and a sphere of irradiance.
@@ -54,7 +60,7 @@ public struct GiConstants
     public uint probeRadiance;
     public uint probeDistance;
     public uint probeIrradiance;
-    public uint padding2;
+    public uint cardRadiosity;
     public uint screenRadiance;
     public uint screenRadiancePrevious;
     public uint screenProbes;
@@ -84,13 +90,14 @@ public struct GiConstants
 public static const float ReflectionRoughnessSharp = 0.4;
 public static const float ReflectionRoughnessLimit = 0.6;
 
-// A lit card's slot: the instance it lights and that instance's capture row.
+// A lit card's slot: the instance it lights, that instance's capture row, and how many times it was lit, 0 the
+// first time, when it holds nothing to blend with.
 public struct LitSlot
 {
     public uint instance;
     public uint capture;
-    public uint padding0;
-    public uint padding1;
+    public uint frames;
+    public uint padding;
 }
 
 // A world probe's cell: the probe, counted in its level's probes, it holds, and its ProbeFlag bits.
@@ -124,8 +131,24 @@ public LitSlot LoadLitSlot(GiConstants gi, uint slot)
     return slots[slot];
 }
 
-// The texel at the top left of a slot in the pool.
-public uint2 GetLitSlotOrigin(uint slot) { return uint2(slot % LitSlotsPerRow, slot / LitSlotsPerRow) * LitSlotTexels; }
+// The texel at the top left of a slot in the pool, and of one of its cards' cells.
+public uint2 GetLitSlotOrigin(uint slot)
+{
+    return uint2(slot % LitSlotsPerRow, slot / LitSlotsPerRow) * uint2(LitSlotWidth, LitSlotHeight);
+}
+
+public uint2 GetLitCardOrigin(uint slot, uint side) { return GetLitSlotOrigin(slot) + uint2(side % 3u, side / 3u) * LitCardCell; }
+
+// A card's lit texels: half its own each way.
+public uint2 GetLitCardSize(GpuCard card) { return max((card.size + 1u) / 2u, 1u); }
+
+// The pool's texture coordinates of a point of a card's lit texels, kept half a texel inside them.
+public float2 GetLitAtlasUv(uint slot, GpuCard card, float2 uv)
+{
+    float2 size = float2(GetLitCardSize(card));
+    float2 texel = clamp(uv * size, float2(0.5), size - 0.5);
+    return (float2(GetLitCardOrigin(slot, card.axis)) + texel) / float(LitPoolTexels);
+}
 
 // --- World probes ---
 

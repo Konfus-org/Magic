@@ -74,7 +74,7 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
 
     public GpuPipeline FieldUpdate { get; private set; }
 
-    public GpuPipeline CaptureCell { get; private set; }
+    public GpuPipeline CaptureCard { get; private set; }
 
     public GpuPipeline ShadowMarkPages { get; private set; }
 
@@ -93,6 +93,8 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
     public GpuPipeline DrawShadow { get; private set; }
 
     public GpuPipeline LitCardLights { get; private set; }
+
+    public GpuPipeline LitCardRadiosity { get; private set; }
 
     public GpuPipeline LitCardShade { get; private set; }
 
@@ -121,6 +123,8 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
     /// </summary>
     public GpuPipeline ShadeLightingRayQuery { get; private set; }
 
+    public GpuPipeline LitCardRadiosityRayQuery { get; private set; }
+
     public GpuPipeline WorldProbeTraceRayQuery { get; private set; }
 
     public GpuPipeline ScreenProbeTraceRayQuery { get; private set; }
@@ -146,7 +150,7 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
                     DrawVisibility,
                     BuildHzb,
                     ResolveStandard,
-                    CaptureCell,
+                    CaptureCard,
                     SkyTransmittance,
                     SkyMultiScattering,
                     SkyView,
@@ -176,6 +180,7 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
                     ShadowCull,
                     DrawShadow,
                     LitCardLights,
+                    LitCardRadiosity,
                     LitCardShade,
                     WorldProbeScroll,
                     WorldProbeSelect,
@@ -191,6 +196,7 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
                     TranslucentResolve,
                     GlassShadow,
                     ShadeLightingRayQuery,
+                    LitCardRadiosityRayQuery,
                     WorldProbeTraceRayQuery,
                     ScreenProbeTraceRayQuery,
                     ReflectionTraceRayQuery,
@@ -242,7 +248,7 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
                 TypeArguments = [new ShaderTypeArgument(standard, "Standard")],
             },
             Entry("Post", "PostCompose", ShaderStage.Compute),
-            Entry("CaptureCell", "CaptureCell", ShaderStage.Compute),
+            Entry("CaptureCard", "CaptureCard", ShaderStage.Compute),
             Entry("ShadowPages", "ShadowMarkPages", ShaderStage.Compute),
             Entry("ShadowPages", "ShadowInvalidatePages", ShaderStage.Compute),
             Entry("ShadowPages", "ShadowFreePages", ShaderStage.Compute),
@@ -272,6 +278,10 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             Entry("Field", "FieldList", ShaderStage.Compute),
             Entry("Field", "FieldUpdate", ShaderStage.Compute),
             Entry("LitCards", "LitCardLights", ShaderStage.Compute),
+            Entry("LitCards", "LitCardRadiosity", ShaderStage.Compute) with
+            {
+                TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere"), field],
+            },
             Entry("LitCards", "LitCardShade", ShaderStage.Compute) with
             {
                 TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere")],
@@ -326,6 +336,10 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             [
                 .. entries,
                 Entry("ShadeLighting", "ShadeLighting", ShaderStage.Compute) with
+                {
+                    TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere"), rayQuery],
+                },
+                Entry("LitCards", "LitCardRadiosity", ShaderStage.Compute) with
                 {
                     TypeArguments = [new ShaderTypeArgument(atmosphere, "Atmosphere"), rayQuery],
                 },
@@ -408,11 +422,11 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             return Result.Failure(resolve.Error);
 
         ResolveStandard = resolve.Value;
-        Result<GpuPipeline> capture = Compute(compiled[6], "Capture cell");
+        Result<GpuPipeline> capture = Compute(compiled[6], "Capture card");
         if (!capture.Ok)
             return Result.Failure(capture.Error);
 
-        CaptureCell = capture.Value;
+        CaptureCard = capture.Value;
         (string Name, int Index)[] shadowEntries =
         [
             ("Shadow mark pages", 7),
@@ -524,17 +538,18 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
         (string Name, int Index)[] giEntries =
         [
             ("List card lights", 29),
-            ("Light cards", 30),
-            ("Scroll probes", 31),
-            ("Select probes", 32),
-            ("Trace probes", 33),
-            ("Place screen probes", 34),
-            ("Trace screen probes", 35),
-            ("Reproject screen probes", 36),
-            ("Filter screen probes", 37),
-            ("Trace reflections", 38),
-            ("Resolve reflections", 39),
-            ("Reproject reflections", 40),
+            ("Card radiosity", 30),
+            ("Light cards", 31),
+            ("Scroll probes", 32),
+            ("Select probes", 33),
+            ("Trace probes", 34),
+            ("Place screen probes", 35),
+            ("Trace screen probes", 36),
+            ("Reproject screen probes", 37),
+            ("Filter screen probes", 38),
+            ("Trace reflections", 39),
+            ("Resolve reflections", 40),
+            ("Reproject reflections", 41),
         ];
         GpuPipeline[] giPipelines = new GpuPipeline[giEntries.Length];
         for (int i = 0; i < giEntries.Length; i++)
@@ -548,6 +563,7 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
 
         (
             LitCardLights,
+            LitCardRadiosity,
             LitCardShade,
             WorldProbeScroll,
             WorldProbeSelect,
@@ -571,27 +587,28 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             giPipelines[8],
             giPipelines[9],
             giPipelines[10],
-            giPipelines[11]
+            giPipelines[11],
+            giPipelines[12]
         );
         (string Name, int Vertex, int Pixel, GpuFormat[] Colors, bool HasDepth, BlendMode Blend)[] translucentEntries =
         [
             (
                 "Translucent moments",
-                41,
                 42,
+                43,
                 [GpuFormat.R16G16B16A16Sfloat, GpuFormat.R16G16B16A16Sfloat],
                 true,
                 BlendMode.Additive
             ),
             (
                 "Translucent resolve",
-                41,
-                43,
+                42,
+                44,
                 [GpuFormat.R16G16B16A16Sfloat, GpuFormat.R16G16Sfloat],
                 true,
                 BlendMode.Additive
             ),
-            ("Glass shadow", 44, 45, [GpuFormat.R16G16B16A16Sfloat], false, BlendMode.Multiply),
+            ("Glass shadow", 45, 46, [GpuFormat.R16G16B16A16Sfloat], false, BlendMode.Multiply),
         ];
         GpuPipeline[] translucentPipelines = new GpuPipeline[translucentEntries.Length];
         for (int i = 0; i < translucentEntries.Length; i++)
@@ -627,12 +644,12 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
         (string Name, int Index)[] postEntries =
         [
             ("Post compose", 5),
-            ("Post resolve", 46),
-            ("Post histogram", 47),
-            ("Post exposure", 48),
-            ("Post bloom down", 49),
-            ("Post bloom up", 50),
-            ("Post final", 51),
+            ("Post resolve", 47),
+            ("Post histogram", 48),
+            ("Post exposure", 49),
+            ("Post bloom down", 50),
+            ("Post bloom up", 51),
+            ("Post final", 52),
         ];
         GpuPipeline[] postPipelines = new GpuPipeline[postEntries.Length];
         for (int i = 0; i < postEntries.Length; i++)
@@ -653,14 +670,15 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
             postPipelines[5],
             postPipelines[6]
         );
-        if (compiled.Length > 52)
+        if (compiled.Length > 53)
         {
             (string Name, int Index)[] rayQueryEntries =
             [
-                ("Shade with ray queries", 52),
-                ("Trace probes with ray queries", 53),
-                ("Trace screen probes with ray queries", 54),
-                ("Trace reflections with ray queries", 55),
+                ("Shade with ray queries", 53),
+                ("Card radiosity with ray queries", 54),
+                ("Trace probes with ray queries", 55),
+                ("Trace screen probes with ray queries", 56),
+                ("Trace reflections with ray queries", 57),
             ];
             GpuPipeline[] rayQueryPipelines = new GpuPipeline[rayQueryEntries.Length];
             for (int i = 0; i < rayQueryEntries.Length; i++)
@@ -672,11 +690,18 @@ internal sealed class RendererPipelines(IGraphicsApi gpu, IShaderCompiler shader
                 rayQueryPipelines[i] = made.Value;
             }
 
-            (ShadeLightingRayQuery, WorldProbeTraceRayQuery, ScreenProbeTraceRayQuery, ReflectionTraceRayQuery) = (
+            (
+                ShadeLightingRayQuery,
+                LitCardRadiosityRayQuery,
+                WorldProbeTraceRayQuery,
+                ScreenProbeTraceRayQuery,
+                ReflectionTraceRayQuery
+            ) = (
                 rayQueryPipelines[0],
                 rayQueryPipelines[1],
                 rayQueryPipelines[2],
-                rayQueryPipelines[3]
+                rayQueryPipelines[3],
+                rayQueryPipelines[4]
             );
         }
 

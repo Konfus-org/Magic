@@ -13,8 +13,9 @@ model reader, the mesh preprocessor and the texture reader.
   not load, names the failure shader or a texture that does not load as the magenta failure material.
 - Every instance keeps its row of the instance table from frame to frame, so a still scene uploads nothing; the
   camera's position is taken off on the GPU.
-- Once a model and its materials are resident, the renderer captures them from 64 directions into atlases of albedo,
-  normal and depth, what the global illumination reads where a ray lands on the model.
+- Once a model and its materials are resident, the renderer draws its cards: the six sides of its box, each into
+  atlases of albedo, normal and depth at the texels its size on screen earns, what the global illumination reads
+  where a ray lands on the model.
 - Every frame, the GPU culls each instance's clusters against the frustum, their normal cones, the pixel error
   threshold that picks the level of detail, and last frame's depth pyramid, draws the visible ones into a
   visibility buffer, retests what the old pyramid hid against the new one and draws those too. The visibility
@@ -35,8 +36,9 @@ model reader, the mesh preprocessor and the texture reader.
   the camera moved or an instance changed. The strongest lights of a pixel's froxel trace cones through the field for
   their shadow. `set WorldRenderer.debug=field` in the console shows the field at every surface instead of the
   picture; `set WorldRenderer.debug=none` shows the picture again.
-- Light bounces: the instances that take most of the view hold lit cards, their captures lit by the sun through its
-  pages, the lights that reach them and the world probes, a few cards a frame; world probes around the camera trace
+- Light bounces: the instances that take most of the view hold lit cards, the irradiance on their cards from the sun
+  through its pages, the lights that reach them and the radiosity each tile of a card gathers through the field, a
+  few a frame; `set WorldRenderer.debug=cards` shows what a ray landing on every surface reads. World probes around the camera trace
   the field and read the cards where their rays land, the sky where they miss; a screen probe in every tile of
   pixels traces the screen, then the field, then reads the world probes, and the pixels read the probes around them
   on their plane. A room with no window stays dark. `set WorldRenderer.debug=indirect` shows that light alone and

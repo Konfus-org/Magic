@@ -101,7 +101,7 @@ void ScreenProbeTrace<S : ISky, T : IWorldTracer>(uint3 group : SV_GroupID, uint
         reach = min(hit.distance, gi.rayRange);
         if (hit.isHit)
         {
-            radiance = ShadeFieldHit(frame, field, gi, origin + direction * hit.distance, hit.normal, direction, hit.instance);
+            radiance = ShadeFieldHit(frame, field, gi, origin + direction * hit.distance, hit.normal, hit.instance);
         }
         else if (!SampleWorldProbeRadiance(gi, origin + direction * min(hit.distance, gi.rayRange), direction, radiance))
         {

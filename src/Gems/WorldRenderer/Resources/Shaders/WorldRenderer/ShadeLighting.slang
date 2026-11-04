@@ -11,8 +11,11 @@ import Core.Frame;
 import Core.Math;
 import Core.Pack;
 import Core.Sampling;
+import Scene.Instances;
+import Scene.Visibility;
 import Scene.Lights;
 import Scene.Probes;
+import Scene.SurfaceCache;
 import Scene.Translucency;
 import Scene.Lighting;
 import Scene.Field;
@@ -235,6 +238,16 @@ void ShadeLighting<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThreadI
             float sun = SampleSunShadow(shadow, world, normal, viewDepth, levelUsed);
             color = levelUsed >= shadow.levels ? float3(1.0, 0.0, 1.0) : lerp(float3(sun), float3(0.0, 0.0, 1.0), float(levelUsed) / float(shadow.levels));
         }
+        else if (lighting.debugView == 8u)
+        {
+            // What a ray landing here would read: the instance's lit card at this surface.
+            uint visibleIndex;
+            uint triangle;
+            DecodeVisibilityId(visibility.Load(thread.xy, 0u), visibleIndex, triangle);
+            ArrayRef<VisibleCluster> visible = { frame.visibleClusters };
+            uint instanceIndex = visible[visibleIndex].instance;
+            color = ShadeInstancePoint(frame, gi, instanceIndex, LoadInstance(frame.instances, instanceIndex), world, normal);
+        }
         else
         {
             color += indirect;
@@ -242,7 +255,8 @@ void ShadeLighting<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThreadI
     }
 
     // The shadow views are shown as they are, with no air before them.
-    if (lighting.fog.isPresent != 0u && lighting.debugView < 6u)
+    bool isShadowView = lighting.debugView == 6u || lighting.debugView == 7u;
+    if (lighting.fog.isPresent != 0u && !isShadowView)
     {
         VolumeRef integrated = { lighting.fogIntegrated };
         SamplerRef sampler = { lighting.fogSampler };

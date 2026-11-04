@@ -139,7 +139,7 @@ void WorldProbeTrace<S : ISky, T : IWorldTracer>(uint3 group : SV_GroupID, uint3
         TraceHit hit = T.Trace(traced, limits);
         if (hit.isHit)
         {
-            radiance = ShadeFieldHit(frame, field, gi, position + direction * hit.distance, hit.normal, direction, hit.instance);
+            radiance = ShadeFieldHit(frame, field, gi, position + direction * hit.distance, hit.normal, hit.instance);
             hitDistance = hit.distance;
         }
         else

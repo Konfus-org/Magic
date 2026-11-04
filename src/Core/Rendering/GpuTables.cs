@@ -122,35 +122,45 @@ public enum MaterialKind : uint
 }
 
 /// <summary>
-/// A capture as the GPU reads it from the capture table, 16 bytes: the twin of <c>Scene/Captures.slang</c>'s. The heap
-/// ids of the atlases a model and its materials were captured into from <see cref="Cells"/> by <see cref="Cells"/>
-/// directions, each cell <see cref="CellSize"/> texels square: albedo with coverage in its alpha, the normal in the
-/// model's frame, and the reversed depth.
+/// A card as the GPU reads it from the card table, 48 bytes: the twin of <c>Scene/Cards.slang</c>'s. One side of a
+/// model's box, the model drawn orthographically along that axis into the card atlases at <see cref="OriginX"/> and
+/// <see cref="OriginY"/>, <see cref="Width"/> by <see cref="Height"/> texels. A capture owns <see cref="PerCapture"/>
+/// cards in a row, one a side.
 /// </summary>
 [ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
-public record struct GpuCapture
+public record struct GpuCard
 {
-    public const int Bytes = 32;
+    public const int Bytes = 48;
 
-    public const int Cells = 8;
+    public const int PerCapture = 6;
 
-    public const int CellSize = 64;
+    public const int AtlasTexels = 2048;
 
-    public const int AtlasSize = Cells * CellSize;
+    public const int MaxTexels = 128;
 
-    public uint Albedo;
+    public uint OriginX;
 
-    public uint Normal;
+    public uint OriginY;
 
-    public uint Depth;
+    public uint Width;
 
-    public uint Padding;
+    public uint Height;
 
     /// <summary>
-    /// The sphere the model was captured around, in the model's frame.
+    /// The centre of the model's box, in the model's frame.
     /// </summary>
-    public Vector3 BoundsCenter;
+    public Vector3 Center;
 
-    public float BoundsRadius;
+    /// <summary>
+    /// Which side: 0 to 5 for +X, -X, +Y, -Y, +Z, -Z.
+    /// </summary>
+    public uint Axis;
+
+    /// <summary>
+    /// The box's half extents along the model's axes.
+    /// </summary>
+    public Vector3 Extents;
+
+    public uint Padding;
 }

@@ -303,7 +303,8 @@ void PostFinal<E0 : IPixelEffect, E1 : IPixelEffect, E2 : IPixelEffect, E3 : IPi
     float2 uv = GetTexelCenterUv(thread.xy, size);
     float3 color = history.Load(thread.xy, 0u).rgb;
     // The shadow views are shown as they are: no bloom, exposure, effect or tonemap.
-    if (lighting.debugView < 6u)
+    bool isShadowView = lighting.debugView == 6u || lighting.debugView == 7u;
+    if (!isShadowView)
     {
         color += bloom.SampleLevel(sampler, uv, 0.0).rgb * post.bloomStrength;
         color = max(color * exposure, 0.0);

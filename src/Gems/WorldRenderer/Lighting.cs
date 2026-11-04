@@ -281,6 +281,9 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
         DistanceField field,
         GlobalIllumination gi,
         Translucency translucency,
+        CardTable cards,
+        GpuBuffer instances,
+        GpuBuffer visibleClusters,
         FrameTargets targets,
         bool usesRayQuery
     )
@@ -332,9 +335,13 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
         graph.Use(targets.GBufferBase, GpuAccess.ShaderRead);
         graph.Use(targets.GBufferSurface, GpuAccess.ShaderRead);
         graph.Use(targets.Hdr, GpuAccess.ShaderWrite);
+        graph.Use(instances, GpuAccess.ShaderRead);
+        graph.Use(visibleClusters, GpuAccess.ShaderRead);
+        cards.UseForReading(graph);
         shadows.UseForSampling(graph);
         field.UseForSampling(graph);
         gi.UseForSampling(graph);
+        gi.UseForCards(graph);
         translucency.UseForSampling(graph);
         graph.Recorder.BindPipeline(usesRayQuery ? pipelines.ShadeLightingRayQuery : pipelines.ShadeLighting);
         graph.Recorder.PushConstants(header);

@@ -111,6 +111,11 @@ internal enum DebugView : uint
     /// tinted blue the coarser the level that answered, magenta where no level had a page.
     /// </summary>
     Sun,
+
+    /// <summary>
+    /// What a ray landing on every surface would read: the instance's lit card there.
+    /// </summary>
+    Cards,
 }
 
 /// <summary>

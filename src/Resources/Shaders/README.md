@@ -7,7 +7,8 @@ compiler loads a module and its imports from the assets, so a game's `Shaders/` 
 - `Core/` is what every module needs: the heap every resource is read through (`Heap`), what a pass is handed
   (`Pass`), what a frame is handed (`Frame`), numbers, colour, packing, sampling and hashing.
 - `Scene/` is the GPU tables and how to read them: the instance table, the pools of vertices, indices and clusters,
-  the material table, the capture table, what the cull leaves for the draw and the resolve, and the cull's tests.
+  the material table, the card table and how a point is placed in a card, what the cull leaves for the draw and the
+  resolve, and the cull's tests.
 - `Surface/` is what a material is handed for a pixel and what it gives back.
 - `Material/` is the material contract, `IMaterial`, and the materials every project has: the standard one, the one
   a broken asset is drawn with, and glass.

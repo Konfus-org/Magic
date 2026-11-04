@@ -25,7 +25,7 @@ four places, every slow thing an `Async` method, results slow to make in the cac
 | Auto-generated derived data                     | A post-processor on `Model` makes clusters and distance fields into the cache, keyed by the asset's version; cards at runtime  |
 
 Two things this plan refuses. **No lighting is baked**: the cache holds geometry-derived data only (clusters, distance
-fields, card placements, imposter captures of albedo and normal), and a static scene lit twice from two different
+fields, the cards' albedo, normal and depth), and a static scene lit twice from two different
 suns gives two different pictures. **No technique is only screen space**: a screen trace may shortcut a world trace, but
 every term has a world-space source that works when the thing it needs is behind the camera.
 
@@ -45,7 +45,7 @@ Six gems, each talking to the others only through Core:
 | `SlangShaders`     | `IShaderCompiler`, `ICache<CompiledShader>`       | `Assets`, `Caches`, settings                                                | slang                    |
 | `AssimpModels`     | `IAssetLoader<Model>`                             | nothing                                                                     | assimp                   |
 | `MeshPreprocessor` | `ILoadPostProcessor<Model>`, `ICache<MeshDerived>` | `Assets`, `Caches`, `Threads`, settings                                     | meshoptimizer            |
-| `WorldRenderer`    | `IRendering`, `IPreloader`, `ICache<GpuCapture>`, `ICache<GpuTexture>` | `IGraphicsApi`, `IShaderCompiler`, `Assets`, `Caches`, `World`, `Threads`, `App`, settings, `IWindow?`, `IScripts` | bc7enc |
+| `WorldRenderer`    | `IRendering`, `IPreloader`, `ICache<GpuCard>`, `ICache<GpuTexture>` | `IGraphicsApi`, `IShaderCompiler`, `Assets`, `Caches`, `World`, `Threads`, `App`, settings, `IWindow?`, `IScripts` | bc7enc |
 | `SdlPlatform`      | already planned; the window and input             |                                                                             |                          |
 
 Core gains, in `Contexts/Gpu/` and `Contexts/Rendering/`, the plain data both sides share: handles, descriptions,
@@ -331,14 +331,18 @@ with kajiya's temporal shape for the probes. The chain is: cards hold what every
 world gather from the cards along traced rays; probes on screen gather from the world probes and from their own short
 rays; the integrator turns that into irradiance per pixel.
 
-- **The surface cache.** The cards are the imposter captures: the 64 cells of albedo, normal and depth a model is
-  captured into from every direction, so a surface facing any way has a cell that saw it. A pool of 256 lit slots
-  goes to the instances that take most of the view; a slot holds the instance's capture lit at half the texels, 8
-  slots lit a frame: a direct pass with the sun through the virtual shadow maps and every light whose reach touches
-  the instance, through a light list per slot, and the world probes' irradiance for the bounce. The result is the
-  final-lit card, what a ray reads when it lands on that instance: the cell that saw the surface from its normal's
-  side, where the cell's depth agrees with the point. An instance with no slot reads its capture's albedo under a
-  fallback light.
+- **The surface cache.** The cards are the six sides of a model's box, each the model drawn orthographically along
+  that axis into atlases of albedo, normal and depth, at the texels the model's size on screen earns (a texel per
+  decimetre, 8 to 128 across, the instance's scale bucketed by powers of two), so a surface facing any way has a
+  side that saw it at the detail it shows. A pool of 160 lit slots goes to the instances that take most of the
+  view; a slot holds the irradiance on the instance's cards at half their texels, a few slots lit a frame: the sun
+  through the virtual shadow maps and every light whose reach touches the instance, through a light list per slot,
+  plus the card's own radiosity, a probe an 8 by 8 tile of lit texels that traces a few cosine rays through the
+  field each time the slot is lit, reads the lit cards they land on, and keeps most of what it held. So the bounce
+  converges on the cards themselves, and the world probes are only the cache past the field's range. What a ray
+  reads when it lands on an instance is the card's albedo under the lit irradiance there: the side its normal faces
+  most, where the card's depth agrees with the point, else the side after it. An instance with no slot reads its
+  card's albedo under a fallback light.
 - **The radiance cache.** A clipmap of world probes (4 levels, 16³ probes, 1 m to 8 m apart), each an octahedral
   16×16 map of radiance, a 16×16 map of hit distance and its square, and an 8×8 map of irradiance. Each frame a
   budget of 256 probes, the ones whose cells moved first and then each in turn, traces 256 rays through the field,
@@ -412,7 +416,7 @@ through this so a release ships with the caches full.
 | From       | Made by            | Into the cache as   | Holds                                                                        |
 | ---------- | ------------------ | ------------------- | ---------------------------------------------------------------------------- |
 | `Model`    | `MeshPreprocessor` | `MeshDerived`       | quantised vertices, the cluster DAG, card placements, the mesh distance field |
-| `Model`    | `WorldRenderer`    | `GpuCapture`        | the imposter octahedral atlas and the card atlas, albedo, normal, emissive, depth |
+| `Model`    | `WorldRenderer`    | `GpuCard`           | the six cards' places in the card atlases, albedo, normal and depth              |
 | `Texture`  | `WorldRenderer`    | `GpuTexture`        | BC7 (colour), BC5 (normals), BC4 (masks) with mips, through bc7enc           |
 | `Shader`   | `SlangShaders`     | `CompiledShader`    | SPIR-V per specialisation, reflection, the layout of every `[ShaderStruct]`   |
 | `Material` | `WorldRenderer`    | nothing             | a row in the material table, remade from the snapshot when the asset arrives  |

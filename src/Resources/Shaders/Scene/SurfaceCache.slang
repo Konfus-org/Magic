@@ -1,7 +1,7 @@
-// What a ray reads where it lands: the surface cache. A point on an instance is looked up in the instance's lit
-// card, the capture cell that saw the surface from its normal's side, where the cell's depth agrees with the
-// point; a point the field found is first given to the nearest of the instances listed for its brick; and a ray
-// marched along the screen's depth lands on the instance drawn there.
+// What a ray reads where it lands: the surface cache. A point on an instance is looked up in the instance's cards,
+// the side its normal faces most, where the card's depth agrees with the point, and read as the card's albedo under
+// the lit card's irradiance there; a point the field found is first given to the nearest of the instances listed
+// for its brick; and a ray marched along the screen's depth lands on the instance drawn there.
 module "Scene/SurfaceCache";
 
 import Core.Heap;
@@ -10,100 +10,90 @@ import Core.Math;
 import Core.Pack;
 import Scene.Instances;
 import Scene.Visibility;
-import Scene.Captures;
+import Scene.Cards;
 import Scene.Field;
 import Scene.Probes;
 import Trace.IWorldTracer;
 
-// The axes of a capture cell's view, as the renderer sets them up: towards the viewer along direction, the view
-// looking back along it.
-public void GetCaptureBasis(float3 direction, out float3 right, out float3 up, out float3 forward)
+// The card of a capture that saw a point from its surface's side: the side the normal faces most, or the one after
+// it where that side's depth disagrees with the point; false when neither saw it, with the first side's card and
+// place all the same.
+bool FindCard(FrameConstants frame, uint capture, float3 modelPoint, float3 modelNormal, out uint cardIndex, out float2 uv)
 {
-    float3 worldUp = abs(direction.y) > 0.9 ? float3(0.0, 0.0, 1.0) : float3(0.0, 1.0, 0.0);
-    forward = -direction;
-    right = normalize(cross(worldUp, forward));
-    up = cross(forward, right);
-}
+    uint best = 0u;
+    uint second = 0u;
+    float bestDot = -2.0;
+    float secondDot = -2.0;
+    for (uint axis = 0u; axis < CardsPerCapture; axis++)
+    {
+        float facing = dot(modelNormal, GetCardDirection(axis));
+        if (facing > bestDot)
+        {
+            second = best;
+            secondDot = bestDot;
+            best = axis;
+            bestDot = facing;
+        }
+        else if (facing > secondDot)
+        {
+            second = axis;
+            secondDot = facing;
+        }
+    }
 
-// Where a point of the model lands in a capture cell seen from a direction: the cell's texture coordinates from its
-// top left, and the reversed depth the capture would hold there.
-public float2 ProjectIntoCapture(GpuCapture capture, float3 direction, float3 modelPoint, out float depth)
-{
-    float3 right;
-    float3 up;
-    float3 forward;
-    GetCaptureBasis(direction, right, up, forward);
-    float radius = max(capture.boundsRadius, 1e-3);
-    float3 eye = capture.boundsCenter + direction * 2.0 * radius;
-    float3 offset = modelPoint - eye;
-    float3 view = float3(dot(offset, right), dot(offset, up), dot(offset, forward));
-    depth = 1.5 - view.z / (2.0 * radius);
-    return float2(view.x / radius * 0.5 + 0.5, 0.5 - view.y / radius * 0.5);
-}
-
-// The texel of the lit pool a point of an instance is read at, from the capture cell that saw the surface it lies
-// on; false when no cell did.
-bool FindLitTexel(GpuCapture capture, uint slot, float3 modelPoint, float3 modelNormal, float3 modelRayDirection, out float2 texel)
-{
-    texel = float2(0.0);
-    TextureRef depthAtlas = { capture.depth };
-    float3 candidates[2] = { modelNormal, -modelRayDirection };
+    cardIndex = (capture * CardsPerCapture) + best;
+    uv = float2(0.5);
+    TextureRef depthAtlas = { frame.cardDepth };
     for (uint i = 0u; i < 2u; i++)
     {
-        float3 direction = NormalizeSafe(candidates[i], float3(0.0, 1.0, 0.0));
-        float2 flat = EncodeOctahedral(direction) * 0.5 + 0.5;
-        uint2 cell = min(uint2(flat * float(CaptureCells)), CaptureCells - 1u);
-        float3 cellDirection = GetCaptureDirection(cell);
+        uint index = (capture * CardsPerCapture) + (i == 0u ? best : second);
+        GpuCard card = LoadCard(frame.cards, index);
         float depth;
-        float2 cellUv = ProjectIntoCapture(capture, cellDirection, modelPoint, depth);
-        if (any(cellUv < 0.0) || any(cellUv >= 1.0))
+        float2 at = ProjectIntoCard(card, modelPoint, depth);
+        if (i == 0u)
+            uv = saturate(at);
+
+        if (any(at < 0.0) || any(at >= 1.0))
             continue;
 
-        uint2 captureTexel = (cell * CaptureCellSize) + uint2(cellUv * float(CaptureCellSize));
-        float captured = depthAtlas.Load(captureTexel, 0u).x;
-        // Depth runs 1 at the near face of the capture to 0 at the far: a difference of 0.05 is a tenth of the radius.
-        if (captured <= 0.0 || abs(captured - depth) > 0.05)
+        uint2 texel = card.origin + min(uint2(at * float2(card.size)), card.size - 1u);
+        float captured = depthAtlas.Load(texel, 0u).x;
+        // Agreement within two texels across the card, or five centimetres, whichever is more.
+        float tolerance = max(2.0 * GetCardTexelWorld(card), 0.05) / GetCardDepthRange(card);
+        if (captured <= 0.0 || abs(captured - depth) > tolerance)
             continue;
 
-        texel = float2(GetLitSlotOrigin(slot)) + (float2(cell) + cellUv) * float(LitCellTexels);
+        cardIndex = index;
+        uv = at;
         return true;
     }
 
     return false;
 }
 
-// What leaves a point of an instance's surface towards a ray that arrived along a direction: its lit card where it
-// has one, else its capture's albedo under the fallback light, else nothing.
-public float3 ShadeInstancePoint(FrameConstants frame, GiConstants gi, uint instanceIndex, GpuInstance instance, float3 world, float3 normal, float3 rayDirection)
+// What leaves a point of an instance's surface: the card's albedo under its lit irradiance where the instance has
+// a lit slot, under the fallback light where it has none, and nothing where it has no capture yet.
+public float3 ShadeInstancePoint(FrameConstants frame, GiConstants gi, uint instanceIndex, GpuInstance instance, float3 world, float3 normal)
 {
     if (instance.capture == 0u)
         return float3(0.0);
 
-    GpuCapture capture = LoadCapture(frame.captures, instance.capture);
     float3x3 rotation = float3x3(instance.world[0].xyz, instance.world[1].xyz, instance.world[2].xyz);
     float3 modelPoint = mul(float4(world, 1.0), instance.inverseWorld).xyz;
     float3 modelNormal = NormalizeSafe(mul(rotation, normal), float3(0.0, 1.0, 0.0));
-    float3 modelRay = NormalizeSafe(mul(rotation, rayDirection), -modelNormal);
+    uint cardIndex;
+    float2 uv;
+    bool isSeen = FindCard(frame, instance.capture, modelPoint, modelNormal, cardIndex, uv);
+    GpuCard card = LoadCard(frame.cards, cardIndex);
+    SamplerRef sampler = { frame.cardSampler };
+    TextureRef albedoAtlas = { frame.cardAlbedo };
+    float3 albedo = albedoAtlas.SampleLevel(sampler, GetCardAtlasUv(card, uv), 0.0).rgb;
     uint slotPlusOne = GetLitSlot(gi, instanceIndex);
-    SamplerRef sampler = { frame.captureSampler };
-    if (slotPlusOne != 0u)
-    {
-        float2 texel;
-        if (FindLitTexel(capture, slotPlusOne - 1u, modelPoint, modelNormal, modelRay, texel))
-        {
-            TextureRef pool = { gi.litPool };
-            return pool.SampleLevel(sampler, texel / float(LitPoolTexels), 0.0).rgb;
-        }
-    }
+    if (!isSeen || slotPlusOne == 0u)
+        return albedo * gi.fallbackIrradiance.rgb * InvPi;
 
-    // No lit card: the albedo the capture saw from the normal's side under the fallback light.
-    float2 flat = EncodeOctahedral(modelNormal) * 0.5 + 0.5;
-    uint2 cell = min(uint2(flat * float(CaptureCells)), CaptureCells - 1u);
-    float depth;
-    float2 cellUv = saturate(ProjectIntoCapture(capture, GetCaptureDirection(cell), modelPoint, depth));
-    TextureRef albedoAtlas = { capture.albedo };
-    float4 albedo = albedoAtlas.SampleLevel(sampler, (float2(cell) + cellUv) / float(CaptureCells), 0.0);
-    return albedo.rgb * gi.fallbackIrradiance.rgb * InvPi;
+    TextureRef pool = { gi.litPool };
+    return albedo * InvPi * pool.SampleLevel(sampler, GetLitAtlasUv(slotPlusOne - 1u, card, uv), 0.0).rgb;
 }
 
 // The instance a point the field found lies on: of those listed for its brick, the one whose field reads nearest
@@ -207,7 +197,7 @@ public bool TraceScreenToSurface(FrameConstants frame, GiConstants gi, float3 or
         TextureRef normalTexture = { frame.gbufferNormal };
         float3 normal = DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0);
         float3 world = ReconstructWorld(frame, GetTexelCenterUv(pixel, size), sceneDepth);
-        radiance = ShadeInstancePoint(frame, gi, instanceIndex, instance, world, normal, direction);
+        radiance = ShadeInstancePoint(frame, gi, instanceIndex, instance, world, normal);
         hitDistance = t;
         return true;
     }
@@ -215,14 +205,14 @@ public bool TraceScreenToSurface(FrameConstants frame, GiConstants gi, float3 or
     return false;
 }
 
-// What leaves a point a trace found, towards a ray that arrived along a direction: on the instance the tracer
-// named, else on the nearest of the instances listed for the point's brick.
-public float3 ShadeFieldHit(FrameConstants frame, FieldConstants field, GiConstants gi, float3 world, float3 normal, float3 rayDirection, uint instanceHint)
+// What leaves a point a trace found: on the instance the tracer named, else on the nearest of the instances listed
+// for the point's brick.
+public float3 ShadeFieldHit(FrameConstants frame, FieldConstants field, GiConstants gi, float3 world, float3 normal, uint instanceHint)
 {
     uint instanceIndex = instanceHint;
     if (instanceHint == TraceNoInstance && !FindFieldInstance(frame, field, world, instanceIndex))
         return float3(0.0);
 
     GpuInstance instance = LoadInstance(frame.instances, instanceIndex);
-    return ShadeInstancePoint(frame, gi, instanceIndex, instance, world, normal, rayDirection);
+    return ShadeInstancePoint(frame, gi, instanceIndex, instance, world, normal);
 }

@@ -71,8 +71,9 @@ public struct FrameConstants
     public uint output;
     // FrameFlags bits.
     public uint flags;
-    public uint captures;
-    public uint captureSampler;
+    // The card table and the sampler the card atlases are read with.
+    public uint cards;
+    public uint cardSampler;
 
     // Pixels the projection is shifted by this frame, for the resolve to take off, and the output's size, which the
     // picture is resolved into.
@@ -84,8 +85,14 @@ public struct FrameConstants
     // table of leaf clusters its instances' geometries name.
     public uint acceleration;
     public uint leafClusters;
+
+    // The card atlases: albedo with coverage, the normal and the depth.
+    public uint cardAlbedo;
+    public uint cardNormal;
+    public uint cardDepth;
     public uint padding1;
     public uint padding2;
+    public uint padding3;
 }
 
 // The cone cull is off: the view is orthographic, as a capture's is, so no one point is the camera.

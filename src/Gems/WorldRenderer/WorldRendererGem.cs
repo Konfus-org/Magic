@@ -48,7 +48,6 @@ public sealed class WorldRendererGem(
     private const int DefaultWidth = 1280;
     private const int DefaultHeight = 720;
     private const int CapturesPerFrame = 4;
-    private const int CaptureCellCount = GpuCapture.Cells * GpuCapture.Cells;
     private const int CullGroupsPerRow = 65535;
     private const float ErrorThresholdPixels = 1;
     private const float SkyBrightness = 0.3f;
@@ -68,7 +67,7 @@ public sealed class WorldRendererGem(
     private readonly GeometryPools _pools = new(gpu, meshes, assets, threads, new DistanceField(gpu));
     private readonly TextureTable _textures = new(gpu, assets, threads);
     private readonly FrameTargets _targets = new(gpu);
-    private readonly FrameTargets _cellTargets = new(gpu);
+    private readonly FrameTargets _cardTargets = new(gpu);
     private readonly GlobalIllumination _gi = new(gpu);
     private readonly Translucency _translucency = new(gpu);
     private readonly RayTracing? _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu) : null;
@@ -76,10 +75,10 @@ public sealed class WorldRendererGem(
     private readonly RendererPipelines _pipelines = new(gpu, shaders, assets);
     private readonly Post _post = new(gpu);
     private readonly InstanceTable _instances = new(gpu);
-    private readonly CaptureTable _captures = new(gpu);
+    private readonly CardTable _cards = new(gpu);
     private readonly SunShadows _shadows = new(gpu);
     private readonly Lighting _lighting = new(gpu);
-    private readonly GpuBuffer[] _cellConstants = new GpuBuffer[CaptureCellCount];
+    private readonly GpuBuffer[] _cardConstants = new GpuBuffer[GpuCard.PerCapture];
     private MaterialTable? _materials;
     private GpuBuffer _constants;
     private GpuBuffer _captureInstance;
@@ -89,7 +88,7 @@ public sealed class WorldRendererGem(
     private GpuBuffer _drawArguments;
     private GpuBuffer _retestList;
     private GpuSampler _sampler;
-    private GpuSampler _captureSampler;
+    private GpuSampler _cardSampler;
     private bool _isReady;
     private bool _hasHzb;
     private DebugView _debugView;
@@ -113,12 +112,12 @@ public sealed class WorldRendererGem(
         _graph.Clear();
         _pipelines.Dispose();
         _targets.Dispose();
-        _cellTargets.Dispose();
+        _cardTargets.Dispose();
         _materials?.Dispose();
         _textures.Dispose();
         _pools.Dispose();
         _instances.Dispose();
-        _captures.Dispose();
+        _cards.Dispose();
         _shadows.Dispose();
         _lighting.Dispose();
         _gi.Dispose();
@@ -135,7 +134,7 @@ public sealed class WorldRendererGem(
                     _visibleClusters,
                     _drawArguments,
                     _retestList,
-                    .. _cellConstants,
+                    .. _cardConstants,
                 ]
         )
         {
@@ -146,8 +145,8 @@ public sealed class WorldRendererGem(
         if (!_sampler.IsNone)
             gpu.Destroy(_sampler);
 
-        if (!_captureSampler.IsNone)
-            gpu.Destroy(_captureSampler);
+        if (!_cardSampler.IsNone)
+            gpu.Destroy(_cardSampler);
     }
 
     /// <summary>
@@ -175,7 +174,7 @@ public sealed class WorldRendererGem(
                     _pools.Create,
                     _materials.Create,
                     _instances.Create,
-                    _captures.Create,
+                    _cards.Create,
                     _shadows.Create,
                     _lighting.Create,
                     _gi.Create,
@@ -185,11 +184,11 @@ public sealed class WorldRendererGem(
                     _pools.Field.Create,
                     CreateBuffers,
                     () =>
-                        _cellTargets.Resize(
-                            GpuCapture.CellSize,
-                            GpuCapture.CellSize,
-                            GpuCapture.CellSize,
-                            GpuCapture.CellSize,
+                        _cardTargets.Resize(
+                            GpuCard.MaxTexels,
+                            GpuCard.MaxTexels,
+                            GpuCard.MaxTexels,
+                            GpuCard.MaxTexels,
                             _graph
                         ),
                 ]
@@ -428,7 +427,7 @@ public sealed class WorldRendererGem(
 
         // The captures newly asked for, drawn before any instance shows them.
         int captured = 0;
-        while (captured < CapturesPerFrame && _captures.TryTakeJob(out CaptureJob job))
+        while (captured < CapturesPerFrame && _cards.TryTakeJob(out CaptureJob job))
         {
             RecordCapture(job);
             captured++;
@@ -439,7 +438,7 @@ public sealed class WorldRendererGem(
         RenderSun sun = _world.Sun ?? new RenderSun(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One, 1);
         int instanceCount = UpdateInstances();
         _graph.BeginTransferPass("Upload frame");
-        _captures.Upload(_graph);
+        _cards.Upload(_graph);
         bool hasArrivals = _pools.HasArrivals;
         _instances.Upload(_graph);
         _rayTracing?.Prepare(_graph, _instances.Rows, _instances.Extras, hasArrivals || _instances.Changes.Length > 0);
@@ -528,7 +527,7 @@ public sealed class WorldRendererGem(
             _lighting,
             _pools.Field,
             _translucency,
-            _captures,
+            _cards,
             _targets,
             UsesRayQuery
         );
@@ -540,6 +539,9 @@ public sealed class WorldRendererGem(
             _pools.Field,
             _gi,
             _translucency,
+            _cards,
+            _instances.Buffer,
+            _visibleClusters,
             _targets,
             UsesRayQuery
         );
@@ -620,32 +622,24 @@ public sealed class WorldRendererGem(
     }
 
     /// <summary>
-    /// An orthographic projection of a sphere of <paramref name="radius"/> whose centre is 2 radii ahead, for row
-    /// vectors, with reversed depth: 1 at the sphere's nearest point and 0 at its farthest.
+    /// An orthographic projection of a card's box, for row vectors: the box's <paramref name="extents"/> across, up
+    /// and along the view, drawn <paramref name="width"/> by <paramref name="height"/> texels into the top left of a
+    /// target <see cref="GpuCard.MaxTexels"/> square, with reversed depth: 1 at the side seen from, 0 at the far
+    /// side, the viewer 2 extents ahead of the box's centre.
     /// </summary>
-    private static Matrix4x4 CreateCaptureProjection(float radius)
+    private static Matrix4x4 CreateCardProjection(uint width, uint height, Vector3 extents)
     {
+        float target = GpuCard.MaxTexels;
         Matrix4x4 projection = default;
-        projection.M11 = 1 / radius;
-        projection.M22 = 1 / radius;
-        projection.M33 = -1 / (2 * radius);
+        projection.M11 = width / (target * extents.X);
+        projection.M22 = height / (target * extents.Y);
+        projection.M41 = (width / target) - 1;
+        projection.M42 = 1 - (height / target);
+        projection.M33 = -1 / (2 * extents.Z);
         projection.M43 = 1.5f;
         projection.M44 = 1;
 
         return projection;
-    }
-
-    /// <summary>
-    /// A unit vector from its octahedral point in [-1, 1]², as <c>Core/Pack.slang</c> decodes it.
-    /// </summary>
-    private static Vector3 DecodeOctahedral(Vector2 flat)
-    {
-        Vector3 n = new(flat.X, flat.Y, 1 - Math.Abs(flat.X) - Math.Abs(flat.Y));
-        float t = Math.Clamp(-n.Z, 0, 1);
-        n.X += n.X >= 0 ? -t : t;
-        n.Y += n.Y >= 0 ? -t : t;
-
-        return Vector3.Normalize(n);
     }
 
     /// <summary>
@@ -676,9 +670,9 @@ public sealed class WorldRendererGem(
             new SamplerDescription { Wrap = TextureWrap.Clamp, HasMipmapBlend = false }
         );
         if (!captureSampler.Ok)
-            return Result.Failure($"the capture sampler was not made: {captureSampler.Error}");
+            return Result.Failure($"the card sampler was not made: {captureSampler.Error}");
 
-        _captureSampler = captureSampler.Value;
+        _cardSampler = captureSampler.Value;
         (string Name, long Bytes, BufferUsages Usage)[] descriptions =
         [
             ("Frame constants", FrameConstants.Bytes, BufferUsages.Storage),
@@ -719,20 +713,20 @@ public sealed class WorldRendererGem(
             made[5],
             made[6]
         );
-        for (int cell = 0; cell < CaptureCellCount; cell++)
+        for (int side = 0; side < GpuCard.PerCapture; side++)
         {
             Result<GpuBuffer> buffer = gpu.CreateBuffer(
                 new BufferDescription
                 {
                     Bytes = FrameConstants.Bytes,
                     Usage = BufferUsages.Storage,
-                    Name = $"Capture constants {cell}",
+                    Name = $"Card constants {side}",
                 }
             );
             if (!buffer.Ok)
-                return Result.Failure($"a capture's constants buffer was not made: {buffer.Error}");
+                return Result.Failure($"a card's constants buffer was not made: {buffer.Error}");
 
-            _cellConstants[cell] = buffer.Value;
+            _cardConstants[side] = buffer.Value;
         }
 
         return Result.Success();
@@ -771,7 +765,7 @@ public sealed class WorldRendererGem(
             Matrix4x4.Invert(world, out Matrix4x4 inverseWorld);
             Vector3 scale = instance.Transform.Scale;
             float maxScale = Math.Max(Math.Abs(scale.X), Math.Max(Math.Abs(scale.Y), Math.Abs(scale.Z)));
-            uint capture = isSettled ? _captures.Get(instance.Model.Id, resident, materialRows) : 0;
+            uint capture = isSettled ? _cards.Get(instance.Model.Id, resident, materialRows, maxScale) : 0;
             Vector3 worldCenter = Vector3.Transform(resident.BoundsCenter, world);
             float worldRadius = resident.BoundsRadius * maxScale;
             GpuMaterial first = _materials.Get(materialRows[0]);
@@ -911,8 +905,11 @@ public sealed class WorldRendererGem(
             GBufferBase = targets.GBufferBase.Id,
             GBufferSurface = targets.GBufferSurface.Id,
             Output = targets.Output.Id,
-            Captures = _captures.Buffer.Id,
-            CaptureSampler = _captureSampler.Id,
+            Cards = _cards.Buffer.Id,
+            CardSampler = _cardSampler.Id,
+            CardAlbedo = _cards.Albedo.Id,
+            CardNormal = _cards.Normal.Id,
+            CardDepth = _cards.Depth.Id,
         };
         FillFrustum(viewProjection, ref frame);
 
@@ -944,8 +941,8 @@ public sealed class WorldRendererGem(
     }
 
     /// <summary>
-    /// The model drawn from every cell's direction into the job's atlases: its finest clusters, at the origin, from
-    /// 2 radii away through an orthographic view of its sphere.
+    /// The model drawn along each of its six sides into the card atlases: its finest clusters, at the origin,
+    /// through an orthographic view of its box, each card at its own size.
     /// </summary>
     private void RecordCapture(in CaptureJob job)
     {
@@ -975,25 +972,20 @@ public sealed class WorldRendererGem(
         _graph.Recorder.CopyBuffer(upload.Buffer, upload.Offset, _captureInstance, 0, GpuInstance.Bytes);
         _graph.EndPass();
 
-        float radius = Math.Max(resident.BoundsRadius, 1e-3f);
-        for (int cell = 0; cell < CaptureCellCount; cell++)
+        for (int side = 0; side < GpuCard.PerCapture; side++)
         {
-            Vector2 flat =
-                (
-                    (new Vector2(cell % GpuCapture.Cells, cell / GpuCapture.Cells) + new Vector2(0.5f))
-                    / GpuCapture.Cells
-                    * 2
-                ) - Vector2.One;
-            Vector3 direction = DecodeOctahedral(flat);
-            Vector3 cameraPosition = resident.BoundsCenter + (direction * 2 * radius);
-            Vector3 up = Math.Abs(direction.Y) > 0.9f ? Vector3.UnitZ : Vector3.UnitY;
-            Matrix4x4 view = Matrix4x4.CreateLookAtLeftHanded(Vector3.Zero, -direction, up);
+            GpuCard card = _cards.GetCard(job.Row, side);
+            CardTable.GetBasis((uint)side, out Vector3 direction, out Vector3 right, out Vector3 up);
+            Vector3 extents = CardTable.GetExtents(card, direction, right, up);
+            Vector3 cameraPosition = card.Center + (direction * 2 * extents.Z);
+            Vector3 worldUp = Math.Abs(direction.Y) > 0.9f ? Vector3.UnitZ : Vector3.UnitY;
+            Matrix4x4 view = Matrix4x4.CreateLookAtLeftHanded(Vector3.Zero, -direction, worldUp);
             FrameConstants frame = GetViewConstants(
                 view,
-                CreateCaptureProjection(radius),
+                CreateCardProjection(card.Width, card.Height, extents),
                 cameraPosition,
                 1e-3f,
-                _cellTargets,
+                _cardTargets,
                 _captureInstance,
                 1
             );
@@ -1001,29 +993,30 @@ public sealed class WorldRendererGem(
             frame.PixelsPerRadian = 1;
             frame.Flags = FrameConstants.FlagNoConeCull;
 
-            _graph.BeginTransferPass($"Capture cell {cell} constants");
-            UploadConstants(_cellConstants[cell], frame);
+            _graph.BeginTransferPass($"Card {side} constants");
+            UploadConstants(_cardConstants[side], frame);
             ResetCounts();
             _graph.EndPass();
 
-            RenderView cellView = new(_cellConstants[cell], _captureInstance, 1, _cellTargets);
-            RecordCull(cellView, $"Capture cell {cell} cull", mode: 0);
-            RecordDraw(cellView, $"Capture cell {cell} draw", TargetLoad.Clear, drawsOffset: 0, countOffset: 0);
-            RecordResolve(cellView, $"Capture cell {cell} resolve");
+            RenderView cardView = new(_cardConstants[side], _captureInstance, 1, _cardTargets);
+            RecordCull(cardView, $"Card {side} cull", mode: 0);
+            RecordDraw(cardView, $"Card {side} draw", TargetLoad.Clear, drawsOffset: 0, countOffset: 0);
+            RecordResolve(cardView, $"Card {side} resolve");
 
-            _graph.BeginComputePass($"Capture cell {cell} write");
-            _graph.Use(_cellConstants[cell], GpuAccess.ShaderRead);
-            _graph.Use(_captures.Buffer, GpuAccess.ShaderRead);
-            _graph.Use(_cellTargets.Visibility, GpuAccess.ShaderRead);
-            _graph.Use(_cellTargets.Depth, GpuAccess.ShaderRead);
-            _graph.Use(_cellTargets.GBufferNormal, GpuAccess.ShaderRead);
-            _graph.Use(_cellTargets.GBufferBase, GpuAccess.ShaderRead);
-            _graph.Use(job.Albedo, GpuAccess.ShaderWrite);
-            _graph.Use(job.Normal, GpuAccess.ShaderWrite);
-            _graph.Use(job.Depth, GpuAccess.ShaderWrite);
-            _graph.Recorder.BindPipeline(_pipelines.CaptureCell);
-            _graph.Recorder.PushConstants(new GpuConstants(_cellConstants[cell].Id, (uint)cell, job.Row));
-            _graph.Recorder.Dispatch(Groups(GpuCapture.CellSize), Groups(GpuCapture.CellSize));
+            uint cardIndex = (job.Row * GpuCard.PerCapture) + (uint)side;
+            _graph.BeginComputePass($"Card {side} write");
+            _graph.Use(_cardConstants[side], GpuAccess.ShaderRead);
+            _graph.Use(_cards.Buffer, GpuAccess.ShaderRead);
+            _graph.Use(_cardTargets.Visibility, GpuAccess.ShaderRead);
+            _graph.Use(_cardTargets.Depth, GpuAccess.ShaderRead);
+            _graph.Use(_cardTargets.GBufferNormal, GpuAccess.ShaderRead);
+            _graph.Use(_cardTargets.GBufferBase, GpuAccess.ShaderRead);
+            _graph.Use(_cards.Albedo, GpuAccess.ShaderWrite);
+            _graph.Use(_cards.Normal, GpuAccess.ShaderWrite);
+            _graph.Use(_cards.Depth, GpuAccess.ShaderWrite);
+            _graph.Recorder.BindPipeline(_pipelines.CaptureCard);
+            _graph.Recorder.PushConstants(new GpuConstants(_cardConstants[side].Id, cardIndex));
+            _graph.Recorder.Dispatch(Groups((int)card.Width), Groups((int)card.Height));
             _graph.EndPass();
         }
     }
@@ -1080,8 +1073,6 @@ public sealed class WorldRendererGem(
         _graph.Use(_pools.Clusters, GpuAccess.ShaderRead);
         _graph.Use(_pools.Indices, GpuAccess.ShaderRead);
         _graph.Use(_visibleClusters, GpuAccess.ShaderRead);
-        _graph.Use(_captures.Buffer, GpuAccess.ShaderRead);
-        _captures.UseAll(_graph);
         _graph.Use(_drawArguments, GpuAccess.Indirect);
         _graph.Use(_counts, GpuAccess.Indirect);
         _graph.Recorder.BindPipeline(_pipelines.DrawVisibility);
@@ -1134,8 +1125,6 @@ public sealed class WorldRendererGem(
         _graph.Use(_pools.Indices, GpuAccess.ShaderRead);
         _graph.Use(_materials.Buffer, GpuAccess.ShaderRead);
         _graph.Use(_visibleClusters, GpuAccess.ShaderRead);
-        _graph.Use(_captures.Buffer, GpuAccess.ShaderRead);
-        _captures.UseAll(_graph);
         _graph.Use(view.Targets.Visibility, GpuAccess.ShaderRead);
         _graph.Use(view.Targets.GBufferNormal, GpuAccess.ShaderWrite);
         _graph.Use(view.Targets.GBufferBase, GpuAccess.ShaderWrite);

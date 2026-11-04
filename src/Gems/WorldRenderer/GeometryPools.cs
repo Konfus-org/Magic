@@ -326,6 +326,14 @@ internal sealed class GeometryPools(
             return;
         }
 
+        Vector3 min = new(float.MaxValue);
+        Vector3 max = new(float.MinValue);
+        foreach (GpuVertex vertex in made.Vertices)
+        {
+            min = Vector3.Min(min, vertex.Position);
+            max = Vector3.Max(max, vertex.Position);
+        }
+
         ResidentModel where = new(
             (uint)_vertexCount,
             (uint)_indexCount,
@@ -333,6 +341,8 @@ internal sealed class GeometryPools(
             (uint)made.Clusters.Length,
             made.BoundsCenter,
             made.BoundsRadius,
+            made.Vertices.IsEmpty ? Vector3.Zero : min,
+            made.Vertices.IsEmpty ? Vector3.Zero : max,
             FieldSlot: made.Field.IsDefaultOrEmpty ? 0 : Field.Add(made)
         );
         if (gpu.Features.HasRayQuery)
@@ -357,9 +367,9 @@ internal sealed class GeometryPools(
 }
 
 /// <summary>
-/// Where a model is in the pools, and the sphere around it in its own frame; <paramref name="IsFailure"/> when it
-/// stands in for a model that could not be made, to be drawn as a failure; <paramref name="FieldSlot"/> its field's
-/// slot in the atlas plus one, 0 for none.
+/// Where a model is in the pools, and the sphere and the box around it in its own frame; <paramref name="IsFailure"/>
+/// when it stands in for a model that could not be made, to be drawn as a failure; <paramref name="FieldSlot"/> its
+/// field's slot in the atlas plus one, 0 for none.
 /// </summary>
 internal readonly record struct ResidentModel(
     uint VertexOffset,
@@ -368,6 +378,8 @@ internal readonly record struct ResidentModel(
     uint ClusterCount,
     Vector3 BoundsCenter,
     float BoundsRadius,
+    Vector3 BoundsMin,
+    Vector3 BoundsMax,
     bool IsFailure = false,
     uint FieldSlot = 0,
     uint LeafOffset = 0,
