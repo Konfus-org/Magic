@@ -44,7 +44,7 @@ internal static class Program
         Log.Verbose($"Command line args: {string.Join(", ", commandLine)}");
 
         // What outlasts a run: the app, which the commands set, and the world the last run kept.
-        App app = new();
+        using App app = new();
         byte[]? kept = null;
         bool isLaunching = true;
 
@@ -56,7 +56,7 @@ internal static class Program
             EventCoordinator events = new();
             Threads threads = new();
             Caches caches = new(files, app);
-            using Assets assets = new(files, caches);
+            using Assets assets = new(files, caches, app);
             using World world = new(assets, files, threads, app);
             using Cli cli = new(app, files, events, assets, world);
 
@@ -70,6 +70,9 @@ internal static class Program
                     return 1;
                 }
             }
+
+            if (app.HasFailed)
+                return ExitFailed();
 
             // A job, like new or --version, is done once it ran, and failed if it logged an error, as a project that
             // won't open does.
@@ -97,10 +100,9 @@ internal static class Program
 
             Log.Info($"Running {project.Name} in {(app.IsHeadless ? "headless" : "GUI")} mode.");
 
-            int run = app.RunVersion;
+            app.StartRun();
             using Gems gems = new(registry, provider, app, files, assets, world, events);
-            using CancellationTokenSource stopping = new();
-            world.StartAsync(kept, stopping.Token).FireAndForget();
+            world.StartAsync(kept, app.Lifetime).FireAndForget();
 
             // If we don't have a window and aren't headless something is wrong, early out.
             if (!app.IsHeadless && app.Window is null)
@@ -111,7 +113,7 @@ internal static class Program
                 app.Exit();
             }
 
-            while (app.IsRunning && app.RunVersion == run && !app.HasFailed)
+            while (!app.Lifetime.IsCancellationRequested)
             {
                 // Core's own steps are timed for whatever listens; the gems' pump times its hooks itself.
                 long start = _stepDuration.Start();
@@ -121,7 +123,7 @@ internal static class Program
                 assets.ProcessChanges();
                 _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "Assets"));
                 start = _stepDuration.Start();
-                world.Pump(stopping.Token);
+                world.Pump();
                 _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "World"));
                 gems.Pump();
                 start = _stepDuration.Start();
@@ -129,19 +131,23 @@ internal static class Program
                 _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "Commands"));
             }
 
+            if (app.HasFailed)
+                return ExitFailed();
+
             // The world is kept while the gems are still whole, for a restart of this same project; they end as this pass
             // does, last made first.
-            stopping.Cancel();
             kept = app.IsExiting || app.Project != project ? null : world.Keep();
-            if (app.HasFailed)
-            {
-                Log.Critical($"Exiting with code 2 due to logged errors. Error count: {Log.ErrorCount}");
-                return 2;
-            }
 
             Log.Info($"Closing {project.Name} and {(app.IsExiting ? "exiting" : "restarting")}.");
             if (app.IsExiting)
                 return 0;
+        }
+
+        static int ExitFailed()
+        {
+            Log.Critical($"Exiting with code 2 due to logged errors. Error count: {Log.ErrorCount}");
+
+            return 2;
         }
     }
 }

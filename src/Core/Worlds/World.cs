@@ -377,7 +377,7 @@ public sealed class World : IEcs, IDisposable
     /// <summary>
     /// Changes the world for the prefabs and domains the assets read again. Main thread.
     /// </summary>
-    internal void Pump(CancellationToken cancel) => ProcessReloads(_assets.Reloaded, cancel);
+    internal void Pump() => ProcessReloads(_assets.Reloaded, _app.Lifetime);
 
     /// <summary>
     /// Every entity with a <see cref="Spin"/> turned on by <paramref name="deltaSec"/> of the world's time. Main thread.

@@ -60,11 +60,6 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
 
     private readonly Assets _assets;
 
-    /// <summary>
-    /// Ends the wait for an icon as the gem ends.
-    /// </summary>
-    private readonly CancellationTokenSource _stopping = new();
-
     private readonly unsafe SDL_Window* _window;
 
     /// <summary>
@@ -288,8 +283,6 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
 
     public unsafe void Dispose()
     {
-        _stopping.Cancel();
-        _stopping.Dispose();
         foreach (nint gamepad in _gamepads.Values)
         {
             SDL_CloseGamepad((SDL_Gamepad*)gamepad);
@@ -701,10 +694,10 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
         if (icon == Handle<Icon>.None)
             return;
 
-        CancellationToken stopping = _stopping.Token;
-        Result<Icon> loaded = await _assets.LoadAsync(icon, null, stopping).ConfigureAwait(false);
+        CancellationToken lifetime = _app.Lifetime;
+        Result<Icon> loaded = await _assets.LoadAsync(icon, null, lifetime).ConfigureAwait(false);
         Result<Texture> image = loaded.Ok
-            ? await _assets.LoadAsync(loaded.Value.Image, null, stopping).ConfigureAwait(false)
+            ? await _assets.LoadAsync(loaded.Value.Image, null, lifetime).ConfigureAwait(false)
             : Result.Failure(loaded.Error);
         if (!image.Ok)
         {

@@ -24,7 +24,6 @@ internal sealed class DebugUIOverlay : IDisposable
     private const int MinBufferBytes = 16 * 1024;
 
     private readonly IGraphicsApi _gpu;
-    private readonly CancellationTokenSource _stopping = new();
     private readonly List<GpuTexture> _textures = [];
     private GpuBuffer _constants;
     private GpuBuffer _vertices;
@@ -39,16 +38,17 @@ internal sealed class DebugUIOverlay : IDisposable
     private volatile CompiledStages? _compiled;
     private bool _hasFailed;
 
-    public DebugUIOverlay(IGraphicsApi gpu, IShaderCompiler shaders, Assets assets)
+    /// <summary>
+    /// Starts compiling the overlay's shaders, which stop with <paramref name="lifetime"/>.
+    /// </summary>
+    public DebugUIOverlay(IGraphicsApi gpu, IShaderCompiler shaders, Assets assets, CancellationToken lifetime)
     {
         _gpu = gpu;
-        CompileAsync(shaders, assets.Find<Shader>(ShaderPath), _stopping.Token).FireAndForget();
+        CompileAsync(shaders, assets.Find<Shader>(ShaderPath), lifetime).FireAndForget();
     }
 
     public void Dispose()
     {
-        _stopping.Cancel();
-        _stopping.Dispose();
         foreach (GpuTexture texture in _textures)
         {
             _gpu.Destroy(texture);

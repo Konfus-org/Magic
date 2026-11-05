@@ -59,19 +59,19 @@ public sealed class Assets : IDisposable
     private readonly AssetWatches _watches;
 
     /// <summary>
-    /// Ends the loads on their way and the watching, as the assets are disposed.
+    /// Whose <see cref="App.Lifetime"/> ends the loads on their way.
     /// </summary>
-    private readonly CancellationTokenSource _stopping = new();
+    private readonly App _app;
 
     /// <summary>
     /// The assets, knowing Magic's built-in folder and Core's own asset types: register the rest (<see cref="Register(string)"/>).
     /// </summary>
-    internal Assets(IFileSystem files, Caches caches)
+    internal Assets(IFileSystem files, Caches caches, App app)
     {
         Files = files;
         Caches = caches;
+        _app = app;
         _watches = new AssetWatches(files);
-        Stopped = _stopping.Token;
         BuiltIn = GetResources(files, typeof(Assets).Assembly, AppContext.BaseDirectory);
         Register(BuiltIn);
         Register(typeof(Assets).Assembly);
@@ -118,11 +118,6 @@ public sealed class Assets : IDisposable
     internal string BuiltIn { get; }
 
     /// <summary>
-    /// <see cref="_stopping"/>'s token, kept so a load still on its way as the assets are disposed reads it.
-    /// </summary>
-    internal CancellationToken Stopped { get; }
-
-    /// <summary>
     /// Where the part built as <paramref name="assembly"/> keeps its own assets: the folder its build recorded, its
     /// source <c>Resources/</c>, which every build but a release does; else <c>Resources/</c> in
     /// <paramref name="folder"/>, the assembly's, where a release copies them.
@@ -131,23 +126,20 @@ public sealed class Assets : IDisposable
         assembly.GetMetadata(ResourcesKey) ?? files.Combine(folder, "Resources");
 
     /// <summary>
-    /// Stops the loads on their way and the watching: the host's to call, at the end of the run, on its thread. A load
-    /// still waited for ends cancelled.
+    /// Stops the watching: the host's to call, at the end of the run, on its thread. The loads on their way stopped with
+    /// the run's <see cref="App.Lifetime"/>, and a load still waited for ends cancelled.
     /// </summary>
     public void Dispose()
     {
         _watches.Dispose();
-        Changes.Close(Stopped);
-        _stopping.Cancel();
+        Changes.Close(_app.Lifetime);
         foreach (AssetEntry entry in Loaded.Entries.Values)
         {
             foreach (TaskCompletionSource<Made> waiter in entry.Waiting)
             {
-                waiter.TrySetCanceled(Stopped);
+                waiter.TrySetCanceled(_app.Lifetime);
             }
         }
-
-        _stopping.Dispose();
     }
 
     /// <summary>
@@ -575,9 +567,10 @@ public sealed class Assets : IDisposable
         AssetDatabase database = Database;
         LoadedAssets loaded = Loaded;
         (database, loaded) = AssetChanges.Take(database, loaded, Changes);
-        (database, loaded) = AssetReindex.Take(database, loaded, _watches, Changes, BuiltIn, Stopped);
-        (database, loaded) = AssetLoads.Land(database, loaded, Changes, Caches, Stopped);
-        loaded = AssetLoads.Start(database, loaded, Changes, Stopped);
+        CancellationToken lifetime = _app.Lifetime;
+        (database, loaded) = AssetReindex.Take(database, loaded, _watches, Changes, BuiltIn, lifetime);
+        (database, loaded) = AssetLoads.Land(database, loaded, Changes, Caches, lifetime);
+        loaded = AssetLoads.Start(database, loaded, Changes, lifetime);
         Database = database;
         Loaded = loaded;
         Changes.TellWaiters();

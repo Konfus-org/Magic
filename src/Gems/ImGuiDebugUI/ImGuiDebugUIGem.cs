@@ -188,6 +188,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     private int _tableColumns;
 
     public unsafe ImGuiDebugUIGem(
+        App app,
         IGraphicsApi gpu,
         IShaderCompiler shaders,
         Assets assets,
@@ -200,7 +201,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
         _ecs = ecs;
         _input = input;
         _clipboard = clipboard;
-        _overlay = new DebugUIOverlay(gpu, shaders, assets);
+        _overlay = new DebugUIOverlay(gpu, shaders, assets, app.Lifetime);
 
         // ImGui writes no ini file, and is told the overlay takes the textures it makes and changes, and draws by vertex
         // offset; it takes the engine's look, at its size.

@@ -33,16 +33,18 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
     private readonly SemaphoreSlim _compiling = new(1, 1);
 
     /// <summary>
-    /// Cancelled as the gem is disposed, so compiles still waiting for their turn give up.
+    /// The run's <see cref="App.Lifetime"/>, which ends before the gem is disposed, so compiles still waiting for their
+    /// turn give up.
     /// </summary>
-    private readonly CancellationTokenSource _stopping = new();
+    private readonly CancellationToken _lifetime;
 
     private readonly nint _globalSession;
 
-    public SlangShaderCompilerGem(Assets assets, Caches caches)
+    public SlangShaderCompilerGem(App app, Assets assets, Caches caches)
     {
         _assets = assets;
         _caches = caches;
+        _lifetime = app.Lifetime;
         _globalSession = Slang.CreateGlobalSession();
         if (_globalSession == 0)
             throw new InvalidOperationException("The Slang compiler could not start.");
@@ -57,12 +59,10 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
     {
         // The compile already running finishes before the session it uses is freed. Waiting for it is safe: the frame loop
         // has ended, and a compile needs no engine thread.
-        _stopping.Cancel();
         _compiling.Wait();
         Slang.Release(_globalSession);
         Slang.Shutdown();
         _compiling.Dispose();
-        _stopping.Dispose();
     }
 
     public async Task<Result<CompiledShader>> CompileAsync(
@@ -102,11 +102,11 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
                     {
                         using CancellationTokenSource waiting = CancellationTokenSource.CreateLinkedTokenSource(
                             cancel,
-                            _stopping.Token
+                            _lifetime
                         );
                         await _compiling.WaitAsync(waiting.Token).ConfigureAwait(false);
                     }
-                    catch (ObjectDisposedException) when (_stopping.IsCancellationRequested)
+                    catch (ObjectDisposedException) when (_lifetime.IsCancellationRequested)
                     {
                         throw new OperationCanceledException("The shader compiler is disposed.");
                     }

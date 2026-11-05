@@ -1,6 +1,8 @@
 using Magic.Debugging;
 using Magic.Platform;
 using Magic.Projects;
+using Magic.Threading;
+using Magic.Utils;
 
 namespace Magic;
 
@@ -8,9 +10,23 @@ namespace Magic;
 /// The app: which project it runs and how, and whether it goes on. Commands change it, at launch and while it runs. It lasts
 /// the whole process, so what they set stays set across runs.
 /// </summary>
-public sealed class App
+public sealed class App : IDisposable
 {
-    internal App() { }
+    /// <summary>
+    /// Cancelled once the process is to end: by <see cref="Exit"/>, or by an error under --fail-on-error. Every run's
+    /// <see cref="Lifetime"/> is linked to it.
+    /// </summary>
+    private readonly CancellationTokenSource _exiting = new();
+
+    private readonly Subscription _logging;
+
+    private CancellationTokenSource _lifetime;
+
+    internal App()
+    {
+        _lifetime = CancellationTokenSource.CreateLinkedTokenSource(_exiting.Token);
+        _logging = Log.Register(new FailOnError(this));
+    }
 
     /// <summary>
     /// The project to run, as read from its <c>.magic</c> file; none until one is opened. Opening another ends the run,
@@ -25,7 +41,6 @@ public sealed class App
                 return;
 
             field = value;
-            IsRunning = value is not null;
             Restart();
         }
     }
@@ -52,9 +67,18 @@ public sealed class App
     }
 
     /// <summary>
-    /// Whether the process exits with 2 as soon as an error is logged.
+    /// Whether the process exits with 2 as soon as an error is logged, or at once if one already was.
     /// </summary>
-    public bool ShouldExitOnError { get; set; }
+    public bool ShouldExitOnError
+    {
+        get;
+        set
+        {
+            field = value;
+            if (HasFailed)
+                Fail();
+        }
+    }
 
     /// <summary>
     /// Pauses the application, simulation systems will not be run until this is set back to true.
@@ -65,32 +89,64 @@ public sealed class App
     /// <summary>
     /// Whether the app runs its project: from the command that opens one until <see cref="Exit"/>, across restarts.
     /// </summary>
-    public bool IsRunning { get; private set; }
+    public bool IsRunning => Project is not null && !IsExiting;
 
     /// <summary>
     /// Whether the process ends once the run does.
     /// </summary>
-    public bool IsExiting { get; private set; }
+    public bool IsExiting => _exiting.IsCancellationRequested;
 
     /// <summary>
-    /// Counts what ends a run to be run again, with everything made anew: <see cref="Restart"/>, a new project or a new mode.
-    /// A run goes on while it stays as it was when the run began.
+    /// The run's token, cancelled when the run ends: on <see cref="Exit"/>, a restart, a new project, a new mode or an
+    /// error under --fail-on-error. Work that belongs to the run stops with it.
     /// </summary>
-    internal int RunVersion { get; private set; }
+    public CancellationToken Lifetime => _lifetime.Token;
 
     /// <summary>
     /// Whether --fail-on-error has seen its error.
     /// </summary>
     internal bool HasFailed => ShouldExitOnError && Log.ErrorCount > 0;
 
-    public void Exit()
+    public void Dispose()
     {
-        IsExiting = true;
-        IsRunning = false;
+        _logging.Dispose();
+        _lifetime.Dispose();
+        _exiting.Dispose();
     }
+
+    public void Exit() => _exiting.Cancel();
 
     /// <summary>
     /// Ends the run, and Magic runs the project again with everything made anew.
     /// </summary>
-    internal void Restart() => RunVersion++;
+    internal void Restart() => _lifetime.Cancel();
+
+    /// <summary>
+    /// Starts a run with a new <see cref="Lifetime"/>, already cancelled if the process is exiting.
+    /// </summary>
+    internal void StartRun()
+    {
+        _lifetime.Dispose();
+        _lifetime = CancellationTokenSource.CreateLinkedTokenSource(_exiting.Token);
+    }
+
+    /// <summary>
+    /// Exits for --fail-on-error's error. It comes from whichever thread logged it, inside the log's lock, so what waits
+    /// on the run runs on a worker, not there.
+    /// </summary>
+    private void Fail() => _exiting.CancelAsync().FireAndForget();
+
+    /// <summary>
+    /// Fails the app at the first error logged under --fail-on-error.
+    /// </summary>
+    private sealed class FailOnError(App app) : ILogSink
+    {
+        public void Write(in Log.Line line)
+        {
+            if (line.Level >= Log.LoggingLevel.Error && app.ShouldExitOnError)
+                app.Fail();
+        }
+
+        public void Flush() { }
+    }
 }
