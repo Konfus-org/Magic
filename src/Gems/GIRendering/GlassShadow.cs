@@ -3,7 +3,6 @@ using System.Runtime.InteropServices;
 using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Rendering;
-using Magic.Shaders;
 using Magic.Utils;
 
 namespace Magic.GIRendering;
@@ -272,7 +271,6 @@ internal readonly record struct DrawList(
 /// <summary>
 /// What the translucent passes read, the twin of <c>Scene/Translucency.slang</c>'s.
 /// </summary>
-[ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct TranslucencyConstants
 {
@@ -308,7 +306,6 @@ internal record struct TranslucencyConstants
 /// <summary>
 /// A translucent instance as a sphere with a tint, the twin of <c>Scene/Translucency.slang</c>'s.
 /// </summary>
-[ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct GpuGlass
 {

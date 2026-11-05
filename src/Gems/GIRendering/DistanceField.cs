@@ -4,7 +4,6 @@ using System.Runtime.InteropServices;
 using Magic.Debugging;
 using Magic.Gpu;
 using Magic.Rendering;
-using Magic.Shaders;
 using Magic.Utils;
 
 namespace Magic.GIRendering;
@@ -429,7 +428,6 @@ internal sealed class DistanceField(IGraphicsApi gpu, RenderGraph graph, GpuPipe
 /// <summary>
 /// What the field passes read, the twin of <c>Scene/Field.slang</c>'s.
 /// </summary>
-[ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct FieldConstants
 {
@@ -493,7 +491,6 @@ internal struct FieldVoxelSizes
 /// <summary>
 /// A model's field in the atlas, the twin of <c>Scene/Field.slang</c>'s.
 /// </summary>
-[ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct GpuModelField
 {

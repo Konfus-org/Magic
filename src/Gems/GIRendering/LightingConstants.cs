@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Magic.Shaders;
 
 namespace Magic.GIRendering;
 
@@ -8,7 +7,6 @@ namespace Magic.GIRendering;
 /// What the lighting passes read beyond the frame, the twin of <c>Scene/Lighting.slang</c>'s: the sun above the
 /// air, the viewer's height, the air, the light table and its froxel lists, the sky's tables and the fog volumes.
 /// </summary>
-[ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct LightingConstants
 {
@@ -132,7 +130,6 @@ internal enum DebugView : uint
 /// <summary>
 /// The frame's air, the twin of <c>Fog/Froxels.slang</c>'s.
 /// </summary>
-[ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct FogConstants
 {
@@ -152,7 +149,6 @@ internal record struct FogConstants
 /// <summary>
 /// A light as the GPU reads it from the light table, 64 bytes: the twin of <c>Scene/Lights.slang</c>'s.
 /// </summary>
-[ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct GpuLight
 {

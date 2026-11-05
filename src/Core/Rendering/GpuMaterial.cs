@@ -1,13 +1,11 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Magic.Shaders;
 
 namespace Magic.Rendering;
 
 /// <summary>
 /// A material as the GPU reads it from the material table, 48 bytes: the twin of <c>Scene/Materials.slang</c>'s.
 /// </summary>
-[ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public record struct GpuMaterial
 {

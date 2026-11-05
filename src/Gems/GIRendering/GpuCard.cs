@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Magic.Shaders;
 
 namespace Magic.GIRendering;
 
@@ -10,7 +9,6 @@ namespace Magic.GIRendering;
 /// <see cref="OriginY"/>, <see cref="Width"/> by <see cref="Height"/> texels. A capture owns <see cref="PerCapture"/>
 /// cards in a row, one a side.
 /// </summary>
-[ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct GpuCard
 {

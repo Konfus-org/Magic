@@ -1,7 +1,6 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Magic.Shaders;
 
 namespace Magic.GIRendering;
 
@@ -9,7 +8,6 @@ namespace Magic.GIRendering;
 /// What the sun's shadow passes read, the twin of <c>Shadow/Virtual.slang</c>'s: the light's frame, the clipmap's
 /// sizes, the heap ids of its tables and each level's window.
 /// </summary>
-[ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct ShadowConstants
 {
@@ -87,7 +85,6 @@ internal struct ShadowWindows
 /// An instance that changed this frame, the twin of <c>Shadow/Virtual.slang</c>'s: the spheres it had and has in
 /// the world, each of no radius when it had none, so the pages under both are drawn again.
 /// </summary>
-[ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct DirtyInstance
 {

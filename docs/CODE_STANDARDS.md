@@ -237,9 +237,10 @@ built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
 - Put what a struct does on it as extensions (`instance.ToCameraRelative(position)`), so a struct shared with C# keeps
   only its fields. Return a struct rather than `out` parameters.
 - A struct C# reads or writes holds only 32-bit scalars, their vectors, row-major matrices, heap references and such
-  structs. Mark its C# twin `[ShaderStruct]`; the renderer checks the two match when it starts.
-- A contract between shaders is an interface (`IMaterial`, `ISky`, `ILight`, `IPixelEffect`), and a pass that works with
-  any is generic over it.
+  structs. Its C# twin is sequential with `Pack = 4` and names the Slang module in its summary. Nothing checks that the
+  two match, so change them together.
+- A contract between shaders is an interface (`IMaterial`, `ISky`, `IPixelEffect`), and a pass that works with any is
+  generic over it.
 - Totals across a dispatch run in its last group (`IsLastGroup`), not in a one-group pass after it.
 - Use wave intrinsics only where the result can't depend on wave size (32 or 64) or the order is already arbitrary. No
   16-bit types, and no runtime-indexed resource arrays but the heap's.

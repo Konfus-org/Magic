@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Magic.Shaders;
 
 namespace Magic.GIRendering;
 
@@ -8,7 +7,6 @@ namespace Magic.GIRendering;
 /// An instance as the GPU reads it from the instance table, 256 bytes: the twin of <c>Scene/Instances.slang</c>'s,
 /// in the world; the GPU takes the camera's position off a position once transformed.
 /// </summary>
-[ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct GpuInstance
 {

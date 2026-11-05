@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Magic.Shaders;
 
 namespace Magic.GIRendering;
 
@@ -8,7 +7,6 @@ namespace Magic.GIRendering;
 /// What every pass of a frame reads, the twin of <c>Core/Frame.slang</c>'s: the view, the sun, the output's size and
 /// the heap ids of the frame's tables and textures, written once a frame into the constants buffer.
 /// </summary>
-[ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct FrameConstants
 {

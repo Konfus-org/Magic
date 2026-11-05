@@ -3,7 +3,6 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Gpu;
 using Magic.Rendering;
-using Magic.Shaders;
 using Magic.Utils;
 
 namespace Magic.GIRendering;
@@ -951,7 +950,6 @@ internal sealed class GlobalIllumination(
 /// <summary>
 /// What the global illumination's passes read, the twin of <c>Scene/Probes.slang</c>'s.
 /// </summary>
-[ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct GiConstants
 {
@@ -1040,7 +1038,6 @@ internal struct ProbeOrigins
 /// A lit card's slot, the twin of <c>Scene/Probes.slang</c>'s: the instance it lights, that instance's capture
 /// row, and how many times it was lit, 0 the first time.
 /// </summary>
-[ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct GpuLitSlot
 {

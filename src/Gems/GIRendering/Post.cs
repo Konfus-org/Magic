@@ -387,7 +387,6 @@ internal sealed record CompiledBox(Result<CompiledShader> Result);
 /// <summary>
 /// What the post passes read, the twin of <c>Scene/Post.slang</c>'s.
 /// </summary>
-[ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct PostConstants
 {
