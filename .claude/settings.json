@@ -27,7 +27,7 @@
             "shell": "bash",
             "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/SessionStart.ps1\"",
             "timeout": 30,
-            "statusMessage": "Reading PLAN.md"
+            "statusMessage": "Reading the checkout"
           }
         ]
       }
