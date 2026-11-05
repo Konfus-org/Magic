@@ -43,6 +43,7 @@ public sealed class GIRenderingGem : IGem, IDisposable
     private readonly Visibility _visibility;
     private readonly FrameView _frameView;
     private readonly SkyLuts _sky;
+    private readonly LightTiles _lightTiles;
     private readonly Lighting _lighting;
     private readonly Shading _shading;
     private readonly SurfaceView _surfaceView;
@@ -91,7 +92,8 @@ public sealed class GIRenderingGem : IGem, IDisposable
         _visibility = new Visibility(gpu, _graph, _pipelines, _pools, _materials);
         _frameView = new FrameView(gpu, _graph, _pools, _materials, _visibility, _rayTracing);
         _sky = new SkyLuts(gpu, _graph, _pipelines);
-        _lighting = new Lighting(gpu, _graph, _sky);
+        _lightTiles = new LightTiles(gpu, _graph, _pipelines);
+        _lighting = new Lighting(gpu, _graph, _sky, _lightTiles);
         _shading = new Shading(_pipelines, _lighting);
         _surfaceView = new SurfaceView(_pipelines);
     }
@@ -109,6 +111,7 @@ public sealed class GIRenderingGem : IGem, IDisposable
         _visibility.Dispose();
         _frameView.Dispose();
         _sky.Dispose();
+        _lightTiles.Dispose();
         _lighting.Dispose();
     }
 
@@ -179,6 +182,7 @@ public sealed class GIRenderingGem : IGem, IDisposable
         _lighting.RecordTables(constants);
         _visibility.RecordMain(view);
         _visibility.RecordResolve(view);
+        _lighting.RecordTiles(view);
         _shading.Record(view);
         _surfaceView.Record(view, _debugView, sun.Exposure);
         _overlay?.Record(_graph, _targets.Output);
@@ -246,6 +250,7 @@ public sealed class GIRenderingGem : IGem, IDisposable
                     _visibility.Create,
                     _frameView.Create,
                     _sky.Create,
+                    _lightTiles.Create,
                     _lighting.Create,
                 ]
         )
@@ -274,6 +279,9 @@ public sealed class GIRenderingGem : IGem, IDisposable
             return true;
 
         Result resized = _targets.Resize(width, height);
+        if (resized.Ok)
+            resized = _lightTiles.Resize(width, height);
+
         if (!resized.Ok)
         {
             Log.Error($"The frame is not drawn: {resized.Error}");

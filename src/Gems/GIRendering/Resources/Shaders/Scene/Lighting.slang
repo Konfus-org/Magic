@@ -1,5 +1,6 @@
-// What the lighting passes read beyond the frame: the sun above the air, the viewer's height, the sky's tables and the
-// HDR picture they light, C#'s LightingConstants, in the buffer whose heap id is the pass header's z.
+// What the lighting passes read beyond the frame: the sun above the air, the viewer's height, the sky's tables, the HDR
+// picture they light, and the light table and its tiles, C#'s LightingConstants, in the buffer whose heap id is the
+// pass header's z.
 module "Scene/Lighting";
 
 import Core.Heap;
@@ -20,8 +21,12 @@ public struct LightingConstants
     // Whether a sky entity draws the sky; the flat fallback where none does.
     public uint hasSky;
     public uint hdr;
+    public uint lights;
+    public uint lightCount;
+    public uint lightTiles;
     public uint padding0;
     public uint padding1;
+    public uint padding2;
 }
 
 public LightingConstants GetLighting() { return LoadConstants<LightingConstants>(GetPassHeader().z); }

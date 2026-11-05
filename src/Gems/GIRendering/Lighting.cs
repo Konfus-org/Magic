@@ -8,10 +8,11 @@ using Magic.Utils;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// What everything that lights a surface shares: the lighting constants, naming the sky's tables, which it fills before
-/// the view is drawn, and the sky's tables made again each frame while there is a sky.
+/// What everything that lights a surface shares: the lighting constants, naming the sky's tables and the lights, which
+/// it fills before the view is drawn, the sky's tables made again each frame while there is a sky, and each tile's
+/// lights.
 /// </summary>
-internal sealed class Lighting(IGraphicsApi gpu, RenderGraph graph, SkyLuts sky) : IDisposable
+internal sealed class Lighting(IGraphicsApi gpu, RenderGraph graph, SkyLuts sky, LightTiles lights) : IDisposable
 {
     private GpuSampler _sampler;
     private bool _hasSky;
@@ -53,11 +54,12 @@ internal sealed class Lighting(IGraphicsApi gpu, RenderGraph graph, SkyLuts sky)
     }
 
     /// <summary>
-    /// The frame's constants uploaded, in a transfer pass the caller opened.
+    /// The frame's constants and lights uploaded, in a transfer pass the caller opened.
     /// </summary>
     public void Prepare(RenderWorld world, RenderCamera camera, RenderSun sun, FrameTargets targets)
     {
         _hasSky = world.HasSky;
+        lights.Prepare(world);
         LightingConstants constants = new()
         {
             SunIlluminance = new Vector4(sun.Radiance, 0),
@@ -68,6 +70,9 @@ internal sealed class Lighting(IGraphicsApi gpu, RenderGraph graph, SkyLuts sky)
             LutSampler = _sampler.Id,
             HasSky = _hasSky ? 1u : 0u,
             Hdr = targets.Hdr.Id,
+            Lights = lights.Table.Id,
+            LightCount = (uint)lights.Count,
+            LightTiles = lights.Tiles.Id,
         };
         GpuUpload upload = gpu.BeginUpload(LightingConstants.Bytes);
         MemoryMarshal.Write(upload.Bytes, in constants);
@@ -90,11 +95,17 @@ internal sealed class Lighting(IGraphicsApi gpu, RenderGraph graph, SkyLuts sky)
     }
 
     /// <summary>
-    /// Says a pass reads the constants and the sky's tables.
+    /// Each tile's lights, from the view's depth.
+    /// </summary>
+    public void RecordTiles(in RenderView view) => lights.Record(view, GetHeader(view.Constants), Constants);
+
+    /// <summary>
+    /// Says a pass reads the constants, the sky's tables and the lights.
     /// </summary>
     public void UseForShading()
     {
         graph.Use(Constants, GpuAccess.ShaderRead);
         sky.UseForReading();
+        lights.UseForReading();
     }
 }

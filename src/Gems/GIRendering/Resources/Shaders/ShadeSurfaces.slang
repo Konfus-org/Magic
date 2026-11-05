@@ -1,6 +1,6 @@
-// Every pixel of the picture lit, into the HDR picture: a surface by the sun through the air and by the sky over it,
-// its direct and indirect light summed over the shared BRDF; and the sky itself where nothing was drawn. The pass
-// header's x is the frame's constants and z the lighting constants.
+// Every pixel of the picture lit, into the HDR picture: a surface by the sun through the air, by the local lights its
+// tile lists and by the sky over it, its direct and indirect light summed over the shared BRDF; and the sky itself
+// where nothing was drawn. The pass header's x is the frame's constants and z the lighting constants.
 module "ShadeSurfaces";
 
 import Core.Heap;
@@ -9,6 +9,8 @@ import Core.Frame;
 import Core.Math;
 import Core.Pack;
 import Scene.Lighting;
+import Scene.Lights;
+import Light.Lights;
 import Sky.ISky;
 import Surface.Brdf;
 
@@ -75,6 +77,24 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
         ? S.GetSunIlluminance(CreateSkyInputs(frame, lighting, toSun, false))
         : lighting.sunIlluminance.rgb;
     float3 color = Evaluate(brdf, normal, view, toSun) * sunIlluminance;
+
+    // The lights of the pixel's tile, a word of bits at a time.
+    float3 world = relative + frame.cameraPosition.xyz;
+    ArrayRef<uint> tiles = { lighting.lightTiles };
+    uint tilesAcross = (size.x + LightTileSize - 1u) / LightTileSize;
+    uint offset = GetLightTileOffset(thread.xy / LightTileSize, tilesAcross);
+    uint buckets = (min(lighting.lightCount, MaxLights) + 31u) / 32u;
+    for (uint bucket = 0u; bucket < buckets; bucket++)
+    {
+        uint bits = tiles[offset + bucket];
+        while (bits != 0u)
+        {
+            uint bit = firstbitlow(bits);
+            bits &= bits - 1u;
+            LightSample sample = SampleLight(LoadLight(lighting.lights, bucket * 32u + bit), world, normal);
+            color += Evaluate(brdf, normal, view, sample.direction) * sample.irradiance;
+        }
+    }
     color += GetSkyLight<S>(frame, lighting, brdf, surface.x, normal, view) * surface.z;
     hdr.Store(thread.xy, float4(color, 1.0));
 }
