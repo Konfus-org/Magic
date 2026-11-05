@@ -9,7 +9,7 @@ namespace Magic.GIRendering;
 /// <summary>
 /// The top-level acceleration structure over the instances, on a GPU that traces rays: an instance row for every
 /// instance whose model has its triangles' structure, built again whenever an instance or a model changed, what
-/// the ray-query tracer traces through.
+/// a ray query traces through.
 /// </summary>
 internal sealed class RayTracing(IGraphicsApi gpu, RenderGraph graph) : IDisposable
 {

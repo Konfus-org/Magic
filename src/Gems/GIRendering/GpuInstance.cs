@@ -41,15 +41,9 @@ internal record struct GpuInstance
 
     public uint ClusterCount;
 
-    /// <summary>
-    /// The model's field's slot in the atlas plus one; 0 while it has none.
-    /// </summary>
-    public uint Flags;
+    public uint Padding0;
 
-    /// <summary>
-    /// The card table's capture row, which names the instance's cards; 0 while there is none.
-    /// </summary>
-    public uint Capture;
+    public uint Padding1;
 
     /// <summary>
     /// The material table's row for each of the instance's 8 slots.

@@ -39,9 +39,9 @@ internal sealed class SkyLuts(IGraphicsApi gpu, RenderGraph graph, GpuPipelines 
 
     public Result Create()
     {
-        Result<GpuTexture> transmittance = Lighting.CreateTable(gpu, "Sky transmittance", 256, 64, 1);
-        Result<GpuTexture> multiScattering = Lighting.CreateTable(gpu, "Sky multi-scattering", 32, 32, 1);
-        Result<GpuTexture> view = Lighting.CreateTable(gpu, "Sky view", 192, 108, 1);
+        Result<GpuTexture> transmittance = CreateTable("Sky transmittance", 256, 64);
+        Result<GpuTexture> multiScattering = CreateTable("Sky multi-scattering", 32, 32);
+        Result<GpuTexture> view = CreateTable("Sky view", 192, 108);
         foreach (Result<GpuTexture> texture in (ReadOnlySpan<Result<GpuTexture>>)[transmittance, multiScattering, view])
         {
             if (!texture.Ok)
@@ -79,4 +79,16 @@ internal sealed class SkyLuts(IGraphicsApi gpu, RenderGraph graph, GpuPipelines 
             .Writes(View)
             .Dispatch(192 / 8, (108 + 7) / 8);
     }
+
+    private Result<GpuTexture> CreateTable(string name, int width, int height) =>
+        gpu.CreateTexture(
+            new TextureDescription
+            {
+                Width = width,
+                Height = height,
+                Format = GpuFormat.R16G16B16A16Sfloat,
+                Usage = TextureUsages.Storage | TextureUsages.Sampled,
+                Name = name,
+            }
+        );
 }

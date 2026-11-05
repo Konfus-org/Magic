@@ -8,7 +8,6 @@ import Core.Heap;
 import Core.Pass;
 import Core.Frame;
 import Scene.Instances;
-import Scene.Materials;
 import Scene.Clusters;
 import Scene.Culling;
 import Scene.Visibility;
@@ -74,7 +73,7 @@ void Test(FrameConstants frame, uint instanceIndex, GpuInstance instance, uint c
 
     // The cone: culled when the camera is behind every triangle's plane, the sphere widening the cone to be sure.
     float cutoff = GetConeCutoff(cluster);
-    if (cutoff < 1.0 && (frame.flags & FrameFlagNoConeCull) == 0u)
+    if (cutoff < 1.0)
     {
         float3 axis = ToWorldDirection(instance.world, GetConeAxis(cluster));
         float distance = length(center);
@@ -108,10 +107,8 @@ void Test(FrameConstants frame, uint instanceIndex, GpuInstance instance, uint c
     VisibleCluster entry = { instanceIndex, clusterIndex };
     visible[listIndex] = entry;
 
-    // A translucent cluster waits for the lighting in its own draws instead of the visibility buffer's.
-    bool isTranslucent = LoadMaterial(frame.materials, GetMaterial(instance, cluster.materialSlot)).kind == MaterialKindGlass;
-    uint countOffset = isTranslucent ? CountTranslucentDraws : (isRetest ? CountRetestDraws : CountVisibleDraws);
-    uint drawOffset = isTranslucent ? 2u * frame.maxVisibleClusters : (isRetest ? frame.maxVisibleClusters : 0u);
+    uint countOffset = isRetest ? CountRetestDraws : CountVisibleDraws;
+    uint drawOffset = isRetest ? frame.maxVisibleClusters : 0u;
     uint drawIndex = counts.InterlockedAdd(countOffset, 1u);
     ArrayRef<DrawArguments> draws = { frame.drawArguments };
     DrawArguments arguments = { cluster.triangleCount * 3u, 1u, 0u, listIndex };

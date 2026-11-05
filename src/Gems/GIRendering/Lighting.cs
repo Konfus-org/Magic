@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Magic.Ecs.Components.Effects;
 using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Rendering;
@@ -9,41 +8,17 @@ using Magic.Utils;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// What everything that lights a surface shares: the lighting constants, naming the sky's tables, the lights' bins and
-/// the air it holds, which it fills before the view is drawn.
+/// What everything that lights a surface shares: the lighting constants, naming the sky's tables, the lights and the
+/// shadow mask, which it fills before the view is drawn, the sky's tables made again each frame while there is a sky,
+/// each tile's lights, and each pixel's shadows on a GPU that traces rays.
 /// </summary>
-internal sealed class Lighting(
-    IGraphicsApi gpu,
-    RenderGraph graph,
-    SunShadows shadows,
-    DistanceField field,
-    SkyLuts sky,
-    LightBins bins,
-    FogVolume fogVolume
-) : IDisposable
+internal sealed class Lighting(IGraphicsApi gpu, RenderGraph graph, SkyLuts sky, LightTiles lights, ShadowMask? shadows)
+    : IDisposable
 {
     private GpuSampler _sampler;
-    private bool _hasFog;
     private bool _hasSky;
 
     public GpuBuffer Constants { get; private set; }
-
-    /// <summary>
-    /// A table a lighting pass fills and reads, 3D when it has a depth.
-    /// </summary>
-    public static Result<GpuTexture> CreateTable(IGraphicsApi gpu, string name, int width, int height, int depth) =>
-        gpu.CreateTexture(
-            new TextureDescription
-            {
-                Width = width,
-                Height = height,
-                Depth = depth,
-                Kind = depth > 1 ? TextureKind.Texture3D : TextureKind.Texture2D,
-                Format = GpuFormat.R16G16B16A16Sfloat,
-                Usage = TextureUsages.Storage | TextureUsages.Sampled,
-                Name = name,
-            }
-        );
 
     public void Dispose()
     {
@@ -80,53 +55,26 @@ internal sealed class Lighting(
     }
 
     /// <summary>
-    /// The frame's lights and constants uploaded and the froxel lists emptied, in a transfer pass the caller opened.
+    /// The frame's constants and lights uploaded, in a transfer pass the caller opened.
     /// </summary>
-    public void Prepare(
-        RenderWorld world,
-        RenderCamera camera,
-        RenderSun sun,
-        FrameTargets targets,
-        DebugView debugView,
-        GpuBuffer giConstants,
-        GpuBuffer glassConstants,
-        GpuBuffer postConstants
-    )
+    public void Prepare(RenderWorld world, RenderCamera camera, RenderSun sun, FrameTargets targets)
     {
-        bins.Prepare(world);
-        _hasFog = world.Fog is not null;
         _hasSky = world.HasSky;
-        Fog fog = world.Fog ?? new Fog();
+        lights.Prepare(world);
         LightingConstants constants = new()
         {
             SunIlluminance = new Vector4(sun.Radiance, 0),
             CameraAltitude = new Vector4(Math.Max(camera.Transform.Position.Y, 0), 0, 0, 0),
-            Fog = new FogConstants
-            {
-                Albedo = new Vector3(fog.Color.R, fog.Color.G, fog.Color.B),
-                Density = fog.Density,
-                Height = fog.Height,
-                HalfHeight = fog.HalfHeight,
-                Anisotropy = fog.Anisotropy,
-                IsPresent = _hasFog ? 1u : 0u,
-            },
-            Lights = bins.Table.Id,
-            LightCount = (uint)bins.Count,
-            FroxelLists = bins.FroxelLists.Id,
             TransmittanceLut = sky.Transmittance.Id,
             MultiScatteringLut = sky.MultiScattering.Id,
             SkyViewLut = sky.View.Id,
             LutSampler = _sampler.Id,
-            FogScattering = fogVolume.Scattering.Id,
-            FogIntegrated = fogVolume.Integrated.Id,
-            FogSampler = _sampler.Id,
-            Hdr = targets.Hdr.Id,
             HasSky = _hasSky ? 1u : 0u,
-            Exposure = sun.Exposure,
-            DebugView = (uint)debugView,
-            Gi = giConstants.Id,
-            Translucency = glassConstants.Id,
-            Post = postConstants.Id,
+            Hdr = targets.Hdr.Id,
+            Lights = lights.Table.Id,
+            LightCount = (uint)lights.Count,
+            LightTiles = lights.Tiles.Id,
+            ShadowMask = shadows?.Mask.Id ?? 0,
         };
         GpuUpload upload = gpu.BeginUpload(LightingConstants.Bytes);
         MemoryMarshal.Write(upload.Bytes, in constants);
@@ -137,50 +85,36 @@ internal sealed class Lighting(
     /// <summary>
     /// What a pass that lights surfaces is told of the frame.
     /// </summary>
-    public GpuConstants GetHeader(GpuBuffer frameConstants) =>
-        new(frameConstants.Id, shadows.Constants.Id, Constants.Id, field.Constants.Id);
+    public GpuConstants GetHeader(GpuBuffer frameConstants) => new(frameConstants.Id, 0, Constants.Id);
 
     /// <summary>
-    /// Says a pass lights surfaces away from the view, as the global illumination's do: the light table and the
-    /// sky's tables, without the froxel lists.
-    /// </summary>
-    public void UseForCards()
-    {
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(bins.Table, GpuAccess.ShaderRead);
-        sky.UseForReading();
-    }
-
-    /// <summary>
-    /// Says a pass lights surfaces in the view, as the shading and the glass do: the light table, its froxel lists, the
-    /// sky's tables and the air.
-    /// </summary>
-    public void UseForShading()
-    {
-        UseForCards();
-        graph.Use(bins.FroxelLists, GpuAccess.ShaderRead);
-        graph.Use(fogVolume.Integrated, GpuAccess.ShaderRead);
-    }
-
-    /// <summary>
-    /// The sky's tables and the froxel lists, before the view is drawn: what the fog and the shading read.
+    /// The sky's tables, while there is a sky.
     /// </summary>
     public void RecordTables(GpuBuffer frameConstants)
     {
-        GpuConstants header = new(frameConstants.Id, shadows.Constants.Id, Constants.Id);
         if (_hasSky)
-            sky.Record(header, frameConstants, Constants);
-
-        if (bins.Count > 0)
-            bins.Record(header, frameConstants, Constants);
+            sky.Record(GetHeader(frameConstants), frameConstants, Constants);
     }
 
     /// <summary>
-    /// The air, after the sun's pages, before the shading reads it.
+    /// Each tile's lights, from the view's depth.
     /// </summary>
-    public void RecordFog(GpuBuffer frameConstants)
+    public void RecordTiles(in RenderView view) => lights.Record(view, GetHeader(view.Constants), Constants);
+
+    /// <summary>
+    /// Each pixel's shadows, on a GPU that traces rays.
+    /// </summary>
+    public void RecordShadows(in RenderView view) => shadows?.Record(view, GetHeader(view.Constants), Constants);
+
+    /// <summary>
+    /// Says a pass reads the constants, the sky's tables, the lights and the shadows.
+    /// </summary>
+    public void UseForShading()
     {
-        if (_hasFog)
-            fogVolume.Record(GetHeader(frameConstants), frameConstants, Constants);
+        graph.Use(Constants, GpuAccess.ShaderRead);
+        sky.UseForReading();
+        lights.UseForReading();
+        if (shadows is not null)
+            graph.Use(shadows.Mask, GpuAccess.ShaderRead);
     }
 }

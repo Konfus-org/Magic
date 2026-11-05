@@ -10,12 +10,7 @@ namespace Magic.GIRendering;
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct FrameConstants
 {
-    public const int Bytes = 672;
-
-    /// <summary>
-    /// The cone cull is off: the view is orthographic, as a capture's is, so no one point is the camera.
-    /// </summary>
-    public const uint FlagNoConeCull = 1;
+    public const int Bytes = 640;
 
     public Matrix4x4 View;
 
@@ -107,27 +102,11 @@ internal record struct FrameConstants
 
     public uint Output;
 
-    public uint Flags;
-
-    public uint Cards;
-
-    public uint LinearSampler;
-
     public Vector2 Jitter;
-
-    public uint OutputWidth;
-
-    public uint OutputHeight;
 
     public uint Acceleration;
 
     public uint LeafClusters;
-
-    public uint CardAlbedo;
-
-    public uint CardNormal;
-
-    public uint CardDepth;
 
     public uint Velocity;
 

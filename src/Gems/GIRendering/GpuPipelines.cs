@@ -15,19 +15,8 @@ namespace Magic.GIRendering;
 internal enum PassShaders : byte
 {
     None = 0,
-    Glass = 1 << 0,
-    Standard = 1 << 1,
-    Atmosphere = 1 << 2,
-
-    /// <summary>
-    /// It traces rays: built once for the field tracer and, where the GPU can, once for the ray-query tracer.
-    /// </summary>
-    Tracer = 1 << 3,
-
-    /// <summary>
-    /// Every effect slot of the final post pass empty.
-    /// </summary>
-    NoEffects = 1 << 4,
+    Standard = 1 << 0,
+    Atmosphere = 1 << 1,
 }
 
 /// <summary>
@@ -43,18 +32,6 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
 
     private const string AtmosphereSky = "Shaders/Sky/Atmosphere.slang";
 
-    private const string GlassMaterial = "Shaders/Material/Glass.slang";
-
-    private const string NoEffect = "Shaders/Post/NoEffect.slang";
-
-    private const string FieldTracer = "Shaders/Trace/DistanceField.slang";
-
-    private const string RayQueryTracer = "Shaders/Trace/RayQuery.slang";
-
-    private const string PostModule = "PostPasses";
-
-    private const int EffectSlots = 4;
-
     private readonly List<GpuPass> _passes = [];
 
     /// <summary>
@@ -68,9 +45,6 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
         {
             if (!pass.Pipeline.IsNone)
                 gpu.Destroy(pass.Pipeline);
-
-            if (!pass.RayQueryPipeline.IsNone)
-                gpu.Destroy(pass.RayQueryPipeline);
         }
     }
 
@@ -110,8 +84,7 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
         string module,
         string vertexEntry,
         string pixelEntry,
-        Func<GraphicsPipelineDescription, GraphicsPipelineDescription> state,
-        PassShaders passShaders = PassShaders.None
+        Func<GraphicsPipelineDescription, GraphicsPipelineDescription> state
     ) =>
         Add(
             new GpuPass
@@ -122,7 +95,7 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
                 Entry = pixelEntry,
                 VertexEntry = vertexEntry,
                 DrawState = state,
-                Shaders = passShaders,
+                Shaders = PassShaders.None,
             }
         );
 
@@ -188,45 +161,22 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
     }
 
     /// <summary>
-    /// Compiles the final post pass for a camera's effects, on a worker: an empty slot runs no effect, and a module's
-    /// effect is the struct named as its file is.
+    /// The library shaders <paramref name="wanted"/> asks for, in the order the entry's generic parameters take them.
     /// </summary>
-    public Task<Result<CompiledShader>> CompileFinalAsync(
-        ImmutableArray<Handle<Shader>> effects,
-        CancellationToken cancel
+    private static ImmutableArray<ShaderTypeArgument> GetArguments(
+        PassShaders wanted,
+        ShaderTypeArgument standard,
+        ShaderTypeArgument atmosphere
     )
     {
-        Handle<Shader> noEffect = assets.Find<Shader>(NoEffect);
-        ImmutableArray<ShaderTypeArgument>.Builder arguments = ImmutableArray.CreateBuilder<ShaderTypeArgument>(
-            EffectSlots
-        );
-        for (int i = 0; i < EffectSlots; i++)
-        {
-            Handle<Shader> effect = i < effects.Length && effects[i] != Handle<Shader>.None ? effects[i] : noEffect;
-            string type = System.IO.Path.GetFileNameWithoutExtension(assets.GetPath(effect) ?? "NoEffect");
-            arguments.Add(new ShaderTypeArgument(effect, type));
-        }
+        ImmutableArray<ShaderTypeArgument>.Builder arguments = ImmutableArray.CreateBuilder<ShaderTypeArgument>();
+        if (wanted.HasFlag(PassShaders.Standard))
+            arguments.Add(standard);
 
-        ShaderEntry entry = GetEntry(PostModule, "PostFinal", ShaderStage.Compute, arguments.MoveToImmutable());
+        if (wanted.HasFlag(PassShaders.Atmosphere))
+            arguments.Add(atmosphere);
 
-        return shaders.CompileAsync(entry, null, cancel);
-    }
-
-    /// <summary>
-    /// A compute pipeline from a compiled entry, for a pass built after the start.
-    /// </summary>
-    public Result<GpuPipeline> CreateCompute(CompiledShader compiled, string name)
-    {
-        Result<GpuPipeline> pipeline = gpu.CreatePipeline(
-            new ComputePipelineDescription
-            {
-                Spirv = compiled.Spirv,
-                EntryPoint = compiled.EntryPoint,
-                Name = name,
-            }
-        );
-
-        return pipeline.Ok ? pipeline : Result.Failure($"the {name} pipeline was not built: {pipeline.Error}");
+        return arguments.ToImmutable();
     }
 
     private GpuPass Add(GpuPass pass)
@@ -240,19 +190,18 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
     {
         CompiledShader entry = compiled[next++];
         pass.GroupSizeX = entry.GroupSizeX;
-        Result<GpuPipeline> made = CreateCompute(entry, pass.Name);
+        Result<GpuPipeline> made = gpu.CreatePipeline(
+            new ComputePipelineDescription
+            {
+                Spirv = entry.Spirv,
+                EntryPoint = entry.EntryPoint,
+                Name = pass.Name,
+            }
+        );
         if (!made.Ok)
-            return Result.Failure(made.Error);
+            return Result.Failure($"the {pass.Name} pipeline was not built: {made.Error}");
 
         pass.Pipeline = made.Value;
-        if (!HasRayQueryVariant(pass))
-            return Result.Success();
-
-        Result<GpuPipeline> rayQuery = CreateCompute(compiled[next++], $"{pass.Name} with ray queries");
-        if (!rayQuery.Ok)
-            return Result.Failure(rayQuery.Error);
-
-        pass.RayQueryPipeline = rayQuery.Value;
 
         return Result.Success();
     }
@@ -283,18 +232,18 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
         return Result.Success();
     }
 
-    private bool HasRayQueryVariant(GpuPass pass) =>
-        pass.Shaders.HasFlag(PassShaders.Tracer) && gpu.Features.HasRayQuery;
-
     /// <summary>
     /// Every entry to compile, in the order <see cref="Create"/> reads them; or which shader is missing.
     /// </summary>
     private Result<ImmutableArray<ShaderEntry>> GetEntries()
     {
-        Result<LibraryShaders> library = FindLibrary();
-        if (!library.Ok)
-            return Result.Failure(library.Error);
+        Handle<Shader> standard = assets.Find<Shader>(StandardMaterial);
+        Handle<Shader> atmosphere = assets.Find<Shader>(AtmosphereSky);
+        if (standard == Handle<Shader>.None || atmosphere == Handle<Shader>.None)
+            return Result.Failure($"there is no {StandardMaterial} or {AtmosphereSky}.");
 
+        ShaderTypeArgument standardArgument = new(standard, "Standard");
+        ShaderTypeArgument atmosphereArgument = new(atmosphere, "Atmosphere");
         ImmutableArray<ShaderEntry>.Builder entries = ImmutableArray.CreateBuilder<ShaderEntry>();
         foreach (GpuPass pass in _passes)
         {
@@ -303,17 +252,13 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
 
             ShaderStage stage = pass.DrawState is null ? ShaderStage.Compute : ShaderStage.Pixel;
             entries.Add(
-                GetEntry(pass.Module, pass.Entry, stage, library.Value.GetArguments(pass.Shaders, library.Value.Field))
+                GetEntry(
+                    pass.Module,
+                    pass.Entry,
+                    stage,
+                    GetArguments(pass.Shaders, standardArgument, atmosphereArgument)
+                )
             );
-            if (HasRayQueryVariant(pass))
-                entries.Add(
-                    GetEntry(
-                        pass.Module,
-                        pass.Entry,
-                        stage,
-                        library.Value.GetArguments(pass.Shaders, library.Value.RayQuery)
-                    )
-                );
         }
 
         foreach (ShaderEntry entry in entries)
@@ -323,29 +268,6 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
         }
 
         return Result.Success(entries.ToImmutable());
-    }
-
-    private Result<LibraryShaders> FindLibrary()
-    {
-        foreach (
-            string path in (ReadOnlySpan<string>)
-                [StandardMaterial, AtmosphereSky, GlassMaterial, NoEffect, FieldTracer, RayQueryTracer]
-        )
-        {
-            if (assets.Find<Shader>(path) == Handle<Shader>.None)
-                return Result.Failure($"there is no {path}.");
-        }
-
-        return Result.Success(
-            new LibraryShaders(
-                new ShaderTypeArgument(assets.Find<Shader>(GlassMaterial), "Glass"),
-                new ShaderTypeArgument(assets.Find<Shader>(StandardMaterial), "Standard"),
-                new ShaderTypeArgument(assets.Find<Shader>(AtmosphereSky), "Atmosphere"),
-                new ShaderTypeArgument(assets.Find<Shader>(FieldTracer), "DistanceFieldTracer"),
-                new ShaderTypeArgument(assets.Find<Shader>(RayQueryTracer), "RayQueryTracer"),
-                new ShaderTypeArgument(assets.Find<Shader>(NoEffect), "NoEffect")
-            )
-        );
     }
 
     private ShaderEntry GetEntry(
@@ -361,41 +283,4 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
             Stage = stage,
             TypeArguments = arguments,
         };
-
-    /// <summary>
-    /// The library's shaders an entry is specialised with.
-    /// </summary>
-    private readonly record struct LibraryShaders(
-        ShaderTypeArgument Glass,
-        ShaderTypeArgument Standard,
-        ShaderTypeArgument Atmosphere,
-        ShaderTypeArgument Field,
-        ShaderTypeArgument RayQuery,
-        ShaderTypeArgument NoEffect
-    )
-    {
-        /// <summary>
-        /// What <paramref name="wanted"/> asks for, with <paramref name="tracer"/> as the tracer.
-        /// </summary>
-        public ImmutableArray<ShaderTypeArgument> GetArguments(PassShaders wanted, ShaderTypeArgument tracer)
-        {
-            ImmutableArray<ShaderTypeArgument>.Builder arguments = ImmutableArray.CreateBuilder<ShaderTypeArgument>();
-            if (wanted.HasFlag(PassShaders.Glass))
-                arguments.Add(Glass);
-
-            if (wanted.HasFlag(PassShaders.Standard))
-                arguments.Add(Standard);
-
-            if (wanted.HasFlag(PassShaders.Atmosphere))
-                arguments.Add(Atmosphere);
-
-            if (wanted.HasFlag(PassShaders.Tracer))
-                arguments.Add(tracer);
-
-            if (wanted.HasFlag(PassShaders.NoEffects))
-                arguments.AddRange(NoEffect, NoEffect, NoEffect, NoEffect);
-
-            return arguments.ToImmutable();
-        }
-    }
 }
