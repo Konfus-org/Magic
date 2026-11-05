@@ -21,7 +21,7 @@ internal sealed class GeometryPools(
     IMeshPreprocessor meshes,
     Assets assets,
     Threads threads,
-    DistanceField distanceField
+    GpuPipelines pipelines
 ) : IDisposable
 {
     public const int VertexCapacity = 1 << 20;
@@ -57,7 +57,7 @@ internal sealed class GeometryPools(
     /// <summary>
     /// The global distance field, which every resident model's field joins.
     /// </summary>
-    public DistanceField Field { get; } = distanceField;
+    public DistanceField Field { get; } = new(gpu, pipelines);
 
     public void Dispose()
     {

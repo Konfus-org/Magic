@@ -13,32 +13,85 @@ namespace GIRendering;
 /// made each frame, the fog volumes, and the passes that fill them and light the GBuffer into the HDR picture, with
 /// the global illumination's probes.
 /// </summary>
-internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
+internal sealed class Lighting(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposable
 {
     public const int MaxLights = 4096;
 
     private const int LightGridX = 32;
+
     private const int LightGridY = 18;
+
     private const int LightGridZ = 48;
+
     private const int LightsPerFroxel = 128;
+
     private const int FogGridX = 96;
+
     private const int FogGridY = 54;
+
     private const int FogGridZ = 64;
+
     private const int FroxelCount = LightGridX * LightGridY * LightGridZ;
+
     private const int BinThreads = 64;
+
     private const int FogThreads = 4;
 
+    private readonly GpuPass _skyTransmittancePass = pipelines.Compute(
+        "Sky: transmittance",
+        "SkyLuts",
+        "SkyTransmittance"
+    );
+
+    private readonly GpuPass _skyMultiScatteringPass = pipelines.Compute(
+        "Sky: multi-scattering",
+        "SkyLuts",
+        "SkyMultiScattering"
+    );
+
+    private readonly GpuPass _skyViewPass = pipelines.Compute("Sky: view", "SkyLuts", "SkyView");
+
+    private readonly GpuPass _binLightsPass = pipelines.Compute("Bin lights", "BinLights", "BinLights");
+
+    private readonly GpuPass _fogInjectPass = pipelines.Compute(
+        "Fog: inject",
+        "FogVolume",
+        "FogInject",
+        PassShaders.Atmosphere
+    );
+
+    private readonly GpuPass _fogIntegratePass = pipelines.Compute("Fog: integrate", "FogVolume", "FogIntegrate");
+
+    private readonly GpuPass _shadePass = pipelines.Compute(
+        "Shade",
+        "ShadeLighting",
+        "ShadeLighting",
+        PassShaders.Atmosphere | PassShaders.Tracer,
+        isTiled: true
+    );
+
     private readonly GpuLight[] _lights = new GpuLight[MaxLights];
+
     private GpuBuffer _lightTable;
+
     private GpuBuffer _froxelLists;
+
     private GpuTexture _transmittance;
+
     private GpuTexture _multiScattering;
+
     private GpuTexture _skyView;
+
     private GpuTexture _fogScattering;
+
     private GpuTexture _fogIntegrated;
+
     private GpuSampler _lutSampler;
+
     private int _lightCount;
+
     private bool _hasFog;
+
     private bool _hasSky;
 
     public GpuBuffer Constants { get; private set; }
@@ -217,56 +270,33 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
     /// <summary>
     /// The sky's tables and the froxel lists, before the view is drawn: what the fog and the lighting read.
     /// </summary>
-    public void RecordTables(
-        RenderGraph graph,
-        RendererPipelines pipelines,
-        GpuBuffer frameConstants,
-        SunShadows shadows
-    )
+    public void RecordTables(RenderGraph graph, GpuBuffer frameConstants, SunShadows shadows)
     {
         GpuConstants header = new(frameConstants.Id, shadows.Constants.Id, Constants.Id);
         if (_hasSky)
         {
-            graph.BeginComputePass("Sky: transmittance");
-            graph.Use(Constants, GpuAccess.ShaderRead);
-            graph.Use(_transmittance, GpuAccess.ShaderWrite);
-            graph.Recorder.BindPipeline(pipelines.SkyTransmittance);
-            graph.Recorder.PushConstants(header);
-            graph.Recorder.Dispatch(256 / 8, 64 / 8);
-            graph.EndPass();
+            _skyTransmittancePass.Run(graph, header).Reads(Constants).Writes(_transmittance).Dispatch(256 / 8, 64 / 8);
 
-            graph.BeginComputePass("Sky: multi-scattering");
-            graph.Use(Constants, GpuAccess.ShaderRead);
-            graph.Use(_transmittance, GpuAccess.ShaderRead);
-            graph.Use(_multiScattering, GpuAccess.ShaderWrite);
-            graph.Recorder.BindPipeline(pipelines.SkyMultiScattering);
-            graph.Recorder.PushConstants(header);
-            graph.Recorder.Dispatch(32 / 8, 32 / 8);
-            graph.EndPass();
+            _skyMultiScatteringPass
+                .Run(graph, header)
+                .Reads(Constants, _transmittance)
+                .Writes(_multiScattering)
+                .Dispatch(32 / 8, 32 / 8);
 
-            graph.BeginComputePass("Sky: view");
-            graph.Use(frameConstants, GpuAccess.ShaderRead);
-            graph.Use(Constants, GpuAccess.ShaderRead);
-            graph.Use(_transmittance, GpuAccess.ShaderRead);
-            graph.Use(_multiScattering, GpuAccess.ShaderRead);
-            graph.Use(_skyView, GpuAccess.ShaderWrite);
-            graph.Recorder.BindPipeline(pipelines.SkyView);
-            graph.Recorder.PushConstants(header);
-            graph.Recorder.Dispatch(192 / 8, (108 + 7) / 8);
-            graph.EndPass();
+            _skyViewPass
+                .Run(graph, header)
+                .Reads(frameConstants, Constants, _transmittance, _multiScattering)
+                .Writes(_skyView)
+                .Dispatch(192 / 8, (108 + 7) / 8);
         }
 
         if (_lightCount > 0)
         {
-            graph.BeginComputePass("Bin lights");
-            graph.Use(frameConstants, GpuAccess.ShaderRead);
-            graph.Use(Constants, GpuAccess.ShaderRead);
-            graph.Use(_lightTable, GpuAccess.ShaderRead);
-            graph.Use(_froxelLists, GpuAccess.ShaderWrite);
-            graph.Recorder.BindPipeline(pipelines.BinLights);
-            graph.Recorder.PushConstants(header);
-            graph.Recorder.Dispatch((uint)((_lightCount + BinThreads - 1) / BinThreads));
-            graph.EndPass();
+            _binLightsPass
+                .Run(graph, header)
+                .Reads(frameConstants, Constants, _lightTable)
+                .Writes(_froxelLists)
+                .Dispatch((uint)((_lightCount + BinThreads - 1) / BinThreads));
         }
     }
 
@@ -275,7 +305,6 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
     /// </summary>
     public void RecordShading(
         RenderGraph graph,
-        RendererPipelines pipelines,
         GpuBuffer frameConstants,
         SunShadows shadows,
         DistanceField field,
@@ -291,62 +320,50 @@ internal sealed class Lighting(IGraphicsApi gpu) : IDisposable
         GpuConstants header = new(frameConstants.Id, shadows.Constants.Id, Constants.Id, field.Constants.Id);
         if (_hasFog)
         {
-            graph.BeginComputePass("Fog: inject");
-            graph.Use(frameConstants, GpuAccess.ShaderRead);
-            graph.Use(Constants, GpuAccess.ShaderRead);
-            graph.Use(_lightTable, GpuAccess.ShaderRead);
-            graph.Use(_froxelLists, GpuAccess.ShaderRead);
-            graph.Use(_transmittance, GpuAccess.ShaderRead);
-            graph.Use(_multiScattering, GpuAccess.ShaderRead);
-            graph.Use(_skyView, GpuAccess.ShaderRead);
-            graph.Use(_fogScattering, GpuAccess.ShaderWrite);
+            GpuPassRun fogInjectRun = _fogInjectPass
+                .Run(graph, header)
+                .Reads(frameConstants, Constants, _lightTable, _froxelLists, _transmittance, _multiScattering, _skyView)
+                .Writes(_fogScattering);
             shadows.UseForSampling(graph);
-            graph.Recorder.BindPipeline(pipelines.FogInject);
-            graph.Recorder.PushConstants(header);
-            graph.Recorder.Dispatch(
+            fogInjectRun.Dispatch(
                 FogGridX / FogThreads,
                 (FogGridY + FogThreads - 1) / FogThreads,
                 FogGridZ / FogThreads
             );
-            graph.EndPass();
 
-            graph.BeginComputePass("Fog: integrate");
-            graph.Use(Constants, GpuAccess.ShaderRead);
-            graph.Use(_fogScattering, GpuAccess.ShaderRead);
-            graph.Use(_fogIntegrated, GpuAccess.ShaderWrite);
-            graph.Recorder.BindPipeline(pipelines.FogIntegrate);
-            graph.Recorder.PushConstants(header);
-            graph.Recorder.Dispatch(FogGridX / 8, (FogGridY + 7) / 8);
-            graph.EndPass();
+            _fogIntegratePass
+                .Run(graph, header)
+                .Reads(Constants, _fogScattering)
+                .Writes(_fogIntegrated)
+                .Dispatch(FogGridX / 8, (FogGridY + 7) / 8);
         }
 
-        graph.BeginComputePass("Shade");
-        graph.Use(frameConstants, GpuAccess.ShaderRead);
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(_lightTable, GpuAccess.ShaderRead);
-        graph.Use(_froxelLists, GpuAccess.ShaderRead);
-        graph.Use(_transmittance, GpuAccess.ShaderRead);
-        graph.Use(_multiScattering, GpuAccess.ShaderRead);
-        graph.Use(_skyView, GpuAccess.ShaderRead);
-        graph.Use(_fogIntegrated, GpuAccess.ShaderRead);
-        graph.Use(targets.Visibility, GpuAccess.ShaderRead);
-        graph.Use(targets.Depth, GpuAccess.ShaderRead);
-        graph.Use(targets.GBufferNormal, GpuAccess.ShaderRead);
-        graph.Use(targets.GBufferBase, GpuAccess.ShaderRead);
-        graph.Use(targets.GBufferSurface, GpuAccess.ShaderRead);
-        graph.Use(targets.Hdr, GpuAccess.ShaderWrite);
-        graph.Use(instances, GpuAccess.ShaderRead);
-        graph.Use(visibleClusters, GpuAccess.ShaderRead);
+        GpuPassRun shadeRun = _shadePass
+            .Run(graph, header, usesRayQuery: usesRayQuery)
+            .Reads(
+                frameConstants,
+                Constants,
+                _lightTable,
+                _froxelLists,
+                _transmittance,
+                _multiScattering,
+                _skyView,
+                _fogIntegrated,
+                targets.Visibility,
+                targets.Depth,
+                targets.GBufferNormal,
+                targets.GBufferBase,
+                targets.GBufferSurface
+            )
+            .Writes(targets.Hdr)
+            .Reads(instances, visibleClusters);
         cards.UseForReading(graph);
         shadows.UseForSampling(graph);
         field.UseForSampling(graph);
         gi.UseForSampling(graph);
         gi.UseForCards(graph);
         translucency.UseForSampling(graph);
-        graph.Recorder.BindPipeline(usesRayQuery ? pipelines.ShadeLightingRayQuery : pipelines.ShadeLighting);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(Groups(targets.Width, pipelines.TileSize), Groups(targets.Height, pipelines.TileSize));
-        graph.EndPass();
+        shadeRun.Dispatch(Groups(targets.Width, pipelines.TileSize), Groups(targets.Height, pipelines.TileSize));
     }
 
     private static uint Groups(int count, uint size) => (uint)((count + size - 1) / size);

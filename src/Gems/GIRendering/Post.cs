@@ -17,27 +17,66 @@ namespace GIRendering;
 /// tonemap. The final pass is specialised to the camera's effects, compiled again on a worker when they change and
 /// swapped in once built.
 /// </summary>
-internal sealed class Post(IGraphicsApi gpu) : IDisposable
+internal sealed class Post(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposable
 {
     public const int BloomLevels = 6;
 
     private const int HistogramBins = 256;
+
     private const float ExposureMin = 1e-5f;
+
     private const float ExposureMax = 1e4f;
 
+    private readonly GpuPass _composePass = pipelines.Compute(
+        "Post: compose",
+        "PostPasses",
+        "PostCompose",
+        isTiled: true
+    );
+
+    private readonly GpuPass _resolvePass = pipelines.Compute("Post: resolve", "PostPasses", "PostResolve");
+
+    private readonly GpuPass _histogramPass = pipelines.Compute("Post: histogram", "PostPasses", "PostHistogram");
+
+    private readonly GpuPass _exposurePass = pipelines.Compute("Post: exposure", "PostPasses", "PostExposure");
+
+    private readonly GpuPass _bloomDownPass = pipelines.Compute("Post: bloom down", "PostPasses", "PostBloomDown");
+
+    private readonly GpuPass _bloomUpPass = pipelines.Compute("Post: bloom up", "PostPasses", "PostBloomUp");
+
+    private readonly GpuPass _finalPass = pipelines.Compute(
+        "Post: final",
+        "PostPasses",
+        "PostFinal",
+        PassShaders.NoEffects
+    );
+
     private readonly GpuTexture[] _history = new GpuTexture[2];
+
     private GpuTexture _bloom;
+
     private GpuBuffer _histogram;
+
     private GpuBuffer _exposureState;
+
     private GpuSampler _sampler;
+
     private GpuPipeline _final;
+
     private ImmutableArray<Handle<Shader>> _effects = [];
+
     private ImmutableArray<Handle<Shader>> _compilingEffects = [];
+
     private Task? _compiling;
+
     private CompiledBox? _compiled;
+
     private int _current;
+
     private int _outputWidth;
+
     private int _outputHeight;
+
     private bool _isTableReady;
 
     public GpuBuffer Constants { get; private set; }
@@ -146,7 +185,7 @@ internal sealed class Post(IGraphicsApi gpu) : IDisposable
     /// The camera's settings for the frame: starts compiling the final pass for its effects when they changed, and
     /// swaps the pass in once built. Main thread.
     /// </summary>
-    public void Update(RendererPipelines pipelines, PostProcessing settings, CancellationToken cancel)
+    public void Update(PostProcessing settings, CancellationToken cancel)
     {
         if (_compiling is { IsCompleted: true })
         {
@@ -181,7 +220,7 @@ internal sealed class Post(IGraphicsApi gpu) : IDisposable
             return;
 
         _compilingEffects = wanted;
-        _compiling = CompileAsync(pipelines, wanted, cancel);
+        _compiling = CompileAsync(wanted, cancel);
     }
 
     /// <summary>
@@ -227,7 +266,6 @@ internal sealed class Post(IGraphicsApi gpu) : IDisposable
     /// </summary>
     public void Record(
         RenderGraph graph,
-        RendererPipelines pipelines,
         GpuBuffer frameConstants,
         SunShadows shadows,
         Lighting lighting,
@@ -237,108 +275,89 @@ internal sealed class Post(IGraphicsApi gpu) : IDisposable
     )
     {
         GpuConstants header = new(frameConstants.Id, shadows.Constants.Id, lighting.Constants.Id, field.Constants.Id);
-        graph.BeginComputePass("Post: compose");
-        graph.Use(frameConstants, GpuAccess.ShaderRead);
-        graph.Use(lighting.Constants, GpuAccess.ShaderRead);
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(targets.Hdr, GpuAccess.ShaderRead);
-        graph.Use(targets.Picture, GpuAccess.ShaderWrite);
+        GpuPassRun composeRun = _composePass
+            .Run(graph, header)
+            .Reads(frameConstants, lighting.Constants, Constants, targets.Hdr)
+            .Writes(targets.Picture);
         translucency.UseForComposite(graph, targets);
-        graph.Recorder.BindPipeline(pipelines.PostCompose);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(Groups(targets.Width), Groups(targets.Height));
-        graph.EndPass();
+        composeRun.Dispatch(Groups(targets.Width), Groups(targets.Height));
 
-        graph.BeginComputePass("Post: resolve");
-        graph.Use(frameConstants, GpuAccess.ShaderRead);
-        graph.Use(lighting.Constants, GpuAccess.ShaderRead);
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(targets.Picture, GpuAccess.ShaderRead);
-        graph.Use(targets.Depth, GpuAccess.ShaderRead);
-        graph.Use(targets.Velocity, GpuAccess.ShaderRead);
-        graph.Use(_history[1 - _current], GpuAccess.ShaderRead);
-        graph.Use(_history[_current], GpuAccess.ShaderWrite);
-        graph.Recorder.BindPipeline(pipelines.PostResolve);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(Groups(_outputWidth), Groups(_outputHeight));
-        graph.EndPass();
+        _resolvePass
+            .Run(graph, header)
+            .Reads(
+                frameConstants,
+                lighting.Constants,
+                Constants,
+                targets.Picture,
+                targets.Depth,
+                targets.Velocity,
+                _history[1 - _current]
+            )
+            .Writes(_history[_current])
+            .Dispatch(Groups(_outputWidth), Groups(_outputHeight));
 
-        graph.BeginComputePass("Post: histogram");
-        graph.Use(frameConstants, GpuAccess.ShaderRead);
-        graph.Use(lighting.Constants, GpuAccess.ShaderRead);
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(_history[_current], GpuAccess.ShaderRead);
-        graph.Use(_histogram, GpuAccess.ShaderWrite);
-        graph.Recorder.BindPipeline(pipelines.PostHistogram);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(Groups(_outputWidth, 16), Groups(_outputHeight, 16));
-        graph.EndPass();
+        _histogramPass
+            .Run(graph, header)
+            .Reads(frameConstants, lighting.Constants, Constants, _history[_current])
+            .Writes(_histogram)
+            .Dispatch(Groups(_outputWidth, 16), Groups(_outputHeight, 16));
 
-        graph.BeginComputePass("Post: exposure");
-        graph.Use(lighting.Constants, GpuAccess.ShaderRead);
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(_histogram, GpuAccess.ShaderWrite);
-        graph.Use(_exposureState, GpuAccess.ShaderWrite);
-        graph.Recorder.BindPipeline(pipelines.PostExposure);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(1);
-        graph.EndPass();
+        _exposurePass
+            .Run(graph, header)
+            .Reads(lighting.Constants, Constants)
+            .Writes(_histogram, _exposureState)
+            .Dispatch(1);
 
         for (int level = 0; level < BloomLevels; level++)
         {
-            graph.BeginComputePass($"Post: bloom down {level}");
-            graph.Use(lighting.Constants, GpuAccess.ShaderRead);
-            graph.Use(Constants, GpuAccess.ShaderRead);
-            graph.Use(_history[_current], GpuAccess.ShaderRead);
-            graph.Use(_exposureState, GpuAccess.ShaderRead);
+            GpuPassRun bloomDownRun = _bloomDownPass
+                .Run(
+                    graph,
+                    new GpuConstants(frameConstants.Id, (uint)level, lighting.Constants.Id),
+                    name: $"Post: bloom down {level}"
+                )
+                .Reads(lighting.Constants, Constants, _history[_current], _exposureState);
             if (level > 0)
-                graph.Use(_bloom, GpuAccess.ShaderRead, level - 1);
+                bloomDownRun.Reads(_bloom, level - 1);
 
-            graph.Use(_bloom, GpuAccess.ShaderWrite, level);
-            graph.Recorder.BindPipeline(pipelines.PostBloomDown);
-            graph.Recorder.PushConstants(new GpuConstants(frameConstants.Id, (uint)level, lighting.Constants.Id));
-            graph.Recorder.Dispatch(Groups(BloomWidth(level)), Groups(BloomHeight(level)));
-            graph.EndPass();
+            bloomDownRun.Writes(_bloom, level).Dispatch(Groups(BloomWidth(level)), Groups(BloomHeight(level)));
         }
 
         for (int level = BloomLevels - 2; level >= 0; level--)
         {
-            graph.BeginComputePass($"Post: bloom up {level}");
-            graph.Use(lighting.Constants, GpuAccess.ShaderRead);
-            graph.Use(Constants, GpuAccess.ShaderRead);
-            graph.Use(_bloom, GpuAccess.ShaderRead, level + 1);
-            graph.Use(_bloom, GpuAccess.ShaderWrite, level);
-            graph.Recorder.BindPipeline(pipelines.PostBloomUp);
-            graph.Recorder.PushConstants(new GpuConstants(frameConstants.Id, (uint)level, lighting.Constants.Id));
-            graph.Recorder.Dispatch(Groups(BloomWidth(level)), Groups(BloomHeight(level)));
-            graph.EndPass();
+            _bloomUpPass
+                .Run(
+                    graph,
+                    new GpuConstants(frameConstants.Id, (uint)level, lighting.Constants.Id),
+                    name: $"Post: bloom up {level}"
+                )
+                .Reads(lighting.Constants, Constants)
+                .Reads(_bloom, level + 1)
+                .Writes(_bloom, level)
+                .Dispatch(Groups(BloomWidth(level)), Groups(BloomHeight(level)));
         }
 
-        graph.BeginComputePass("Post: final");
-        graph.Use(frameConstants, GpuAccess.ShaderRead);
-        graph.Use(lighting.Constants, GpuAccess.ShaderRead);
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(_history[_current], GpuAccess.ShaderRead);
-        graph.Use(_bloom, GpuAccess.ShaderRead);
-        graph.Use(_exposureState, GpuAccess.ShaderRead);
-        graph.Use(targets.Visibility, GpuAccess.ShaderRead);
-        graph.Use(targets.Depth, GpuAccess.ShaderRead);
-        graph.Use(targets.GBufferNormal, GpuAccess.ShaderRead);
-        graph.Use(targets.Output, GpuAccess.ShaderWrite);
+        GpuPassRun finalRun = _finalPass
+            .Run(graph, header, pipeline: _final)
+            .Reads(
+                frameConstants,
+                lighting.Constants,
+                Constants,
+                _history[_current],
+                _bloom,
+                _exposureState,
+                targets.Visibility,
+                targets.Depth,
+                targets.GBufferNormal
+            )
+            .Writes(targets.Output);
         field.UseForSampling(graph);
-        graph.Recorder.BindPipeline(_final.IsNone ? pipelines.PostFinal : _final);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(Groups(_outputWidth), Groups(_outputHeight));
-        graph.EndPass();
+        finalRun.Dispatch(Groups(_outputWidth), Groups(_outputHeight));
     }
 
     private static uint Groups(int count, int size = 8) => (uint)((count + size - 1) / size);
 
-    private async Task CompileAsync(
-        RendererPipelines pipelines,
-        ImmutableArray<Handle<Shader>> effects,
-        CancellationToken cancel
-    )
+    private async Task CompileAsync(ImmutableArray<Handle<Shader>> effects, CancellationToken cancel)
     {
         Result<CompiledShader> result = await pipelines.CompileFinalAsync(effects, cancel).ConfigureAwait(false);
         Interlocked.Exchange(ref _compiled, new CompiledBox(result));

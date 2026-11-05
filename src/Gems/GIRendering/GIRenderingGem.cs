@@ -27,17 +27,7 @@ namespace GIRendering;
 /// window and saves it when a screenshot is asked for. It is public because nothing in its assembly makes it: Magic
 /// does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class GIRenderingGem(
-    IGraphicsApi gpu,
-    IShaderCompiler shaders,
-    Assets assets,
-    IMeshPreprocessor meshes,
-    IEcs ecs,
-    IFileSystem files,
-    Threads threads,
-    App app,
-    EventCoordinator events
-) : IGem, IDisposable
+public sealed class GIRenderingGem : IGem, IDisposable
 {
     private const int MaxVisibleClusters = 1 << 18;
     private const int CountsBytes = 64;
@@ -60,22 +50,34 @@ public sealed class GIRenderingGem(
     /// </summary>
     private const float FallbackLight = 0.15f;
 
-    private readonly RenderGraph _graph = new(gpu);
+    private readonly IGraphicsApi _gpu;
+    private readonly Assets _assets;
+    private readonly IEcs _ecs;
+    private readonly IFileSystem _files;
+    private readonly Threads _threads;
+    private readonly App _app;
+    private readonly EventCoordinator _events;
+    private readonly GpuPass _cullPass;
+    private readonly GpuPass _drawPass;
+    private readonly GpuPass _buildHzbPass;
+    private readonly GpuPass _resolvePass;
+    private readonly GpuPass _captureCardPass;
+    private readonly RenderGraph _graph;
     private readonly RenderWorld _world = new();
-    private readonly GeometryPools _pools = new(gpu, meshes, assets, threads, new DistanceField(gpu));
-    private readonly TextureTable _textures = new(gpu, assets, threads);
-    private readonly FrameTargets _targets = new(gpu);
-    private readonly FrameTargets _cardTargets = new(gpu);
-    private readonly GlobalIllumination _gi = new(gpu);
-    private readonly Translucency _translucency = new(gpu);
-    private readonly RayTracing? _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu) : null;
+    private readonly GeometryPools _pools;
+    private readonly TextureTable _textures;
+    private readonly FrameTargets _targets;
+    private readonly FrameTargets _cardTargets;
+    private readonly GlobalIllumination _gi;
+    private readonly Translucency _translucency;
+    private readonly RayTracing? _rayTracing;
     private RendererPreset _preset = RendererPreset.Quality;
-    private readonly RendererPipelines _pipelines = new(gpu, shaders, assets);
-    private readonly Post _post = new(gpu);
-    private readonly InstanceTable _instances = new(gpu);
-    private readonly CardTable _cards = new(gpu);
-    private readonly SunShadows _shadows = new(gpu);
-    private readonly Lighting _lighting = new(gpu);
+    private readonly GpuPipelines _pipelines;
+    private readonly Post _post;
+    private readonly InstanceTable _instances;
+    private readonly CardTable _cards;
+    private readonly SunShadows _shadows;
+    private readonly Lighting _lighting;
     private readonly GpuBuffer[] _cardConstants = new GpuBuffer[GpuCard.PerCapture];
     private MaterialTable? _materials;
     private GpuBuffer _constants;
@@ -101,11 +103,70 @@ public sealed class GIRenderingGem(
     private Vector4 _previousCameraPosition;
     private bool _hasPreviousFrame;
 
+    public GIRenderingGem(
+        IGraphicsApi gpu,
+        IShaderCompiler shaders,
+        Assets assets,
+        IMeshPreprocessor meshes,
+        IEcs ecs,
+        IFileSystem files,
+        Threads threads,
+        App app,
+        EventCoordinator events
+    )
+    {
+        _gpu = gpu;
+        _assets = assets;
+        _ecs = ecs;
+        _files = files;
+        _threads = threads;
+        _app = app;
+        _events = events;
+        _graph = new RenderGraph(gpu);
+        _pipelines = new GpuPipelines(gpu, shaders, assets);
+        _pools = new GeometryPools(gpu, meshes, assets, threads, _pipelines);
+        _textures = new TextureTable(gpu, assets, threads);
+        _targets = new FrameTargets(gpu);
+        _cardTargets = new FrameTargets(gpu);
+        _gi = new GlobalIllumination(gpu, _pipelines);
+        _translucency = new Translucency(gpu, _pipelines);
+        _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu) : null;
+        WantsRayQuery = gpu.Features.HasRayQuery;
+        _post = new Post(gpu, _pipelines);
+        _instances = new InstanceTable(gpu);
+        _cards = new CardTable(gpu);
+        _shadows = new SunShadows(gpu, _pipelines);
+        _lighting = new Lighting(gpu, _pipelines);
+        _cullPass = _pipelines.Compute("Cull clusters", "CullClusters", "CullClusters");
+        _drawPass = _pipelines.Draw(
+            "Draw visibility",
+            "DrawVisibility",
+            "DrawVisibilityVertex",
+            "DrawVisibilityPixel",
+            state =>
+                state with
+                {
+                    ColorFormats = [GpuFormat.R32Uint],
+                    DepthFormat = GpuFormat.D32Sfloat,
+                    Depth = DepthMode.TestAndWrite,
+                }
+        );
+        _buildHzbPass = _pipelines.Compute("Build depth pyramid", "BuildHzb", "BuildHzb", isTiled: true);
+        _resolvePass = _pipelines.Compute(
+            "Resolve standard material",
+            "ResolveMaterial",
+            "ResolveMaterial",
+            PassShaders.Standard,
+            isTiled: true
+        );
+        _captureCardPass = _pipelines.Compute("Capture card", "CaptureCard", "CaptureCard", isTiled: true);
+    }
+
     /// <summary>
     /// Whether the run asks to trace through the GPU's acceleration structures, which it does by default where it
     /// can; <c>set GIRendering.tracer=field</c> turns it off.
     /// </summary>
-    private bool WantsRayQuery { get; set; } = gpu.Features.HasRayQuery;
+    private bool WantsRayQuery { get; set; }
 
     /// <summary>
     /// Whether the frame traces through the GPU's acceleration structures: asked for, and there is one to trace.
@@ -144,14 +205,14 @@ public sealed class GIRenderingGem(
         )
         {
             if (!buffer.IsNone)
-                gpu.Destroy(buffer);
+                _gpu.Destroy(buffer);
         }
 
         if (!_sampler.IsNone)
-            gpu.Destroy(_sampler);
+            _gpu.Destroy(_sampler);
 
         if (!_linearSampler.IsNone)
-            gpu.Destroy(_linearSampler);
+            _gpu.Destroy(_linearSampler);
     }
 
     /// <summary>
@@ -166,7 +227,7 @@ public sealed class GIRenderingGem(
         }
 
         _world.Clear();
-        foreach (EcsChunk<Transform, Renderer> chunk in ecs.Query<Transform, Renderer>())
+        foreach (EcsChunk<Transform, Renderer> chunk in _ecs.Query<Transform, Renderer>())
         {
             for (int i = 0; i < chunk.Entities.Length; i++)
             {
@@ -180,7 +241,7 @@ public sealed class GIRenderingGem(
             }
         }
 
-        foreach (EcsChunk<Transform, Camera> chunk in ecs.Query<Transform, Camera>())
+        foreach (EcsChunk<Transform, Camera> chunk in _ecs.Query<Transform, Camera>())
         {
             for (int i = 0; i < chunk.Entities.Length && _world.Camera is null; i++)
             {
@@ -190,7 +251,7 @@ public sealed class GIRenderingGem(
             }
         }
 
-        foreach (EcsChunk<Camera, PostProcessing> chunk in ecs.Query<Camera, PostProcessing>())
+        foreach (EcsChunk<Camera, PostProcessing> chunk in _ecs.Query<Camera, PostProcessing>())
         {
             for (int i = 0; i < chunk.Entities.Length; i++)
             {
@@ -202,7 +263,7 @@ public sealed class GIRenderingGem(
         // The directional light the frame is lit by: the sun while it is up, else the moon while it is up, else the
         // first there is.
         int sunRank = -1;
-        foreach (EcsChunk<Transform, DirectionalLight> chunk in ecs.Query<Transform, DirectionalLight>())
+        foreach (EcsChunk<Transform, DirectionalLight> chunk in _ecs.Query<Transform, DirectionalLight>())
         {
             for (int i = 0; i < chunk.Entities.Length; i++)
             {
@@ -225,7 +286,7 @@ public sealed class GIRenderingGem(
             }
         }
 
-        foreach (EcsChunk<Transform, PointLight> chunk in ecs.Query<Transform, PointLight>())
+        foreach (EcsChunk<Transform, PointLight> chunk in _ecs.Query<Transform, PointLight>())
         {
             for (int i = 0; i < chunk.Entities.Length; i++)
             {
@@ -244,7 +305,7 @@ public sealed class GIRenderingGem(
             }
         }
 
-        foreach (EcsChunk<Transform, SpotLight> chunk in ecs.Query<Transform, SpotLight>())
+        foreach (EcsChunk<Transform, SpotLight> chunk in _ecs.Query<Transform, SpotLight>())
         {
             for (int i = 0; i < chunk.Entities.Length; i++)
             {
@@ -265,7 +326,7 @@ public sealed class GIRenderingGem(
             }
         }
 
-        foreach (EcsChunk<Transform, RectLight> chunk in ecs.Query<Transform, RectLight>())
+        foreach (EcsChunk<Transform, RectLight> chunk in _ecs.Query<Transform, RectLight>())
         {
             for (int i = 0; i < chunk.Entities.Length; i++)
             {
@@ -287,13 +348,13 @@ public sealed class GIRenderingGem(
             }
         }
 
-        foreach (EcsChunk<Fog> chunk in ecs.Query<Fog>())
+        foreach (EcsChunk<Fog> chunk in _ecs.Query<Fog>())
         {
             if (chunk.Entities.Length > 0 && _world.Fog is null)
                 _world.Fog = chunk.First[0];
         }
 
-        foreach (EcsChunk<Sky> chunk in ecs.Query<Sky>())
+        foreach (EcsChunk<Sky> chunk in _ecs.Query<Sky>())
         {
             _world.HasSky |= chunk.Entities.Length > 0;
         }
@@ -354,8 +415,8 @@ public sealed class GIRenderingGem(
         if (!_isReady || _materials is null)
             return;
 
-        int outputWidth = app.Window is { Width: > 0, Height: > 0 } window ? window.Width : DefaultWidth;
-        int outputHeight = app.Window is { Width: > 0, Height: > 0 } sized ? sized.Height : DefaultHeight;
+        int outputWidth = _app.Window is { Width: > 0, Height: > 0 } window ? window.Width : DefaultWidth;
+        int outputHeight = _app.Window is { Width: > 0, Height: > 0 } sized ? sized.Height : DefaultHeight;
         int width = Math.Max((int)MathF.Round(outputWidth * _preset.Scale), 16);
         int height = Math.Max((int)MathF.Round(outputHeight * _preset.Scale), 16);
         if (
@@ -429,21 +490,14 @@ public sealed class GIRenderingGem(
             _post.Constants
         );
         _translucency.Prepare(_graph, sun.Direction, camera.Transform.Position, _targets);
-        _post.Update(_pipelines, _world.Post, CancellationToken.None);
+        _post.Update(_world.Post, CancellationToken.None);
         _post.Prepare(_graph, _targets, _world.Post, (float)frame.AppSec);
         _gi.Prepare(_graph, _instances.Rows, camera.Transform.Position, frame.Index, sun.Radiance * FallbackLight);
-        _pools.Field.Prepare(
-            _graph,
-            _pipelines,
-            _constants,
-            camera.Transform.Position,
-            _instances.Changes,
-            instanceCount
-        );
+        _pools.Field.Prepare(_graph, _constants, camera.Transform.Position, _instances.Changes, instanceCount);
         _instances.ClearChanges();
         _graph.EndPass();
-        _pools.Field.Record(_graph, _pipelines, _constants, _instances.Buffer);
-        _lighting.RecordTables(_graph, _pipelines, _constants, _shadows);
+        _pools.Field.Record(_graph, _constants, _instances.Buffer);
+        _lighting.RecordTables(_graph, _constants, _shadows);
 
         RenderView view = new(_constants, _instances.Buffer, instanceCount, _targets);
         RecordCull(view, "Cull clusters", mode: 0);
@@ -474,12 +528,11 @@ public sealed class GIRenderingGem(
             _materials.Buffer,
             _visibleClusters
         );
-        _translucency.RecordShadow(_graph, _pipelines, translucentDraws);
-        _shadows.Record(_graph, _pipelines, _constants, _instances.Buffer, instanceCount, _pools, _targets);
+        _translucency.RecordShadow(_graph, translucentDraws);
+        _shadows.Record(_graph, _constants, _instances.Buffer, instanceCount, _pools, _targets);
         RecordResolve(view, "Resolve materials");
         _gi.Record(
             _graph,
-            _pipelines,
             _constants,
             _instances.Buffer,
             _visibleClusters,
@@ -493,7 +546,6 @@ public sealed class GIRenderingGem(
         );
         _lighting.RecordShading(
             _graph,
-            _pipelines,
             _constants,
             _shadows,
             _pools.Field,
@@ -505,10 +557,10 @@ public sealed class GIRenderingGem(
             _targets,
             UsesRayQuery
         );
-        _translucency.RecordDraws(_graph, _pipelines, translucentDraws, _targets, _shadows, _lighting, _gi);
-        _post.Record(_graph, _pipelines, _constants, _shadows, _lighting, _pools.Field, _translucency, _targets);
+        _translucency.RecordDraws(_graph, translucentDraws, _targets, _shadows, _lighting, _gi);
+        _post.Record(_graph, _constants, _shadows, _lighting, _pools.Field, _translucency, _targets);
 
-        GpuTexture target = gpu.WindowTarget;
+        GpuTexture target = _gpu.WindowTarget;
         if (!target.IsNone)
         {
             _graph.Import(target, GpuAccess.None);
@@ -531,12 +583,12 @@ public sealed class GIRenderingGem(
             _graph.EndPass();
         }
 
-        gpu.Submit(_graph.Finish());
+        _gpu.Submit(_graph.Finish());
         _hasHzb = true;
         if (!_hasDrawn)
         {
             _hasDrawn = true;
-            events.Publish(new FirstFrameDrawn());
+            _events.Publish(new FirstFrameDrawn());
         }
 
         if (requests.Length > 0)
@@ -647,7 +699,7 @@ public sealed class GIRenderingGem(
             return;
         }
 
-        _materials = new MaterialTable(gpu, assets, _textures, threads);
+        _materials = new MaterialTable(_gpu, _assets, _textures, _threads);
         Result made = _pipelines.Create(compiled.Value);
         foreach (
             Func<Result> step in (ReadOnlySpan<Func<Result>>)
@@ -691,12 +743,12 @@ public sealed class GIRenderingGem(
 
     private Result CreateBuffers()
     {
-        Result<GpuSampler> sampler = gpu.CreateSampler(new SamplerDescription { Anisotropy = 8 });
+        Result<GpuSampler> sampler = _gpu.CreateSampler(new SamplerDescription { Anisotropy = 8 });
         if (!sampler.Ok)
             return Result.Failure($"the default sampler was not made: {sampler.Error}");
 
         _sampler = sampler.Value;
-        Result<GpuSampler> linearSampler = gpu.CreateSampler(
+        Result<GpuSampler> linearSampler = _gpu.CreateSampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, HasMipmapBlend = false }
         );
         if (!linearSampler.Ok)
@@ -720,7 +772,7 @@ public sealed class GIRenderingGem(
         GpuBuffer[] made = new GpuBuffer[descriptions.Length];
         for (int i = 0; i < descriptions.Length; i++)
         {
-            Result<GpuBuffer> buffer = gpu.CreateBuffer(
+            Result<GpuBuffer> buffer = _gpu.CreateBuffer(
                 new BufferDescription
                 {
                     Bytes = descriptions[i].Bytes,
@@ -745,7 +797,7 @@ public sealed class GIRenderingGem(
         );
         for (int side = 0; side < GpuCard.PerCapture; side++)
         {
-            Result<GpuBuffer> buffer = gpu.CreateBuffer(
+            Result<GpuBuffer> buffer = _gpu.CreateBuffer(
                 new BufferDescription
                 {
                     Bytes = FrameConstants.Bytes,
@@ -771,7 +823,7 @@ public sealed class GIRenderingGem(
         if (_materials is null)
             return 0;
 
-        Handle<Material> failureMaterial = assets.GetFailure<Material, Model>();
+        Handle<Material> failureMaterial = _assets.GetFailure<Material, Model>();
         Span<uint> materialRows = stackalloc uint[MaterialSlots.Capacity];
         _instances.Begin(unchecked((uint)Environment.TickCount));
         foreach (RenderInstance instance in _world.Instances)
@@ -809,7 +861,7 @@ public sealed class GIRenderingGem(
             InstanceExtra extra =
                 isGlass || resident.Acceleration.IsNone
                     ? default
-                    : new InstanceExtra(gpu.GetAddress(resident.Acceleration), resident.LeafOffset);
+                    : new InstanceExtra(_gpu.GetAddress(resident.Acceleration), resident.LeafOffset);
             _instances.Set(
                 instance.Entity,
                 new GpuInstance
@@ -947,7 +999,7 @@ public sealed class GIRenderingGem(
 
     private void UploadConstants(GpuBuffer buffer, in FrameConstants frame)
     {
-        GpuUpload upload = gpu.BeginUpload(FrameConstants.Bytes);
+        GpuUpload upload = _gpu.BeginUpload(FrameConstants.Bytes);
         MemoryMarshal.Write(upload.Bytes, in frame);
         _graph.Use(buffer, GpuAccess.CopyDestination);
         _graph.Recorder.CopyBuffer(upload.Buffer, upload.Offset, buffer, 0, FrameConstants.Bytes);
@@ -960,7 +1012,7 @@ public sealed class GIRenderingGem(
     {
         _graph.Use(_counts, GpuAccess.CopyDestination);
         _graph.Recorder.FillBuffer(_counts, 0);
-        GpuUpload retest = gpu.BeginUpload(RetestArgumentsBytes);
+        GpuUpload retest = _gpu.BeginUpload(RetestArgumentsBytes);
         Span<uint> words = MemoryMarshal.Cast<byte, uint>(retest.Bytes);
         words[0] = 0;
         words[1] = 1;
@@ -977,7 +1029,7 @@ public sealed class GIRenderingGem(
     {
         ResidentModel resident = job.Resident;
         _graph.BeginTransferPass("Capture instance");
-        GpuUpload upload = gpu.BeginUpload(GpuInstance.Bytes);
+        GpuUpload upload = _gpu.BeginUpload(GpuInstance.Bytes);
         GpuInstance instance = new()
         {
             World = Matrix4x4.Identity,
@@ -1032,20 +1084,18 @@ public sealed class GIRenderingGem(
             RecordResolve(cardView, $"Card {side} resolve");
 
             uint cardIndex = (job.Row * GpuCard.PerCapture) + (uint)side;
-            _graph.BeginComputePass($"Card {side} write");
-            _graph.Use(_cardConstants[side], GpuAccess.ShaderRead);
-            _graph.Use(_cards.Buffer, GpuAccess.ShaderRead);
-            _graph.Use(_cardTargets.Visibility, GpuAccess.ShaderRead);
-            _graph.Use(_cardTargets.Depth, GpuAccess.ShaderRead);
-            _graph.Use(_cardTargets.GBufferNormal, GpuAccess.ShaderRead);
-            _graph.Use(_cardTargets.GBufferBase, GpuAccess.ShaderRead);
-            _graph.Use(_cards.Albedo, GpuAccess.ShaderWrite);
-            _graph.Use(_cards.Normal, GpuAccess.ShaderWrite);
-            _graph.Use(_cards.Depth, GpuAccess.ShaderWrite);
-            _graph.Recorder.BindPipeline(_pipelines.CaptureCard);
-            _graph.Recorder.PushConstants(new GpuConstants(_cardConstants[side].Id, cardIndex));
-            _graph.Recorder.Dispatch(Groups((int)card.Width), Groups((int)card.Height));
-            _graph.EndPass();
+            _captureCardPass
+                .Run(_graph, new GpuConstants(_cardConstants[side].Id, cardIndex), name: $"Card {side} write")
+                .Reads(
+                    _cardConstants[side],
+                    _cards.Buffer,
+                    _cardTargets.Visibility,
+                    _cardTargets.Depth,
+                    _cardTargets.GBufferNormal,
+                    _cardTargets.GBufferBase
+                )
+                .Writes(_cards.Albedo, _cards.Normal, _cards.Depth)
+                .Dispatch(Groups((int)card.Width), Groups((int)card.Height));
         }
     }
 
@@ -1055,66 +1105,49 @@ public sealed class GIRenderingGem(
     /// </summary>
     private void RecordCull(in RenderView view, string name, uint mode)
     {
-        _graph.BeginComputePass(name);
-        _graph.Use(view.Constants, GpuAccess.ShaderRead);
-        _graph.Use(view.Instances, GpuAccess.ShaderRead);
-        _graph.Use(_pools.Clusters, GpuAccess.ShaderRead);
-        _graph.Use(_counts, GpuAccess.ShaderWrite);
-        _graph.Use(_visibleClusters, GpuAccess.ShaderWrite);
-        _graph.Use(_drawArguments, GpuAccess.ShaderWrite);
-        _graph.Use(view.Targets.Hzb, GpuAccess.ShaderRead);
-        _graph.Recorder.BindPipeline(_pipelines.CullClusters);
-        _graph.Recorder.PushConstants(new GpuConstants(view.Constants.Id, mode));
+        GpuPassRun cullRun = _cullPass
+            .Run(_graph, new GpuConstants(view.Constants.Id, mode), name: name)
+            .Reads(view.Constants, view.Instances, _pools.Clusters)
+            .Writes(_counts, _visibleClusters, _drawArguments)
+            .Reads(view.Targets.Hzb);
         if (mode == 0)
         {
-            _graph.Use(_retestList, GpuAccess.ShaderWrite);
-            _graph.Use(_retestArguments, GpuAccess.ShaderWrite);
             int rows = (view.InstanceCount + CullGroupsPerRow - 1) / CullGroupsPerRow;
-            _graph.Recorder.Dispatch((uint)Math.Min(view.InstanceCount, CullGroupsPerRow), (uint)Math.Max(rows, 1));
+            cullRun
+                .Writes(_retestList, _retestArguments)
+                .Dispatch((uint)Math.Min(view.InstanceCount, CullGroupsPerRow), (uint)Math.Max(rows, 1));
         }
         else
         {
-            _graph.Use(_retestList, GpuAccess.ShaderRead);
-            _graph.Use(_retestArguments, GpuAccess.Indirect);
-            _graph.Recorder.DispatchIndirect(_retestArguments, 0);
+            cullRun.Reads(_retestList).Indirect(_retestArguments).DispatchIndirect(_retestArguments, 0);
         }
-
-        _graph.EndPass();
     }
 
     /// <summary>
     /// The visible clusters drawn into the view's visibility buffer and its depth, one indirect draw each.
     /// </summary>
-    private void RecordDraw(in RenderView view, string name, TargetLoad load, ulong drawsOffset, ulong countOffset)
-    {
-        _graph.BeginDrawPass(
-            name,
-            new GpuRenderTargets
-            {
-                Colors = [new GpuColorTarget { Texture = view.Targets.Visibility, Load = load }],
-                Depth = new GpuDepthTarget { Texture = view.Targets.Depth, Load = load },
-            }
-        );
-        _graph.Use(view.Constants, GpuAccess.ShaderRead);
-        _graph.Use(view.Instances, GpuAccess.ShaderRead);
-        _graph.Use(_pools.Vertices, GpuAccess.ShaderRead);
-        _graph.Use(_pools.Clusters, GpuAccess.ShaderRead);
-        _graph.Use(_pools.Indices, GpuAccess.ShaderRead);
-        _graph.Use(_visibleClusters, GpuAccess.ShaderRead);
-        _graph.Use(_drawArguments, GpuAccess.Indirect);
-        _graph.Use(_counts, GpuAccess.Indirect);
-        _graph.Recorder.BindPipeline(_pipelines.DrawVisibility);
-        _graph.Recorder.PushConstants(new GpuConstants(view.Constants.Id));
-        _graph.Recorder.DrawIndirectCount(
-            _drawArguments,
-            drawsOffset,
-            _counts,
-            countOffset,
-            MaxVisibleClusters,
-            DrawArgumentsBytes
-        );
-        _graph.EndPass();
-    }
+    private void RecordDraw(in RenderView view, string name, TargetLoad load, ulong drawsOffset, ulong countOffset) =>
+        _drawPass
+            .Run(
+                _graph,
+                new GpuConstants(view.Constants.Id),
+                new GpuRenderTargets
+                {
+                    Colors = [new GpuColorTarget { Texture = view.Targets.Visibility, Load = load }],
+                    Depth = new GpuDepthTarget { Texture = view.Targets.Depth, Load = load },
+                },
+                name: name
+            )
+            .Reads(view.Constants, view.Instances, _pools.Vertices, _pools.Clusters, _pools.Indices, _visibleClusters)
+            .Indirect(_drawArguments, _counts)
+            .DrawIndirectCount(
+                _drawArguments,
+                drawsOffset,
+                _counts,
+                countOffset,
+                MaxVisibleClusters,
+                DrawArgumentsBytes
+            );
 
     /// <summary>
     /// The depth pyramid from the depth so far, a level a pass.
@@ -1123,20 +1156,18 @@ public sealed class GIRenderingGem(
     {
         for (int level = 0; level < _targets.HzbLevels; level++)
         {
-            _graph.BeginComputePass($"Build depth pyramid {level}");
-            _graph.Use(_constants, GpuAccess.ShaderRead);
+            GpuPassRun buildHzbRun = _buildHzbPass
+                .Run(_graph, new GpuConstants(_constants.Id, (uint)level), name: $"Build depth pyramid {level}")
+                .Reads(_constants);
             if (level == 0)
-                _graph.Use(_targets.Depth, GpuAccess.ShaderRead);
+                buildHzbRun.Reads(_targets.Depth);
             else
-                _graph.Use(_targets.Hzb, GpuAccess.ShaderRead, level - 1);
+                buildHzbRun.Reads(_targets.Hzb, level - 1);
 
-            _graph.Use(_targets.Hzb, GpuAccess.ShaderWrite, level);
-            _graph.Recorder.BindPipeline(_pipelines.BuildHzb);
-            _graph.Recorder.PushConstants(new GpuConstants(_constants.Id, (uint)level));
+            buildHzbRun.Writes(_targets.Hzb, level);
             int width = Math.Max(_targets.Width >> level, 1);
             int height = Math.Max(_targets.Height >> level, 1);
-            _graph.Recorder.Dispatch(Groups(width), Groups(height));
-            _graph.EndPass();
+            buildHzbRun.Dispatch(Groups(width), Groups(height));
         }
     }
 
@@ -1145,23 +1176,25 @@ public sealed class GIRenderingGem(
         if (_materials is null)
             return;
 
-        _graph.BeginComputePass(name);
-        _graph.Use(view.Constants, GpuAccess.ShaderRead);
-        _graph.Use(view.Instances, GpuAccess.ShaderRead);
-        _graph.Use(_pools.Clusters, GpuAccess.ShaderRead);
-        _graph.Use(_pools.Vertices, GpuAccess.ShaderRead);
-        _graph.Use(_pools.Indices, GpuAccess.ShaderRead);
-        _graph.Use(_materials.Buffer, GpuAccess.ShaderRead);
-        _graph.Use(_visibleClusters, GpuAccess.ShaderRead);
-        _graph.Use(view.Targets.Visibility, GpuAccess.ShaderRead);
-        _graph.Use(view.Targets.GBufferNormal, GpuAccess.ShaderWrite);
-        _graph.Use(view.Targets.GBufferBase, GpuAccess.ShaderWrite);
-        _graph.Use(view.Targets.GBufferSurface, GpuAccess.ShaderWrite);
-        _graph.Use(view.Targets.Velocity, GpuAccess.ShaderWrite);
-        _graph.Recorder.BindPipeline(_pipelines.ResolveStandard);
-        _graph.Recorder.PushConstants(new GpuConstants(view.Constants.Id));
-        _graph.Recorder.Dispatch(Groups(view.Targets.Width), Groups(view.Targets.Height));
-        _graph.EndPass();
+        _resolvePass
+            .Run(_graph, new GpuConstants(view.Constants.Id), name: name)
+            .Reads(
+                view.Constants,
+                view.Instances,
+                _pools.Clusters,
+                _pools.Vertices,
+                _pools.Indices,
+                _materials.Buffer,
+                _visibleClusters,
+                view.Targets.Visibility
+            )
+            .Writes(
+                view.Targets.GBufferNormal,
+                view.Targets.GBufferBase,
+                view.Targets.GBufferSurface,
+                view.Targets.Velocity
+            )
+            .Dispatch(Groups(view.Targets.Width), Groups(view.Targets.Height));
     }
 
     private uint Groups(int pixels) => (uint)((pixels + _pipelines.TileSize - 1) / _pipelines.TileSize);
@@ -1171,7 +1204,7 @@ public sealed class GIRenderingGem(
     /// </summary>
     private async Task SaveScreenshotAsync(string path, int width, int height)
     {
-        Result<ReadOnlyMemory<byte>> pixels = await gpu.ReadBackAsync(
+        Result<ReadOnlyMemory<byte>> pixels = await _gpu.ReadBackAsync(
                 _targets.Readback,
                 0,
                 width * height * 4,
@@ -1186,7 +1219,7 @@ public sealed class GIRenderingGem(
         }
 
         byte[] png = Png.Encode(width, height, pixels.Value.Span);
-        Result made = files.CreateDirectory(files.GetParent(path));
+        Result made = _files.CreateDirectory(_files.GetParent(path));
         if (!made.Ok)
         {
             Log.Error($"The screenshot's folder could not be made: {made.Error}");
@@ -1194,7 +1227,7 @@ public sealed class GIRenderingGem(
             return;
         }
 
-        Result written = await files.WriteAsync(path, png, CancellationToken.None).ConfigureAwait(false);
+        Result written = await _files.WriteAsync(path, png, CancellationToken.None).ConfigureAwait(false);
         if (written.Ok)
             Log.Info($"Screenshot: {path}");
         else

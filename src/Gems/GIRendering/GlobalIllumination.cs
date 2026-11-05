@@ -16,72 +16,215 @@ namespace GIRendering;
 /// world probes; the short-range occlusion of every pixel; the sharp reflections, a ray every stride of pixels; and
 /// the passes that keep each up to date, a budget of each a frame.
 /// </summary>
-internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
+internal sealed class GlobalIllumination(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposable
 {
     public const int ProbeLevels = 4;
+
     public const int ProbesPerAxis = 16;
+
     public const int ProbesPerLevel = ProbesPerAxis * ProbesPerAxis * ProbesPerAxis;
+
     public const int ProbeBudget = 256;
 
     private const int LitPoolTexels = 2048;
+
     private const int LitCardTexels = GpuCard.MaxTexels / 2;
+
     private const int LitSlotWidth = LitCardTexels * 3;
+
     private const int LitSlotHeight = LitCardTexels * 2;
+
     private const int LitSlots = LitPoolTexels / LitSlotWidth * (LitPoolTexels / LitSlotHeight);
+
     private const int LitTileTexels = 8;
+
     private const int LitRadiosityTexels = LitPoolTexels / LitTileTexels;
+
     private const int LitLightsPerSlot = 64;
+
     private const int MaxSlotsPerFrame = 8;
+
     private const int ProbeStateBytes = 16;
+
     private const int ScreenProbeBytes = 48;
+
     private const int AssignPeriod = 16;
+
     private const int ProbeTexels = 16;
+
     private const int ProbeIrradianceTexels = 8;
+
     private const int ProbesPerAtlasRow = 64;
+
     private const int ScreenTile = 8;
+
     private const int ScreenTexels = 8;
+
     private const int Threads = 64;
+
     private const float FinestSpacing = 1;
+
     private const float RayRange = 64;
 
+    private readonly GpuPass _cardLightsPass = pipelines.Compute("GI: list card lights", "LitCards", "LitCardLights");
+
+    private readonly GpuPass _cardRadiosityPass = pipelines.Compute(
+        "GI: card radiosity",
+        "LitCards",
+        "LitCardRadiosity",
+        PassShaders.Atmosphere | PassShaders.Tracer
+    );
+
+    private readonly GpuPass _lightCardsPass = pipelines.Compute(
+        "GI: light cards",
+        "LitCards",
+        "LitCardShade",
+        PassShaders.Atmosphere
+    );
+
+    private readonly GpuPass _scrollProbesPass = pipelines.Compute(
+        "GI: scroll probes",
+        "WorldProbes",
+        "WorldProbeScroll"
+    );
+
+    private readonly GpuPass _selectProbesPass = pipelines.Compute(
+        "GI: select probes",
+        "WorldProbes",
+        "WorldProbeSelect"
+    );
+
+    private readonly GpuPass _traceProbesPass = pipelines.Compute(
+        "GI: trace probes",
+        "WorldProbes",
+        "WorldProbeTrace",
+        PassShaders.Atmosphere | PassShaders.Tracer
+    );
+
+    private readonly GpuPass _placeScreenProbesPass = pipelines.Compute(
+        "GI: place screen probes",
+        "ScreenProbes",
+        "ScreenProbePlace"
+    );
+
+    private readonly GpuPass _traceScreenProbesPass = pipelines.Compute(
+        "GI: trace screen probes",
+        "ScreenProbes",
+        "ScreenProbeTrace",
+        PassShaders.Atmosphere | PassShaders.Tracer
+    );
+
+    private readonly GpuPass _reprojectScreenProbesPass = pipelines.Compute(
+        "GI: reproject screen probes",
+        "ScreenProbes",
+        "ScreenProbeTemporal"
+    );
+
+    private readonly GpuPass _occlusionPass = pipelines.Compute("GI: occlusion", "Occlusion", "Occlusion");
+
+    private readonly GpuPass _blurOcclusionPass = pipelines.Compute("GI: blur occlusion", "Occlusion", "OcclusionBlur");
+
+    private readonly GpuPass _filterScreenProbesPass = pipelines.Compute(
+        "GI: filter screen probes",
+        "ScreenProbes",
+        "ScreenProbeFilter"
+    );
+
+    private readonly GpuPass _traceReflectionsPass = pipelines.Compute(
+        "Reflections: trace",
+        "Reflections",
+        "ReflectionTrace",
+        PassShaders.Atmosphere | PassShaders.Tracer
+    );
+
+    private readonly GpuPass _resolveReflectionsPass = pipelines.Compute(
+        "Reflections: resolve",
+        "Reflections",
+        "ReflectionResolve"
+    );
+
+    private readonly GpuPass _reprojectReflectionsPass = pipelines.Compute(
+        "Reflections: reproject",
+        "Reflections",
+        "ReflectionTemporal"
+    );
+
     private readonly uint[] _slotOfInstance = new uint[InstanceTable.Capacity];
+
     private readonly GpuLitSlot[] _slots = new GpuLitSlot[LitSlots];
+
     private readonly bool[] _isSlotUsed = new bool[LitSlots];
+
     private readonly bool[] _isWanted = new bool[InstanceTable.Capacity];
+
     private readonly Stack<int> _freeSlots = new();
+
     private readonly Queue<uint> _pendingSlots = new();
+
     private readonly List<(float Importance, int Index)> _candidates = [];
+
     private readonly uint[] _batch = new uint[MaxSlotsPerFrame];
+
     private int _slotsPerFrame = MaxSlotsPerFrame;
+
     private bool _hasReflections = true;
+
     private int _reflectionStride = 1;
+
     private readonly GpuTexture[] _screenFiltered = new GpuTexture[2];
+
     private readonly GpuTexture[] _reflections = new GpuTexture[2];
+
     private GpuTexture _reflectionTraced;
+
     private GpuTexture _reflectionResolved;
+
     private GpuTexture _occlusionRaw;
+
     private GpuTexture _occlusion;
+
     private readonly GpuBuffer[] _screenProbes = new GpuBuffer[2];
+
     private GpuTexture _litPool;
+
     private GpuTexture _radiosity;
+
     private GpuTexture _probeRadiance;
+
     private GpuTexture _probeDistance;
+
     private GpuTexture _probeIrradiance;
+
     private GpuTexture _screenRadiance;
+
     private GpuBuffer _litSlots;
+
     private GpuBuffer _slotInstances;
+
     private GpuBuffer _slotBatch;
+
     private GpuBuffer _slotLights;
+
     private GpuBuffer _probeStates;
+
     private GpuBuffer _probeList;
+
     private GpuBuffer _screenIrradiance;
+
     private int _screenProbesX;
+
     private int _screenProbesY;
+
     private int _current;
+
     private int _batchCount;
+
     private int _cursor;
+
     private uint _framesSinceAssigned = AssignPeriod;
+
     private bool _areSlotsDirty = true;
+
     private bool _isTableReady;
 
     public GpuBuffer Constants { get; private set; }
@@ -422,7 +565,6 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
     /// </summary>
     public void Record(
         RenderGraph graph,
-        RendererPipelines pipelines,
         GpuBuffer frameConstants,
         GpuBuffer instances,
         GpuBuffer visibleClusters,
@@ -439,242 +581,188 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu) : IDisposable
         if (_batchCount > 0)
         {
             uint batchCards = (uint)(_batchCount * GpuCard.PerCapture);
-            graph.BeginComputePass("GI: list card lights");
-            graph.Use(frameConstants, GpuAccess.ShaderRead);
-            graph.Use(Constants, GpuAccess.ShaderRead);
-            graph.Use(instances, GpuAccess.ShaderRead);
-            graph.Use(_slotBatch, GpuAccess.ShaderRead);
-            graph.Use(_slotInstances, GpuAccess.ShaderRead);
-            graph.Use(_slotLights, GpuAccess.ShaderWrite);
+            GpuPassRun cardLightsRun = _cardLightsPass
+                .Run(graph, header)
+                .Reads(frameConstants, Constants, instances, _slotBatch, _slotInstances)
+                .Writes(_slotLights);
             lighting.UseForCards(graph);
-            graph.Recorder.BindPipeline(pipelines.LitCardLights);
-            graph.Recorder.PushConstants(header);
-            graph.Recorder.Dispatch((uint)_batchCount);
-            graph.EndPass();
+            cardLightsRun.Dispatch((uint)_batchCount);
 
-            graph.BeginComputePass("GI: card radiosity");
-            graph.Use(frameConstants, GpuAccess.ShaderRead);
-            graph.Use(Constants, GpuAccess.ShaderRead);
-            graph.Use(instances, GpuAccess.ShaderRead);
-            graph.Use(_slotBatch, GpuAccess.ShaderRead);
-            graph.Use(_slotInstances, GpuAccess.ShaderRead);
-            graph.Use(_radiosity, GpuAccess.ShaderWrite);
+            GpuPassRun cardRadiosityRun = _cardRadiosityPass
+                .Run(graph, header, usesRayQuery: usesRayQuery)
+                .Reads(frameConstants, Constants, instances, _slotBatch, _slotInstances)
+                .Writes(_radiosity);
             UseForCards(graph);
             UseProbes(graph);
             cards.UseForReading(graph);
             field.UseForSampling(graph);
             lighting.UseForCards(graph);
             translucency.UseForSampling(graph);
-            graph.Recorder.BindPipeline(usesRayQuery ? pipelines.LitCardRadiosityRayQuery : pipelines.LitCardRadiosity);
-            graph.Recorder.PushConstants(header);
-            graph.Recorder.Dispatch(LitCardTexels / LitTileTexels, LitCardTexels / LitTileTexels, batchCards);
-            graph.EndPass();
+            cardRadiosityRun.Dispatch(LitCardTexels / LitTileTexels, LitCardTexels / LitTileTexels, batchCards);
 
-            graph.BeginComputePass("GI: light cards");
-            graph.Use(frameConstants, GpuAccess.ShaderRead);
-            graph.Use(Constants, GpuAccess.ShaderRead);
-            graph.Use(instances, GpuAccess.ShaderRead);
-            graph.Use(_slotBatch, GpuAccess.ShaderRead);
-            graph.Use(_slotInstances, GpuAccess.ShaderRead);
-            graph.Use(_slotLights, GpuAccess.ShaderRead);
-            graph.Use(_radiosity, GpuAccess.ShaderRead);
-            graph.Use(_litPool, GpuAccess.ShaderWrite);
+            GpuPassRun lightCardsRun = _lightCardsPass
+                .Run(graph, header)
+                .Reads(frameConstants, Constants, instances, _slotBatch, _slotInstances, _slotLights, _radiosity)
+                .Writes(_litPool);
             cards.UseForReading(graph);
             shadows.UseForSampling(graph);
             lighting.UseForCards(graph);
             translucency.UseForSampling(graph);
-            graph.Recorder.BindPipeline(pipelines.LitCardShade);
-            graph.Recorder.PushConstants(header);
-            graph.Recorder.Dispatch(Groups(LitCardTexels, 8), Groups(LitCardTexels, 8), batchCards);
-            graph.EndPass();
+            lightCardsRun.Dispatch(Groups(LitCardTexels, 8), Groups(LitCardTexels, 8), batchCards);
         }
 
         int cells = ProbeLevels * ProbesPerLevel;
-        graph.BeginComputePass("GI: scroll probes");
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(lighting.Constants, GpuAccess.ShaderRead);
-        graph.Use(_probeStates, GpuAccess.ShaderWrite);
-        graph.Use(_probeList, GpuAccess.ShaderWrite);
-        graph.Recorder.BindPipeline(pipelines.WorldProbeScroll);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(Groups(cells));
-        graph.EndPass();
+        _scrollProbesPass
+            .Run(graph, header)
+            .Reads(Constants, lighting.Constants)
+            .Writes(_probeStates, _probeList)
+            .Dispatch(Groups(cells));
 
-        graph.BeginComputePass("GI: select probes");
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(lighting.Constants, GpuAccess.ShaderRead);
-        graph.Use(_probeStates, GpuAccess.ShaderWrite);
-        graph.Use(_probeList, GpuAccess.ShaderWrite);
+        GpuPassRun selectProbesRun = _selectProbesPass
+            .Run(graph, header)
+            .Reads(Constants, lighting.Constants)
+            .Writes(_probeStates, _probeList);
         field.UseForChanges(graph);
-        graph.Recorder.BindPipeline(pipelines.WorldProbeSelect);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(Groups(cells));
-        graph.EndPass();
+        selectProbesRun.Dispatch(Groups(cells));
 
-        graph.BeginComputePass("GI: trace probes");
-        graph.Use(frameConstants, GpuAccess.ShaderRead);
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(instances, GpuAccess.ShaderRead);
-        graph.Use(_probeList, GpuAccess.ShaderRead);
-        graph.Use(_probeStates, GpuAccess.ShaderWrite);
-        graph.Use(_probeRadiance, GpuAccess.ShaderWrite);
-        graph.Use(_probeDistance, GpuAccess.ShaderWrite);
-        graph.Use(_probeIrradiance, GpuAccess.ShaderWrite);
+        GpuPassRun traceProbesRun = _traceProbesPass
+            .Run(graph, header, usesRayQuery: usesRayQuery)
+            .Reads(frameConstants, Constants, instances, _probeList)
+            .Writes(_probeStates, _probeRadiance, _probeDistance, _probeIrradiance);
         UseForCards(graph);
         cards.UseForReading(graph);
         field.UseForSampling(graph);
         lighting.UseForCards(graph);
         translucency.UseForSampling(graph);
-        graph.Recorder.BindPipeline(usesRayQuery ? pipelines.WorldProbeTraceRayQuery : pipelines.WorldProbeTrace);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(ProbeBudget);
-        graph.EndPass();
+        traceProbesRun.Dispatch(ProbeBudget);
 
         int probeCount = _screenProbesX * _screenProbesY;
-        graph.BeginComputePass("GI: place screen probes");
-        graph.Use(frameConstants, GpuAccess.ShaderRead);
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(lighting.Constants, GpuAccess.ShaderRead);
-        graph.Use(targets.Visibility, GpuAccess.ShaderRead);
-        graph.Use(targets.Depth, GpuAccess.ShaderRead);
-        graph.Use(targets.GBufferNormal, GpuAccess.ShaderRead);
-        graph.Use(targets.Velocity, GpuAccess.ShaderRead);
-        graph.Use(_screenProbes[_current], GpuAccess.ShaderWrite);
-        graph.Recorder.BindPipeline(pipelines.ScreenProbePlace);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(Groups(_screenProbesX, 8), Groups(_screenProbesY, 8));
-        graph.EndPass();
+        _placeScreenProbesPass
+            .Run(graph, header)
+            .Reads(
+                frameConstants,
+                Constants,
+                lighting.Constants,
+                targets.Visibility,
+                targets.Depth,
+                targets.GBufferNormal,
+                targets.Velocity
+            )
+            .Writes(_screenProbes[_current])
+            .Dispatch(Groups(_screenProbesX, 8), Groups(_screenProbesY, 8));
 
-        graph.BeginComputePass("GI: trace screen probes");
-        graph.Use(frameConstants, GpuAccess.ShaderRead);
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(instances, GpuAccess.ShaderRead);
-        graph.Use(visibleClusters, GpuAccess.ShaderRead);
-        graph.Use(targets.Visibility, GpuAccess.ShaderRead);
-        graph.Use(targets.Depth, GpuAccess.ShaderRead);
-        graph.Use(targets.GBufferNormal, GpuAccess.ShaderRead);
-        graph.Use(targets.Hzb, GpuAccess.ShaderRead, 0);
-        graph.Use(_screenProbes[_current], GpuAccess.ShaderRead);
-        graph.Use(_screenRadiance, GpuAccess.ShaderWrite);
+        GpuPassRun traceScreenProbesRun = _traceScreenProbesPass
+            .Run(graph, header, usesRayQuery: usesRayQuery)
+            .Reads(
+                frameConstants,
+                Constants,
+                instances,
+                visibleClusters,
+                targets.Visibility,
+                targets.Depth,
+                targets.GBufferNormal
+            )
+            .Reads(targets.Hzb, 0)
+            .Reads(_screenProbes[_current])
+            .Writes(_screenRadiance);
         UseForCards(graph);
         UseProbes(graph);
         cards.UseForReading(graph);
         field.UseForSampling(graph);
         lighting.UseForCards(graph);
         translucency.UseForSampling(graph);
-        graph.Recorder.BindPipeline(usesRayQuery ? pipelines.ScreenProbeTraceRayQuery : pipelines.ScreenProbeTrace);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch((uint)probeCount);
-        graph.EndPass();
+        traceScreenProbesRun.Dispatch((uint)probeCount);
 
-        graph.BeginComputePass("GI: reproject screen probes");
-        graph.Use(frameConstants, GpuAccess.ShaderRead);
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(lighting.Constants, GpuAccess.ShaderRead);
-        graph.Use(_screenProbes[_current], GpuAccess.ShaderRead);
-        graph.Use(_screenProbes[1 - _current], GpuAccess.ShaderRead);
-        graph.Use(_screenFiltered[1 - _current], GpuAccess.ShaderRead);
-        graph.Use(_screenRadiance, GpuAccess.ShaderWrite);
-        graph.Recorder.BindPipeline(pipelines.ScreenProbeTemporal);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(Groups(_screenProbesX * ScreenTexels, 8), Groups(_screenProbesY * ScreenTexels, 8));
-        graph.EndPass();
+        _reprojectScreenProbesPass
+            .Run(graph, header)
+            .Reads(
+                frameConstants,
+                Constants,
+                lighting.Constants,
+                _screenProbes[_current],
+                _screenProbes[1 - _current],
+                _screenFiltered[1 - _current]
+            )
+            .Writes(_screenRadiance)
+            .Dispatch(Groups(_screenProbesX * ScreenTexels, 8), Groups(_screenProbesY * ScreenTexels, 8));
 
-        graph.BeginComputePass("GI: occlusion");
-        graph.Use(frameConstants, GpuAccess.ShaderRead);
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(lighting.Constants, GpuAccess.ShaderRead);
-        graph.Use(targets.Depth, GpuAccess.ShaderRead);
-        graph.Use(targets.GBufferNormal, GpuAccess.ShaderRead);
-        graph.Use(_occlusionRaw, GpuAccess.ShaderWrite);
-        graph.Recorder.BindPipeline(pipelines.Occlusion);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(Groups(targets.Width, 8), Groups(targets.Height, 8));
-        graph.EndPass();
+        _occlusionPass
+            .Run(graph, header)
+            .Reads(frameConstants, Constants, lighting.Constants, targets.Depth, targets.GBufferNormal)
+            .Writes(_occlusionRaw)
+            .Dispatch(Groups(targets.Width, 8), Groups(targets.Height, 8));
 
-        graph.BeginComputePass("GI: blur occlusion");
-        graph.Use(frameConstants, GpuAccess.ShaderRead);
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(lighting.Constants, GpuAccess.ShaderRead);
-        graph.Use(targets.Depth, GpuAccess.ShaderRead);
-        graph.Use(_occlusionRaw, GpuAccess.ShaderRead);
-        graph.Use(_occlusion, GpuAccess.ShaderWrite);
-        graph.Recorder.BindPipeline(pipelines.OcclusionBlur);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(Groups(targets.Width, 8), Groups(targets.Height, 8));
-        graph.EndPass();
+        _blurOcclusionPass
+            .Run(graph, header)
+            .Reads(frameConstants, Constants, lighting.Constants, targets.Depth, _occlusionRaw)
+            .Writes(_occlusion)
+            .Dispatch(Groups(targets.Width, 8), Groups(targets.Height, 8));
 
-        graph.BeginComputePass("GI: filter screen probes");
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(lighting.Constants, GpuAccess.ShaderRead);
-        graph.Use(_screenProbes[_current], GpuAccess.ShaderRead);
-        graph.Use(_screenRadiance, GpuAccess.ShaderRead);
-        graph.Use(_screenFiltered[_current], GpuAccess.ShaderWrite);
-        graph.Use(_screenIrradiance, GpuAccess.ShaderWrite);
-        graph.Recorder.BindPipeline(pipelines.ScreenProbeFilter);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch((uint)probeCount);
-        graph.EndPass();
+        _filterScreenProbesPass
+            .Run(graph, header)
+            .Reads(Constants, lighting.Constants, _screenProbes[_current], _screenRadiance)
+            .Writes(_screenFiltered[_current], _screenIrradiance)
+            .Dispatch((uint)probeCount);
 
         if (!_hasReflections)
             return;
 
-        graph.BeginComputePass("Reflections: trace");
-        graph.Use(frameConstants, GpuAccess.ShaderRead);
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(instances, GpuAccess.ShaderRead);
-        graph.Use(visibleClusters, GpuAccess.ShaderRead);
-        graph.Use(targets.Visibility, GpuAccess.ShaderRead);
-        graph.Use(targets.Depth, GpuAccess.ShaderRead);
-        graph.Use(targets.GBufferNormal, GpuAccess.ShaderRead);
-        graph.Use(targets.GBufferSurface, GpuAccess.ShaderRead);
-        graph.Use(targets.Hzb, GpuAccess.ShaderRead, 0);
-        graph.Use(_reflectionTraced, GpuAccess.ShaderWrite);
+        GpuPassRun traceReflectionsRun = _traceReflectionsPass
+            .Run(graph, header, usesRayQuery: usesRayQuery)
+            .Reads(
+                frameConstants,
+                Constants,
+                instances,
+                visibleClusters,
+                targets.Visibility,
+                targets.Depth,
+                targets.GBufferNormal,
+                targets.GBufferSurface
+            )
+            .Reads(targets.Hzb, 0)
+            .Writes(_reflectionTraced);
         UseForCards(graph);
         UseProbes(graph);
         cards.UseForReading(graph);
         field.UseForSampling(graph);
         lighting.UseForCards(graph);
         translucency.UseForSampling(graph);
-        graph.Recorder.BindPipeline(usesRayQuery ? pipelines.ReflectionTraceRayQuery : pipelines.ReflectionTrace);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(
+        traceReflectionsRun.Dispatch(
             Groups((targets.Width + _reflectionStride - 1) / _reflectionStride, 8),
             Groups((targets.Height + _reflectionStride - 1) / _reflectionStride, 8)
         );
-        graph.EndPass();
 
-        graph.BeginComputePass("Reflections: resolve");
-        graph.Use(frameConstants, GpuAccess.ShaderRead);
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(lighting.Constants, GpuAccess.ShaderRead);
-        graph.Use(targets.Visibility, GpuAccess.ShaderRead);
-        graph.Use(targets.Depth, GpuAccess.ShaderRead);
-        graph.Use(targets.GBufferNormal, GpuAccess.ShaderRead);
-        graph.Use(targets.GBufferSurface, GpuAccess.ShaderRead);
-        graph.Use(_reflectionTraced, GpuAccess.ShaderRead);
-        graph.Use(_reflectionResolved, GpuAccess.ShaderWrite);
-        graph.Recorder.BindPipeline(pipelines.ReflectionResolve);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(Groups(targets.Width, 8), Groups(targets.Height, 8));
-        graph.EndPass();
+        _resolveReflectionsPass
+            .Run(graph, header)
+            .Reads(
+                frameConstants,
+                Constants,
+                lighting.Constants,
+                targets.Visibility,
+                targets.Depth,
+                targets.GBufferNormal,
+                targets.GBufferSurface,
+                _reflectionTraced
+            )
+            .Writes(_reflectionResolved)
+            .Dispatch(Groups(targets.Width, 8), Groups(targets.Height, 8));
 
-        graph.BeginComputePass("Reflections: reproject");
-        graph.Use(frameConstants, GpuAccess.ShaderRead);
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(lighting.Constants, GpuAccess.ShaderRead);
-        graph.Use(targets.Visibility, GpuAccess.ShaderRead);
-        graph.Use(targets.Depth, GpuAccess.ShaderRead);
-        graph.Use(targets.GBufferNormal, GpuAccess.ShaderRead);
-        graph.Use(targets.GBufferSurface, GpuAccess.ShaderRead);
-        graph.Use(targets.Velocity, GpuAccess.ShaderRead);
-        graph.Use(_reflectionResolved, GpuAccess.ShaderRead);
-        graph.Use(_reflections[1 - _current], GpuAccess.ShaderRead);
-        graph.Use(_reflections[_current], GpuAccess.ShaderWrite);
-        graph.Recorder.BindPipeline(pipelines.ReflectionTemporal);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(Groups(targets.Width, 8), Groups(targets.Height, 8));
-        graph.EndPass();
+        _reprojectReflectionsPass
+            .Run(graph, header)
+            .Reads(
+                frameConstants,
+                Constants,
+                lighting.Constants,
+                targets.Visibility,
+                targets.Depth,
+                targets.GBufferNormal,
+                targets.GBufferSurface,
+                targets.Velocity,
+                _reflectionResolved,
+                _reflections[1 - _current]
+            )
+            .Writes(_reflections[_current])
+            .Dispatch(Groups(targets.Width, 8), Groups(targets.Height, 8));
     }
 
     /// <summary>

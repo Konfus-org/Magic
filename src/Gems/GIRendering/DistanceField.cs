@@ -15,42 +15,84 @@ namespace GIRendering;
 /// an instance moved through are listed, the instances over each listed, and the bricks made again from those
 /// instances' fields. A still world updates nothing.
 /// </summary>
-internal sealed class DistanceField(IGraphicsApi gpu) : IDisposable
+internal sealed class DistanceField(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposable
 {
     public const int Levels = 4;
+
     public const int Voxels = 128;
+
     public const int BrickVoxels = 8;
+
     public const int Bricks = Voxels / BrickVoxels;
+
     public const int BricksPerLevel = Bricks * Bricks * Bricks;
+
     public const int InstancesPerBrick = 64;
+
     public const int AtlasVoxels = 384;
+
     public const int ModelVoxels = MeshDerived.FieldSize;
+
     public const int SlotsPerRow = AtlasVoxels / ModelVoxels;
+
     public const int ModelSlots = SlotsPerRow * SlotsPerRow * SlotsPerRow;
+
     public const int MaxDirtyBricks = 4096;
+
     public const float FinestVoxel = 0.125f;
 
     private const int CountsBytes = 64;
+
     private const int DirtyArgumentsBytes = 12;
+
     private const int Threads = 64;
+
     private const int ListGroupsPerRow = 65535;
 
+    private readonly GpuPass _writeModelPass = pipelines.Compute("Field: write model", "Field", "FieldWriteModel");
+
+    private readonly GpuPass _scrollPass = pipelines.Compute("Field: scroll", "Field", "FieldScroll");
+
+    private readonly GpuPass _invalidatePass = pipelines.Compute("Field: invalidate", "Field", "FieldInvalidate");
+
+    private readonly GpuPass _collectPass = pipelines.Compute("Field: collect", "Field", "FieldCollect");
+
+    private readonly GpuPass _listPass = pipelines.Compute("Field: list instances", "Field", "FieldList");
+
+    private readonly GpuPass _updatePass = pipelines.Compute("Field: update bricks", "Field", "FieldUpdate");
+
     private readonly GpuTexture[] _clipmaps = new GpuTexture[Levels];
+
     private readonly List<(MeshDerived Derived, uint Slot)> _arrived = [];
+
     private GpuTexture _atlas;
+
     private GpuBuffer _modelFields;
+
     private GpuBuffer _bricks;
+
     private GpuBuffer _lists;
+
     private GpuBuffer _dirtyBricks;
+
     private GpuBuffer _counts;
+
     private GpuBuffer _dirtyArguments;
+
     private GpuBuffer _dirtyInstances;
+
     private GpuBuffer _modelBytes;
+
     private GpuSampler _sampler;
+
     private int _slotCount;
+
     private int _dirtyInstanceCount;
+
     private int _instanceCount;
+
     private bool _isFullLogged;
+
     private bool _isTableReady;
 
     public GpuBuffer Constants { get; private set; }
@@ -178,7 +220,6 @@ internal sealed class DistanceField(IGraphicsApi gpu) : IDisposable
     /// </summary>
     public void Prepare(
         RenderGraph graph,
-        RendererPipelines pipelines,
         GpuBuffer frameConstants,
         Vector3 cameraPosition,
         ReadOnlySpan<DirtyInstance> dirty,
@@ -278,15 +319,15 @@ internal sealed class DistanceField(IGraphicsApi gpu) : IDisposable
             graph.Use(_modelBytes, GpuAccess.CopyDestination);
             graph.Recorder.CopyBuffer(bytes.Buffer, bytes.Offset, _modelBytes, 0, (ulong)derived.Field.Length);
             graph.EndPass();
-            graph.BeginComputePass($"Field: write model {slot}");
-            graph.Use(frameConstants, GpuAccess.ShaderRead);
-            graph.Use(Constants, GpuAccess.ShaderRead);
-            graph.Use(_modelBytes, GpuAccess.ShaderRead);
-            graph.Use(_atlas, GpuAccess.ShaderWrite);
-            graph.Recorder.BindPipeline(pipelines.FieldWriteModel);
-            graph.Recorder.PushConstants(new GpuConstants(frameConstants.Id, _modelBytes.Id, slot, Constants.Id));
-            graph.Recorder.Dispatch(ModelVoxels / 8, ModelVoxels / 8, ModelVoxels / 8);
-            graph.EndPass();
+            _writeModelPass
+                .Run(
+                    graph,
+                    new GpuConstants(frameConstants.Id, _modelBytes.Id, slot, Constants.Id),
+                    name: $"Field: write model {slot}"
+                )
+                .Reads(frameConstants, Constants, _modelBytes)
+                .Writes(_atlas)
+                .Dispatch(ModelVoxels / 8, ModelVoxels / 8, ModelVoxels / 8);
             Log.Verbose($"The field atlas took a model in slot {slot}.");
         }
 
@@ -297,79 +338,49 @@ internal sealed class DistanceField(IGraphicsApi gpu) : IDisposable
     /// <summary>
     /// The clipmaps brought up to date, after the frame's instances are uploaded.
     /// </summary>
-    public void Record(RenderGraph graph, RendererPipelines pipelines, GpuBuffer frameConstants, GpuBuffer instances)
+    public void Record(RenderGraph graph, GpuBuffer frameConstants, GpuBuffer instances)
     {
         GpuConstants header = new(frameConstants.Id, 0, 0, Constants.Id);
         int cells = Levels * BricksPerLevel;
 
-        graph.BeginComputePass("Field: scroll");
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(_bricks, GpuAccess.ShaderWrite);
-        graph.Recorder.BindPipeline(pipelines.FieldScroll);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(Groups(cells));
-        graph.EndPass();
+        _scrollPass.Run(graph, header).Reads(Constants).Writes(_bricks).Dispatch(Groups(cells));
 
         if (_dirtyInstanceCount > 0)
         {
-            graph.BeginComputePass("Field: invalidate");
-            graph.Use(Constants, GpuAccess.ShaderRead);
-            graph.Use(_dirtyInstances, GpuAccess.ShaderRead);
-            graph.Use(_bricks, GpuAccess.ShaderWrite);
-            graph.Recorder.BindPipeline(pipelines.FieldInvalidate);
-            graph.Recorder.PushConstants(header);
-            graph.Recorder.Dispatch(Groups(_dirtyInstanceCount));
-            graph.EndPass();
+            _invalidatePass
+                .Run(graph, header)
+                .Reads(Constants, _dirtyInstances)
+                .Writes(_bricks)
+                .Dispatch(Groups(_dirtyInstanceCount));
         }
 
-        graph.BeginComputePass("Field: collect");
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(_bricks, GpuAccess.ShaderRead);
-        graph.Use(_dirtyBricks, GpuAccess.ShaderWrite);
-        graph.Use(_lists, GpuAccess.ShaderWrite);
-        graph.Use(_counts, GpuAccess.ShaderWrite);
-        graph.Use(_dirtyArguments, GpuAccess.ShaderWrite);
-        graph.Recorder.BindPipeline(pipelines.FieldCollect);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(Groups(cells));
-        graph.EndPass();
+        _collectPass
+            .Run(graph, header)
+            .Reads(Constants, _bricks)
+            .Writes(_dirtyBricks, _lists, _counts, _dirtyArguments)
+            .Dispatch(Groups(cells));
 
         if (_instanceCount > 0)
         {
-            graph.BeginComputePass("Field: list instances");
-            graph.Use(frameConstants, GpuAccess.ShaderRead);
-            graph.Use(Constants, GpuAccess.ShaderRead);
-            graph.Use(instances, GpuAccess.ShaderRead);
-            graph.Use(_bricks, GpuAccess.ShaderRead);
-            graph.Use(_lists, GpuAccess.ShaderWrite);
-            graph.Recorder.BindPipeline(pipelines.FieldList);
-            graph.Recorder.PushConstants(header);
+            GpuPassRun listRun = _listPass
+                .Run(graph, header)
+                .Reads(frameConstants, Constants, instances, _bricks)
+                .Writes(_lists);
             int groups = (int)Groups(_instanceCount);
             int rows = (groups + ListGroupsPerRow - 1) / ListGroupsPerRow;
-            graph.Recorder.Dispatch((uint)Math.Min(groups, ListGroupsPerRow), (uint)rows);
-            graph.EndPass();
+            listRun.Dispatch((uint)Math.Min(groups, ListGroupsPerRow), (uint)rows);
         }
 
-        graph.BeginComputePass("Field: update bricks");
-        graph.Use(frameConstants, GpuAccess.ShaderRead);
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(instances, GpuAccess.ShaderRead);
-        graph.Use(_modelFields, GpuAccess.ShaderRead);
-        graph.Use(_atlas, GpuAccess.ShaderRead);
-        graph.Use(_lists, GpuAccess.ShaderRead);
-        graph.Use(_dirtyBricks, GpuAccess.ShaderRead);
-        graph.Use(_counts, GpuAccess.ShaderRead);
-        graph.Use(_bricks, GpuAccess.ShaderWrite);
+        GpuPassRun updateRun = _updatePass
+            .Run(graph, header)
+            .Reads(frameConstants, Constants, instances, _modelFields, _atlas, _lists, _dirtyBricks, _counts)
+            .Writes(_bricks);
         foreach (GpuTexture clipmap in _clipmaps)
         {
-            graph.Use(clipmap, GpuAccess.ShaderWrite);
+            updateRun.Writes(clipmap);
         }
 
-        graph.Use(_dirtyArguments, GpuAccess.Indirect);
-        graph.Recorder.BindPipeline(pipelines.FieldUpdate);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.DispatchIndirect(_dirtyArguments, 0);
-        graph.EndPass();
+        updateRun.Indirect(_dirtyArguments).DispatchIndirect(_dirtyArguments, 0);
     }
 
     /// <summary>

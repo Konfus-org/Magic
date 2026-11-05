@@ -13,19 +13,75 @@ namespace GIRendering;
 /// view; the moments of their depths and their light, drawn after the lighting over the opaque depth, that the
 /// tonemap composes over the picture; and the list of translucent instances the rays cross.
 /// </summary>
-internal sealed class Translucency(IGraphicsApi gpu) : IDisposable
+internal sealed class Translucency(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposable
 {
     public const int GlassMax = 64;
 
     private const int ShadowTexels = 1024;
+
     private const float ShadowHalfExtent = 32;
+
     private const float MomentsNear = 0.1f;
+
     private const float MomentsFar = 500;
 
+    private readonly GpuPass _glassShadowPass = pipelines.Draw(
+        "Glass shadow",
+        "DrawTranslucent",
+        "GlassShadowVertex",
+        "GlassShadowPixel",
+        state =>
+            state with
+            {
+                ColorFormats = [GpuFormat.R16G16B16A16Sfloat],
+                Blend = BlendMode.Multiply,
+                Cull = CullMode.None,
+            },
+        PassShaders.Glass
+    );
+
+    private readonly GpuPass _momentsPass = pipelines.Draw(
+        "Translucent: moments",
+        "DrawTranslucent",
+        "DrawTranslucentVertex",
+        "TranslucentMomentsPixel",
+        state =>
+            state with
+            {
+                ColorFormats = [GpuFormat.R16G16B16A16Sfloat, GpuFormat.R16G16B16A16Sfloat],
+                DepthFormat = GpuFormat.D32Sfloat,
+                Depth = DepthMode.TestOnly,
+                Blend = BlendMode.Additive,
+                Cull = CullMode.None,
+            },
+        PassShaders.Glass
+    );
+
+    private readonly GpuPass _resolvePass = pipelines.Draw(
+        "Translucent: resolve",
+        "DrawTranslucent",
+        "DrawTranslucentVertex",
+        "TranslucentResolvePixel",
+        state =>
+            state with
+            {
+                ColorFormats = [GpuFormat.R16G16B16A16Sfloat, GpuFormat.R16G16Sfloat],
+                DepthFormat = GpuFormat.D32Sfloat,
+                Depth = DepthMode.TestOnly,
+                Blend = BlendMode.Additive,
+                Cull = CullMode.None,
+            },
+        PassShaders.Glass | PassShaders.Atmosphere
+    );
+
     private readonly GpuGlass[] _glass = new GpuGlass[GlassMax];
+
     private GpuTexture _glassShadow;
+
     private GpuBuffer _glassList;
+
     private GpuSampler _sampler;
+
     private int _glassCount;
 
     public GpuBuffer Constants { get; private set; }
@@ -176,10 +232,11 @@ internal sealed class Translucency(IGraphicsApi gpu) : IDisposable
     /// <summary>
     /// The glass shadow drawn, after the cull: what the lighting and the cards read the sun through.
     /// </summary>
-    public void RecordShadow(RenderGraph graph, RendererPipelines pipelines, in DrawList draws)
+    public void RecordShadow(RenderGraph graph, in DrawList draws)
     {
-        graph.BeginDrawPass(
-            "Glass shadow",
+        GpuPassRun glassShadowRun = _glassShadowPass.Run(
+            graph,
+            draws.Header,
             new GpuRenderTargets
             {
                 Colors =
@@ -194,9 +251,7 @@ internal sealed class Translucency(IGraphicsApi gpu) : IDisposable
             }
         );
         UseDraws(graph, draws);
-        graph.Recorder.BindPipeline(pipelines.GlassShadow);
-        graph.Recorder.PushConstants(draws.Header);
-        graph.Recorder.DrawIndirectCount(
+        glassShadowRun.DrawIndirectCount(
             draws.Arguments,
             draws.ArgumentsOffset,
             draws.Counts,
@@ -204,7 +259,6 @@ internal sealed class Translucency(IGraphicsApi gpu) : IDisposable
             draws.MaxDraws,
             draws.ArgumentsStride
         );
-        graph.EndPass();
     }
 
     /// <summary>
@@ -212,7 +266,6 @@ internal sealed class Translucency(IGraphicsApi gpu) : IDisposable
     /// </summary>
     public void RecordDraws(
         RenderGraph graph,
-        RendererPipelines pipelines,
         in DrawList draws,
         FrameTargets targets,
         SunShadows shadows,
@@ -220,8 +273,9 @@ internal sealed class Translucency(IGraphicsApi gpu) : IDisposable
         GlobalIllumination gi
     )
     {
-        graph.BeginDrawPass(
-            "Translucent: moments",
+        GpuPassRun momentsRun = _momentsPass.Run(
+            graph,
+            draws.Header,
             new GpuRenderTargets
             {
                 Colors =
@@ -233,21 +287,20 @@ internal sealed class Translucency(IGraphicsApi gpu) : IDisposable
             }
         );
         UseDraws(graph, draws);
-        graph.Use(lighting.Constants, GpuAccess.ShaderRead);
-        graph.Recorder.BindPipeline(pipelines.TranslucentMoments);
-        graph.Recorder.PushConstants(draws.Header);
-        graph.Recorder.DrawIndirectCount(
-            draws.Arguments,
-            draws.ArgumentsOffset,
-            draws.Counts,
-            draws.CountOffset,
-            draws.MaxDraws,
-            draws.ArgumentsStride
-        );
-        graph.EndPass();
+        momentsRun
+            .Reads(lighting.Constants)
+            .DrawIndirectCount(
+                draws.Arguments,
+                draws.ArgumentsOffset,
+                draws.Counts,
+                draws.CountOffset,
+                draws.MaxDraws,
+                draws.ArgumentsStride
+            );
 
-        graph.BeginDrawPass(
-            "Translucent: resolve",
+        GpuPassRun resolveRun = _resolvePass.Run(
+            graph,
+            draws.Header,
             new GpuRenderTargets
             {
                 Colors =
@@ -259,15 +312,11 @@ internal sealed class Translucency(IGraphicsApi gpu) : IDisposable
             }
         );
         UseDraws(graph, draws);
-        graph.Use(targets.OpticalDepth, GpuAccess.ShaderRead);
-        graph.Use(targets.Moments, GpuAccess.ShaderRead);
-        graph.Use(_glassShadow, GpuAccess.ShaderRead);
+        resolveRun.Reads(targets.OpticalDepth, targets.Moments, _glassShadow);
         shadows.UseForSampling(graph);
         lighting.UseForShading(graph);
         gi.UseForSampling(graph);
-        graph.Recorder.BindPipeline(pipelines.TranslucentResolve);
-        graph.Recorder.PushConstants(draws.Header);
-        graph.Recorder.DrawIndirectCount(
+        resolveRun.DrawIndirectCount(
             draws.Arguments,
             draws.ArgumentsOffset,
             draws.Counts,
@@ -275,7 +324,6 @@ internal sealed class Translucency(IGraphicsApi gpu) : IDisposable
             draws.MaxDraws,
             draws.ArgumentsStride
         );
-        graph.EndPass();
     }
 
     /// <summary>

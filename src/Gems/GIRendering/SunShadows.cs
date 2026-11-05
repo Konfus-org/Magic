@@ -12,37 +12,106 @@ namespace GIRendering;
 /// that changed invalidate the pages under them, unmarked pages go back to the pool, marked pages without one take
 /// one, and only the invalid pages are cleared and drawn, so a still scene draws no shadow geometry at all.
 /// </summary>
-internal sealed class SunShadows(IGraphicsApi gpu) : IDisposable
+internal sealed class SunShadows(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposable
 {
     public const int Levels = 20;
+
     public const int TableWidth = 128;
+
     public const int PageTexels = 128;
+
     public const int PoolPagesPerRow = 32;
+
     public const int PoolPages = PoolPagesPerRow * PoolPagesPerRow;
+
     public const int PoolTexels = PoolPagesPerRow * PageTexels;
+
     public const int MaxInvalidPages = 2048;
+
     public const int MaxDraws = 1 << 18;
+
     public const float BaseTexel = 8f / 16384;
 
     private const int Cells = Levels * TableWidth * TableWidth;
+
     private const int CountsBytes = 64;
+
     private const int ClearArgumentsBytes = 12;
+
     private const int DrawCountOffset = 4;
+
     private const int DrawArgumentsBytes = 16;
+
     private const int CullThreads = 64;
+
     private const int CullGroupsPerRow = 65535;
 
+    private readonly GpuPass _markPagesPass = pipelines.Compute(
+        "Shadow: mark pages",
+        "ShadowPages",
+        "ShadowMarkPages",
+        isTiled: true
+    );
+
+    private readonly GpuPass _invalidatePagesPass = pipelines.Compute(
+        "Shadow: invalidate pages",
+        "ShadowPages",
+        "ShadowInvalidatePages"
+    );
+
+    private readonly GpuPass _freePagesPass = pipelines.Compute("Shadow: free pages", "ShadowPages", "ShadowFreePages");
+
+    private readonly GpuPass _allocatePagesPass = pipelines.Compute(
+        "Shadow: allocate pages",
+        "ShadowPages",
+        "ShadowAllocatePages"
+    );
+
+    private readonly GpuPass _clearPagesPass = pipelines.Compute(
+        "Shadow: clear pages",
+        "ShadowPages",
+        "ShadowClearPages",
+        isTiled: true
+    );
+
+    private readonly GpuPass _cullPass = pipelines.Compute("Shadow: cull clusters", "ShadowCull", "ShadowCull");
+
+    private readonly GpuPass _drawPagesPass = pipelines.Draw(
+        "Shadow: draw pages",
+        "DrawShadow",
+        "DrawShadowVertex",
+        "DrawShadowPixel",
+        state => state with { Cull = CullMode.None }
+    );
+
+    private readonly GpuPass _finishPagesPass = pipelines.Compute(
+        "Shadow: finish pages",
+        "ShadowPages",
+        "ShadowFinishPages"
+    );
+
     private GpuBuffer _pageTable;
+
     private GpuBuffer _pageRequests;
+
     private GpuBuffer _freeList;
+
     private GpuBuffer _invalidPages;
+
     private GpuBuffer _draws;
+
     private GpuBuffer _drawArguments;
+
     private GpuBuffer _counts;
+
     private GpuBuffer _clearArguments;
+
     private GpuBuffer _dirtyInstances;
+
     private GpuTexture _pool;
+
     private bool _isTableReady;
+
     private int _dirtyCount;
 
     public GpuBuffer Constants { get; private set; }
@@ -247,7 +316,6 @@ internal sealed class SunShadows(IGraphicsApi gpu) : IDisposable
     /// </summary>
     public void Record(
         RenderGraph graph,
-        RendererPipelines pipelines,
         GpuBuffer frameConstants,
         GpuBuffer instances,
         int instanceCount,
@@ -257,104 +325,69 @@ internal sealed class SunShadows(IGraphicsApi gpu) : IDisposable
     {
         GpuConstants header = new(frameConstants.Id, Constants.Id);
 
-        graph.BeginComputePass("Shadow: mark pages");
-        graph.Use(frameConstants, GpuAccess.ShaderRead);
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(targets.Depth, GpuAccess.ShaderRead);
-        graph.Use(_pageRequests, GpuAccess.ShaderWrite);
-        graph.Recorder.BindPipeline(pipelines.ShadowMarkPages);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(Groups(targets.Width, pipelines.TileSize), Groups(targets.Height, pipelines.TileSize));
-        graph.EndPass();
+        _markPagesPass
+            .Run(graph, header)
+            .Reads(frameConstants, Constants, targets.Depth)
+            .Writes(_pageRequests)
+            .Dispatch(Groups(targets.Width, pipelines.TileSize), Groups(targets.Height, pipelines.TileSize));
 
         if (_dirtyCount > 0)
         {
-            graph.BeginComputePass("Shadow: invalidate pages");
-            graph.Use(Constants, GpuAccess.ShaderRead);
-            graph.Use(_dirtyInstances, GpuAccess.ShaderRead);
-            graph.Use(_pageTable, GpuAccess.ShaderWrite);
-            graph.Recorder.BindPipeline(pipelines.ShadowInvalidatePages);
-            graph.Recorder.PushConstants(header);
-            graph.Recorder.Dispatch(Groups(_dirtyCount, CullThreads));
-            graph.EndPass();
+            _invalidatePagesPass
+                .Run(graph, header)
+                .Reads(Constants, _dirtyInstances)
+                .Writes(_pageTable)
+                .Dispatch(Groups(_dirtyCount, CullThreads));
         }
 
-        graph.BeginComputePass("Shadow: free pages");
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(_pageRequests, GpuAccess.ShaderRead);
-        graph.Use(_pageTable, GpuAccess.ShaderWrite);
-        graph.Use(_freeList, GpuAccess.ShaderWrite);
-        graph.Recorder.BindPipeline(pipelines.ShadowFreePages);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(Groups(Cells, CullThreads));
-        graph.EndPass();
+        _freePagesPass
+            .Run(graph, header)
+            .Reads(Constants, _pageRequests)
+            .Writes(_pageTable, _freeList)
+            .Dispatch(Groups(Cells, CullThreads));
 
-        graph.BeginComputePass("Shadow: allocate pages");
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(_pageRequests, GpuAccess.ShaderRead);
-        graph.Use(_pageTable, GpuAccess.ShaderWrite);
-        graph.Use(_freeList, GpuAccess.ShaderWrite);
-        graph.Use(_invalidPages, GpuAccess.ShaderWrite);
-        graph.Use(_counts, GpuAccess.ShaderWrite);
-        graph.Use(_clearArguments, GpuAccess.ShaderWrite);
-        graph.Recorder.BindPipeline(pipelines.ShadowAllocatePages);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.Dispatch(Groups(Cells, CullThreads));
-        graph.EndPass();
+        _allocatePagesPass
+            .Run(graph, header)
+            .Reads(Constants, _pageRequests)
+            .Writes(_pageTable, _freeList, _invalidPages, _counts, _clearArguments)
+            .Dispatch(Groups(Cells, CullThreads));
 
-        graph.BeginComputePass("Shadow: clear pages");
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(_counts, GpuAccess.ShaderRead);
-        graph.Use(_invalidPages, GpuAccess.ShaderRead);
-        graph.Use(_pool, GpuAccess.ShaderWrite);
-        graph.Use(_clearArguments, GpuAccess.Indirect);
-        graph.Recorder.BindPipeline(pipelines.ShadowClearPages);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.DispatchIndirect(_clearArguments, 0);
-        graph.EndPass();
+        _clearPagesPass
+            .Run(graph, header)
+            .Reads(Constants, _counts, _invalidPages)
+            .Writes(_pool)
+            .Indirect(_clearArguments)
+            .DispatchIndirect(_clearArguments, 0);
 
-        graph.BeginComputePass("Shadow: cull clusters");
-        graph.Use(frameConstants, GpuAccess.ShaderRead);
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(instances, GpuAccess.ShaderRead);
-        graph.Use(pools.Clusters, GpuAccess.ShaderRead);
-        graph.Use(_pageTable, GpuAccess.ShaderRead);
-        graph.Use(_counts, GpuAccess.ShaderWrite);
-        graph.Use(_draws, GpuAccess.ShaderWrite);
-        graph.Use(_drawArguments, GpuAccess.ShaderWrite);
-        graph.Recorder.BindPipeline(pipelines.ShadowCull);
-        graph.Recorder.PushConstants(header);
+        GpuPassRun cullRun = _cullPass
+            .Run(graph, header)
+            .Reads(frameConstants, Constants, instances, pools.Clusters, _pageTable)
+            .Writes(_counts, _draws, _drawArguments);
         int rows = (instanceCount + CullGroupsPerRow - 1) / CullGroupsPerRow;
-        graph.Recorder.Dispatch((uint)Math.Min(instanceCount, CullGroupsPerRow), (uint)Math.Max(rows, 1));
-        graph.EndPass();
+        cullRun.Dispatch((uint)Math.Min(instanceCount, CullGroupsPerRow), (uint)Math.Max(rows, 1));
 
-        graph.BeginDrawPass("Shadow: draw pages", new GpuRenderTargets { Width = PoolTexels, Height = PoolTexels });
-        graph.Use(frameConstants, GpuAccess.ShaderRead);
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(instances, GpuAccess.ShaderRead);
-        graph.Use(pools.Clusters, GpuAccess.ShaderRead);
-        graph.Use(pools.Vertices, GpuAccess.ShaderRead);
-        graph.Use(pools.Indices, GpuAccess.ShaderRead);
-        graph.Use(_pageTable, GpuAccess.ShaderRead);
-        graph.Use(_draws, GpuAccess.ShaderRead);
-        graph.Use(_pool, GpuAccess.ShaderWrite);
-        graph.Use(_drawArguments, GpuAccess.Indirect);
-        graph.Use(_counts, GpuAccess.Indirect);
-        graph.Recorder.BindPipeline(pipelines.DrawShadow);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.DrawIndirectCount(_drawArguments, 0, _counts, DrawCountOffset, MaxDraws, DrawArgumentsBytes);
-        graph.EndPass();
+        _drawPagesPass
+            .Run(graph, header, new GpuRenderTargets { Width = PoolTexels, Height = PoolTexels })
+            .Reads(
+                frameConstants,
+                Constants,
+                instances,
+                pools.Clusters,
+                pools.Vertices,
+                pools.Indices,
+                _pageTable,
+                _draws
+            )
+            .Writes(_pool)
+            .Indirect(_drawArguments, _counts)
+            .DrawIndirectCount(_drawArguments, 0, _counts, DrawCountOffset, MaxDraws, DrawArgumentsBytes);
 
-        graph.BeginComputePass("Shadow: finish pages");
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        graph.Use(_counts, GpuAccess.ShaderRead);
-        graph.Use(_invalidPages, GpuAccess.ShaderRead);
-        graph.Use(_pageTable, GpuAccess.ShaderWrite);
-        graph.Use(_clearArguments, GpuAccess.Indirect);
-        graph.Recorder.BindPipeline(pipelines.ShadowFinishPages);
-        graph.Recorder.PushConstants(header);
-        graph.Recorder.DispatchIndirect(_clearArguments, 0);
-        graph.EndPass();
+        _finishPagesPass
+            .Run(graph, header)
+            .Reads(Constants, _counts, _invalidPages)
+            .Writes(_pageTable)
+            .Indirect(_clearArguments)
+            .DispatchIndirect(_clearArguments, 0);
     }
 
     /// <summary>
