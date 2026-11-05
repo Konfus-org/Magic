@@ -1,6 +1,7 @@
 using System.Numerics;
 using Magic.Ecs;
 using Magic.Ecs.Components;
+using Magic.Ecs.Components.Effects;
 using Magic.Files;
 using Magic.Files.Types;
 
@@ -23,10 +24,10 @@ internal static class WorldCopy
         ReadCamera(ecs, world);
         ReadSun(ecs, world);
         ReadLights(ecs, world);
-        foreach (EcsChunk<Fog> chunk in ecs.Query<Fog>())
+        foreach (EcsChunk<Weather> chunk in ecs.Query<Weather>())
         {
-            if (chunk.Entities.Length > 0 && world.Fog is null)
-                world.Fog = chunk.First[0];
+            if (chunk.Entities.Length > 0 && world.Fog is null && chunk.First[0].Effects.TryGet(out Fog fog))
+                world.Fog = fog;
         }
 
         foreach (EcsChunk<Sky> chunk in ecs.Query<Sky>())

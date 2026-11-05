@@ -52,12 +52,17 @@
             }
         },
         {
-            "name": "Fog",
+            "name": "Weather",
             "components": {
-                "Fog": {
-                    "density": 0.02,
-                    "halfHeight": 40,
-                    "anisotropy": 0.6
+                "Weather": {
+                    "effects": [
+                        {
+                            "type": "Fog",
+                            "density": 0.02,
+                            "halfHeight": 40,
+                            "anisotropy": 0.6
+                        }
+                    ]
                 }
             }
         },

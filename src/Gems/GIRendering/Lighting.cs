@@ -1,6 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Magic.Ecs.Components;
+using Magic.Ecs.Components.Effects;
 using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Rendering;

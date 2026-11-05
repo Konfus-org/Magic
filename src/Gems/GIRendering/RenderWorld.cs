@@ -1,6 +1,7 @@
 using System.Numerics;
 using Magic.Ecs;
 using Magic.Ecs.Components;
+using Magic.Ecs.Components.Effects;
 using Magic.Files;
 using Magic.Files.Types;
 

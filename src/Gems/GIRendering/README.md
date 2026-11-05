@@ -12,8 +12,8 @@ model reader, the mesh preprocessor and the texture reader.
   a material or texture that doesn't load as the magenta failure material.
 - The directional light is the sun while it is above the horizon, else the moon while it is, else the first there is.
 - Point, spot and rect lights are in physical units: lux for the sun, candela for the rest.
-- A sky entity's material draws the sky and colours the sun through the air. A fog entity fills the view with air the
-  sun and the lights scatter.
+- A sky entity's material draws the sky and colours the sun through the air. A `Weather` that lists `Fog` fills the view with
+  air the sun and the lights scatter.
 - A material that names the glass shader is drawn after the lighting, in any order. Glass casts no sun shadow of its
   own and is left out of the distance field.
 - A camera's `PostProcessing` names up to four shaders implementing the pixel effect contract, which the final pass
