@@ -33,7 +33,6 @@ public sealed class GIRenderingGem : IGem, IDisposable
     private readonly IGraphicsApi _gpu;
     private readonly Assets _assets;
     private readonly IEcs _ecs;
-    private readonly IFileSystem _files;
     private readonly App _app;
     private readonly EventCoordinator _events;
     private readonly RenderGraph _graph;
@@ -77,7 +76,6 @@ public sealed class GIRenderingGem : IGem, IDisposable
         Assets assets,
         IMeshPreprocessor meshes,
         IEcs ecs,
-        IFileSystem files,
         Threads threads,
         App app,
         EventCoordinator events
@@ -86,7 +84,6 @@ public sealed class GIRenderingGem : IGem, IDisposable
         _gpu = gpu;
         _assets = assets;
         _ecs = ecs;
-        _files = files;
         _app = app;
         _events = events;
         _graph = new RenderGraph(gpu);
@@ -291,7 +288,7 @@ public sealed class GIRenderingGem : IGem, IDisposable
         if (requests.Length > 0)
         {
             Screenshot
-                .SaveAsync(_gpu, _files, _targets.Readback, requests[^1].Path, outputWidth, outputHeight)
+                .SaveAsync(_gpu, _assets, _targets.Readback, requests[^1].Path, outputWidth, outputHeight)
                 .FireAndForget();
         }
     }

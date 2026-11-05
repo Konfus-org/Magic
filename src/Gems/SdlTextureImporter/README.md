@@ -1,7 +1,8 @@
 # SdlTextureImporter
 
 Reads PNG, JPEG, TGA, BMP, SVG and ICO files into textures ready to upload, through SDL_image, and keeps the result in the
-cache under the file's version: provides `IAssetImporter<Texture>`.
+cache under the file's version: provides `IAssetImporter<Texture>`. Writes a plain RGBA8 texture as a PNG, through SDL:
+provides `IAssetExporter<Texture>`.
 
 To use it, list `SdlTextureImporter` in a project's `.magic` file.
 

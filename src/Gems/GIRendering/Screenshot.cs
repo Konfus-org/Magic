@@ -1,7 +1,7 @@
 using Magic.Debugging;
 using Magic.Files;
+using Magic.Files.Types;
 using Magic.Gpu;
-using Magic.Images;
 using Magic.Rendering;
 using Magic.Utils;
 
@@ -26,11 +26,12 @@ internal static class Screenshot
     }
 
     /// <summary>
-    /// Writes what was read back to <paramref name="path"/> once the GPU is done with it.
+    /// Writes what was read back to <paramref name="path"/> once the GPU is done with it, as a texture through the gem
+    /// that writes them.
     /// </summary>
     public static async Task SaveAsync(
         IGraphicsApi gpu,
-        IFileSystem files,
+        Assets assets,
         GpuBuffer readback,
         string path,
         int width,
@@ -51,16 +52,17 @@ internal static class Screenshot
             return;
         }
 
-        byte[] png = Png.Encode(width, height, pixels.Value.Span);
-        Result made = files.CreateDirectory(files.GetParent(path));
-        if (!made.Ok)
+        Texture shot = new()
         {
-            Log.Error($"The screenshot's folder could not be made: {made.Error}");
-
-            return;
-        }
-
-        Result written = await files.WriteAsync(path, png, CancellationToken.None).ConfigureAwait(false);
+            Width = width,
+            Height = height,
+            Format = TextureFormat.Rgba8Srgb,
+            Pixels = pixels.Value,
+            Levels = [new TextureLevel(width, height, 0, pixels.Value.Length)],
+            HasMipmaps = false,
+            IsCompressed = false,
+        };
+        Result written = await assets.ExportAsync(shot, path, null, CancellationToken.None).ConfigureAwait(false);
         if (written.Ok)
             Log.Info($"Screenshot: {path}");
         else

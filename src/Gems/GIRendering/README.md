@@ -1,7 +1,7 @@
 # GIRendering
 
 Draws the world into the window: every renderer's model, GPU-driven, lit by the sun, the lights and the light they
-bounce. It saves a PNG when the console asks for a screenshot.
+bounce. When the console asks for a screenshot, it hands the frame as a texture to the gem that writes textures.
 
 To use it, list `GIRendering` in a project's `.magic` file after the GPU provider, the shader compiler, the ECS, the
 model reader, the mesh preprocessor and the texture reader.

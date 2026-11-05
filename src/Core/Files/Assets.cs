@@ -1,9 +1,14 @@
 using System.Collections.Immutable;
+using System.IO.Hashing;
+using System.Linq;
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Magic.Caching;
 using Magic.Debugging;
 using Magic.Files.Pipeline;
+using Magic.Serialization;
 using Magic.Threading;
 using Magic.Utils;
 
@@ -21,7 +26,7 @@ namespace Magic.Files;
 /// which comes once every gem is made, waits for it, as the gem that reads its type may be made after the one asking.
 /// </para>
 /// <para>
-/// Each file is imported on a worker by <see cref="ImportPipeline{T}"/>: read it, read its <c>.meta</c>, look in the
+/// Each file is imported on a worker by <see cref="RunImportAsync{T}"/>: read it, read its <c>.meta</c>, look in the
 /// cache, make it, keep it in the cache. It is made by the <see cref="IAssetImporter{T}"/> a gem provides for its type,
 /// else by Core itself for a type marked <see cref="AssetFormatAttribute"/>. What loaded is kept for the run.
 /// </para>
@@ -383,7 +388,7 @@ public sealed class Assets : IDisposable
     /// it was not written. The path ends in the exporter's extension. The asset is found once the directory is indexed
     /// again, or by the next run. Any thread.
     /// </summary>
-    public Task<Result<Handle<T>>> SaveAsync<T>(
+    public async Task<Result<Handle<T>>> SaveAsync<T>(
         T asset,
         string path,
         IProgress<LoadProgress>? progress,
@@ -391,12 +396,57 @@ public sealed class Assets : IDisposable
     )
         where T : IAsset<T>
     {
-        ArgumentNullException.ThrowIfNull(asset);
         ArgumentNullException.ThrowIfNull(path);
 
-        return Loaded.Exporters.GetValueOrDefault(typeof(T)) is IAssetExporter<T> exporter
-            ? ExportPipeline<T>.RunAsync(asset, path, exporter, Database.Directories[0], Files, progress, cancel)
-            : Task.FromResult<Result<Handle<T>>>(Result.Failure($"no gem the project lists writes {typeof(T).Name}s."));
+        string file = Files.Combine(Database.Directories[0], path);
+        Result written = await ExportAsync(asset, file, progress, cancel).ConfigureAwait(false);
+        if (!written.Ok)
+            return Result.Failure(written.Error);
+
+        // The same whatever the path's case, and never none.
+        ulong id = Math.Max(XxHash3.HashToUInt64(Encoding.UTF8.GetBytes(path.ToUpperInvariant())), 1);
+        Result<JsonElement> sidecar = Json.Write(
+            new Dictionary<string, object> { ["id"] = id, ["type"] = typeof(T).Name },
+            typeof(Dictionary<string, object>)
+        );
+        if (!sidecar.Ok)
+            return Result.Failure(sidecar.Error);
+
+        byte[] sidecarBytes = Encoding.UTF8.GetBytes(sidecar.Value.GetRawText());
+        Result sidecarWritten = await Files
+            .WriteAsync(file + AssetIndex.Sidecar, sidecarBytes, cancel)
+            .ConfigureAwait(false);
+
+        return sidecarWritten.Ok ? Result.Success(new Handle<T>(id)) : Result.Failure(sidecarWritten.Error);
+    }
+
+    /// <summary>
+    /// Writes <paramref name="asset"/> to <paramref name="file"/>, a path on the machine, through the
+    /// <see cref="IAssetExporter{T}"/> a gem provides for its type, with no sidecar, so it is a file and not an asset: why
+    /// not, when it was not written. The path ends in the exporter's extension. Any thread.
+    /// </summary>
+    public async Task<Result> ExportAsync<T>(
+        T asset,
+        string file,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
+        where T : IAsset<T>
+    {
+        ArgumentNullException.ThrowIfNull(asset);
+        ArgumentNullException.ThrowIfNull(file);
+
+        if (Loaded.Exporters.GetValueOrDefault(typeof(T)) is not IAssetExporter<T> exporter)
+            return Result.Failure($"no gem the project lists writes {typeof(T).Name}s.");
+
+        if (!file.EndsWith(exporter.Extension, StringComparison.OrdinalIgnoreCase))
+            return Result.Failure($"a {typeof(T).Name}'s file ends in {exporter.Extension}, not {file}.");
+
+        Result<ReadOnlyMemory<byte>> bytes = await exporter.ExportAsync(asset, progress, cancel).ConfigureAwait(false);
+        if (!bytes.Ok)
+            return Result.Failure(bytes.Error);
+
+        return await Files.WriteAsync(file, bytes.Value, cancel).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -533,8 +583,8 @@ public sealed class Assets : IDisposable
         typeof(T).GetCustomAttribute<AssetFormatAttribute>() is not null || Loaded.Importers.ContainsKey(typeof(T));
 
     /// <summary>
-    /// Asset <paramref name="id"/> as <paramref name="type"/>, at once when it has loaded, else once its
-    /// pipeline has it loaded; asked for by asset <paramref name="dependent"/>'s importer when that is not 0.
+    /// Asset <paramref name="id"/> as <paramref name="type"/>, at once when it has loaded, else once it has been
+    /// imported; asked for by asset <paramref name="dependent"/>'s importer when that is not 0.
     /// </summary>
     internal async Task<Made> RequestAsync(
         ulong id,
@@ -573,7 +623,10 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
-    /// Runs the pipeline that imports asset <paramref name="id"/> as a <typeparamref name="T"/>, and says what it made.
+    /// Imports asset <paramref name="id"/> as a <typeparamref name="T"/> on a worker, for several assets at once, and says
+    /// what it made: reads the file and its <c>.meta</c>, looks in the cache, makes the asset, and keeps what it made in the
+    /// cache. It is made by the gem that reads its type, else by Core itself for a type marked
+    /// <see cref="AssetFormatAttribute"/>.
     /// </summary>
     internal async Task<Made> RunImportAsync<T>(
         ulong id,
@@ -584,20 +637,50 @@ public sealed class Assets : IDisposable
     )
         where T : IAsset<T>
     {
-        AssetImport<T> import = new()
-        {
-            Id = id,
-            Path = file.Path,
-            File = file.File,
-            Settings = file.Settings,
-            Importer = importer as IAssetImporter<T>,
-            Progress = progress,
-        };
-        AssetImport<T> done = await ImportPipeline<T>.RunAsync(import, Files, Caches, cancel).ConfigureAwait(false);
+        string notAsset = $"{file.Path} is not a {typeof(T).Name}: ";
+        IAssetImporter<T>? reader = importer as IAssetImporter<T>;
 
-        return done.Asset is { Ok: true, Value: { } asset }
-            ? new Made(Result.Success<object>(asset), done.Version, AssetScan.FindHandles(asset))
-            : new Made(Result.Failure(done.Asset?.Error ?? $"{file.Path} made nothing."), done.Version);
+        // A file with an extension the type's importer doesn't take is refused before it is read.
+        if (
+            reader is not null
+            && !reader.Extensions.Any(extension => file.Path.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+        )
+        {
+            string extensions = string.Join(", ", reader.Extensions);
+
+            return new Made(Result.Failure($"{notAsset}a {typeof(T).Name}'s file ends in {extensions}."), 0);
+        }
+
+        Result<byte[]> bytes = await Files.ReadBytesAsync(file.File, cancel).ConfigureAwait(false);
+        if (!bytes.Ok)
+            return new Made(Result.Failure($"{file.Path} could not be read: {bytes.Error}"), 0);
+
+        ulong version = AssetIndex.ComputeVersion(bytes.Value, file.Settings);
+        Result<AssetMetadata> metadata = ReadSettings<T>(file.Settings);
+        if (!metadata.Ok)
+            return new Made(Result.Failure(notAsset + metadata.Error), version);
+
+        // What was made of the file before, by its id and version, when its importer is also a cache.
+        ICache<T>? cache = reader as ICache<T>;
+        if (cache is not null)
+        {
+            Result<T> cached = await Caches.ReadAsync(id, version, cache, cancel).ConfigureAwait(false);
+            if (cached.Ok)
+                return new Made(Result.Success<object>(cached.Value), version, AssetScan.FindHandles(cached.Value));
+        }
+
+        Result<T> read = reader is not null
+            ? await reader
+                .ImportAsync(new AssetFile(id, file.Path, bytes.Value, metadata.Value, version), progress, cancel)
+                .ConfigureAwait(false)
+            : ReadCoreFormat<T>(bytes.Value, file.Settings);
+        if (!read.Ok)
+            return new Made(Result.Failure(notAsset + read.Error), version);
+
+        if (cache is not null)
+            await Caches.WriteAsync(id, version, read.Value, cache, cancel).ConfigureAwait(false);
+
+        return new Made(Result.Success<object>(read.Value), version, AssetScan.FindHandles(read.Value));
     }
 
     /// <summary>
@@ -607,13 +690,103 @@ public sealed class Assets : IDisposable
     private static Result<object> ReadBuiltIn<T>(ReadOnlyMemory<byte> bytes, JsonElement settings)
         where T : IAsset<T>
     {
-        Result<AssetMetadata> metadata = ImportPipeline<T>.ReadSettings(settings);
+        Result<AssetMetadata> metadata = ReadSettings<T>(settings);
         if (!metadata.Ok)
             return Result.Failure(metadata.Error);
 
-        Result<T> read = ImportPipeline<T>.ReadBuiltIn(bytes, settings);
+        Result<T> read = ReadCoreFormat<T>(bytes, settings);
 
         return read.Ok ? Result.Success<object>(read.Value) : Result.Failure(read.Error);
+    }
+
+    /// <summary>
+    /// <paramref name="settings"/>, a <c>.meta</c>'s, read as the values of <typeparamref name="T"/>'s
+    /// <see cref="AssetMetaAttribute"/> properties, each in the type of its property, one it leaves out its
+    /// initializer; or why they are not: a key no marked property has, or a value not of its property's type.
+    /// </summary>
+    private static Result<AssetMetadata> ReadSettings<T>(JsonElement settings)
+        where T : IAsset<T>
+    {
+        // A type made with its initializers is where the defaults are; one with no parameterless constructor has none.
+        object? defaults = typeof(T).GetConstructor(Type.EmptyTypes) is null ? null : Activator.CreateInstance<T>();
+        Dictionary<string, PropertyInfo> byKey = new(StringComparer.Ordinal);
+        ImmutableDictionary<string, object?>.Builder values = ImmutableDictionary.CreateBuilder<string, object?>(
+            StringComparer.Ordinal
+        );
+        foreach (PropertyInfo property in typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            if (property.GetCustomAttribute<AssetMetaAttribute>() is null)
+                continue;
+
+            byKey.Add(JsonNamingPolicy.CamelCase.ConvertName(property.Name), property);
+            values[property.Name] =
+                defaults is not null ? property.GetValue(defaults)
+                : property.PropertyType.IsValueType ? Activator.CreateInstance(property.PropertyType)
+                : null;
+        }
+
+        foreach (JsonProperty setting in settings.EnumerateObject())
+        {
+            if (!byKey.TryGetValue(setting.Name, out PropertyInfo? property))
+            {
+                string takes = byKey.Count == 0 ? "none" : string.Join(", ", byKey.Keys);
+                return Result.Failure(
+                    $"its .meta sets \"{setting.Name}\", which a {typeof(T).Name} does not take; it takes {takes}."
+                );
+            }
+
+            Result<object> value = Json.Read(setting.Value, property.PropertyType);
+            if (!value.Ok)
+                return Result.Failure(
+                    $"its .meta's \"{setting.Name}\" is not a {property.PropertyType.Name}: {value.Error}"
+                );
+
+            values[property.Name] = value.Value;
+        }
+
+        return Result.Success(new AssetMetadata(values.ToImmutable()));
+    }
+
+    /// <summary>
+    /// <paramref name="bytes"/> read by Core itself, in the <see cref="AssetFileFormat"/> its type is marked with, with
+    /// what its <c>.meta</c> sets, <paramref name="settings"/>, already read against the type's
+    /// <see cref="AssetMetaAttribute"/> properties, set over it; else no gem the project lists reads the type.
+    /// </summary>
+    private static Result<T> ReadCoreFormat<T>(ReadOnlyMemory<byte> bytes, JsonElement settings)
+        where T : IAsset<T>
+    {
+        if (typeof(T).GetCustomAttribute<AssetFormatAttribute>() is not { } format)
+            return Result.Failure($"no gem the project lists reads {typeof(T).Name}s.");
+
+        if (format.Format == AssetFileFormat.Json && settings.GetPropertyCount() == 0)
+            return Json.Read<T>(bytes.Span);
+
+        JsonObject json;
+        if (format.Format == AssetFileFormat.Json)
+        {
+            Result<JsonObject> read = Json.Read<JsonObject>(bytes.Span);
+            if (!read.Ok)
+                return Result.Failure(read.Error);
+
+            json = read.Value;
+        }
+        else
+        {
+            ReadOnlySpan<byte> text = bytes.Span;
+            if (text.StartsWith(Encoding.UTF8.Preamble))
+                text = text[Encoding.UTF8.Preamble.Length..];
+
+            json = new JsonObject { ["text"] = Encoding.UTF8.GetString(text) };
+        }
+
+        foreach (JsonProperty setting in settings.EnumerateObject())
+        {
+            json[setting.Name] = JsonNode.Parse(setting.Value.GetRawText());
+        }
+
+        Result<JsonElement> element = Json.Write(json, typeof(JsonObject));
+
+        return element.Ok ? Json.Read<T>(element.Value) : Result.Failure(element.Error);
     }
 
     /// <summary>
@@ -646,7 +819,7 @@ public sealed class Assets : IDisposable
         ).MakeGenericMethod(type);
 
     /// <summary>
-    /// Asset <paramref name="id"/>, at once when it has loaded, else once its pipeline has it loaded; asked for by asset
+    /// Asset <paramref name="id"/>, at once when it has loaded, else once it has been imported; asked for by asset
     /// <paramref name="dependent"/>'s importer when that is not 0.
     /// </summary>
     private async Task<Result<T>> LoadIdAsync<T>(

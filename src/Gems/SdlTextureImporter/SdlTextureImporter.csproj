@@ -2,7 +2,7 @@
   <!-- A gem: Magic loads it from Gems/SdlTextureImporter/SdlTextureImporter.dll when a project lists SdlTextureImporter. -->
   <PropertyGroup>
     <!-- Shown beside the gem as Magic starts it. -->
-    <Description>Reads PNG, JPEG, TGA, BMP, SVG and ICO image files into textures with mips, block-compressed and cached, through SDL_image: provides IAssetImporter&lt;Texture&gt;.</Description>
+    <Description>Reads PNG, JPEG, TGA, BMP, SVG and ICO image files into textures with mips, block-compressed and cached, through SDL_image, and writes plain textures as PNG: provides IAssetImporter&lt;Texture&gt; and IAssetExporter&lt;Texture&gt;.</Description>
     <Version>1.0.0</Version>
     <Authors>Konfus</Authors>
     <!-- Copies the gem's own NuGet dependencies next to it, where its load context finds them. -->

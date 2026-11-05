@@ -31,7 +31,7 @@ internal enum AssetStage : byte
 }
 
 /// <summary>
-/// Runs the pipeline that imports asset <paramref name="id"/> as its type, by <paramref name="importer"/>, the gem that
+/// Imports asset <paramref name="id"/> as its type, by <paramref name="importer"/>, the gem that
 /// reads the type, or by Core itself when there is none: what a load of the type runs on a worker.
 /// </summary>
 internal delegate Task<Made> AssetImportRun(

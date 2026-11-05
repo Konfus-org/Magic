@@ -11,8 +11,8 @@ Write the engine as data flowing through functions, not objects calling each oth
 - **Data:** plain values, such as `Domain`, `Prefab` and `EntitiesChangeList`.
 - **Databases:** one place that holds state and does little else, such as the assets' database and the ECS's columns.
 - **Services:** what you call, such as `world.Create` and `assets.Find`.
-- **Steps:** work done in an order, as named methods that take values and return values. `Program` and `ImportPipeline`
-  read this way.
+- **Steps:** work done in an order, as named methods that take values and return values. `Program` and
+  `Assets.RunImportAsync` read this way.
 
 - **Nothing glued in.** Just about everything is a gem that can be swapped out.
 - **Direct calls, not webs.** Data moves A â†’ B â†’ C, and the whole flow reads top to bottom in one place. Call a thing by
