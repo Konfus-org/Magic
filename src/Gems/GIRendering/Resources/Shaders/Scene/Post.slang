@@ -31,7 +31,8 @@ public struct PostConstants
     public float exposureMax;
     // Seconds the run has taken.
     public float time;
-    public float padding0;
+    // Whether the frame traces the sharp reflections.
+    public uint hasReflections;
     public float padding1;
     public float padding2;
 }

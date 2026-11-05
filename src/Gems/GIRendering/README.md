@@ -24,11 +24,15 @@ model reader, the mesh preprocessor and the texture reader.
 
 Set these in the console with `set GIRendering.<name>=<value>`. A wrong value logs what it takes.
 
-- `debug` shows one part of the picture alone: what the sun lights, the distance field, the cards, the bounced light,
-  the probes, the occlusion, the motion or the reflections. `none` shows the picture again. The names are in
-  `DebugView`.
+- `debug` shows one part of the picture alone: a part of the GBuffer, the bounced light, the shadows, the reflections,
+  or the picture without post-processing. `final` shows the finished frame again. The names are in `DebugView`.
 - `preset` trades quality for speed. The presets are in `RendererPreset`.
 - `tracer` is `field` or, on a GPU that traces rays, `rayquery`.
+- `window` is `true` or `false`, and opens the Rendering window.
+
+With a gem that provides the debug UI, F2 opens the Rendering window, which chooses the view, the preset and the tracer.
+F5 and F6 step through the views, and a line on screen names any view but the finished frame. With a gem that provides
+`IOverlay`, it is drawn over the finished picture.
 
 `bake` in the console opens every domain under `Domains/` in turn and exits, so a release ships with the caches full.
 

@@ -105,6 +105,16 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     private uint _nextTexture = 1;
     private uint _nextSampler = 1;
 
+    /// <summary>
+    /// Every allocation's size, so what is freed takes off what it added.
+    /// </summary>
+    private readonly Dictionary<VkDeviceMemory, ulong> _allocations = [];
+
+    /// <summary>
+    /// Bytes of device memory the resources hold now.
+    /// </summary>
+    public long MemoryBytes { get; private set; }
+
     public void Dispose()
     {
         // Every resource still alive, whatever frame used it: the device is idle by now.
@@ -606,10 +616,13 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             memoryTypeIndex = (uint)type,
         };
         VkResult result = device.Api.vkAllocateMemory(&allocateInfo, out VkDeviceMemory memory);
+        if (result != VkResult.Success)
+            return Result.Failure($"Vulkan gave no memory for {requirements.size} bytes: {result}.");
 
-        return result == VkResult.Success
-            ? Result.Success(memory)
-            : Result.Failure($"Vulkan gave no memory for {requirements.size} bytes: {result}.");
+        _allocations[memory] = requirements.size;
+        MemoryBytes += (long)requirements.size;
+
+        return Result.Success(memory);
     }
 
     public Result<VulkanBuffer> CreateVulkanBuffer(in BufferDescription description)
@@ -666,7 +679,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             if (result != VkResult.Success)
             {
                 device.Api.vkDestroyBuffer(buffer);
-                device.Api.vkFreeMemory(memory.Value);
+                FreeMemory(memory.Value);
 
                 return Result.Failure($"Vulkan could not map a buffer of {description.Bytes} bytes: {result}.");
             }
@@ -714,7 +727,14 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     private void Free(VulkanBuffer buffer)
     {
         device.Api.vkDestroyBuffer(buffer.Buffer);
-        device.Api.vkFreeMemory(buffer.Memory);
+        FreeMemory(buffer.Memory);
+    }
+
+    private void FreeMemory(VkDeviceMemory memory)
+    {
+        device.Api.vkFreeMemory(memory);
+        if (_allocations.Remove(memory, out ulong bytes))
+            MemoryBytes -= (long)bytes;
     }
 
     /// <summary>
@@ -845,7 +865,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             return;
 
         device.Api.vkDestroyImage(texture.Image);
-        device.Api.vkFreeMemory(texture.Memory);
+        FreeMemory(texture.Memory);
     }
 
     private void AddTexture(uint id, VulkanTexture texture)
@@ -937,7 +957,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
         if (!view.Ok)
         {
             device.Api.vkDestroyImage(image);
-            device.Api.vkFreeMemory(memory.Value);
+            FreeMemory(memory.Value);
 
             return Result.Failure(view.Error);
         }
@@ -955,7 +975,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
 
                 device.Api.vkDestroyImageView(view.Value);
                 device.Api.vkDestroyImage(image);
-                device.Api.vkFreeMemory(memory.Value);
+                FreeMemory(memory.Value);
 
                 return Result.Failure(levelView.Error);
             }

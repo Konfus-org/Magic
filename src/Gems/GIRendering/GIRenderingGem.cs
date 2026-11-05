@@ -7,6 +7,7 @@ using Magic.Events;
 using Magic.Files;
 using Magic.Files.Types;
 using Magic.Gpu;
+using Magic.Input;
 using Magic.Projects;
 using Magic.Rendering;
 using Magic.Shaders;
@@ -58,6 +59,8 @@ public sealed class GIRenderingGem : IGem, IDisposable
     private readonly Visibility _visibility;
     private readonly FrameView _frameView;
     private readonly CardCapture _capture;
+    private readonly IOverlay? _overlay;
+    private readonly RendererDebugWindow? _debugWindow;
     private RendererPreset _preset = RendererPreset.Quality;
     private DebugView _debugView;
     private bool _isStarting;
@@ -78,9 +81,14 @@ public sealed class GIRenderingGem : IGem, IDisposable
         IEcs ecs,
         Threads threads,
         App app,
-        EventCoordinator events
+        EventCoordinator events,
+        IDebugUI? debugUI = null,
+        IOverlay? overlay = null,
+        IInput? input = null
     )
     {
+        _overlay = overlay;
+        _debugWindow = debugUI is null ? null : new RendererDebugWindow(debugUI, input, gpu.Features.HasRayQuery);
         _gpu = gpu;
         _assets = assets;
         _ecs = ecs;
@@ -116,9 +124,9 @@ public sealed class GIRenderingGem : IGem, IDisposable
             _cards,
             _visibility
         );
-        _shading = new Shading(_pipelines, _lighting, _shadows, _pools.Field, _gi, _glassShadow, _cards, _visibility);
+        _shading = new Shading(_pipelines, _lighting, _shadows, _pools.Field, _gi, _glassShadow);
         _glassDraws = new GlassDraws(_graph, _pipelines, _glassShadow, _shadows, _lighting, _gi);
-        _post = new Post(gpu, _graph, _pipelines, _lighting, _pools.Field, _glassDraws);
+        _post = new Post(gpu, _graph, _pipelines, _lighting, _glassDraws);
     }
 
     /// <summary>
@@ -172,6 +180,9 @@ public sealed class GIRenderingGem : IGem, IDisposable
         {
             ApplySetting(setting);
         }
+
+        if (_debugWindow is not null)
+            Apply(_debugWindow.Update(new RendererChoices(_debugView, _preset, WantsRayQuery)));
     }
 
     /// <summary>
@@ -240,7 +251,7 @@ public sealed class GIRenderingGem : IGem, IDisposable
         );
         _glassShadow.Prepare(sun.Direction, camera.Transform.Position, _targets);
         _post.Update(_world.Post, CancellationToken.None);
-        _post.Prepare(_targets, _world.Post, (float)frame.AppSec);
+        _post.Prepare(_targets, _world.Post, (float)frame.AppSec, _preset.HasReflections);
         _gi.Prepare(_instances.Rows, camera.Transform.Position, frame.Index, sun.Radiance * FallbackLight);
         _pools.Field.Prepare(constants, camera.Transform.Position, _instances.Changes, instanceCount);
         _instances.ClearChanges();
@@ -260,6 +271,7 @@ public sealed class GIRenderingGem : IGem, IDisposable
         _shading.Record(view, UsesRayQuery);
         _glassDraws.Record(glass, _targets);
         _post.Record(view);
+        _overlay?.Record(_graph, _targets.Output);
 
         GpuTexture target = _gpu.WindowTarget;
         if (!target.IsNone)
@@ -391,6 +403,23 @@ public sealed class GIRenderingGem : IGem, IDisposable
         return true;
     }
 
+    /// <summary>
+    /// What the debug window has chosen.
+    /// </summary>
+    private void Apply(in RendererChoices chosen)
+    {
+        _debugView = chosen.View;
+        WantsRayQuery = chosen.WantsRayQuery;
+        if (chosen.Preset != _preset)
+            SetPreset(chosen.Preset);
+    }
+
+    private void SetPreset(in RendererPreset preset)
+    {
+        _preset = preset;
+        _gi.Configure(preset.SlotsPerFrame, preset.HasReflections, preset.ReflectionStride);
+    }
+
     private void ApplySetting(in SettingChanged setting)
     {
         if (setting.Key == "GIRendering.tracer")
@@ -408,14 +437,19 @@ public sealed class GIRenderingGem : IGem, IDisposable
         if (setting.Key == "GIRendering.preset")
         {
             if (RendererPreset.TryParse(setting.Value, out RendererPreset preset))
-            {
-                _preset = preset;
-                _gi.Configure(preset.SlotsPerFrame, preset.HasReflections, preset.ReflectionStride);
-            }
+                SetPreset(preset);
             else
-            {
                 Log.Error($"{setting.Key} takes {RendererPreset.Names}, not '{setting.Value}'.");
-            }
+
+            return;
+        }
+
+        if (setting.Key == "GIRendering.window")
+        {
+            if (_debugWindow is not null && bool.TryParse(setting.Value, out bool isOpen))
+                _debugWindow.IsOpen = isOpen;
+            else
+                Log.Error($"{setting.Key} takes true or false, with a debug UI to draw it, not '{setting.Value}'.");
 
             return;
         }
@@ -423,7 +457,8 @@ public sealed class GIRenderingGem : IGem, IDisposable
         if (setting.Key != "GIRendering.debug")
             return;
 
-        if (Enum.TryParse(setting.Value, ignoreCase: true, out DebugView view))
+        // A number parses as any value of the enum, named or not.
+        if (Enum.TryParse(setting.Value, ignoreCase: true, out DebugView view) && Enum.IsDefined(view))
             _debugView = view;
         else
             Log.Error($"{setting.Key} takes {string.Join(", ", Enum.GetNames<DebugView>())}, not '{setting.Value}'.");

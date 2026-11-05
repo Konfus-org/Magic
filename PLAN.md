@@ -17,6 +17,13 @@ Set by the kickoff interview. Changes only with the user's explicit yes.
 
 One line each, newest first: `YYYY-MM-DD · decision · reason`.
 
+- 2026-11-04 · The debug UI landed as one change, not slices · the user chose this when the slice rule arrived mid-task,
+  having approved the whole plan.
+- 2026-11-04 · A stats view lives in a new DebugTools gem · FPS, CPU and memory must work with any renderer.
+- 2026-11-04 · Renderers draw overlays into their output through `IOverlay`, before showing it · screenshots show the UI,
+  and `Submit` stays once a frame.
+- 2026-11-04 · `IDebugUI`, `IOverlay`, `Frame.Cpu` and `IGraphicsApi.MemoryBytes` are public API; ImGuiDebugUI and
+  DebugTools are new gems · approved with the plan.
 - 2026-11-04 · The frame's target is upstream's on this laptop: 27 ms of GPU at 2858x1481 and 1.7 GB of VRAM (Sponza's hall view, Vulkan, Release) · measured in slice 1. The images are in the main checkout's `Build/Reference/`, not in a worktree's; `startup.lua` and `capture.ps1` beside them show how they were made, with this session's paths in them, from upstream at 0.72.141.
 - 2026-11-04 · Roll from slice to slice under `/goal`, the plannotator review still gating each merge; stop at checkpoints, or when a spike or a measurement says this is the wrong direction · the user's goal says not to pause, and nothing merges unapproved.
 - 2026-11-04 · A slice's shader lines may pass 300 when it ports one named upstream pass, C# held to the limit; each slice lists its upstream files · one pass can be 700 lines, and restructured shaders don't diff against upstream.
@@ -84,6 +91,19 @@ One line each. Not sliced until they're current.
 
 Anything noticed mid-slice that isn't the slice's job.
 
+- CPU `Render` in the stats includes the GPU and display waits, so it reads about a whole frame at 60 FPS. Split the wait
+  out of `Submit` to show real CPU time.
+- The debug UI uses ImGui's own font. The Font importer and the asset-fed font loader are unblocked now SdlBindings has
+  merged.
+- The debug UI shows nothing until the renderer draws its first frame, and nothing without a renderer.
+- The console and settings windows join DebugTools once `ICommands` and a settings service exist.
+- Clicking and typing in the debug UI have not been driven by a script: SDL takes the mouse from the real cursor.
+- Under the validation layer: every graphics pipeline's vertex stage breaks `vertexPipelineStoresAndAtomics` through the
+  heap's writable buffers, the `Show` blit hazards with the window image's next transition, and the `Lit slots` copy
+  hazards with its fill. Each ends a validated run under `--fail-on-error`.
+- Slice 3 deletes `Shading`, `Post`, `Lighting` and `RendererPreset`, which `DebugView`, `RendererDebugWindow` and the
+  views in `ShadeLighting` and `PostPasses` are built on. The new frame needs them written again over its own passes.
+- `Validate.ps1 -Only Screenshot` stops after its first project: no native command has set `$LASTEXITCODE` by then.
 - `GpuVertex` and `GpuCluster` are in Core, and their Slang twins are in the GI renderer's gem.
 
 ## Log
@@ -91,5 +111,6 @@ Anything noticed mid-slice that isn't the slice's job.
 One line each, newest first: `YYYY-MM-DD · slice · result · notes`. Past about 30 lines, fold the oldest into one
 paragraph.
 
+- 2026-11-04 · Debug UI, debug views and stats view · committed unstamped at the user's word, not merged · one change, over the slice size by choice. Before the review's five fixes the tests passed and each sample's screenshot looked right; after them it has only compiled, and no run or second review saw them.
 - 2026-11-04 · 1 · Vulkan Release on the RTX 3070 Ti Laptop at 2858x1481 with every RT feature and DDGI on: GPU 26.9 ms in the hall view (DDGI 1.6 ms), VRAM 1.7 GB; whole frames averaged 27 to 36 ms across five views in the last run, 25 ms for the atrium in an earlier one, and the run before it 28 to 67 ms, with one view at 243 ms as the profiler came on; about 3.5 min to compile 385 shaders on first run · Other sessions held the CPU at 50 to 100% throughout, so only the GPU figure is a clean target; no run was on a quiet machine, and the profiler image shows only part of the GPU list. The scene's own fire lights dominate the colour, and arcades away from them read dark. Whether this is the look the user wants is for this slice's review. One-line patch to the clone so `vulkan` is parsed before the window, and `alwaysactive` so it runs unfocused.
 - 2026-11-04 · Correct the shader struct docs · done · removed `[ShaderStruct]` and the doc's mention of `ILight`.

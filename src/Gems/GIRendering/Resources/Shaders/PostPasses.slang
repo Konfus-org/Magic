@@ -12,11 +12,9 @@ import Core.Math;
 import Core.Color;
 import Core.Pack;
 import Scene.Lighting;
-import Scene.Field;
 import Scene.Translucency;
 import Scene.Post;
 import Post.IPixelEffect;
-import Trace.DistanceField;
 
 static const float HistoryWeight = 0.9;
 static const float ExposureSpeed = 0.05;
@@ -192,6 +190,10 @@ void PostExposure(uint3 local : SV_GroupThreadID)
     float mean = weightSum > 0.0 ? exp2(weightedSum / weightSum) : 1.0;
     float target = clamp(0.18 * exp2(post.exposureCompensation) / max(mean, 1e-6), post.exposureMin, post.exposureMax);
     float exposure = previous > 0.0 ? lerp(previous, target, ExposureSpeed) : target;
+    // The meter holds through a view of one part of the light, so the picture is as bright as it was when it returns.
+    if (previous > 0.0 && IsLightPartView(GetDebugView(GetLighting())))
+        exposure = previous;
+
     state.Store<float>(0u, exposure);
 }
 
@@ -280,6 +282,54 @@ float3 Agx(float3 linear)
     return pow(saturate(value), 2.2);
 }
 
+// How far a depth view reaches, in metres: what is this far away or farther is black.
+static const float DepthViewFar = 1000.0;
+
+// Whether a view shows what the visibility and the GBuffer hold, which no pass after them touches.
+bool IsSurfaceView(DebugView view)
+{
+    uint code = (uint)view;
+    return code >= (uint)DebugView.Albedo && code <= (uint)DebugView.Velocity;
+}
+
+// What a surface view shows at a pixel of the picture, encoded for the screen: its data as it is, so a roughness of a
+// half reads as a half, and its albedo as the colour it is. Black where nothing was drawn, but for the velocity, which
+// the sky has too.
+float3 GetSurfaceView(FrameConstants frame, DebugView view, uint2 pixel)
+{
+    if (view == DebugView.Velocity)
+    {
+        TextureRef velocityTexture = { frame.velocity };
+        return float3(abs(velocityTexture.Load(pixel, 0u).xy) * 10.0, 0.0);
+    }
+
+    UintTextureRef visibility = { frame.visibility };
+    if (visibility.Load(pixel, 0u) == 0u)
+        return float3(0.0);
+
+    TextureRef baseTexture = { frame.gbufferBase };
+    TextureRef surfaceTexture = { frame.gbufferSurface };
+    TextureRef normalTexture = { frame.gbufferNormal };
+    TextureRef depthTexture = { frame.depth };
+    switch (view)
+    {
+    case DebugView.Albedo:
+        return ToSrgb(baseTexture.Load(pixel, 0u).rgb);
+    case DebugView.Normal:
+        return DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0) * 0.5 + 0.5;
+    case DebugView.Depth:
+        // On a log scale, so what is near and what is far both read: white at the camera.
+        float viewDepth = ToViewDepth(depthTexture.Load(pixel, 0u).x, frame.near);
+        return float3(1.0 - saturate(log2(1.0 + viewDepth) / log2(1.0 + DepthViewFar)));
+    case DebugView.Roughness:
+        return float3(surfaceTexture.Load(pixel, 0u).x);
+    case DebugView.Metalness:
+        return float3(baseTexture.Load(pixel, 0u).a);
+    default:
+        return float3(surfaceTexture.Load(pixel, 0u).z);
+    }
+}
+
 // Each output pixel: the resolved picture with the bloom, scaled by the exposure, through the camera's effects,
 // tonemapped and encoded; or a debug view in its place.
 [shader("compute")]
@@ -299,51 +349,49 @@ void PostFinal<E0 : IPixelEffect, E1 : IPixelEffect, E2 : IPixelEffect, E3 : IPi
     BufferRef state = { post.exposureState };
     float exposure = state.Load<float>(0u);
     float2 uv = GetTexelCenterUv(thread.xy, size);
-    float3 color = history.Load(thread.xy, 0u).rgb;
-    // The views of a factor rather than a light are shown as they are: no bloom, exposure, effect or tonemap.
-    if (!IsFactorView(lighting.debugView))
-    {
-        color += bloom.SampleLevel(sampler, uv, 0.0).rgb * post.bloomStrength;
-        color = max(color * exposure, 0.0);
-
-        PixelEffectInputs inputs;
-        inputs.uv = uv;
-        inputs.pixel = thread.xy;
-        inputs.size = size;
-        inputs.exposure = exposure;
-        inputs.time = post.time;
-        color = E0.Apply(color, inputs);
-        color = E1.Apply(color, inputs);
-        color = E2.Apply(color, inputs);
-        color = E3.Apply(color, inputs);
-        color = Agx(color);
-    }
-
-    if (lighting.debugView == 1u || lighting.debugView == 2u)
-    {
-        // The field at the surface, or two voxels above it along the normal: green where it reads the distance to
-        // the surface, red where it reads farther out, blue where it reads farther in, the more the farther, in
-        // voxels.
-        uint2 inner = uint2(frame.width, frame.height);
-        uint2 pixel = min(uint2(uv * float2(inner)), inner - 1u);
-        UintTextureRef visibility = { frame.visibility };
-        if (visibility.Load(pixel, 0u) != 0u)
-        {
-            TextureRef depthTexture = { frame.depth };
-            TextureRef normalTexture = { frame.gbufferNormal };
-            float depth = depthTexture.Load(pixel, 0u).x;
-            float3 world = ReconstructWorld(frame, GetTexelCenterUv(pixel, inner), depth);
-            float3 normal = DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0);
-            FieldConstants field = GetFieldConstants();
-            uint level;
-            SampleField(field, world, level);
-            float above = lighting.debugView == 2u ? 2.0 * field.voxelSizes[level] : 0.0;
-            float sampled = (SampleField(field, world + normal * above, level) - above) / field.voxelSizes[level];
-            float amount = saturate(abs(sampled) / 4.0);
-            color = sampled >= 0.0 ? lerp(float3(0.0, 1.0, 0.0), float3(1.0, 0.0, 0.0), amount) : lerp(float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), amount);
-        }
-    }
-
+    DebugView view = GetDebugView(lighting);
+    uint2 inner = uint2(frame.width, frame.height);
+    uint2 pixel = min(uint2(uv * float2(inner)), inner - 1u);
     StorageRef output = { frame.output, 0u };
+    if (IsSurfaceView(view))
+    {
+        output.Store(thread.xy, float4(GetSurfaceView(frame, view, pixel), 1.0));
+        return;
+    }
+
+    if (view == DebugView.Reflections && post.hasReflections == 0u)
+    {
+        output.Store(thread.xy, float4(NothingColor, 1.0));
+        return;
+    }
+
+    TextureRef picture = { post.picture };
+    float3 color = view == DebugView.WithoutPost ? picture.Load(pixel, 0u).rgb : history.Load(thread.xy, 0u).rgb;
+    // The shadows are a factor rather than a light, so they show as they are; every other view is scaled by the
+    // exposure, and only the finished frame has the bloom and the effects.
+    if (view != DebugView.Shadows)
+    {
+        if (view == DebugView.Final)
+            color += bloom.SampleLevel(sampler, uv, 0.0).rgb * post.bloomStrength;
+
+        color = max(color * exposure, 0.0);
+        if (view == DebugView.Final)
+        {
+            PixelEffectInputs inputs;
+            inputs.uv = uv;
+            inputs.pixel = thread.xy;
+            inputs.size = size;
+            inputs.exposure = exposure;
+            inputs.time = post.time;
+            color = E0.Apply(color, inputs);
+            color = E1.Apply(color, inputs);
+            color = E2.Apply(color, inputs);
+            color = E3.Apply(color, inputs);
+        }
+
+        if (view != DebugView.WithoutPost)
+            color = Agx(color);
+    }
+
     output.Store(thread.xy, float4(ToSrgb(color), 1.0));
 }

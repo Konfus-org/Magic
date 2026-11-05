@@ -42,6 +42,16 @@ internal sealed class Gems : IDisposable
     private long _buildTimestamp;
 
     /// <summary>
+    /// How long the main thread worked on the last frame, which the next frame carries.
+    /// </summary>
+    private CpuTimings _lastCpu;
+
+    /// <summary>
+    /// When the last sleep ended, 0 before the first frame's: where a frame's work starts.
+    /// </summary>
+    private long _frameStart;
+
+    /// <summary>
     /// Makes the gems through <paramref name="provider"/>, which was built from the services they were registered with.
     /// </summary>
     public Gems(
@@ -93,18 +103,35 @@ internal sealed class Gems : IDisposable
         // While the world loads, its time runs as it is, as the gems may need steps to get ready.
         bool isPaused = _app.IsPaused || (_world.IsPaused && !_world.IsLoading);
         float timeScale = _world.IsLoading ? 1 : _world.TimeScale;
-        Frame frame = _clock.Advance(isPaused, timeScale, out int fixedSteps) with { Events = _events.Take() };
+        Frame frame = _clock.Advance(isPaused, timeScale, out int fixedSteps) with
+        {
+            Events = _events.Take(),
+            Cpu = _lastCpu,
+        };
 
+        long updateStart = Stopwatch.GetTimestamp();
         RunHook(Hook.Update, frame);
+        long fixedStart = Stopwatch.GetTimestamp();
         for (int step = 1; step <= fixedSteps; step++)
         {
             RunHook(Hook.FixedUpdate, _clock.GetFixedStep(frame, step));
         }
 
         _clock.EndFixedSteps(fixedSteps);
+        long lateStart = Stopwatch.GetTimestamp();
         RunHook(Hook.LateUpdate, frame);
+        long renderStart = Stopwatch.GetTimestamp();
         RunHook(Hook.Render, frame);
+        long renderEnd = Stopwatch.GetTimestamp();
+        _lastCpu = new CpuTimings(
+            Stopwatch.GetElapsedTime(updateStart, fixedStart).TotalMilliseconds,
+            Stopwatch.GetElapsedTime(fixedStart, lateStart).TotalMilliseconds,
+            Stopwatch.GetElapsedTime(lateStart, renderStart).TotalMilliseconds,
+            Stopwatch.GetElapsedTime(renderStart, renderEnd).TotalMilliseconds,
+            Stopwatch.GetElapsedTime(_frameStart == 0 ? updateStart : _frameStart, renderEnd).TotalMilliseconds
+        );
         _clock.SleepUntilDue();
+        _frameStart = Stopwatch.GetTimestamp();
     }
 
     /// <summary>
