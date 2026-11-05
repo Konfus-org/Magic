@@ -34,6 +34,15 @@ internal static class WorldCopy
         {
             world.HasSky |= chunk.Entities.Length > 0;
         }
+
+        foreach (EcsChunk<PostProcessing> chunk in ecs.Query<PostProcessing>())
+        {
+            if (chunk.Entities.Length == 0)
+                continue;
+
+            world.Post = chunk.First[0];
+            break;
+        }
     }
 
     private static void ReadRenderers(IEcs ecs, RenderWorld world)
@@ -62,15 +71,6 @@ internal static class WorldCopy
                 Camera camera = chunk.Second[i];
                 if (camera.Target.IsWindow)
                     world.Camera = new RenderCamera(chunk.First[i], camera.FieldOfView, camera.Near);
-            }
-        }
-
-        foreach (EcsChunk<Camera, PostProcessing> chunk in ecs.Query<Camera, PostProcessing>())
-        {
-            for (int i = 0; i < chunk.Entities.Length; i++)
-            {
-                if (chunk.First[i].Target.IsWindow)
-                    world.Post = chunk.Second[i];
             }
         }
     }

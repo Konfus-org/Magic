@@ -27,7 +27,8 @@ internal sealed class RenderWorld
     public bool HasSky { get; set; }
 
     /// <summary>
-    /// What the camera does to its picture after the lighting; the defaults when it says nothing.
+    /// What is done to the picture after the lighting: the first entity's that has a <see cref="PostProcessing"/>, else
+    /// the defaults.
     /// </summary>
     public PostProcessing Post { get; set; }
 

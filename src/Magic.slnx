@@ -39,6 +39,10 @@
       <File Path="../samples/Lights/Lights.magic" />
       <Project Path="../samples/Lights/Samples.Lights.csproj" />
     </Folder>
+  <Folder Name="/Samples/Shared/">
+    <File Path="../samples/Shared/README.md" />
+    <Project Path="../samples/Shared/SamplesShared.csproj" />
+  </Folder>
   <Folder Name="/Samples/HelloWorld/">
     <File Path="../samples/HelloWorld/HelloWorld.magic" />
     <Project Path="../samples/HelloWorld/Samples.HelloWorld.csproj" />

@@ -1,7 +1,10 @@
 {
     "entities": [
         {
-            "name": "Camera",
+            "name": "Spawn",
+            "tags": [
+                "spawn"
+            ],
             "components": {
                 "Transform": {
                     "position": {
@@ -9,9 +12,12 @@
                         "y": 2.2,
                         "z": -8.5
                     }
-                },
-                "Camera": {},
-                "Spin": {},
+                }
+            }
+        },
+        {
+            "name": "PostProcessing",
+            "components": {
                 "PostProcessing": {
                     "effect0": {
                         "id": 1700000000000283

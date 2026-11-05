@@ -1,0 +1,13 @@
+{
+    "entities": [
+        {
+            "name": "Player",
+            "tags": [ "player" ],
+            "components": {
+                "Transform": {},
+                "Camera": {},
+                "Spin": {}
+            }
+        }
+    ]
+}
