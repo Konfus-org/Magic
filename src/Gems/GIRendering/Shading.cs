@@ -10,9 +10,7 @@ internal sealed class Shading(
     SunShadows shadows,
     DistanceField field,
     GlobalIllumination gi,
-    GlassShadow glassShadow,
-    CardTable cards,
-    Visibility visibility
+    GlassShadow glassShadow
 )
 {
     private readonly GpuPass _shadePass = pipelines.Compute(
@@ -37,13 +35,11 @@ internal sealed class Shading(
                 targets.GBufferSurface
             )
             .Writes(targets.Hdr)
-            .Reads(view.Instances, visibility.VisibleClusters);
+            .Reads(view.Instances);
         lighting.UseForShading();
-        cards.UseForReading();
         shadows.UseForSampling();
         field.UseForSampling();
         gi.UseForSampling();
-        gi.UseForCards();
         glassShadow.UseForSampling();
         shadeRun.Dispatch(pipelines.GetTiles(targets.Width), pipelines.GetTiles(targets.Height));
     }

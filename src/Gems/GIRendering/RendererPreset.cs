@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 namespace Magic.GIRendering;
 
 /// <summary>
@@ -21,9 +23,14 @@ internal readonly record struct RendererPreset(
 
     public static readonly RendererPreset Quality = new("quality", 1, 8, true, 1);
 
+    /// <summary>
+    /// Every preset, from the least done a frame to the most.
+    /// </summary>
+    public static ImmutableArray<RendererPreset> All { get; } = [Toaster, Balanced, Quality];
+
     public static bool TryParse(string name, out RendererPreset preset)
     {
-        foreach (RendererPreset known in (ReadOnlySpan<RendererPreset>)[Toaster, Balanced, Quality])
+        foreach (RendererPreset known in All)
         {
             if (known.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
             {

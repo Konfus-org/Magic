@@ -28,9 +28,7 @@ public struct LightingConstants
     public uint hasSky;
     // What the tonemap scales the HDR picture by.
     public float exposure;
-    // What the output shows instead of the picture, C#'s DebugView: 0 the picture, 1 the field at every surface, 2
-    // the field two voxels above every surface, 3 the indirect light, 4 the world probes, 5 the reflections, 6 the
-    // glass shadow, 7 the sun, 8 the cards, 9 the occlusion, 10 the velocity.
+    // What the output shows, a DebugView.
     public uint debugView;
     // The global illumination's constants, C#'s GiConstants.
     public uint gi;
@@ -42,6 +40,31 @@ public struct LightingConstants
 
 public LightingConstants GetLighting() { return LoadConstants<LightingConstants>(GetPassHeader().z); }
 
-// Whether a debug view shows a factor rather than a light: the glass shadow, the sun, the occlusion and the
-// velocity are shown as they are, with no air, exposure, bloom or tonemap over them.
-public bool IsFactorView(uint debugView) { return debugView == 6u || debugView == 7u || debugView >= 9u; }
+// What the output can show, C#'s DebugView.
+public enum DebugView : uint
+{
+    Final,
+    Albedo,
+    Normal,
+    Depth,
+    Roughness,
+    Metalness,
+    Occlusion,
+    Velocity,
+    GI,
+    Shadows,
+    Reflections,
+    WithoutPost,
+}
+
+// What a debug view shows where the world has no such effect.
+public static const float3 NothingColor = float3(0.0, 0.5, 0.5);
+
+public DebugView GetDebugView(LightingConstants lighting) { return (DebugView)lighting.debugView; }
+
+// Whether a view lights the picture with one part of the light alone: it has no sky or air, and says nothing of how
+// bright the picture is.
+public bool IsLightPartView(DebugView view)
+{
+    return view == DebugView.GI || view == DebugView.Shadows || view == DebugView.Reflections;
+}

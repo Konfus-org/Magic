@@ -22,7 +22,6 @@ internal sealed class Post(
     RenderGraph graph,
     GpuPipelines pipelines,
     Lighting lighting,
-    DistanceField field,
     GlassDraws glassDraws
 ) : IDisposable
 {
@@ -85,6 +84,8 @@ internal sealed class Post(
     private int _outputHeight;
 
     private bool _isTableReady;
+
+    private bool _isExposureReady;
 
     public GpuBuffer Constants { get; private set; }
 
@@ -233,17 +234,22 @@ internal sealed class Post(
     /// <summary>
     /// The frame's constants uploaded, in a transfer pass the caller opened, the tables cleared the first time.
     /// </summary>
-    public void Prepare(FrameTargets targets, PostProcessing settings, float time)
+    public void Prepare(FrameTargets targets, PostProcessing settings, float time, bool hasReflections)
     {
         _current = 1 - _current;
         if (!_isTableReady)
         {
             _isTableReady = true;
-            foreach (GpuBuffer buffer in (ReadOnlySpan<GpuBuffer>)[_histogram, _exposureState])
-            {
-                graph.Use(buffer, GpuAccess.CopyDestination);
-                graph.Recorder.FillBuffer(buffer, 0);
-            }
+            graph.Use(_histogram, GpuAccess.CopyDestination);
+            graph.Recorder.FillBuffer(_histogram, 0);
+        }
+
+        // Once only: the exposure outlasts a resize, as a debug view of one part of the light can't meter it again.
+        if (!_isExposureReady)
+        {
+            _isExposureReady = true;
+            graph.Use(_exposureState, GpuAccess.CopyDestination);
+            graph.Recorder.FillBuffer(_exposureState, 0);
         }
 
         PostConstants constants = new()
@@ -261,6 +267,7 @@ internal sealed class Post(
             ExposureMin = ExposureMin,
             ExposureMax = ExposureMax,
             Time = time,
+            HasReflections = hasReflections ? 1u : 0u,
         };
         GpuUpload upload = gpu.BeginUpload(PostConstants.Bytes);
         MemoryMarshal.Write(upload.Bytes, in constants);
@@ -332,7 +339,7 @@ internal sealed class Post(
                 .Dispatch(Groups(BloomWidth(level)), Groups(BloomHeight(level)));
         }
 
-        GpuPassRun finalRun = _finalPass
+        _finalPass
             .Run(header, pipeline: _final)
             .Reads(
                 frameConstants,
@@ -341,13 +348,16 @@ internal sealed class Post(
                 _history[_current],
                 _bloom,
                 _exposureState,
+                targets.Picture,
                 targets.Visibility,
                 targets.Depth,
-                targets.GBufferNormal
+                targets.GBufferNormal,
+                targets.GBufferBase,
+                targets.GBufferSurface,
+                targets.Velocity
             )
-            .Writes(targets.Output);
-        field.UseForSampling();
-        finalRun.Dispatch(Groups(_outputWidth), Groups(_outputHeight));
+            .Writes(targets.Output)
+            .Dispatch(Groups(_outputWidth), Groups(_outputHeight));
     }
 
     private static uint Groups(int count, int size = 8) => (uint)((count + size - 1) / size);
@@ -418,7 +428,7 @@ internal record struct PostConstants
 
     public float Time;
 
-    public float Padding0;
+    public uint HasReflections;
 
     public float Padding1;
 

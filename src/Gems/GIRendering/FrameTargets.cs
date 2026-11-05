@@ -150,7 +150,7 @@ internal sealed class FrameTargets(IGraphicsApi gpu, RenderGraph graph) : IDispo
                 Width = outputWidth,
                 Height = outputHeight,
                 Format = GpuFormat.R8G8B8A8Unorm,
-                Usage = TextureUsages.Storage | TextureUsages.CopySource,
+                Usage = TextureUsages.Storage | TextureUsages.ColorTarget | TextureUsages.CopySource,
                 Name = "Output",
             }
         );

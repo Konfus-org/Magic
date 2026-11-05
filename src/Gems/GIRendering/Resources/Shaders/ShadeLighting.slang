@@ -11,11 +11,8 @@ import Core.Frame;
 import Core.Math;
 import Core.Pack;
 import Core.Sampling;
-import Scene.Instances;
-import Scene.Visibility;
 import Scene.Lights;
 import Scene.Probes;
-import Scene.SurfaceCache;
 import Scene.Translucency;
 import Scene.Lighting;
 import Scene.Field;
@@ -103,6 +100,7 @@ void ShadeLighting<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThreadI
     sky.skyViewLut = lighting.skyViewLut;
     sky.sampler = lighting.lutSampler;
     bool hasSky = lighting.hasSky != 0u;
+    DebugView view = GetDebugView(lighting);
 
     float3 color;
     float viewDepth;
@@ -111,6 +109,8 @@ void ShadeLighting<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThreadI
     {
         viewDepth = FogFar;
         color = hasSky ? S.Evaluate(sky) : frame.skyRadiance.rgb * lighting.sunIlluminance.r * lerp(0.6, 1.4, 1.0 - uv.y);
+        if (IsLightPartView(view))
+            color = float3(0.0);
     }
     else
     {
@@ -211,24 +211,15 @@ void ShadeLighting<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThreadI
         float3 reflectedSharp = reflections.Load(thread.xy, 0u).rgb;
         float3 specular = lerp(irradiance * InvPi, reflectedSharp, sharpness);
         float3 indirect = (brdf.diffuse * (1.0 - fresnel) * irradiance * InvPi + fresnel * (1.0 - brdf.alpha * 0.5) * specular) * (surface.z * occlusion);
-        if (lighting.debugView == 3u)
+        if (view == DebugView.GI)
         {
             color = indirect;
         }
-        else if (lighting.debugView == 4u)
-        {
-            float3 probes;
-            color = SampleWorldProbeIrradiance(gi, world + normal * start, normal, probes) ? probes * InvPi : float3(1.0, 0.0, 1.0);
-        }
-        else if (lighting.debugView == 5u)
+        else if (view == DebugView.Reflections)
         {
             color = reflectedSharp;
         }
-        else if (lighting.debugView == 6u)
-        {
-            color = GetGlassShadow(GetTranslucency(), world);
-        }
-        else if (lighting.debugView == 7u)
+        else if (view == DebugView.Shadows)
         {
             // How lit by the sun, through its pages alone; magenta where no level had a page, and the level that
             // answered as a tint of blue, the deeper the coarser.
@@ -236,32 +227,13 @@ void ShadeLighting<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThreadI
             float sun = SampleSunShadow(shadow, world, normal, viewDepth, levelUsed);
             color = levelUsed >= shadow.levels ? float3(1.0, 0.0, 1.0) : lerp(float3(sun), float3(0.0, 0.0, 1.0), float(levelUsed) / float(shadow.levels));
         }
-        else if (lighting.debugView == 8u)
-        {
-            // What a ray landing here would read: the instance's lit card at this surface.
-            uint visibleIndex;
-            uint triangle;
-            DecodeVisibilityId(visibility.Load(thread.xy, 0u), visibleIndex, triangle);
-            ArrayRef<VisibleCluster> visible = { frame.visibleClusters };
-            uint instanceIndex = visible[visibleIndex].instance;
-            color = ShadeInstancePoint(frame, gi, instanceIndex, LoadInstance(frame.instances, instanceIndex), world, normal, 0.0);
-        }
-        else if (lighting.debugView == 9u)
-        {
-            color = float3(occlusion);
-        }
-        else if (lighting.debugView == 10u)
-        {
-            TextureRef velocityTexture = { frame.velocity };
-            color = float3(abs(velocityTexture.Load(thread.xy, 0u).xy) * 10.0, 0.0);
-        }
         else
         {
             color += indirect;
         }
     }
 
-    if (lighting.fog.isPresent != 0u && !IsFactorView(lighting.debugView))
+    if (lighting.fog.isPresent != 0u && !IsLightPartView(view))
     {
         VolumeRef integrated = { lighting.fogIntegrated };
         SamplerRef sampler = { lighting.fogSampler };

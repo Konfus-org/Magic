@@ -5,6 +5,7 @@ using Magic.Debugging;
 using Magic.Events;
 using Magic.Files;
 using Magic.Projects;
+using Magic.Serialization;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
@@ -50,6 +51,7 @@ internal static class Program
             Threads threads = new();
             Caches caches = new(files, app);
             Assemblies assemblies = new(typeof(App).Assembly);
+            Json.Assemblies = assemblies;
             using Assets assets = new(files, caches);
             using World world = new(assets, threads, app, assemblies);
             using Cli cli = new(app, files, events, assets, world);

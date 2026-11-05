@@ -1,12 +1,12 @@
 using Magic.Files.Types;
 
-namespace Magic.Ecs.Components;
+namespace Magic.Ecs.Components.Effects;
 
 /// <summary>
 /// The air of the world: a haze that scatters the lights, thickest at <see cref="Height"/> and thinning above it, so
-/// a light's beam shows and the far fades. A world has one, on an entity of its own; none leaves the air clear.
+/// a light's beam shows and the far fades. <see cref="Weather"/> not listing one leaves the air clear.
 /// </summary>
-public record struct Fog : IComponent
+public record struct Fog : IWeatherEffect
 {
     /// <summary>
     /// How much of the light a metre of air at <see cref="Height"/> scatters, 0 to 1.

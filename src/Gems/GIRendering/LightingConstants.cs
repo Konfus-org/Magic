@@ -45,7 +45,7 @@ internal record struct LightingConstants
     public float Exposure;
 
     /// <summary>
-    /// What the output shows instead of the picture: a <see cref="DebugView"/>.
+    /// What the output shows: a <see cref="DebugView"/>.
     /// </summary>
     public uint DebugView;
 
@@ -66,65 +66,67 @@ internal record struct LightingConstants
 }
 
 /// <summary>
-/// What the output can show instead of the picture, set with <c>set GIRendering.debug=&lt;view&gt;</c>.
+/// What the output shows, set with <c>set GIRendering.debug=&lt;view&gt;</c>; the twin of <c>Scene/Lighting.slang</c>'s.
+/// A view of one part of a surface is black where nothing was drawn.
 /// </summary>
 internal enum DebugView : uint
 {
-    None,
-
     /// <summary>
-    /// The global distance field at every surface: green where it is zero there, as it should be, red where it reads
-    /// outside and blue inside, the more the farther.
+    /// The finished frame.
     /// </summary>
-    Field,
+    Final,
 
     /// <summary>
-    /// The global distance field two voxels above every surface along its normal: green where it reads that
-    /// distance, red where it reads farther out and blue farther in, the more the farther.
+    /// The surface's base colour.
     /// </summary>
-    FieldAbove,
+    Albedo,
 
     /// <summary>
-    /// The indirect light alone: what the screen probes give every surface.
+    /// The surface's world normal, each axis from -1 to 1 shown from 0 to 1.
     /// </summary>
-    Indirect,
+    Normal,
 
     /// <summary>
-    /// The world probes' irradiance at every surface, what a card or a ray's end reads.
+    /// How far the surface is from the camera, on a log scale: white at the camera.
     /// </summary>
-    Probes,
+    Depth,
+
+    Roughness,
+
+    Metalness,
 
     /// <summary>
-    /// The sharp reflections alone, before the surface's Fresnel: what a smooth surface mirrors.
-    /// </summary>
-    Reflections,
-
-    /// <summary>
-    /// The sun's colour through the glass at every surface: white where no pane is in the way.
-    /// </summary>
-    GlassShadow,
-
-    /// <summary>
-    /// How lit by the sun every surface is through the sun's pages alone: white in the sun, black in shadow,
-    /// tinted blue the coarser the level that answered, magenta where no level had a page.
-    /// </summary>
-    Sun,
-
-    /// <summary>
-    /// What a ray landing on every surface would read: the instance's lit card there.
-    /// </summary>
-    Cards,
-
-    /// <summary>
-    /// The short-range occlusion at every surface: white where the hemisphere above it is open.
+    /// The material's own occlusion, not what the screen shows of it.
     /// </summary>
     Occlusion,
 
     /// <summary>
-    /// Where every pixel's surface was on last frame's screen: its move since, red across and green down, a tenth
-    /// of the screen at full.
+    /// Where every pixel's surface was on last frame's screen: its move since, red across and green down, a tenth of the
+    /// screen at full.
     /// </summary>
     Velocity,
+
+    /// <summary>
+    /// The indirect light alone: what the probes give every surface.
+    /// </summary>
+    GI,
+
+    /// <summary>
+    /// How lit by the sun every surface is through the sun's pages alone: white in the sun, black in shadow, tinted blue the
+    /// coarser the level that answered, magenta where no level had a page.
+    /// </summary>
+    Shadows,
+
+    /// <summary>
+    /// The sharp reflections alone, before the surface's Fresnel: what a smooth surface mirrors. Flat teal on a preset that
+    /// traces none.
+    /// </summary>
+    Reflections,
+
+    /// <summary>
+    /// The picture as lit, scaled by the exposure: no resolve over time, bloom, effects or tonemap.
+    /// </summary>
+    WithoutPost,
 }
 
 /// <summary>

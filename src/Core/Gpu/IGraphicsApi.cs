@@ -24,6 +24,11 @@ public interface IGraphicsApi
     /// </summary>
     GpuTimings Timings { get; }
 
+    /// <summary>
+    /// Bytes of GPU memory Magic's resources hold now, against the <see cref="GpuLimits.DeviceMemoryBytes"/> there are.
+    /// </summary>
+    long MemoryBytes { get; }
+
     TextureDescription GetDescription(GpuTexture texture);
 
     BufferDescription GetDescription(GpuBuffer buffer);
@@ -38,9 +43,6 @@ public interface IGraphicsApi
 
     Result<GpuPipeline> CreatePipeline(in GraphicsPipelineDescription description);
 
-    /// <summary>
-    /// Frees a resource once no frame in flight uses it. The handle is gone at once.
-    /// </summary>
     /// <summary>
     /// A bottom-level acceleration structure over triangles of the heap's buffers, built by
     /// <see cref="GpuCommandRecorder.BuildAcceleration"/>; only when <see cref="GpuFeatures.HasRayQuery"/>.
@@ -58,6 +60,9 @@ public interface IGraphicsApi
     /// </summary>
     ulong GetAddress(GpuAcceleration acceleration);
 
+    /// <summary>
+    /// Frees a resource once no frame in flight uses it. The handle is gone at once.
+    /// </summary>
     void Destroy(GpuBuffer buffer);
 
     void Destroy(GpuTexture texture);

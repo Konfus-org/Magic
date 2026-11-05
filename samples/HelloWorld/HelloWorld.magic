@@ -1,1 +1,1 @@
-{ "name": "HelloWorld", "gems": ["SdlPlatform", "VulkanGraphics", "SlangShaderCompiler", "GpuChecks", "ArchEcs", "AssimpModelImporter", "MeshPreprocessor", "SdlTextureImporter", "GIRendering", "PrefabImporter", "DomainImporter"], "entryPoint": { "id": 100001 } }
+{ "name": "HelloWorld", "gems": ["SdlPlatform", "VulkanGraphics", "SlangShaderCompiler", "GpuChecks", "ArchEcs", "AssimpModelImporter", "MeshPreprocessor", "SdlTextureImporter", "ImGuiDebugUI", "DebugTools", "GIRendering", "PrefabImporter", "DomainImporter"], "entryPoint": { "id": 100001 } }
