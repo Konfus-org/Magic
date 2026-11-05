@@ -422,8 +422,9 @@ public sealed class Assets : IDisposable
 
     /// <summary>
     /// Writes <paramref name="asset"/> to <paramref name="file"/>, a path on the machine, through the
-    /// <see cref="IAssetExporter{T}"/> a gem provides for its type, with no sidecar, so it is a file and not an asset: why
-    /// not, when it was not written. The path ends in the exporter's extension. Any thread.
+    /// <see cref="IAssetExporter{T}"/> a gem provides for its type, else by Core itself for a type marked
+    /// <see cref="AssetFormatAttribute"/>, with no sidecar, so it is a file and not an asset: why not, when it was not
+    /// written. The path ends in the exporter's extension. Any thread.
     /// </summary>
     public async Task<Result> ExportAsync<T>(
         T asset,
@@ -436,13 +437,23 @@ public sealed class Assets : IDisposable
         ArgumentNullException.ThrowIfNull(asset);
         ArgumentNullException.ThrowIfNull(file);
 
-        if (Loaded.Exporters.GetValueOrDefault(typeof(T)) is not IAssetExporter<T> exporter)
+        Result<ReadOnlyMemory<byte>> bytes;
+        if (Loaded.Exporters.GetValueOrDefault(typeof(T)) is IAssetExporter<T> exporter)
+        {
+            if (!file.EndsWith(exporter.Extension, StringComparison.OrdinalIgnoreCase))
+                return Result.Failure($"a {typeof(T).Name}'s file ends in {exporter.Extension}, not {file}.");
+
+            bytes = await exporter.ExportAsync(asset, progress, cancel).ConfigureAwait(false);
+        }
+        else if (typeof(T).GetCustomAttribute<AssetFormatAttribute>() is { } format)
+        {
+            bytes = await Task.Run(() => WriteCoreFormat(asset, format.Format), cancel).ConfigureAwait(false);
+        }
+        else
+        {
             return Result.Failure($"no gem the project lists writes {typeof(T).Name}s.");
+        }
 
-        if (!file.EndsWith(exporter.Extension, StringComparison.OrdinalIgnoreCase))
-            return Result.Failure($"a {typeof(T).Name}'s file ends in {exporter.Extension}, not {file}.");
-
-        Result<ReadOnlyMemory<byte>> bytes = await exporter.ExportAsync(asset, progress, cancel).ConfigureAwait(false);
         if (!bytes.Ok)
             return Result.Failure(bytes.Error);
 
@@ -787,6 +798,34 @@ public sealed class Assets : IDisposable
         Result<JsonElement> element = Json.Write(json, typeof(JsonObject));
 
         return element.Ok ? Json.Read<T>(element.Value) : Result.Failure(element.Error);
+    }
+
+    /// <summary>
+    /// <paramref name="asset"/> as Core writes its type itself, in the <see cref="AssetFileFormat"/> it is marked with: the
+    /// file <see cref="ReadCoreFormat{T}"/> reads back, without its <see cref="AssetMetaAttribute"/> properties, which its
+    /// <c>.meta</c> holds. Why not, when JSON can't hold it.
+    /// </summary>
+    private static Result<ReadOnlyMemory<byte>> WriteCoreFormat<T>(T asset, AssetFileFormat format)
+    {
+        Result<JsonElement> written = Json.Write(asset, typeof(T));
+        if (!written.Ok)
+            return Result.Failure(written.Error);
+
+        if (JsonObject.Create(written.Value) is not { } json)
+            return Result.Failure($"a {typeof(T).Name} is not a JSON object.");
+
+        foreach (PropertyInfo property in typeof(T).GetProperties())
+        {
+            if (property.GetCustomAttribute<AssetMetaAttribute>() is not null)
+                json.Remove(JsonNamingPolicy.CamelCase.ConvertName(property.Name));
+        }
+
+        if (format == AssetFileFormat.Json)
+            return Result.Success<ReadOnlyMemory<byte>>(Encoding.UTF8.GetBytes(json.ToJsonString(Json.Options)));
+
+        return json["text"]?.GetValue<string>() is { } text
+            ? Result.Success<ReadOnlyMemory<byte>>(Encoding.UTF8.GetBytes(text))
+            : Result.Failure($"a {typeof(T).Name} has no text.");
     }
 
     /// <summary>

@@ -22,8 +22,8 @@ public static class Json
     public static JsonSerializerOptions Options { get; } = CreateDialect();
 
     /// <summary>
-    /// The code loaded, which a file that names a type by its name finds it in, as a render effect is
-    /// (<see cref="Ecs.Components.Effects.RenderEffects{T}"/>): the run's, set as the run starts.
+    /// The code loaded, which a file that names a type by its name finds it in, as a component or a render effect does:
+    /// the run's, set as the run starts.
     /// </summary>
     internal static Assemblies? Assemblies { get; set; }
 

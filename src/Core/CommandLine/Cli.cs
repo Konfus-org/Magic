@@ -33,7 +33,7 @@ internal sealed class Cli : IDisposable
     private long _waitUntilTimestamp;
     private bool _isWaitingForWorld;
     private readonly Queue<string> _queued = new();
-    private bool _isOpeningDomain;
+    private bool _isChangingWorld;
     private bool _isWaitingToDraw;
     private bool _hasDrawn;
     private readonly Subscription _drawnWatch;
@@ -110,7 +110,7 @@ internal sealed class Cli : IDisposable
 
         if (_isWaitingForWorld)
         {
-            if (_isOpeningDomain || _world.IsLoading || _world.Contents.IsEmpty)
+            if (_isChangingWorld || _world.IsLoading || _world.Domains.IsEmpty)
                 return;
 
             _isWaitingForWorld = false;
@@ -293,6 +293,20 @@ internal sealed class Cli : IDisposable
                 {
                     Action = new CliCommand(cmds => Screenshot()),
                 },
+                new Command("save", "Saves the world as the .world asset at the given path, under the project's folder")
+                {
+                    Arguments = { new Argument<string>("path") { Description = "Where, ending in .world" } },
+                    Action = new CliCommand(cmds =>
+                        SaveWorldAsync(cmds.GetRequiredValue<string>("path")).FireAndForget()
+                    ),
+                },
+                new Command("restore", "Puts the world back as the .world asset at the given path holds it")
+                {
+                    Arguments = { new Argument<string>("path") { Description = "The .world asset" } },
+                    Action = new CliCommand(cmds =>
+                        RestoreWorldAsync(cmds.GetRequiredValue<string>("path")).FireAndForget()
+                    ),
+                },
                 new Command("bake", "Opens every domain under Domains/ in turn, so their caches are made, then exits")
                 {
                     Action = new CliCommand(cmds => Bake()),
@@ -390,6 +404,65 @@ internal sealed class Cli : IDisposable
     }
 
     /// <summary>
+    /// Saves the world as the asset at <paramref name="path"/>, holding <c>wait loaded</c> meanwhile.
+    /// </summary>
+    private async Task SaveWorldAsync(string path)
+    {
+        if (!IsProjectOpen($"save {path} in"))
+            return;
+
+        _isChangingWorld = true;
+        try
+        {
+            WorldState world = await _world.SaveAsync(CancellationToken.None).ConfigureAwait(false);
+            Result<Handle<WorldState>> saved = await _assets
+                .SaveAsync(world, path, null, CancellationToken.None)
+                .ConfigureAwait(false);
+            if (saved.Ok)
+                Log.Info($"Saved the world as {path}.");
+            else
+                Log.Error($"The world was not saved as {path}: {saved.Error}");
+        }
+        finally
+        {
+            _isChangingWorld = false;
+        }
+    }
+
+    /// <summary>
+    /// Puts the world back as the asset at <paramref name="path"/> holds it, holding <c>wait loaded</c> meanwhile.
+    /// </summary>
+    private async Task RestoreWorldAsync(string path)
+    {
+        if (!IsProjectOpen($"restore {path} in"))
+            return;
+
+        Handle<WorldState> handle = _assets.Find<WorldState>(path);
+        if (handle == Handle<WorldState>.None)
+        {
+            Log.Error($"There is no saved world at {path}.");
+
+            return;
+        }
+
+        _isChangingWorld = true;
+        try
+        {
+            Result<WorldState> loaded = await _assets
+                .LoadAsync(handle, null, CancellationToken.None)
+                .ConfigureAwait(false);
+            if (loaded.Ok)
+                await _world.RestoreAsync(loaded.Value, CancellationToken.None).ConfigureAwait(false);
+            else
+                Log.Error($"{path} was not restored: {loaded.Error}");
+        }
+        finally
+        {
+            _isChangingWorld = false;
+        }
+    }
+
+    /// <summary>
     /// Opens the domain at <paramref name="path"/> in place of the world, holding <c>wait loaded</c> meanwhile.
     /// </summary>
     private async Task OpenDomainAsync(string path)
@@ -405,10 +478,10 @@ internal sealed class Cli : IDisposable
             return;
         }
 
-        _isOpeningDomain = true;
+        _isChangingWorld = true;
         try
         {
-            Result<WorldContent> opened = await _world
+            Result opened = await _world
                 .OpenAsync(domain, DomainOpenMode.Replace, null, CancellationToken.None)
                 .ConfigureAwait(false);
             if (!opened.Ok)
@@ -416,7 +489,7 @@ internal sealed class Cli : IDisposable
         }
         finally
         {
-            _isOpeningDomain = false;
+            _isChangingWorld = false;
         }
     }
 }
