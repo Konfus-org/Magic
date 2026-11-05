@@ -11,7 +11,7 @@ namespace VulkanGraphics;
 
 /// <summary>
 /// The instance, the GPU picked and its device and queue, made once as the gem starts and freed last. Picks the
-/// fastest GPU that has every feature of the baseline (RENDERING_PLAN.md, IGraphicsApi) and can show the window, and
+/// fastest GPU that has every feature of the baseline (IGraphicsApi) and can show the window, and
 /// notes which optional ones it has. Throws when there is no such GPU: the gem can't exist without one.
 /// </summary>
 internal sealed unsafe class VulkanDevice : IDisposable
