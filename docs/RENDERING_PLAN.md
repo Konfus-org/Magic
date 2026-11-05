@@ -34,7 +34,7 @@ every term has a world-space source that works when the thing it needs is behind
 ```text
 Core    IGraphicsApi    IShaderCompiler    IRendering  IRenderPipeline    IAssetImporter<Model>    ILoadPostProcessor<Model>
              ▲                ▲                ▲              ▲                   ▲                        ▲
-gems  VulkanGraphics ┘  SlangShaders ┘  WorldRenderer ┴──────┘        AssimpModels ┘        MeshPreprocessor ┘
+gems  VulkanGraphics ┘  SlangShaderCompiler ┘  GIRendering ┴──────┘        AssimpModelImporter ┘        MeshPreprocessor ┘
 ```
 
 Six gems, each talking to the others only through Core:
@@ -42,10 +42,10 @@ Six gems, each talking to the others only through Core:
 | Gem                | Provides                                          | Takes                                                                       | Native                   |
 | ------------------ | ------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------ |
 | `VulkanGraphics`   | `IGraphicsApi`                                    | settings, `Threads`, `IWindow?`                                             | Vortice.Vulkan, SDL3     |
-| `SlangShaders`     | `IShaderCompiler`, `ICache<CompiledShader>`       | `Assets`, `Caches`, settings                                                | slang                    |
-| `AssimpModels`     | `IAssetImporter<Model>`                             | nothing                                                                     | assimp                   |
+| `SlangShaderCompiler`     | `IShaderCompiler`, `ICache<CompiledShader>`       | `Assets`, `Caches`, settings                                                | slang                    |
+| `AssimpModelImporter`     | `IAssetImporter<Model>`                             | nothing                                                                     | assimp                   |
 | `MeshPreprocessor` | `ILoadPostProcessor<Model>`, `ICache<MeshDerived>` | `Assets`, `Caches`, `Threads`, settings                                     | meshoptimizer            |
-| `WorldRenderer`    | `IRendering`, `IPreloader`, `ICache<GpuTexture>` | `IGraphicsApi`, `IShaderCompiler`, `Assets`, `Caches`, `World`, `Threads`, `App`, settings, `IWindow?`, `IScripts` | bc7enc |
+| `GIRendering`    | `IRendering`, `IPreloader`, `ICache<GpuTexture>` | `IGraphicsApi`, `IShaderCompiler`, `Assets`, `Caches`, `World`, `Threads`, `App`, settings, `IWindow?`, `IScripts` | bc7enc |
 | `SdlPlatform`      | already planned; the window and input             |                                                                             |                          |
 
 Core gains, in `Contexts/Gpu/` and `Contexts/Rendering/`, the plain data both sides share: handles, descriptions,
@@ -422,9 +422,9 @@ through this so a release ships with the caches full.
 | From       | Made by            | Into the cache as   | Holds                                                                        |
 | ---------- | ------------------ | ------------------- | ---------------------------------------------------------------------------- |
 | `Model`    | `MeshPreprocessor` | `MeshDerived`       | packed vertices, the cluster DAG, the mesh distance field |
-| `Texture`  | `WorldRenderer`    | `GpuTexture`        | BC7 (colour), BC5 (normals), BC4 (masks) with mips, through bc7enc           |
-| `Shader`   | `SlangShaders`     | `CompiledShader`    | SPIR-V per specialisation, reflection, the layout of every `[ShaderStruct]`   |
-| `Material` | `WorldRenderer`    | nothing             | a row in the material table, remade from the snapshot when the asset arrives  |
+| `Texture`  | `GIRendering`    | `GpuTexture`        | BC7 (colour), BC5 (normals), BC4 (masks) with mips, through bc7enc           |
+| `Shader`   | `SlangShaderCompiler`     | `CompiledShader`    | SPIR-V per specialisation, reflection, the layout of every `[ShaderStruct]`   |
+| `Material` | `GIRendering`    | nothing             | a row in the material table, remade from the snapshot when the asset arrives  |
 
 Captures need a GPU, so they are made on the render thread when a model first loads, after its clusters are resident,
 through `Threads.PostAsync`; the preloader counts them as part of a domain's opening. Everything else runs on a worker.
@@ -435,7 +435,7 @@ thin `ProcessAsync` around them, so each is a unit test with a known mesh.
 
 `IRenderPipeline` is what the renderer runs each frame; the default is `Resources/Scripts/DefaultPipeline.cs`, a script
 asset the project's `.magic` or a camera can replace. Until script assets exist, the renderer runs the default order
-below with the `WorldRenderer.preset` setting choosing how much of it a frame does. A pipeline records passes into a
+below with the `GIRendering.preset` setting choosing how much of it a frame does. A pipeline records passes into a
 render graph through the renderer's steps:
 
 ```csharp
@@ -575,8 +575,8 @@ Line counts are estimates of C# and Slang.
 
 | Phase | Builds                                                                                                   | Checkpoint                                                                                                   | Size  |
 | ----- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ----- |
-| 0     | Core's `Gpu/` and `Shaders/`, `IGraphicsApi`, `VulkanGraphics`, `IShaderCompiler`, `SlangShaders`, the `Core/` shaders, a `GpuChecks` gem | A compute gradient through the heap, read back and checked headless on lavapipe, and shown in the window on Windows, Linux and a Mac | 7k    |
-| 1     | `AssimpModels`, `MeshPreprocessor` clusters and DAG, the render graph, instance and cluster tables, culling, visibility, HZB, materials, GBuffer, a flat sun | 10,000 instances of a 1M-triangle model draw at a stable frame time at any distance; walking away pops nothing; the graph compile and the DAG build have tests | 9k |
+| 0     | Core's `Gpu/` and `Shaders/`, `IGraphicsApi`, `VulkanGraphics`, `IShaderCompiler`, `SlangShaderCompiler`, the `Core/` shaders, a `GpuChecks` gem | A compute gradient through the heap, read back and checked headless on lavapipe, and shown in the window on Windows, Linux and a Mac | 7k    |
+| 1     | `AssimpModelImporter`, `MeshPreprocessor` clusters and DAG, the render graph, instance and cluster tables, culling, visibility, HZB, materials, GBuffer, a flat sun | 10,000 instances of a 1M-triangle model draw at a stable frame time at any distance; walking away pops nothing; the graph compile and the DAG build have tests | 9k |
 | 2     | A sloppy root as the last level, captures for the cards, texture compression and the cache, failure stand-ins | A forest of 100,000 trees to the horizon; a broken model is a cube, a broken material magenta            | 3k    |
 | 3     | Virtual shadow maps for the sun: page marking, allocation, caching, cluster draw into pages, sampling    | A fence shadow sharp at 2 m and a ridge's shadow sharp at 2 km in one view; a still scene draws zero pages     | 4k    |
 | 4     | Lights: clustered lists, physical units, local VSMs, rect lights, the atmosphere sky, volumetric fog     | The Lights sample at a thousand lights; dusk from the atmosphere; a shaft through a window into fog           | 4k    |
@@ -608,5 +608,5 @@ GI chain touch nothing in the shadow and light chain but the GBuffer they read.
   energy, and a sunlit plane matches the sky model's irradiance within a tolerance, on lavapipe with the `Toaster`
   preset.
 - **Screenshots, every sample domain,** looked at by a person at every phase, with the debug views captured too.
-- **Metrics:** the `Magic.Gems.WorldRenderer` meter in the log at every checkpoint, so a phase that slows a pass is
+- **Metrics:** the `Magic.Gems.GIRendering` meter in the log at every checkpoint, so a phase that slows a pass is
   seen when it lands and not at the end.

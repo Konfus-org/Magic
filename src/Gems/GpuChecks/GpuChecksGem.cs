@@ -19,7 +19,7 @@ namespace GpuChecks;
 public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, Assets assets) : IGem, IDisposable
 {
     private const int Size = 256;
-    private const string ShaderPath = "Shaders/Checks/Gradient.slang";
+    private const string ShaderPath = "Shaders/Gradient.slang";
 
     private readonly GpuCommandRecorder _recorder = new();
     private GpuPipeline _pipeline;
