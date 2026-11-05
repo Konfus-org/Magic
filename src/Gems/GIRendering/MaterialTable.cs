@@ -27,7 +27,6 @@ internal sealed class MaterialTable(
     public const int Capacity = 4096;
 
     private const string FailureShader = "Shaders/Material/Failure.slang";
-    private const string GlassShader = "Shaders/Material/Glass.slang";
 
     private readonly GpuMaterial[] _rows = new GpuMaterial[Capacity];
     private readonly Material?[] _assets = new Material?[Capacity];
@@ -91,16 +90,6 @@ internal sealed class MaterialTable(
     }
 
     /// <summary>
-    /// Whether the row waits on nothing more: its asset and its textures have arrived or failed.
-    /// </summary>
-    public bool IsSettled(uint row) => row == 0 || (_assets[row] is not null && !_waiting.Contains(row));
-
-    /// <summary>
-    /// The row as the GPU reads it.
-    /// </summary>
-    public GpuMaterial Get(uint row) => _rows[row];
-
-    /// <summary>
     /// Makes again the rows whose textures were loading, once a frame.
     /// </summary>
     public void Refresh()
@@ -152,8 +141,6 @@ internal sealed class MaterialTable(
 
         MaterialVisuals visuals = material.Visuals;
         GpuMaterial made = visuals.Shader == assets.Find<Shader>(FailureShader) ? GetFailure() : GetDefault();
-        if (visuals.Shader == assets.Find<Shader>(GlassShader))
-            made.Kind = (uint)MaterialKind.Glass;
         MaterialParamDictionary parameters = visuals.Params;
         if (parameters.TryGetValue("color", out MaterialParam? color))
             made.BaseColor = new Vector4(color.R, color.G, color.B, color.A);

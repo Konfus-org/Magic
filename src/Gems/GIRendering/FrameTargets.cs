@@ -35,32 +35,6 @@ internal sealed class FrameTargets(IGraphicsApi gpu, RenderGraph graph) : IDispo
     /// </summary>
     public GpuTexture Velocity { get; private set; }
 
-    public GpuTexture Hdr { get; private set; }
-
-    /// <summary>
-    /// The HDR picture with the panes composed over it: what the post resolves.
-    /// </summary>
-    public GpuTexture Picture { get; private set; }
-
-    /// <summary>
-    /// The output's size, which the picture is resolved into: the window's, whatever the picture is drawn at.
-    /// </summary>
-    public int OutputWidth { get; private set; }
-
-    public int OutputHeight { get; private set; }
-
-    /// <summary>
-    /// The translucent surfaces' power moments of depth, their absorbance by colour and in all, the light they add
-    /// with its weight, and how far they bend the picture behind them.
-    /// </summary>
-    public GpuTexture Moments { get; private set; }
-
-    public GpuTexture OpticalDepth { get; private set; }
-
-    public GpuTexture Accumulation { get; private set; }
-
-    public GpuTexture Offsets { get; private set; }
-
     public GpuTexture Output { get; private set; }
 
     public GpuBuffer Readback { get; private set; }
@@ -70,13 +44,11 @@ internal sealed class FrameTargets(IGraphicsApi gpu, RenderGraph graph) : IDispo
     /// <summary>
     /// Makes the targets at a size, the old ones destroyed and forgotten by the graph.
     /// </summary>
-    public Result Resize(int width, int height, int outputWidth, int outputHeight)
+    public Result Resize(int width, int height)
     {
         Destroy(graph);
         Width = width;
         Height = height;
-        OutputWidth = outputWidth;
-        OutputHeight = outputHeight;
         HzbLevels = TextureDescription.GetFullLevels(width, height);
         Result<GpuTexture> visibility = Make(
             "Visibility",
@@ -114,72 +86,22 @@ internal sealed class FrameTargets(IGraphicsApi gpu, RenderGraph graph) : IDispo
             GpuFormat.R16G16B16A16Sfloat,
             TextureUsages.Storage | TextureUsages.Sampled
         );
-        Result<GpuTexture> hdr = Make(
-            "HDR",
-            GpuFormat.R16G16B16A16Sfloat,
-            TextureUsages.Storage | TextureUsages.Sampled
-        );
-        Result<GpuTexture> picture = Make(
-            "Picture",
-            GpuFormat.R16G16B16A16Sfloat,
-            TextureUsages.Storage | TextureUsages.Sampled
-        );
-        Result<GpuTexture> moments = Make(
-            "Translucent moments",
-            GpuFormat.R16G16B16A16Sfloat,
-            TextureUsages.ColorTarget | TextureUsages.Sampled
-        );
-        Result<GpuTexture> opticalDepth = Make(
-            "Translucent absorbance",
-            GpuFormat.R16G16B16A16Sfloat,
-            TextureUsages.ColorTarget | TextureUsages.Sampled
-        );
-        Result<GpuTexture> accumulation = Make(
-            "Translucent light",
-            GpuFormat.R16G16B16A16Sfloat,
-            TextureUsages.ColorTarget | TextureUsages.Sampled
-        );
-        Result<GpuTexture> offsets = Make(
-            "Translucent offsets",
-            GpuFormat.R16G16Sfloat,
-            TextureUsages.ColorTarget | TextureUsages.Sampled
-        );
-        Result<GpuTexture> output = gpu.CreateTexture(
-            new TextureDescription
-            {
-                Width = outputWidth,
-                Height = outputHeight,
-                Format = GpuFormat.R8G8B8A8Unorm,
-                Usage = TextureUsages.Storage | TextureUsages.ColorTarget | TextureUsages.CopySource,
-                Name = "Output",
-            }
+        Result<GpuTexture> output = Make(
+            "Output",
+            GpuFormat.R8G8B8A8Unorm,
+            TextureUsages.Storage | TextureUsages.ColorTarget | TextureUsages.CopySource
         );
         Result<GpuBuffer> readback = gpu.CreateBuffer(
             new BufferDescription
             {
-                Bytes = (long)outputWidth * outputHeight * 4,
+                Bytes = (long)width * height * 4,
                 Usage = BufferUsages.Readback,
                 Name = "Output readback",
             }
         );
         foreach (
             Result<GpuTexture> made in (ReadOnlySpan<Result<GpuTexture>>)
-                [
-                    visibility,
-                    depth,
-                    hzb,
-                    normal,
-                    baseColor,
-                    surface,
-                    velocity,
-                    hdr,
-                    picture,
-                    moments,
-                    opticalDepth,
-                    accumulation,
-                    offsets,
-                    output,
-                ]
+                [visibility, depth, hzb, normal, baseColor, surface, velocity, output]
         )
         {
             if (!made.Ok)
@@ -196,12 +118,6 @@ internal sealed class FrameTargets(IGraphicsApi gpu, RenderGraph graph) : IDispo
         GBufferBase = baseColor.Value;
         GBufferSurface = surface.Value;
         Velocity = velocity.Value;
-        Hdr = hdr.Value;
-        Picture = picture.Value;
-        Moments = moments.Value;
-        OpticalDepth = opticalDepth.Value;
-        Accumulation = accumulation.Value;
-        Offsets = offsets.Value;
         Output = output.Value;
         Readback = readback.Value;
 
@@ -225,22 +141,7 @@ internal sealed class FrameTargets(IGraphicsApi gpu, RenderGraph graph) : IDispo
     {
         foreach (
             GpuTexture texture in (ReadOnlySpan<GpuTexture>)
-                [
-                    Visibility,
-                    Depth,
-                    Hzb,
-                    GBufferNormal,
-                    GBufferBase,
-                    GBufferSurface,
-                    Velocity,
-                    Hdr,
-                    Picture,
-                    Moments,
-                    OpticalDepth,
-                    Accumulation,
-                    Offsets,
-                    Output,
-                ]
+                [Visibility, Depth, Hzb, GBufferNormal, GBufferBase, GBufferSurface, Velocity, Output]
         )
         {
             if (texture.IsNone)
@@ -263,12 +164,6 @@ internal sealed class FrameTargets(IGraphicsApi gpu, RenderGraph graph) : IDispo
         GBufferBase = GpuTexture.None;
         GBufferSurface = GpuTexture.None;
         Velocity = GpuTexture.None;
-        Hdr = GpuTexture.None;
-        Picture = GpuTexture.None;
-        Moments = GpuTexture.None;
-        OpticalDepth = GpuTexture.None;
-        Accumulation = GpuTexture.None;
-        Offsets = GpuTexture.None;
         Output = GpuTexture.None;
         Readback = GpuBuffer.None;
         Width = 0;

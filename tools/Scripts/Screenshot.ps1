@@ -38,7 +38,7 @@ Domains to open after the first screenshot, each by its asset path, a screenshot
 tools/Scripts/Screenshot.ps1
 
 .EXAMPLE
-tools/Scripts/Screenshot.ps1 -Commands 'set GIRendering.preset=toaster'
+tools/Scripts/Screenshot.ps1 -Commands 'set GIRendering.debug=normal'
 
 .EXAMPLE
 tools/Scripts/Screenshot.ps1 -Project samples/Forest/Forest.magic

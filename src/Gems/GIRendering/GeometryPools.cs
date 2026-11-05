@@ -21,8 +21,7 @@ internal sealed class GeometryPools(
     RenderGraph graph,
     IMeshPreprocessor meshes,
     Assets assets,
-    Threads threads,
-    GpuPipelines pipelines
+    Threads threads
 ) : IDisposable
 {
     public const int VertexCapacity = 1 << 20;
@@ -55,14 +54,8 @@ internal sealed class GeometryPools(
     /// </summary>
     public bool HasArrivals => _arrived.Count > 0;
 
-    /// <summary>
-    /// The global distance field, which every resident model's field joins.
-    /// </summary>
-    public DistanceField Field { get; } = new(gpu, graph, pipelines);
-
     public void Dispose()
     {
-        Field.Dispose();
         foreach (ResidentModel resident in _resident.Values)
         {
             if (!resident.Acceleration.IsNone)
@@ -260,7 +253,7 @@ internal sealed class GeometryPools(
         );
         if (!made2.Ok)
         {
-            Log.Warn($"{name} is traced through the field alone: {made2.Error}");
+            Log.Warn($"{name} has no acceleration structure, so rays pass through it: {made2.Error}");
 
             return GpuAcceleration.None;
         }
@@ -342,8 +335,7 @@ internal sealed class GeometryPools(
             made.BoundsCenter,
             made.BoundsRadius,
             made.Vertices.IsEmpty ? Vector3.Zero : min,
-            made.Vertices.IsEmpty ? Vector3.Zero : max,
-            FieldSlot: made.Field.IsDefaultOrEmpty ? 0 : Field.Add(made)
+            made.Vertices.IsEmpty ? Vector3.Zero : max
         );
         if (gpu.Features.HasRayQuery)
             where = where with { LeafOffset = (uint)_leafCount, Acceleration = CreateAcceleration(name, made, where) };
@@ -368,8 +360,7 @@ internal sealed class GeometryPools(
 
 /// <summary>
 /// Where a model is in the pools, and the sphere and the box around it in its own frame; <paramref name="IsFailure"/>
-/// when it stands in for a model that could not be made, to be drawn as a failure; <paramref name="FieldSlot"/> its
-/// field's slot in the atlas plus one, 0 for none.
+/// when it stands in for a model that could not be made, to be drawn as a failure.
 /// </summary>
 internal readonly record struct ResidentModel(
     uint VertexOffset,
@@ -381,7 +372,6 @@ internal readonly record struct ResidentModel(
     Vector3 BoundsMin,
     Vector3 BoundsMax,
     bool IsFailure = false,
-    uint FieldSlot = 0,
     uint LeafOffset = 0,
     GpuAcceleration Acceleration = default
 );

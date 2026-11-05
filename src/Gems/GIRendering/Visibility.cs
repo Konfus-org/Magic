@@ -100,7 +100,7 @@ internal sealed class Visibility(
         );
         Result<GpuBuffer> drawArguments = CreateBuffer(
             "Draw arguments",
-            (long)MaxVisibleClusters * 3 * DrawArgumentsBytes,
+            (long)MaxVisibleClusters * 2 * DrawArgumentsBytes,
             BufferUsages.Storage | BufferUsages.Indirect
         );
         Result<GpuBuffer> retestList = CreateBuffer("Retest list", (long)MaxVisibleClusters * 8, BufferUsages.Storage);
@@ -157,19 +157,9 @@ internal sealed class Visibility(
         RecordHzb(view);
     }
 
-    /// <summary>
-    /// A single view drawn with no retest, as a card's is.
-    /// </summary>
-    public void RecordOnce(in RenderView view, string name)
-    {
-        RecordCull(view, $"{name} cull", mode: 0);
-        RecordDraw(view, $"{name} draw", TargetLoad.Clear, drawsOffset: 0, countOffset: 0);
-        RecordResolve(view, $"{name} resolve");
-    }
-
-    public void RecordResolve(in RenderView view, string name) =>
+    public void RecordResolve(in RenderView view) =>
         _resolvePass
-            .Run(new GpuConstants(view.Constants.Id), name: name)
+            .Run(new GpuConstants(view.Constants.Id))
             .Reads(
                 view.Constants,
                 view.Instances,
@@ -187,27 +177,6 @@ internal sealed class Visibility(
                 view.Targets.Velocity
             )
             .Dispatch(pipelines.GetTiles(view.Targets.Width), pipelines.GetTiles(view.Targets.Height));
-
-    /// <summary>
-    /// What the cull left for the translucent passes to draw.
-    /// </summary>
-    public DrawList GetTranslucentDraws(in GpuConstants header, GpuBuffer frameConstants, GpuBuffer instances) =>
-        new(
-            header,
-            frameConstants,
-            instances,
-            DrawArguments,
-            (ulong)MaxVisibleClusters * 2 * DrawArgumentsBytes,
-            Counts,
-            16,
-            MaxVisibleClusters,
-            DrawArgumentsBytes,
-            pools.Vertices,
-            pools.Indices,
-            pools.Clusters,
-            materials.Buffer,
-            VisibleClusters
-        );
 
     private Result<GpuBuffer> CreateBuffer(string name, long bytes, BufferUsages usage)
     {
