@@ -20,6 +20,11 @@ namespace Magic.Worlds;
 internal readonly record struct DomainPlace(Handle<Prefab> Prefab, Transform At);
 
 /// <summary>
+/// A prefab a domain places, where, and the prefab as it was read.
+/// </summary>
+internal readonly record struct PlacedPrefab(DomainPlace Place, Prefab Prefab);
+
+/// <summary>
 /// An entity a domain places, by its key, with its components as the domain's files make it.
 /// </summary>
 internal readonly record struct Placement(EntityKey Key, ImmutableArray<IComponent> Components);
@@ -50,6 +55,12 @@ public sealed class World : IEcs, IDisposable
     /// Each entity the open domains placed, by its key. A destroyed one keeps its key, with a handle to nothing. Main thread.
     /// </summary>
     private readonly Dictionary<EntityKey, Entity> _placed = [];
+
+    /// <summary>
+    /// The prefabs each open domain placed, as they were read: what its entities are compared with, by a save and as the
+    /// domain opens again. Main thread.
+    /// </summary>
+    private readonly Dictionary<Handle<Domain>, ImmutableArray<PlacedPrefab>> _read = [];
 
     /// <summary>
     /// The ECS a gem provides, as soon as it is made.
@@ -195,10 +206,11 @@ public sealed class World : IEcs, IDisposable
     {
         SaveFile? saving = null;
         await RunInTurnAsync(
-                async () =>
+                () =>
                 {
-                    WorldChanges changes = await FindChangesAsync(cancel).ConfigureAwait(false);
-                    saving = new SaveFile(Domains, changes, IsPaused, TimeScale);
+                    saving = new SaveFile(Domains, FindChanges(Domains), IsPaused, TimeScale);
+
+                    return Task.CompletedTask;
                 },
                 cancel
             )
@@ -407,16 +419,7 @@ public sealed class World : IEcs, IDisposable
             Result<WorldState> read = Json.Read<WorldState>(kept);
             if (read.Ok)
             {
-                await RunLoadingAsync(
-                        () =>
-                        {
-                            Restore(read.Value);
-
-                            return Task.CompletedTask;
-                        },
-                        cancel
-                    )
-                    .ConfigureAwait(false);
+                await RunLoadingAsync(() => RestoreKeptAsync(read.Value, cancel), cancel).ConfigureAwait(false);
 
                 return;
             }
@@ -596,6 +599,24 @@ public sealed class World : IEcs, IDisposable
         [.. placements.Select(placement => placement.Components)];
 
     /// <summary>
+    /// The entities <paramref name="prefabs"/> spawn as in <paramref name="domain"/>, each by its key.
+    /// </summary>
+    private static ImmutableArray<Placement> GetPlacements(Handle<Domain> domain, ImmutableArray<PlacedPrefab> prefabs)
+    {
+        ImmutableArray<Placement>.Builder placements = ImmutableArray.CreateBuilder<Placement>();
+        foreach (PlacedPrefab placed in prefabs)
+        {
+            ImmutableArray<ImmutableArray<IComponent>> parts = GetEntities(placed.Prefab, placed.Place.At);
+            for (int part = 0; part < parts.Length; part++)
+            {
+                placements.Add(new Placement(new EntityKey(domain, placed.Place.Prefab, part), parts[part]));
+            }
+        }
+
+        return placements.ToImmutable();
+    }
+
+    /// <summary>
     /// The whole world as data, for a restart: the domains open, each entity they placed by its key and the keys of those
     /// destroyed, every other entity, and its pause and time scale, as of now. Main thread, with no work running, as the
     /// run's end has it.
@@ -646,9 +667,11 @@ public sealed class World : IEcs, IDisposable
     /// <summary>
     /// <paramref name="domain"/> comes, and is in the world from then on. Main thread.
     /// </summary>
-    private void Add(Handle<Domain> domain, ImmutableArray<Placement> coming)
+    private void Add(Handle<Domain> domain, ImmutableArray<PlacedPrefab> prefabs)
     {
+        ImmutableArray<Placement> coming = GetPlacements(domain, prefabs);
         Place(coming);
+        _read[domain] = prefabs;
         Domains = Domains.Add(domain);
         Log.Info($"Opened {GetName(domain)}: {coming.Length} entities.");
     }
@@ -659,6 +682,7 @@ public sealed class World : IEcs, IDisposable
     private void Remove(Handle<Domain> domain)
     {
         Unplace(domain);
+        _read.Remove(domain);
         Domains = Domains.Remove(domain);
     }
 
@@ -814,12 +838,14 @@ public sealed class World : IEcs, IDisposable
         if (!isReplace && Domains.Contains(domain))
             return Result.Success();
 
-        Result<ImmutableArray<Placement>> read = await ReadDomainAsync(domain, progress, cancel).ConfigureAwait(false);
+        Result<ImmutableArray<PlacedPrefab>> read = await ReadDomainAsync(domain, progress, cancel)
+            .ConfigureAwait(false);
         if (!read.Ok)
             return Result.Failure(read.Error);
 
         ImmutableArray<ImmutableArray<IComponent>> player = isReplace
-            ? await ReadPlayerAsync(domain, GetComponents(read.Value), progress, cancel).ConfigureAwait(false)
+            ? await ReadPlayerAsync(domain, GetComponents(GetPlacements(domain, read.Value)), progress, cancel)
+                .ConfigureAwait(false)
             : [];
         ImmutableArray<Entity> loading = [];
         if (isReplace)
@@ -840,10 +866,11 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Everything leaves, globals too, and what the saved world holds comes: each domain with its own entities, then the
-    /// rest. Main thread.
+    /// Each domain's prefabs read first on workers, for saves and reloads to compare with, then, in one step on the main
+    /// thread, everything leaves, globals too, and what the saved world holds comes: each domain with its own entities, then
+    /// the rest. Run as work in turn.
     /// </summary>
-    private void Restore(WorldState saved)
+    private async Task RestoreKeptAsync(WorldState saved, CancellationToken cancel)
     {
         if (!HasEcs)
         {
@@ -852,9 +879,27 @@ public sealed class World : IEcs, IDisposable
             return;
         }
 
+        Dictionary<Handle<Domain>, ImmutableArray<PlacedPrefab>> read = [];
+        foreach (Handle<Domain> domain in saved.Domains)
+        {
+            Result<ImmutableArray<PlacedPrefab>> prefabs = await ReadDomainAsync(domain, null, cancel)
+                .ConfigureAwait(false);
+            if (prefabs.Ok)
+                read[domain] = prefabs.Value;
+            else
+                Log.Error($"{GetName(domain)}'s changes are not saved, nor kept as it opens again: {prefabs.Error}");
+        }
+
+        await _threads.Enter(EngineThread.Main);
         IsLoading = true;
         DestroyEntities(FindAll());
         _placed.Clear();
+        _read.Clear();
+        foreach ((Handle<Domain> domain, ImmutableArray<PlacedPrefab> prefabs) in read)
+        {
+            _read[domain] = prefabs;
+        }
+
         Place(saved.Placed);
         foreach (EntityKey key in saved.Destroyed)
         {
@@ -879,10 +924,11 @@ public sealed class World : IEcs, IDisposable
         if (!HasEcs)
             return Result.Failure("no gem the project lists provides the ECS.");
 
-        List<(Handle<Domain> Domain, ImmutableArray<Placement> Placements)> domains = [];
+        List<(Handle<Domain> Domain, ImmutableArray<PlacedPrefab> Prefabs)> domains = [];
         foreach (Handle<Domain> domain in saved.Domains)
         {
-            Result<ImmutableArray<Placement>> read = await ReadDomainAsync(domain, null, cancel).ConfigureAwait(false);
+            Result<ImmutableArray<PlacedPrefab>> read = await ReadDomainAsync(domain, null, cancel)
+                .ConfigureAwait(false);
             if (!read.Ok)
                 return Result.Failure($"{GetName(domain)} does not open: {read.Error}");
 
@@ -893,10 +939,11 @@ public sealed class World : IEcs, IDisposable
         IsLoading = true;
         DestroyEntities(FindAll());
         _placed.Clear();
+        _read.Clear();
         Domains = [];
-        foreach ((Handle<Domain> domain, ImmutableArray<Placement> placements) in domains)
+        foreach ((Handle<Domain> domain, ImmutableArray<PlacedPrefab> prefabs) in domains)
         {
-            Add(domain, placements);
+            Add(domain, prefabs);
         }
 
         saved.Changes.Apply(_ecs, _placed);
@@ -908,29 +955,19 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// What changed against the open domains' files: each domain read again on workers, then compared on the main thread. A
-    /// domain that no longer loads is an error, and its changes are left out. Run as a change.
+    /// What changed in <paramref name="domains"/> against their prefabs as they were read, and every entity no domain placed.
+    /// Main thread.
     /// </summary>
-    private async Task<WorldChanges> FindChangesAsync(CancellationToken cancel)
+    private WorldChanges FindChanges(ImmutableArray<Handle<Domain>> domains)
     {
         Dictionary<EntityKey, ImmutableArray<IComponent>> authored = [];
-        foreach (Handle<Domain> domain in Domains)
+        foreach (Handle<Domain> domain in domains)
         {
-            Result<ImmutableArray<Placement>> read = await ReadDomainAsync(domain, null, cancel).ConfigureAwait(false);
-            if (!read.Ok)
-            {
-                Log.Error($"{GetName(domain)}'s changes are left out: {read.Error}");
-
-                continue;
-            }
-
-            foreach (Placement placement in read.Value)
+            foreach (Placement placement in GetPlacements(domain, _read.GetValueOrDefault(domain, [])))
             {
                 authored[placement.Key] = placement.Components;
             }
         }
-
-        await _threads.Enter(EngineThread.Main);
 
         return new WorldChanges(_ecs, _placed, authored);
     }
@@ -979,8 +1016,8 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Each open domain that is or places one of <paramref name="changed"/> makes its entities again, losing what happened
-    /// to them; one that no longer loads stays as it was, which is an error.
+    /// Each open domain that is or places one of <paramref name="changed"/> makes its entities again as its files now say,
+    /// keeping what happened to them; one that no longer loads stays as it was, which is an error.
     /// </summary>
     private Task ReopenAsync(HashSet<ulong> changed, CancellationToken cancel) =>
         RunInTurnAsync(
@@ -1006,9 +1043,14 @@ public sealed class World : IEcs, IDisposable
             cancel
         );
 
+    /// <summary>
+    /// <paramref name="domain"/>'s entities made again from its files as they are now, then what changed in them against its
+    /// files as they were made again on top: a component changed as the game ran keeps its value, one that didn't takes the
+    /// file's, and a destroyed entity stays destroyed.
+    /// </summary>
     private async Task ReopenAsync(Handle<Domain> domain, CancellationToken cancel)
     {
-        Result<ImmutableArray<Placement>> read = await ReadDomainAsync(domain, null, cancel).ConfigureAwait(false);
+        Result<ImmutableArray<PlacedPrefab>> read = await ReadDomainAsync(domain, null, cancel).ConfigureAwait(false);
         await _threads.Enter(EngineThread.Main);
         if (!read.Ok)
         {
@@ -1017,16 +1059,22 @@ public sealed class World : IEcs, IDisposable
             return;
         }
 
+        WorldChanges kept = new([.. FindChanges([domain]).Entities.Where(change => change.Key.Domain == domain)]);
         Unplace(domain);
-        Place(read.Value);
-        Log.Info($"Opened {GetName(domain)} again: {read.Value.Length} entities.");
+        ImmutableArray<Placement> placements = GetPlacements(domain, read.Value);
+        Place(placements);
+        _read[domain] = read.Value;
+        kept.Apply(_ecs, _placed);
+        Log.Info(
+            $"Opened {GetName(domain)} again: {placements.Length} entities, {kept.Entities.Length} changed ones kept."
+        );
     }
 
     /// <summary>
-    /// The entities of <paramref name="handle"/>, each prefab it places made into them, each by its key. A prefab that
-    /// doesn't load is an error, and it is left out; why not, when the domain doesn't load or no gem reads prefabs.
+    /// The prefabs <paramref name="handle"/> places, loaded, and where. A prefab that doesn't load is an error, and it is left
+    /// out; why not, when the domain doesn't load or no gem reads prefabs.
     /// </summary>
-    private async Task<Result<ImmutableArray<Placement>>> ReadDomainAsync(
+    private async Task<Result<ImmutableArray<PlacedPrefab>>> ReadDomainAsync(
         Handle<Domain> handle,
         IProgress<LoadProgress>? progress,
         CancellationToken cancel
@@ -1042,24 +1090,16 @@ public sealed class World : IEcs, IDisposable
             return Result.Failure($"{path} holds prefabs, and no gem the project lists reads them.");
 
         Result<Prefab>[] prefabs = await LoadPrefabsAsync(places, progress, cancel).ConfigureAwait(false);
-        ImmutableArray<Placement>.Builder entities = ImmutableArray.CreateBuilder<Placement>();
+        ImmutableArray<PlacedPrefab>.Builder read = ImmutableArray.CreateBuilder<PlacedPrefab>(places.Length);
         for (int i = 0; i < places.Length; i++)
         {
-            if (prefabs[i] is not { Ok: true, Value: { } prefab })
-            {
+            if (prefabs[i] is { Ok: true, Value: { } prefab })
+                read.Add(new PlacedPrefab(places[i], prefab));
+            else
                 Log.Error($"{path} goes without a prefab: {prefabs[i].Error}");
-
-                continue;
-            }
-
-            ImmutableArray<ImmutableArray<IComponent>> parts = GetEntities(prefab, places[i].At);
-            for (int part = 0; part < parts.Length; part++)
-            {
-                entities.Add(new Placement(new EntityKey(handle, places[i].Prefab, part), parts[part]));
-            }
         }
 
-        return Result.Success(entities.ToImmutable());
+        return Result.Success(read.ToImmutable());
     }
 
     /// <summary>
@@ -1131,7 +1171,7 @@ public sealed class World : IEcs, IDisposable
         if (domain == Handle<Domain>.None)
             return [];
 
-        Result<ImmutableArray<Placement>> read = await ReadDomainAsync(domain, null, cancel).ConfigureAwait(false);
+        Result<ImmutableArray<PlacedPrefab>> read = await ReadDomainAsync(domain, null, cancel).ConfigureAwait(false);
         if (!read.Ok)
         {
             Log.Warn($"No loading screen is shown: {read.Error}");
@@ -1141,7 +1181,7 @@ public sealed class World : IEcs, IDisposable
 
         await _threads.Enter(EngineThread.Main);
 
-        return CreateEntities(GetComponents(read.Value));
+        return CreateEntities(GetComponents(GetPlacements(domain, read.Value)));
     }
 
     /// <summary>
@@ -1159,6 +1199,7 @@ public sealed class World : IEcs, IDisposable
 
         DestroyEntities(leaving.ToImmutable());
         _placed.Clear();
+        _read.Clear();
         Domains = [];
     }
 
