@@ -130,7 +130,7 @@ public sealed class GIRenderingGem : IGem, IDisposable
         }
 
         WorldCopy.Read(_ecs, _world);
-        foreach (SettingChanged setting in frame.Events.Get<SettingChanged>())
+        foreach (SetCliCommand setting in frame.Events.Get<SetCliCommand>())
         {
             ApplySetting(setting);
         }
@@ -301,7 +301,7 @@ public sealed class GIRenderingGem : IGem, IDisposable
         return true;
     }
 
-    private void ApplySetting(in SettingChanged setting)
+    private void ApplySetting(in SetCliCommand setting)
     {
         if (setting.Key == "GIRendering.window")
         {

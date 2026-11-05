@@ -34,7 +34,7 @@ public sealed class DebugToolsGem(IDebugUI ui, IInput? input = null) : IGem, IDi
 
     public void Update(in Frame frame)
     {
-        foreach (SettingChanged setting in frame.Events.Get<SettingChanged>())
+        foreach (SetCliCommand setting in frame.Events.Get<SetCliCommand>())
         {
             if (setting.Key is not CounterSetting and not StatsSetting)
                 continue;

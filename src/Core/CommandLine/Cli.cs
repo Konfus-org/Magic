@@ -164,7 +164,7 @@ internal sealed class Cli : IDisposable
         if (!IsProjectOpen($"set {setting} in"))
             return;
 
-        _events.Publish(new SettingChanged(setting[..equals].Trim(), setting[(equals + 1)..].Trim()));
+        _events.Publish(new SetCliCommand(setting[..equals].Trim(), setting[(equals + 1)..].Trim()));
     }
 
     /// <summary>
