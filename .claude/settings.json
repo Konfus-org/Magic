@@ -39,9 +39,8 @@
           {
             "type": "command",
             "shell": "bash",
-            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/GuardMainCheckout.ps1\"",
-            "timeout": 30,
-            "statusMessage": "Checking the edit is in a worktree"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-main-checkout.sh\"",
+            "timeout": 10
           }
         ]
       },
@@ -52,35 +51,8 @@
             "type": "command",
             "if": "Bash(git *)",
             "shell": "bash",
-            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/tools/Scripts/AgentTaskComplete.ps1\" -Hook",
-            "timeout": 60,
-            "statusMessage": "Checking that this state was validated"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "shell": "bash",
-            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/SliceSize.ps1\"",
-            "timeout": 30,
-            "statusMessage": "Measuring the slice"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "shell": "bash",
-            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/StopGate.ps1\"",
-            "timeout": 60,
+            "command": "input=$(cat); case \"$input\" in *commit*|*merge*) printf '%s' \"$input\" | powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/tools/Scripts/AgentTaskComplete.ps1\" -Hook || exit 2; printf '%s' \"$input\" | powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/ReviewGuard.ps1\" ;; esac",
+            "timeout": 120,
             "statusMessage": "Checking the slice was validated and reviewed"
           }
         ]

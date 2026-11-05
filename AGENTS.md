@@ -51,11 +51,10 @@ The hooks in `.claude/settings.json` hold the workflow without anyone typing a c
 - Each session, and each `/clear` or compaction, starts with the checkout and PLAN.md's next step in context.
 - An edit to a file in the main checkout is refused. Starting Claude Code with `MAGIC_ALLOW_MAIN_EDITS=1` allows it
   for that session; only the user sets it.
-- Past about 300 changed lines, every edit warns that the slice is over its size.
-- A turn that leaves changes in a worktree can't end until `tools/Scripts/AgentTaskComplete.ps1` stamped that exact
-  state and the `slice-reviewer` subagent reviewed it. When you stop to ask the user or to report a block, start that
-  line with `NEEDS-USER:`.
-- `git commit` and `git merge` are refused for a state `tools/Scripts/AgentTaskComplete.ps1` hasn't stamped.
+- The status line shows the slice's size against its limit of 300 lines, and how full the context is.
+- `git commit` and `git merge` are refused for a state `tools/Scripts/AgentTaskComplete.ps1` hasn't stamped, and for
+  a slice the `slice-reviewer` subagent hasn't reviewed. One review covers the slice until fixes add more than about
+  100 lines.
 - A plan opens in plannotator for the user's approval.
 - C# diagnostics reach you after every edit through the C# language server plugin.
 
@@ -77,7 +76,7 @@ Before changing an area, read every `README.md` from that area's root folder dow
 | Size     | What counts                                                                | Process                                                        |
 | -------- | -------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | Small    | One file, about 20 lines or fewer, no public API change, no new dependency | In a worktree: change, validate, open the review               |
-| Normal   | Anything larger                                                            | Proposal first, in plan mode; no edits until the user approves |
+| Normal   | Anything larger                                                            | A PLAN.md slice starts at once; anything else, proposal first  |
 | Sweeping | Multi-file architectural or data-flow changes                              | Proposal with before/after snippets and a data-flow diagram    |
 
 ### Slices
@@ -87,6 +86,11 @@ Work moves one slice at a time. [PLAN.md](PLAN.md) holds the goal, the decisions
 - **Only slices in PLAN.md.** A request that isn't one becomes a proposed slice first. A sweeping change is planned
   as a bucket of slices in PLAN.md and never done as one task.
 - **One slice is one task:** one worktree, one review, one merge.
+- **Approved once.** Slicing a bucket in PLAN.md is the user's approval of its slices. A listed slice starts as soon
+  as you state its brief in a few lines (the slice skill). A proposal in plan mode is only for work PLAN.md doesn't
+  list, or a slice that needs a hard-to-reverse decision.
+- **Iterate on the narrowest check.** While building, run one step of Validate, one test project or one sample.
+  Run `tools/Scripts/AgentTaskComplete.ps1` once, when the slice is done.
 - **Size:** reviewable in about 15 minutes, under about 300 changed lines, one area or one seam between two, and
   one runnable check that shows it works. A request that needs "and" more than once, or a design doc first, is too
   big: say so plainly and propose the split.
@@ -95,7 +99,7 @@ Work moves one slice at a time. [PLAN.md](PLAN.md) holds the goal, the decisions
 - **Stop after each slice.** Once it merges, propose the next slice and wait. Never start it on your own.
 - **Suggest `/goal` when it fits.** When a slice will take many turns toward an end state its own output can show,
   such as a migration until every call site compiles and the tests pass, offer a ready-to-paste `/goal` line in the
-  proposal. Write it with one end state, how you'll show it (`tools/Scripts/AgentTaskComplete.ps1 -Change <level>`
+  brief. Write it with one end state, how you'll show it (`tools/Scripts/AgentTaskComplete.ps1 -Change <level>`
   stamps the state and the `slice-reviewer` returns `VERDICT: PASS`), what must not change, and a bound such as `or
   stop after 20 turns`. Don't offer one for a slice a single turn finishes, or one that needs the user's decisions.
   You can't set it yourself; the user types it.
@@ -176,14 +180,14 @@ assumptions and decisions a reviewer would question as you make them.
 3. For a `Visual` change, open and look at every screenshot it printed. If the change only shows somewhere the
    samples don't reach, screenshot that too with `tools/Scripts/Screenshot.ps1 -Project` or `-Commands`.
 4. Have the `slice-reviewer` subagent review the validated state, naming the worktree, the merge target and the
-   slice. Fix its findings at their cause, or say with evidence why not. A fix goes back to step 2, then to another
-   review.
+   slice. Fix its findings at their cause, or say with evidence why not, then run step 2 again. Another review is
+   needed only once fixes add more than about 100 lines.
 5. Summarize what changed, the level you validated at, what you assumed, what you couldn't verify and, for a
    `Visual` change, what the screenshots show. Keep the fix and the cleanup apart. End with the next slice you
    propose, in one line.
 6. From the worktree, run `plannotator review --base <merge target>` in the background and wait for it. If it stops
    before the user decides, run it again; their comments are kept.
-7. Address each comment, or say with evidence why not, validate and review again, and go back to step 5. If the
+7. Address each comment, or say with evidence why not, validate again, and go back to step 5. If the
    review closes with neither comments nor approval, ask what the user wants.
 8. Approval, in the review or typed as "approved", means commit and merge ([Worktrees](#worktrees)). Don't ask again.
    Then stop ([Slices](#slices)).

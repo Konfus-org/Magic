@@ -1,32 +1,31 @@
 # Status line: the checkout, the slice's size against the merge target, the model and how full the context is.
+# Three git calls at most, since it runs often.
 $ErrorActionPreference = 'SilentlyContinue'
 $data = [Console]::In.ReadToEnd() | ConvertFrom-Json
 $esc = [char]27
 $dir = $data.workspace.current_dir
 if (-not $dir) { $dir = $data.cwd }
 
-$branch = & git -C $dir branch --show-current 2>$null
-$gitDir = & git -C $dir rev-parse --path-format=absolute --git-dir 2>$null
-$common = & git -C $dir rev-parse --path-format=absolute --git-common-dir 2>$null
 $parts = New-Object System.Collections.Generic.List[string]
-if ($gitDir -and $common -and $gitDir -ne $common) {
-    $parts.Add("$esc[36m$branch$esc[0m")
-    $main = (& git -C $dir worktree list --porcelain 2>$null | Where-Object { $_ -like 'branch refs/heads/*' } | Select-Object -First 1)
-    if ($main) {
-        $target = $main.Substring(18)
-        $base = & git -C $dir merge-base HEAD $target 2>$null
-        if ($base) {
-            $lines = 0
-            foreach ($row in (& git -C $dir diff --numstat $base 2>$null)) {
-                $cells = $row -split "`t"
-                if ($cells[0] -match '^\d+$') { $lines += [int]$cells[0] + [int]$cells[1] }
+$info = @(& git -C $dir rev-parse --path-format=absolute --git-dir --git-common-dir --abbrev-ref HEAD 2>$null)
+if ($info.Count -ge 3) {
+    $branch = $info[2]
+    if ($info[0] -ne $info[1]) {
+        $parts.Add("$esc[36m$branch$esc[0m")
+        $ref = Get-Content -LiteralPath (Join-Path $info[1] 'HEAD') -TotalCount 1
+        if ($ref -match '^ref: refs/heads/(.+)$') {
+            $base = & git -C $dir merge-base HEAD $Matches[1] 2>$null
+            if ($base) {
+                $lines = 0
+                $stat = [string](& git -C $dir diff --shortstat $base 2>$null)
+                foreach ($m in [regex]::Matches($stat, '(\d+) (insertion|deletion)')) { $lines += [int]$m.Groups[1].Value }
+                $color = if ($lines -gt 300) { '31' } elseif ($lines -gt 200) { '33' } else { '32' }
+                $parts.Add("$esc[${color}mslice $lines/300$esc[0m")
             }
-            $color = if ($lines -gt 300) { '31' } elseif ($lines -gt 200) { '33' } else { '32' }
-            $parts.Add("$esc[${color}mslice $lines/300$esc[0m")
         }
+    } else {
+        $parts.Add("$esc[35mmain checkout ($branch)$esc[0m")
     }
-} elseif ($branch) {
-    $parts.Add("$esc[35mmain checkout ($branch)$esc[0m")
 }
 
 $parts.Add($data.model.display_name)

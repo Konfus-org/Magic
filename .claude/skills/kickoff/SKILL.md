@@ -15,7 +15,8 @@ description: Interviews the user to set the goal and buckets in PLAN.md. Use it 
    If the answers describe several projects, say so and ask which comes first.
 3. Sum up the goal in three lines and ask for a yes.
 4. Propose three to five buckets ordered by risk, each with a one-sentence goal. Ask the user to confirm or reorder.
-5. Slice only the current bucket, each slice within the size in [AGENTS.md](../../../AGENTS.md#slices). Later
-   buckets stay one line each.
+5. Slice only the current bucket, each slice within the size in [AGENTS.md](../../../AGENTS.md#slices) and written
+   with its mode and its runnable check, as `Verb + result (prototype; check: <command or sample>)`. Later buckets
+   stay one line each. Tell the user that approving these slices lets each one start without another approval.
 6. Write the goal, decisions and buckets into PLAN.md as a `docs` task, following AGENTS.md's workflow.
 7. Propose the first slice and wait.

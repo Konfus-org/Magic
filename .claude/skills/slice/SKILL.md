@@ -1,6 +1,6 @@
 ---
 name: slice
-description: Turns the next PLAN.md slice into a proposal before any edit. Use it on your own, without being asked, whenever the user asks for any change to code, docs or tools, and when starting the next slice.
+description: Starts a slice. Use it on your own, without being asked, whenever the user asks for any change to code, docs or tools, and when starting the next PLAN.md slice. A listed slice starts after a short brief; anything else gets a proposal first.
 ---
 
 # Slice
@@ -11,7 +11,7 @@ description: Turns the next PLAN.md slice into a proposal before any edit. Use i
    four smaller slices and stop until the user picks one.
 3. Check it against the goal and decisions in PLAN.md. Flag drift, and flag any public API, file format, dependency,
    gem or architecture change as a decision that needs a yes.
-4. Read only the code the slice needs, then present the proposal AGENTS.md asks for, led by this brief:
+4. Read only the code the slice needs, then write this brief:
 
    ```markdown
    ## Slice: <verb + what the user can see or run>
@@ -33,5 +33,7 @@ description: Turns the next PLAN.md slice into a proposal before any edit. Use i
    Include the `/goal` line only when the slice will take many turns toward an end state the transcript can show
    ([AGENTS.md](../../../AGENTS.md#slices)). Say in one sentence why it fits.
 
-5. Present it in plan mode, so it opens in plannotator for the user's approval. Make no edits until they approve,
-   trim or split it.
+5. If the slice is listed in PLAN.md and needs no hard-to-reverse decision, state the brief in the chat and start
+   building. Don't wait for approval: the user approved it when the bucket was sliced.
+6. Otherwise, present the full proposal AGENTS.md asks for, led by the brief, in plan mode so it opens in
+   plannotator. Make no edits until the user approves, trims or splits it.

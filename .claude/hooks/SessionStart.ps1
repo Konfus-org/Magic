@@ -40,10 +40,10 @@ try {
             $out.Add("- Current bucket: $bucket")
             if ($next) { $out.Add("- Next slice: $next") }
             else { $out.Add('- The current bucket has no open slice: propose the next bucket (the kickoff skill).') }
-            $out.Add('- Map any request for work to a PLAN.md slice and present it with the slice skill before the first edit.')
+            $out.Add('- Map any request for work to a PLAN.md slice; the slice skill says when it needs a proposal first.')
         }
     }
-    $out.Add('- Ending a turn with changes in a worktree needs AgentTaskComplete and then the slice-reviewer subagent. When you stop to ask the user or report a block, start that line with NEEDS-USER:.')
+    $out.Add('- A slice approved in PLAN.md starts without a new proposal. git commit needs AgentTaskComplete and one slice-reviewer review first.')
     [Console]::Out.Write(($out -join "`n"))
 } catch {
     exit 0
