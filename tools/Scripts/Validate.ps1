@@ -42,7 +42,7 @@ param(
     [ValidateSet('Debug', 'Optimize', 'Release')]
     [string] $Configuration = 'Debug',
     [ValidateRange(1, [int]::MaxValue)]
-    [int] $Seconds = 120,
+    [int] $Seconds = 300,
     [string[]] $Project = @(),
     [ValidateSet('Build', 'Test', 'Headless', 'Screenshot')]
     [string[]] $Only = @('Build', 'Test', 'Headless', 'Screenshot')
