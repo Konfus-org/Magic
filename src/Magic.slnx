@@ -5,20 +5,17 @@
   </Folder>
   <Folder Name="/Gems/">
     <Project Path="Gems/ArchEcs/ArchEcs.csproj" />
-    <Project Path="Gems/AssimpModels/AssimpModels.csproj" />
+    <Project Path="Gems/AssimpModelImporter/AssimpModelImporter.csproj" />
     <Project Path="Gems/MeshPreprocessor/MeshPreprocessor.csproj" />
-    <Project Path="Gems/DomainLoader/DomainLoader.csproj" />
-    <Project Path="Gems/Forest/Forest.csproj" />
+    <Project Path="Gems/DomainImporter/DomainImporter.csproj" />
     <Project Path="Gems/GpuChecks/GpuChecks.csproj" />
-    <Project Path="Gems/Hello/Hello.csproj" />
-    <Project Path="Gems/Lights/Lights.csproj" />
-    <Project Path="Gems/PrefabLoader/PrefabLoader.csproj" />
+    <Project Path="Gems/PrefabImporter/PrefabImporter.csproj" />
     <Project Path="Gems/SdlPlatform/SdlPlatform.csproj" />
-    <Project Path="Gems/SlangShaders/SlangShaders.csproj" />
-    <Project Path="Gems/Textures/Textures.csproj" />
+    <Project Path="Gems/SlangShaderCompiler/SlangShaderCompiler.csproj" />
+    <Project Path="Gems/SdlBindings/SdlBindings.csproj" />
+    <Project Path="Gems/SdlTextureImporter/SdlTextureImporter.csproj" />
     <Project Path="Gems/VulkanGraphics/VulkanGraphics.csproj" />
-    <Project Path="Gems/WorldLoader/WorldLoader.csproj" />
-    <Project Path="Gems/WorldRenderer/WorldRenderer.csproj" />
+    <Project Path="Gems/GIRendering/GIRendering.csproj" />
   </Folder>
   <Folder Name="/Docs/">
     <File Path="../AGENTS.md" />
@@ -32,6 +29,14 @@
   <Folder Name="/Samples/">
     <File Path="../samples/README.md" />
   </Folder>
+    <Folder Name="/Samples/Forest/">
+      <File Path="../samples/Forest/Forest.magic" />
+      <Project Path="../samples/Forest/Samples.Forest.csproj" />
+    </Folder>
+    <Folder Name="/Samples/Lights/">
+      <File Path="../samples/Lights/Lights.magic" />
+      <Project Path="../samples/Lights/Samples.Lights.csproj" />
+    </Folder>
   <Folder Name="/Samples/HelloWorld/">
     <File Path="../samples/HelloWorld/HelloWorld.magic" />
     <Project Path="../samples/HelloWorld/Samples.HelloWorld.csproj" />

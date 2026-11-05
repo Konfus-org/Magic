@@ -1,12 +1,10 @@
-using System.Linq;
 using System.Runtime;
-using Magic.Assets.Pipeline;
 using Magic.Caching;
+using Magic.CommandLine;
 using Magic.Debugging;
 using Magic.Events;
 using Magic.Files;
-using Magic.Gems;
-using Magic.Pipelines;
+using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
@@ -38,29 +36,33 @@ internal static class Program
     {
         Log.Verbose($"Command line args: {string.Join(", ", commandLine)}");
 
+        // What outlasts a run: the app, which the commands set, and the world the last run kept.
+        App app = new();
+        byte[]? kept = null;
+        bool isLaunching = true;
+
         // One pass per run, all new for it: a typed command that asks for another project or mode, or a change to a gem's
-        // code, ends the run, and the next starts anew from the command line and the commands like it.
+        // code, ends the run, and the next starts anew.
         while (true)
         {
             FileSystem files = new();
             EventCoordinator events = new();
             Threads threads = new();
-            PipelineCoordinator pipelines = new(threads);
-            App app = new(files, events, threads, pipelines);
+            Caches caches = new(files, app);
+            Assemblies assemblies = new(typeof(App).Assembly);
+            using Assets assets = new(files, caches);
+            using World world = new(assets, threads, app, assemblies);
+            using Cli cli = new(app, files, events, assets, world);
 
-            // Setup required core services
-            ServiceCollection services = [];
-            services.AddSingleton(app);
-            services.AddSingleton<IFileSystem>(files);
-            services.AddSingleton(events);
-            services.AddSingleton(threads);
-
-            // Runs initial arguments
-            Result ran = app.Cli.Execute(commandLine);
-            if (!ran.Ok)
+            if (isLaunching)
             {
-                Log.Critical($"Couldn't run the command line: {ran.Error}");
-                return 1;
+                isLaunching = false;
+                Result ran = cli.Execute(commandLine);
+                if (!ran.Ok)
+                {
+                    Log.Critical($"Couldn't run the command line: {ran.Error}");
+                    return 1;
+                }
             }
 
             // A job, like new or --version, is done once it ran, and failed if it logged an error, as a project that
@@ -68,33 +70,59 @@ internal static class Program
             if (app.IsExiting || app.Project is not { } project)
                 return Log.ErrorCount == 0 ? 0 : 1;
 
-            // Setup services that require a project
-            Caches caches = new(files, project.Name, files.GetParent(project.Path));
-            using AssetDatabase assets = new(files, pipelines);
-            using World world = new(assets, threads, pipelines);
+            // The project's folder comes first, as the first winning a path two directories have.
+            assets.Register(files.GetParent(project.Path));
+
+            // The services, then the gems the project lists, which join them.
+            ServiceCollection services = [];
+            services.AddSingleton(app);
+            services.AddSingleton<IFileSystem>(files);
+            services.AddSingleton(events);
+            services.AddSingleton(threads);
             services.AddSingleton(caches);
-            services.AddSingleton(pipelines);
+            services.AddSingleton(assemblies);
             services.AddSingleton(assets);
             services.AddSingleton(world);
+            GemRegistry registry = new(files, project.Gems);
+            registry.Register(services);
 
-            // Find the gems the project lists, which join the services
-            GemRegistry gems = new(services, files, project.Gems);
-            services.AddSingleton(
-                new Assemblies([typeof(App).Assembly, .. gems.Gems.Select(gem => gem.Type.Assembly)])
-            );
-
-            // Never disposed, since its singletons are the gems, which AppEnd unloads.
+            // Never disposed, since its singletons are the gems, which Gems ends.
             services.MakeReadOnly();
             IServiceProvider provider = services.BuildServiceProvider();
 
-            // Run the application
-            Result ended = app.Run(provider, gems, assets, caches, world);
-            if (!ended.Ok)
+            Log.Info($"Running {project.Name} in {(app.IsHeadless ? "headless" : "GUI")} mode.");
+            int run = app.RunVersion;
+            using Gems gems = new(registry, provider, app, files, assets, assemblies, world, events);
+            using CancellationTokenSource stopping = new();
+            world.LoadAsync(kept, stopping.Token).FireAndForget();
+            if (!app.IsHeadless && app.Window is null)
             {
-                Log.Critical(ended.Error);
+                Log.Warn(
+                    $"{project.Name} has no gem that provides a window, so the run is exiting. List one, or use --headless."
+                );
+                app.Exit();
+            }
+
+            while (app.IsRunning && app.RunVersion == run && !app.HasFailed)
+            {
+                threads.Pump(EngineThread.Main);
+                assets.ProcessChanges();
+                world.Pump(stopping.Token);
+                gems.Pump();
+                cli.Pump();
+            }
+
+            // The world is kept while the gems are still whole, for a restart of this same project; they end as this pass
+            // does, last made first.
+            stopping.Cancel();
+            kept = app.IsExiting || app.Project != project ? null : world.Keep();
+            if (app.HasFailed)
+            {
+                Log.Critical($"Exiting with code 2 due to logged errors. Error count: {Log.ErrorCount}");
                 return 2;
             }
 
+            Log.Info($"Closing {project.Name} and {(app.IsExiting ? "exiting" : "restarting")}.");
             if (app.IsExiting)
                 return 0;
         }

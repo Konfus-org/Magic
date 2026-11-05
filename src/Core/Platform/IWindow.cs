@@ -1,7 +1,5 @@
-using System.Collections.Immutable;
-using Magic.Assets;
-using Magic.Assets.Types;
-using Magic.Utils;
+using Magic.Files;
+using Magic.Files.Types;
 
 namespace Magic.Platform;
 
@@ -14,8 +12,8 @@ public interface IWindow
     string Title { get; set; }
 
     /// <summary>
-    /// What the window shows in its title bar and task bar until
-    /// it is set. A new one shows once it has loaded.
+    /// What the window shows in its title bar and task bar: the default icon until it is set. A new one shows once it has
+    /// loaded.
     /// </summary>
     Handle<Icon> Icon { get; set; }
 
@@ -30,19 +28,7 @@ public interface IWindow
     int Height { get; }
 
     /// <summary>
-    /// What the platform knows the window by, 0 when there is none.
+    /// What the OS knows the window by; none when there is no window.
     /// </summary>
-    uint Id { get; }
-
-    /// <summary>
-    /// The Vulkan instance extensions a surface on this window needs; none headless, or when the platform has no
-    /// Vulkan.
-    /// </summary>
-    ImmutableArray<string> VulkanExtensions { get; }
-
-    /// <summary>
-    /// A Vulkan surface on the window for <paramref name="instance"/>, a <c>VkInstance</c>, as a <c>VkSurfaceKHR</c>
-    /// the caller destroys; why not when the window has none to give. Main thread.
-    /// </summary>
-    Result<ulong> CreateVulkanSurface(nint instance);
+    WindowHandle Handle { get; }
 }

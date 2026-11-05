@@ -1,14 +1,12 @@
-using Magic;
 using Magic.Debugging;
-using Magic.Gems;
 using Magic.Gpu;
-using Magic.Pipelines;
 using Magic.Platform;
+using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
 using Vortice.Vulkan;
 
-namespace VulkanGraphics;
+namespace Magic.VulkanGraphics;
 
 /// <summary>
 /// The GPU through Vulkan 1.3: one bindless heap, resources made from Core's descriptions, and one frame of commands
@@ -17,7 +15,7 @@ namespace VulkanGraphics;
 /// what records next. The renderer records and submits; a frame nothing submitted still shows the window's image.
 /// It is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IPipeline<ServicePump>, IPipeline<Render>, IDisposable
+public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
 {
     private readonly Threads _threads;
     private readonly VulkanDevice _device;
@@ -242,26 +240,19 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IPipeline<ServicePum
     /// Begins the frame before the renderer's turn: last frame's commands if nothing submitted them, then the next
     /// frame and the window's image.
     /// </summary>
-    public ValueTask<Render> RunAsync(Render state, CancellationToken cancel)
+    public void Render(in Frame frame)
     {
         if (_isBegun && !_isSubmitted)
             Submit(GpuCommands.None);
 
         _isBegun = false;
         BeginFrame();
-
-        return ValueTask.FromResult(state);
     }
 
     /// <summary>
-    /// Finishes the frames the GPU is done with, so a readback awaited while no frame begins still completes.
+    /// Finishes the frames the GPU is done with, so a readback awaited completes whether or not the renderer draws.
     /// </summary>
-    public ValueTask<ServicePump> RunAsync(ServicePump state, CancellationToken cancel)
-    {
-        _frames.Poll();
-
-        return ValueTask.FromResult(state);
-    }
+    public void Update(in Frame frame) => _frames.Poll();
 
     private void BeginFrame()
     {

@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Magic.Shaders;
 
 namespace Magic.Rendering;
 
@@ -11,7 +10,6 @@ namespace Magic.Rendering;
 /// when its parent's error projects above the threshold and its own at or below it. A leaf's error is 0 and a
 /// root's parent error is the model's diameter, so some level draws until the whole model is under the threshold.
 /// </summary>
-[ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public record struct GpuCluster
 {

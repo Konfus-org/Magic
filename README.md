@@ -1,7 +1,7 @@
 # Magic
 
 Magic is a plugin-driven game engine written in C#, in active development. Today it is the `Magic` program, its assets,
-its pipelines and the build rules.
+its services and the build rules.
 
 ## Requirements
 
@@ -20,8 +20,7 @@ dotnet run --project samples/HelloWorld
 What follows `--` goes to Magic, whose commands are declared in [`Cli.cs`](src/Core/CommandLine/Cli.cs); `--help` lists
 them. Without `--headless`, the project must list a gem that provides a window. Each line typed into the terminal
 runs the same commands, and an option may leave out its leading `--`. A typed `open <path>` or `headless false` restarts
-the run. Building a gem the project lists restarts it too, with the new build and the world where it was, when the
-project lists a gem that writes saved worlds. The build output goes to `Build/bin/<Configuration>/`.
+the run. Building a gem the project lists restarts it too, with the new build and the world where it was. The build output goes to `Build/bin/<Configuration>/`.
 
 `Magic new <template> <name>` makes `<name>` with `dotnet new magic-<template>`, passing on any option Magic doesn't
 know, such as `-o <folder>`. Install Magic's templates first with `tools/VS Templates/InstallTemplates.ps1`.

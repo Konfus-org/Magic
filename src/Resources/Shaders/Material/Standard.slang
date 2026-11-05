@@ -1,5 +1,5 @@
 // The standard material: a base colour, tinted by a texture when the row names one, with roughness, metalness and an
-// emissive colour from the row. Its params are "color", "roughness", "metalness", "emissive" and "baseColorTexture".
+// emissive colour from the row. Its params are "color", "roughness", "metalness", "emissive" and "colorMap".
 module "Material/Standard";
 
 import Core.Heap;

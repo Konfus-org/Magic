@@ -1,45 +1,38 @@
-using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Text;
-using Magic;
-using Magic.Assets;
-using Magic.Assets.Types;
 using Magic.Debugging;
-using Magic.Gems;
+using Magic.Files;
+using Magic.Files.Types;
 using Magic.Input;
-using Magic.Pipelines;
 using Magic.Platform;
+using Magic.Projects;
+using Magic.SdlBindings;
 using Magic.Threading;
 using Magic.Utils;
-using static SdlPlatform.SDL_EventType;
-using static SdlPlatform.SDL_GamepadAxis;
-using static SdlPlatform.SDL_MouseWheelDirection;
-using static SdlPlatform.SDL3;
+using static Magic.SdlBindings.SDL_EventType;
+using static Magic.SdlBindings.SDL_GamepadAxis;
+using static Magic.SdlBindings.SDL_MouseWheelDirection;
+using static Magic.SdlBindings.SDL_PixelFormat;
+using static Magic.SdlBindings.SDL3;
 
-namespace SdlPlatform;
+namespace Magic.SdlPlatform;
 
 /// <summary>
 /// The window, clipboard and input, through SDL3. Opens the window, keeps the clipboard, and turns keyboards, mice and
 /// gamepads into <see cref="IInput"/>'s controls and typed text. Headless, it opens no window, keeps the clipboard's text
 /// to itself and reads gamepads only: keyboards and mice need a window to type and point into.
 /// <para>
-/// SDL's windows and events belong to the process's main thread, which everything here runs on:
-/// <see cref="ServicePump"/> turns SDL's events into changes as they come, and <see cref="BeginUpdate"/> applies them, so
-/// input stays fixed for the rest of a frame. It is public because nothing in its assembly makes it: Magic does, by
-/// reflection, when a project lists the gem.
+/// SDL's windows and events belong to the process's main thread, which everything here runs on: <see cref="Update"/>
+/// turns SDL's events into changes and applies them, before any gem that takes the input runs, as they are made after
+/// this one, so input stays fixed for the rest of a frame. It is public because nothing in its assembly makes it: Magic
+/// does, by reflection, when a project lists the gem.
 /// </para>
 /// </summary>
-public sealed class SdlPlatformGem
-    : IGem,
-        IWindow,
-        IClipboard,
-        IInput,
-        IPipeline<ServicePump>,
-        IPipeline<BeginUpdate>,
-        IDisposable
+public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposable
 {
     private const int InitialWidth = 1280;
+
     private const int InitialHeight = 720;
 
     /// <summary>
@@ -62,7 +55,16 @@ public sealed class SdlPlatformGem
     ];
 
     private readonly App _app;
+
     private readonly Threads _threads;
+
+    private readonly Assets _assets;
+
+    /// <summary>
+    /// Ends the wait for an icon as the gem ends.
+    /// </summary>
+    private readonly CancellationTokenSource _stopping = new();
+
     private readonly unsafe SDL_Window* _window;
 
     /// <summary>
@@ -74,6 +76,7 @@ public sealed class SdlPlatformGem
     /// The devices as of this frame, and their controls by <see cref="ControlExtensions"/>' Index, at the same indexes.
     /// </summary>
     private readonly List<InputDevice> _devices = [];
+
     private readonly List<ControlState[]> _controls = [];
 
     /// <summary>
@@ -93,23 +96,31 @@ public sealed class SdlPlatformGem
     private readonly StringBuilder _typed = new();
 
     /// <summary>
-    /// Whether the window opened with Vulkan, so it can give a surface.
+    /// What holds the window's Metal layer on macOS, so its handle has one to name; null elsewhere.
     /// </summary>
-    private readonly bool _hasVulkan;
+    private readonly unsafe void* _metalView;
 
     private string _title;
+
     private string _clipboard = string.Empty;
+
     private string _text = string.Empty;
+
+    /// <summary>
+    /// An icon that has loaded, for the next frame to give the window: set by a worker, taken on the main thread.
+    /// </summary>
+    private WantedIcon? _wantedIcon;
 
     /// <summary>
     /// Window pixels per screen point, which SDL's mouse positions are in.
     /// </summary>
     private float _pixelDensity = 1;
 
-    public unsafe SdlPlatformGem(App app, Threads threads)
+    public unsafe SdlPlatformGem(App app, Threads threads, Assets assets)
     {
         _app = app;
         _threads = threads;
+        _assets = assets;
         _title = app.Project?.Name ?? string.Empty;
 
         uint systems = app.IsHeadless ? SDL_INIT_GAMEPAD : SDL_INIT_VIDEO | SDL_INIT_GAMEPAD;
@@ -119,29 +130,12 @@ public sealed class SdlPlatformGem
         if (app.IsHeadless)
             return;
 
-        // A window a GPU gem can draw into needs Vulkan at its opening; one without still opens on a machine with no
-        // Vulkan, for a project that draws nothing.
+        // macOS draws through a Metal layer, which the window must be opened for; elsewhere the OS's window is enough.
+        ulong flags =
+            SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | (OperatingSystem.IsMacOS() ? SDL_WINDOW_METAL : 0);
         fixed (byte* title = CString.ToBytes(_title))
         {
-            _window = SDL_CreateWindow(
-                title,
-                InitialWidth,
-                InitialHeight,
-                SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_VULKAN
-            );
-            _hasVulkan = _window != null;
-            if (_window == null)
-            {
-                Log.Warn(
-                    $"The window opens without Vulkan, so nothing can be drawn into it: {CString.Read(SDL_GetError())}"
-                );
-                _window = SDL_CreateWindow(
-                    title,
-                    InitialWidth,
-                    InitialHeight,
-                    SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
-                );
-            }
+            _window = SDL_CreateWindow(title, InitialWidth, InitialHeight, flags);
         }
 
         if (_window == null)
@@ -152,8 +146,10 @@ public sealed class SdlPlatformGem
             throw new InvalidOperationException($"SDL could not open a window: {error}");
         }
 
-        Id = SDL_GetWindowID(_window);
-        VulkanExtensions = _hasVulkan ? ReadVulkanExtensions() : [];
+        if (OperatingSystem.IsMacOS())
+            _metalView = SDL_Metal_CreateView(_window);
+
+        Handle = ReadHandle();
 
         // Typed characters come as text events only while text input is on: always, as a desktop has no on-screen
         // keyboard for it to bring up.
@@ -182,6 +178,7 @@ public sealed class SdlPlatformGem
         }
 
         SDL_free(mice);
+        Icon = assets.GetDefault<Icon>();
     }
 
     public unsafe string Title
@@ -201,8 +198,20 @@ public sealed class SdlPlatformGem
         }
     }
 
-    // TODO: show it once a gem reads textures; until then the window keeps what the OS gives it.
-    public Handle<Icon> Icon { get; set; }
+    /// <summary>
+    /// Set on the main thread, it reaches the window once it and its image have loaded, unless another was set meanwhile.
+    /// </summary>
+    public unsafe Handle<Icon> Icon
+    {
+        get => field;
+        set
+        {
+            ThrowIfNotOnMain();
+            field = value;
+            if (_window != null)
+                ShowAsync(value).FireAndForget();
+        }
+    }
 
     /// <summary>
     /// 0 when headless.
@@ -214,12 +223,7 @@ public sealed class SdlPlatformGem
     /// </summary>
     public int Height { get; private set; }
 
-    /// <summary>
-    /// SDL's id for the window; 0 when headless.
-    /// </summary>
-    public uint Id { get; }
-
-    public ImmutableArray<string> VulkanExtensions { get; } = [];
+    public WindowHandle Handle { get; }
 
     public ReadOnlySpan<InputDevice> Devices => CollectionsMarshal.AsSpan(_devices);
 
@@ -282,25 +286,17 @@ public sealed class SdlPlatformGem
         }
     }
 
-    public unsafe Result<ulong> CreateVulkanSurface(nint instance)
-    {
-        ThrowIfNotOnMain();
-        if (_window == null || !_hasVulkan)
-            return Result.Failure("the window opened without Vulkan.");
-
-        VkSurfaceKHR_T* surface;
-        if (!SDL_Vulkan_CreateSurface(_window, (VkInstance_T*)instance, null, &surface))
-            return Result.Failure($"SDL could not make a surface: {CString.Read(SDL_GetError())}");
-
-        return Result.Success((ulong)surface);
-    }
-
     public unsafe void Dispose()
     {
+        _stopping.Cancel();
+        _stopping.Dispose();
         foreach (nint gamepad in _gamepads.Values)
         {
             SDL_CloseGamepad((SDL_Gamepad*)gamepad);
         }
+
+        if (_metalView != null)
+            SDL_Metal_DestroyView(_metalView);
 
         if (_window != null)
             SDL_DestroyWindow(_window);
@@ -309,14 +305,113 @@ public sealed class SdlPlatformGem
     }
 
     /// <summary>
-    /// Turns SDL's events into changes for the next frame, so the window answers the OS while no frames run too.
+    /// Makes input this frame's: what happened last frame is over, SDL's events since are turned into changes and
+    /// applied, and sticks and triggers are read as they stand now, rather than added up from events.
+    /// </summary>
+    public unsafe void Update(in Frame frame)
+    {
+        if (Interlocked.Exchange(ref _wantedIcon, null) is { } wanted && wanted.Icon == Icon)
+            SetIcon(wanted.Image);
+
+        for (int i = 0; i < _devices.Count; i++)
+        {
+            StartFrame(_devices[i].Kind, _controls[i]);
+        }
+
+        PollEvents();
+        _typed.Clear();
+        foreach (Change change in _changes)
+        {
+            Apply(change);
+        }
+
+        _changes.Clear();
+        _text = _typed.Length == 0 ? string.Empty : _typed.ToString();
+        foreach ((uint id, nint gamepad) in _gamepads)
+        {
+            ReadAxes(id, (SDL_Gamepad*)gamepad);
+        }
+    }
+
+    /// <summary>
+    /// What happened last frame is over: pressed and released clear, and a mouse's motion and wheel go back to 0.
+    /// </summary>
+    private static void StartFrame(DeviceKind kind, ControlState[] states)
+    {
+        for (int i = 0; i < states.Length; i++)
+        {
+            states[i] = states[i] with { WasPressed = false, WasReleased = false };
+        }
+
+        if (kind != DeviceKind.Mouse)
+            return;
+
+        states[Control.MouseMotionX.Index] = default;
+        states[Control.MouseMotionY.Index] = default;
+        states[Control.MouseWheelX.Index] = default;
+        states[Control.MouseWheelY.Index] = default;
+    }
+
+    /// <summary>
+    /// Gives a control a new value, and with it whether it went down or came up. Pressed and released only ever turn on
+    /// within a frame, so a tap between two frames shows as both.
+    /// </summary>
+    private static void SetState(ControlState[] states, Control control, float value)
+    {
+        ref ControlState state = ref states[control.Index];
+        bool isDown = MathF.Abs(value) >= 0.5f;
+        state = new ControlState(
+            value,
+            isDown,
+            state.WasPressed || (isDown && !state.IsDown),
+            state.WasReleased || (!isDown && state.IsDown)
+        );
+    }
+
+    /// <summary>
+    /// The clipboard's text, which SDL hands out as a copy that is freed once read.
+    /// </summary>
+    private static unsafe string ReadClipboard()
+    {
+        byte* text = SDL_GetClipboardText();
+        string value = CString.Read(text);
+        SDL_free(text);
+
+        return value;
+    }
+
+    /// <summary>
+    /// An SDL axis, -32768 to 32767, as -1 to 1: 0 inside the dead zone, and past it growing from 0 to 1 at full
+    /// deflection, so the zone's edge is no step. Triggers only reach the positive half.
+    /// </summary>
+    private static float ToStick(short value)
+    {
+        float raw = Math.Max(value / 32767f, -1f);
+        float past = MathF.Abs(raw) - StickDeadZone;
+
+        return past <= 0 ? 0 : MathF.CopySign(past / (1 - StickDeadZone), raw);
+    }
+
+    /// <summary>
+    /// The named pointer in a window's <paramref name="properties"/>; 0 when it has none.
+    /// </summary>
+    private static unsafe nint GetPointer(uint properties, ReadOnlySpan<byte> name)
+    {
+        fixed (byte* key = name)
+        {
+            return (nint)SDL_GetPointerProperty(properties, key, null);
+        }
+    }
+
+    /// <summary>
+    /// Turns SDL's events since the last frame into changes, in the order they happened.
     /// </summary>
     [SuppressMessage(
         "Style",
         "IDE0010:Add missing cases",
         Justification = "SDL has far more events than the gem reads; the rest are ignored on purpose."
     )]
-    public unsafe ValueTask<ServicePump> RunAsync(ServicePump state, CancellationToken cancel)
+    private unsafe void PollEvents()
     {
         SDL_Event sdlEvent;
         while (SDL_PollEvent(&sdlEvent))
@@ -407,94 +502,6 @@ public sealed class SdlPlatformGem
                     break;
             }
         }
-
-        return ValueTask.FromResult(state);
-    }
-
-    /// <summary>
-    /// Makes input this frame's: what happened last frame is over, what the pump saw since applies, and sticks and triggers
-    /// are read as they stand now, rather than added up from events.
-    /// </summary>
-    public unsafe ValueTask<BeginUpdate> RunAsync(BeginUpdate state, CancellationToken cancel)
-    {
-        for (int i = 0; i < _devices.Count; i++)
-        {
-            StartFrame(_devices[i].Kind, _controls[i]);
-        }
-
-        _typed.Clear();
-        foreach (Change change in _changes)
-        {
-            Apply(change);
-        }
-
-        _changes.Clear();
-        _text = _typed.Length == 0 ? string.Empty : _typed.ToString();
-        foreach ((uint id, nint gamepad) in _gamepads)
-        {
-            ReadAxes(id, (SDL_Gamepad*)gamepad);
-        }
-
-        return ValueTask.FromResult(state);
-    }
-
-    /// <summary>
-    /// What happened last frame is over: pressed and released clear, and a mouse's motion and wheel go back to 0.
-    /// </summary>
-    private static void StartFrame(DeviceKind kind, ControlState[] states)
-    {
-        for (int i = 0; i < states.Length; i++)
-        {
-            states[i] = states[i] with { WasPressed = false, WasReleased = false };
-        }
-
-        if (kind != DeviceKind.Mouse)
-            return;
-
-        states[Control.MouseMotionX.Index] = default;
-        states[Control.MouseMotionY.Index] = default;
-        states[Control.MouseWheelX.Index] = default;
-        states[Control.MouseWheelY.Index] = default;
-    }
-
-    /// <summary>
-    /// Gives a control a new value, and with it whether it went down or came up. Pressed and released only ever turn on
-    /// within a frame, so a tap between two frames shows as both.
-    /// </summary>
-    private static void SetState(ControlState[] states, Control control, float value)
-    {
-        ref ControlState state = ref states[control.Index];
-        bool isDown = MathF.Abs(value) >= 0.5f;
-        state = new ControlState(
-            value,
-            isDown,
-            state.WasPressed || (isDown && !state.IsDown),
-            state.WasReleased || (!isDown && state.IsDown)
-        );
-    }
-
-    /// <summary>
-    /// The clipboard's text, which SDL hands out as a copy that is freed once read.
-    /// </summary>
-    private static unsafe string ReadClipboard()
-    {
-        byte* text = SDL_GetClipboardText();
-        string value = CString.Read(text);
-        SDL_free(text);
-
-        return value;
-    }
-
-    /// <summary>
-    /// An SDL axis, -32768 to 32767, as -1 to 1: 0 inside the dead zone, and past it growing from 0 to 1 at full
-    /// deflection, so the zone's edge is no step. Triggers only reach the positive half.
-    /// </summary>
-    private static float ToStick(short value)
-    {
-        float raw = Math.Max(value / 32767f, -1f);
-        float past = MathF.Abs(raw) - StickDeadZone;
-
-        return past <= 0 ? 0 : MathF.CopySign(past / (1 - StickDeadZone), raw);
     }
 
     /// <summary>
@@ -665,29 +672,6 @@ public sealed class SdlPlatformGem
     }
 
     /// <summary>
-    /// The instance extensions a surface on this window needs, as SDL lists them for this platform.
-    /// </summary>
-    private static unsafe ImmutableArray<string> ReadVulkanExtensions()
-    {
-        uint count;
-        byte** names = SDL_Vulkan_GetInstanceExtensions(&count);
-        if (names == null)
-        {
-            Log.Warn($"SDL lists no Vulkan extensions for the window: {CString.Read(SDL_GetError())}");
-
-            return [];
-        }
-
-        ImmutableArray<string>.Builder extensions = ImmutableArray.CreateBuilder<string>((int)count);
-        for (uint i = 0; i < count; i++)
-        {
-            extensions.Add(CString.Read(names[i]));
-        }
-
-        return extensions.MoveToImmutable();
-    }
-
-    /// <summary>
     /// Window pixels per screen point, which SDL's mouse positions are in; 1 when SDL cannot say.
     /// </summary>
     private unsafe float ReadPixelDensity()
@@ -706,6 +690,96 @@ public sealed class SdlPlatformGem
 
         Width = width;
         Height = height;
+    }
+
+    /// <summary>
+    /// Loads <paramref name="icon"/> and its image on workers, for the next frame to give the image to the window. One that
+    /// does not load is a warning, and the window keeps what it shows.
+    /// </summary>
+    private async Task ShowAsync(Handle<Icon> icon)
+    {
+        if (icon == Handle<Icon>.None)
+            return;
+
+        CancellationToken stopping = _stopping.Token;
+        Result<Icon> loaded = await _assets.LoadAsync(icon, null, stopping).ConfigureAwait(false);
+        Result<Texture> image = loaded.Ok
+            ? await _assets.LoadAsync(loaded.Value.Image, null, stopping).ConfigureAwait(false)
+            : Result.Failure(loaded.Error);
+        if (!image.Ok)
+        {
+            Log.Warn($"The window's icon is not shown: {image.Error}");
+
+            return;
+        }
+
+        Volatile.Write(ref _wantedIcon, new WantedIcon(icon, image.Value));
+    }
+
+    /// <summary>
+    /// Gives the window <paramref name="image"/>'s first level, which SDL copies.
+    /// </summary>
+    private unsafe void SetIcon(Texture image)
+    {
+        if (image.Format is not (TextureFormat.Rgba8Srgb or TextureFormat.Rgba8Unorm))
+        {
+            Log.Warn($"The window's icon is not shown: its image is {image.Format}, not uncompressed.");
+
+            return;
+        }
+
+        TextureLevel top = image.Levels[0];
+        fixed (byte* pixels = image.Pixels.Span)
+        {
+            SDL_Surface* surface = SDL_CreateSurfaceFrom(
+                top.Width,
+                top.Height,
+                SDL_PIXELFORMAT_RGBA32,
+                pixels,
+                top.Width * 4
+            );
+            if (surface == null || !SDL_SetWindowIcon(_window, surface))
+                Log.Warn($"The window's icon is not shown: {CString.Read(SDL_GetError())}");
+
+            SDL_DestroySurface(surface);
+        }
+    }
+
+    /// <summary>
+    /// What the OS knows the window by, which SDL keeps among its properties.
+    /// </summary>
+    private unsafe WindowHandle ReadHandle()
+    {
+        if (OperatingSystem.IsMacOS())
+            return new WindowHandle(WindowSystem.Cocoa, 0, (nint)SDL_Metal_GetLayer(_metalView));
+
+        uint properties = SDL_GetWindowProperties(_window);
+        if (OperatingSystem.IsWindows())
+        {
+            return new WindowHandle(
+                WindowSystem.Windows,
+                GetPointer(properties, SDL_PROP_WINDOW_WIN32_INSTANCE_POINTER),
+                GetPointer(properties, SDL_PROP_WINDOW_WIN32_HWND_POINTER)
+            );
+        }
+
+        // Linux runs on either, whichever SDL found.
+        nint wayland = GetPointer(properties, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER);
+        if (wayland != 0)
+            return new WindowHandle(
+                WindowSystem.Wayland,
+                wayland,
+                GetPointer(properties, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER)
+            );
+
+        fixed (byte* window = SDL_PROP_WINDOW_X11_WINDOW_NUMBER)
+        {
+            return new WindowHandle(
+                WindowSystem.X11,
+                GetPointer(properties, SDL_PROP_WINDOW_X11_DISPLAY_POINTER),
+                (nint)SDL_GetNumberProperty(properties, window, 0)
+            );
+        }
     }
 
     /// <summary>
@@ -748,4 +822,9 @@ public sealed class SdlPlatformGem
         string? Name = null,
         string? Text = null
     );
+
+    /// <summary>
+    /// An icon and the image it names, loaded.
+    /// </summary>
+    private sealed record WantedIcon(Handle<Icon> Icon, Texture Image);
 }

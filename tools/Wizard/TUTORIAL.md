@@ -112,10 +112,9 @@ Add the SDK's version to `Directory.Packages.props`, in order:
     <PackageVersion Include="ModelContextProtocol.Core" Version="2.2.0" />
 ```
 
-In `src/Magic.slnx`, check the template put it in the `/Gems/` folder, in order:
+In `src/Magic.slnx`, check the template put it in the `/Gems/` folder:
 
 ```xml
-    <Project Path="Gems/Hello/Hello.csproj" />
     <Project Path="Gems/Mcp/Mcp.csproj" />
 ```
 
@@ -777,11 +776,7 @@ Each POST to `/mcp` carries one JSON-RPC message and gets one answer. Nothing is
 
 ### 1.6 List it
 
-Add `Mcp` after `Hello` in `samples/HelloWorld/HelloWorld.magic`:
-
-```json
-{ "name": "HelloWorld", "gems": ["Hello", "Mcp"] }
-```
+Add `Mcp` to the end of the gems in `samples/HelloWorld/HelloWorld.magic`.
 
 Do the same in `tools/VS Templates/Project/ProjectName.magic`, then run `tools/VS Templates/InstallTemplates.ps1` again to update the
 installed template.

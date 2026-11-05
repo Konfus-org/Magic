@@ -7,11 +7,11 @@ using Magic.Utils;
 using Vortice.Vulkan;
 using static Vortice.Vulkan.Vulkan;
 
-namespace VulkanGraphics;
+namespace Magic.VulkanGraphics;
 
 /// <summary>
 /// The instance, the GPU picked and its device and queue, made once as the gem starts and freed last. Picks the
-/// fastest GPU that has every feature of the baseline (RENDERING_PLAN.md, IGraphicsApi) and can show the window, and
+/// fastest GPU that has every feature of the baseline (IGraphicsApi) and can show the window, and
 /// notes which optional ones it has. Throws when there is no such GPU: the gem can't exist without one.
 /// </summary>
 internal sealed unsafe class VulkanDevice : IDisposable
@@ -39,10 +39,8 @@ internal sealed unsafe class VulkanDevice : IDisposable
         HashSet<string> instanceExtensions = GetInstanceExtensions();
         HasDebugUtils = instanceExtensions.Contains(DebugUtilsExtension);
         bool hasPortability = instanceExtensions.Contains(PortabilityEnumerationExtension);
-        List<string> wantedExtensions = [];
-        if (window is not null)
-            wantedExtensions.AddRange(window.VulkanExtensions);
-
+        WindowHandle handle = window?.Handle ?? default;
+        List<string> wantedExtensions = [.. VulkanSurface.GetExtensions(handle.System)];
         if (HasDebugUtils)
             wantedExtensions.Add(DebugUtilsExtension);
 
@@ -54,13 +52,13 @@ internal sealed unsafe class VulkanDevice : IDisposable
         if (HasDebugUtils && HasValidation)
             _messenger = CreateMessenger();
 
-        if (window is not null)
+        if (handle.System != WindowSystem.None)
         {
-            Result<ulong> surface = window.CreateVulkanSurface(Instance.Handle);
+            Result<VkSurfaceKHR> surface = VulkanSurface.Create(InstanceApi, handle);
             if (!surface.Ok)
                 Log.Warn($"The window gives no Vulkan surface, so nothing is drawn into it: {surface.Error}");
             else
-                Surface = new VkSurfaceKHR(surface.Value);
+                Surface = surface.Value;
         }
 
         Pick picked = PickPhysicalDevice();

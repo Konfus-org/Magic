@@ -1,21 +1,19 @@
+using System.Collections.Immutable;
 using System.Runtime.InteropServices;
-using Magic.Pipelines;
 
 namespace Magic.Ecs;
 
 /// <summary>
-/// Changes to entities, pushed as data, and what came of them: the state of the pipeline that makes them, the one way
-/// entities change. Push onto <c>pipelines.Get&lt;EntitiesChangeList&gt;().Deferred</c> and they run once a frame, or run a
-/// list of your own at once with <c>world.Apply</c>, which is also how to change entities straight after a query's loop, where they can't change during
-/// it. The gem that provides the ECS makes them (<see cref="Apply"/>), and a gem after it reads <see cref="Created"/> and
-/// <see cref="Destroyed"/>. Pushing and making box nothing but what is boxed already, and one kept and reused allocates
-/// nothing once it has grown. Main thread.
+/// Changes to entities, pushed as data for bulk work, and what came of them. Fill a list of your own and run it at once with
+/// <c>world.Apply</c>, which is also how to change entities straight after a query's loop, where they can't change during
+/// it. Pushing and making box nothing but what is boxed already, and one kept and reused allocates nothing once it has
+/// grown. Main thread.
 /// </summary>
-public sealed class EntitiesChangeList : IChangeList
+public sealed class EntitiesChangeList
 {
     private readonly List<Change> _changes = [];
 
-    private readonly List<EntityTemplate> _templates = [];
+    private readonly List<ImmutableArray<IComponent>> _entities = [];
 
     /// <summary>
     /// The components pushed already boxed, whatever their type.
@@ -44,10 +42,10 @@ public sealed class EntitiesChangeList : IChangeList
     /// <summary>
     /// One new entity for each of <paramref name="entities"/>.
     /// </summary>
-    public void Create(ReadOnlySpan<EntityTemplate> entities)
+    public void Create(ReadOnlySpan<ImmutableArray<IComponent>> entities)
     {
-        _changes.Add(new Change(ChangeKind.CreateFromTemplates, default, null, _templates.Count, entities.Length));
-        _templates.AddRange(entities);
+        _changes.Add(new Change(ChangeKind.CreateFromComponents, default, null, _entities.Count, entities.Length));
+        _entities.AddRange(entities);
     }
 
     /// <summary>
@@ -137,16 +135,16 @@ public sealed class EntitiesChangeList : IChangeList
 
     /// <summary>
     /// Makes every change pushed on <paramref name="ecs"/>, in the order pushed, and fills in <see cref="Created"/> and
-    /// <see cref="Destroyed"/>: for the gem that provides it to call in its pipeline over this list. A change to an entity
-    /// that is no longer alive, destroyed by an earlier change or since it was pushed, is skipped.
+    /// <see cref="Destroyed"/>. A change to an entity that is no longer alive, destroyed by an earlier change or since it was
+    /// pushed, is skipped.
     /// </summary>
     public void Apply(IEcs ecs)
     {
         ArgumentNullException.ThrowIfNull(ecs);
         foreach (Change change in _changes)
         {
-            if (change.Kind == ChangeKind.CreateFromTemplates)
-                CreateFromTemplates(ecs, change);
+            if (change.Kind == ChangeKind.CreateFromComponents)
+                CreateFromComponents(ecs, change);
             else if (change.Kind == ChangeKind.Create)
                 change.Batch?.Create(ecs, change.Slot, change.Count, _created);
             else if (ecs.IsAlive(change.Entity))
@@ -162,7 +160,7 @@ public sealed class EntitiesChangeList : IChangeList
     public void Clear()
     {
         _changes.Clear();
-        _templates.Clear();
+        _entities.Clear();
         _boxed.Clear();
         _created.Clear();
         _destroyed.Clear();
@@ -183,11 +181,11 @@ public sealed class EntitiesChangeList : IChangeList
         return CollectionsMarshal.AsSpan(created)[before..];
     }
 
-    private void CreateFromTemplates(IEcs ecs, Change change)
+    private void CreateFromComponents(IEcs ecs, Change change)
     {
         for (int i = change.Slot; i < change.Slot + change.Count; i++)
         {
-            _created.Add(ecs.Create(_templates[i].Components.AsSpan()));
+            _created.Add(ecs.Create(_entities[i].AsSpan()));
         }
     }
 
@@ -208,7 +206,7 @@ public sealed class EntitiesChangeList : IChangeList
             case ChangeKind.Remove:
                 (change.Batch as IColumn)?.Remove(ecs, change.Entity);
                 break;
-            case ChangeKind.CreateFromTemplates:
+            case ChangeKind.CreateFromComponents:
             case ChangeKind.Create:
             default:
                 throw new ArgumentException($"{change.Kind} is no change to an entity.", nameof(change));
@@ -226,7 +224,7 @@ public sealed class EntitiesChangeList : IChangeList
 
     private enum ChangeKind : byte
     {
-        CreateFromTemplates,
+        CreateFromComponents,
         Create,
         Destroy,
         SetBoxed,

@@ -10,12 +10,13 @@ Write the engine as data flowing through functions, not objects calling each oth
 
 - **Data:** plain values, such as `Domain`, `Prefab` and `EntitiesChangeList`.
 - **Databases:** one place that holds state and does little else, such as the assets' database and the ECS's columns.
-- **Pipelines:** where the work happens, once a frame over a batch.
-- **Services:** immediate calls where that's the normal thing, such as `world.Create` and `assets.Find`.
+- **Services:** what you call, such as `world.Create` and `assets.Find`.
+- **Steps:** work done in an order, as named methods that take values and return values. `Program` and
+  `Assets.RunImportAsync` read this way.
 
 - **Nothing glued in.** Just about everything is a gem that can be swapped out.
-- **Pipelines, not webs.** Data moves A → B → C. Each step takes values and returns values, and the whole flow reads
-  top to bottom in one place. No events firing into handlers that fire more events.
+- **Direct calls, not webs.** Data moves A â†’ B â†’ C, and the whole flow reads top to bottom in one place. Call a thing by
+  its name, so go-to-definition and a stack trace lead to it. No events firing into handlers that fire more events.
 - **Stateless by default.** A function takes what it needs and returns a result.
 - **Testable.** Each piece is modular, can be tested on its own, and is easy to debug.
 - **Functions over objects.** Records, plain data and static functions. No objects that guard their own fields.
@@ -37,41 +38,37 @@ Write the engine as data flowing through functions, not objects calling each oth
   binary or copied code. Hand-write a binding only where the generator can't, and say so in the gem's README.
 - No keys, tokens or passwords in code, configuration or workflows. CI reads its own from the repository's secrets.
 
-## Gems, pipelines and services
+## Gems, hooks and services
 
 - A gem is a plugin: a decoupled, hot-reloadable, modular piece of logic that a project adds or replaces to meet its
-  needs. It is a `public sealed` class implementing `IGem`, an `IPipeline<TState>` for each pipeline it joins, and the
-  Core interfaces it provides.
-- A service is what you call. A pipeline is work the engine runs, in the order it's told.
-- A gem's constructor takes everything it depends on. Only code that builds objects from constructors takes
-  `IServiceProvider`.
-- A pipeline takes its state and hands it on, changed or not. It runs after the gems it needs, then in the order the
-  project lists them. [`PipelineStages.cs`](../src/Core/Pipelines/PipelineStages.cs) has the states Core runs.
-- Any pipeline runs either way, and the caller picks: `pipelines.Get<MyState>().Run(state)` runs it now, on the main
-  thread, and `.Defer(state)`, from any thread, runs it after the frame's fixed steps. What joins can't tell which. For
-  a change list, `pipelines.Get<MyList>().Deferred` is the list to push onto; the runner holds it, runs it and clears it.
-- A change to a database is pushed onto a change list, whose pipeline acts on it and says what came of it, as
-  `EntitiesChangeList` and `AssetsChangeList` do. A service's calls push onto its own, as `assets.Add` does. Push for
-  bulk work. Work over a list costs a walk per run, so a call
-  that runs one at once is for the odd change, not a hot path.
-- Core's own work is its root pipelines, each doing one area's work at each point of a run. `App.Run` lists them. A
-  dedicated pipeline is for a substantial piece of work, not each step: a step is a method.
-- A pipeline that can't take a run because of what its caller is doing throws `PipelineRefusedException`, which goes to
-  the caller.
-- What a frame runs is on the main thread and returns finished, with `ValueTask.FromResult`. A gem whose pipeline throws
-  or returns unfinished is logged and leaves every pipeline.
-- What is awaited, such as `Startup`, is called on the main thread and may await. After an await of its own, it steps
-  back with `await threads.Enter(EngineThread.Main)`.
+  needs. It is a `public sealed` class implementing `IGem` and the Core interfaces it provides.
+- A gem's constructor takes everything it depends on and starts what the gem is; `Dispose` ends it. Only code that
+  builds objects from constructors takes `IServiceProvider`. Gems are made in dependency order, then in the order the
+  project lists them, and disposed in reverse.
+- A hook is what the engine calls on a gem each frame: `IGem`'s `Update`, `FixedUpdate`, `LateUpdate` and `Render`, in
+  that order over the gems, on the main thread. A gem implements the ones it needs. One that throws in a hook is logged
+  and leaves every hook.
+- Where Core needs something from a gem, the gem implements an interface and Core calls it, as with `IEcs` and
+  `IAssetImporter<T>`. Add one when a gem first needs it.
+- A gem that keeps something for each entity compares what it holds with the entities each frame, adding what came and
+  dropping what went, as the renderer does. It needs no call when content loads or unloads.
+- `Program` sets a run up and owns its loop, calling each service's `Pump` in turn. `App` lasts the whole process; what a
+  run makes is new for it, and a restart keeps only the world, as JSON. A service starts in its constructor
+  and ends in `Dispose`, not with paired start and stop calls. A step is a method. A class of its own is for a substantial piece of work.
+- Push onto an `EntitiesChangeList` for bulk work, and run it with `world.Apply`. A single change is a call on `World`.
+- A method that needs the main thread after an await of its own steps onto it with
+  `await threads.Enter(EngineThread.Main)`; nothing hops threads for it.
 - Gems talk through message structs. Publish one from any thread and every gem reads it the next frame, from
   `frame.Events` or through `EventCoordinator.Watch`.
-- Async work a frame's pipeline starts arrives in a later frame: by a message, or by work posted with `Threads.Post`.
-- `Shutdown` and `Dispose` free what the gem started, once none of its work still runs on a worker.
+- Async work a hook starts arrives in a later frame: by a message, or by work posted with `Threads.Post`. A gem that
+  needs slow setup starts it in its constructor and reads what came of it in a hook.
+- `Dispose` frees what the gem started, once none of its work still runs on a worker.
 - A gem's csproj states its `Description`, `Version` and `Authors`. Nothing else does.
 - Gems depend on Core's interfaces, never on each other.
 - A component is an unmanaged struct with public fields that implements `IComponent`, and members for what follows from
   those fields.
-- Work over many entities is a system: a function over chunks a gem calls from its pipeline, through `IEcs.Query` on its
-  own thread or `IEcs.Run` on the ECS's workers.
+- Work over many entities is a system: a function over chunks a gem calls from a hook, through `IEcs.Query` on its own
+  thread or `IEcs.Run` on the ECS's workers.
 - A game is its assets and scripts, never a gem.
 
 ## Async
@@ -108,8 +105,8 @@ Write the engine as data flowing through functions, not objects calling each oth
   `InvalidOperationException` or `NotSupportedException`, never `Exception` itself. Use the throw helpers
   (`ArgumentNullException.ThrowIfNull`, `ObjectDisposedException.ThrowIf` and their siblings).
 - Never catch and drop. Log what you catch with what failed and on what, or `throw;`. Catch `Exception` only where one
-  failure mustn't stop the run (a gem's pipeline, a loader, a forgotten task); elsewhere catch what you expect or filter
-  with `when`.
+  failure mustn't stop the run (a gem's hook, an importer, a forgotten task); elsewhere catch what you expect or
+  filter with `when`.
 - A log line says what happened and to what, once. Anything that repeats every frame is `Log.Verbose` or a metric.
 - `Assert` is for impossible state and ends the process with a crash file.
 - No null-forgiving `!` (MG0002); it and every nullable warning fail the build. Don't make what is always there nullable: pass it
@@ -139,7 +136,7 @@ Write the engine as data flowing through functions, not objects calling each oth
 
 - A namespace is the project's root namespace (`Magic` for Core, `Magic.<Name>` otherwise) plus its folders.
 - Core is one project, `src/Core/Magic.Core.csproj`. Its root holds only what starts the process; every other type
-  goes in the folder of its area, such as `Assets` or `Gems`. A new area is a new folder, never a new project.
+  goes in the folder of its area, such as `Files` or `Plugins`. A new area is a new folder, never a new project.
 - A folder exists only once it holds something. Split a big one into a subfolder per area, never named like a type in
   it.
 - A gem is flat: every file at its root, in `Magic.<Gem>`. Its `Resources/` holds the assets and scripts only it uses.
@@ -153,7 +150,8 @@ Write the engine as data flowing through functions, not objects calling each oth
 - An asset type holds what its users read: plain data, properties only, no JSON attributes, no file details, no I/O.
   Separate code reads it.
 - An asset type gems share is Core's. One only a gem reads is that gem's.
-- Reading a file format is its loader's one job; anything else known about an asset is found by Core.
+- Reading a file format is its importer's one job, and writing one its exporter's; anything else known about an asset,
+  its sidecar included, is Core's.
 - An import setting is a property of the asset type, declared as one, never a settings type beside it.
 - A key the file must have is `required { get; init; }`. One with a default is `{ get; set; }`, the default as its
   initializer and nowhere else. What code sets, not the file, has no public setter.
@@ -193,7 +191,7 @@ built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
 
 ### Naming
 
-- A name reads well as `Class.Member(arguments)`: `AssetDatabase.Find<Texture>(path)`, `App.Exit()`. Action first,
+- A name reads well as `Class.Member(arguments)`: `Assets.Find<Texture>(path)`, `App.Exit()`. Action first,
   subject second (`ReadDomain`), naming what it acts on even if that's longer. If it doesn't make sense without its
   summary (`Process()`, `_scratch`), rename it.
 - Each verb means one thing:
@@ -239,9 +237,10 @@ built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
 - Put what a struct does on it as extensions (`instance.ToCameraRelative(position)`), so a struct shared with C# keeps
   only its fields. Return a struct rather than `out` parameters.
 - A struct C# reads or writes holds only 32-bit scalars, their vectors, row-major matrices, heap references and such
-  structs. Mark its C# twin `[ShaderStruct]`; the renderer checks the two match when it starts.
-- A contract between shaders is an interface (`IMaterial`, `ISky`, `ILight`, `IPixelEffect`), and a pass that works with
-  any is generic over it.
+  structs. Its C# twin is sequential with `Pack = 4` and names the Slang module in its summary. Nothing checks that the
+  two match, so change them together.
+- A contract between shaders is an interface (`IMaterial`, `ISky`, `IPixelEffect`), and a pass that works with any is
+  generic over it.
 - Totals across a dispatch run in its last group (`IsLastGroup`), not in a one-group pass after it.
 - Use wave intrinsics only where the result can't depend on wave size (32 or 64) or the order is already arbitrary. No
   16-bit types, and no runtime-indexed resource arrays but the heap's.
@@ -250,8 +249,8 @@ built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
 - A compute pass has no implicit derivatives. Code it may run takes them as inputs, as `SurfaceInputs` and
   `SkyInputs` do.
 - Few variants: a generic for what changes the pipeline, a `[branch]` on a draw-wide value for the rest.
-- The BRDF, lights and their units, and the shading models live once in the shared shader library in
-  `src/Resources/Shaders/`. Every renderer shades with them.
+- The BRDF, the material contract and the shading models live once in the shared shader library in
+  `src/Resources/Shaders/`. Every renderer shades with them. A renderer's own tables and techniques go in its gem.
 - Write a technique from its paper and name the paper in a comment. No third-party shader code.
 
 ## Cross platform
@@ -260,7 +259,7 @@ All code runs on Windows, Linux and macOS.
 
 - **Paths.** Build them with `IFileSystem.Combine` and split them with `IFileSystem.GetParent`; never touch separators.
   `Path.GetExtension`, `Path.GetFileName*` and `Path.ChangeExtension` are fine. No drive letters, absolute paths or
-  checks for `..`. An asset path is relative to its root and uses `/`; only `AssetDatabase` turns it into an OS path.
+  checks for `..`. An asset path is relative to its root and uses `/`; only `Assets` turns it into an OS path.
 - **Case.** File names in code, assets, `#include`s, csproj and `.meta` files match the disk exactly. Two files never
   differ only by case.
 - **Disk.** All disk access goes through `IFileSystem`, never `File` or `Directory`; only `Debugging` is exempt. Engine
@@ -275,7 +274,7 @@ All code runs on Windows, Linux and macOS.
   its binary under `runtimes/<rid>/native/`. No csproj names a runtime identifier.
 - **Scripts.** Repository scripts are one PowerShell file each, for `pwsh` and Windows PowerShell 5.1, or a `dotnet`
   command. No `.bat`/`.sh` pairs.
-- **Graphics.** Draw through `IGpuDriver`: a gem records commands as plain data and the GPU provider turns them into API
-  calls; only the GPU provider has backend code. Draw into a render target (a `GpuTexture`), asking its format and size;
+- **Graphics.** Draw through `IGraphicsApi`: a gem records commands as plain data and the GPU provider turns them into
+  API calls; only the GPU provider has backend code. Draw into a render target (a `GpuTexture`), asking its format and size;
   never assume a window. Use a GPU feature only if Vulkan 1.3 has it on every GPU Magic runs on, a Mac's MoltenVK and
   KosmicKrisp included. Anything more is optional, with a path that works without it.
