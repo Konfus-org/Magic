@@ -50,9 +50,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/Scripts/Validate.ps1
 
 ### 1.1 What Core gives the gem
 
-The gem takes Core's public `World`, `Assemblies`, `Json`, `Settings`, `Threads` and `ICommands` in its constructor.
-Core lacks one thing: a list of every component type, for an "add component" menu. Add it next to `Get<T>` in
-`src/Core/Services/Assemblies.cs`:
+The gem takes Core's public `World`, `Settings`, `Threads` and `ICommands` in its constructor, and calls the static
+`Assemblies` and `Json`. Core lacks one thing: a list of every component type, for an "add component" menu. Add it next
+to `Get<T>` in `src/Core/Projects/Assemblies.cs`:
 
 ```csharp
     /// <summary>
@@ -60,12 +60,12 @@ Core lacks one thing: a list of every component type, for an "add component" men
     /// by its name with <see cref="Get{T}"/>: what a list to pick a component's struct from offers. It searches the
     /// code every time, so it is for a tool's menu, not the frame loop.
     /// </summary>
-    public IReadOnlyList<Type> GetAll<T>()
+    public static IReadOnlyList<Type> GetAll<T>()
     {
         List<Type> found = [];
-        foreach (Assembly assembly in _code.All)
+        foreach (Assembly assembly in _assemblies)
         {
-            foreach (Type type in From(assembly))
+            foreach (Type type in GetTypes(assembly))
             {
                 if (!type.IsNested && !type.IsAbstract && !type.ContainsGenericParameters && type.IsAssignableTo(typeof(T)))
                 {
@@ -201,7 +201,6 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
     private readonly McpSettings _settings;
     private readonly World _world;
     private readonly Assets _assets;
-    private readonly Assemblies _assemblies;
     private readonly Settings _gemSettings;
     private readonly Threads _threads;
     private readonly App _app;
@@ -228,12 +227,11 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
     /// </summary>
     private ulong _frame;
 
-    public McpGem(McpSettings settings, World world, Assets assets, Assemblies assemblies, Settings gemSettings, Threads threads, App app, ICommands? commands = null)
+    public McpGem(McpSettings settings, World world, Assets assets, Settings gemSettings, Threads threads, App app, ICommands? commands = null)
     {
         _settings = settings;
         _world = world;
         _assets = assets;
-        _assemblies = assemblies;
         _gemSettings = gemSettings;
         _threads = threads;
         _app = app;
@@ -647,7 +645,7 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
 
     private string FormatComponentTypes()
     {
-        IReadOnlyList<Type> types = _assemblies.GetAll<IComponent>();
+        IReadOnlyList<Type> types = Assemblies.GetAll<IComponent>();
         string[] names = new string[types.Count];
         for (int i = 0; i < types.Count; i++)
         {
@@ -715,7 +713,7 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
 
     private Type FindComponentType(string name)
     {
-        Result<Type> type = _assemblies.TryGet<IComponent>(name);
+        Result<Type> type = Assemblies.Get<IComponent>(name);
         return type.Ok ? type.Value : throw new McpException($"{type.Error} component_types lists them.");
     }
 

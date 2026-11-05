@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Magic.Serialization;
+using Magic.Projects;
 using Magic.Utils;
 
 namespace Magic.Ecs;
@@ -8,7 +8,7 @@ namespace Magic.Ecs;
 /// <summary>
 /// A component held as <see cref="IComponent"/>, as JSON: its type's name and its values,
 /// <c>{ "type": "Transform", "values": { "position": { "x": 0, "y": 1, "z": 0 } } }</c>, the type found in the code loaded
-/// (<see cref="Projects.Assemblies.Get{T}"/>), so it outlives the code that made it. A type no code declares fails the read.
+/// (<see cref="Assemblies.Get{T}"/>), so it outlives the code that made it. A type no code declares fails the read.
 /// </summary>
 internal sealed class ComponentJsonConverter : JsonConverter<IComponent>
 {
@@ -28,10 +28,7 @@ internal sealed class ComponentJsonConverter : JsonConverter<IComponent>
             );
         }
 
-        if (Json.Assemblies is not { } code)
-            throw new JsonException($"{name} cannot be found, as no code is loaded to find it in.");
-
-        Result<Type> type = code.Get<IComponent>(name);
+        Result<Type> type = Assemblies.Get<IComponent>(name);
         if (!type.Ok)
             throw new JsonException(type.Error);
 

@@ -1,7 +1,6 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Magic.Projects;
 using Magic.Utils;
 
 namespace Magic.Serialization;
@@ -20,12 +19,6 @@ public static class Json
     /// cannot be changed.
     /// </summary>
     public static JsonSerializerOptions Options { get; } = CreateDialect();
-
-    /// <summary>
-    /// The code loaded, which a file that names a type by its name finds it in, as a component or a render effect does:
-    /// the run's, set as the run starts.
-    /// </summary>
-    internal static Assemblies? Assemblies { get; set; }
 
     /// <summary>
     /// <paramref name="utf8"/> as a <typeparamref name="T"/>, or why it is not one. A byte order mark, which editors on

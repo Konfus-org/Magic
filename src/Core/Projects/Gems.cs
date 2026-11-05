@@ -29,7 +29,6 @@ internal sealed class Gems : IDisposable
     private readonly App _app;
     private readonly IFileSystem _files;
     private readonly Assets _assets;
-    private readonly Assemblies _assemblies;
     private readonly World _world;
     private readonly EventCoordinator _events;
     private readonly FrameClock _clock = new();
@@ -60,7 +59,6 @@ internal sealed class Gems : IDisposable
         App app,
         IFileSystem files,
         Assets assets,
-        Assemblies assemblies,
         World world,
         EventCoordinator events
     )
@@ -70,7 +68,6 @@ internal sealed class Gems : IDisposable
         _app = app;
         _files = files;
         _assets = assets;
-        _assemblies = assemblies;
         _world = world;
         _events = events;
         Load();
@@ -154,7 +151,7 @@ internal sealed class Gems : IDisposable
                 _assets.Register(gem.Resources);
 
             _assets.Register(gem.Type.Assembly);
-            Subscription code = _assemblies.Register(gem.Type.Assembly);
+            Subscription code = Assemblies.Register(gem.Type.Assembly);
             IGem made;
             try
             {

@@ -5,7 +5,6 @@ using Magic.Debugging;
 using Magic.Events;
 using Magic.Files;
 using Magic.Projects;
-using Magic.Serialization;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
@@ -50,8 +49,6 @@ internal static class Program
             EventCoordinator events = new();
             Threads threads = new();
             Caches caches = new(files, app);
-            Assemblies assemblies = new(typeof(App).Assembly);
-            Json.Assemblies = assemblies;
             using Assets assets = new(files, caches);
             using World world = new(assets, threads, app);
             using Cli cli = new(app, files, events, assets, world);
@@ -82,7 +79,6 @@ internal static class Program
             services.AddSingleton(events);
             services.AddSingleton(threads);
             services.AddSingleton(caches);
-            services.AddSingleton(assemblies);
             services.AddSingleton(assets);
             services.AddSingleton(world);
             GemRegistry registry = new(files, project.Gems);
@@ -95,7 +91,7 @@ internal static class Program
             Log.Info($"Running {project.Name} in {(app.IsHeadless ? "headless" : "GUI")} mode.");
 
             int run = app.RunVersion;
-            using Gems gems = new(registry, provider, app, files, assets, assemblies, world, events);
+            using Gems gems = new(registry, provider, app, files, assets, world, events);
             using CancellationTokenSource stopping = new();
             world.LoadAsync(kept, stopping.Token).FireAndForget();
 
