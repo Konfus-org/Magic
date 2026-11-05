@@ -2,8 +2,12 @@ using System.Collections.Immutable;
 using System.CommandLine;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Linq;
+using System.Numerics;
 using Magic.Debugging;
+using Magic.Ecs;
+using Magic.Ecs.Components;
 using Magic.Events;
 using Magic.Files;
 using Magic.Files.Types;
@@ -20,23 +24,42 @@ namespace Magic.CommandLine;
 /// </summary>
 internal sealed class Cli : IDisposable
 {
+    /// <summary>
+    /// How far in front of the player a prefab spawned without a place goes.
+    /// </summary>
+    private const float SpawnAheadMetres = 3;
+
+    private const string TeleportUsage = "teleport takes x y z, a domain, or a domain then x y z";
+
     private readonly App _app;
+
     private readonly IFileSystem _files;
+
     private readonly EventCoordinator _events;
+
     private readonly Assets _assets;
+
     private readonly World _world;
+
     private readonly RootCommand _commands;
+
     private int _waitFrames;
 
     /// <summary>
     /// When a wait in seconds ends, as <see cref="Stopwatch.GetTimestamp"/> counts; 0 when none is on.
     /// </summary>
     private long _waitUntilTimestamp;
+
     private bool _isWaitingForWorld;
+
     private readonly Queue<string> _queued = new();
+
     private bool _isChangingWorld;
+
     private bool _isWaitingToDraw;
+
     private bool _hasDrawn;
+
     private readonly Subscription _drawnWatch;
 
     public Cli(App app, IFileSystem files, EventCoordinator events, Assets assets, World world)
@@ -144,6 +167,24 @@ internal sealed class Cli : IDisposable
     }
 
     /// <summary>
+    /// The three numbers of <paramref name="xyz"/> as a position, or why they are not one.
+    /// </summary>
+    private static Result<Vector3> ParsePosition(ReadOnlySpan<string> xyz)
+    {
+        if (xyz.Length != 3)
+            return Result.Failure($"a position is three numbers, x y z, not {xyz.Length}.");
+
+        Span<float> numbers = stackalloc float[3];
+        for (int i = 0; i < 3; i++)
+        {
+            if (!float.TryParse(xyz[i], NumberStyles.Float, CultureInfo.InvariantCulture, out numbers[i]))
+                return Result.Failure($"'{xyz[i]}' is not a number.");
+        }
+
+        return Result.Success(new Vector3(numbers));
+    }
+
+    /// <summary>
     /// Whether a project is open for a command that needs one to <paramref name="what"/>; it logs an error when none is.
     /// </summary>
     private bool IsProjectOpen(string what)
@@ -214,6 +255,188 @@ internal sealed class Cli : IDisposable
         {
             Log.Info($"{path} of {line}");
         }
+    }
+
+    /// <summary>
+    /// Moves the player to x y z, with three words; with a domain first, opens it in place of the world, which puts the
+    /// player at its spawn, then moves the player to the x y z after it, if any, once it has loaded.
+    /// </summary>
+    private void Teleport(string[] where)
+    {
+        if (!IsProjectOpen("teleport in"))
+            return;
+
+        if (where.Length == 3)
+        {
+            MovePlayer(where);
+
+            return;
+        }
+
+        if (where.Length == 2)
+        {
+            Log.Error($"{TeleportUsage}, not two words.");
+
+            return;
+        }
+
+        Handle<Domain> domain = FindAsset<Domain>(where[0]);
+        if (_assets.GetPath(domain) is not { } path)
+        {
+            Log.Error($"There is no domain at or named {where[0]}.");
+
+            return;
+        }
+
+        Result<Vector3> position = where.Length == 4 ? ParsePosition(where.AsSpan(1)) : Result.Success(Vector3.Zero);
+        if (!position.Ok)
+        {
+            Log.Error($"{TeleportUsage}: {position.Error}");
+
+            return;
+        }
+
+        OpenDomainAsync(path).FireAndForget();
+        if (where.Length != 4)
+            return;
+
+        _queued.Enqueue("wait loaded");
+        _queued.Enqueue($"teleport {string.Join(' ', where[1..])}");
+    }
+
+    /// <summary>
+    /// Moves every entity tagged player by how far the first is from the x y z of <paramref name="to"/>, so they keep
+    /// their places around it.
+    /// </summary>
+    private void MovePlayer(string[] to)
+    {
+        Result<Vector3> position = ParsePosition(to);
+        if (!position.Ok)
+        {
+            Log.Error($"{TeleportUsage}: {position.Error}");
+
+            return;
+        }
+
+        if (FindPlayer() is not { } player)
+        {
+            Log.Error("There is no entity tagged player with a transform to teleport.");
+
+            return;
+        }
+
+        Vector3 by = position.Value - player.Position;
+        foreach (EcsChunk<Tags, Transform> chunk in _world.Query<Tags, Transform>())
+        {
+            for (int i = 0; i < chunk.Entities.Length; i++)
+            {
+                if (chunk.First[i].Has(Tag.Player))
+                    chunk.Second[i].Position += by;
+            }
+        }
+
+        Log.Info($"Teleported the player to {position.Value}.");
+    }
+
+    /// <summary>
+    /// Puts the prefab at or named <paramref name="name"/> in the world at the x y z of <paramref name="at"/>, or
+    /// <see cref="SpawnAheadMetres"/> in front of the player for none, holding <c>wait loaded</c> meanwhile.
+    /// </summary>
+    private void Spawn(string name, string[] at)
+    {
+        if (!IsProjectOpen($"spawn {name} in"))
+            return;
+
+        Handle<Prefab> prefab = FindAsset<Prefab>(name);
+        if (prefab == Handle<Prefab>.None)
+        {
+            Log.Error($"There is no prefab at or named {name}.");
+
+            return;
+        }
+
+        Result<Vector3> position = at.Length == 0 ? Result.Success(GetAheadOfPlayer()) : ParsePosition(at);
+        if (!position.Ok)
+        {
+            Log.Error($"spawn {name}: {position.Error}");
+
+            return;
+        }
+
+        SpawnAsync(prefab, name, new Transform { Position = position.Value }).FireAndForget();
+    }
+
+    private async Task SpawnAsync(Handle<Prefab> prefab, string name, Transform at)
+    {
+        _isChangingWorld = true;
+        try
+        {
+            Result<ImmutableArray<Entity>> spawned = await _world
+                .SpawnAsync(prefab, at, null, CancellationToken.None)
+                .ConfigureAwait(false);
+            if (spawned.Ok)
+            {
+                string ids = string.Join(", ", spawned.Value.Select(entity => entity.Id));
+                Log.Info($"Spawned {name} at {at.Position} as entities {ids}.");
+            }
+            else
+            {
+                Log.Error($"{name} was not spawned: {spawned.Error}");
+            }
+        }
+        finally
+        {
+            _isChangingWorld = false;
+        }
+    }
+
+    /// <summary>
+    /// <see cref="SpawnAheadMetres"/> in front of the player, the way it faces; the origin when there is no player.
+    /// </summary>
+    private Vector3 GetAheadOfPlayer() =>
+        FindPlayer() is { } player
+            ? player.Position + (Vector3.Transform(Vector3.UnitZ, player.Rotation) * SpawnAheadMetres)
+            : Vector3.Zero;
+
+    /// <summary>
+    /// The transform of the first entity tagged player that has one; null when none has.
+    /// </summary>
+    private Transform? FindPlayer()
+    {
+        foreach (EcsChunk<Tags, Transform> chunk in _world.Query<Tags, Transform>())
+        {
+            for (int i = 0; i < chunk.Entities.Length; i++)
+            {
+                if (chunk.First[i].Has(Tag.Player))
+                    return chunk.Second[i];
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The <typeparamref name="T"/> at <paramref name="pathOrName"/>, or else the first whose file is named it, in any
+    /// case and without its extension (<c>Tree</c> for <c>Prefabs/Tree.prefab</c>); none when there is neither.
+    /// </summary>
+    private Handle<T> FindAsset<T>(string pathOrName)
+        where T : IAsset<T>
+    {
+        Handle<T> atPath = _assets.Find<T>(pathOrName);
+        if (atPath != Handle<T>.None)
+            return atPath;
+
+        foreach (string path in _assets.Database.Index.ByPath.Keys)
+        {
+            if (!string.Equals(Path.GetFileNameWithoutExtension(path), pathOrName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            Handle<T> named = _assets.Find<T>(path);
+            if (named != Handle<T>.None)
+                return named;
+        }
+
+        return Handle<T>.None;
     }
 
     /// <summary>
@@ -391,6 +614,36 @@ internal sealed class Cli : IDisposable
                         },
                     },
                     Action = new CliCommand(cmds => LogEntityValue(cmds.GetRequiredValue<string>("path"))),
+                },
+                new Command(
+                    "teleport",
+                    "Moves the player to x y z; or opens a domain in place of the world, with the player at its spawn or at x y z"
+                )
+                {
+                    Arguments =
+                    {
+                        new Argument<string[]>("where")
+                        {
+                            Description = "x y z; or a domain's path or name, then x y z if wanted",
+                            Arity = new ArgumentArity(1, 4),
+                        },
+                    },
+                    Action = new CliCommand(cmds => Teleport(cmds.GetRequiredValue<string[]>("where"))),
+                },
+                new Command("spawn", "Puts a prefab in the world at x y z, or a few metres in front of the player")
+                {
+                    Arguments =
+                    {
+                        new Argument<string>("prefab") { Description = "The prefab's path or name" },
+                        new Argument<string[]>("at")
+                        {
+                            Description = "x y z; none for in front of the player",
+                            Arity = ArgumentArity.ZeroOrMore,
+                        },
+                    },
+                    Action = new CliCommand(cmds =>
+                        Spawn(cmds.GetRequiredValue<string>("prefab"), cmds.GetValue<string[]>("at") ?? [])
+                    ),
                 },
                 new Command(
                     "wait",
