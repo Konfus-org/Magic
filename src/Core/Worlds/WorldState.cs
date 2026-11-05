@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Magic.Debugging;
 using Magic.Ecs;
-using Magic.Plugins;
+using Magic.Projects;
 using Magic.Serialization;
 using Magic.Utils;
 

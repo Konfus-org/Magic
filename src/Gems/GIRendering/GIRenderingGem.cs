@@ -10,7 +10,7 @@ using Magic.Files;
 using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Images;
-using Magic.Plugins;
+using Magic.Projects;
 using Magic.Rendering;
 using Magic.Shaders;
 using Magic.Threading;

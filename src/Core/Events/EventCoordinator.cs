@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using Magic.Debugging;
-using Magic.Plugins;
+using Magic.Projects;
 using Magic.Utils;
 
 namespace Magic.Events;

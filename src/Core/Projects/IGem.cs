@@ -1,4 +1,4 @@
-namespace Magic.Plugins;
+namespace Magic.Projects;
 
 /// <summary>
 /// A plugin: the one class in a gem's assembly. Magic makes it after what its constructor takes, in dependency order, then

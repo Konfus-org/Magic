@@ -1,5 +1,5 @@
 using Magic.Debugging;
-using Magic.Plugins;
+using Magic.Projects;
 
 namespace Hello;
 

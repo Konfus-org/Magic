@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using Magic.Events;
 
-namespace Magic.Plugins;
+namespace Magic.Projects;
 
 /// <summary>
 /// The frame's clocks: real time, the simulation's, and how many fixed steps the simulation owes. It starts with the first

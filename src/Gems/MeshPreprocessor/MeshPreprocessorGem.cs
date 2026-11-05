@@ -7,7 +7,7 @@ using Magic.Caching;
 using Magic.Debugging;
 using Magic.Files;
 using Magic.Files.Types;
-using Magic.Plugins;
+using Magic.Projects;
 using Magic.Rendering;
 using Magic.Utils;
 

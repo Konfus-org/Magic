@@ -1,6 +1,6 @@
 using Magic.Events;
 
-namespace Magic.Plugins;
+namespace Magic.Projects;
 
 /// <summary>
 /// One frame's clocks and messages, handed to every hook the frame runs.

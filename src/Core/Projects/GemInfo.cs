@@ -1,6 +1,6 @@
 using System.Runtime.Loader;
 
-namespace Magic.Plugins;
+namespace Magic.Projects;
 
 /// <summary>
 /// A gem found and registered: what it is, what it provides and what it needs, before it is made.

@@ -3,7 +3,7 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using Magic.Files.Pipeline;
 using Magic.Files.Types;
-using Magic.Plugins;
+using Magic.Projects;
 using Magic.Utils;
 using static AssimpModelImporter.aiPostProcessSteps;
 using static AssimpModelImporter.assimp;

@@ -11,7 +11,7 @@ using Magic.Utils;
 using Magic.Worlds;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Magic.Plugins;
+namespace Magic.Projects;
 
 /// <summary>
 /// The gems a project lists, found, then registered with the services as their class and every interface they provide,

@@ -9,7 +9,7 @@ using Magic.Utils;
 using Magic.Worlds;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Magic.Plugins;
+namespace Magic.Projects;
 
 /// <summary>
 /// The run's gems: makes the ones the registry found as it is made, each after the gems it needs, drives them through the

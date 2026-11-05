@@ -4,7 +4,7 @@ using System.IO;
 using Magic.Files;
 using Magic.Files.Pipeline;
 using Magic.Files.Types;
-using Magic.Plugins;
+using Magic.Projects;
 using Magic.Utils;
 
 namespace DomainImporter;

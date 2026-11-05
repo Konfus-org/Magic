@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 using Magic.Caching;
 using Magic.Files;
 using Magic.Files.Types;
-using Magic.Plugins;
+using Magic.Projects;
 using Magic.Shaders;
 using Magic.Utils;
 
