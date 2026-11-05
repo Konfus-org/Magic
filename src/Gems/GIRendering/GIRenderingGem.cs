@@ -94,7 +94,9 @@ public sealed class GIRenderingGem : IGem, IDisposable
         _frameView = new FrameView(gpu, _graph, _pools, _materials, _visibility, _rayTracing);
         _sky = new SkyLuts(gpu, _graph, _pipelines);
         _lightTiles = new LightTiles(gpu, _graph, _pipelines);
-        _shadows = _rayTracing is null ? null : new ShadowMask(gpu, _graph, _pipelines, _lightTiles);
+        _shadows = _rayTracing is null
+            ? null
+            : new ShadowMask(gpu, _graph, _pipelines, _pools, _visibility, _lightTiles);
         _lighting = new Lighting(gpu, _graph, _sky, _lightTiles, _shadows);
         _shading = new Shading(_pipelines, _lighting);
         _surfaceView = new SurfaceView(_pipelines);

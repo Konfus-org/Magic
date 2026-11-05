@@ -11,6 +11,10 @@ import Core.Math;
 import Core.Pack;
 import Core.Random;
 import Core.Sampling;
+import Scene.Instances;
+import Scene.Clusters;
+import Scene.Vertices;
+import Scene.Visibility;
 import Scene.Lighting;
 import Scene.Lights;
 import Scene.Shadows;
@@ -40,12 +44,51 @@ bool CanReach(RaytracingAccelerationStructure world, float3 origin, float3 direc
     return query.CommittedStatus() == COMMITTED_NOTHING;
 }
 
+// How far a point must rise along a vertex's normal to reach the plane through the vertex square to it, when it lies
+// below that plane.
+float3 GetLift(float3 fromVertex, float3 normal) { return -min(0.0, dot(fromVertex, normal)) * normal; }
+
+// A pixel's point lifted off its flat triangle towards the curved surface the triangle's vertex normals describe, so
+// that a ray from the lit side of a curve doesn't hit the next triangle and shadow the curve a facet at a time (Hanika,
+// "Hacking the Shadow Terminator", Ray Tracing Gems II, 2021). A point in a hollow stays where it is.
+float3 LiftOffTriangle(FrameConstants frame, uint id, float2 uv, float3 relative)
+{
+    uint visibleIndex;
+    uint triangle;
+    DecodeVisibilityId(id, visibleIndex, triangle);
+    ArrayRef<VisibleCluster> visible = { frame.visibleClusters };
+    VisibleCluster entry = visible[visibleIndex];
+    GpuInstance instance = LoadInstance(frame.instances, entry.instance);
+    GpuCluster cluster = LoadCluster(frame.clusters, entry.cluster);
+
+    uint first = cluster.indexOffset + triangle * 3u;
+    Vertex v0 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first));
+    Vertex v1 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first + 1u));
+    Vertex v2 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first + 2u));
+    float3 p0 = Relative(frame, ToWorld(instance.world, v0.position));
+    float3 p1 = Relative(frame, ToWorld(instance.world, v1.position));
+    float3 p2 = Relative(frame, ToWorld(instance.world, v2.position));
+    float3 lambda = ComputeBarycentrics(
+        mul(float4(p0, 1.0), frame.viewProjection),
+        mul(float4(p1, 1.0), frame.viewProjection),
+        mul(float4(p2, 1.0), frame.viewProjection),
+        ToClip(uv),
+        float2(frame.width, frame.height)
+    ).lambda;
+
+    return relative
+        + lambda.x * GetLift(relative - p0, ToWorldNormal(instance.world, v0.normal))
+        + lambda.y * GetLift(relative - p1, ToWorldNormal(instance.world, v1.normal))
+        + lambda.z * GetLift(relative - p2, ToWorldNormal(instance.world, v2.normal));
+}
+
 // A pixel's words: all lit for the sky and where there is nothing to hit.
 uint4 Trace(FrameConstants frame, LightingConstants lighting, uint2 pixel)
 {
     uint2 size = uint2(frame.width, frame.height);
     UintTextureRef visibility = { frame.visibility };
-    if (visibility.Load(pixel, 0u) == 0u || frame.acceleration == 0u)
+    uint id = visibility.Load(pixel, 0u);
+    if (id == 0u || frame.acceleration == 0u)
         return uint4(0xFFFFFFFFu);
 
     float2 uv = GetTexelCenterUv(pixel, size);
@@ -53,7 +96,7 @@ uint4 Trace(FrameConstants frame, LightingConstants lighting, uint2 pixel)
     TextureRef normalTexture = { frame.gbufferNormal };
     float3 relative = ReconstructRelative(frame, uv, depthTexture.Load(pixel, 0u).x);
     float3 normal = DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0);
-    float3 world = relative + frame.cameraPosition.xyz;
+    float3 world = LiftOffTriangle(frame, id, uv, relative) + frame.cameraPosition.xyz;
     float offset = 0.01 + OffsetPixels * length(relative) / frame.pixelsPerRadian;
     float3 origin = world + normal * offset;
     AccelerationRef acceleration = { frame.acceleration };

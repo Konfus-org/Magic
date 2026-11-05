@@ -9,8 +9,14 @@ namespace Magic.GIRendering;
 /// sun and each of the first lights its tile lists, into a buffer of 16 bytes a pixel, the layout
 /// <c>Scene/Shadows.slang</c> reads, and the sun's tiles beside it, which the denoiser makes the mask shading reads of.
 /// </summary>
-internal sealed class ShadowMask(IGraphicsApi gpu, RenderGraph graph, GpuPipelines pipelines, LightTiles lights)
-    : IDisposable
+internal sealed class ShadowMask(
+    IGraphicsApi gpu,
+    RenderGraph graph,
+    GpuPipelines pipelines,
+    GeometryPools pools,
+    Visibility visibility,
+    LightTiles lights
+) : IDisposable
 {
     private const int BytesPerPixel = 16;
     private const int SunTileWidth = 8;
@@ -81,6 +87,11 @@ internal sealed class ShadowMask(IGraphicsApi gpu, RenderGraph graph, GpuPipelin
                 lightingConstants,
                 lights.Table,
                 lights.Tiles,
+                view.Instances,
+                pools.Clusters,
+                pools.Vertices,
+                pools.Indices,
+                visibility.VisibleClusters,
                 targets.Visibility,
                 targets.Depth,
                 targets.GBufferNormal
