@@ -3,9 +3,9 @@ using System.Numerics;
 using Magic.Debugging;
 using Magic.Files.Types;
 using Magic.Rendering;
-using static MeshPreprocessor.meshoptimizer;
+using static Magic.MeshPreprocessor.meshoptimizer;
 
-namespace MeshPreprocessor;
+namespace Magic.MeshPreprocessor;
 
 /// <summary>
 /// Builds a model's cluster hierarchy, the DAG of Karis, "Nanite: A Deep Dive", 2021: the leaves are clusters of

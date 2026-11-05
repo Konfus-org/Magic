@@ -2,7 +2,7 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using Magic.Shaders;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// What every pass of a frame reads, the twin of <c>Core/Frame.slang</c>'s: the view, the sun, the output's size and

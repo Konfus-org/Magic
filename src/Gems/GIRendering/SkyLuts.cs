@@ -2,7 +2,7 @@ using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// The sky's three tables, made each frame while there is a sky: how much of the sun gets through the air, what the air

@@ -4,7 +4,7 @@ using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// The sun's virtual shadow map: its page table, the pool of physical pages, the lists the frame's passes fill, and

@@ -8,7 +8,7 @@ using Magic.Rendering;
 using Magic.Threading;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// The three pools every drawn model lives in, vertices, indices and clusters, and which models are in them. A model
@@ -231,7 +231,7 @@ internal sealed class GeometryPools(
     /// The model's acceleration structure over its leaf clusters, a geometry each, and the leaves counted into the
     /// leaf table; none when the structure could not be made.
     /// </summary>
-    private GpuAcceleration MakeAcceleration(string name, MeshDerived made, ResidentModel where)
+    private GpuAcceleration CreateAcceleration(string name, MeshDerived made, ResidentModel where)
     {
         List<TriangleGeometry> geometries = [];
         foreach (GpuCluster cluster in made.Clusters)
@@ -346,7 +346,7 @@ internal sealed class GeometryPools(
             FieldSlot: made.Field.IsDefaultOrEmpty ? 0 : Field.Add(made)
         );
         if (gpu.Features.HasRayQuery)
-            where = where with { LeafOffset = (uint)_leafCount, Acceleration = MakeAcceleration(name, made, where) };
+            where = where with { LeafOffset = (uint)_leafCount, Acceleration = CreateAcceleration(name, made, where) };
 
         _vertexCount += made.Vertices.Length;
         _indexCount += made.Indices.Length;

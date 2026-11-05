@@ -7,7 +7,7 @@ using Magic.Utils;
 using Vortice.Vulkan;
 using static Vortice.Vulkan.Vulkan;
 
-namespace VulkanGraphics;
+namespace Magic.VulkanGraphics;
 
 /// <summary>
 /// The instance, the GPU picked and its device and queue, made once as the gem starts and freed last. Picks the

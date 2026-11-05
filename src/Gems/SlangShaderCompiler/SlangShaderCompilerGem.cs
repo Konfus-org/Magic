@@ -11,7 +11,7 @@ using Magic.Projects;
 using Magic.Shaders;
 using Magic.Utils;
 
-namespace SlangShaderCompiler;
+namespace Magic.SlangShaderCompiler;
 
 /// <summary>
 /// Compiles Slang entries to SPIR-V: the entry's module and every module it imports, found as <see cref="Shader"/>

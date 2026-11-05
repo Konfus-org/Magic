@@ -5,7 +5,7 @@ using Magic.Images;
 using Magic.Rendering;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// The output read back and saved: what a screenshot asked for is.

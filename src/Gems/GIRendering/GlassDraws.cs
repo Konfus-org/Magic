@@ -1,7 +1,7 @@
 using Magic.Gpu;
 using Magic.Rendering;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// The panes drawn after the lighting, forward, over the opaque depth, in any order: their absorbance and the moments of

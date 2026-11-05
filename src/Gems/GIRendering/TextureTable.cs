@@ -6,7 +6,7 @@ using Magic.Rendering;
 using Magic.Threading;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// Where a texture asset is in the loading: not yet, on the GPU, or never.

@@ -3,7 +3,7 @@ using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// The frame's lights: their table, and the froxel lists of the view they are binned into, so a pixel loops over its own

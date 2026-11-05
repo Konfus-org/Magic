@@ -4,7 +4,7 @@ using Magic.Ecs.Components;
 using Magic.Files;
 using Magic.Files.Types;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// Reads what a frame draws out of the entities into a <see cref="RenderWorld"/>.

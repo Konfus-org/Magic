@@ -11,7 +11,7 @@ using ArchEntity = Arch.Core.Entity;
 using ArchWorld = Arch.Core.World;
 using Entity = Magic.Ecs.Entity;
 
-namespace ArchEcs;
+namespace Magic.ArchEcs;
 
 /// <summary>
 /// The entity world, in one Arch world, on the thread that made the gem. Entities are Arch's, bit for bit, and

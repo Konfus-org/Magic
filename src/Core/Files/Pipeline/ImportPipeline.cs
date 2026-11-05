@@ -37,7 +37,7 @@ internal static class ImportPipeline<T>
         if (import.Asset is not null)
             return import;
 
-        import = await MakeAsync(import, cancel).ConfigureAwait(false);
+        import = await ImportAsync(import, cancel).ConfigureAwait(false);
         await WriteCacheAsync(import, caches, cancel).ConfigureAwait(false);
 
         return import;
@@ -193,7 +193,7 @@ internal static class ImportPipeline<T>
         return cached.Ok ? import with { Asset = cached } : import;
     }
 
-    private static async Task<AssetImport<T>> MakeAsync(AssetImport<T> import, CancellationToken cancel)
+    private static async Task<AssetImport<T>> ImportAsync(AssetImport<T> import, CancellationToken cancel)
     {
         Result<T> read = import.Importer is { } importer
             ? await importer

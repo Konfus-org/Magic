@@ -6,7 +6,7 @@ using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// What everything that lights a surface shares: the lighting constants, naming the sky's tables, the lights' bins and

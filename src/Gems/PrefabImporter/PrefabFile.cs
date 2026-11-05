@@ -4,7 +4,7 @@ using System.Text.Json;
 using Magic.Files;
 using Magic.Files.Types;
 
-namespace PrefabImporter;
+namespace Magic.PrefabImporter;
 
 /// <summary>
 /// A <c>.prefab</c> file as it is written, <c>{ "entities": [ ... ] }</c>.

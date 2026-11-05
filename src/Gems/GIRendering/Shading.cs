@@ -1,4 +1,4 @@
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// The GBuffer lit into the HDR picture: the sun through its pages, the lights of each pixel's froxel, the global

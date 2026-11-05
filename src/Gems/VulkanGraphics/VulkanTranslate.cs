@@ -3,7 +3,7 @@ using Magic.Files.Types;
 using Magic.Gpu;
 using Vortice.Vulkan;
 
-namespace VulkanGraphics;
+namespace Magic.VulkanGraphics;
 
 /// <summary>
 /// Core's GPU words as Vulkan's: formats, usages, accesses with the stage, access and layout each implies. Pure

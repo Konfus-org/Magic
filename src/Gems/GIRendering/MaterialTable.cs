@@ -8,7 +8,7 @@ using Magic.Rendering;
 using Magic.Threading;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// The material table: a row per material drawn, made from the asset's params as it arrives and made again as the

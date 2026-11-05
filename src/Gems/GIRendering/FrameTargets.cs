@@ -2,7 +2,7 @@ using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// The textures a frame draws through, all the output's size, made again when that changes: the visibility buffer

@@ -4,7 +4,7 @@ using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// Models drawn into the card atlases as they become resident, a few a frame: each along its six sides, its finest

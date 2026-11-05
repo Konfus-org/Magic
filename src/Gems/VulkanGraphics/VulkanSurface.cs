@@ -3,7 +3,7 @@ using Magic.Platform;
 using Magic.Utils;
 using Vortice.Vulkan;
 
-namespace VulkanGraphics;
+namespace Magic.VulkanGraphics;
 
 /// <summary>
 /// A window's Vulkan surface, made from its OS handles: the one place Vulkan meets each window system.

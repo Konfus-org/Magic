@@ -4,7 +4,7 @@ using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// The top-level acceleration structure over the instances, on a GPU that traces rays: an instance row for every

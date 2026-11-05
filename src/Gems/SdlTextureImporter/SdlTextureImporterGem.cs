@@ -6,15 +6,15 @@ using Magic.Caching;
 using Magic.Files.Pipeline;
 using Magic.Files.Types;
 using Magic.Projects;
+using Magic.SdlBindings;
 using Magic.Utils;
-using SdlBindings;
-using static SdlBindings.SDL_PixelFormat;
-using static SdlBindings.SDL_ScaleMode;
-using static SdlBindings.SDL3;
-using static SdlBindings.SDL3_image;
-using static SdlTextureImporter.bc7enc;
+using static Magic.SdlBindings.SDL_PixelFormat;
+using static Magic.SdlBindings.SDL_ScaleMode;
+using static Magic.SdlBindings.SDL3;
+using static Magic.SdlBindings.SDL3_image;
+using static Magic.SdlTextureImporter.bc7enc;
 
-namespace SdlTextureImporter;
+namespace Magic.SdlTextureImporter;
 
 /// <summary>
 /// Reads image files into textures ready to upload, through SDL_image: decoded, their mip chain made by halving each level

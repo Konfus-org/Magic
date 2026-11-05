@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Numerics;
-using Magic;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
@@ -15,7 +14,7 @@ using Magic.Shaders;
 using Magic.Threading;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// Draws the world. <c>Update</c> reads what the frame draws out of the entities; <c>Render</c> records the frame in

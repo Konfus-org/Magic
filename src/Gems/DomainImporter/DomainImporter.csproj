@@ -4,6 +4,7 @@
     <!-- Shown beside the gem as Magic starts it. -->
     <Description>Reads .domain files and the folders they are in.</Description>
     <Version>1.0.0</Version>
+    <Authors>Konfus</Authors>
   </PropertyGroup>
   <ItemGroup>
     <AssemblyMetadata Include="Magic.Author" Value="$(Authors)" />

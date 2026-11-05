@@ -1,23 +1,22 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Text;
-using Magic;
 using Magic.Debugging;
 using Magic.Files;
 using Magic.Files.Types;
 using Magic.Input;
 using Magic.Platform;
 using Magic.Projects;
+using Magic.SdlBindings;
 using Magic.Threading;
 using Magic.Utils;
-using SdlBindings;
-using static SdlBindings.SDL_EventType;
-using static SdlBindings.SDL_GamepadAxis;
-using static SdlBindings.SDL_MouseWheelDirection;
-using static SdlBindings.SDL_PixelFormat;
-using static SdlBindings.SDL3;
+using static Magic.SdlBindings.SDL_EventType;
+using static Magic.SdlBindings.SDL_GamepadAxis;
+using static Magic.SdlBindings.SDL_MouseWheelDirection;
+using static Magic.SdlBindings.SDL_PixelFormat;
+using static Magic.SdlBindings.SDL3;
 
-namespace SdlPlatform;
+namespace Magic.SdlPlatform;
 
 /// <summary>
 /// The window, clipboard and input, through SDL3. Opens the window, keeps the clipboard, and turns keyboards, mice and

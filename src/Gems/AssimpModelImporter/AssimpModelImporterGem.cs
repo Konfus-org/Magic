@@ -5,10 +5,10 @@ using Magic.Files.Pipeline;
 using Magic.Files.Types;
 using Magic.Projects;
 using Magic.Utils;
-using static AssimpModelImporter.aiPostProcessSteps;
-using static AssimpModelImporter.assimp;
+using static Magic.AssimpModelImporter.aiPostProcessSteps;
+using static Magic.AssimpModelImporter.assimp;
 
-namespace AssimpModelImporter;
+namespace Magic.AssimpModelImporter;
 
 /// <summary>
 /// Reads FBX, glTF and OBJ files through assimp into <see cref="Model"/>s: every node's meshes flattened into the
@@ -72,7 +72,7 @@ public sealed unsafe class AssimpModelImporterGem : IGem, IAssetImporter<Model>
 
     /// <summary>
     /// Every triangle mesh of the scene as one <see cref="Mesh"/> per material slot, slots numbered as the file's
-    /// materials are first used; a file with more than <see cref="Magic.Ecs.Components.MaterialSlots.Capacity"/> is
+    /// materials are first used; a file with more than <see cref="Ecs.Components.MaterialSlots.Capacity"/> is
     /// refused.
     /// </summary>
     private static Result<Model> ReadMeshes(aiScene* scene, Vector3 origin)
@@ -88,10 +88,10 @@ public sealed unsafe class AssimpModelImporterGem : IGem, IAssetImporter<Model>
 
             if (!slots.TryGetValue(mesh->mMaterialIndex, out int slot))
             {
-                if (slots.Count >= Magic.Ecs.Components.MaterialSlots.Capacity)
+                if (slots.Count >= Ecs.Components.MaterialSlots.Capacity)
                 {
                     return Result.Failure(
-                        $"it uses more than {Magic.Ecs.Components.MaterialSlots.Capacity} materials; a renderer has that many slots."
+                        $"it uses more than {Ecs.Components.MaterialSlots.Capacity} materials; a renderer has that many slots."
                     );
                 }
 

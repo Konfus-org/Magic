@@ -9,7 +9,6 @@
     <Project Path="Gems/MeshPreprocessor/MeshPreprocessor.csproj" />
     <Project Path="Gems/DomainImporter/DomainImporter.csproj" />
     <Project Path="Gems/GpuChecks/GpuChecks.csproj" />
-    <Project Path="Gems/Hello/Hello.csproj" />
     <Project Path="Gems/PrefabImporter/PrefabImporter.csproj" />
     <Project Path="Gems/SdlPlatform/SdlPlatform.csproj" />
     <Project Path="Gems/SlangShaderCompiler/SlangShaderCompiler.csproj" />

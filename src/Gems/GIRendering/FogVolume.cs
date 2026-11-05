@@ -1,7 +1,7 @@
 using Magic.Gpu;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// The air: a volume over the view that the sun, through its pages, and the lights scatter towards the camera, summed

@@ -14,7 +14,7 @@ public struct Brdf
 }
 
 // A surface's terms from what the GBuffer keeps of it.
-public Brdf MakeBrdf(float3 baseColor, float metalness, float roughness, float specular)
+public Brdf CreateBrdf(float3 baseColor, float metalness, float roughness, float specular)
 {
     Brdf brdf;
     brdf.diffuse = baseColor * (1.0 - metalness);

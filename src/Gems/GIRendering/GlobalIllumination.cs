@@ -6,7 +6,7 @@ using Magic.Rendering;
 using Magic.Shaders;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// What lights the world indirectly: the lit cards, a pool of slots each holding the irradiance on an instance's

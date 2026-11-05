@@ -1,4 +1,4 @@
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// How much the renderer does a frame, set with <c>set GIRendering.preset=&lt;name&gt;</c>: the share of the

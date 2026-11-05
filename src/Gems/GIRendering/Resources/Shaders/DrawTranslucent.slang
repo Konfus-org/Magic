@@ -44,7 +44,7 @@ struct Varyings
     nointerpolation float tangentSign : TANGENT_SIGN;
 };
 
-Varyings MakeVaryings(FrameConstants frame, uint vertexIndex, uint instanceIndex)
+Varyings CreateVaryings(FrameConstants frame, uint vertexIndex, uint instanceIndex)
 {
     ArrayRef<VisibleCluster> visible = { frame.visibleClusters };
     VisibleCluster entry = visible[instanceIndex];
@@ -66,7 +66,7 @@ Varyings MakeVaryings(FrameConstants frame, uint vertexIndex, uint instanceIndex
 [shader("vertex")]
 Varyings DrawTranslucentVertex(uint vertexIndex : SV_VertexID, uint instanceIndex : SV_StartInstanceLocation)
 {
-    return MakeVaryings(GetFrame(), vertexIndex, instanceIndex);
+    return CreateVaryings(GetFrame(), vertexIndex, instanceIndex);
 }
 
 // The surface the material makes of a fragment.
@@ -146,7 +146,7 @@ ResolveOutputs TranslucentResolvePixel<M : IMaterial, S : ISky>(Varyings input)
         normal = -normal;
 
     float3 world = input.relative + frame.cameraPosition.xyz;
-    Brdf brdf = MakeBrdf(surface.baseColor, surface.metalness, surface.roughness, 0.5);
+    Brdf brdf = CreateBrdf(surface.baseColor, surface.metalness, surface.roughness, 0.5);
 
     SkyInputs sky;
     sky.viewDirection = reflect(-viewDirection, normal);

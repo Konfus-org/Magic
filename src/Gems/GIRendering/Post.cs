@@ -9,7 +9,7 @@ using Magic.Rendering;
 using Magic.Shaders;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// The picture after the lighting, to the output: the panes composed over it, each frame resolved into the output's

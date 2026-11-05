@@ -1,7 +1,7 @@
 using Magic.Debugging;
 using Magic.Projects;
 
-namespace GemName;
+namespace Magic.GemName;
 
 /// <summary>
 /// The gem: the one class in its assembly that implements <see cref="IGem"/>. Magic makes it after whatever its

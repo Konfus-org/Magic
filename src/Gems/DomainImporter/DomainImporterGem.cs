@@ -7,7 +7,7 @@ using Magic.Files.Types;
 using Magic.Projects;
 using Magic.Utils;
 
-namespace DomainImporter;
+namespace Magic.DomainImporter;
 
 /// <summary>
 /// Reads <c>.domain</c> files into <see cref="Domain"/>s, each in a folder of its own beside its prefabs: every one in the

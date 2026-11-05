@@ -3,7 +3,7 @@ using System.Numerics;
 using Magic.Files.Types;
 using Magic.Rendering;
 
-namespace MeshPreprocessor;
+namespace Magic.MeshPreprocessor;
 
 /// <summary>
 /// Builds a model's signed distance field: a cube of voxels around its bounds, each the distance to the nearest

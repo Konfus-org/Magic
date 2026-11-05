@@ -6,7 +6,7 @@ using Magic.Rendering;
 using Magic.Shaders;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// What light and rays read of the glass: the sun's glass shadow, the panes' tints multiplied in the sun's view, and the

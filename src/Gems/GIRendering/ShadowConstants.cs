@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Shaders;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// What the sun's shadow passes read, the twin of <c>Shadow/Virtual.slang</c>'s: the light's frame, the clipmap's

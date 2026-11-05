@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace SlangShaderCompiler;
+namespace Magic.SlangShaderCompiler;
 
 /// <summary>
 /// The compiler's API, bound by hand (README): its C entry points, and its C++ interfaces called through their

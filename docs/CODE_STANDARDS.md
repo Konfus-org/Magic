@@ -273,7 +273,7 @@ All code runs on Windows, Linux and macOS.
   its binary under `runtimes/<rid>/native/`. No csproj names a runtime identifier.
 - **Scripts.** Repository scripts are one PowerShell file each, for `pwsh` and Windows PowerShell 5.1, or a `dotnet`
   command. No `.bat`/`.sh` pairs.
-- **Graphics.** Draw through `IGpuDriver`: a gem records commands as plain data and the GPU provider turns them into API
-  calls; only the GPU provider has backend code. Draw into a render target (a `GpuTexture`), asking its format and size;
+- **Graphics.** Draw through `IGraphicsApi`: a gem records commands as plain data and the GPU provider turns them into
+  API calls; only the GPU provider has backend code. Draw into a render target (a `GpuTexture`), asking its format and size;
   never assume a window. Use a GPU feature only if Vulkan 1.3 has it on every GPU Magic runs on, a Mac's MoltenVK and
   KosmicKrisp included. Anything more is optional, with a path that works without it.

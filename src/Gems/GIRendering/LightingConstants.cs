@@ -2,7 +2,7 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using Magic.Shaders;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// What the lighting passes read beyond the frame, the twin of <c>Scene/Lighting.slang</c>'s: the sun above the

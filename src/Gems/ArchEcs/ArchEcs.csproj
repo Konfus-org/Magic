@@ -4,6 +4,7 @@
     <!-- Shown beside the gem as Magic starts it. -->
     <Description>The entity world, through Arch: provides IEcs.</Description>
     <Version>1.0.0</Version>
+    <Authors>Konfus</Authors>
     <!-- Copies the gem's own NuGet dependencies next to it, where its load context finds them. -->
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>

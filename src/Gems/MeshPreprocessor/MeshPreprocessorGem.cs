@@ -11,7 +11,7 @@ using Magic.Projects;
 using Magic.Rendering;
 using Magic.Utils;
 
-namespace MeshPreprocessor;
+namespace Magic.MeshPreprocessor;
 
 /// <summary>
 /// Makes what the renderer draws a model as, the cluster hierarchy, and keeps it in the cache under the model's

@@ -4,7 +4,7 @@ using Magic.Ecs.Components;
 using Magic.Files;
 using Magic.Files.Types;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// What the frame draws, read out of the entities in <c>Update</c> so <c>Render</c> never touches the ECS: every

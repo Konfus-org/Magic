@@ -3,7 +3,7 @@ using Magic.Files.Types;
 using Magic.Rendering;
 using Xunit;
 
-namespace MeshPreprocessor.Tests;
+namespace Magic.MeshPreprocessor.Tests;
 
 /// <summary>
 /// The hierarchy of a sphere of a few thousand triangles: leaves of its own triangles, errors that never fall going

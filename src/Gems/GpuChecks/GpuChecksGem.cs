@@ -7,7 +7,7 @@ using Magic.Shaders;
 using Magic.Threading;
 using Magic.Utils;
 
-namespace GpuChecks;
+namespace Magic.GpuChecks;
 
 /// <summary>
 /// Proves the GPU provider and the shader compiler work together, before any renderer draws: from the first frame, a

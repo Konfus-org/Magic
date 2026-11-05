@@ -9,7 +9,7 @@ using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// The instance table: a slot per entity drawn, kept from frame to frame, so a frame's work is the rows that changed:

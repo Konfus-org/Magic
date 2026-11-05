@@ -4,7 +4,7 @@ using Magic.Platform;
 using Magic.Utils;
 using Vortice.Vulkan;
 
-namespace VulkanGraphics;
+namespace Magic.VulkanGraphics;
 
 /// <summary>
 /// The window's images: made for the window's size, each a texture of the heap while it lasts, remade when the window

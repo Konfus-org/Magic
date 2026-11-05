@@ -5,7 +5,7 @@ using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// The card table: six cards per model, set of materials and scale in the world, the sides of the model's box
@@ -99,9 +99,9 @@ internal sealed class CardTable(IGraphicsApi gpu, RenderGraph graph) : IDisposab
             return Result.Failure($"the card table was not made: {buffer.Error}");
 
         Buffer = buffer.Value;
-        Result<GpuTexture> albedo = MakeAtlas("Card albedo", GpuFormat.R8G8B8A8Unorm);
-        Result<GpuTexture> normal = MakeAtlas("Card normals", GpuFormat.R16G16Unorm);
-        Result<GpuTexture> depth = MakeAtlas("Card depths", GpuFormat.R32Sfloat);
+        Result<GpuTexture> albedo = CreateAtlas("Card albedo", GpuFormat.R8G8B8A8Unorm);
+        Result<GpuTexture> normal = CreateAtlas("Card normals", GpuFormat.R16G16Unorm);
+        Result<GpuTexture> depth = CreateAtlas("Card depths", GpuFormat.R32Sfloat);
         if (!albedo.Ok || !normal.Ok || !depth.Ok)
             return Result.Failure($"the card atlases were not made: {albedo.Error}{normal.Error}{depth.Error}");
 
@@ -249,7 +249,7 @@ internal sealed class CardTable(IGraphicsApi gpu, RenderGraph graph) : IDisposab
         return true;
     }
 
-    private Result<GpuTexture> MakeAtlas(string name, GpuFormat format) =>
+    private Result<GpuTexture> CreateAtlas(string name, GpuFormat format) =>
         gpu.CreateTexture(
             new TextureDescription
             {

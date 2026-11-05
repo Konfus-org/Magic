@@ -1,11 +1,11 @@
 using System.Diagnostics.CodeAnalysis;
 using Magic.Input;
-using SdlBindings;
-using static SdlBindings.SDL_GamepadButton;
-using static SdlBindings.SDL_Scancode;
-using static SdlBindings.SDL3;
+using Magic.SdlBindings;
+using static Magic.SdlBindings.SDL_GamepadButton;
+using static Magic.SdlBindings.SDL_Scancode;
+using static Magic.SdlBindings.SDL3;
 
-namespace SdlPlatform;
+namespace Magic.SdlPlatform;
 
 /// <summary>
 /// SDL's keys and buttons as Magic's <see cref="Control"/>s; what Magic does not name is null.

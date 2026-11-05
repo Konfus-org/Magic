@@ -121,7 +121,7 @@ void ShadeLighting<S : ISky, T : IWorldTracer>(uint3 thread : SV_DispatchThreadI
         float3 normal = DecodeOctahedral(normalTexture.Load(thread.xy, 0u).xy * 2.0 - 1.0);
         float4 base = baseTexture.Load(thread.xy, 0u);
         float4 surface = surfaceTexture.Load(thread.xy, 0u);
-        Brdf brdf = MakeBrdf(base.rgb, base.a, surface.x, surface.y);
+        Brdf brdf = CreateBrdf(base.rgb, base.a, surface.x, surface.y);
         float3 world = relative + frame.cameraPosition.xyz;
 
         ShadowConstants shadow = LoadShadowConstants(GetPassHeader().y);

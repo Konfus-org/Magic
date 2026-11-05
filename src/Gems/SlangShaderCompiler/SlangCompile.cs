@@ -3,7 +3,7 @@ using System.Text;
 using Magic.Shaders;
 using Magic.Utils;
 
-namespace SlangShaderCompiler;
+namespace Magic.SlangShaderCompiler;
 
 /// <summary>
 /// A module's text with the name it imports as, in the order it is loaded: what one compile is made from.
@@ -29,6 +29,7 @@ internal static unsafe class SlangCompile
         "entry-point-names",
         "emit-spirv-directly",
         "no-warning-41012",
+        "optimization-1",
     ];
 
     public static Result<CompiledShader> Compile(

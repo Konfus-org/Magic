@@ -5,7 +5,7 @@ using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// A view's constants: its matrices, its targets and the frame's tables, jittered for the main view and remembering last

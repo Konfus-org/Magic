@@ -11,7 +11,7 @@ using Magic.Projects;
 using Magic.Serialization;
 using Magic.Utils;
 
-namespace PrefabImporter;
+namespace Magic.PrefabImporter;
 
 /// <summary>
 /// Reads <c>.prefab</c> files into <see cref="Prefab"/>s: each entity a part, with its components read as their types by

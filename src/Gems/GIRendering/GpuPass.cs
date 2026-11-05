@@ -1,7 +1,7 @@
 using Magic.Gpu;
 using Magic.Rendering;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// A buffer or a texture, as a pass names what it reads or writes.

@@ -7,7 +7,7 @@ using Magic.Rendering;
 using Magic.Shaders;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// The global distance field: the atlas every resident model's field is written into, four clipmaps of voxels around
@@ -170,14 +170,14 @@ internal sealed class DistanceField(IGraphicsApi gpu, RenderGraph graph, GpuPipe
             _dirtyInstances,
             _modelBytes
         ) = (made[0], made[1], made[2], made[3], made[4], made[5], made[6], made[7], made[8]);
-        Result<GpuTexture> atlas = MakeVolume("Model field atlas", AtlasVoxels);
+        Result<GpuTexture> atlas = CreateVolume("Model field atlas", AtlasVoxels);
         if (!atlas.Ok)
             return Result.Failure($"the model field atlas was not made: {atlas.Error}");
 
         _atlas = atlas.Value;
         for (int level = 0; level < Levels; level++)
         {
-            Result<GpuTexture> clipmap = MakeVolume($"Field clipmap {level}", Voxels);
+            Result<GpuTexture> clipmap = CreateVolume($"Field clipmap {level}", Voxels);
             if (!clipmap.Ok)
                 return Result.Failure($"a field clipmap was not made: {clipmap.Error}");
 
@@ -411,7 +411,7 @@ internal sealed class DistanceField(IGraphicsApi gpu, RenderGraph graph, GpuPipe
     /// </summary>
     private static int Snap(int voxel) => (int)Math.Floor(voxel / (double)BrickVoxels) * BrickVoxels;
 
-    private Result<GpuTexture> MakeVolume(string name, int size) =>
+    private Result<GpuTexture> CreateVolume(string name, int size) =>
         gpu.CreateTexture(
             new TextureDescription
             {

@@ -1,4 +1,3 @@
-using Magic;
 using Magic.Debugging;
 using Magic.Gpu;
 using Magic.Platform;
@@ -7,7 +6,7 @@ using Magic.Threading;
 using Magic.Utils;
 using Vortice.Vulkan;
 
-namespace VulkanGraphics;
+namespace Magic.VulkanGraphics;
 
 /// <summary>
 /// The GPU through Vulkan 1.3: one bindless heap, resources made from Core's descriptions, and one frame of commands

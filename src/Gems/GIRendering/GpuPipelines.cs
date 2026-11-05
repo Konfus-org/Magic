@@ -6,7 +6,7 @@ using Magic.Rendering;
 using Magic.Shaders;
 using Magic.Utils;
 
-namespace GIRendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// The library shaders a pass's entry is specialised with, in this order.
