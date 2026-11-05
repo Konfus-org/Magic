@@ -16,6 +16,7 @@ internal enum PassShaders : byte
 {
     None = 0,
     Standard = 1 << 0,
+    Atmosphere = 1 << 1,
 }
 
 /// <summary>
@@ -28,6 +29,8 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
     private const string Folder = "Shaders/";
 
     private const string StandardMaterial = "Shaders/Material/Standard.slang";
+
+    private const string AtmosphereSky = "Shaders/Sky/Atmosphere.slang";
 
     private readonly List<GpuPass> _passes = [];
 
@@ -157,6 +160,25 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
         return TileSize > 0 ? Result.Success() : Result.Failure("no full-screen pass reported a group size.");
     }
 
+    /// <summary>
+    /// The library shaders <paramref name="wanted"/> asks for, in the order the entry's generic parameters take them.
+    /// </summary>
+    private static ImmutableArray<ShaderTypeArgument> GetArguments(
+        PassShaders wanted,
+        ShaderTypeArgument standard,
+        ShaderTypeArgument atmosphere
+    )
+    {
+        ImmutableArray<ShaderTypeArgument>.Builder arguments = ImmutableArray.CreateBuilder<ShaderTypeArgument>();
+        if (wanted.HasFlag(PassShaders.Standard))
+            arguments.Add(standard);
+
+        if (wanted.HasFlag(PassShaders.Atmosphere))
+            arguments.Add(atmosphere);
+
+        return arguments.ToImmutable();
+    }
+
     private GpuPass Add(GpuPass pass)
     {
         _passes.Add(pass);
@@ -216,10 +238,12 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
     private Result<ImmutableArray<ShaderEntry>> GetEntries()
     {
         Handle<Shader> standard = assets.Find<Shader>(StandardMaterial);
-        if (standard == Handle<Shader>.None)
-            return Result.Failure($"there is no {StandardMaterial}.");
+        Handle<Shader> atmosphere = assets.Find<Shader>(AtmosphereSky);
+        if (standard == Handle<Shader>.None || atmosphere == Handle<Shader>.None)
+            return Result.Failure($"there is no {StandardMaterial} or {AtmosphereSky}.");
 
-        ImmutableArray<ShaderTypeArgument> standardArgument = [new ShaderTypeArgument(standard, "Standard")];
+        ShaderTypeArgument standardArgument = new(standard, "Standard");
+        ShaderTypeArgument atmosphereArgument = new(atmosphere, "Atmosphere");
         ImmutableArray<ShaderEntry>.Builder entries = ImmutableArray.CreateBuilder<ShaderEntry>();
         foreach (GpuPass pass in _passes)
         {
@@ -232,7 +256,7 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
                     pass.Module,
                     pass.Entry,
                     stage,
-                    pass.Shaders.HasFlag(PassShaders.Standard) ? standardArgument : []
+                    GetArguments(pass.Shaders, standardArgument, atmosphereArgument)
                 )
             );
         }

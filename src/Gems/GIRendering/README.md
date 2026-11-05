@@ -1,7 +1,7 @@
 # GIRendering
 
-Draws the world into the window: every renderer's model, GPU-driven, as its surfaces' colours. When the console asks
-for a screenshot, it hands the frame as a texture to the gem that writes textures.
+Draws the world into the window: every renderer's model, GPU-driven, lit by the sun and the sky. When the console
+asks for a screenshot, it hands the frame as a texture to the gem that writes textures.
 
 To use it, list `GIRendering` in a project's `.magic` file after the GPU provider, the shader compiler, the ECS, the
 model reader, the mesh preprocessor and the texture reader.
@@ -10,8 +10,10 @@ model reader, the mesh preprocessor and the texture reader.
 
 - A model shows once the preprocessor has made its clusters. One that doesn't load is drawn as the failure model, and
   a material or texture that doesn't load as the magenta failure material.
-- Nothing is lit yet, and the sky, fog, glass and a camera's `PostProcessing` aren't drawn: a glass material draws as
-  an opaque one.
+- The directional light is the sun while it is above the horizon, else the moon while it is, else the first there is.
+  It casts no shadows yet.
+- A sky entity's material draws the sky and colours the sun through the air, and the sky lights what it shines on.
+- Local lights, fog, glass and a camera's `PostProcessing` aren't drawn yet: a glass material draws as an opaque one.
 
 ## Settings
 
@@ -37,4 +39,6 @@ the finished picture.
   - `Core/Frame` is what every pass of a frame reads.
   - `Scene/` is the GPU tables and how to read them: the instance table, the pools of vertices, indices and clusters,
     what the cull leaves for the draw and the resolve, and the cull's tests.
+  - `Scene/Lighting` is what the lighting passes share beyond the frame: the sun, the sky's tables and the HDR picture.
   - `Light/` is what a local light gives a point: a point, spot or rect light's direction and irradiance there.
+- Parts of the lighting are adapted from another engine under the MIT licence; `THIRD-PARTY-NOTICES.md` holds it.

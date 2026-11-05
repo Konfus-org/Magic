@@ -29,6 +29,11 @@ internal static class WorldCopy
             if (chunk.Entities.Length > 0 && world.Fog is null && chunk.First[0].Effects.TryGet(out Fog fog))
                 world.Fog = fog;
         }
+
+        foreach (EcsChunk<Sky> chunk in ecs.Query<Sky>())
+        {
+            world.HasSky |= chunk.Entities.Length > 0;
+        }
     }
 
     private static void ReadRenderers(IEcs ecs, RenderWorld world)

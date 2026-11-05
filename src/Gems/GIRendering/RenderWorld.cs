@@ -24,6 +24,8 @@ internal sealed class RenderWorld
 
     public Fog? Fog { get; set; }
 
+    public bool HasSky { get; set; }
+
     /// <summary>
     /// What the camera does to its picture after the lighting; the defaults when it says nothing.
     /// </summary>
@@ -36,6 +38,7 @@ internal sealed class RenderWorld
         Camera = null;
         Sun = null;
         Fog = null;
+        HasSky = false;
         Post = new PostProcessing();
     }
 }

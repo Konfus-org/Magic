@@ -43,17 +43,24 @@ internal enum DebugView : uint
 }
 
 /// <summary>
-/// The output drawn from the GBuffer: the surfaces' colours, or one of their other properties when a debug view asks.
+/// The output drawn from the lit picture, or from one of the GBuffer's properties when a debug view asks.
 /// </summary>
 internal sealed class SurfaceView(GpuPipelines pipelines)
 {
     private readonly GpuPass _showPass = pipelines.Compute("Show surface", "ShowSurface", "ShowSurface", isTiled: true);
 
-    public void Record(in RenderView view, DebugView debugView)
+    public void Record(in RenderView view, DebugView debugView, float exposure)
     {
         FrameTargets targets = view.Targets;
         _showPass
-            .Run(new GpuConstants(view.Constants.Id, (uint)debugView))
+            .Run(
+                new GpuConstants(
+                    view.Constants.Id,
+                    (uint)debugView,
+                    targets.Hdr.Id,
+                    BitConverter.SingleToUInt32Bits(exposure)
+                )
+            )
             .Reads(
                 view.Constants,
                 targets.Visibility,
@@ -61,7 +68,8 @@ internal sealed class SurfaceView(GpuPipelines pipelines)
                 targets.GBufferNormal,
                 targets.GBufferBase,
                 targets.GBufferSurface,
-                targets.Velocity
+                targets.Velocity,
+                targets.Hdr
             )
             .Writes(targets.Output)
             .Dispatch(pipelines.GetTiles(targets.Width), pipelines.GetTiles(targets.Height));

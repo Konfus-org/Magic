@@ -35,6 +35,11 @@ internal sealed class FrameTargets(IGraphicsApi gpu, RenderGraph graph) : IDispo
     /// </summary>
     public GpuTexture Velocity { get; private set; }
 
+    /// <summary>
+    /// The lit picture, in the frame's light units before the exposure.
+    /// </summary>
+    public GpuTexture Hdr { get; private set; }
+
     public GpuTexture Output { get; private set; }
 
     public GpuBuffer Readback { get; private set; }
@@ -86,6 +91,11 @@ internal sealed class FrameTargets(IGraphicsApi gpu, RenderGraph graph) : IDispo
             GpuFormat.R16G16B16A16Sfloat,
             TextureUsages.Storage | TextureUsages.Sampled
         );
+        Result<GpuTexture> hdr = Make(
+            "HDR",
+            GpuFormat.R16G16B16A16Sfloat,
+            TextureUsages.Storage | TextureUsages.Sampled
+        );
         Result<GpuTexture> output = Make(
             "Output",
             GpuFormat.R8G8B8A8Unorm,
@@ -101,7 +111,7 @@ internal sealed class FrameTargets(IGraphicsApi gpu, RenderGraph graph) : IDispo
         );
         foreach (
             Result<GpuTexture> made in (ReadOnlySpan<Result<GpuTexture>>)
-                [visibility, depth, hzb, normal, baseColor, surface, velocity, output]
+                [visibility, depth, hzb, normal, baseColor, surface, velocity, hdr, output]
         )
         {
             if (!made.Ok)
@@ -118,6 +128,7 @@ internal sealed class FrameTargets(IGraphicsApi gpu, RenderGraph graph) : IDispo
         GBufferBase = baseColor.Value;
         GBufferSurface = surface.Value;
         Velocity = velocity.Value;
+        Hdr = hdr.Value;
         Output = output.Value;
         Readback = readback.Value;
 
@@ -141,7 +152,7 @@ internal sealed class FrameTargets(IGraphicsApi gpu, RenderGraph graph) : IDispo
     {
         foreach (
             GpuTexture texture in (ReadOnlySpan<GpuTexture>)
-                [Visibility, Depth, Hzb, GBufferNormal, GBufferBase, GBufferSurface, Velocity, Output]
+                [Visibility, Depth, Hzb, GBufferNormal, GBufferBase, GBufferSurface, Velocity, Hdr, Output]
         )
         {
             if (texture.IsNone)
@@ -164,6 +175,7 @@ internal sealed class FrameTargets(IGraphicsApi gpu, RenderGraph graph) : IDispo
         GBufferBase = GpuTexture.None;
         GBufferSurface = GpuTexture.None;
         Velocity = GpuTexture.None;
+        Hdr = GpuTexture.None;
         Output = GpuTexture.None;
         Readback = GpuBuffer.None;
         Width = 0;

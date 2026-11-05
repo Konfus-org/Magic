@@ -42,6 +42,9 @@ public sealed class GIRenderingGem : IGem, IDisposable
     private readonly InstanceTable _instances;
     private readonly Visibility _visibility;
     private readonly FrameView _frameView;
+    private readonly SkyLuts _sky;
+    private readonly Lighting _lighting;
+    private readonly Shading _shading;
     private readonly SurfaceView _surfaceView;
     private readonly IOverlay? _overlay;
     private readonly RendererDebugWindow? _debugWindow;
@@ -87,6 +90,9 @@ public sealed class GIRenderingGem : IGem, IDisposable
         _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu, _graph) : null;
         _visibility = new Visibility(gpu, _graph, _pipelines, _pools, _materials);
         _frameView = new FrameView(gpu, _graph, _pools, _materials, _visibility, _rayTracing);
+        _sky = new SkyLuts(gpu, _graph, _pipelines);
+        _lighting = new Lighting(gpu, _graph, _sky);
+        _shading = new Shading(_pipelines, _lighting);
         _surfaceView = new SurfaceView(_pipelines);
     }
 
@@ -102,6 +108,8 @@ public sealed class GIRenderingGem : IGem, IDisposable
         _rayTracing?.Dispose();
         _visibility.Dispose();
         _frameView.Dispose();
+        _sky.Dispose();
+        _lighting.Dispose();
     }
 
     /// <summary>
@@ -163,13 +171,16 @@ public sealed class GIRenderingGem : IGem, IDisposable
             _frameView.GetMain(camera, sun, frame.Index, _targets, _instances.Buffer, instanceCount, _hasHzb)
         );
         _visibility.ResetCounts();
+        _lighting.Prepare(_world, camera, sun, _targets);
         _graph.EndPass();
 
         // The passes, in the order they run.
         RenderView view = new(constants, _instances.Buffer, instanceCount, _targets);
+        _lighting.RecordTables(constants);
         _visibility.RecordMain(view);
         _visibility.RecordResolve(view);
-        _surfaceView.Record(view, _debugView);
+        _shading.Record(view);
+        _surfaceView.Record(view, _debugView, sun.Exposure);
         _overlay?.Record(_graph, _targets.Output);
 
         GpuTexture target = _gpu.WindowTarget;
@@ -234,6 +245,8 @@ public sealed class GIRenderingGem : IGem, IDisposable
                     () => _rayTracing?.Create() ?? Result.Success(),
                     _visibility.Create,
                     _frameView.Create,
+                    _sky.Create,
+                    _lighting.Create,
                 ]
         )
         {

@@ -1,6 +1,7 @@
-// What the output shows of the surfaces drawn: each pixel's GBuffer, as the view the pass header's y names asks, encoded
-// for the screen, so a roughness of a half reads as a half and an albedo as the colour it is. Black where nothing was
-// drawn, but for the velocity, which the sky has too.
+// What the output shows: the lit picture scaled by the exposure, or each pixel's GBuffer as the view the pass header's
+// y names asks, encoded for the screen, so a roughness of a half reads as a half and an albedo as the colour it is. A
+// GBuffer view is black where nothing was drawn, but for the velocity, which the sky has too. The header's z is the HDR
+// picture and w the exposure's bits.
 module "ShowSurface";
 
 import Core.Heap;
@@ -61,6 +62,13 @@ float3 GetSurfaceView(FrameConstants frame, SurfaceView view, uint2 pixel)
     }
 }
 
+// The lit picture for the screen. PROTO: a plain exposure curve until the tonemap is ported.
+float3 GetPicture(uint hdr, float exposure, uint2 pixel)
+{
+    TextureRef picture = { hdr };
+    return ToSrgb(1.0 - exp(-picture.Load(pixel, 0u).rgb * exposure));
+}
+
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void ShowSurface(uint3 thread : SV_DispatchThreadID)
@@ -69,6 +77,9 @@ void ShowSurface(uint3 thread : SV_DispatchThreadID)
     if (any(thread.xy >= uint2(frame.width, frame.height)))
         return;
 
+    PassHeader header = GetPassHeader();
+    SurfaceView view = (SurfaceView)header.y;
+    float3 color = view == SurfaceView.Final ? GetPicture(header.z, asfloat(header.w), thread.xy) : GetSurfaceView(frame, view, thread.xy);
     StorageRef output = { frame.output, 0u };
-    output.Store(thread.xy, float4(GetSurfaceView(frame, (SurfaceView)GetPassHeader().y, thread.xy), 1.0));
+    output.Store(thread.xy, float4(color, 1.0));
 }
