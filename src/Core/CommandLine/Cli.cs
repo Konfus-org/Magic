@@ -41,7 +41,7 @@ internal sealed class Cli : IDisposable
 
     private readonly World _world;
 
-    private readonly RootCommand _commands;
+    private readonly RootCommand _cliCommands;
 
     private int _waitFrames;
 
@@ -69,7 +69,7 @@ internal sealed class Cli : IDisposable
         _events = events;
         _assets = assets;
         _world = world;
-        _commands = CreateCommands();
+        _cliCommands = CreateCliCommands();
         _drawnWatch = events.Watch<FirstFrameDrawn>(_ => _hasDrawn = true);
     }
 
@@ -81,8 +81,8 @@ internal sealed class Cli : IDisposable
     /// </summary>
     public Result Execute(string[] commands)
     {
-        ParseResult parsed = _commands.Parse(commands);
-        if (parsed.Errors.Count == 0 && parsed.Action == _commands.Action)
+        ParseResult parsed = _cliCommands.Parse(commands);
+        if (parsed.Errors.Count == 0 && parsed.Action == _cliCommands.Action)
             return Result.Failure(
                 "it has no command; open a project with 'Magic open <project>', or see 'Magic --help'."
             );
@@ -104,12 +104,12 @@ internal sealed class Cli : IDisposable
             return Result.Success();
 
         string firstWord = command.Split(' ', 2)[0];
-        if (command.StartsWith('-') || _commands.Subcommands.Any(subcommand => subcommand.Name == firstWord))
-            return Invoke(_commands.Parse(command));
+        if (command.StartsWith('-') || _cliCommands.Subcommands.Any(subcommand => subcommand.Name == firstWord))
+            return Invoke(_cliCommands.Parse(command));
 
         string dashes = command.Length == 1 ? "-" : "--";
 
-        return Invoke(_commands.Parse(dashes + command));
+        return Invoke(_cliCommands.Parse(dashes + command));
     }
 
     /// <summary>
@@ -518,7 +518,7 @@ internal sealed class Cli : IDisposable
     /// The commands: verbs that act on the app or do a job of their own, and options that set how it runs, given before
     /// or after the verb.
     /// </summary>
-    private RootCommand CreateCommands()
+    private RootCommand CreateCliCommands()
     {
         RootCommand commands = new("Magic CLI.\nAllows interaction with the Magic game engine from the command line.")
         {
@@ -558,18 +558,18 @@ internal sealed class Cli : IDisposable
                 {
                     Action = new CliCommand(cmds => Screenshot()),
                 },
-                new Command("save", "Saves the world as the .world asset at the given path, under the project's folder")
+                new Command("save", "Saves the game as Saves/<name>.save beside Magic")
                 {
-                    Arguments = { new Argument<string>("path") { Description = "Where, ending in .world" } },
+                    Arguments = { new Argument<string>("name") { Description = "The save's name" } },
                     Action = new CliCommand(cmds =>
-                        SaveWorldAsync(cmds.GetRequiredValue<string>("path")).FireAndForget()
+                        SaveGameAsync(cmds.GetRequiredValue<string>("name")).FireAndForget()
                     ),
                 },
-                new Command("restore", "Puts the world back as the .world asset at the given path holds it")
+                new Command("load", "Puts the game back as Saves/<name>.save beside Magic holds it")
                 {
-                    Arguments = { new Argument<string>("path") { Description = "The .world asset" } },
+                    Arguments = { new Argument<string>("name") { Description = "The save's name" } },
                     Action = new CliCommand(cmds =>
-                        RestoreWorldAsync(cmds.GetRequiredValue<string>("path")).FireAndForget()
+                        LoadGameAsync(cmds.GetRequiredValue<string>("name")).FireAndForget()
                     ),
                 },
                 new Command("bake", "Opens every domain under Domains/ in turn, so their caches are made, then exits")
@@ -730,24 +730,21 @@ internal sealed class Cli : IDisposable
     }
 
     /// <summary>
-    /// Saves the world as the asset at <paramref name="path"/>, holding <c>wait loaded</c> meanwhile.
+    /// Saves the game as <paramref name="name"/>, holding <c>wait loaded</c> meanwhile.
     /// </summary>
-    private async Task SaveWorldAsync(string path)
+    private async Task SaveGameAsync(string name)
     {
-        if (!IsProjectOpen($"save {path} in"))
+        if (!IsProjectOpen($"save {name} in"))
             return;
 
         _isChangingWorld = true;
         try
         {
-            WorldState world = await _world.SaveAsync(CancellationToken.None).ConfigureAwait(false);
-            Result<Handle<WorldState>> saved = await _assets
-                .SaveAsync(world, path, null, CancellationToken.None)
-                .ConfigureAwait(false);
+            Result saved = await _world.SaveAsync(name, CancellationToken.None).ConfigureAwait(false);
             if (saved.Ok)
-                Log.Info($"Saved the world as {path}.");
+                Log.Info($"Saved the game as {name}.");
             else
-                Log.Error($"The world was not saved as {path}: {saved.Error}");
+                Log.Error($"The game was not saved as {name}: {saved.Error}");
         }
         finally
         {
@@ -756,31 +753,19 @@ internal sealed class Cli : IDisposable
     }
 
     /// <summary>
-    /// Puts the world back as the asset at <paramref name="path"/> holds it, holding <c>wait loaded</c> meanwhile.
+    /// Puts the game back as the save <paramref name="name"/> holds it, holding <c>wait loaded</c> meanwhile.
     /// </summary>
-    private async Task RestoreWorldAsync(string path)
+    private async Task LoadGameAsync(string name)
     {
-        if (!IsProjectOpen($"restore {path} in"))
+        if (!IsProjectOpen($"load {name} in"))
             return;
-
-        Handle<WorldState> handle = _assets.Find<WorldState>(path);
-        if (handle == Handle<WorldState>.None)
-        {
-            Log.Error($"There is no saved world at {path}.");
-
-            return;
-        }
 
         _isChangingWorld = true;
         try
         {
-            Result<WorldState> loaded = await _assets
-                .LoadAsync(handle, null, CancellationToken.None)
-                .ConfigureAwait(false);
-            if (loaded.Ok)
-                await _world.RestoreAsync(loaded.Value, CancellationToken.None).ConfigureAwait(false);
-            else
-                Log.Error($"{path} was not restored: {loaded.Error}");
+            Result loaded = await _world.RestoreAsync(name, CancellationToken.None).ConfigureAwait(false);
+            if (!loaded.Ok)
+                Log.Error($"The save {name} was not loaded: {loaded.Error}");
         }
         finally
         {

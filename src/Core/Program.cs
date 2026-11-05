@@ -50,7 +50,7 @@ internal static class Program
             Threads threads = new();
             Caches caches = new(files, app);
             using Assets assets = new(files, caches);
-            using World world = new(assets, threads, app);
+            using World world = new(assets, files, threads, app);
             using Cli cli = new(app, files, events, assets, world);
 
             if (isLaunching)
@@ -93,7 +93,7 @@ internal static class Program
             int run = app.RunVersion;
             using Gems gems = new(registry, provider, app, files, assets, world, events);
             using CancellationTokenSource stopping = new();
-            world.LoadAsync(kept, stopping.Token).FireAndForget();
+            world.StartAsync(kept, stopping.Token).FireAndForget();
 
             // If we don't have a window and aren't headless something is wrong, early out.
             if (!app.IsHeadless && app.Window is null)
