@@ -4,7 +4,8 @@
             "name": "Camera",
             "components": {
                 "Transform": { "position": { "x": 0, "y": 7, "z": -990 }, "rotation": { "x": 0.0523, "y": 0, "z": 0, "w": 0.9986 } },
-                "Camera": {}
+                "Camera": {},
+                "Spin": {}
             }
         },
         {

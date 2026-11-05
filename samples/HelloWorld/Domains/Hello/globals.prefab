@@ -11,7 +11,8 @@
             "name": "Camera",
             "components": {
                 "Transform": { "position": { "x": 0, "y": 2, "z": -4 }, "rotation": { "x": 0.2164, "y": 0, "z": 0, "w": 0.9763 } },
-                "Camera": {}
+                "Camera": {},
+                "Spin": {}
             }
         },
         {

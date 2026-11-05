@@ -92,8 +92,8 @@ internal sealed class Gems : IDisposable
     }
 
     /// <summary>
-    /// One frame: restarts the run if a gem was built, works out the clocks, runs every gem's hooks in order with the fixed
-    /// steps the clock owes, and sleeps until the next frame is due. Time begins with the first frame, not with what was
+    /// One frame: restarts the run if a gem was built, works out the clocks, turns what spins, runs every gem's hooks in
+    /// order with the fixed steps the clock owes, and sleeps until the next frame is due. Time begins with the first frame, not with what was
     /// loaded before it.
     /// </summary>
     public void Pump()
@@ -109,6 +109,7 @@ internal sealed class Gems : IDisposable
             Cpu = _lastCpu,
         };
 
+        _world.TurnSpins((float)frame.SimDeltaSec);
         long updateStart = Stopwatch.GetTimestamp();
         RunHook(Hook.Update, frame);
         long fixedStart = Stopwatch.GetTimestamp();

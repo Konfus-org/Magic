@@ -11,6 +11,7 @@
                     }
                 },
                 "Camera": {},
+                "Spin": {},
                 "PostProcessing": {
                     "effect0": {
                         "id": 1700000000000283

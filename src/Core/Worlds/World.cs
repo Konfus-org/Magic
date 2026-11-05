@@ -353,6 +353,23 @@ public sealed class World : IEcs, IDisposable
     internal void Pump(CancellationToken cancel) => ProcessReloads(_assets.Reloaded, cancel);
 
     /// <summary>
+    /// Every entity with a <see cref="Spin"/> turned on by <paramref name="deltaSec"/> of the world's time. Main thread.
+    /// </summary>
+    internal void TurnSpins(float deltaSec)
+    {
+        if (deltaSec <= 0)
+            return;
+
+        foreach (EcsChunk<Transform, Spin> chunk in Query<Transform, Spin>())
+        {
+            for (int i = 0; i < chunk.Entities.Length; i++)
+            {
+                chunk.First[i].Rotation = chunk.Second[i].Turn(chunk.First[i].Rotation, deltaSec);
+            }
+        }
+    }
+
+    /// <summary>
     /// Puts back the JSON <paramref name="kept"/>; the entry point opens when there is none or it doesn't read, which is an
     /// error.
     /// </summary>
