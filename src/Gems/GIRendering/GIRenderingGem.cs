@@ -44,6 +44,7 @@ public sealed class GIRenderingGem : IGem, IDisposable
     private readonly FrameView _frameView;
     private readonly SkyLuts _sky;
     private readonly LightTiles _lightTiles;
+    private readonly ShadowMask? _shadows;
     private readonly Lighting _lighting;
     private readonly Shading _shading;
     private readonly SurfaceView _surfaceView;
@@ -93,7 +94,8 @@ public sealed class GIRenderingGem : IGem, IDisposable
         _frameView = new FrameView(gpu, _graph, _pools, _materials, _visibility, _rayTracing);
         _sky = new SkyLuts(gpu, _graph, _pipelines);
         _lightTiles = new LightTiles(gpu, _graph, _pipelines);
-        _lighting = new Lighting(gpu, _graph, _sky, _lightTiles);
+        _shadows = _rayTracing is null ? null : new ShadowMask(gpu, _graph, _pipelines, _lightTiles);
+        _lighting = new Lighting(gpu, _graph, _sky, _lightTiles, _shadows);
         _shading = new Shading(_pipelines, _lighting);
         _surfaceView = new SurfaceView(_pipelines);
     }
@@ -112,6 +114,7 @@ public sealed class GIRenderingGem : IGem, IDisposable
         _frameView.Dispose();
         _sky.Dispose();
         _lightTiles.Dispose();
+        _shadows?.Dispose();
         _lighting.Dispose();
     }
 
@@ -183,6 +186,7 @@ public sealed class GIRenderingGem : IGem, IDisposable
         _visibility.RecordMain(view);
         _visibility.RecordResolve(view);
         _lighting.RecordTiles(view);
+        _lighting.RecordShadows(view);
         _shading.Record(view);
         _surfaceView.Record(view, _debugView, sun.Exposure);
         _overlay?.Record(_graph, _targets.Output);
@@ -281,6 +285,9 @@ public sealed class GIRenderingGem : IGem, IDisposable
         Result resized = _targets.Resize(width, height);
         if (resized.Ok)
             resized = _lightTiles.Resize(width, height);
+
+        if (resized.Ok && _shadows is not null)
+            resized = _shadows.Resize(width, height);
 
         if (!resized.Ok)
         {

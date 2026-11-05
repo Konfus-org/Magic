@@ -5,7 +5,7 @@ namespace Magic.GIRendering;
 
 /// <summary>
 /// What the lighting passes read beyond the frame, the twin of <c>Scene/Lighting.slang</c>'s: the sun above the air, the
-/// viewer's height, the sky's tables, the HDR picture they light, and the light table and its tiles.
+/// viewer's height, the sky's tables, the HDR picture they light, the light table and its tiles, and the shadow mask.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct LightingConstants
@@ -34,7 +34,10 @@ internal record struct LightingConstants
 
     public uint LightTiles;
 
-    public uint Padding0;
+    /// <summary>
+    /// 0 on a GPU that traces no rays: nothing is shadowed.
+    /// </summary>
+    public uint ShadowMask;
 
     public uint Padding1;
 

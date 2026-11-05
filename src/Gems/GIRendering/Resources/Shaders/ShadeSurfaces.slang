@@ -1,6 +1,6 @@
 // Every pixel of the picture lit, into the HDR picture: a surface by the sun through the air, by the local lights its
-// tile lists and by the sky over it, its direct and indirect light summed over the shared BRDF; and the sky itself
-// where nothing was drawn. The pass header's x is the frame's constants and z the lighting constants.
+// tile lists, each dimmed by the shadow mask, and by the sky over it, its direct and indirect light summed over the
+// shared BRDF; and the sky itself where nothing was drawn. The pass header's x is the frame's constants and z the lighting constants.
 module "ShadeSurfaces";
 
 import Core.Heap;
@@ -10,6 +10,7 @@ import Core.Math;
 import Core.Pack;
 import Scene.Lighting;
 import Scene.Lights;
+import Scene.Shadows;
 import Light.Lights;
 import Sky.ISky;
 import Surface.Brdf;
@@ -76,7 +77,8 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
     float3 sunIlluminance = lighting.hasSky != 0u
         ? S.GetSunIlluminance(CreateSkyInputs(frame, lighting, toSun, false))
         : lighting.sunIlluminance.rgb;
-    float3 color = Evaluate(brdf, normal, view, toSun) * sunIlluminance;
+    uint4 shadows = LoadShadowMask(lighting.shadowMask, thread.xy, size.x);
+    float3 color = Evaluate(brdf, normal, view, toSun) * sunIlluminance * GetShadow(shadows, 0u);
 
     // The lights of the pixel's tile, a word of bits at a time.
     float3 world = relative + frame.cameraPosition.xyz;
@@ -84,6 +86,7 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
     uint tilesAcross = (size.x + LightTileSize - 1u) / LightTileSize;
     uint offset = GetLightTileOffset(thread.xy / LightTileSize, tilesAcross);
     uint buckets = (min(lighting.lightCount, MaxLights) + 31u) / 32u;
+    uint slot = 1u;
     for (uint bucket = 0u; bucket < buckets; bucket++)
     {
         uint bits = tiles[offset + bucket];
@@ -92,7 +95,8 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
             uint bit = firstbitlow(bits);
             bits &= bits - 1u;
             LightSample sample = SampleLight(LoadLight(lighting.lights, bucket * 32u + bit), world, normal);
-            color += Evaluate(brdf, normal, view, sample.direction) * sample.irradiance;
+            color += Evaluate(brdf, normal, view, sample.direction) * sample.irradiance * GetShadow(shadows, slot);
+            slot++;
         }
     }
     color += GetSkyLight<S>(frame, lighting, brdf, surface.x, normal, view) * surface.z;

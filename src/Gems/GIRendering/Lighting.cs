@@ -8,11 +8,12 @@ using Magic.Utils;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// What everything that lights a surface shares: the lighting constants, naming the sky's tables and the lights, which
-/// it fills before the view is drawn, the sky's tables made again each frame while there is a sky, and each tile's
-/// lights.
+/// What everything that lights a surface shares: the lighting constants, naming the sky's tables, the lights and the
+/// shadow mask, which it fills before the view is drawn, the sky's tables made again each frame while there is a sky,
+/// each tile's lights, and each pixel's shadows on a GPU that traces rays.
 /// </summary>
-internal sealed class Lighting(IGraphicsApi gpu, RenderGraph graph, SkyLuts sky, LightTiles lights) : IDisposable
+internal sealed class Lighting(IGraphicsApi gpu, RenderGraph graph, SkyLuts sky, LightTiles lights, ShadowMask? shadows)
+    : IDisposable
 {
     private GpuSampler _sampler;
     private bool _hasSky;
@@ -73,6 +74,7 @@ internal sealed class Lighting(IGraphicsApi gpu, RenderGraph graph, SkyLuts sky,
             Lights = lights.Table.Id,
             LightCount = (uint)lights.Count,
             LightTiles = lights.Tiles.Id,
+            ShadowMask = shadows?.Mask.Id ?? 0,
         };
         GpuUpload upload = gpu.BeginUpload(LightingConstants.Bytes);
         MemoryMarshal.Write(upload.Bytes, in constants);
@@ -100,12 +102,19 @@ internal sealed class Lighting(IGraphicsApi gpu, RenderGraph graph, SkyLuts sky,
     public void RecordTiles(in RenderView view) => lights.Record(view, GetHeader(view.Constants), Constants);
 
     /// <summary>
-    /// Says a pass reads the constants, the sky's tables and the lights.
+    /// Each pixel's shadows, on a GPU that traces rays.
+    /// </summary>
+    public void RecordShadows(in RenderView view) => shadows?.Record(view, GetHeader(view.Constants), Constants);
+
+    /// <summary>
+    /// Says a pass reads the constants, the sky's tables, the lights and the shadows.
     /// </summary>
     public void UseForShading()
     {
         graph.Use(Constants, GpuAccess.ShaderRead);
         sky.UseForReading();
         lights.UseForReading();
+        if (shadows is not null)
+            graph.Use(shadows.Mask, GpuAccess.ShaderRead);
     }
 }
