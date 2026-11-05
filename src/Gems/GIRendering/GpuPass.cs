@@ -56,24 +56,13 @@ internal sealed class GpuPass
     internal GpuPipeline Pipeline { get; set; }
 
     /// <summary>
-    /// The pass specialised to the ray-query tracer; none on a GPU that traces no rays, or for a pass that doesn't trace.
+    /// Starts it as a compute pass, under <paramref name="name"/> when one run differs from another.
     /// </summary>
-    internal GpuPipeline RayQueryPipeline { get; set; }
-
-    /// <summary>
-    /// Starts it as a compute pass, under <paramref name="name"/> when one run differs from another, with
-    /// <paramref name="pipeline"/> in place of its own when there is one.
-    /// </summary>
-    public GpuPassRun Run(
-        in GpuConstants header,
-        string? name = null,
-        bool usesRayQuery = false,
-        GpuPipeline pipeline = default
-    )
+    public GpuPassRun Run(in GpuConstants header, string? name = null)
     {
         Graph.BeginComputePass(name ?? Name);
 
-        return new GpuPassRun(Graph, header, Choose(usesRayQuery, pipeline));
+        return new GpuPassRun(Graph, header, Pipeline);
     }
 
     /// <summary>
@@ -84,14 +73,6 @@ internal sealed class GpuPass
         Graph.BeginDrawPass(name ?? Name, targets);
 
         return new GpuPassRun(Graph, header, Pipeline);
-    }
-
-    private GpuPipeline Choose(bool usesRayQuery, GpuPipeline pipeline)
-    {
-        if (!pipeline.IsNone)
-            return pipeline;
-
-        return usesRayQuery ? RayQueryPipeline : Pipeline;
     }
 }
 

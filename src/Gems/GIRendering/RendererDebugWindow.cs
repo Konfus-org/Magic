@@ -4,19 +4,12 @@ using Magic.Input;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// What someone debugging can choose of how the frame is drawn.
-/// </summary>
-internal readonly record struct RendererChoices(DebugView View, RendererPreset Preset, bool WantsRayQuery);
-
-/// <summary>
-/// The renderer's debug window, drawn with the debug UI's widgets: it takes what is chosen now and hands back what is
+/// The renderer's debug window, drawn with the debug UI's widgets: it takes the view chosen now and hands back the one
 /// chosen next. F2 opens it, F5 and F6 step through the views, and a line on screen names any view but the finished frame.
 /// </summary>
-internal sealed class RendererDebugWindow(IDebugUI ui, IInput? input, bool canTraceRays)
+internal sealed class RendererDebugWindow(IDebugUI ui, IInput? input)
 {
     private static readonly string[] _viewNames = Enum.GetNames<DebugView>();
-    private static readonly string[] _presetNames = CreatePresetNames();
-    private static readonly string[] _tracerNames = ["Field", "Ray query"];
 
     /// <summary>
     /// The line naming a view, made once per view.
@@ -31,9 +24,9 @@ internal sealed class RendererDebugWindow(IDebugUI ui, IInput? input, bool canTr
         set => _isOpen = value;
     }
 
-    public RendererChoices Update(in RendererChoices current)
+    public DebugView Update(DebugView current)
     {
-        DebugView view = current.View;
+        DebugView view = current;
         if (input is not null)
         {
             if (input[Control.KeyF2].WasPressed)
@@ -46,43 +39,25 @@ internal sealed class RendererDebugWindow(IDebugUI ui, IInput? input, bool canTr
                 view = Step(view, 1);
         }
 
-        RendererChoices chosen = current with { View = view };
         if (_isOpen)
-            chosen = Draw(chosen);
+            view = Draw(view);
 
-        if (chosen.View != DebugView.Final)
-            ui.Text(_viewLines[(int)chosen.View]);
+        if (view != DebugView.Final)
+            ui.Text(_viewLines[(int)view]);
 
-        return chosen;
+        return view;
     }
 
     private static DebugView Step(DebugView view, int by) =>
         (DebugView)(((int)view + by + _viewNames.Length) % _viewNames.Length);
 
-    private static string[] CreatePresetNames()
-    {
-        string[] names = new string[RendererPreset.All.Length];
-        for (int i = 0; i < names.Length; i++)
-        {
-            names[i] = RendererPreset.All[i].Name;
-        }
-
-        return names;
-    }
-
-    private RendererChoices Draw(in RendererChoices current)
+    private DebugView Draw(DebugView current)
     {
         ui.Begin("Rendering", ref _isOpen);
-        int viewIndex = (int)current.View;
+        int viewIndex = (int)current;
         ui.Choice("View", ref viewIndex, _viewNames);
-        int presetIndex = RendererPreset.All.IndexOf(current.Preset);
-        ui.Choice("Preset", ref presetIndex, _presetNames);
-        int tracerIndex = current.WantsRayQuery ? 1 : 0;
-        if (canTraceRays)
-            ui.Choice("Tracer", ref tracerIndex, _tracerNames);
-
         ui.End();
 
-        return new RendererChoices((DebugView)viewIndex, RendererPreset.All[presetIndex], tracerIndex == 1);
+        return (DebugView)viewIndex;
     }
 }

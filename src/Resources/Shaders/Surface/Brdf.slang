@@ -1,6 +1,7 @@
-// How a surface reflects a light: a Lambert diffuse under a GGX specular with Smith's height-correlated masking and
-// Schlick's Fresnel (Walter et al., "Microfacet Models for Refraction through Rough Surfaces", 2007; Heitz,
-// "Understanding the Masking-Shadowing Function", 2014), as every lighting pass evaluates it.
+// How a surface reflects a light: a Lambert diffuse, less what the specular's Fresnel reflects, under a GGX specular
+// with Smith's height-correlated masking and Schlick's Fresnel (Walter et al., "Microfacet Models for Refraction
+// through Rough Surfaces", 2007; Heitz, "Understanding the Masking-Shadowing Function", 2014), as every lighting pass
+// evaluates it; and the specular's response to light from every direction, for what an environment reflects.
 module "Surface/Brdf";
 
 import Core.Math;
@@ -52,8 +53,19 @@ public float3 Evaluate(Brdf brdf, float3 normal, float3 view, float3 light)
     float nDotV = max(dot(normal, view), 1e-4);
     float nDotH = saturate(dot(normal, half));
     float vDotH = saturate(dot(view, half));
-    float3 specular = DistributionGgx(brdf.alpha, nDotH) * VisibilitySmith(brdf.alpha, nDotV, nDotL) * FresnelSchlick(brdf.f0, vDotH);
-    return (brdf.diffuse * InvPi + specular) * nDotL;
+    float3 fresnel = FresnelSchlick(brdf.f0, vDotH);
+    float3 specular = DistributionGgx(brdf.alpha, nDotH) * VisibilitySmith(brdf.alpha, nDotV, nDotL) * fresnel;
+    return (brdf.diffuse * (1.0 - fresnel) * InvPi + specular) * nDotL;
+}
+
+// The share of light from every direction the specular reflects towards the viewer, by perceptual roughness: the
+// pre-integrated GGX response fitted analytically (Karis, "Physically Based Shading on Mobile", 2014).
+public float3 GetEnvironmentBrdf(float3 f0, float roughness, float nDotV)
+{
+    float4 r = roughness * float4(-1.0, -0.0275, -0.572, 0.022) + float4(1.0, 0.0425, 1.04, -0.04);
+    float a004 = min(r.x * r.x, exp2(-9.28 * nDotV)) * r.x + r.y;
+    float2 scaleBias = float2(-1.04, 1.04) * a004 + r.zw;
+    return f0 * scaleBias.x + scaleBias.y;
 }
 
 // A microfacet normal the view sees, drawn from the GGX distribution of the visible ones (Heitz, "Sampling the GGX

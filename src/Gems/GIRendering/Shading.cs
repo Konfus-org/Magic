@@ -1,32 +1,24 @@
 namespace Magic.GIRendering;
 
 /// <summary>
-/// The GBuffer lit into the HDR picture: the sun through its pages, the lights of each pixel's froxel, the global
-/// illumination's probes and the air in front of it.
+/// The view's surfaces lit into the HDR picture, and the sky drawn where nothing was.
 /// </summary>
-internal sealed class Shading(
-    GpuPipelines pipelines,
-    Lighting lighting,
-    SunShadows shadows,
-    DistanceField field,
-    GlobalIllumination gi,
-    GlassShadow glassShadow
-)
+internal sealed class Shading(GpuPipelines pipelines, Lighting lighting)
 {
     private readonly GpuPass _shadePass = pipelines.Compute(
-        "Shade",
-        "ShadeLighting",
-        "ShadeLighting",
-        PassShaders.Atmosphere | PassShaders.Tracer,
+        "Shade surfaces",
+        "ShadeSurfaces",
+        "ShadeSurfaces",
+        PassShaders.Atmosphere,
         isTiled: true
     );
 
-    public void Record(in RenderView view, bool usesRayQuery)
+    public void Record(in RenderView view)
     {
         FrameTargets targets = view.Targets;
-        GpuPassRun shadeRun = _shadePass
-            .Run(lighting.GetHeader(view.Constants), usesRayQuery: usesRayQuery)
-            .Reads(
+        GpuPassRun run = _shadePass.Run(lighting.GetHeader(view.Constants));
+        lighting.UseForShading();
+        run.Reads(
                 view.Constants,
                 targets.Visibility,
                 targets.Depth,
@@ -35,12 +27,6 @@ internal sealed class Shading(
                 targets.GBufferSurface
             )
             .Writes(targets.Hdr)
-            .Reads(view.Instances);
-        lighting.UseForShading();
-        shadows.UseForSampling();
-        field.UseForSampling();
-        gi.UseForSampling();
-        glassShadow.UseForSampling();
-        shadeRun.Dispatch(pipelines.GetTiles(targets.Width), pipelines.GetTiles(targets.Height));
+            .Dispatch(pipelines.GetTiles(targets.Width), pipelines.GetTiles(targets.Height));
     }
 }

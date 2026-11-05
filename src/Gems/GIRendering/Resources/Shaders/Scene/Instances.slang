@@ -19,10 +19,8 @@ public struct GpuInstance
     // The instance's clusters in the cluster pool.
     public uint clusterOffset;
     public uint clusterCount;
-    // The model's field's slot in the atlas plus one; 0 while it has none.
-    public uint flags;
-    // The card table's capture row, which names the instance's cards; 0 while there is none.
-    public uint capture;
+    public uint padding0;
+    public uint padding1;
     // The material table's row for each slot.
     public uint materials[MaterialSlots];
 }
@@ -42,16 +40,6 @@ public float GetMaxScale(float4x4 world)
     float3 y = float3(world[1][0], world[1][1], world[1][2]);
     float3 z = float3(world[2][0], world[2][1], world[2][2]);
     return sqrt(max(dot(x, x), max(dot(y, y), dot(z, z))));
-}
-
-// The least a world matrix scales a length by: the shortest of its axes, what a distance in the model is at least
-// in the world.
-public float GetMinScale(float4x4 world)
-{
-    float3 x = float3(world[0][0], world[0][1], world[0][2]);
-    float3 y = float3(world[1][0], world[1][1], world[1][2]);
-    float3 z = float3(world[2][0], world[2][1], world[2][2]);
-    return sqrt(min(dot(x, x), min(dot(y, y), dot(z, z))));
 }
 
 // A point of the model in the world.

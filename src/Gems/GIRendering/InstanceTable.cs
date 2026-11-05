@@ -37,8 +37,6 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisp
 
     private readonly List<int> _dirtySlots = [];
 
-    private readonly List<DirtyInstance> _changes = [];
-
     private uint _frame;
 
     private bool _isFullLogged;
@@ -51,9 +49,9 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisp
     public int Count { get; private set; }
 
     /// <summary>
-    /// The instances that changed since <see cref="ClearChanges"/>: the spheres they had and have.
+    /// Whether any row differs from what <see cref="Upload"/> last copied.
     /// </summary>
-    public ReadOnlySpan<DirtyInstance> Changes => CollectionsMarshal.AsSpan(_changes);
+    public bool HasChanges => _dirtySlots.Count > 0;
 
     /// <summary>
     /// The rows as the GPU reads them, by instance index; a freed slot's row draws nothing.
@@ -89,21 +87,11 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisp
         return Result.Success();
     }
 
-    public void ClearChanges() => _changes.Clear();
-
     /// <summary>
-    /// Every renderer's row in the table: its model's place in the pools, its material rows and its capture, or an empty
-    /// row while its model is being made; a glass one also joins <paramref name="glassShadow"/>. How many rows the cull
-    /// walks.
+    /// Every renderer's row in the table: its model's place in the pools and its material rows, or an empty row while its
+    /// model is being made. How many rows the cull walks.
     /// </summary>
-    public int Fill(
-        RenderWorld world,
-        GeometryPools pools,
-        MaterialTable materials,
-        CardTable cards,
-        GlassShadow glassShadow,
-        Handle<Material> failureMaterial
-    )
+    public int Fill(RenderWorld world, GeometryPools pools, MaterialTable materials, Handle<Material> failureMaterial)
     {
         Span<uint> materialRows = stackalloc uint[MaterialSlots.Capacity];
         Begin(unchecked((uint)Environment.TickCount));
@@ -117,32 +105,20 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisp
 
             MaterialSlots slots = instance.Materials;
             ReadOnlySpan<Handle<Material>> slotHandles = slots;
-            bool isSettled = true;
             for (int slot = 0; slot < MaterialSlots.Capacity; slot++)
             {
                 materialRows[slot] = materials.GetRow(resident.IsFailure ? failureMaterial : slotHandles[slot]);
-                isSettled &= materials.IsSettled(materialRows[slot]);
             }
 
             Matrix4x4 worldMatrix = instance.Transform.Matrix;
             Matrix4x4.Invert(worldMatrix, out Matrix4x4 inverseWorld);
             Vector3 scale = instance.Transform.Scale;
             float maxScale = Math.Max(Math.Abs(scale.X), Math.Max(Math.Abs(scale.Y), Math.Abs(scale.Z)));
-            uint capture = isSettled ? cards.Get(instance.Model.Id, resident, materialRows, maxScale) : 0;
             Vector3 worldCenter = Vector3.Transform(resident.BoundsCenter, worldMatrix);
             float worldRadius = resident.BoundsRadius * maxScale;
-            GpuMaterial first = materials.Get(materialRows[0]);
-            bool isGlass = first.Kind == (uint)MaterialKind.Glass;
-            if (isGlass)
-            {
-                Vector3 color = new(first.BaseColor.X, first.BaseColor.Y, first.BaseColor.Z);
-                glassShadow.Add(worldCenter, worldRadius, Vector3.One - (first.BaseColor.W * (Vector3.One - color)));
-            }
-
-            InstanceExtra extra =
-                isGlass || resident.Acceleration.IsNone
-                    ? default
-                    : new InstanceExtra(gpu.GetAddress(resident.Acceleration), resident.LeafOffset);
+            InstanceExtra extra = resident.Acceleration.IsNone
+                ? default
+                : new InstanceExtra(gpu.GetAddress(resident.Acceleration), resident.LeafOffset);
             Set(
                 instance.Entity,
                 new GpuInstance
@@ -153,8 +129,6 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisp
                     BoundsRadius = worldRadius,
                     ClusterOffset = resident.ClusterOffset,
                     ClusterCount = resident.ClusterCount,
-                    Flags = isGlass ? 0 : resident.FieldSlot,
-                    Capture = capture,
                     Material0 = materialRows[0],
                     Material1 = materialRows[1],
                     Material2 = materialRows[2],
@@ -209,22 +183,6 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisp
     }
 
     /// <summary>
-    /// Whether the rows place their geometry differently, or put a different thing there, as when a material
-    /// turns out to be glass once it arrives: what the shadows and the field must redo.
-    /// </summary>
-    private static bool IsMoved(in GpuInstance before, in GpuInstance after)
-    {
-        bool wasDrawn = before.ClusterCount > 0;
-        bool isDrawn = after.ClusterCount > 0;
-
-        return before.World != after.World
-            || before.BoundsCenter != after.BoundsCenter
-            || before.BoundsRadius != after.BoundsRadius
-            || before.Flags != after.Flags
-            || wasDrawn != isDrawn;
-    }
-
-    /// <summary>
     /// Starts a frame's rows: every entity set before <see cref="End"/> keeps its slot, the others lose theirs.
     /// </summary>
     private void Begin(uint frame) => _frame = frame;
@@ -260,9 +218,6 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisp
         if (_rows[slot] == row)
             return;
 
-        if (IsMoved(_rows[slot], row))
-            RecordChange(_rows[slot], row);
-
         _rows[slot] = row;
         MarkDirty(slot);
     }
@@ -280,7 +235,6 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisp
             _slotOf.Remove(_entityOf[slot]);
             _isUsed[slot] = false;
             _free.Push(slot);
-            RecordChange(_rows[slot], default);
             _rows[slot] = default;
             _extras[slot] = default;
             MarkDirty(slot);
@@ -299,17 +253,6 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisp
 
         return true;
     }
-
-    private void RecordChange(in GpuInstance before, in GpuInstance after) =>
-        _changes.Add(
-            new DirtyInstance
-            {
-                OldCenter = before.BoundsCenter,
-                OldRadius = before.ClusterCount == 0 ? 0 : before.BoundsRadius,
-                NewCenter = after.BoundsCenter,
-                NewRadius = after.ClusterCount == 0 ? 0 : after.BoundsRadius,
-            }
-        );
 
     private void MarkDirty(int slot)
     {

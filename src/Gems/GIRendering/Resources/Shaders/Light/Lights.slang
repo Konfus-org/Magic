@@ -1,9 +1,10 @@
-// What a local light gives a point: its direction, its irradiance there in the frame's units, and nothing past its
-// reach. A point light is a sphere, a spot light a cone of one, a rect light a rectangle lit from its nearest point
+// What a local light gives a point: its direction, its irradiance there in the frame's units, nothing past its reach,
+// and a random point of the light for a shadow ray to aim at. A point light is a sphere, a spot light a cone of one, a rect light a rectangle lit from its nearest point
 // (Karis, "Real Shading in Unreal Engine 4", 2013).
 module "Light/Lights";
 
 import Core.Math;
+import Core.Sampling;
 import Scene.Lights;
 
 public struct LightSample
@@ -21,6 +22,28 @@ float Falloff(float distance, float range)
     return window * window / max(distance * distance, 0.01);
 }
 
+// A light's own axes as rows: across and up its face, and the way it shines.
+public float3x3 GetLightBasis(GpuLight light)
+{
+    float3 right = NormalizeSafe(cross(float3(0.0, 1.0, 0.0), light.direction), float3(1.0, 0.0, 0.0));
+    return float3x3(right, cross(light.direction, right), light.direction);
+}
+
+// A random point of the light as a receiver sees it, from two random numbers: anywhere on a rect light's face, or on
+// the disc of a point or spot light's sphere that faces the receiver.
+public float3 SampleLightPoint(GpuLight light, float3 position, float2 xi)
+{
+    if (light.type == LightRect)
+    {
+        float3x3 basis = GetLightBasis(light);
+        float2 offset = (xi - 0.5) * float2(light.width, light.height);
+        return light.position + basis[0] * offset.x + basis[1] * offset.y;
+    }
+
+    float3 toReceiver = NormalizeSafe(position - light.position, float3(0.0, 1.0, 0.0));
+    return light.position + ToWorld(CreateBasis(toReceiver), float3(SampleConcentricDisk(xi) * light.radius, 0.0));
+}
+
 public LightSample SampleLight(GpuLight light, float3 position, float3 normal)
 {
     LightSample sample;
@@ -29,12 +52,11 @@ public LightSample SampleLight(GpuLight light, float3 position, float3 normal)
     if (light.type == LightRect)
     {
         // The nearest point of the rectangle to the receiver, in the light's own axes.
-        float3 right = NormalizeSafe(cross(float3(0.0, 1.0, 0.0), along), float3(1.0, 0.0, 0.0));
-        float3 up = cross(along, right);
+        float3x3 basis = GetLightBasis(light);
         float3 offset = position - light.position;
-        float x = clamp(dot(offset, right), -light.width * 0.5, light.width * 0.5);
-        float y = clamp(dot(offset, up), -light.height * 0.5, light.height * 0.5);
-        from = light.position + right * x + up * y;
+        float x = clamp(dot(offset, basis[0]), -light.width * 0.5, light.width * 0.5);
+        float y = clamp(dot(offset, basis[1]), -light.height * 0.5, light.height * 0.5);
+        from = light.position + basis[0] * x + basis[1] * y;
     }
 
     float3 toLight = from - position;

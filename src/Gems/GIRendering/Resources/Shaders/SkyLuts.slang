@@ -1,6 +1,6 @@
 // The atmosphere's three tables, made ahead of each frame: transmittance through the air by height and direction,
 // the light every direction scatters again by height and sun, and the sky as seen from the camera's height. The
-// pass header's x is the frame's constants, y the shadow constants and z the lighting constants.
+// pass header's x is the frame's constants and z the lighting constants.
 module "SkyLuts";
 
 import Core.Heap;

@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
@@ -8,8 +7,8 @@ using Magic.Utils;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// A view's constants: its matrices, its targets and the frame's tables, jittered for the main view and remembering last
-/// frame's so a thing that moved carries where it was.
+/// A view's constants: its matrices, its targets and the frame's tables, remembering last frame's so a thing that moved
+/// carries where it was.
 /// </summary>
 internal sealed class FrameView(
     IGraphicsApi gpu,
@@ -17,7 +16,6 @@ internal sealed class FrameView(
     GeometryPools pools,
     MaterialTable materials,
     Visibility visibility,
-    CardTable cards,
     RayTracing? rayTracing
 ) : IDisposable
 {
@@ -25,7 +23,6 @@ internal sealed class FrameView(
     private const float SkyBrightness = 0.3f;
 
     private GpuSampler _sampler;
-    private GpuSampler _linearSampler;
     private Matrix4x4 _previousViewProjection;
     private Vector4 _previousCameraPosition;
     private bool _hasPreviousFrame;
@@ -42,9 +39,6 @@ internal sealed class FrameView(
 
         if (!_sampler.IsNone)
             gpu.Destroy(_sampler);
-
-        if (!_linearSampler.IsNone)
-            gpu.Destroy(_linearSampler);
     }
 
     public Result Create()
@@ -54,13 +48,6 @@ internal sealed class FrameView(
             return Result.Failure($"the default sampler was not made: {sampler.Error}");
 
         _sampler = sampler.Value;
-        Result<GpuSampler> linearSampler = gpu.CreateSampler(
-            new SamplerDescription { Wrap = TextureWrap.Clamp, HasMipmapBlend = false }
-        );
-        if (!linearSampler.Ok)
-            return Result.Failure($"the linear sampler was not made: {linearSampler.Error}");
-
-        _linearSampler = linearSampler.Value;
         Result<GpuBuffer> constants = gpu.CreateBuffer(
             new BufferDescription
             {
@@ -93,59 +80,6 @@ internal sealed class FrameView(
         float aspect = (float)targets.Width / targets.Height;
         Matrix4x4.Invert(Matrix4x4.CreateFromQuaternion(camera.Transform.Rotation), out Matrix4x4 view);
         Matrix4x4 projection = CreatePerspective(camera.FieldOfView, aspect, camera.Near);
-        Matrix4x4 unjittered = view * projection;
-        Vector2 jitter = new(GetHalton(frameIndex + 1, 2) - 0.5f, GetHalton(frameIndex + 1, 3) - 0.5f);
-        projection.M31 = jitter.X * 2 / targets.Width;
-        projection.M32 = -jitter.Y * 2 / targets.Height;
-        FrameConstants frame = GetView(
-            view,
-            projection,
-            camera.Transform.Position,
-            camera.Near,
-            targets,
-            instances,
-            instanceCount
-        );
-        frame.SunDirection = new Vector4(sun.Direction, 0);
-        frame.SunRadiance = new Vector4(sun.Radiance, 0);
-        frame.SkyRadiance = new Vector4(SkyBrightness * 0.8f, SkyBrightness * 0.9f, SkyBrightness, 0);
-        frame.HasHzb = hasHzb ? 1u : 0u;
-        frame.PixelsPerRadian = targets.Height / (2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360));
-        frame.ErrorThreshold = ErrorThresholdPixels;
-        frame.FrameIndex = frameIndex;
-        frame.Jitter = jitter;
-        frame.OutputWidth = (uint)targets.OutputWidth;
-        frame.OutputHeight = (uint)targets.OutputHeight;
-        frame.Acceleration = rayTracing?.Acceleration.Id ?? 0;
-        frame.LeafClusters = pools.LeafClusters.Id;
-        if (!_hasPreviousFrame)
-        {
-            _hasPreviousFrame = true;
-            _previousViewProjection = unjittered;
-            _previousCameraPosition = frame.CameraPosition;
-        }
-
-        frame.PreviousViewProjection = _previousViewProjection;
-        frame.PreviousCameraPosition = _previousCameraPosition;
-        _previousViewProjection = unjittered;
-        _previousCameraPosition = frame.CameraPosition;
-
-        return frame;
-    }
-
-    /// <summary>
-    /// What every view's constants share: its matrices, its targets and the frame's tables.
-    /// </summary>
-    public FrameConstants GetView(
-        in Matrix4x4 view,
-        in Matrix4x4 projection,
-        Vector3 cameraPosition,
-        float near,
-        FrameTargets targets,
-        GpuBuffer instances,
-        int instanceCount
-    )
-    {
         Matrix4x4 viewProjection = view * projection;
         Matrix4x4.Invert(viewProjection, out Matrix4x4 inverse);
         FrameConstants frame = new()
@@ -154,11 +88,11 @@ internal sealed class FrameView(
             Projection = projection,
             ViewProjection = viewProjection,
             InverseViewProjection = inverse,
-            CameraPosition = new Vector4(cameraPosition, 0),
+            CameraPosition = new Vector4(camera.Transform.Position, 0),
             Width = (uint)targets.Width,
             Height = (uint)targets.Height,
             HzbLevels = (uint)targets.HzbLevels,
-            Near = near,
+            Near = camera.Near,
             InstanceCount = (uint)instanceCount,
             MaxVisibleClusters = Visibility.MaxVisibleClusters,
             DefaultSampler = _sampler.Id,
@@ -180,13 +114,28 @@ internal sealed class FrameView(
             GBufferSurface = targets.GBufferSurface.Id,
             Velocity = targets.Velocity.Id,
             Output = targets.Output.Id,
-            Cards = cards.Buffer.Id,
-            LinearSampler = _linearSampler.Id,
-            CardAlbedo = cards.Albedo.Id,
-            CardNormal = cards.Normal.Id,
-            CardDepth = cards.Depth.Id,
+            SunDirection = new Vector4(sun.Direction, 0),
+            SunRadiance = new Vector4(sun.Radiance, 0),
+            SkyRadiance = new Vector4(SkyBrightness * 0.8f, SkyBrightness * 0.9f, SkyBrightness, 0),
+            HasHzb = hasHzb ? 1u : 0u,
+            PixelsPerRadian = targets.Height / (2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360)),
+            ErrorThreshold = ErrorThresholdPixels,
+            FrameIndex = frameIndex,
+            Acceleration = rayTracing?.Acceleration.Id ?? 0,
+            LeafClusters = pools.LeafClusters.Id,
         };
         FillFrustum(viewProjection, ref frame);
+        if (!_hasPreviousFrame)
+        {
+            _hasPreviousFrame = true;
+            _previousViewProjection = viewProjection;
+            _previousCameraPosition = frame.CameraPosition;
+        }
+
+        frame.PreviousViewProjection = _previousViewProjection;
+        frame.PreviousCameraPosition = _previousCameraPosition;
+        _previousViewProjection = viewProjection;
+        _previousCameraPosition = frame.CameraPosition;
 
         return frame;
     }
@@ -242,22 +191,5 @@ internal sealed class FrameView(
         projection.M43 = near;
 
         return projection;
-    }
-
-    /// <summary>
-    /// The Halton sequence's term in a base, 0 to 1: a different one each frame that fills the pixel evenly.
-    /// </summary>
-    private static float GetHalton(uint index, uint radix)
-    {
-        float result = 0;
-        float fraction = 1f / radix;
-        while (index > 0)
-        {
-            result += fraction * (index % radix);
-            index /= radix;
-            fraction /= radix;
-        }
-
-        return result;
     }
 }
