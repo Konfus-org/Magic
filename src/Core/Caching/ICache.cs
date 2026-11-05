@@ -5,8 +5,8 @@ namespace Magic.Caching;
 
 /// <summary>
 /// How one type of cached thing is written and read back: the gem that makes it passes its own to
-/// <see cref="Caches"/>. An asset loader that also implements it has what it loads cached by the asset's id and
-/// version, so only one whose asset loads no other assets may: on a hit the loader doesn't run, so nothing it would
+/// <see cref="Caches"/>. An asset importer that also implements it has what it imports cached by the asset's id and
+/// version, so only one whose asset loads no other assets may: on a hit the importer doesn't run, so nothing it would
 /// load is recorded as a dependency. Safe from any thread, for several at once.
 /// </summary>
 public interface ICache<T>

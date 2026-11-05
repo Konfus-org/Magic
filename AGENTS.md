@@ -12,8 +12,8 @@ The scripts run under `pwsh` and Windows PowerShell ([Tools](tools/README.md)).
 - **Task complete:** `tools/Scripts/AgentTaskComplete.ps1 -Change <level>` formats, runs the steps of
   `tools/Scripts/Validate.ps1` the level needs and stamps the validated state. Run it when a task is done, and again
   after any later edit or rebase. A state already stamped at that level returns at once.
-- **Validate:** `tools/Scripts/Validate.ps1` builds, runs the tests, runs the sample project headless, then
-  screenshots it and prints the path.
+- **Validate:** `tools/Scripts/Validate.ps1` builds, runs the tests, runs every sample project headless, then
+  screenshots each and prints the paths.
 - **Screenshot:** `tools/Scripts/Screenshot.ps1` runs a project until its world loads and prints the screenshot's
   path. Use `-Domains`, `-Project` and `-Commands` to reach what the samples don't show.
 - **Review:** `plannotator review` opens the change as a diff in the user's browser and returns when they comment or
@@ -25,8 +25,8 @@ unsure:
 | `-Change` | For                                                                               | Runs                                                                 |
 | --------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | `Docs`    | Markdown, comments, docstrings                                                    | The build                                                            |
-| `Code`    | Anything that runs differently but draws the same, refactors and renames included | The build, the tests, the sample project headless                    |
-| `Visual`  | Anything that can change what is drawn                                            | The build, the tests, a screenshot of every sample domain to look at |
+| `Code`    | Anything that runs differently but draws the same, refactors and renames included | The build, the tests, every sample project headless                  |
+| `Visual`  | Anything that can change what is drawn                                            | The build, the tests, a screenshot of every sample project to look at |
 
 Commit or merge only once `tools/Scripts/AgentTaskComplete.ps1` has stamped that exact state.
 
@@ -35,8 +35,8 @@ To run one step of Validate on its own:
 ```powershell
 dotnet build src/Magic.slnx
 dotnet test --solution src/Magic.slnx
-'exit' | Build/bin/Debug/Magic open samples/HelloWorld/HelloWorld.magic --headless --fail-on-error
-tools/Scripts/Screenshot.ps1 -Domains 'Domains/Audio/Audio.domain'
+'wait loaded', 'wait 10s', 'exit' | Build/bin/Debug/Magic open samples/HelloWorld/HelloWorld.magic --headless --fail-on-error
+tools/Scripts/Screenshot.ps1 -Project samples/Forest/Forest.magic
 ```
 
 `--fail-on-error` exits with `2` if anything was logged as an error.
@@ -44,10 +44,26 @@ tools/Scripts/Screenshot.ps1 -Domains 'Domains/Audio/Audio.domain'
 - The build must have no errors, and no warnings but unused or unreachable code's (`Directory.Build.props`). Fix a
   warning at its cause. If a warning doesn't apply, say so in your summary instead of suppressing it.
 
+### What Runs on Its Own
+
+The hooks in `.claude/settings.json` hold the workflow without anyone typing a command:
+
+- Each session, and each `/clear` or compaction, starts with the checkout and PLAN.md's next step in context.
+- An edit to a file in the main checkout is refused. Starting Claude Code with `MAGIC_ALLOW_MAIN_EDITS=1` allows it
+  for that session; only the user sets it.
+- Past about 300 changed lines, every edit warns that the slice is over its size.
+- A turn that leaves changes in a worktree can't end until `tools/Scripts/AgentTaskComplete.ps1` stamped that exact
+  state and the `slice-reviewer` subagent reviewed it. When you stop to ask the user or to report a block, start that
+  line with `NEEDS-USER:`.
+- `git commit` and `git merge` are refused for a state `tools/Scripts/AgentTaskComplete.ps1` hasn't stamped.
+- A plan opens in plannotator for the user's approval.
+- C# diagnostics reach you after every edit through the C# language server plugin.
+
 ## Before You Edit
 
 | Document                                 | Read                                  |
 | ---------------------------------------- | ------------------------------------- |
+| [Plan](PLAN.md)                          | At the start of every session         |
 | [README](README.md)                      | Once per session                      |
 | [Code Standards](docs/CODE_STANDARDS.md) | Before editing any `.cs` file         |
 | [Contributing](docs/CONTRIBUTING.md)     | Before presenting a change for review |
@@ -63,6 +79,52 @@ Before changing an area, read every `README.md` from that area's root folder dow
 | Small    | One file, about 20 lines or fewer, no public API change, no new dependency | In a worktree: change, validate, open the review               |
 | Normal   | Anything larger                                                            | Proposal first, in plan mode; no edits until the user approves |
 | Sweeping | Multi-file architectural or data-flow changes                              | Proposal with before/after snippets and a data-flow diagram    |
+
+### Slices
+
+Work moves one slice at a time. [PLAN.md](PLAN.md) holds the goal, the decisions, the buckets of slices and the log.
+
+- **Only slices in PLAN.md.** A request that isn't one becomes a proposed slice first. A sweeping change is planned
+  as a bucket of slices in PLAN.md and never done as one task.
+- **One slice is one task:** one worktree, one review, one merge.
+- **Size:** reviewable in about 15 minutes, under about 300 changed lines, one area or one seam between two, and
+  one runnable check that shows it works. A request that needs "and" more than once, or a design doc first, is too
+  big: say so plainly and propose the split.
+- **Check for drift.** Before each slice, check it against the goal and decisions in PLAN.md. Say so if it doesn't
+  serve them.
+- **Stop after each slice.** Once it merges, propose the next slice and wait. Never start it on your own.
+- **Suggest `/goal` when it fits.** When a slice will take many turns toward an end state its own output can show,
+  such as a migration until every call site compiles and the tests pass, offer a ready-to-paste `/goal` line in the
+  proposal. Write it with one end state, how you'll show it (`tools/Scripts/AgentTaskComplete.ps1 -Change <level>`
+  stamps the state and the `slice-reviewer` returns `VERDICT: PASS`), what must not change, and a bound such as `or
+  stop after 20 turns`. Don't offer one for a slice a single turn finishes, or one that needs the user's decisions.
+  You can't set it yourself; the user types it.
+- **One slice per session.** After a merge, suggest the user start the next slice fresh with `/clear`; PLAN.md and
+  the session start carry everything it needs. When compacting, keep the slice, its worktree path, the files it
+  changed and its `-Change` level.
+
+### Kickoff
+
+When PLAN.md has no goal, or a new bucket starts, interview the user one question at a time before any code: what
+the work is for, the one decision it should drive, what the user does first, the riskiest unknown and what is out of
+scope. Then propose small buckets ordered by risk, and slice only the current one (the kickoff skill).
+
+### Modes
+
+Every slice names its mode.
+
+| Mode         | For                                      | Allowed                                                | Not allowed                                              |
+| ------------ | ---------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------- |
+| `spike`      | Answering one question                   | Hard-coded values, copy-paste, no tests, no cleanup    | Merging: the answer goes in PLAN.md                      |
+| `prototype`  | Proving a feature works end to end       | Hard-coded values behind one member, marked `// PROTO` | New abstractions, generic systems, work for later needs  |
+| `production` | Code a second feature already depends on | Everything these docs ask for                          | Anything hacky without a line under Cleanup in PLAN.md   |
+
+`prototype` is the default. A prototype becomes `production` only when a second feature depends on it, in a slice of
+its own. In a `spike`, skip [Leave it cleaner](#implement). In a `prototype`, it covers only the lines the slice
+itself writes.
+
+Push back when the user polishes early: a refactor, rename, generalization or doc rewrite of `spike` or `prototype`
+code nothing depends on yet goes under Cleanup in PLAN.md, not into the current slice.
 
 ### Check the Request
 
@@ -80,6 +142,12 @@ For normal and sweeping changes, present:
 2. The alternatives you considered, and why the chosen one is the simplest.
 3. For anything new, the existing libraries or tools you looked at.
 4. The riskiest assumption, what you haven't verified, and what would change your recommendation.
+5. The slice: its mode, its time-box, its runnable check, the `-Change` level, and what is out of scope (the slice
+   skill).
+
+Hard-to-reverse decisions need an explicit yes before you build on them: public API, file formats, a new
+dependency or gem, and the architecture. State the decision and the alternative, then log it in PLAN.md with its
+reason.
 
 ### Implement
 
@@ -100,23 +168,33 @@ assumptions and decisions a reviewer would question as you make them.
 
 ### Finish
 
-1. Run `git rebase --autostash <merge target>`, then `tools/Scripts/AgentTaskComplete.ps1 -Change <level>`. If
+1. Update PLAN.md in the change: tick the slice, add its log line, its decisions and anything noticed under
+   Cleanup.
+2. Run `git rebase --autostash <merge target>`, then `tools/Scripts/AgentTaskComplete.ps1 -Change <level>`. If
    putting your work back conflicts, resolve it in your own changes and drop the stash. Fix a failing test at its
    cause; never loosen, skip or delete it.
-2. For a `Visual` change, open and look at every screenshot it printed. If the change only shows somewhere the
+3. For a `Visual` change, open and look at every screenshot it printed. If the change only shows somewhere the
    samples don't reach, screenshot that too with `tools/Scripts/Screenshot.ps1 -Project` or `-Commands`.
-3. Summarize what changed, the level you validated at, what you assumed, what you couldn't verify and, for a
-   `Visual` change, what the screenshots show. Keep the fix and the cleanup apart.
-4. From the worktree, run `plannotator review --base <merge target>` in the background and wait for it. If it stops
+4. Have the `slice-reviewer` subagent review the validated state, naming the worktree, the merge target and the
+   slice. Fix its findings at their cause, or say with evidence why not. A fix goes back to step 2, then to another
+   review.
+5. Summarize what changed, the level you validated at, what you assumed, what you couldn't verify and, for a
+   `Visual` change, what the screenshots show. Keep the fix and the cleanup apart. End with the next slice you
+   propose, in one line.
+6. From the worktree, run `plannotator review --base <merge target>` in the background and wait for it. If it stops
    before the user decides, run it again; their comments are kept.
-5. Address each comment, or say with evidence why not, validate again, and go back to step 3. If the review closes
-   with neither comments nor approval, ask what the user wants.
-6. Approval, in the review or typed as "approved", means commit and merge ([Worktrees](#worktrees)). Don't ask again.
+7. Address each comment, or say with evidence why not, validate and review again, and go back to step 5. If the
+   review closes with neither comments nor approval, ask what the user wants.
+8. Approval, in the review or typed as "approved", means commit and merge ([Worktrees](#worktrees)). Don't ask again.
+   Then stop ([Slices](#slices)).
 
 ### When Blocked
 
 - A build or test failure outside your files: stop and report it. Don't fix other agents' work.
 - An ambiguity that changes the design: ask. Otherwise pick the reasonable reading and say which.
+- The slice grows past about 300 lines, needs files outside its scope, or runs past its time-box: stop and report
+  what exists. The user decides to continue, split or drop it.
+- The same fix has failed twice: stop and report instead of trying a third time.
 
 ## Design Rules
 
@@ -139,6 +217,7 @@ assumptions and decisions a reviewer would question as you make them.
 - No copies of code: no member, option or default lists; point to the code, `--help` or the settings class.
 - Outside configuration files, name another gem by its role ("the GPU provider"), never by its name.
 - Docs change in the same change as the code.
+- PLAN.md is the working plan, not a doc: its decisions keep their reasons, and its log is history on purpose.
 
 ## Git
 

@@ -1,6 +1,6 @@
 using System.Numerics;
-using Magic.Assets;
-using Magic.Assets.Types;
+using Magic.Files;
+using Magic.Files.Types;
 
 namespace Magic.Ecs.Components;
 

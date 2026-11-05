@@ -1,13 +1,11 @@
 using System.CommandLine;
+using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
-using Magic.Assets;
-using Magic.Assets.Pipeline;
-using Magic.Assets.Types;
 using Magic.Debugging;
 using Magic.Events;
 using Magic.Files;
-using Magic.Images;
+using Magic.Files.Types;
 using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
@@ -19,44 +17,43 @@ namespace Magic.CommandLine;
 /// Magic's commands, run against the <see cref="App"/>: the command line Magic was launched with is the first of
 /// them, and each line typed into the terminal runs the same commands.
 /// </summary>
-internal sealed class Cli
+internal sealed class Cli : IDisposable
 {
-    /// <summary>
-    /// The typed lines that ended earlier runs without exiting, such as <c>open Other.magic</c>, in order: each run
-    /// starts anew from the command line and then these. Static because each run has its own Cli.
-    /// </summary>
-    private static readonly List<string> _restarts = [];
-
     private readonly App _app;
     private readonly IFileSystem _files;
     private readonly EventCoordinator _events;
+    private readonly Assets _assets;
+    private readonly World _world;
     private readonly RootCommand _commands;
     private int _waitFrames;
+
+    /// <summary>
+    /// When a wait in seconds ends, as <see cref="Stopwatch.GetTimestamp"/> counts; 0 when none is on.
+    /// </summary>
+    private long _waitUntilTimestamp;
     private bool _isWaitingForWorld;
     private readonly Queue<string> _queued = new();
     private bool _isOpeningDomain;
+    private bool _isWaitingToDraw;
+    private bool _hasDrawn;
+    private readonly Subscription _drawnWatch;
 
-    public Cli(App app, IFileSystem files, EventCoordinator events)
+    public Cli(App app, IFileSystem files, EventCoordinator events, Assets assets, World world)
     {
         _app = app;
         _files = files;
         _events = events;
+        _assets = assets;
+        _world = world;
         _commands = CreateCommands();
+        _drawnWatch = events.Watch<FirstFrameDrawn>(_ => _hasDrawn = true);
     }
 
-    /// <summary>
-    /// The run's world, which <c>wait loaded</c> watches and <c>open</c> opens a domain in; none before a run.
-    /// </summary>
-    internal World? World { get; set; }
+    public void Dispose() => _drawnWatch.Dispose();
 
     /// <summary>
-    /// The run's assets, which <c>open</c> finds a domain in; none before a run.
-    /// </summary>
-    internal AssetDatabase? Assets { get; set; }
-
-    /// <summary>
-    /// Executes the commands Magic was launched with, then the typed lines that ended earlier runs, or says why the
-    /// commands didn't run. Only open runs a project; any other command does its job and leaves the app exiting.
+    /// Executes the commands Magic was launched with, or says why they didn't run. Only open runs a project; any other
+    /// command does its job and leaves the app exiting.
     /// </summary>
     public Result Execute(string[] commands)
     {
@@ -67,11 +64,6 @@ internal sealed class Cli
             );
 
         Result ran = Invoke(parsed);
-        foreach (string line in _restarts)
-        {
-            Execute(line);
-        }
-
         if (_app.Project is null)
             _app.Exit();
 
@@ -97,8 +89,7 @@ internal sealed class Cli
     }
 
     /// <summary>
-    /// Executes the next line typed into the terminal, if one is waiting. One that ends the run without exiting is kept,
-    /// for the runs after it.
+    /// Executes the next line typed into the terminal, if one is waiting.
     /// </summary>
     public void Pump()
     {
@@ -109,12 +100,28 @@ internal sealed class Cli
             return;
         }
 
+        if (_waitUntilTimestamp != 0)
+        {
+            if (Stopwatch.GetTimestamp() < _waitUntilTimestamp)
+                return;
+
+            _waitUntilTimestamp = 0;
+        }
+
         if (_isWaitingForWorld)
         {
-            if (_isOpeningDomain || World is not { } world || world.IsLoading || world.Contents.IsEmpty)
+            if (_isOpeningDomain || _world.IsLoading || _world.Contents.IsEmpty)
                 return;
 
             _isWaitingForWorld = false;
+        }
+
+        if (_isWaitingToDraw)
+        {
+            if (!_hasDrawn)
+                return;
+
+            _isWaitingToDraw = false;
         }
 
         if (!_queued.TryDequeue(out string? line) && !Terminal.Pump(out line))
@@ -123,9 +130,6 @@ internal sealed class Cli
         Result ran = Execute(line);
         if (!ran.Ok)
             Log.Error($"Couldn't run '{line}': {ran.Error}");
-
-        if (!_app.IsRunning && !_app.IsExiting)
-            _restarts.Add(line);
     }
 
     private static Result Invoke(ParseResult parsed)
@@ -136,6 +140,19 @@ internal sealed class Cli
         parsed.Invoke();
 
         return Result.Success();
+    }
+
+    /// <summary>
+    /// Whether a project is open for a command that needs one to <paramref name="what"/>; it logs an error when none is.
+    /// </summary>
+    private bool IsProjectOpen(string what)
+    {
+        if (_app.Project is not null)
+            return true;
+
+        Log.Error($"No project is running to {what}.");
+
+        return false;
     }
 
     /// <summary>
@@ -151,7 +168,23 @@ internal sealed class Cli
             return;
         }
 
+        if (!IsProjectOpen($"set {setting} in"))
+            return;
+
         _events.Publish(new SettingChanged(setting[..equals].Trim(), setting[(equals + 1)..].Trim()));
+    }
+
+    /// <summary>
+    /// Asks whatever draws the frame to save the next one as a PNG under <c>Screenshots/</c> beside Magic.
+    /// </summary>
+    private void Screenshot()
+    {
+        if (!IsProjectOpen("screenshot"))
+            return;
+
+        string name = DateTime.Now.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture);
+        string path = _files.Combine(AppContext.BaseDirectory, "Screenshots", $"{name}.png");
+        _events.Publish(new ScreenshotRequested(path));
     }
 
     /// <summary>
@@ -159,15 +192,11 @@ internal sealed class Cli
     /// </summary>
     private void Bake()
     {
-        if (Assets is not { } assets)
-        {
-            Log.Error("No project is running to bake.");
-
+        if (!IsProjectOpen("bake"))
             return;
-        }
 
         int domains = 0;
-        foreach (string path in assets.GetPathsUnder("Domains"))
+        foreach (string path in _assets.GetPathsUnder("Domains"))
         {
             if (!path.EndsWith(".domain", StringComparison.OrdinalIgnoreCase))
                 continue;
@@ -183,8 +212,9 @@ internal sealed class Cli
     }
 
     /// <summary>
-    /// Holds the lines after this one until <paramref name="until"/> frames have passed, or, for <c>loaded</c>, until
-    /// the world has content and is not loading.
+    /// Holds the lines after this one until <paramref name="until"/> frames have passed, or that many seconds for a
+    /// number ending in <c>s</c>; for <c>loaded</c>, until the world has content and is not loading; for <c>drawn</c>, until
+    /// the first frame is drawn.
     /// </summary>
     private void Wait(string until)
     {
@@ -195,10 +225,28 @@ internal sealed class Cli
             return;
         }
 
-        if (int.TryParse(until, NumberStyles.Integer, CultureInfo.InvariantCulture, out int frames))
-            _waitFrames = Math.Max(frames, 0);
+        if (until == "drawn")
+        {
+            _isWaitingToDraw = true;
+
+            return;
+        }
+
+        bool isSeconds = until.EndsWith('s');
+        string amount = isSeconds ? until[..^1] : until;
+        if (!double.TryParse(amount, NumberStyles.Float, CultureInfo.InvariantCulture, out double count) || count < 0)
+        {
+            Log.Error(
+                $"wait takes a number of frames, a number of seconds ending in s, loaded or drawn, not '{until}'."
+            );
+
+            return;
+        }
+
+        if (isSeconds)
+            _waitUntilTimestamp = Stopwatch.GetTimestamp() + (long)(count * Stopwatch.Frequency);
         else
-            Log.Error($"wait takes a number of frames or loaded, not '{until}'.");
+            _waitFrames = (int)count;
     }
 
     /// <summary>
@@ -243,12 +291,7 @@ internal sealed class Cli
                 },
                 new Command("screenshot", "Saves what the next frame draws as a PNG under Screenshots/ beside Magic")
                 {
-                    Action = new CliCommand(cmds =>
-                    {
-                        string name = DateTime.Now.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture);
-                        string path = _files.Combine(AppContext.BaseDirectory, "Screenshots", $"{name}.png");
-                        _events.Publish(new ScreenshotRequested(path));
-                    }),
+                    Action = new CliCommand(cmds => Screenshot()),
                 },
                 new Command("bake", "Opens every domain under Domains/ in turn, so their caches are made, then exits")
                 {
@@ -262,11 +305,17 @@ internal sealed class Cli
                     },
                     Action = new CliCommand(cmds => Set(cmds.GetRequiredValue<string>("setting"))),
                 },
-                new Command("wait", "Holds the lines after it for a number of frames, or until the world has loaded")
+                new Command(
+                    "wait",
+                    "Holds the lines after it for a number of frames, or of seconds ending in s, or until the world has loaded or the first frame is drawn"
+                )
                 {
                     Arguments =
                     {
-                        new Argument<string>("until") { Description = "How many frames pass first, or loaded" },
+                        new Argument<string>("until")
+                        {
+                            Description = "How many frames pass first, or seconds as 10s, or loaded, or drawn",
+                        },
                     },
                     Action = new CliCommand(cmds => Wait(cmds.GetRequiredValue<string>("until"))),
                 },
@@ -345,14 +394,10 @@ internal sealed class Cli
     /// </summary>
     private async Task OpenDomainAsync(string path)
     {
-        if (World is not { } world || Assets is not { } assets)
-        {
-            Log.Error($"No project is running to open {path} in.");
-
+        if (!IsProjectOpen($"open {path} in"))
             return;
-        }
 
-        Handle<Domain> domain = assets.Find<Domain>(path);
+        Handle<Domain> domain = _assets.Find<Domain>(path);
         if (domain == Handle<Domain>.None)
         {
             Log.Error($"There is no domain at {path}.");
@@ -363,7 +408,7 @@ internal sealed class Cli
         _isOpeningDomain = true;
         try
         {
-            Result<WorldContent> opened = await world
+            Result<WorldContent> opened = await _world
                 .OpenAsync(domain, DomainOpenMode.Replace, null, CancellationToken.None)
                 .ConfigureAwait(false);
             if (!opened.Ok)

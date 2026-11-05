@@ -3,7 +3,7 @@ using Magic.Gpu;
 using Magic.Utils;
 using Vortice.Vulkan;
 
-namespace VulkanGraphics;
+namespace Magic.VulkanGraphics;
 
 /// <summary>
 /// A buffer as Vulkan holds it: its memory, mapped when the CPU may touch it.
@@ -105,6 +105,16 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     private uint _nextTexture = 1;
     private uint _nextSampler = 1;
 
+    /// <summary>
+    /// Every allocation's size, so what is freed takes off what it added.
+    /// </summary>
+    private readonly Dictionary<VkDeviceMemory, ulong> _allocations = [];
+
+    /// <summary>
+    /// Bytes of device memory the resources hold now.
+    /// </summary>
+    public long MemoryBytes { get; private set; }
+
     public void Dispose()
     {
         // Every resource still alive, whatever frame used it: the device is idle by now.
@@ -195,7 +205,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             counts[i] = triangles.TriangleCount;
         }
 
-        return MakeAcceleration(VkAccelerationStructureTypeKHR.BottomLevel, geometries, counts, description.Name);
+        return CreateAcceleration(VkAccelerationStructureTypeKHR.BottomLevel, geometries, counts, description.Name);
     }
 
     /// <summary>
@@ -226,7 +236,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             },
         ];
 
-        return MakeAcceleration(
+        return CreateAcceleration(
             VkAccelerationStructureTypeKHR.TopLevel,
             geometries,
             [(uint)description.MaxInstances],
@@ -264,7 +274,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
         if (!TryTakeId(_freeBuffers, ref _nextBuffer, VulkanHeap.Buffers, out uint id))
             return Result.Failure($"the heap holds its {VulkanHeap.Buffers} buffers already.");
 
-        Result<VulkanBuffer> made = MakeBuffer(description);
+        Result<VulkanBuffer> made = CreateVulkanBuffer(description);
         if (!made.Ok)
         {
             _freeBuffers.Push(id);
@@ -292,7 +302,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
         if (!TryTakeId(_freeTextures, ref _nextTexture, VulkanHeap.Textures, out uint id))
             return Result.Failure($"the heap holds its {VulkanHeap.Textures} textures already.");
 
-        Result<VulkanTexture> made = MakeTexture(description);
+        Result<VulkanTexture> made = CreateVulkanTexture(description);
         if (!made.Ok)
         {
             _freeTextures.Push(id);
@@ -314,7 +324,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
         if (!TryTakeId(_freeTextures, ref _nextTexture, VulkanHeap.Textures, out uint id))
             return Result.Failure($"the heap holds its {VulkanHeap.Textures} textures already.");
 
-        Result<VkImageView> view = MakeView(image, description, 0, description.Levels);
+        Result<VkImageView> view = CreateView(image, description, 0, description.Levels);
         if (!view.Ok)
         {
             _freeTextures.Push(id);
@@ -337,7 +347,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     }
 
     /// <summary>
-    /// Gives a buffer made with <see cref="MakeBuffer"/> a place in the heap, as the staging ring's are.
+    /// Gives a buffer made with <see cref="CreateVulkanBuffer"/> a place in the heap, as the staging ring's are.
     /// </summary>
     public Result<GpuBuffer> Adopt(VulkanBuffer buffer)
     {
@@ -388,7 +398,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
 
     public Result<GpuPipeline> CreatePipeline(in ComputePipelineDescription description)
     {
-        Result<VkShaderModule> module = MakeModule(description.Spirv);
+        Result<VkShaderModule> module = CreateModule(description.Spirv);
         if (!module.Ok)
             return Result.Failure(module.Error);
 
@@ -416,11 +426,11 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
 
     public Result<GpuPipeline> CreatePipeline(in GraphicsPipelineDescription description)
     {
-        Result<VkShaderModule> vertex = MakeModule(description.VertexSpirv);
+        Result<VkShaderModule> vertex = CreateModule(description.VertexSpirv);
         if (!vertex.Ok)
             return Result.Failure(vertex.Error);
 
-        Result<VkShaderModule> pixel = MakeModule(description.PixelSpirv);
+        Result<VkShaderModule> pixel = CreateModule(description.PixelSpirv);
         if (!pixel.Ok)
         {
             device.Api.vkDestroyShaderModule(vertex.Value);
@@ -606,13 +616,16 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             memoryTypeIndex = (uint)type,
         };
         VkResult result = device.Api.vkAllocateMemory(&allocateInfo, out VkDeviceMemory memory);
+        if (result != VkResult.Success)
+            return Result.Failure($"Vulkan gave no memory for {requirements.size} bytes: {result}.");
 
-        return result == VkResult.Success
-            ? Result.Success(memory)
-            : Result.Failure($"Vulkan gave no memory for {requirements.size} bytes: {result}.");
+        _allocations[memory] = requirements.size;
+        MemoryBytes += (long)requirements.size;
+
+        return Result.Success(memory);
     }
 
-    public Result<VulkanBuffer> MakeBuffer(in BufferDescription description)
+    public Result<VulkanBuffer> CreateVulkanBuffer(in BufferDescription description)
     {
         VkBufferCreateInfo createInfo = new()
         {
@@ -666,7 +679,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             if (result != VkResult.Success)
             {
                 device.Api.vkDestroyBuffer(buffer);
-                device.Api.vkFreeMemory(memory.Value);
+                FreeMemory(memory.Value);
 
                 return Result.Failure($"Vulkan could not map a buffer of {description.Bytes} bytes: {result}.");
             }
@@ -714,14 +727,21 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     private void Free(VulkanBuffer buffer)
     {
         device.Api.vkDestroyBuffer(buffer.Buffer);
-        device.Api.vkFreeMemory(buffer.Memory);
+        FreeMemory(buffer.Memory);
+    }
+
+    private void FreeMemory(VkDeviceMemory memory)
+    {
+        device.Api.vkFreeMemory(memory);
+        if (_allocations.Remove(memory, out ulong bytes))
+            MemoryBytes -= (long)bytes;
     }
 
     /// <summary>
     /// An acceleration structure of a type over geometries, sized by the driver, with its buffer and scratch made
     /// and its place in the heap taken.
     /// </summary>
-    private Result<GpuAcceleration> MakeAcceleration(
+    private Result<GpuAcceleration> CreateAcceleration(
         VkAccelerationStructureTypeKHR type,
         VkAccelerationStructureGeometryKHR[] geometries,
         uint[] counts,
@@ -755,7 +775,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             );
         }
 
-        Result<VulkanBuffer> buffer = MakeBuffer(
+        Result<VulkanBuffer> buffer = CreateVulkanBuffer(
             new BufferDescription
             {
                 Bytes = (long)sizes.accelerationStructureSize,
@@ -763,7 +783,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
                 Name = name,
             }
         );
-        Result<VulkanBuffer> scratch = MakeBuffer(
+        Result<VulkanBuffer> scratch = CreateVulkanBuffer(
             new BufferDescription
             {
                 Bytes = (long)Math.Max(sizes.buildScratchSize, 256),
@@ -845,7 +865,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             return;
 
         device.Api.vkDestroyImage(texture.Image);
-        device.Api.vkFreeMemory(texture.Memory);
+        FreeMemory(texture.Memory);
     }
 
     private void AddTexture(uint id, VulkanTexture texture)
@@ -870,7 +890,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
         return new GpuPipeline((uint)_pipelines.Count - 1);
     }
 
-    private Result<VulkanTexture> MakeTexture(in TextureDescription description)
+    private Result<VulkanTexture> CreateVulkanTexture(in TextureDescription description)
     {
         bool isCube = description.Kind == TextureKind.Cube;
         VkImageCreateInfo createInfo = new()
@@ -933,11 +953,11 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             );
         }
 
-        Result<VkImageView> view = MakeView(image, description, 0, description.Levels);
+        Result<VkImageView> view = CreateView(image, description, 0, description.Levels);
         if (!view.Ok)
         {
             device.Api.vkDestroyImage(image);
-            device.Api.vkFreeMemory(memory.Value);
+            FreeMemory(memory.Value);
 
             return Result.Failure(view.Error);
         }
@@ -945,7 +965,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
         VkImageView[] levelViews = new VkImageView[description.Levels];
         for (int level = 0; level < description.Levels; level++)
         {
-            Result<VkImageView> levelView = MakeView(image, description, level, 1);
+            Result<VkImageView> levelView = CreateView(image, description, level, 1);
             if (!levelView.Ok)
             {
                 for (int made = 0; made < level; made++)
@@ -955,7 +975,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
 
                 device.Api.vkDestroyImageView(view.Value);
                 device.Api.vkDestroyImage(image);
-                device.Api.vkFreeMemory(memory.Value);
+                FreeMemory(memory.Value);
 
                 return Result.Failure(levelView.Error);
             }
@@ -983,7 +1003,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     /// A view of <paramref name="levels"/> levels from <paramref name="firstLevel"/>: the whole texture as its kind
     /// is sampled, or one level as it is written and drawn into, where a cube is six layers.
     /// </summary>
-    private Result<VkImageView> MakeView(VkImage image, in TextureDescription description, int firstLevel, int levels)
+    private Result<VkImageView> CreateView(VkImage image, in TextureDescription description, int firstLevel, int levels)
     {
         bool isWhole = levels == description.Levels && firstLevel == 0;
         bool isCube = description.Kind == TextureKind.Cube;
@@ -1014,7 +1034,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             : Result.Failure($"Vulkan could not view the texture {description.Name}: {result}.");
     }
 
-    private Result<VkShaderModule> MakeModule(ReadOnlyMemory<byte> spirv)
+    private Result<VkShaderModule> CreateModule(ReadOnlyMemory<byte> spirv)
     {
         if (spirv.Length == 0 || spirv.Length % 4 != 0)
             return Result.Failure($"{spirv.Length} bytes are not SPIR-V.");

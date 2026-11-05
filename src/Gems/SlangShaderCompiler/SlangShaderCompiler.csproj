@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A gem: Magic loads it from Gems/SlangShaderCompiler/SlangShaderCompiler.dll when a project lists SlangShaderCompiler. -->
+  <PropertyGroup>
+    <!-- Shown beside the gem as Magic starts it. -->
+    <Description>Compiles Slang shaders to SPIR-V and caches them: provides IShaderCompiler.</Description>
+    <Version>1.0.0</Version>
+    <Authors>Konfus</Authors>
+    <!-- Copies the gem's own NuGet dependencies next to it, where its load context finds them. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <!-- Slang's API is C++ interfaces called through their tables of functions. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="Magic.Author" Value="$(Authors)" />
+  </ItemGroup>
+  <!-- The compiler alone, built from source: no tools, tests, examples, language server, interpreter, runtime or
+       GPU layer, and no glslang or LLVM, as SPIR-V is emitted directly. Its API is C++ interfaces, which the generator
+       cannot bind, so it is bound by hand (README) and the item declares the binary alone. -->
+  <ItemGroup>
+    <NativeLibrary
+      Include="slang-compiler"
+      Repository="https://github.com/shader-slang/slang"
+      Tag="v2026.9.2"
+      CMakeTarget="slang"
+      Submodules="external/unordered_dense;external/miniz;external/lz4;external/spirv-headers;external/cmark;external/vulkan;external/lua"
+      CMakeOptions="-DSLANG_LIB_TYPE=SHARED;-DSLANG_ENABLE_GFX=OFF;-DSLANG_ENABLE_SLANGD=OFF;-DSLANG_ENABLE_SLANGC=OFF;
+                    -DSLANG_ENABLE_SLANGI=OFF;-DSLANG_ENABLE_SLANGRT=OFF;-DSLANG_ENABLE_REPLAYER=OFF;
+                    -DSLANG_ENABLE_TESTS=OFF;-DSLANG_ENABLE_EXAMPLES=OFF;-DSLANG_ENABLE_SLANG_RHI=OFF;
+                    -DSLANG_ENABLE_SLANG_GLSLANG=OFF;-DSLANG_ENABLE_DXIL=OFF;-DSLANG_SLANG_LLVM_FLAVOR=DISABLE;
+                    -DSLANG_ENABLE_CUDA=OFF;-DSLANG_ENABLE_OPTIX=OFF"
+    />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- What the cache keys and versions are hashed with. -->
+    <PackageReference Include="System.IO.Hashing" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its interfaces. -->
+    <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" Private="false" />
+  </ItemGroup>
+</Project>

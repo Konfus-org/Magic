@@ -2,7 +2,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-namespace MeshPreprocessor.Tests;
+namespace Magic.MeshPreprocessor.Tests;
 
 /// <summary>
 /// Finds the gem's native libraries for the tests: the gem is loaded straight into the test, not through its load

@@ -3,7 +3,7 @@ using System.Collections.Immutable;
 namespace Magic.Gpu;
 
 /// <summary>
-/// Which faces of a triangle a draw skips. Triangles are clockwise from outside (<see cref="Assets.Types.Model"/>).
+/// Which faces of a triangle a draw skips. Triangles are clockwise from outside (<see cref="Files.Types.Model"/>).
 /// </summary>
 public enum CullMode : byte
 {

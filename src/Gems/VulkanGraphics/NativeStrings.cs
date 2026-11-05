@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace VulkanGraphics;
+namespace Magic.VulkanGraphics;
 
 /// <summary>
 /// Strings as Vulkan takes them: an array of pointers to UTF-8 bytes each ending in 0, held in native memory until

@@ -1,8 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Magic.Assets;
-using Magic.Assets.Types;
+using Magic.Files;
+using Magic.Files.Types;
 
 namespace Magic.Ecs.Components;
 

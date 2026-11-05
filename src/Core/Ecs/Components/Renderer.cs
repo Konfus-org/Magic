@@ -1,7 +1,8 @@
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
-using Magic.Assets;
-using Magic.Assets.Types;
+using Magic.Files;
+using Magic.Files.Types;
 
 namespace Magic.Ecs.Components;
 
@@ -33,6 +34,11 @@ public struct MaterialSlots : IEquatable<MaterialSlots>
     public const int Capacity = 8;
 
     private Handle<Material> _first;
+
+    /// <summary>
+    /// Every slot as a list, an empty slot none: what reading an inline array through reflection can't reach.
+    /// </summary>
+    public readonly ImmutableArray<Handle<Material>> All => [.. (ReadOnlySpan<Handle<Material>>)this];
 
     public static bool operator ==(MaterialSlots left, MaterialSlots right) => left.Equals(right);
 

@@ -1,4 +1,4 @@
-using Magic.Assets.Types;
+using Magic.Files.Types;
 
 namespace Magic.Ecs.Components;
 

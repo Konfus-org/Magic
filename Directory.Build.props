@@ -51,6 +51,11 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
 
+  <!-- A gem's root namespace, and its tests' and the gem template's, which the bindings it generates take too. -->
+  <PropertyGroup Condition="$(MagicSource.StartsWith('src/Gems/')) Or $(MagicSource.StartsWith('tests/')) Or $(MagicSource.StartsWith('tools/VS Templates/Gem/'))">
+    <RootNamespace>Magic.$(MSBuildProjectName)</RootNamespace>
+  </PropertyGroup>
+
   <!-- Assets: a part's own are its Resources/ folder (MagicResources). A release copies them beside its assembly, their
        READMEs and any project file left behind; any other build copies nothing and records the folder in the assembly
        (Magic.Resources), so assets are read where they are written, and an edit reaches a running engine without a

@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Magic.Shaders;
 
 namespace Magic.Rendering;
 
@@ -8,7 +7,6 @@ namespace Magic.Rendering;
 /// A vertex as the GPU reads it from the vertex pool, 32 bytes: the twin of <c>Scene/Vertices.slang</c>'s. Normals and
 /// tangents are octahedral, packed as <c>Core/Pack.slang</c> packs them.
 /// </summary>
-[ShaderStruct]
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public record struct GpuVertex
 {

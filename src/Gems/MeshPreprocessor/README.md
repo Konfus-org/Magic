@@ -12,4 +12,6 @@ To use it, list `MeshPreprocessor` in a project's `.magic` file after the gem th
 - Every cluster carries its own error and its parent group's, so which clusters to draw is decided on the GPU, per
   cluster, with no walk. A root's parent error is the model's diameter, so a model draws its root until the whole of
   it is under a pixel, and then nothing.
+- A model also gets a signed distance field: a cube of voxels around its bounds, each the distance to the nearest
+  triangle, negative inside, clamped to a few voxels either side of a surface.
 - meshoptimizer does the clustering, grouping and simplifying; the kit builds it from source.

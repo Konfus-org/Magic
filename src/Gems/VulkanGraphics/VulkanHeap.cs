@@ -1,7 +1,7 @@
 using Magic.Gpu;
 using Vortice.Vulkan;
 
-namespace VulkanGraphics;
+namespace Magic.VulkanGraphics;
 
 /// <summary>
 /// The bindless heap: one descriptor set every shader reads, an array per kind of resource, each resource at the

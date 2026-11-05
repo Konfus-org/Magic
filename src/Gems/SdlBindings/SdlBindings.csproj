@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- What the gems built on SDL share: no project lists it in its .magic file, a gem references it in its csproj. -->
+  <PropertyGroup>
+    <Description>SDL3 and SDL_image's C APIs, generated, for the gems built on SDL.</Description>
+    <Version>1.0.0</Version>
+    <Authors>Konfus</Authors>
+    <!-- A generated C API is pointers and fixed buffers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <!-- SDL is installed, so SDL_image finds it there; SDL_image reads its formats itself, so none of its vendored codecs is
+       built or fetched. Of SDL's API, what no one C# declaration is right for on every platform is left unbound: what takes
+       a wchar_t (two bytes on Windows, four elsewhere), a C long (four bytes on Windows, eight elsewhere) or a va_list (each
+       OS's own), and the macros the generator writes as C# that does not compile. -->
+  <ItemGroup>
+    <NativeLibrary
+      Include="SDL3"
+      Repository="https://github.com/libsdl-org/SDL"
+      Tag="release-3.4.18"
+      CMakeOptions="-DSDL_TEST_LIBRARY=OFF;-DSDL_EXAMPLES=OFF;-DSDL_INSTALL_TESTS=OFF"
+      Headers="include/SDL3/SDL.h"
+      IncludePath="include"
+      Unbound="SDL_wcslen;SDL_wcsnlen;SDL_wcslcpy;SDL_wcslcat;SDL_wcsdup;SDL_wcsstr;SDL_wcsnstr;
+                            SDL_wcscmp;SDL_wcsncmp;SDL_wcscasecmp;SDL_wcsncasecmp;SDL_wcstol;
+                            SDL_hid_open;SDL_hid_get_manufacturer_string;SDL_hid_get_product_string;SDL_hid_get_serial_number_string;
+                            SDL_hid_get_indexed_string;
+                            SDL_ltoa;SDL_ultoa;SDL_strtol;SDL_strtoul;SDL_lround;SDL_lroundf;
+                            SDL_vsscanf;SDL_vsnprintf;SDL_vswprintf;SDL_vasprintf;SDL_SetErrorV;SDL_IOvprintf;SDL_LogMessageV;
+                            __inline__;SDL_FUNCTION;SDL_WINAPI_FAMILY_PHONE;WINAPI_FAMILY_WINRT;
+                            SDL_memcpy;SDL_memmove;SDL_memset;SDL_BeginThreadFunction;SDL_EndThreadFunction;
+                            HAS_BUILTIN_BSWAP16;HAS_BUILTIN_BSWAP32;HAS_BUILTIN_BSWAP64;HAS_BROKEN_BSWAP"
+    />
+    <NativeLibrary
+      Include="SDL3_image"
+      Repository="https://github.com/libsdl-org/SDL_image"
+      Tag="release-3.4.8"
+      DependsOn="SDL3"
+      CMakeTarget="SDL3_image-shared"
+      CMakeOptions="-DSDLIMAGE_VENDORED=OFF;-DSDLIMAGE_SAMPLES=OFF;-DSDLIMAGE_AVIF=OFF;-DSDLIMAGE_WEBP=OFF;-DSDLIMAGE_TIF=OFF;-DSDLIMAGE_JXL=OFF;
+                                 -DCMAKE_PREFIX_PATH=$(MagicNativeLibs)SDL3/built"
+      Headers="include/SDL3_image/SDL_image.h"
+      IncludePath="include"
+    />
+  </ItemGroup>
+</Project>

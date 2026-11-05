@@ -2,7 +2,7 @@ using Magic.Debugging;
 using Magic.Gpu;
 using Vortice.Vulkan;
 
-namespace VulkanGraphics;
+namespace Magic.VulkanGraphics;
 
 /// <summary>
 /// Turns a frame's <see cref="GpuCommands"/> into Vulkan commands: a debug group and timestamps around each pass,

@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-Runs the checks a change must pass: a clean build, the tests, the sample headless, and the sample with a window, ending
-in a screenshot to look at.
+Runs the checks a change must pass: a clean build, the tests, every sample headless, and every sample with a window,
+ending in a screenshot of each to look at.
 
 .DESCRIPTION
 The steps run in order and the first failure ends the run with that step's exit code; a run that passes exits 0.
@@ -11,10 +11,11 @@ error, so a clean build is one that exits 0. It logs with MSBuild's plain consol
 progress shows as it happens, which the terminal logger holds back until each project ends. Formatting is not checked
 here: tools/Scripts/Format.ps1 formats a change before it is validated, and the build fails on every rule it applies that a
 build can see.
-The tests run against that build, so running them alone (-Only Test) needs one. The Headless step runs the project
-without a window under --fail-on-error, types exit into it and passes when it ends with 0; an error logged during the
+The tests run against that build, so running them alone (-Only Test) needs one. The Headless step runs each project
+without a window under --fail-on-error, waits for its world and then ten seconds, so what checks the GPU as the run
+starts has checked, types exit into it and passes when it ends with 0; an error logged during the
 run exits 2, and a run still going after -Seconds is killed and fails. The Screenshot step runs
-tools/Scripts/Screenshot.ps1 on the project and prints the images' paths last: open each and look at what it shows
+tools/Scripts/Screenshot.ps1 on each project and prints the images' paths last: open each and look at what it shows
 before reporting the change as working. It needs a display and a GPU; the others do not. Runs from any current
 directory.
 
@@ -25,7 +26,7 @@ The build configuration: Debug, Optimize or Release.
 The longest each sample run may last, in seconds, before it is killed and fails: a ceiling, not a wait.
 
 .PARAMETER Project
-The .magic file the sample runs open, relative to the repository root.
+The .magic files the sample runs open, relative to the repository root; every sample's by default.
 
 .PARAMETER Only
 The steps to run when not all of them: Build, Test, Headless, Screenshot, in that order whatever order they are given.
@@ -41,8 +42,8 @@ param(
     [ValidateSet('Debug', 'Optimize', 'Release')]
     [string] $Configuration = 'Debug',
     [ValidateRange(1, [int]::MaxValue)]
-    [int] $Seconds = 120,
-    [string] $Project = 'samples/HelloWorld/HelloWorld.magic',
+    [int] $Seconds = 300,
+    [string[]] $Project = @(),
     [ValidateSet('Build', 'Test', 'Headless', 'Screenshot')]
     [string[]] $Only = @('Build', 'Test', 'Headless', 'Screenshot')
 )
@@ -57,17 +58,33 @@ $env:MSBUILDDISABLENODEREUSE = '1'
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $solution = Join-Path (Join-Path $root 'src') 'Magic.slnx'
 $magic = Join-Path (Join-Path (Join-Path (Join-Path $root 'Build') 'bin') $Configuration) 'Magic'
-$projectPath = if ([System.IO.Path]::IsPathRooted($Project)) { $Project } else { Join-Path $root $Project }
+if ($Project.Count -eq 0) {
+    $Project = @(Get-ChildItem (Join-Path $root 'samples') -Directory | ForEach-Object { Get-ChildItem $_.FullName -Filter '*.magic' } | Sort-Object FullName | ForEach-Object { $_.FullName })
+    if ($Project.Count -eq 0) {
+        Write-Output 'There are no projects under samples/ to run.'
+        exit 1
+    }
+}
 $screenshots = @()
 
-# Runs the project headless, types exit into it and waits for it to end; a run still going after -Seconds is killed.
+# Runs the project headless, waits for its world and ten seconds, types exit into it and waits for it to end; a run
+# still going after -Seconds is killed.
 function Invoke-Headless {
+    foreach ($one in $Project) {
+        Invoke-HeadlessProject $(if ([System.IO.Path]::IsPathRooted($one)) { $one } else { Join-Path $root $one })
+        if ($LASTEXITCODE -ne 0) { return }
+    }
+}
+
+function Invoke-HeadlessProject([string] $projectPath) {
     $info = New-Object System.Diagnostics.ProcessStartInfo
     $info.FileName = $magic
     $info.Arguments = "open `"$projectPath`" --headless true --fail-on-error"
     $info.UseShellExecute = $false
     $info.RedirectStandardInput = $true
     $process = [System.Diagnostics.Process]::Start($info)
+    $process.StandardInput.WriteLine('wait loaded')
+    $process.StandardInput.WriteLine('wait 10s')
     $process.StandardInput.WriteLine('exit')
     $process.StandardInput.Close()
     if (-not $process.WaitForExit($Seconds * 1000)) {
@@ -79,12 +96,20 @@ function Invoke-Headless {
     $global:LASTEXITCODE = $process.ExitCode
 }
 
-# Runs tools/Scripts/Screenshot.ps1 on the project and keeps the images' paths, its output.
+# Runs tools/Scripts/Screenshot.ps1 on each project and keeps the images' paths, its output.
 function Invoke-Screenshot {
-    $output = & (Join-Path $PSScriptRoot 'Screenshot.ps1') -Configuration $Configuration -Seconds $Seconds -Project $Project
-    $code = $LASTEXITCODE
-    if ($code -eq 0) { $script:screenshots = @($output) }
-    $global:LASTEXITCODE = $code
+    foreach ($one in $Project) {
+        $output = & (Join-Path $PSScriptRoot 'Screenshot.ps1') -Configuration $Configuration -Seconds $Seconds -Project $one
+        $code = $LASTEXITCODE
+        if ($code -ne 0) {
+            $global:LASTEXITCODE = $code
+            return
+        }
+
+        $script:screenshots += @($output)
+    }
+
+    $global:LASTEXITCODE = 0
 }
 
 $steps = @(

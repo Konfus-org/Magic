@@ -4,7 +4,7 @@ using Magic.Gpu;
 using Magic.Utils;
 using Vortice.Vulkan;
 
-namespace VulkanGraphics;
+namespace Magic.VulkanGraphics;
 
 /// <summary>
 /// What a frame in flight owns: its command buffer, the fence that says the GPU is done with it, its staging ring,
@@ -112,7 +112,7 @@ internal sealed unsafe class VulkanFrames : IDisposable
         if (offset + bytes > frame.Staging.Description.Bytes)
         {
             long wanted = Math.Max(frame.Staging.Description.Bytes * 2, offset + bytes);
-            Result<VulkanBuffer> grown = _resources.MakeBuffer(
+            Result<VulkanBuffer> grown = _resources.CreateVulkanBuffer(
                 new BufferDescription
                 {
                     Bytes = wanted,
@@ -292,7 +292,7 @@ internal sealed unsafe class VulkanFrames : IDisposable
             };
             Check(device.Api.vkCreateQueryPool(&queryInfo, out VkQueryPool queries), "a query pool");
             Queries = queries;
-            Result<VulkanBuffer> staging = resources.MakeBuffer(
+            Result<VulkanBuffer> staging = resources.CreateVulkanBuffer(
                 new BufferDescription
                 {
                     Bytes = StagingBytes,

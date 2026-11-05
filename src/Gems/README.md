@@ -13,6 +13,7 @@ the restore downloads. The item's metadata are documented in `Directory.Build.ta
   `MagicNativeLibs` to move them and `MagicNativeCores` to limit the cores their build uses.
 - The headers are read with the machine's own C headers. Call only what every platform declares.
 - The API uses C's own names. Add `using static` for the library's class and the enums you use. Nothing is wrapped.
+- A library several gems call goes in a project of its own, which they reference and no `.magic` file lists.
 - A callback is an `[UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]` method.
 - List a declaration to leave out in the item's `Unbound`, with a comment saying why.
 - To run the generator by hand: `ClangSharpPInvokeGenerator @<library>.bindings.rsp`, with the file the build writes
