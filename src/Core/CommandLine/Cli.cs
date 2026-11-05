@@ -1,12 +1,8 @@
-using System.Collections.Immutable;
 using System.CommandLine;
 using System.Globalization;
-using System.IO;
 using System.Linq;
-using System.Numerics;
+using Magic.CommandLine.Commands;
 using Magic.Debugging;
-using Magic.Ecs;
-using Magic.Ecs.Components;
 using Magic.Events;
 using Magic.Files;
 using Magic.Files.Types;
@@ -23,13 +19,6 @@ namespace Magic.CommandLine;
 /// </summary>
 internal sealed class Cli : IDisposable
 {
-    /// <summary>
-    /// How far in front of the player a prefab spawned without a place goes.
-    /// </summary>
-    private const float SpawnAheadMetres = 3;
-
-    private const string TeleportUsage = "teleport takes x y z, a domain, or a domain then x y z";
-
     private readonly App _app;
 
     private readonly IFileSystem _files;
@@ -118,276 +107,11 @@ internal sealed class Cli : IDisposable
     }
 
     /// <summary>
-    /// The three numbers of <paramref name="xyz"/> as a position, or why they are not one.
-    /// </summary>
-    private static Result<Vector3> ParsePosition(ReadOnlySpan<string> xyz)
-    {
-        if (xyz.Length != 3)
-            return Result.Failure($"a position is three numbers, x y z, not {xyz.Length}.");
-
-        Span<float> numbers = stackalloc float[3];
-        for (int i = 0; i < 3; i++)
-        {
-            if (!float.TryParse(xyz[i], NumberStyles.Float, CultureInfo.InvariantCulture, out numbers[i]))
-                return Result.Failure($"'{xyz[i]}' is not a number.");
-        }
-
-        return Result.Success(new Vector3(numbers));
-    }
-
-    /// <summary>
-    /// Whether a project is open for a command that needs one to <paramref name="what"/>; it logs an error when none is.
-    /// </summary>
-    private bool IsProjectOpen(string what)
-    {
-        if (_app.Project is not null)
-            return true;
-
-        Log.Error($"No project is running to {what}.");
-
-        return false;
-    }
-
-    /// <summary>
-    /// Publishes a setting, <c>Key=value</c>, for the gem its key names.
-    /// </summary>
-    private void Set(string setting)
-    {
-        int equals = setting.IndexOf('=', StringComparison.Ordinal);
-        if (equals <= 0)
-        {
-            Log.Error($"set takes Key=value, not '{setting}'.");
-
-            return;
-        }
-
-        if (!IsProjectOpen($"set {setting} in"))
-            return;
-
-        _events.Publish(new SetCliCommand(setting[..equals].Trim(), setting[(equals + 1)..].Trim()));
-    }
-
-    /// <summary>
-    /// Sets the value at <paramref name="path"/> on the entities it names to <paramref name="values"/>
-    /// (<see cref="EntityPaths.Write"/>), logging how many it set or why none.
-    /// </summary>
-    private void SetEntityValue(string path, string[] values)
-    {
-        if (!IsProjectOpen($"set {path} in"))
-            return;
-
-        Result<int> written = EntityPaths.Write(_world, path, values);
-        if (written.Ok)
-            Log.Info(
-                $"Set {path} to {string.Join(' ', values)} on {written.Value} {(written.Value == 1 ? "entity" : "entities")}."
-            );
-        else
-            Log.Error($"{path} was not set: {written.Error}");
-    }
-
-    /// <summary>
-    /// Logs the value at <paramref name="path"/> on each entity it names (<see cref="EntityPaths.Read"/>), or why there
-    /// is none.
-    /// </summary>
-    private void LogEntityValue(string path)
-    {
-        if (!IsProjectOpen($"get {path} in"))
-            return;
-
-        Result<ImmutableArray<string>> read = EntityPaths.Read(_world, path);
-        if (!read.Ok)
-        {
-            Log.Error($"{path} was not read: {read.Error}");
-
-            return;
-        }
-
-        foreach (string line in read.Value)
-        {
-            Log.Info($"{path} of {line}");
-        }
-    }
-
-    /// <summary>
-    /// Moves the player to x y z, with three words; with a domain first, opens it in place of the world, which puts the
-    /// player at its spawn, then moves the player to the x y z after it, if any, once it has loaded.
-    /// </summary>
-    private void Teleport(string[] where)
-    {
-        if (!IsProjectOpen("teleport in"))
-            return;
-
-        if (where.Length == 3)
-        {
-            MovePlayer(where);
-
-            return;
-        }
-
-        if (where.Length == 2)
-        {
-            Log.Error($"{TeleportUsage}, not two words.");
-
-            return;
-        }
-
-        Handle<Domain> domain = FindAsset<Domain>(where[0]);
-        if (_assets.GetPath(domain) is not { } path)
-        {
-            Log.Error($"There is no domain at or named {where[0]}.");
-
-            return;
-        }
-
-        Result<Vector3> position = where.Length == 4 ? ParsePosition(where.AsSpan(1)) : Result.Success(Vector3.Zero);
-        if (!position.Ok)
-        {
-            Log.Error($"{TeleportUsage}: {position.Error}");
-
-            return;
-        }
-
-        OpenDomainAsync(path).FireAndForget();
-        if (where.Length != 4)
-            return;
-
-        _queue.Enqueue("wait loaded");
-        _queue.Enqueue($"teleport {string.Join(' ', where[1..])}");
-    }
-
-    /// <summary>
-    /// Moves every entity tagged player by how far the first is from the x y z of <paramref name="to"/>, so they keep
-    /// their places around it.
-    /// </summary>
-    private void MovePlayer(string[] to)
-    {
-        Result<Vector3> position = ParsePosition(to);
-        if (!position.Ok)
-        {
-            Log.Error($"{TeleportUsage}: {position.Error}");
-
-            return;
-        }
-
-        if (FindPlayer() is not { } player)
-        {
-            Log.Error("There is no entity tagged player with a transform to teleport.");
-
-            return;
-        }
-
-        Vector3 by = position.Value - player.Position;
-        foreach (EcsChunk<Tags, Transform> chunk in _world.Query<Tags, Transform>())
-        {
-            for (int i = 0; i < chunk.Entities.Length; i++)
-            {
-                if (chunk.First[i].Has(Tag.Player))
-                    chunk.Second[i].Position += by;
-            }
-        }
-
-        Log.Info($"Teleported the player to {position.Value}.");
-    }
-
-    /// <summary>
-    /// Puts the prefab at or named <paramref name="name"/> in the world at the x y z of <paramref name="at"/>, or
-    /// <see cref="SpawnAheadMetres"/> in front of the player for none, holding <c>wait loaded</c> meanwhile.
-    /// </summary>
-    private void Spawn(string name, string[] at)
-    {
-        if (!IsProjectOpen($"spawn {name} in"))
-            return;
-
-        Handle<Prefab> prefab = FindAsset<Prefab>(name);
-        if (prefab == Handle<Prefab>.None)
-        {
-            Log.Error($"There is no prefab at or named {name}.");
-
-            return;
-        }
-
-        Result<Vector3> position = at.Length == 0 ? Result.Success(GetAheadOfPlayer()) : ParsePosition(at);
-        if (!position.Ok)
-        {
-            Log.Error($"spawn {name}: {position.Error}");
-
-            return;
-        }
-
-        SpawnAsync(prefab, name, new Transform { Position = position.Value }).FireAndForget();
-    }
-
-    private async Task SpawnAsync(Handle<Prefab> prefab, string name, Transform at)
-    {
-        Result<ImmutableArray<Entity>> spawned = await _queue
-            .ChangeWorldAsync(() => _world.SpawnAsync(prefab, at, null, CancellationToken.None))
-            .ConfigureAwait(false);
-        if (!spawned.Ok)
-        {
-            Log.Error($"{name} was not spawned: {spawned.Error}");
-
-            return;
-        }
-
-        string ids = string.Join(", ", spawned.Value.Select(entity => entity.Id));
-        Log.Info($"Spawned {name} at {at.Position} as entities {ids}.");
-    }
-
-    /// <summary>
-    /// <see cref="SpawnAheadMetres"/> in front of the player, the way it faces; the origin when there is no player.
-    /// </summary>
-    private Vector3 GetAheadOfPlayer() =>
-        FindPlayer() is { } player
-            ? player.Position + (Vector3.Transform(Vector3.UnitZ, player.Rotation) * SpawnAheadMetres)
-            : Vector3.Zero;
-
-    /// <summary>
-    /// The transform of the first entity tagged player that has one; null when none has.
-    /// </summary>
-    private Transform? FindPlayer()
-    {
-        foreach (EcsChunk<Tags, Transform> chunk in _world.Query<Tags, Transform>())
-        {
-            for (int i = 0; i < chunk.Entities.Length; i++)
-            {
-                if (chunk.First[i].Has(Tag.Player))
-                    return chunk.Second[i];
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// The <typeparamref name="T"/> at <paramref name="pathOrName"/>, or else the first whose file is named it, in any
-    /// case and without its extension (<c>Tree</c> for <c>Prefabs/Tree.prefab</c>); none when there is neither.
-    /// </summary>
-    private Handle<T> FindAsset<T>(string pathOrName)
-        where T : IAsset<T>
-    {
-        Handle<T> atPath = _assets.Find<T>(pathOrName);
-        if (atPath != Handle<T>.None)
-            return atPath;
-
-        foreach (string path in _assets.Database.Index.ByPath.Keys)
-        {
-            if (!string.Equals(Path.GetFileNameWithoutExtension(path), pathOrName, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            Handle<T> named = _assets.Find<T>(path);
-            if (named != Handle<T>.None)
-                return named;
-        }
-
-        return Handle<T>.None;
-    }
-
-    /// <summary>
     /// Asks whatever draws the frame to save the next one as a PNG under <c>Screenshots/</c> beside Magic.
     /// </summary>
     private void Screenshot()
     {
-        if (!IsProjectOpen("screenshot"))
+        if (!CommandLookups.IsProjectOpen(_app, "screenshot"))
             return;
 
         string name = DateTime.Now.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture);
@@ -400,7 +124,7 @@ internal sealed class Cli : IDisposable
     /// </summary>
     private void Bake()
     {
-        if (!IsProjectOpen("bake"))
+        if (!CommandLookups.IsProjectOpen(_app, "bake"))
             return;
 
         int domains = 0;
@@ -519,75 +243,10 @@ internal sealed class Cli : IDisposable
                 {
                     Action = new CliCommand(cmds => Bake()),
                 },
-                new Command(
-                    "set",
-                    "Sets a gem's setting for the run, as Key=value; or an entity's value, as entity.component.member and on to any depth, then the value"
-                )
-                {
-                    Arguments =
-                    {
-                        new Argument<string>("setting")
-                        {
-                            Description =
-                                "Key=value, or the path to an entity's value: the entity a tag or an id, each part its name or initials",
-                        },
-                        new Argument<string[]>("value")
-                        {
-                            Description = "The entity's value in JSON, or one per field, as 1 2 3 for a position",
-                            Arity = ArgumentArity.ZeroOrMore,
-                        },
-                    },
-                    Action = new CliCommand(cmds =>
-                    {
-                        string setting = cmds.GetRequiredValue<string>("setting");
-                        string[] values = cmds.GetValue<string[]>("value") ?? [];
-                        if (values.Length == 0 && setting.Contains('=', StringComparison.Ordinal))
-                            Set(setting);
-                        else
-                            SetEntityValue(setting, values);
-                    }),
-                },
-                new Command("get", "Logs an entity's value, named as entity.component.member and on to any depth")
-                {
-                    Arguments =
-                    {
-                        new Argument<string>("path")
-                        {
-                            Description = "The entity a tag or an id, then the component and its members",
-                        },
-                    },
-                    Action = new CliCommand(cmds => LogEntityValue(cmds.GetRequiredValue<string>("path"))),
-                },
-                new Command(
-                    "teleport",
-                    "Moves the player to x y z; or opens a domain in place of the world, with the player at its spawn or at x y z"
-                )
-                {
-                    Arguments =
-                    {
-                        new Argument<string[]>("where")
-                        {
-                            Description = "x y z; or a domain's path or name, then x y z if wanted",
-                            Arity = new ArgumentArity(1, 4),
-                        },
-                    },
-                    Action = new CliCommand(cmds => Teleport(cmds.GetRequiredValue<string[]>("where"))),
-                },
-                new Command("spawn", "Puts a prefab in the world at x y z, or a few metres in front of the player")
-                {
-                    Arguments =
-                    {
-                        new Argument<string>("prefab") { Description = "The prefab's path or name" },
-                        new Argument<string[]>("at")
-                        {
-                            Description = "x y z; none for in front of the player",
-                            Arity = ArgumentArity.ZeroOrMore,
-                        },
-                    },
-                    Action = new CliCommand(cmds =>
-                        Spawn(cmds.GetRequiredValue<string>("prefab"), cmds.GetValue<string[]>("at") ?? [])
-                    ),
-                },
+                new SetCommand(_app, _events, _world),
+                new GetCommand(_app, _world),
+                new TeleportCommand(_app, _world, _assets, _queue),
+                new SpawnCommand(_app, _world, _assets, _queue),
                 new Command(
                     "wait",
                     "Holds the lines after it for a number of frames, or of seconds ending in s, or until the world has loaded or the first frame is drawn"
@@ -677,7 +336,7 @@ internal sealed class Cli : IDisposable
     /// </summary>
     private async Task SaveGameAsync(string name)
     {
-        if (!IsProjectOpen($"save {name} in"))
+        if (!CommandLookups.IsProjectOpen(_app, $"save {name} in"))
             return;
 
         Result saved = await _queue
@@ -694,7 +353,7 @@ internal sealed class Cli : IDisposable
     /// </summary>
     private async Task LoadGameAsync(string name)
     {
-        if (!IsProjectOpen($"load {name} in"))
+        if (!CommandLookups.IsProjectOpen(_app, $"load {name} in"))
             return;
 
         Result loaded = await _queue
@@ -709,7 +368,7 @@ internal sealed class Cli : IDisposable
     /// </summary>
     private async Task OpenDomainAsync(string path)
     {
-        if (!IsProjectOpen($"open {path} in"))
+        if (!CommandLookups.IsProjectOpen(_app, $"open {path} in"))
             return;
 
         Handle<Domain> domain = _assets.Find<Domain>(path);
