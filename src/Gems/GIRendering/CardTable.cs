@@ -13,7 +13,7 @@ namespace GIRendering;
 /// its rows and its places in the atlases and waits in line; the renderer draws the model into them side by side,
 /// and from then the row is handed to the instances that show it.
 /// </summary>
-internal sealed class CardTable(IGraphicsApi gpu) : IDisposable
+internal sealed class CardTable(IGraphicsApi gpu, RenderGraph graph) : IDisposable
 {
     public const int Capacity = 4096;
 
@@ -197,7 +197,7 @@ internal sealed class CardTable(IGraphicsApi gpu) : IDisposable
     /// <summary>
     /// Says the pass reads the table and the atlases: what every pass that reads a card declares.
     /// </summary>
-    public void UseForReading(RenderGraph graph)
+    public void UseForReading()
     {
         graph.Use(Buffer, GpuAccess.ShaderRead);
         graph.Use(Albedo, GpuAccess.ShaderRead);
@@ -208,7 +208,7 @@ internal sealed class CardTable(IGraphicsApi gpu) : IDisposable
     /// <summary>
     /// Copies the rows into the table, in the frame's upload pass, when any were added.
     /// </summary>
-    public void Upload(RenderGraph graph)
+    public void Upload()
     {
         if (!_isDirty)
             return;

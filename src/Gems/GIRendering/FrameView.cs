@@ -13,6 +13,7 @@ namespace GIRendering;
 /// </summary>
 internal sealed class FrameView(
     IGraphicsApi gpu,
+    RenderGraph graph,
     GeometryPools pools,
     MaterialTable materials,
     Visibility visibility,
@@ -193,7 +194,7 @@ internal sealed class FrameView(
     /// <summary>
     /// <paramref name="frame"/> copied into <paramref name="buffer"/>, in a transfer pass.
     /// </summary>
-    public void Upload(RenderGraph graph, GpuBuffer buffer, in FrameConstants frame)
+    public void Upload(GpuBuffer buffer, in FrameConstants frame)
     {
         GpuUpload upload = gpu.BeginUpload(FrameConstants.Bytes);
         MemoryMarshal.Write(upload.Bytes, in frame);

@@ -46,7 +46,12 @@ public sealed class GIRenderingGem : IGem, IDisposable
     private readonly MaterialTable _materials;
     private readonly FrameTargets _targets;
     private readonly GlobalIllumination _gi;
-    private readonly Translucency _translucency;
+    private readonly GlassShadow _glassShadow;
+    private readonly GlassDraws _glassDraws;
+    private readonly Shading _shading;
+    private readonly SkyLuts _sky;
+    private readonly LightBins _bins;
+    private readonly FogVolume _fog;
     private readonly RayTracing? _rayTracing;
     private readonly Post _post;
     private readonly InstanceTable _instances;
@@ -87,23 +92,38 @@ public sealed class GIRenderingGem : IGem, IDisposable
         _app = app;
         _events = events;
         _graph = new RenderGraph(gpu);
-        _pipelines = new GpuPipelines(gpu, shaders, assets);
-        _pools = new GeometryPools(gpu, meshes, assets, threads, _pipelines);
-        _textures = new TextureTable(gpu, assets, threads);
-        _materials = new MaterialTable(gpu, assets, _textures, threads);
-        _targets = new FrameTargets(gpu);
-        _gi = new GlobalIllumination(gpu, _pipelines);
-        _translucency = new Translucency(gpu, _pipelines);
-        _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu) : null;
+        _pipelines = new GpuPipelines(gpu, _graph, shaders, assets);
+        _pools = new GeometryPools(gpu, _graph, meshes, assets, threads, _pipelines);
+        _textures = new TextureTable(gpu, _graph, assets, threads);
+        _materials = new MaterialTable(gpu, _graph, assets, _textures, threads);
+        _targets = new FrameTargets(gpu, _graph);
+        _instances = new InstanceTable(gpu, _graph);
+        _cards = new CardTable(gpu, _graph);
+        _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu, _graph) : null;
         WantsRayQuery = gpu.Features.HasRayQuery;
-        _post = new Post(gpu, _pipelines);
-        _instances = new InstanceTable(gpu);
-        _cards = new CardTable(gpu);
-        _shadows = new SunShadows(gpu, _pipelines);
-        _lighting = new Lighting(gpu, _pipelines);
-        _visibility = new Visibility(gpu, _pipelines, _pools, _materials);
-        _frameView = new FrameView(gpu, _pools, _materials, _visibility, _cards, _rayTracing);
-        _capture = new CardCapture(gpu, _pipelines, _cards, _visibility, _frameView);
+        _visibility = new Visibility(gpu, _graph, _pipelines, _pools, _materials);
+        _frameView = new FrameView(gpu, _graph, _pools, _materials, _visibility, _cards, _rayTracing);
+        _capture = new CardCapture(gpu, _graph, _pipelines, _cards, _visibility, _frameView);
+        _shadows = new SunShadows(gpu, _graph, _pipelines, _pools);
+        _sky = new SkyLuts(gpu, _graph, _pipelines);
+        _bins = new LightBins(gpu, _graph, _pipelines);
+        _fog = new FogVolume(gpu, _pipelines, _sky, _bins, _shadows);
+        _lighting = new Lighting(gpu, _graph, _shadows, _pools.Field, _sky, _bins, _fog);
+        _glassShadow = new GlassShadow(gpu, _graph, _pipelines);
+        _gi = new GlobalIllumination(
+            gpu,
+            _graph,
+            _pipelines,
+            _shadows,
+            _lighting,
+            _pools.Field,
+            _glassShadow,
+            _cards,
+            _visibility
+        );
+        _shading = new Shading(_pipelines, _lighting, _shadows, _pools.Field, _gi, _glassShadow, _cards, _visibility);
+        _glassDraws = new GlassDraws(_graph, _pipelines, _glassShadow, _shadows, _lighting, _gi);
+        _post = new Post(gpu, _graph, _pipelines, _lighting, _pools.Field, _glassDraws);
     }
 
     /// <summary>
@@ -131,7 +151,10 @@ public sealed class GIRenderingGem : IGem, IDisposable
         _shadows.Dispose();
         _lighting.Dispose();
         _gi.Dispose();
-        _translucency.Dispose();
+        _glassShadow.Dispose();
+        _sky.Dispose();
+        _bins.Dispose();
+        _fog.Dispose();
         _post.Dispose();
         _rayTracing?.Dispose();
         _visibility.Dispose();
@@ -175,12 +198,12 @@ public sealed class GIRenderingGem : IGem, IDisposable
         // What arrived: models into the pools, textures, material rows.
         _materials.Refresh();
         _graph.BeginTransferPass("Upload arrivals");
-        _pools.Upload(_graph);
-        _textures.Upload(_graph);
-        _materials.Upload(_graph);
+        _pools.Upload();
+        _textures.Upload();
+        _materials.Upload();
         _graph.EndPass();
 
-        _capture.Record(_graph);
+        _capture.Record();
 
         // The frame's tables.
         RenderCamera camera = _world.Camera ?? new RenderCamera(new Transform(), 60, 0.05f);
@@ -191,87 +214,57 @@ public sealed class GIRenderingGem : IGem, IDisposable
             _pools,
             _materials,
             _cards,
-            _translucency,
+            _glassShadow,
             _assets.GetFailure<Material, Model>()
         );
         _graph.BeginTransferPass("Upload frame");
-        _cards.Upload(_graph);
+        _cards.Upload();
         bool hasArrivals = _pools.HasArrivals;
-        _instances.Upload(_graph);
-        _rayTracing?.Prepare(_graph, _instances.Rows, _instances.Extras, hasArrivals || _instances.Changes.Length > 0);
+        _instances.Upload();
+        _rayTracing?.Prepare(_instances.Rows, _instances.Extras, hasArrivals || _instances.Changes.Length > 0);
         _frameView.Upload(
-            _graph,
             constants,
             _frameView.GetMain(camera, sun, frame.Index, _targets, _instances.Buffer, instanceCount, _hasHzb)
         );
-        _visibility.ResetCounts(_graph);
+        _visibility.ResetCounts();
         _shadows.Prepare(
-            _graph,
             camera.Transform.Position,
             sun.Direction,
             2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360) / _targets.Height,
             _instances.Changes
         );
         _lighting.Prepare(
-            _graph,
             _world,
             camera,
             sun,
             _targets,
             _debugView,
             _gi.Constants,
-            _translucency.Constants,
+            _glassShadow.Constants,
             _post.Constants
         );
-        _translucency.Prepare(_graph, sun.Direction, camera.Transform.Position, _targets);
+        _glassShadow.Prepare(sun.Direction, camera.Transform.Position, _targets);
         _post.Update(_world.Post, CancellationToken.None);
-        _post.Prepare(_graph, _targets, _world.Post, (float)frame.AppSec);
-        _gi.Prepare(_graph, _instances.Rows, camera.Transform.Position, frame.Index, sun.Radiance * FallbackLight);
-        _pools.Field.Prepare(_graph, constants, camera.Transform.Position, _instances.Changes, instanceCount);
+        _post.Prepare(_targets, _world.Post, (float)frame.AppSec);
+        _gi.Prepare(_instances.Rows, camera.Transform.Position, frame.Index, sun.Radiance * FallbackLight);
+        _pools.Field.Prepare(constants, camera.Transform.Position, _instances.Changes, instanceCount);
         _instances.ClearChanges();
         _graph.EndPass();
 
         // The passes, in the order they run.
-        _pools.Field.Record(_graph, constants, _instances.Buffer);
-        _lighting.RecordTables(_graph, constants, _shadows);
         RenderView view = new(constants, _instances.Buffer, instanceCount, _targets);
-        _visibility.RecordMain(_graph, view);
-        DrawList translucentDraws = _visibility.GetTranslucentDraws(
-            new GpuConstants(constants.Id, _shadows.Constants.Id, _lighting.Constants.Id, _pools.Field.Constants.Id),
-            constants,
-            _instances.Buffer
-        );
-        _translucency.RecordShadow(_graph, translucentDraws);
-        _shadows.Record(_graph, constants, _instances.Buffer, instanceCount, _pools, _targets);
-        _visibility.RecordResolve(_graph, view, "Resolve materials");
-        _gi.Record(
-            _graph,
-            constants,
-            _instances.Buffer,
-            _visibility.VisibleClusters,
-            _shadows,
-            _lighting,
-            _pools.Field,
-            _translucency,
-            _cards,
-            _targets,
-            UsesRayQuery
-        );
-        _lighting.RecordShading(
-            _graph,
-            constants,
-            _shadows,
-            _pools.Field,
-            _gi,
-            _translucency,
-            _cards,
-            _instances.Buffer,
-            _visibility.VisibleClusters,
-            _targets,
-            UsesRayQuery
-        );
-        _translucency.RecordDraws(_graph, translucentDraws, _targets, _shadows, _lighting, _gi);
-        _post.Record(_graph, constants, _shadows, _lighting, _pools.Field, _translucency, _targets);
+        _pools.Field.Record(view);
+        _lighting.RecordTables(constants);
+        _visibility.RecordMain(view);
+        DrawList glass = _visibility.GetTranslucentDraws(_lighting.GetHeader(constants), constants, _instances.Buffer);
+        _glassShadow.Record(glass);
+        _shadows.Record(view);
+        _visibility.RecordResolve(view, "Resolve materials");
+        _gi.Record(view, UsesRayQuery);
+        _lighting.RecordFog(constants);
+        _shading.Record(view, UsesRayQuery);
+        _glassDraws.Record(glass, _targets);
+        _post.Record(view);
 
         GpuTexture target = _gpu.WindowTarget;
         if (!target.IsNone)
@@ -338,15 +331,18 @@ public sealed class GIRenderingGem : IGem, IDisposable
                     _instances.Create,
                     _cards.Create,
                     _shadows.Create,
+                    _sky.Create,
+                    _bins.Create,
+                    _fog.Create,
                     _lighting.Create,
                     _gi.Create,
-                    _translucency.Create,
+                    _glassShadow.Create,
                     _post.Create,
                     () => _rayTracing?.Create() ?? Result.Success(),
                     _pools.Field.Create,
                     _visibility.Create,
                     _frameView.Create,
-                    () => _capture.Create(_graph),
+                    _capture.Create,
                 ]
         )
         {
@@ -381,12 +377,12 @@ public sealed class GIRenderingGem : IGem, IDisposable
         if (fits)
             return true;
 
-        Result resized = _targets.Resize(width, height, outputWidth, outputHeight, _graph);
+        Result resized = _targets.Resize(width, height, outputWidth, outputHeight);
         if (resized.Ok)
-            resized = _gi.Resize(width, height, _graph);
+            resized = _gi.Resize(width, height);
 
         if (resized.Ok)
-            resized = _post.Resize(outputWidth, outputHeight, _graph);
+            resized = _post.Resize(outputWidth, outputHeight);
 
         if (!resized.Ok)
         {

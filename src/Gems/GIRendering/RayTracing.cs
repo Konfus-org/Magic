@@ -11,7 +11,7 @@ namespace GIRendering;
 /// instance whose model has its triangles' structure, built again whenever an instance or a model changed, what
 /// the ray-query tracer traces through.
 /// </summary>
-internal sealed class RayTracing(IGraphicsApi gpu) : IDisposable
+internal sealed class RayTracing(IGraphicsApi gpu, RenderGraph graph) : IDisposable
 {
     private readonly GpuAccelerationInstance[] _rows = new GpuAccelerationInstance[InstanceTable.Capacity];
     private GpuBuffer _instances;
@@ -67,12 +67,7 @@ internal sealed class RayTracing(IGraphicsApi gpu) : IDisposable
     /// The structure built again over the instances when any changed, in a transfer pass the caller opened after
     /// the instance table and the models' structures were uploaded.
     /// </summary>
-    public void Prepare(
-        RenderGraph graph,
-        ReadOnlySpan<GpuInstance> rows,
-        ReadOnlySpan<InstanceExtra> extras,
-        bool hasChanges
-    )
+    public void Prepare(ReadOnlySpan<GpuInstance> rows, ReadOnlySpan<InstanceExtra> extras, bool hasChanges)
     {
         if (!hasChanges && _isBuilt)
             return;

@@ -15,7 +15,7 @@ internal readonly record struct GpuResource(GpuBuffer Buffer, GpuTexture Texture
 
 /// <summary>
 /// One pass of the frame: its name and its pipeline, declared by the area that runs it and built by
-/// <see cref="GpuPipelines"/>. <see cref="Run(RenderGraph, in GpuConstants, string?, bool, GpuPipeline)"/> starts it, once a
+/// <see cref="GpuPipelines"/>. <c>Run</c> starts it, once a
 /// frame or more.
 /// </summary>
 internal sealed class GpuPass
@@ -26,6 +26,8 @@ internal sealed class GpuPass
     /// What a compute entry's dispatches are sized by, along x.
     /// </summary>
     public uint GroupSizeX { get; internal set; }
+
+    internal required RenderGraph Graph { get; init; }
 
     internal required string Module { get; init; }
 
@@ -63,26 +65,25 @@ internal sealed class GpuPass
     /// <paramref name="pipeline"/> in place of its own when there is one.
     /// </summary>
     public GpuPassRun Run(
-        RenderGraph graph,
         in GpuConstants header,
         string? name = null,
         bool usesRayQuery = false,
         GpuPipeline pipeline = default
     )
     {
-        graph.BeginComputePass(name ?? Name);
+        Graph.BeginComputePass(name ?? Name);
 
-        return new GpuPassRun(graph, header, Choose(usesRayQuery, pipeline));
+        return new GpuPassRun(Graph, header, Choose(usesRayQuery, pipeline));
     }
 
     /// <summary>
     /// Starts it as a draw pass into <paramref name="targets"/>.
     /// </summary>
-    public GpuPassRun Run(RenderGraph graph, in GpuConstants header, in GpuRenderTargets targets, string? name = null)
+    public GpuPassRun Run(in GpuConstants header, in GpuRenderTargets targets, string? name = null)
     {
-        graph.BeginDrawPass(name ?? Name, targets);
+        Graph.BeginDrawPass(name ?? Name, targets);
 
-        return new GpuPassRun(graph, header, Pipeline);
+        return new GpuPassRun(Graph, header, Pipeline);
     }
 
     private GpuPipeline Choose(bool usesRayQuery, GpuPipeline pipeline)

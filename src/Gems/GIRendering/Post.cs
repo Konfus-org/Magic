@@ -17,7 +17,14 @@ namespace GIRendering;
 /// tonemap. The final pass is specialised to the camera's effects, compiled again on a worker when they change and
 /// swapped in once built.
 /// </summary>
-internal sealed class Post(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposable
+internal sealed class Post(
+    IGraphicsApi gpu,
+    RenderGraph graph,
+    GpuPipelines pipelines,
+    Lighting lighting,
+    DistanceField field,
+    GlassDraws glassDraws
+) : IDisposable
 {
     public const int BloomLevels = 6;
 
@@ -138,7 +145,7 @@ internal sealed class Post(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposab
     /// Makes the resolved pictures and the bloom for an output size, the old ones destroyed and forgotten by the
     /// graph.
     /// </summary>
-    public Result Resize(int width, int height, RenderGraph graph)
+    public Result Resize(int width, int height)
     {
         Destroy(graph);
         _outputWidth = width;
@@ -226,7 +233,7 @@ internal sealed class Post(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposab
     /// <summary>
     /// The frame's constants uploaded, in a transfer pass the caller opened, the tables cleared the first time.
     /// </summary>
-    public void Prepare(RenderGraph graph, FrameTargets targets, PostProcessing settings, float time)
+    public void Prepare(FrameTargets targets, PostProcessing settings, float time)
     {
         _current = 1 - _current;
         if (!_isTableReady)
@@ -264,26 +271,20 @@ internal sealed class Post(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposab
     /// <summary>
     /// The picture to the output: composed, resolved, metered, bloomed, and finished with the camera's effects.
     /// </summary>
-    public void Record(
-        RenderGraph graph,
-        GpuBuffer frameConstants,
-        SunShadows shadows,
-        Lighting lighting,
-        DistanceField field,
-        Translucency translucency,
-        FrameTargets targets
-    )
+    public void Record(in RenderView view)
     {
-        GpuConstants header = new(frameConstants.Id, shadows.Constants.Id, lighting.Constants.Id, field.Constants.Id);
+        GpuBuffer frameConstants = view.Constants;
+        FrameTargets targets = view.Targets;
+        GpuConstants header = lighting.GetHeader(frameConstants);
         GpuPassRun composeRun = _composePass
-            .Run(graph, header)
+            .Run(header)
             .Reads(frameConstants, lighting.Constants, Constants, targets.Hdr)
             .Writes(targets.Picture);
-        translucency.UseForComposite(graph, targets);
+        glassDraws.UseForComposite(targets);
         composeRun.Dispatch(Groups(targets.Width), Groups(targets.Height));
 
         _resolvePass
-            .Run(graph, header)
+            .Run(header)
             .Reads(
                 frameConstants,
                 lighting.Constants,
@@ -297,22 +298,17 @@ internal sealed class Post(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposab
             .Dispatch(Groups(_outputWidth), Groups(_outputHeight));
 
         _histogramPass
-            .Run(graph, header)
+            .Run(header)
             .Reads(frameConstants, lighting.Constants, Constants, _history[_current])
             .Writes(_histogram)
             .Dispatch(Groups(_outputWidth, 16), Groups(_outputHeight, 16));
 
-        _exposurePass
-            .Run(graph, header)
-            .Reads(lighting.Constants, Constants)
-            .Writes(_histogram, _exposureState)
-            .Dispatch(1);
+        _exposurePass.Run(header).Reads(lighting.Constants, Constants).Writes(_histogram, _exposureState).Dispatch(1);
 
         for (int level = 0; level < BloomLevels; level++)
         {
             GpuPassRun bloomDownRun = _bloomDownPass
                 .Run(
-                    graph,
                     new GpuConstants(frameConstants.Id, (uint)level, lighting.Constants.Id),
                     name: $"Post: bloom down {level}"
                 )
@@ -327,7 +323,6 @@ internal sealed class Post(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposab
         {
             _bloomUpPass
                 .Run(
-                    graph,
                     new GpuConstants(frameConstants.Id, (uint)level, lighting.Constants.Id),
                     name: $"Post: bloom up {level}"
                 )
@@ -338,7 +333,7 @@ internal sealed class Post(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposab
         }
 
         GpuPassRun finalRun = _finalPass
-            .Run(graph, header, pipeline: _final)
+            .Run(header, pipeline: _final)
             .Reads(
                 frameConstants,
                 lighting.Constants,
@@ -351,7 +346,7 @@ internal sealed class Post(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposab
                 targets.GBufferNormal
             )
             .Writes(targets.Output);
-        field.UseForSampling(graph);
+        field.UseForSampling();
         finalRun.Dispatch(Groups(_outputWidth), Groups(_outputHeight));
     }
 
@@ -367,14 +362,14 @@ internal sealed class Post(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposab
 
     private int BloomHeight(int level) => Math.Max((_outputHeight / 2) >> level, 1);
 
-    private void Destroy(RenderGraph? graph)
+    private void Destroy(RenderGraph? forgetIn)
     {
         foreach (GpuTexture texture in (ReadOnlySpan<GpuTexture>)[_history[0], _history[1], _bloom])
         {
             if (texture.IsNone)
                 continue;
 
-            graph?.Forget(texture);
+            forgetIn?.Forget(texture);
             gpu.Destroy(texture);
         }
 

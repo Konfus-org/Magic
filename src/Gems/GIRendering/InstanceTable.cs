@@ -15,7 +15,7 @@ namespace GIRendering;
 /// The instance table: a slot per entity drawn, kept from frame to frame, so a frame's work is the rows that changed:
 /// an entity that moved, arrived or left. Rows that changed are uploaded in runs; a still scene uploads nothing.
 /// </summary>
-internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
+internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisposable
 {
     public const int Capacity = 1 << 18;
 
@@ -93,7 +93,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
 
     /// <summary>
     /// Every renderer's row in the table: its model's place in the pools, its material rows and its capture, or an empty
-    /// row while its model is being made; a glass one also joins <paramref name="translucency"/>. How many rows the cull
+    /// row while its model is being made; a glass one also joins <paramref name="glassShadow"/>. How many rows the cull
     /// walks.
     /// </summary>
     public int Fill(
@@ -101,7 +101,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
         GeometryPools pools,
         MaterialTable materials,
         CardTable cards,
-        Translucency translucency,
+        GlassShadow glassShadow,
         Handle<Material> failureMaterial
     )
     {
@@ -136,7 +136,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
             if (isGlass)
             {
                 Vector3 color = new(first.BaseColor.X, first.BaseColor.Y, first.BaseColor.Z);
-                translucency.Add(worldCenter, worldRadius, Vector3.One - (first.BaseColor.W * (Vector3.One - color)));
+                glassShadow.Add(worldCenter, worldRadius, Vector3.One - (first.BaseColor.W * (Vector3.One - color)));
             }
 
             InstanceExtra extra =
@@ -176,7 +176,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
     /// <summary>
     /// Copies the rows that changed into the table, each run of them in one copy, in the frame's upload pass.
     /// </summary>
-    public void Upload(RenderGraph graph)
+    public void Upload()
     {
         if (_dirtySlots.Count == 0)
             return;

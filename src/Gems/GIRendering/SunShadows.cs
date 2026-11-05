@@ -12,7 +12,8 @@ namespace GIRendering;
 /// that changed invalidate the pages under them, unmarked pages go back to the pool, marked pages without one take
 /// one, and only the invalid pages are cleared and drawn, so a still scene draws no shadow geometry at all.
 /// </summary>
-internal sealed class SunShadows(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposable
+internal sealed class SunShadows(IGraphicsApi gpu, RenderGraph graph, GpuPipelines pipelines, GeometryPools pools)
+    : IDisposable
 {
     public const int Levels = 20;
 
@@ -213,7 +214,6 @@ internal sealed class SunShadows(IGraphicsApi gpu, GpuPipelines pipelines) : IDi
     /// light's frame from the sun, each level's window around the camera, and the instances that changed.
     /// </summary>
     public void Prepare(
-        RenderGraph graph,
         Vector3 cameraPosition,
         Vector3 sunDirection,
         float footprintPerMetre,
@@ -314,19 +314,16 @@ internal sealed class SunShadows(IGraphicsApi gpu, GpuPipelines pipelines) : IDi
     /// <summary>
     /// The frame's shadow passes, after the view's depth is drawn and before it is shaded.
     /// </summary>
-    public void Record(
-        RenderGraph graph,
-        GpuBuffer frameConstants,
-        GpuBuffer instances,
-        int instanceCount,
-        GeometryPools pools,
-        FrameTargets targets
-    )
+    public void Record(in RenderView view)
     {
+        GpuBuffer frameConstants = view.Constants;
+        GpuBuffer instances = view.Instances;
+        int instanceCount = view.InstanceCount;
+        FrameTargets targets = view.Targets;
         GpuConstants header = new(frameConstants.Id, Constants.Id);
 
         _markPagesPass
-            .Run(graph, header)
+            .Run(header)
             .Reads(frameConstants, Constants, targets.Depth)
             .Writes(_pageRequests)
             .Dispatch(Groups(targets.Width, pipelines.TileSize), Groups(targets.Height, pipelines.TileSize));
@@ -334,40 +331,40 @@ internal sealed class SunShadows(IGraphicsApi gpu, GpuPipelines pipelines) : IDi
         if (_dirtyCount > 0)
         {
             _invalidatePagesPass
-                .Run(graph, header)
+                .Run(header)
                 .Reads(Constants, _dirtyInstances)
                 .Writes(_pageTable)
                 .Dispatch(Groups(_dirtyCount, CullThreads));
         }
 
         _freePagesPass
-            .Run(graph, header)
+            .Run(header)
             .Reads(Constants, _pageRequests)
             .Writes(_pageTable, _freeList)
             .Dispatch(Groups(Cells, CullThreads));
 
         _allocatePagesPass
-            .Run(graph, header)
+            .Run(header)
             .Reads(Constants, _pageRequests)
             .Writes(_pageTable, _freeList, _invalidPages, _counts, _clearArguments)
             .Dispatch(Groups(Cells, CullThreads));
 
         _clearPagesPass
-            .Run(graph, header)
+            .Run(header)
             .Reads(Constants, _counts, _invalidPages)
             .Writes(_pool)
             .Indirect(_clearArguments)
             .DispatchIndirect(_clearArguments, 0);
 
         GpuPassRun cullRun = _cullPass
-            .Run(graph, header)
+            .Run(header)
             .Reads(frameConstants, Constants, instances, pools.Clusters, _pageTable)
             .Writes(_counts, _draws, _drawArguments);
         int rows = (instanceCount + CullGroupsPerRow - 1) / CullGroupsPerRow;
         cullRun.Dispatch((uint)Math.Min(instanceCount, CullGroupsPerRow), (uint)Math.Max(rows, 1));
 
         _drawPagesPass
-            .Run(graph, header, new GpuRenderTargets { Width = PoolTexels, Height = PoolTexels })
+            .Run(header, new GpuRenderTargets { Width = PoolTexels, Height = PoolTexels })
             .Reads(
                 frameConstants,
                 Constants,
@@ -383,7 +380,7 @@ internal sealed class SunShadows(IGraphicsApi gpu, GpuPipelines pipelines) : IDi
             .DrawIndirectCount(_drawArguments, 0, _counts, DrawCountOffset, MaxDraws, DrawArgumentsBytes);
 
         _finishPagesPass
-            .Run(graph, header)
+            .Run(header)
             .Reads(Constants, _counts, _invalidPages)
             .Writes(_pageTable)
             .Indirect(_clearArguments)
@@ -393,7 +390,7 @@ internal sealed class SunShadows(IGraphicsApi gpu, GpuPipelines pipelines) : IDi
     /// <summary>
     /// Says the shading pass reads the pages: what it declares before sampling them.
     /// </summary>
-    public void UseForSampling(RenderGraph graph)
+    public void UseForSampling()
     {
         graph.Use(Constants, GpuAccess.ShaderRead);
         graph.Use(_pageTable, GpuAccess.ShaderRead);

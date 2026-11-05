@@ -16,7 +16,17 @@ namespace GIRendering;
 /// world probes; the short-range occlusion of every pixel; the sharp reflections, a ray every stride of pixels; and
 /// the passes that keep each up to date, a budget of each a frame.
 /// </summary>
-internal sealed class GlobalIllumination(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposable
+internal sealed class GlobalIllumination(
+    IGraphicsApi gpu,
+    RenderGraph graph,
+    GpuPipelines pipelines,
+    SunShadows shadows,
+    Lighting lighting,
+    DistanceField field,
+    GlassShadow glassShadow,
+    CardTable cards,
+    Visibility visibility
+) : IDisposable
 {
     public const int ProbeLevels = 4;
 
@@ -361,7 +371,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu, GpuPipelines pipeline
     /// <summary>
     /// Makes the screen probes for an output size, the old ones destroyed and forgotten by the graph.
     /// </summary>
-    public Result Resize(int width, int height, RenderGraph graph)
+    public Result Resize(int width, int height)
     {
         Destroy(graph);
         NeedsResize = false;
@@ -458,7 +468,6 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu, GpuPipelines pipeline
     /// caller opened. The instances that matter most to the view hold the slots: the largest on screen first.
     /// </summary>
     public void Prepare(
-        RenderGraph graph,
         ReadOnlySpan<GpuInstance> instances,
         Vector3 cameraPosition,
         uint frameIndex,
@@ -488,13 +497,13 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu, GpuPipelines pipeline
         if (_areSlotsDirty)
         {
             _areSlotsDirty = false;
-            Upload(graph, _litSlots, MemoryMarshal.AsBytes(_slotOfInstance.AsSpan()));
-            Upload(graph, _slotInstances, MemoryMarshal.AsBytes(_slots.AsSpan()));
+            Upload(_litSlots, MemoryMarshal.AsBytes(_slotOfInstance.AsSpan()));
+            Upload(_slotInstances, MemoryMarshal.AsBytes(_slots.AsSpan()));
         }
 
         PickBatch();
         if (_batchCount > 0)
-            Upload(graph, _slotBatch, MemoryMarshal.AsBytes(_batch.AsSpan(0, _batchCount)));
+            Upload(_slotBatch, MemoryMarshal.AsBytes(_batch.AsSpan(0, _batchCount)));
 
         // A slot lit this frame has something to blend with from the next.
         for (int i = 0; i < _batchCount; i++)
@@ -563,82 +572,74 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu, GpuPipelines pipeline
     /// The lit cards, the world probes, the screen probes, the occlusion and the reflections brought up to date,
     /// after the GBuffer, the depth pyramid and the sun's pages, before the lighting reads them.
     /// </summary>
-    public void Record(
-        RenderGraph graph,
-        GpuBuffer frameConstants,
-        GpuBuffer instances,
-        GpuBuffer visibleClusters,
-        SunShadows shadows,
-        Lighting lighting,
-        DistanceField field,
-        Translucency translucency,
-        CardTable cards,
-        FrameTargets targets,
-        bool usesRayQuery
-    )
+    public void Record(in RenderView view, bool usesRayQuery)
     {
-        GpuConstants header = new(frameConstants.Id, shadows.Constants.Id, lighting.Constants.Id, field.Constants.Id);
+        GpuBuffer frameConstants = view.Constants;
+        GpuBuffer instances = view.Instances;
+        GpuBuffer visibleClusters = visibility.VisibleClusters;
+        FrameTargets targets = view.Targets;
+        GpuConstants header = lighting.GetHeader(frameConstants);
         if (_batchCount > 0)
         {
             uint batchCards = (uint)(_batchCount * GpuCard.PerCapture);
             GpuPassRun cardLightsRun = _cardLightsPass
-                .Run(graph, header)
+                .Run(header)
                 .Reads(frameConstants, Constants, instances, _slotBatch, _slotInstances)
                 .Writes(_slotLights);
-            lighting.UseForCards(graph);
+            lighting.UseForCards();
             cardLightsRun.Dispatch((uint)_batchCount);
 
             GpuPassRun cardRadiosityRun = _cardRadiosityPass
-                .Run(graph, header, usesRayQuery: usesRayQuery)
+                .Run(header, usesRayQuery: usesRayQuery)
                 .Reads(frameConstants, Constants, instances, _slotBatch, _slotInstances)
                 .Writes(_radiosity);
-            UseForCards(graph);
-            UseProbes(graph);
-            cards.UseForReading(graph);
-            field.UseForSampling(graph);
-            lighting.UseForCards(graph);
-            translucency.UseForSampling(graph);
+            UseForCards();
+            UseProbes();
+            cards.UseForReading();
+            field.UseForSampling();
+            lighting.UseForCards();
+            glassShadow.UseForSampling();
             cardRadiosityRun.Dispatch(LitCardTexels / LitTileTexels, LitCardTexels / LitTileTexels, batchCards);
 
             GpuPassRun lightCardsRun = _lightCardsPass
-                .Run(graph, header)
+                .Run(header)
                 .Reads(frameConstants, Constants, instances, _slotBatch, _slotInstances, _slotLights, _radiosity)
                 .Writes(_litPool);
-            cards.UseForReading(graph);
-            shadows.UseForSampling(graph);
-            lighting.UseForCards(graph);
-            translucency.UseForSampling(graph);
+            cards.UseForReading();
+            shadows.UseForSampling();
+            lighting.UseForCards();
+            glassShadow.UseForSampling();
             lightCardsRun.Dispatch(Groups(LitCardTexels, 8), Groups(LitCardTexels, 8), batchCards);
         }
 
         int cells = ProbeLevels * ProbesPerLevel;
         _scrollProbesPass
-            .Run(graph, header)
+            .Run(header)
             .Reads(Constants, lighting.Constants)
             .Writes(_probeStates, _probeList)
             .Dispatch(Groups(cells));
 
         GpuPassRun selectProbesRun = _selectProbesPass
-            .Run(graph, header)
+            .Run(header)
             .Reads(Constants, lighting.Constants)
             .Writes(_probeStates, _probeList);
-        field.UseForChanges(graph);
+        field.UseForChanges();
         selectProbesRun.Dispatch(Groups(cells));
 
         GpuPassRun traceProbesRun = _traceProbesPass
-            .Run(graph, header, usesRayQuery: usesRayQuery)
+            .Run(header, usesRayQuery: usesRayQuery)
             .Reads(frameConstants, Constants, instances, _probeList)
             .Writes(_probeStates, _probeRadiance, _probeDistance, _probeIrradiance);
-        UseForCards(graph);
-        cards.UseForReading(graph);
-        field.UseForSampling(graph);
-        lighting.UseForCards(graph);
-        translucency.UseForSampling(graph);
+        UseForCards();
+        cards.UseForReading();
+        field.UseForSampling();
+        lighting.UseForCards();
+        glassShadow.UseForSampling();
         traceProbesRun.Dispatch(ProbeBudget);
 
         int probeCount = _screenProbesX * _screenProbesY;
         _placeScreenProbesPass
-            .Run(graph, header)
+            .Run(header)
             .Reads(
                 frameConstants,
                 Constants,
@@ -652,7 +653,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu, GpuPipelines pipeline
             .Dispatch(Groups(_screenProbesX, 8), Groups(_screenProbesY, 8));
 
         GpuPassRun traceScreenProbesRun = _traceScreenProbesPass
-            .Run(graph, header, usesRayQuery: usesRayQuery)
+            .Run(header, usesRayQuery: usesRayQuery)
             .Reads(
                 frameConstants,
                 Constants,
@@ -665,16 +666,16 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu, GpuPipelines pipeline
             .Reads(targets.Hzb, 0)
             .Reads(_screenProbes[_current])
             .Writes(_screenRadiance);
-        UseForCards(graph);
-        UseProbes(graph);
-        cards.UseForReading(graph);
-        field.UseForSampling(graph);
-        lighting.UseForCards(graph);
-        translucency.UseForSampling(graph);
+        UseForCards();
+        UseProbes();
+        cards.UseForReading();
+        field.UseForSampling();
+        lighting.UseForCards();
+        glassShadow.UseForSampling();
         traceScreenProbesRun.Dispatch((uint)probeCount);
 
         _reprojectScreenProbesPass
-            .Run(graph, header)
+            .Run(header)
             .Reads(
                 frameConstants,
                 Constants,
@@ -687,19 +688,19 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu, GpuPipelines pipeline
             .Dispatch(Groups(_screenProbesX * ScreenTexels, 8), Groups(_screenProbesY * ScreenTexels, 8));
 
         _occlusionPass
-            .Run(graph, header)
+            .Run(header)
             .Reads(frameConstants, Constants, lighting.Constants, targets.Depth, targets.GBufferNormal)
             .Writes(_occlusionRaw)
             .Dispatch(Groups(targets.Width, 8), Groups(targets.Height, 8));
 
         _blurOcclusionPass
-            .Run(graph, header)
+            .Run(header)
             .Reads(frameConstants, Constants, lighting.Constants, targets.Depth, _occlusionRaw)
             .Writes(_occlusion)
             .Dispatch(Groups(targets.Width, 8), Groups(targets.Height, 8));
 
         _filterScreenProbesPass
-            .Run(graph, header)
+            .Run(header)
             .Reads(Constants, lighting.Constants, _screenProbes[_current], _screenRadiance)
             .Writes(_screenFiltered[_current], _screenIrradiance)
             .Dispatch((uint)probeCount);
@@ -708,7 +709,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu, GpuPipelines pipeline
             return;
 
         GpuPassRun traceReflectionsRun = _traceReflectionsPass
-            .Run(graph, header, usesRayQuery: usesRayQuery)
+            .Run(header, usesRayQuery: usesRayQuery)
             .Reads(
                 frameConstants,
                 Constants,
@@ -721,19 +722,19 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu, GpuPipelines pipeline
             )
             .Reads(targets.Hzb, 0)
             .Writes(_reflectionTraced);
-        UseForCards(graph);
-        UseProbes(graph);
-        cards.UseForReading(graph);
-        field.UseForSampling(graph);
-        lighting.UseForCards(graph);
-        translucency.UseForSampling(graph);
+        UseForCards();
+        UseProbes();
+        cards.UseForReading();
+        field.UseForSampling();
+        lighting.UseForCards();
+        glassShadow.UseForSampling();
         traceReflectionsRun.Dispatch(
             Groups((targets.Width + _reflectionStride - 1) / _reflectionStride, 8),
             Groups((targets.Height + _reflectionStride - 1) / _reflectionStride, 8)
         );
 
         _resolveReflectionsPass
-            .Run(graph, header)
+            .Run(header)
             .Reads(
                 frameConstants,
                 Constants,
@@ -748,7 +749,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu, GpuPipelines pipeline
             .Dispatch(Groups(targets.Width, 8), Groups(targets.Height, 8));
 
         _reprojectReflectionsPass
-            .Run(graph, header)
+            .Run(header)
             .Reads(
                 frameConstants,
                 Constants,
@@ -768,7 +769,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu, GpuPipelines pipeline
     /// <summary>
     /// Says a pass reads the screen probes and the world probes: what the lighting declares.
     /// </summary>
-    public void UseForSampling(RenderGraph graph)
+    public void UseForSampling()
     {
         graph.Use(Constants, GpuAccess.ShaderRead);
         graph.Use(_screenProbes[_current], GpuAccess.ShaderRead);
@@ -776,13 +777,13 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu, GpuPipelines pipeline
         graph.Use(_screenIrradiance, GpuAccess.ShaderRead);
         graph.Use(_reflections[_current], GpuAccess.ShaderRead);
         graph.Use(_occlusion, GpuAccess.ShaderRead);
-        UseProbes(graph);
+        UseProbes();
     }
 
     /// <summary>
     /// Says a pass reads the lit cards: what a pass that shades a ray's end declares.
     /// </summary>
-    public void UseForCards(RenderGraph graph)
+    public void UseForCards()
     {
         graph.Use(_litPool, GpuAccess.ShaderRead);
         graph.Use(_litSlots, GpuAccess.ShaderRead);
@@ -790,7 +791,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu, GpuPipelines pipeline
 
     private static uint Groups(int count, int size = Threads) => (uint)((count + size - 1) / size);
 
-    private void UseProbes(RenderGraph graph)
+    private void UseProbes()
     {
         graph.Use(_probeStates, GpuAccess.ShaderRead);
         graph.Use(_probeRadiance, GpuAccess.ShaderRead);
@@ -798,7 +799,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu, GpuPipelines pipeline
         graph.Use(_probeIrradiance, GpuAccess.ShaderRead);
     }
 
-    private void Upload(RenderGraph graph, GpuBuffer buffer, ReadOnlySpan<byte> bytes)
+    private void Upload(GpuBuffer buffer, ReadOnlySpan<byte> bytes)
     {
         GpuUpload upload = gpu.BeginUpload(bytes.Length);
         bytes.CopyTo(upload.Bytes);
@@ -899,7 +900,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu, GpuPipelines pipeline
             }
         );
 
-    private void Destroy(RenderGraph? graph)
+    private void Destroy(RenderGraph? forgetIn)
     {
         foreach (
             GpuTexture texture in (ReadOnlySpan<GpuTexture>)
@@ -919,7 +920,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu, GpuPipelines pipeline
             if (texture.IsNone)
                 continue;
 
-            graph?.Forget(texture);
+            forgetIn?.Forget(texture);
             gpu.Destroy(texture);
         }
 
@@ -928,7 +929,7 @@ internal sealed class GlobalIllumination(IGraphicsApi gpu, GpuPipelines pipeline
             if (buffer.IsNone)
                 continue;
 
-            graph?.Forget(buffer);
+            forgetIn?.Forget(buffer);
             gpu.Destroy(buffer);
         }
 

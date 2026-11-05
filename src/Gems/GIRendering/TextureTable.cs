@@ -22,7 +22,7 @@ internal enum TextureState : byte
 /// The textures the materials name, each read once, made on the GPU with every level and the sampler its asset asks
 /// for, and copied up in the frame after it arrives. A texture stays resident for the run.
 /// </summary>
-internal sealed class TextureTable(IGraphicsApi gpu, Assets assets, Threads threads) : IDisposable
+internal sealed class TextureTable(IGraphicsApi gpu, RenderGraph graph, Assets assets, Threads threads) : IDisposable
 {
     private readonly Dictionary<ulong, Entry> _entries = [];
     private readonly Dictionary<(TextureFilter, TextureWrap), GpuSampler> _samplers = [];
@@ -63,7 +63,7 @@ internal sealed class TextureTable(IGraphicsApi gpu, Assets assets, Threads thre
     /// <summary>
     /// Copies the levels of what arrived since the last frame, in the frame's upload pass.
     /// </summary>
-    public void Upload(RenderGraph graph)
+    public void Upload()
     {
         foreach ((Texture asset, GpuTexture texture) in _arrived)
         {

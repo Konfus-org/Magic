@@ -16,8 +16,13 @@ namespace GIRendering;
 /// names the failure shader or a texture that does not load is drawn as the failure kind. The whole table is
 /// uploaded again in the frame after a row changes.
 /// </summary>
-internal sealed class MaterialTable(IGraphicsApi gpu, Assets assets, TextureTable textures, Threads threads)
-    : IDisposable
+internal sealed class MaterialTable(
+    IGraphicsApi gpu,
+    RenderGraph graph,
+    Assets assets,
+    TextureTable textures,
+    Threads threads
+) : IDisposable
 {
     public const int Capacity = 4096;
 
@@ -113,7 +118,7 @@ internal sealed class MaterialTable(IGraphicsApi gpu, Assets assets, TextureTabl
     /// <summary>
     /// Copies the rows into the table, in the frame's upload pass, when any changed.
     /// </summary>
-    public void Upload(RenderGraph graph)
+    public void Upload()
     {
         if (!_isDirty)
             return;

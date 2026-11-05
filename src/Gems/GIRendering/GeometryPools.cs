@@ -18,6 +18,7 @@ namespace GIRendering;
 /// </summary>
 internal sealed class GeometryPools(
     IGraphicsApi gpu,
+    RenderGraph graph,
     IMeshPreprocessor meshes,
     Assets assets,
     Threads threads,
@@ -57,7 +58,7 @@ internal sealed class GeometryPools(
     /// <summary>
     /// The global distance field, which every resident model's field joins.
     /// </summary>
-    public DistanceField Field { get; } = new(gpu, pipelines);
+    public DistanceField Field { get; } = new(gpu, graph, pipelines);
 
     public void Dispose()
     {
@@ -165,7 +166,7 @@ internal sealed class GeometryPools(
     /// <summary>
     /// Copies what arrived since the last frame into the pools, in the frame's upload pass.
     /// </summary>
-    public void Upload(RenderGraph graph)
+    public void Upload()
     {
         if (_arrived.Count == 0)
             return;
@@ -220,7 +221,7 @@ internal sealed class GeometryPools(
                 (ulong)where.ClusterOffset * GpuCluster.Bytes,
                 (ulong)clusterBytes
             );
-            UploadLeaves(graph, derived, where);
+            UploadLeaves(derived, where);
         }
 
         _arrived.Clear();
@@ -272,7 +273,7 @@ internal sealed class GeometryPools(
     /// <summary>
     /// The model's leaf clusters into the leaf table and its acceleration structure built, after its pools landed.
     /// </summary>
-    private void UploadLeaves(RenderGraph graph, MeshDerived derived, ResidentModel where)
+    private void UploadLeaves(MeshDerived derived, ResidentModel where)
     {
         if (where.Acceleration.IsNone)
             return;

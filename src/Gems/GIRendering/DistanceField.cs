@@ -15,7 +15,7 @@ namespace GIRendering;
 /// an instance moved through are listed, the instances over each listed, and the bricks made again from those
 /// instances' fields. A still world updates nothing.
 /// </summary>
-internal sealed class DistanceField(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposable
+internal sealed class DistanceField(IGraphicsApi gpu, RenderGraph graph, GpuPipelines pipelines) : IDisposable
 {
     public const int Levels = 4;
 
@@ -219,7 +219,6 @@ internal sealed class DistanceField(IGraphicsApi gpu, GpuPipelines pipelines) : 
     /// transfer pass the caller opened, then as passes of their own.
     /// </summary>
     public void Prepare(
-        RenderGraph graph,
         GpuBuffer frameConstants,
         Vector3 cameraPosition,
         ReadOnlySpan<DirtyInstance> dirty,
@@ -321,7 +320,6 @@ internal sealed class DistanceField(IGraphicsApi gpu, GpuPipelines pipelines) : 
             graph.EndPass();
             _writeModelPass
                 .Run(
-                    graph,
                     new GpuConstants(frameConstants.Id, _modelBytes.Id, slot, Constants.Id),
                     name: $"Field: write model {slot}"
                 )
@@ -338,24 +336,26 @@ internal sealed class DistanceField(IGraphicsApi gpu, GpuPipelines pipelines) : 
     /// <summary>
     /// The clipmaps brought up to date, after the frame's instances are uploaded.
     /// </summary>
-    public void Record(RenderGraph graph, GpuBuffer frameConstants, GpuBuffer instances)
+    public void Record(in RenderView view)
     {
+        GpuBuffer frameConstants = view.Constants;
+        GpuBuffer instances = view.Instances;
         GpuConstants header = new(frameConstants.Id, 0, 0, Constants.Id);
         int cells = Levels * BricksPerLevel;
 
-        _scrollPass.Run(graph, header).Reads(Constants).Writes(_bricks).Dispatch(Groups(cells));
+        _scrollPass.Run(header).Reads(Constants).Writes(_bricks).Dispatch(Groups(cells));
 
         if (_dirtyInstanceCount > 0)
         {
             _invalidatePass
-                .Run(graph, header)
+                .Run(header)
                 .Reads(Constants, _dirtyInstances)
                 .Writes(_bricks)
                 .Dispatch(Groups(_dirtyInstanceCount));
         }
 
         _collectPass
-            .Run(graph, header)
+            .Run(header)
             .Reads(Constants, _bricks)
             .Writes(_dirtyBricks, _lists, _counts, _dirtyArguments)
             .Dispatch(Groups(cells));
@@ -363,7 +363,7 @@ internal sealed class DistanceField(IGraphicsApi gpu, GpuPipelines pipelines) : 
         if (_instanceCount > 0)
         {
             GpuPassRun listRun = _listPass
-                .Run(graph, header)
+                .Run(header)
                 .Reads(frameConstants, Constants, instances, _bricks)
                 .Writes(_lists);
             int groups = (int)Groups(_instanceCount);
@@ -372,7 +372,7 @@ internal sealed class DistanceField(IGraphicsApi gpu, GpuPipelines pipelines) : 
         }
 
         GpuPassRun updateRun = _updatePass
-            .Run(graph, header)
+            .Run(header)
             .Reads(frameConstants, Constants, instances, _modelFields, _atlas, _lists, _dirtyBricks, _counts)
             .Writes(_bricks);
         foreach (GpuTexture clipmap in _clipmaps)
@@ -386,7 +386,7 @@ internal sealed class DistanceField(IGraphicsApi gpu, GpuPipelines pipelines) : 
     /// <summary>
     /// Says a pass traces the field: what it declares before sampling.
     /// </summary>
-    public void UseForSampling(RenderGraph graph)
+    public void UseForSampling()
     {
         graph.Use(Constants, GpuAccess.ShaderRead);
         foreach (GpuTexture clipmap in _clipmaps)
@@ -398,7 +398,7 @@ internal sealed class DistanceField(IGraphicsApi gpu, GpuPipelines pipelines) : 
     /// <summary>
     /// Says a pass reads the instances that changed this frame: what redoes its own tables under them.
     /// </summary>
-    public void UseForChanges(RenderGraph graph)
+    public void UseForChanges()
     {
         graph.Use(Constants, GpuAccess.ShaderRead);
         graph.Use(_dirtyInstances, GpuAccess.ShaderRead);

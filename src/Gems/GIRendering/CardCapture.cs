@@ -12,6 +12,7 @@ namespace GIRendering;
 /// </summary>
 internal sealed class CardCapture(
     IGraphicsApi gpu,
+    RenderGraph graph,
     GpuPipelines pipelines,
     CardTable cards,
     Visibility visibility,
@@ -26,7 +27,7 @@ internal sealed class CardCapture(
         "CaptureCard",
         isTiled: true
     );
-    private readonly FrameTargets _targets = new(gpu);
+    private readonly FrameTargets _targets = new(gpu, graph);
     private readonly GpuBuffer[] _constants = new GpuBuffer[GpuCard.PerCapture];
     private GpuBuffer _instance;
 
@@ -43,7 +44,7 @@ internal sealed class CardCapture(
         }
     }
 
-    public Result Create(RenderGraph graph)
+    public Result Create()
     {
         Result<GpuBuffer> instance = gpu.CreateBuffer(
             new BufferDescription
@@ -73,18 +74,18 @@ internal sealed class CardCapture(
             _constants[side] = buffer.Value;
         }
 
-        return _targets.Resize(GpuCard.MaxTexels, GpuCard.MaxTexels, GpuCard.MaxTexels, GpuCard.MaxTexels, graph);
+        return _targets.Resize(GpuCard.MaxTexels, GpuCard.MaxTexels, GpuCard.MaxTexels, GpuCard.MaxTexels);
     }
 
     /// <summary>
     /// The captures newly asked for, drawn before any instance shows them.
     /// </summary>
-    public void Record(RenderGraph graph)
+    public void Record()
     {
         int captured = 0;
         while (captured < CapturesPerFrame && cards.TryTakeJob(out CaptureJob job))
         {
-            RecordJob(graph, job);
+            RecordJob(job);
             captured++;
         }
     }
@@ -110,7 +111,7 @@ internal sealed class CardCapture(
         return projection;
     }
 
-    private void RecordJob(RenderGraph graph, in CaptureJob job)
+    private void RecordJob(in CaptureJob job)
     {
         ResidentModel resident = job.Resident;
         graph.BeginTransferPass("Capture instance");
@@ -160,15 +161,15 @@ internal sealed class CardCapture(
 
             GpuBuffer constants = _constants[side];
             graph.BeginTransferPass($"Card {side} constants");
-            frameView.Upload(graph, constants, frame);
-            visibility.ResetCounts(graph);
+            frameView.Upload(constants, frame);
+            visibility.ResetCounts();
             graph.EndPass();
 
-            visibility.RecordOnce(graph, new RenderView(constants, _instance, 1, _targets), $"Card {side}");
+            visibility.RecordOnce(new RenderView(constants, _instance, 1, _targets), $"Card {side}");
 
             uint cardIndex = (job.Row * GpuCard.PerCapture) + (uint)side;
             _writePass
-                .Run(graph, new GpuConstants(constants.Id, cardIndex), name: $"Card {side} write")
+                .Run(new GpuConstants(constants.Id, cardIndex), name: $"Card {side} write")
                 .Reads(
                     constants,
                     cards.Buffer,

@@ -20,8 +20,13 @@ internal readonly record struct RenderView(
 /// threshold and last frame's depth pyramid; the visible ones drawn into a visibility buffer; what the old pyramid hid
 /// retested against the new one; and every pixel's material resolved into the GBuffer.
 /// </summary>
-internal sealed class Visibility(IGraphicsApi gpu, GpuPipelines pipelines, GeometryPools pools, MaterialTable materials)
-    : IDisposable
+internal sealed class Visibility(
+    IGraphicsApi gpu,
+    RenderGraph graph,
+    GpuPipelines pipelines,
+    GeometryPools pools,
+    MaterialTable materials
+) : IDisposable
 {
     public const int MaxVisibleClusters = 1 << 18;
 
@@ -120,7 +125,7 @@ internal sealed class Visibility(IGraphicsApi gpu, GpuPipelines pipelines, Geome
     /// <summary>
     /// The counts at zero and the retest dispatch at no groups, in a transfer pass.
     /// </summary>
-    public void ResetCounts(RenderGraph graph)
+    public void ResetCounts()
     {
         graph.Use(Counts, GpuAccess.CopyDestination);
         graph.Recorder.FillBuffer(Counts, 0);
@@ -136,36 +141,35 @@ internal sealed class Visibility(IGraphicsApi gpu, GpuPipelines pipelines, Geome
     /// <summary>
     /// The main view drawn twice: what last frame's pyramid shows, then what it hid and this frame's shows.
     /// </summary>
-    public void RecordMain(RenderGraph graph, in RenderView view)
+    public void RecordMain(in RenderView view)
     {
-        RecordCull(graph, view, "Cull clusters", mode: 0);
-        RecordDraw(graph, view, "Draw visibility", TargetLoad.Clear, drawsOffset: 0, countOffset: 0);
-        RecordHzb(graph, view);
-        RecordCull(graph, view, "Retest clusters", mode: 1);
+        RecordCull(view, "Cull clusters", mode: 0);
+        RecordDraw(view, "Draw visibility", TargetLoad.Clear, drawsOffset: 0, countOffset: 0);
+        RecordHzb(view);
+        RecordCull(view, "Retest clusters", mode: 1);
         RecordDraw(
-            graph,
             view,
             "Draw retested",
             TargetLoad.Keep,
             drawsOffset: (ulong)MaxVisibleClusters * DrawArgumentsBytes,
             countOffset: 8
         );
-        RecordHzb(graph, view);
+        RecordHzb(view);
     }
 
     /// <summary>
     /// A single view drawn with no retest, as a card's is.
     /// </summary>
-    public void RecordOnce(RenderGraph graph, in RenderView view, string name)
+    public void RecordOnce(in RenderView view, string name)
     {
-        RecordCull(graph, view, $"{name} cull", mode: 0);
-        RecordDraw(graph, view, $"{name} draw", TargetLoad.Clear, drawsOffset: 0, countOffset: 0);
-        RecordResolve(graph, view, $"{name} resolve");
+        RecordCull(view, $"{name} cull", mode: 0);
+        RecordDraw(view, $"{name} draw", TargetLoad.Clear, drawsOffset: 0, countOffset: 0);
+        RecordResolve(view, $"{name} resolve");
     }
 
-    public void RecordResolve(RenderGraph graph, in RenderView view, string name) =>
+    public void RecordResolve(in RenderView view, string name) =>
         _resolvePass
-            .Run(graph, new GpuConstants(view.Constants.Id), name: name)
+            .Run(new GpuConstants(view.Constants.Id), name: name)
             .Reads(
                 view.Constants,
                 view.Instances,
@@ -223,10 +227,10 @@ internal sealed class Visibility(IGraphicsApi gpu, GpuPipelines pipelines, Geome
     /// The cluster cull: mode 0 one group an instance over its clusters, mode 1 the retest list, as many groups as
     /// mode 0 left in the retest arguments.
     /// </summary>
-    private void RecordCull(RenderGraph graph, in RenderView view, string name, uint mode)
+    private void RecordCull(in RenderView view, string name, uint mode)
     {
         GpuPassRun cullRun = _cullPass
-            .Run(graph, new GpuConstants(view.Constants.Id, mode), name: name)
+            .Run(new GpuConstants(view.Constants.Id, mode), name: name)
             .Reads(view.Constants, view.Instances, pools.Clusters)
             .Writes(Counts, VisibleClusters, DrawArguments)
             .Reads(view.Targets.Hzb);
@@ -246,17 +250,9 @@ internal sealed class Visibility(IGraphicsApi gpu, GpuPipelines pipelines, Geome
     /// <summary>
     /// The visible clusters drawn into the view's visibility buffer and its depth, one indirect draw each.
     /// </summary>
-    private void RecordDraw(
-        RenderGraph graph,
-        in RenderView view,
-        string name,
-        TargetLoad load,
-        ulong drawsOffset,
-        ulong countOffset
-    ) =>
+    private void RecordDraw(in RenderView view, string name, TargetLoad load, ulong drawsOffset, ulong countOffset) =>
         _drawPass
             .Run(
-                graph,
                 new GpuConstants(view.Constants.Id),
                 new GpuRenderTargets
                 {
@@ -272,13 +268,13 @@ internal sealed class Visibility(IGraphicsApi gpu, GpuPipelines pipelines, Geome
     /// <summary>
     /// The depth pyramid from the depth so far, a level a pass.
     /// </summary>
-    private void RecordHzb(RenderGraph graph, in RenderView view)
+    private void RecordHzb(in RenderView view)
     {
         FrameTargets targets = view.Targets;
         for (int level = 0; level < targets.HzbLevels; level++)
         {
             GpuPassRun buildHzbRun = _buildHzbPass
-                .Run(graph, new GpuConstants(view.Constants.Id, (uint)level), name: $"Build depth pyramid {level}")
+                .Run(new GpuConstants(view.Constants.Id, (uint)level), name: $"Build depth pyramid {level}")
                 .Reads(view.Constants);
             if (level == 0)
                 buildHzbRun.Reads(targets.Depth);

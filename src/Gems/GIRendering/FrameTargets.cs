@@ -9,7 +9,7 @@ namespace GIRendering;
 /// and its depth, the depth pyramid the next frame culls against, the GBuffer, and the output with the buffer its
 /// pixels are read back through for a screenshot.
 /// </summary>
-internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
+internal sealed class FrameTargets(IGraphicsApi gpu, RenderGraph graph) : IDisposable
 {
     public int Width { get; private set; }
 
@@ -70,7 +70,7 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
     /// <summary>
     /// Makes the targets at a size, the old ones destroyed and forgotten by the graph.
     /// </summary>
-    public Result Resize(int width, int height, int outputWidth, int outputHeight, RenderGraph graph)
+    public Result Resize(int width, int height, int outputWidth, int outputHeight)
     {
         Destroy(graph);
         Width = width;
@@ -221,7 +221,7 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
             }
         );
 
-    private void Destroy(RenderGraph? graph)
+    private void Destroy(RenderGraph? forgetIn)
     {
         foreach (
             GpuTexture texture in (ReadOnlySpan<GpuTexture>)
@@ -246,13 +246,13 @@ internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
             if (texture.IsNone)
                 continue;
 
-            graph?.Forget(texture);
+            forgetIn?.Forget(texture);
             gpu.Destroy(texture);
         }
 
         if (!Readback.IsNone)
         {
-            graph?.Forget(Readback);
+            forgetIn?.Forget(Readback);
             gpu.Destroy(Readback);
         }
 
