@@ -113,6 +113,12 @@ public sealed class Texture : IAsset<Texture>
     public bool HasMipmaps { get; set; } = true;
 
     /// <summary>
+    /// Whether its levels are packed into blocks. Off for an image the CPU reads, such as a window's icon.
+    /// </summary>
+    [AssetMeta]
+    public bool IsCompressed { get; set; } = true;
+
+    /// <summary>
     /// For an <c>.svg</c>: the width, in pixels, it is drawn at, its height kept in proportion; 0 is the size the file
     /// states.
     /// </summary>

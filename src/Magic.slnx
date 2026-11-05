@@ -13,7 +13,8 @@
     <Project Path="Gems/PrefabImporter/PrefabImporter.csproj" />
     <Project Path="Gems/SdlPlatform/SdlPlatform.csproj" />
     <Project Path="Gems/SlangShaderCompiler/SlangShaderCompiler.csproj" />
-    <Project Path="Gems/Textures/Textures.csproj" />
+    <Project Path="Gems/SdlBindings/SdlBindings.csproj" />
+    <Project Path="Gems/SdlTextureImporter/SdlTextureImporter.csproj" />
     <Project Path="Gems/VulkanGraphics/VulkanGraphics.csproj" />
     <Project Path="Gems/GIRendering/GIRendering.csproj" />
   </Folder>

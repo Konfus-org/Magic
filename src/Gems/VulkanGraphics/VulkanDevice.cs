@@ -39,10 +39,8 @@ internal sealed unsafe class VulkanDevice : IDisposable
         HashSet<string> instanceExtensions = GetInstanceExtensions();
         HasDebugUtils = instanceExtensions.Contains(DebugUtilsExtension);
         bool hasPortability = instanceExtensions.Contains(PortabilityEnumerationExtension);
-        List<string> wantedExtensions = [];
-        if (window is not null)
-            wantedExtensions.AddRange(window.VulkanExtensions);
-
+        WindowHandle handle = window?.Handle ?? default;
+        List<string> wantedExtensions = [.. VulkanSurface.GetExtensions(handle.System)];
         if (HasDebugUtils)
             wantedExtensions.Add(DebugUtilsExtension);
 
@@ -54,13 +52,13 @@ internal sealed unsafe class VulkanDevice : IDisposable
         if (HasDebugUtils && HasValidation)
             _messenger = CreateMessenger();
 
-        if (window is not null)
+        if (handle.System != WindowSystem.None)
         {
-            Result<ulong> surface = window.CreateVulkanSurface(Instance.Handle);
+            Result<VkSurfaceKHR> surface = VulkanSurface.Create(InstanceApi, handle);
             if (!surface.Ok)
                 Log.Warn($"The window gives no Vulkan surface, so nothing is drawn into it: {surface.Error}");
             else
-                Surface = new VkSurfaceKHR(surface.Value);
+                Surface = surface.Value;
         }
 
         Pick picked = PickPhysicalDevice();

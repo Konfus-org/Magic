@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A gem: Magic loads it from Gems/SdlTextureImporter/SdlTextureImporter.dll when a project lists SdlTextureImporter. -->
+  <PropertyGroup>
+    <!-- Shown beside the gem as Magic starts it. -->
+    <Description>Reads PNG, JPEG, TGA, BMP, SVG and ICO image files into textures with mips, block-compressed and cached, through SDL_image: provides IAssetImporter&lt;Texture&gt;.</Description>
+    <Version>1.0.0</Version>
+    <Authors>Konfus</Authors>
+    <!-- Copies the gem's own NuGet dependencies next to it, where its load context finds them. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <!-- SDL_image and bc7enc are C APIs: their streams, surfaces and blocks are pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="Magic.Author" Value="$(Authors)" />
+  </ItemGroup>
+  <!-- bc7enc: what encodes the texels into BC7 blocks. One C file with no build of its own, so built from its source, which
+       has no tags: pinned to the archive of its repository's last commit. -->
+  <ItemGroup>
+    <NativeLibrary
+      Include="bc7enc"
+      Url="https://github.com/richgel999/bc7enc/archive/f66c2e489b07138f2673a2fb3d27c1aa1d565c48.tar.gz"
+      Sha256="5c3632dcf5227c15ef987696c23d34be993f2341278ff8a5a37bd23ea714dce9"
+      Sources="bc7enc.c"
+      Headers="bc7enc.h"
+      IncludePath="."
+    />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- SDL and SDL_image's C APIs, shared with the other gems built on SDL. -->
+    <ProjectReference Include="../SdlBindings/SdlBindings.csproj" />
+    <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its interfaces. -->
+    <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" Private="false" />
+  </ItemGroup>
+</Project>

@@ -82,7 +82,7 @@
       SkipGetTargetFrameworkProperties="true"
     />
     <ProjectReference
-      Include="$(MagicRoot)src/Gems/Textures/Textures.csproj"
+      Include="$(MagicRoot)src/Gems/SdlTextureImporter/SdlTextureImporter.csproj"
       ReferenceOutputAssembly="false"
       Private="false"
       SkipGetTargetFrameworkProperties="true"

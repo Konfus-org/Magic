@@ -1,8 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
 using Magic.Input;
-using static SdlPlatform.SDL_GamepadButton;
-using static SdlPlatform.SDL_Scancode;
-using static SdlPlatform.SDL3;
+using SdlBindings;
+using static SdlBindings.SDL_GamepadButton;
+using static SdlBindings.SDL_Scancode;
+using static SdlBindings.SDL3;
 
 namespace SdlPlatform;
 

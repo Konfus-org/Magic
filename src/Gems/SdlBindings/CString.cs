@@ -1,13 +1,13 @@
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace SdlPlatform;
+namespace SdlBindings;
 
 /// <summary>
 /// Text at the C boundary: a C string is UTF-8 bytes ending in a zero, which the binding takes and gives as
 /// <c>byte*</c>.
 /// </summary>
-internal static class CString
+public static class CString
 {
     /// <summary>
     /// The text at a C string, or empty for a null one.

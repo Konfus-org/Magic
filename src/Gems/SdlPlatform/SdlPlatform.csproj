@@ -13,29 +13,9 @@
   <ItemGroup>
     <AssemblyMetadata Include="Magic.Author" Value="$(Authors)" />
   </ItemGroup>
-  <!-- Of SDL's API, what no one C# declaration is right for on every platform is left unbound: what takes a wchar_t (two
-       bytes on Windows, four elsewhere), a C long (four bytes on Windows, eight elsewhere) or a va_list (each OS's own),
-       and the macros the generator writes as C# that does not compile. -->
   <ItemGroup>
-    <NativeLibrary
-      Include="SDL3"
-      Repository="https://github.com/libsdl-org/SDL"
-      Tag="release-3.4.18"
-      CMakeOptions="-DSDL_TEST_LIBRARY=OFF;-DSDL_EXAMPLES=OFF;-DSDL_INSTALL_TESTS=OFF"
-      Headers="include/SDL3/SDL.h;include/SDL3/SDL_vulkan.h"
-      IncludePath="include"
-      Unbound="SDL_wcslen;SDL_wcsnlen;SDL_wcslcpy;SDL_wcslcat;SDL_wcsdup;SDL_wcsstr;SDL_wcsnstr;
-                            SDL_wcscmp;SDL_wcsncmp;SDL_wcscasecmp;SDL_wcsncasecmp;SDL_wcstol;
-                            SDL_hid_open;SDL_hid_get_manufacturer_string;SDL_hid_get_product_string;SDL_hid_get_serial_number_string;
-                            SDL_hid_get_indexed_string;
-                            SDL_ltoa;SDL_ultoa;SDL_strtol;SDL_strtoul;SDL_lround;SDL_lroundf;
-                            SDL_vsscanf;SDL_vsnprintf;SDL_vswprintf;SDL_vasprintf;SDL_SetErrorV;SDL_IOvprintf;SDL_LogMessageV;
-                            __inline__;SDL_FUNCTION;SDL_WINAPI_FAMILY_PHONE;WINAPI_FAMILY_WINRT;
-                            SDL_memcpy;SDL_memmove;SDL_memset;SDL_BeginThreadFunction;SDL_EndThreadFunction;
-                            HAS_BUILTIN_BSWAP16;HAS_BUILTIN_BSWAP32;HAS_BUILTIN_BSWAP64;HAS_BROKEN_BSWAP"
-    />
-  </ItemGroup>
-  <ItemGroup>
+    <!-- SDL's C API, shared with the other gems built on SDL. -->
+    <ProjectReference Include="../SdlBindings/SdlBindings.csproj" />
     <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its interfaces. -->
     <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" Private="false" />
   </ItemGroup>
