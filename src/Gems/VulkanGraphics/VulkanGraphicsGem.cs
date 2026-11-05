@@ -1,3 +1,4 @@
+using System.Diagnostics.Metrics;
 using Magic.Debugging;
 using Magic.Gpu;
 using Magic.Platform;
@@ -24,6 +25,9 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     private readonly VulkanFrames _frames;
     private readonly VulkanRecorder _recorder;
     private readonly VulkanSwapchain? _swapchain;
+    private readonly Meter _meter;
+    private readonly Gauge<long> _memoryUsage;
+    private readonly Gauge<long> _memoryLimit;
     private bool _isBegun;
     private bool _isSubmitted;
 
@@ -32,9 +36,22 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
         _threads = threads;
         IWindow? drawn = app.IsHeadless ? null : window;
         _device = new VulkanDevice(drawn, wantsValidation: IsDebugBuild);
+
+        // The gem's meter goes with it, so nothing holds the gem's code once it unloads.
+        _meter = new Meter(new MeterOptions("Magic.Gems.VulkanGraphics") { Tags = _device.Description });
+        _memoryUsage = _meter.CreateGauge<long>(
+            "magic.gems.vulkan_graphics.gpu.memory.usage",
+            "By",
+            "Device memory the resources hold."
+        );
+        _memoryLimit = _meter.CreateGauge<long>(
+            "magic.gems.vulkan_graphics.gpu.memory.limit",
+            "By",
+            "Device memory the GPU has for the resources."
+        );
         _heap = new VulkanHeap(_device.Api, _device.Features.HasRayQuery);
         _resources = new VulkanResources(_device, _heap);
-        _frames = new VulkanFrames(_device, _resources);
+        _frames = new VulkanFrames(_device, _resources, _meter);
         _recorder = new VulkanRecorder(_device, _resources, _heap);
         if (drawn is not null && _device.Surface.IsNotNull)
             _swapchain = new VulkanSwapchain(_device, _resources, drawn);
@@ -67,6 +84,7 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
         _resources.Dispose();
         _heap.Dispose();
         _device.Dispose();
+        _meter.Dispose();
     }
 
     public TextureDescription GetDescription(GpuTexture texture) =>
@@ -254,7 +272,12 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     /// <summary>
     /// Finishes the frames the GPU is done with, so a readback awaited completes whether or not the renderer draws.
     /// </summary>
-    public void Update(in Frame frame) => _frames.Poll();
+    public void Update(in Frame frame)
+    {
+        _frames.Poll();
+        _memoryUsage.Record(_resources.MemoryBytes);
+        _memoryLimit.Record(_device.Limits.DeviceMemoryBytes);
+    }
 
     private void BeginFrame()
     {

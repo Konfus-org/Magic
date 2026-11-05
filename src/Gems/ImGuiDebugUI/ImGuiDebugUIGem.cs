@@ -574,9 +574,22 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
         return true;
     }
 
-    public unsafe bool Header(string label, bool folds = false)
+    public unsafe bool Header(string label, bool folds = false, int depth = 0)
     {
         ThrowIfOutsideFrame();
+
+        // Indented a step a level from where the window or view's last header left it; its own Begin starts at none.
+        if (_depth > 0 && _levels[_depth - 1] is { } level && level.Indent != depth)
+        {
+            float steps = (depth - level.Indent) * ImGui_GetStyle()->IndentSpacing;
+            if (steps > 0)
+                ImGui_IndentEx(steps);
+            else
+                ImGui_UnindentEx(-steps);
+
+            level.Indent = depth;
+        }
+
         if (folds)
             ImGui_SetNextItemOpen(false, (int)ImGuiCond_Always);
 
@@ -772,6 +785,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
         Level level = _levels[depth];
         level.Closed.Clear();
         level.IsScrollable = scrollable;
+        level.Indent = 0;
         if (depth == 0)
         {
             _isWindowDrawn = true;
@@ -950,6 +964,11 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
         internal uint Id { get; set; }
 
         internal bool IsScrollable { get; set; }
+
+        /// <summary>
+        /// How many steps its last header indented what follows it.
+        /// </summary>
+        internal int Indent { get; set; }
 
         internal List<(uint Id, float ClosedAt)> Closed { get; } = [];
     }

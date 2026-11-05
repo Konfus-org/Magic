@@ -1,3 +1,4 @@
+using System.Diagnostics.Metrics;
 using System.Runtime;
 using Magic.Caching;
 using Magic.CommandLine;
@@ -14,6 +15,12 @@ namespace Magic;
 
 internal static class Program
 {
+    private static readonly Histogram<double> _stepDuration = Metrics.Meter.CreateHistogram<double>(
+        "magic.core.step.duration",
+        "s",
+        "One step of Core's own in the run's loop."
+    );
+
     private static int Main(string[] commandLine)
     {
         GCSettings.LatencyMode = GCLatencyMode.LowLatency;
@@ -106,11 +113,20 @@ internal static class Program
 
             while (app.IsRunning && app.RunVersion == run && !app.HasFailed)
             {
+                // Core's own steps are timed for whatever listens; the gems' pump times its hooks itself.
+                long start = _stepDuration.Start();
                 threads.Pump(EngineThread.Main);
+                _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "Threads"));
+                start = _stepDuration.Start();
                 assets.ProcessChanges();
+                _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "Assets"));
+                start = _stepDuration.Start();
                 world.Pump(stopping.Token);
+                _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "World"));
                 gems.Pump();
+                start = _stepDuration.Start();
                 cli.Pump();
+                _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "Commands"));
             }
 
             // The world is kept while the gems are still whole, for a restart of this same project; they end as this pass

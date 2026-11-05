@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Metrics;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Events;
@@ -24,15 +25,47 @@ internal sealed class Gems : IDisposable
     /// </summary>
     private static readonly TimeSpan _settleTime = TimeSpan.FromSeconds(1);
 
+    /// <summary>
+    /// Each <see cref="Hook"/>'s name, made once, as its metric's tag.
+    /// </summary>
+    private static readonly string[] _hookNames = Enum.GetNames<Hook>();
+
+    private static readonly Histogram<double> _frameDuration = Metrics.Meter.CreateHistogram<double>(
+        "magic.core.frame.duration",
+        "s",
+        "From one frame to the next."
+    );
+
+    private static readonly Histogram<double> _frameWorkDuration = Metrics.Meter.CreateHistogram<double>(
+        "magic.core.frame.work.duration",
+        "s",
+        "The main thread's work on a frame, the waits for the GPU and the display among it."
+    );
+
+    private static readonly Histogram<double> _hookDuration = Metrics.Meter.CreateHistogram<double>(
+        "magic.core.gem.hook.duration",
+        "s",
+        "One gem's hook."
+    );
+
     private readonly GemRegistry _registry;
+
     private readonly IServiceProvider _provider;
+
     private readonly App _app;
+
     private readonly IFileSystem _files;
+
     private readonly Assets _assets;
+
     private readonly World _world;
+
     private readonly EventCoordinator _events;
+
     private readonly FrameClock _clock = new();
+
     private readonly List<LoadedGem> _loaded = [];
+
     private readonly Subscriptions _watches = [];
 
     /// <summary>
@@ -106,6 +139,10 @@ internal sealed class Gems : IDisposable
             Cpu = _lastCpu,
         };
 
+        // The first frame's time is the load's before it, not a frame's.
+        if (_frameStart != 0)
+            _frameDuration.Record(frame.AppDeltaSec);
+
         _world.TurnSpins((float)frame.SimDeltaSec);
         long updateStart = Stopwatch.GetTimestamp();
         RunHook(Hook.Update, frame);
@@ -128,8 +165,48 @@ internal sealed class Gems : IDisposable
             Stopwatch.GetElapsedTime(renderStart, renderEnd).TotalMilliseconds,
             Stopwatch.GetElapsedTime(_frameStart == 0 ? updateStart : _frameStart, renderEnd).TotalMilliseconds
         );
+        _frameWorkDuration.Record(
+            Stopwatch.GetElapsedTime(_frameStart == 0 ? updateStart : _frameStart, renderEnd).TotalSeconds
+        );
         _clock.SleepUntilDue();
         _frameStart = Stopwatch.GetTimestamp();
+    }
+
+    /// <summary>
+    /// Calls <paramref name="hook"/> on <paramref name="gem"/>, which leaves the frame if it throws.
+    /// </summary>
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Whatever a gem throws, it is logged and the gem leaves the frame; the others go on."
+    )]
+    private static void RunHook(Hook hook, in Frame frame, LoadedGem gem)
+    {
+        try
+        {
+            switch (hook)
+            {
+                case Hook.Update:
+                    gem.Instance.Update(in frame);
+                    break;
+                case Hook.FixedUpdate:
+                    gem.Instance.FixedUpdate(in frame);
+                    break;
+                case Hook.LateUpdate:
+                    gem.Instance.LateUpdate(in frame);
+                    break;
+                case Hook.Render:
+                    gem.Instance.Render(in frame);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(hook), hook, "There is no such hook.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Gem {gem.Name} failed in {hook} and stops running: {ex}");
+            gem.HasFailed = true;
+        }
     }
 
     /// <summary>
@@ -209,43 +286,20 @@ internal sealed class Gems : IDisposable
     /// <summary>
     /// Calls <paramref name="hook"/> on every gem still in the frame, in the order they were made.
     /// </summary>
-    [SuppressMessage(
-        "Design",
-        "CA1031:Do not catch general exception types",
-        Justification = "Whatever a gem throws, it is logged and the gem leaves the frame; the others go on."
-    )]
     private void RunHook(Hook hook, in Frame frame)
     {
         foreach (LoadedGem gem in _loaded)
         {
-            if (gem.HasLeft)
+            if (gem.HasFailed)
                 continue;
 
-            try
-            {
-                switch (hook)
-                {
-                    case Hook.Update:
-                        gem.Gem.Update(in frame);
-                        break;
-                    case Hook.FixedUpdate:
-                        gem.Gem.FixedUpdate(in frame);
-                        break;
-                    case Hook.LateUpdate:
-                        gem.Gem.LateUpdate(in frame);
-                        break;
-                    case Hook.Render:
-                        gem.Gem.Render(in frame);
-                        break;
-                    default:
-                        throw new ArgumentOutOfRangeException(nameof(hook), hook, "There is no such hook.");
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"Gem {gem.Name} failed in {hook} and stops running: {ex}");
-                gem.HasLeft = true;
-            }
+            long start = _hookDuration.Start();
+            RunHook(hook, frame, gem);
+            _hookDuration.RecordSince(
+                start,
+                new KeyValuePair<string, object?>(Metrics.GemNameTag, gem.Name),
+                new KeyValuePair<string, object?>(Metrics.HookTag, _hookNames[(int)hook])
+            );
         }
     }
 

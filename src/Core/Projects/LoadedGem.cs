@@ -16,11 +16,11 @@ internal sealed class LoadedGem : IDisposable
     internal LoadedGem(IGem gem, GemInfo info)
     {
         _context = info.Context;
-        Gem = gem;
+        Instance = gem;
         Name = info.Name;
     }
 
-    public IGem Gem { get; }
+    public IGem Instance { get; }
 
     /// <summary>
     /// The gem's name, as the project lists it.
@@ -28,9 +28,9 @@ internal sealed class LoadedGem : IDisposable
     public string Name { get; }
 
     /// <summary>
-    /// Whether the gem threw in a hook and left the frame for good: it is still disposed with the others.
+    /// Whether the gem threw in a hook, so it no longer runs: it is still disposed with the others.
     /// </summary>
-    public bool HasLeft { get; set; }
+    public bool HasFailed { get; set; }
 
     /// <summary>
     /// What ends with the gem; the host adds to it.
@@ -44,7 +44,7 @@ internal sealed class LoadedGem : IDisposable
 
         _isDisposed = true;
         Subscriptions.Dispose();
-        (Gem as IDisposable)?.Dispose();
+        (Instance as IDisposable)?.Dispose();
         _context.Unload();
     }
 }

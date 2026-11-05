@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics.Metrics;
 using Magic.Debugging;
 using Magic.Gpu;
 using Magic.Utils;
@@ -17,19 +18,32 @@ internal sealed unsafe class VulkanFrames : IDisposable
 
     private const int TimestampCapacity = 512;
     private const long StagingBytes = 64L * 1024 * 1024;
+    private const string PassTag = "magic.gems.vulkan_graphics.gpu.pass";
 
     private readonly VulkanDevice _device;
     private readonly VulkanResources _resources;
+    private readonly Histogram<double> _passDuration;
+    private readonly Histogram<double> _frameDuration;
     private readonly Frame[] _frames = new Frame[InFlight];
     private readonly List<Readback> _readbacks = [];
     private int _current;
     private ulong _serial;
     private ulong _completedSerial;
 
-    public VulkanFrames(VulkanDevice device, VulkanResources resources)
+    public VulkanFrames(VulkanDevice device, VulkanResources resources, Meter meter)
     {
         _device = device;
         _resources = resources;
+        _passDuration = meter.CreateHistogram<double>(
+            "magic.gems.vulkan_graphics.gpu.pass.duration",
+            "s",
+            "One pass of a frame on the GPU, tagged with its name."
+        );
+        _frameDuration = meter.CreateHistogram<double>(
+            "magic.gems.vulkan_graphics.gpu.frame.duration",
+            "s",
+            "A frame on the GPU, from its first pass's start to its last's end."
+        );
         for (int i = 0; i < InFlight; i++)
         {
             _frames[i] = new Frame(device, resources, i);
@@ -193,7 +207,23 @@ internal sealed unsafe class VulkanFrames : IDisposable
             _readbacks.RemoveAt(i);
         }
 
-        Timings = frame.ReadTimings(_device);
+        Timings = frame.ReadTimings(_device, out double frameMs);
+        RecordTimings(frameMs);
+    }
+
+    /// <summary>
+    /// The frame just read back, on the meter: its time on the GPU, and each pass's under its name.
+    /// </summary>
+    private void RecordTimings(double frameMs)
+    {
+        if (Timings.Passes.IsEmpty || !_passDuration.Enabled)
+            return;
+
+        _frameDuration.Record(frameMs / 1000);
+        foreach (GpuTiming timing in Timings.Passes)
+        {
+            _passDuration.Record(timing.Milliseconds / 1000, new KeyValuePair<string, object?>(PassTag, timing.Name));
+        }
     }
 
     private uint Register(VulkanBuffer buffer)
@@ -376,10 +406,12 @@ internal sealed unsafe class VulkanFrames : IDisposable
         }
 
         /// <summary>
-        /// Each pass's time from its first timestamp to its last, and each named stamp's from its pass's first.
+        /// Each pass's time from its first timestamp to its last, and each named stamp's from its pass's first; and in
+        /// <paramref name="frameMs"/> the frame's, from its first timestamp to its last, 0 when it has none.
         /// </summary>
-        public GpuTimings ReadTimings(VulkanDevice device)
+        public GpuTimings ReadTimings(VulkanDevice device, out double frameMs)
         {
+            frameMs = 0;
             int count = Timestamps.Count;
             if (count == 0)
                 return new GpuTimings((uint)Serial, []);
@@ -398,6 +430,7 @@ internal sealed unsafe class VulkanFrames : IDisposable
                 return new GpuTimings((uint)Serial, []);
 
             double msPerTick = device.TimestampPeriod / 1_000_000.0;
+            frameMs = (ticks[count - 1] - ticks[0]) * msPerTick;
             ImmutableArray<GpuTiming>.Builder timings = ImmutableArray.CreateBuilder<GpuTiming>();
             int passStart = 0;
             for (int i = 0; i < count; i++)
