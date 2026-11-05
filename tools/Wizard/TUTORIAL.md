@@ -206,7 +206,6 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
     private readonly App _app;
     private readonly ICommands? _commands;
     private readonly McpServerOptions _options;
-    private readonly CancellationTokenSource _stopping = new();
 
     /// <summary>
     /// Guards the log: the log's own thread writes it while requests read it.
@@ -286,9 +285,7 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
 
     public void Dispose()
     {
-        _stopping.Cancel();
         _listener?.Close();
-        _stopping.Dispose();
     }
 
     public void Update(in Frame frame)
@@ -352,7 +349,7 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
         }
 
         _listener = listener;
-        AcceptAsync(listener, _stopping.Token).FireAndForget();
+        AcceptAsync(listener, _app.Lifetime).FireAndForget();
         Debugging.Info($"MCP clients reach the engine at http://localhost:{port}/mcp");
     }
 
@@ -474,7 +471,7 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
     private async Task<string> OnMainThreadAsync(Func<string> work)
     {
         await _threads.Enter(EngineThread.Main);
-        _stopping.Token.ThrowIfCancellationRequested();
+        _app.Lifetime.ThrowIfCancellationRequested();
         try
         {
             return work();
@@ -545,7 +542,7 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
 
     private async Task OpenDomainAsync(Handle<Domain> domain, DomainOpenMode mode, string path)
     {
-        Result<Domain> opened = await _world.OpenAsync(domain, mode, cancel: _stopping.Token).ConfigureAwait(false);
+        Result<Domain> opened = await _world.OpenAsync(domain, mode, cancel: _app.Lifetime).ConfigureAwait(false);
         if (!opened.Ok) Debugging.Error($"An MCP client's domain {path} did not open: {opened.Error}");
     }
 
