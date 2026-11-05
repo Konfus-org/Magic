@@ -32,6 +32,11 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
     /// </summary>
     private readonly SemaphoreSlim _compiling = new(1, 1);
 
+    /// <summary>
+    /// Cancelled as the gem is disposed, so compiles still waiting for their turn give up.
+    /// </summary>
+    private readonly CancellationTokenSource _stopping = new();
+
     private readonly nint _globalSession;
 
     public SlangShaderCompilerGem(Assets assets, Caches caches)
@@ -50,9 +55,14 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
 
     public void Dispose()
     {
+        // The compile already running finishes before the session it uses is freed. Waiting for it is safe: the frame loop
+        // has ended, and a compile needs no engine thread.
+        _stopping.Cancel();
+        _compiling.Wait();
         Slang.Release(_globalSession);
         Slang.Shutdown();
         _compiling.Dispose();
+        _stopping.Dispose();
     }
 
     public async Task<Result<CompiledShader>> CompileAsync(
@@ -87,7 +97,20 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
         Result<CompiledShader> compiled = await Task.Run(
                 async () =>
                 {
-                    await _compiling.WaitAsync(cancel).ConfigureAwait(false);
+                    // A compile that comes once the gem is disposed ends cancelled, as one still waiting for its turn does.
+                    try
+                    {
+                        using CancellationTokenSource waiting = CancellationTokenSource.CreateLinkedTokenSource(
+                            cancel,
+                            _stopping.Token
+                        );
+                        await _compiling.WaitAsync(waiting.Token).ConfigureAwait(false);
+                    }
+                    catch (ObjectDisposedException) when (_stopping.IsCancellationRequested)
+                    {
+                        throw new OperationCanceledException("The shader compiler is disposed.");
+                    }
+
                     try
                     {
                         return SlangCompile.Compile(
