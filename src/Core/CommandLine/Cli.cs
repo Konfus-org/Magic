@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.CommandLine;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -41,26 +40,9 @@ internal sealed class Cli : IDisposable
 
     private readonly World _world;
 
+    private readonly CommandQueue _queue;
+
     private readonly RootCommand _cliCommands;
-
-    private int _waitFrames;
-
-    /// <summary>
-    /// When a wait in seconds ends, as <see cref="Stopwatch.GetTimestamp"/> counts; 0 when none is on.
-    /// </summary>
-    private long _waitUntilTimestamp;
-
-    private bool _isWaitingForWorld;
-
-    private readonly Queue<string> _queued = new();
-
-    private bool _isChangingWorld;
-
-    private bool _isWaitingToDraw;
-
-    private bool _hasDrawn;
-
-    private readonly Subscription _drawnWatch;
 
     public Cli(App app, IFileSystem files, EventCoordinator events, Assets assets, World world)
     {
@@ -69,11 +51,11 @@ internal sealed class Cli : IDisposable
         _events = events;
         _assets = assets;
         _world = world;
+        _queue = new CommandQueue(world, events);
         _cliCommands = CreateCliCommands();
-        _drawnWatch = events.Watch<FirstFrameDrawn>(_ => _hasDrawn = true);
     }
 
-    public void Dispose() => _drawnWatch.Dispose();
+    public void Dispose() => _queue.Dispose();
 
     /// <summary>
     /// Executes the commands Magic was launched with, or says why they didn't run. Only open runs a project; any other
@@ -113,42 +95,11 @@ internal sealed class Cli : IDisposable
     }
 
     /// <summary>
-    /// Executes the next line typed into the terminal, if one is waiting.
+    /// Executes the next line, queued or typed into the terminal, once nothing holds it back.
     /// </summary>
     public void Pump()
     {
-        if (_waitFrames > 0)
-        {
-            _waitFrames--;
-
-            return;
-        }
-
-        if (_waitUntilTimestamp != 0)
-        {
-            if (Stopwatch.GetTimestamp() < _waitUntilTimestamp)
-                return;
-
-            _waitUntilTimestamp = 0;
-        }
-
-        if (_isWaitingForWorld)
-        {
-            if (_isChangingWorld || _world.IsLoading || _world.Domains.IsEmpty)
-                return;
-
-            _isWaitingForWorld = false;
-        }
-
-        if (_isWaitingToDraw)
-        {
-            if (!_hasDrawn)
-                return;
-
-            _isWaitingToDraw = false;
-        }
-
-        if (!_queued.TryDequeue(out string? line) && !Terminal.Pump(out line))
+        if (!_queue.TryDequeue(out string? line))
             return;
 
         Result ran = Execute(line);
@@ -300,8 +251,8 @@ internal sealed class Cli : IDisposable
         if (where.Length != 4)
             return;
 
-        _queued.Enqueue("wait loaded");
-        _queued.Enqueue($"teleport {string.Join(' ', where[1..])}");
+        _queue.Enqueue("wait loaded");
+        _queue.Enqueue($"teleport {string.Join(' ', where[1..])}");
     }
 
     /// <summary>
@@ -368,26 +319,18 @@ internal sealed class Cli : IDisposable
 
     private async Task SpawnAsync(Handle<Prefab> prefab, string name, Transform at)
     {
-        _isChangingWorld = true;
-        try
+        Result<ImmutableArray<Entity>> spawned = await _queue
+            .ChangeWorldAsync(() => _world.SpawnAsync(prefab, at, null, CancellationToken.None))
+            .ConfigureAwait(false);
+        if (!spawned.Ok)
         {
-            Result<ImmutableArray<Entity>> spawned = await _world
-                .SpawnAsync(prefab, at, null, CancellationToken.None)
-                .ConfigureAwait(false);
-            if (spawned.Ok)
-            {
-                string ids = string.Join(", ", spawned.Value.Select(entity => entity.Id));
-                Log.Info($"Spawned {name} at {at.Position} as entities {ids}.");
-            }
-            else
-            {
-                Log.Error($"{name} was not spawned: {spawned.Error}");
-            }
+            Log.Error($"{name} was not spawned: {spawned.Error}");
+
+            return;
         }
-        finally
-        {
-            _isChangingWorld = false;
-        }
+
+        string ids = string.Join(", ", spawned.Value.Select(entity => entity.Id));
+        Log.Info($"Spawned {name} at {at.Position} as entities {ids}.");
     }
 
     /// <summary>
@@ -467,13 +410,13 @@ internal sealed class Cli : IDisposable
                 continue;
 
             domains++;
-            _queued.Enqueue($"open {path}");
-            _queued.Enqueue("wait loaded");
-            _queued.Enqueue("wait 120");
+            _queue.Enqueue($"open {path}");
+            _queue.Enqueue("wait loaded");
+            _queue.Enqueue("wait 120");
         }
 
         Log.Info($"Baking {domains} domains.");
-        _queued.Enqueue("exit");
+        _queue.Enqueue("exit");
     }
 
     /// <summary>
@@ -485,14 +428,14 @@ internal sealed class Cli : IDisposable
     {
         if (until == "loaded")
         {
-            _isWaitingForWorld = true;
+            _queue.WaitForWorld();
 
             return;
         }
 
         if (until == "drawn")
         {
-            _isWaitingToDraw = true;
+            _queue.WaitForDrawn();
 
             return;
         }
@@ -509,9 +452,9 @@ internal sealed class Cli : IDisposable
         }
 
         if (isSeconds)
-            _waitUntilTimestamp = Stopwatch.GetTimestamp() + (long)(count * Stopwatch.Frequency);
+            _queue.WaitSeconds(count);
         else
-            _waitFrames = (int)count;
+            _queue.WaitFrames((int)count);
     }
 
     /// <summary>
@@ -737,19 +680,13 @@ internal sealed class Cli : IDisposable
         if (!IsProjectOpen($"save {name} in"))
             return;
 
-        _isChangingWorld = true;
-        try
-        {
-            Result saved = await _world.SaveAsync(name, CancellationToken.None).ConfigureAwait(false);
-            if (saved.Ok)
-                Log.Info($"Saved the game as {name}.");
-            else
-                Log.Error($"The game was not saved as {name}: {saved.Error}");
-        }
-        finally
-        {
-            _isChangingWorld = false;
-        }
+        Result saved = await _queue
+            .ChangeWorldAsync(() => _world.SaveAsync(name, CancellationToken.None))
+            .ConfigureAwait(false);
+        if (saved.Ok)
+            Log.Info($"Saved the game as {name}.");
+        else
+            Log.Error($"The game was not saved as {name}: {saved.Error}");
     }
 
     /// <summary>
@@ -760,17 +697,11 @@ internal sealed class Cli : IDisposable
         if (!IsProjectOpen($"load {name} in"))
             return;
 
-        _isChangingWorld = true;
-        try
-        {
-            Result loaded = await _world.RestoreAsync(name, CancellationToken.None).ConfigureAwait(false);
-            if (!loaded.Ok)
-                Log.Error($"The save {name} was not loaded: {loaded.Error}");
-        }
-        finally
-        {
-            _isChangingWorld = false;
-        }
+        Result loaded = await _queue
+            .ChangeWorldAsync(() => _world.RestoreAsync(name, CancellationToken.None))
+            .ConfigureAwait(false);
+        if (!loaded.Ok)
+            Log.Error($"The save {name} was not loaded: {loaded.Error}");
     }
 
     /// <summary>
@@ -789,18 +720,10 @@ internal sealed class Cli : IDisposable
             return;
         }
 
-        _isChangingWorld = true;
-        try
-        {
-            Result opened = await _world
-                .OpenAsync(domain, DomainOpenMode.Replace, null, CancellationToken.None)
-                .ConfigureAwait(false);
-            if (!opened.Ok)
-                Log.Error($"{path} did not open: {opened.Error}");
-        }
-        finally
-        {
-            _isChangingWorld = false;
-        }
+        Result opened = await _queue
+            .ChangeWorldAsync(() => _world.OpenAsync(domain, DomainOpenMode.Replace, null, CancellationToken.None))
+            .ConfigureAwait(false);
+        if (!opened.Ok)
+            Log.Error($"{path} did not open: {opened.Error}");
     }
 }
