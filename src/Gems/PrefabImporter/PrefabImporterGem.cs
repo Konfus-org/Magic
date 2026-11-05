@@ -11,7 +11,7 @@ using Magic.Plugins;
 using Magic.Serialization;
 using Magic.Utils;
 
-namespace PrefabLoader;
+namespace PrefabImporter;
 
 /// <summary>
 /// Reads <c>.prefab</c> files into <see cref="Prefab"/>s: each entity a part, with its components read as their types by
@@ -19,7 +19,7 @@ namespace PrefabLoader;
 /// reads one is what that one is made from, so it is read again when one of them changes. It is public because nothing in
 /// its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class PrefabLoaderGem(Assets assets, Assemblies code) : IGem, IAssetLoader<Prefab>
+public sealed class PrefabImporterGem(Assets assets, Assemblies code) : IGem, IAssetImporter<Prefab>
 {
     /// <summary>
     /// The components files name that could not be read, each said once. Read on workers.
@@ -28,7 +28,7 @@ public sealed class PrefabLoaderGem(Assets assets, Assemblies code) : IGem, IAss
 
     public ImmutableArray<string> Extensions => [".prefab"];
 
-    public async Task<Result<Prefab>> LoadAsync(
+    public async Task<Result<Prefab>> ImportAsync(
         AssetFile file,
         IProgress<LoadProgress>? progress,
         CancellationToken cancel

@@ -16,7 +16,10 @@ namespace Magic.Files.Pipeline;
 /// </summary>
 internal sealed record AssetIndex
 {
-    private const string Sidecar = ".meta";
+    /// <summary>
+    /// What a file's sidecar ends in: its name, then this.
+    /// </summary>
+    public const string Sidecar = ".meta";
 
     public static AssetIndex Empty { get; } =
         new()
@@ -214,7 +217,7 @@ internal sealed record AssetIndex
 
     /// <summary>
     /// The asset the sidecar at <paramref name="sidecar"/> makes <paramref name="file"/>, at <paramref name="path"/>:
-    /// its id, its type's name, and the rest of it, the import settings its loader reads.
+    /// its id, its type's name, and the rest of it, the import settings its importer reads.
     /// </summary>
     private static Result<IndexedFile> ReadSidecar(IFileSystem files, string sidecar, string path, string file)
     {
@@ -260,5 +263,5 @@ internal sealed record AssetIndex
 /// <param name="Type">The name of the asset type its sidecar says it is, such as <c>Material</c>.</param>
 /// <param name="Path">Where it is from its asset directory, with <c>/</c>.</param>
 /// <param name="File">Where it is on disk.</param>
-/// <param name="Settings">Its sidecar without the id and the type: its loader's import settings.</param>
+/// <param name="Settings">Its sidecar without the id and the type: its importer's import settings.</param>
 internal sealed record IndexedFile(ulong Id, string Type, string Path, string File, JsonElement Settings);

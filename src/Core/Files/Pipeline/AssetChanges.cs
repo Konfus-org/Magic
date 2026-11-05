@@ -4,246 +4,261 @@ using Magic.Utils;
 namespace Magic.Files.Pipeline;
 
 /// <summary>
-/// Takes what was pushed, and what workers finished, into the snapshot: the rules of what each change does.
+/// Takes what was pushed, and what workers finished, into the database and the loaded assets: the rules of what each
+/// change does.
 /// </summary>
 internal static class AssetChanges
 {
-    public static AssetSnapshot Take(AssetSnapshot snapshot, AssetsChangeList changes)
+    public static (AssetDatabase, LoadedAssets) Take(
+        AssetDatabase database,
+        LoadedAssets loaded,
+        AssetsChangeList changes
+    )
     {
-        // The first run comes once every gem is made, so each type's loader is on the list by now.
-        snapshot = snapshot with
-        {
-            IsLoadingEnabled = true,
-        };
         while (changes.TryTakeAsked(out AssetChange? change))
         {
-            snapshot = change switch
+            switch (change)
             {
-                AssetRequested requested => Request(snapshot, requested, changes),
-                AssetLoaderAdded added => AddLoader(snapshot, added),
-                AssetLoaderRemoved removed => RemoveLoader(snapshot, removed),
-                AssetWriterAdded added => AddWriter(snapshot, added),
-                AssetWriterRemoved removed => RemoveWriter(snapshot, removed),
-                AssetAdded added => Add(snapshot, added),
-                BuiltInAssetMissing missing => ReportMissing(snapshot, missing),
-                AssetFolderListed listed => RecordFolder(snapshot, listed),
-                AssetDependenciesScanned scanned => snapshot with
-                {
-                    Scanned = snapshot.Scanned.SetItem(scanned.Id, scanned.Dependencies),
-                },
-                _ => throw new ArgumentException(
-                    $"{change.GetType().Name} is no change the assets take.",
-                    nameof(changes)
-                ),
-            };
+                case AssetRequested requested:
+                    loaded = Request(database, loaded, requested, changes);
+                    break;
+                case AssetImporterAdded added:
+                    loaded = AddImporter(loaded, added);
+                    break;
+                case AssetImporterRemoved removed:
+                    loaded = RemoveImporter(loaded, removed);
+                    break;
+                case AssetExporterAdded added:
+                    loaded = AddExporter(loaded, added);
+                    break;
+                case AssetExporterRemoved removed:
+                    loaded = RemoveExporter(loaded, removed);
+                    break;
+                case AssetAdded added:
+                    loaded = Add(database, loaded, added);
+                    break;
+                case BuiltInAssetMissing missing:
+                    loaded = ReportMissing(loaded, missing);
+                    break;
+                case AssetFolderListed listed:
+                    loaded = RecordFolder(loaded, listed);
+                    break;
+                case AssetDependenciesFound found:
+                    database = database.SetDependencies(found.Id, found.Dependencies);
+                    break;
+                default:
+                    throw new ArgumentException(
+                        $"{change.GetType().Name} is no change the assets take.",
+                        nameof(changes)
+                    );
+            }
         }
 
         while (changes.TryTakeRead(out AssetFileRead read))
         {
             // Gone while it was read: nobody is told, as its waiters were when it went.
-            if (snapshot.Assets.TryGetValue(read.Id, out AssetEntry? entry))
-                snapshot = snapshot.Land(read.Id, entry, read.Made);
+            if (loaded.Entries.TryGetValue(read.Id, out AssetEntry? entry))
+                loaded = loaded.Land(read.Id, entry, read.Made);
         }
 
-        return snapshot;
+        return (database, loaded);
     }
 
     /// <summary>
     /// Answers <paramref name="requested"/>: with what loaded, by waiting for a load on its way, or by asking for one;
-    /// with a failure when it is another type, or, asked for by a loader, when it depends on what asks for it.
+    /// with a failure when it is another type, or, asked for by an importer, when it depends on what asks for it.
     /// </summary>
-    private static AssetSnapshot Request(AssetSnapshot snapshot, AssetRequested requested, AssetsChangeList changes)
+    private static LoadedAssets Request(
+        AssetDatabase database,
+        LoadedAssets loaded,
+        AssetRequested requested,
+        AssetsChangeList changes
+    )
     {
         ulong id = requested.Id;
         ulong dependent = requested.Dependent;
         if (dependent != 0)
         {
-            if (id == dependent || snapshot.GetDependencies(id, Assets.AllLevels).Contains(dependent))
+            if (id == dependent || loaded.IsMadeFrom(id, dependent))
             {
-                string name = snapshot.GetName(dependent);
+                string name = database.GetName(dependent);
                 Fail(changes, requested, $"{name} depends on itself: something it loads as it is made loads it.");
 
-                return snapshot;
+                return loaded;
             }
 
-            snapshot = RecordDependency(snapshot, dependent, id);
+            loaded = RecordMadeFrom(loaded, dependent, id);
         }
 
-        if (snapshot.Index.ById.TryGetValue(id, out IndexedFile? file) && file.Type != requested.Type.Name)
+        if (database.Index.ById.TryGetValue(id, out IndexedFile? file) && file.Type != requested.Type.Name)
         {
             Fail(changes, requested, $"{file.Path} is a {file.Type}, so it is not a {requested.Type.Name}.");
 
-            return snapshot;
+            return loaded;
         }
 
-        if (!snapshot.Assets.TryGetValue(id, out AssetEntry? entry))
+        if (!loaded.Entries.TryGetValue(id, out AssetEntry? entry))
         {
             entry = new AssetEntry
             {
                 Type = requested.Type,
-                Read = requested.Read,
+                Import = requested.Import,
                 Stage = AssetStage.Wanted,
                 Progress = requested.Progress,
                 Waiting = [requested.Waiter],
             };
 
-            return snapshot with
+            return loaded with
             {
-                Assets = snapshot.Assets.SetItem(id, entry),
-                Wanted = snapshot.Wanted.Add(id),
+                Entries = loaded.Entries.SetItem(id, entry),
+                Wanted = loaded.Wanted.Add(id),
             };
         }
 
         if (entry.Type != requested.Type)
         {
-            string name = snapshot.GetName(id);
+            string name = database.GetName(id);
             Fail(changes, requested, $"{name} is loaded as a {entry.Type.Name}, so it is not a {requested.Type.Name}.");
 
-            return snapshot;
+            return loaded;
         }
 
         if (entry.Stage == AssetStage.Loaded)
         {
             changes.Answer(requested.Waiter, entry.Outcome);
 
-            return snapshot;
+            return loaded;
         }
 
-        return snapshot with
+        return loaded with
         {
-            Assets = snapshot.Assets.SetItem(id, entry with { Waiting = entry.Waiting.Add(requested.Waiter) }),
+            Entries = loaded.Entries.SetItem(id, entry with { Waiting = entry.Waiting.Add(requested.Waiter) }),
         };
     }
 
     /// <summary>
-    /// Has <paramref name="added"/>'s loader read its type; a type another reads already stays that one's, and is an
+    /// Has <paramref name="added"/>'s importer read its type; a type another reads already stays that one's, and is an
     /// error.
     /// </summary>
-    private static AssetSnapshot AddLoader(AssetSnapshot snapshot, AssetLoaderAdded added)
+    private static LoadedAssets AddImporter(LoadedAssets loaded, AssetImporterAdded added)
     {
-        if (snapshot.Loaders.TryGetValue(added.Type, out object? reads))
+        if (loaded.Importers.TryGetValue(added.Type, out object? reads))
         {
             Log.Error(
-                $"{added.Loader.GetType().Name} reads {added.Type.Name}s, which {reads.GetType().Name} reads already, "
+                $"{added.Importer.GetType().Name} reads {added.Type.Name}s, which {reads.GetType().Name} reads already, "
                     + "so it does not."
             );
 
-            return snapshot;
+            return loaded;
         }
 
-        return snapshot with
+        return loaded with
         {
-            Loaders = snapshot.Loaders.Add(added.Type, added.Loader),
+            Importers = loaded.Importers.Add(added.Type, added.Importer),
         };
     }
 
-    private static AssetSnapshot RemoveLoader(AssetSnapshot snapshot, AssetLoaderRemoved removed) =>
-        snapshot.Loaders.TryGetValue(removed.Type, out object? reads) && ReferenceEquals(reads, removed.Loader)
-            ? snapshot with
+    private static LoadedAssets RemoveImporter(LoadedAssets loaded, AssetImporterRemoved removed) =>
+        loaded.Importers.TryGetValue(removed.Type, out object? reads) && ReferenceEquals(reads, removed.Importer)
+            ? loaded with
             {
-                Loaders = snapshot.Loaders.Remove(removed.Type),
+                Importers = loaded.Importers.Remove(removed.Type),
             }
-            : snapshot;
+            : loaded;
 
-    private static AssetSnapshot AddWriter(AssetSnapshot snapshot, AssetWriterAdded added)
+    private static LoadedAssets AddExporter(LoadedAssets loaded, AssetExporterAdded added)
     {
-        if (snapshot.Writers.TryGetValue(added.Type, out object? writes))
+        if (loaded.Exporters.TryGetValue(added.Type, out object? writes))
         {
             Log.Error(
-                $"{added.Writer.GetType().Name} writes {added.Type.Name}s, which {writes.GetType().Name} writes already, "
+                $"{added.Exporter.GetType().Name} writes {added.Type.Name}s, which {writes.GetType().Name} writes already, "
                     + "so it does not."
             );
 
-            return snapshot;
+            return loaded;
         }
 
-        return snapshot with
+        return loaded with
         {
-            Writers = snapshot.Writers.Add(added.Type, added.Writer),
+            Exporters = loaded.Exporters.Add(added.Type, added.Exporter),
         };
     }
 
-    private static AssetSnapshot RemoveWriter(AssetSnapshot snapshot, AssetWriterRemoved removed) =>
-        snapshot.Writers.TryGetValue(removed.Type, out object? writes) && ReferenceEquals(writes, removed.Writer)
-            ? snapshot with
+    private static LoadedAssets RemoveExporter(LoadedAssets loaded, AssetExporterRemoved removed) =>
+        loaded.Exporters.TryGetValue(removed.Type, out object? writes) && ReferenceEquals(writes, removed.Exporter)
+            ? loaded with
             {
-                Writers = snapshot.Writers.Remove(removed.Type),
+                Exporters = loaded.Exporters.Remove(removed.Type),
             }
-            : snapshot;
+            : loaded;
 
     /// <summary>
     /// Hands out an asset a gem made, replacing any it added under the id before, a version later; refused when a file
     /// has the id.
     /// </summary>
-    private static AssetSnapshot Add(AssetSnapshot snapshot, AssetAdded added)
+    private static LoadedAssets Add(AssetDatabase database, LoadedAssets loaded, AssetAdded added)
     {
-        if (snapshot.Index.ById.TryGetValue(added.Id, out IndexedFile? file))
+        if (database.Index.ById.TryGetValue(added.Id, out IndexedFile? file))
         {
             Log.Error(
                 $"A {added.Type.Name} a gem made has the id {added.Id}, which {file.Path} has, so it is not added."
             );
 
-            return snapshot;
+            return loaded;
         }
 
-        snapshot.Assets.TryGetValue(added.Id, out AssetEntry? before);
+        loaded.Entries.TryGetValue(added.Id, out AssetEntry? before);
         ulong version = (before?.Current?.Version ?? 0) + 1;
         AssetEntry entry = new()
         {
             Type = added.Type,
-            Read = added.Read,
+            Import = added.Import,
             Stage = AssetStage.Landed,
             Waiting = before?.Waiting ?? [],
         };
 
-        return snapshot.Land(added.Id, entry, new Made(Result.Success(added.Asset), version));
+        return loaded.Land(added.Id, entry, new Made(Result.Success(added.Asset), version));
     }
 
     /// <summary>
     /// Says a missing default or failure is missing, the first time it is asked for.
     /// </summary>
-    private static AssetSnapshot ReportMissing(AssetSnapshot snapshot, BuiltInAssetMissing missing)
+    private static LoadedAssets ReportMissing(LoadedAssets loaded, BuiltInAssetMissing missing)
     {
-        if (snapshot.ReportedMissing.Contains(missing.Key))
-            return snapshot;
+        if (loaded.ReportedMissing.Contains(missing.Key))
+            return loaded;
 
         Log.Error(missing.Message);
 
-        return snapshot with
+        return loaded with
         {
-            ReportedMissing = snapshot.ReportedMissing.Add(missing.Key),
+            ReportedMissing = loaded.ReportedMissing.Add(missing.Key),
         };
     }
 
-    private static AssetSnapshot RecordFolder(AssetSnapshot snapshot, AssetFolderListed listed)
+    private static LoadedAssets RecordFolder(LoadedAssets loaded, AssetFolderListed listed)
     {
-        if (!snapshot.Assets.TryGetValue(listed.Id, out AssetEntry? entry) || entry.Folders.Contains(listed.Folder))
-            return snapshot;
+        if (!loaded.Entries.TryGetValue(listed.Id, out AssetEntry? entry) || entry.Folders.Contains(listed.Folder))
+            return loaded;
 
-        return snapshot with
+        return loaded with
         {
-            Assets = snapshot.Assets.SetItem(listed.Id, entry with { Folders = entry.Folders.Add(listed.Folder) }),
+            Entries = loaded.Entries.SetItem(listed.Id, entry with { Folders = entry.Folders.Add(listed.Folder) }),
         };
     }
 
     /// <summary>
-    /// <paramref name="snapshot"/> with <paramref name="dependency"/> among what asset <paramref name="dependent"/>
-    /// depends on.
+    /// <paramref name="loaded"/> with <paramref name="source"/> among what asset <paramref name="dependent"/> is made
+    /// from.
     /// </summary>
-    private static AssetSnapshot RecordDependency(AssetSnapshot snapshot, ulong dependent, ulong dependency)
+    private static LoadedAssets RecordMadeFrom(LoadedAssets loaded, ulong dependent, ulong source)
     {
-        if (!snapshot.Assets.TryGetValue(dependent, out AssetEntry? entry) || entry.Dependencies.Contains(dependency))
-            return snapshot;
+        if (!loaded.Entries.TryGetValue(dependent, out AssetEntry? entry) || entry.MadeFrom.Contains(source))
+            return loaded;
 
-        return snapshot with
+        return loaded with
         {
-            Assets = snapshot.Assets.SetItem(
-                dependent,
-                entry with
-                {
-                    Dependencies = entry.Dependencies.Add(dependency),
-                }
-            ),
+            Entries = loaded.Entries.SetItem(dependent, entry with { MadeFrom = entry.MadeFrom.Add(source) }),
         };
     }
 

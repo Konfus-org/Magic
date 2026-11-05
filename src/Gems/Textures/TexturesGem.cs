@@ -18,7 +18,7 @@ namespace Textures;
 /// version, so an image is encoded once per change. It is public because nothing in its assembly makes it: Magic
 /// does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class TexturesGem(Caches caches) : IGem, IAssetLoader<Texture>, ICache<Texture>
+public sealed class TexturesGem(Caches caches) : IGem, IAssetImporter<Texture>, ICache<Texture>
 {
     private const int HeaderBytes = 24;
 
@@ -29,7 +29,7 @@ public sealed class TexturesGem(Caches caches) : IGem, IAssetLoader<Texture>, IC
     /// </summary>
     public int Version => 1;
 
-    public async Task<Result<Texture>> LoadAsync(
+    public async Task<Result<Texture>> ImportAsync(
         AssetFile file,
         IProgress<LoadProgress>? progress,
         CancellationToken cancel

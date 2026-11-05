@@ -1067,7 +1067,7 @@ public sealed class World : IEcs, IDisposable
 
         string path = _assets.GetPath(content.Domain) ?? "A domain";
         ImmutableArray<DomainPlace> places = GetPlaces(domain.Value);
-        if (places.Length > 0 && !_assets.CanRead<Prefab>())
+        if (places.Length > 0 && !_assets.CanImport<Prefab>())
             return Result.Failure($"{path} holds prefabs, and no gem the project lists reads them.");
 
         Result<Prefab>[] prefabs = await LoadPrefabsAsync(places, progress, cancel).ConfigureAwait(false);

@@ -49,7 +49,7 @@ Write the engine as data flowing through functions, not objects calling each oth
   that order over the gems, on the main thread. A gem implements the ones it needs. One that throws in a hook is logged
   and leaves every hook.
 - Where Core needs something from a gem, the gem implements an interface and Core calls it, as with `IEcs` and
-  `IAssetLoader<T>`. Add one when a gem first needs it.
+  `IAssetImporter<T>`. Add one when a gem first needs it.
 - A gem that keeps something for each entity compares what it holds with the entities each frame, adding what came and
   dropping what went, as the renderer does. It needs no call when content loads or unloads.
 - `Program` sets a run up and owns its loop, calling each service's `Pump` in turn. `App` lasts the whole process; what a
@@ -105,7 +105,7 @@ Write the engine as data flowing through functions, not objects calling each oth
   `InvalidOperationException` or `NotSupportedException`, never `Exception` itself. Use the throw helpers
   (`ArgumentNullException.ThrowIfNull`, `ObjectDisposedException.ThrowIf` and their siblings).
 - Never catch and drop. Log what you catch with what failed and on what, or `throw;`. Catch `Exception` only where one
-  failure mustn't stop the run (a gem's hook or stage, a loader, a forgotten task); elsewhere catch what you expect or
+  failure mustn't stop the run (a gem's hook, an importer, a forgotten task); elsewhere catch what you expect or
   filter with `when`.
 - A log line says what happened and to what, once. Anything that repeats every frame is `Log.Verbose` or a metric.
 - `Assert` is for impossible state and ends the process with a crash file.
@@ -150,7 +150,7 @@ Write the engine as data flowing through functions, not objects calling each oth
 - An asset type holds what its users read: plain data, properties only, no JSON attributes, no file details, no I/O.
   Separate code reads it.
 - An asset type gems share is Core's. One only a gem reads is that gem's.
-- Reading a file format is its loader's one job, and writing one its writer's; anything else known about an asset,
+- Reading a file format is its importer's one job, and writing one its exporter's; anything else known about an asset,
   its sidecar included, is Core's.
 - An import setting is a property of the asset type, declared as one, never a settings type beside it.
 - A key the file must have is `required { get; init; }`. One with a default is `{ get; set; }`, the default as its

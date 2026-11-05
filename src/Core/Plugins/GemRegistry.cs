@@ -183,7 +183,7 @@ internal sealed class GemRegistry
     /// Whether a gem implementing <paramref name="contract"/> hands it to the host, rather than provide it to other gems.
     /// </summary>
     private static bool IsHostContract(Type contract) =>
-        contract == typeof(IAssetLoader<>) || contract == typeof(IAssetWriter<>);
+        contract == typeof(IAssetImporter<>) || contract == typeof(IAssetExporter<>);
 
     /// <summary>
     /// <paramref name="gems"/>, each with the names of the others its constructor asks for, by their class or an
@@ -309,7 +309,7 @@ internal sealed class GemRegistry
     }
 
     /// <summary>
-    /// <paramref name="type"/>'s name as C# writes it: <c>IAssetLoader&lt;Texture&gt;</c>, not <c>IAssetLoader`1</c>.
+    /// <paramref name="type"/>'s name as C# writes it: <c>IAssetImporter&lt;Texture&gt;</c>, not <c>IAssetImporter`1</c>.
     /// </summary>
     private static string GetName(Type type)
     {

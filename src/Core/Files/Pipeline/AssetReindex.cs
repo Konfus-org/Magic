@@ -1,77 +1,58 @@
 using System.Collections.Immutable;
-using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using Magic.Debugging;
-using Magic.Threading;
 using Magic.Utils;
 
 namespace Magic.Files.Pipeline;
 
 /// <summary>
-/// Takes in what the watches see: once they have seen nothing for <see cref="_settleTime"/>, a worker reads the asset
-/// directories again. Then each asset loaded whose file changed, is another file now, lists a folder that changed, or
-/// depends on one of those, and so on
-/// out, loads again, each after its dependencies, as a load waits for those on their way; one whose file is gone is let go.
+/// Takes in the asset directories as they were read again (<see cref="AssetWatches"/>): each asset loaded whose file
+/// changed, is another file now, lists a folder that changed, or was made from one of those, and so on out, loads again,
+/// each after what it was made from, as a load waits for those on their way; one whose file is gone is let go.
 /// </summary>
 internal static class AssetReindex
 {
-    /// <summary>
-    /// How long the files must have been left alone before their changes are taken in: an editor saving a file, or a
-    /// build copying a folder, writes several times in a row.
-    /// </summary>
-    private static readonly TimeSpan _settleTime = TimeSpan.FromMilliseconds(300);
-
-    public static AssetSnapshot Take(AssetSnapshot snapshot, AssetsChangeList state, Assets assets)
+    public static (AssetDatabase, LoadedAssets) Take(
+        AssetDatabase database,
+        LoadedAssets loaded,
+        AssetWatches watches,
+        AssetsChangeList changes,
+        string builtIn,
+        CancellationToken stopped
+    )
     {
-        while (state.TryTakeReindexed(out AssetDirectoriesReindexed reindexed))
+        while (watches.TryTakeRead(out AssetDirectoriesReindexed read))
         {
-            snapshot = snapshot with { IsIndexing = false };
-            if (reindexed.Index is { } index)
-            {
-                snapshot = Reindex(snapshot, index, reindexed.Touched, state);
-            }
+            if (read.Index is { } index)
+                (database, loaded) = Reindex(database, loaded, index, read.Touched, changes);
         }
 
-        while (state.TryTakeTouched(out string? path))
-        {
-            snapshot = snapshot with
-            {
-                Touched = snapshot.Touched.Add(path),
-                TouchedTimestamp = Stopwatch.GetTimestamp(),
-            };
-        }
+        watches.ReadOnceSettled(database.Directories, builtIn, stopped);
 
-        if (
-            !snapshot.Touched.IsEmpty
-            && !snapshot.IsIndexing
-            && Stopwatch.GetElapsedTime(snapshot.TouchedTimestamp) >= _settleTime
-        )
-        {
-            ImmutableHashSet<string> touched = snapshot.Touched;
-            ImmutableArray<string> directories = snapshot.Directories;
-            snapshot = snapshot with { Touched = touched.Clear(), IsIndexing = true };
-            Task.Run(() => ReadDirectories(directories, touched, state, assets), assets.Stopped).FireAndForget();
-        }
-
-        return snapshot;
+        return (database, loaded);
     }
 
-    private static AssetSnapshot Reindex(
-        AssetSnapshot snapshot,
+    private static (AssetDatabase, LoadedAssets) Reindex(
+        AssetDatabase database,
+        LoadedAssets loaded,
         AssetIndex now,
         ImmutableHashSet<string> touched,
         AssetsChangeList changes
     )
     {
-        AssetIndex before = snapshot.Index;
+        AssetIndex before = database.Index;
         HashSet<ulong> changed = AssetIndex.Diff(before, now, touched);
-        changed.UnionWith(snapshot.GetListersOf(touched));
-        HashSet<ulong> reload = [.. changed, .. snapshot.GetDependents(changed, Assets.AllLevels)];
-        snapshot = snapshot with { Index = now, Scanned = snapshot.Scanned.RemoveRange(changed) };
+        changed.UnionWith(loaded.GetListersOf(touched));
+        HashSet<ulong> reload = [.. changed, .. loaded.GetMadeFromThese(changed)];
+        database = database with { Index = now };
+        foreach (ulong id in changed)
+        {
+            database = database.RemoveDependencies(id);
+        }
+
         int reloading = 0;
         foreach (ulong id in reload)
         {
-            if (!snapshot.Assets.TryGetValue(id, out AssetEntry? entry))
+            if (!loaded.Entries.TryGetValue(id, out AssetEntry? entry))
                 continue;
 
             if (!now.ById.ContainsKey(id))
@@ -85,7 +66,7 @@ internal static class AssetReindex
                     changes.Answer(waiter, new Made(Result.Failure($"{gone.Path} is gone."), 0));
                 }
 
-                snapshot = snapshot with { Assets = snapshot.Assets.Remove(id) };
+                loaded = loaded with { Entries = loaded.Entries.Remove(id) };
                 continue;
             }
 
@@ -93,45 +74,18 @@ internal static class AssetReindex
                 continue;
 
             reloading++;
-            snapshot =
+            loaded =
                 entry.Stage == AssetStage.Loaded
-                    ? snapshot.Want(id)
-                    : snapshot with
+                    ? loaded.Want(id)
+                    : loaded with
                     {
-                        Assets = snapshot.Assets.SetItem(id, entry with { IsStale = true }),
+                        Entries = loaded.Entries.SetItem(id, entry with { IsStale = true }),
                     };
         }
 
         if (reloading > 0)
             Log.Info($"Reloading {reloading} assets.");
 
-        return snapshot;
-    }
-
-    /// <summary>
-    /// Reads the asset directories again, on a worker, and pushes what it found. Whatever goes wrong is logged, and the next
-    /// change is still taken in.
-    /// </summary>
-    [SuppressMessage(
-        "Design",
-        "CA1031:Do not catch general exception types",
-        Justification = "Whatever goes wrong taking in one batch is logged, and the next is still taken in."
-    )]
-    private static void ReadDirectories(
-        ImmutableArray<string> directories,
-        ImmutableHashSet<string> touched,
-        AssetsChangeList changes,
-        Assets assets
-    )
-    {
-        try
-        {
-            changes.PushReindexed(AssetIndex.Create(assets.Files, directories, assets.BuiltIn), touched);
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"The asset files' changes could not be taken in: {ex}");
-            changes.PushReindexed(null, touched);
-        }
+        return (database, loaded);
     }
 }

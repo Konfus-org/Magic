@@ -1,42 +1,39 @@
 using System.Collections.Immutable;
-using System.IO.Hashing;
 using System.Reflection;
-using System.Text;
 using System.Text.Json;
 using Magic.Caching;
 using Magic.Debugging;
 using Magic.Files.Pipeline;
-using Magic.Serialization;
 using Magic.Threading;
 using Magic.Utils;
 
 namespace Magic.Files;
 
 /// <summary>
-/// The assets: what the files under the asset directories describe, the project's folder, then each gem's
-/// <c>Resources/</c>, then Magic's built-in one, the first winning a path two of them have. A file is an asset when a
-/// <c>.meta</c> sidecar is beside it, holding its 64-bit id, which is what a <see cref="Handle{T}"/> holds, and the
-/// import settings its loader reads. An asset path is relative to its asset directory, with <c>/</c> between folders on
-/// every OS. Any thread.
+/// The assets, as gems and gameplay use them: what the files under the asset directories describe, the project's folder,
+/// then each gem's <c>Resources/</c>, then Magic's built-in one, the first winning a path two of them have. A file is an
+/// asset when a <c>.meta</c> sidecar is beside it, holding its 64-bit id, which is what a <see cref="Handle{T}"/> holds,
+/// and the import settings its importer reads. An asset path is relative to its asset directory, with <c>/</c> between
+/// folders on every OS. Any thread.
 /// <para>
 /// Every asset directory is indexed as it is registered, a gem's before the gem is made, so finding an asset works in a
 /// constructor; a load asked for before changes are first taken in,
 /// which comes once every gem is made, waits for it, as the gem that reads its type may be made after the one asking.
 /// </para>
 /// <para>
-/// Each file is loaded on a worker by <see cref="ImportPipeline{T}"/>: read it, read its <c>.meta</c>, look in the cache,
-/// make it, keep it in the cache. It is made by the
-/// <see cref="IAssetLoader{T}"/> a gem provides for its type, else by Core itself for a type marked
-/// <see cref="AssetFormatAttribute"/>. What loaded is kept for the run.
+/// Each file is imported on a worker by <see cref="ImportPipeline{T}"/>: read it, read its <c>.meta</c>, look in the
+/// cache, make it, keep it in the cache. It is made by the <see cref="IAssetImporter{T}"/> a gem provides for its type,
+/// else by Core itself for a type marked <see cref="AssetFormatAttribute"/>. What loaded is kept for the run.
 /// </para>
 /// <para>
 /// The asset directories are watched from when they are registered until the assets are disposed. Once their changes settle, they are
-/// indexed again, and every asset loaded whose file changed, or that depends on one that did, is made again, each after
-/// its dependencies: <see cref="GetVersion{T}"/> then says so, and a load gets the new one. One that fails to load again
-/// keeps what loaded before.
+/// indexed again, and every asset loaded whose file changed, or that was made from one that did, is made again, each after
+/// what it was made from: <see cref="GetVersion{T}"/> then says so, and a load gets the new one. One that fails to load
+/// again keeps what loaded before.
 /// </para>
 /// <para>
-/// What it knows is one snapshot, a value every call reads as it is. It changes in one place,
+/// What assets there are and what depends on what is its <see cref="AssetDatabase"/>, what was loaded its
+/// <see cref="LoadedAssets"/>: values every call reads as they are. They change in one place,
 /// <see cref="ProcessChanges"/>, which runs between frames when something was pushed there. So the assets hold still for
 /// the whole frame, and a load lands, or an asset changes, only between frames.
 /// </para>
@@ -48,16 +45,13 @@ public sealed class Assets : IDisposable
     /// </summary>
     public const int AllLevels = int.MaxValue;
 
-    internal const string Sidecar = ".meta";
-
     /// <summary>
     /// The assembly metadata a build records the folder of its part's assets in, where it does not copy them beside it
     /// (the root <c>Directory.Build.props</c>).
     /// </summary>
     private const string ResourcesKey = "Magic.Resources";
 
-    private readonly Caches _caches;
-    private readonly Subscriptions _watches = [];
+    private readonly AssetWatches _watches;
 
     /// <summary>
     /// Ends the loads on their way and the watching, as the assets are disposed.
@@ -65,18 +59,13 @@ public sealed class Assets : IDisposable
     private readonly CancellationTokenSource _stopping = new();
 
     /// <summary>
-    /// What is known: written on the main thread alone, by the pipeline over its change list and before its
-    /// first run.
-    /// </summary>
-    private AssetSnapshot _snapshot = AssetSnapshot.Empty;
-
-    /// <summary>
     /// The assets, knowing Magic's built-in folder and Core's own asset types: register the rest (<see cref="Register(string)"/>).
     /// </summary>
     internal Assets(IFileSystem files, Caches caches)
     {
         Files = files;
-        _caches = caches;
+        Caches = caches;
+        _watches = new AssetWatches(files);
         Stopped = _stopping.Token;
         BuiltIn = GetResources(files, typeof(Assets).Assembly, AppContext.BaseDirectory);
         Register(BuiltIn);
@@ -84,13 +73,22 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
-    /// What it knows as of now, as any thread reads it. The main thread alone writes it.
+    /// What assets there are and what depends on what, as of now, as any thread reads it. The main thread alone writes it.
     /// </summary>
-    internal AssetSnapshot Snapshot
+    internal AssetDatabase Database
     {
-        get => Volatile.Read(ref _snapshot);
-        set => Volatile.Write(ref _snapshot, value);
-    }
+        get => Volatile.Read(ref field);
+        private set => Volatile.Write(ref field, value);
+    } = AssetDatabase.Empty;
+
+    /// <summary>
+    /// What was asked for and made, as of now, as any thread reads it. The main thread alone writes it.
+    /// </summary>
+    internal LoadedAssets Loaded
+    {
+        get => Volatile.Read(ref field);
+        private set => Volatile.Write(ref field, value);
+    } = LoadedAssets.Empty;
 
     /// <summary>
     /// What is asked of the assets, as data: every change to them goes through here. Any thread.
@@ -100,9 +98,9 @@ public sealed class Assets : IDisposable
     internal IFileSystem Files { get; }
 
     /// <summary>
-    /// Where what is slow to make is kept, as the project says: set as the run starts, before a load can begin.
+    /// Where what is slow to make is kept.
     /// </summary>
-    internal Caches? Caches { get; set; }
+    internal Caches Caches { get; }
 
     /// <summary>
     /// The assets that had loaded and loaded again as changes were last taken in.
@@ -136,7 +134,7 @@ public sealed class Assets : IDisposable
         _watches.Dispose();
         Changes.Close(Stopped);
         _stopping.Cancel();
-        foreach (AssetEntry entry in _snapshot.Assets.Values)
+        foreach (AssetEntry entry in Loaded.Entries.Values)
         {
             foreach (TaskCompletionSource<Made> waiter in entry.Waiting)
             {
@@ -152,7 +150,7 @@ public sealed class Assets : IDisposable
     /// </summary>
     public Handle<T> Find<T>(string path)
         where T : IAsset<T> =>
-        Snapshot.Index.ByPath.TryGetValue(path, out IndexedFile? found) && found.Type == typeof(T).Name
+        Database.Index.ByPath.TryGetValue(path, out IndexedFile? found) && found.Type == typeof(T).Name
             ? new Handle<T>(found.Id)
             : Handle<T>.None;
 
@@ -181,7 +179,7 @@ public sealed class Assets : IDisposable
     /// prefabs.
     /// </summary>
     public ImmutableArray<string> GetPaths(string folder) =>
-        Snapshot.Index.ByFolder.TryGetValue(folder, out ImmutableArray<string> paths) ? paths : [];
+        Database.Index.ByFolder.TryGetValue(folder, out ImmutableArray<string> paths) ? paths : [];
 
     /// <summary>
     /// The paths of the assets in <paramref name="folder"/> and every folder under it, as <see cref="Find{T}"/>
@@ -190,7 +188,7 @@ public sealed class Assets : IDisposable
     public ImmutableArray<string> GetPathsUnder(string folder)
     {
         ImmutableArray<string>.Builder paths = ImmutableArray.CreateBuilder<string>();
-        foreach ((string indexed, ImmutableArray<string> files) in Snapshot.Index.ByFolder)
+        foreach ((string indexed, ImmutableArray<string> files) in Database.Index.ByFolder)
         {
             bool isUnder =
                 indexed.Equals(folder, StringComparison.OrdinalIgnoreCase)
@@ -203,7 +201,7 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
-    /// <see cref="GetPaths(string)"/>, as an <see cref="IAssetLoader{T}"/> reads it while making asset
+    /// <see cref="GetPaths(string)"/>, as an <see cref="IAssetImporter{T}"/> reads it while making asset
     /// <paramref name="dependent"/> (<see cref="AssetFile.Id"/>), which is made again when a file in the folder changes.
     /// </summary>
     public ImmutableArray<string> GetPaths(string folder, ulong dependent)
@@ -217,7 +215,7 @@ public sealed class Assets : IDisposable
     /// Where <paramref name="asset"/> is, as <see cref="Find{T}"/> takes it; null when no file has its id.
     /// </summary>
     public string? GetPath<T>(Handle<T> asset)
-        where T : IAsset<T> => Snapshot.Index.ById.TryGetValue(asset.Id, out IndexedFile? found) ? found.Path : null;
+        where T : IAsset<T> => Database.Index.ById.TryGetValue(asset.Id, out IndexedFile? found) ? found.Path : null;
 
     /// <summary>
     /// Which make of <paramref name="asset"/> a load gets: for one read from a file, a hash of the file and its
@@ -227,11 +225,10 @@ public sealed class Assets : IDisposable
     public ulong GetVersion<T>(Handle<T> asset)
         where T : IAsset<T>
     {
-        AssetSnapshot snapshot = Snapshot;
-        if (snapshot.Assets.TryGetValue(asset.Id, out AssetEntry? entry) && entry.Current is { } made)
+        if (Loaded.Entries.TryGetValue(asset.Id, out AssetEntry? entry) && entry.Current is { } made)
             return made.Version;
 
-        if (!snapshot.Index.ById.TryGetValue(asset.Id, out IndexedFile? file))
+        if (!Database.Index.ById.TryGetValue(asset.Id, out IndexedFile? file))
             return 0;
 
         Result<byte[]> bytes = Files.ReadBytes(file.File);
@@ -240,12 +237,20 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
-    /// The ids of the assets <paramref name="asset"/>'s loader loaded as it made it last, naming it as the dependent:
-    /// when one of them is made again, so is it, after it. None for an asset made from its file alone, and for one not
-    /// loaded. What its file names, loaded or not, is <see cref="FindDependenciesAsync{TAsset}"/>'s.
+    /// The ids of what <paramref name="asset"/> holds handles to or was made from, down to <paramref name="levels"/>
+    /// levels: 1 for its own, <see cref="AllLevels"/> for everything under it. As far as is known now, from what has
+    /// loaded or been found; reading what has not is <see cref="FindDependenciesAsync{TAsset}"/>'s.
     /// </summary>
-    public ImmutableArray<ulong> GetDependencies<T>(Handle<T> asset)
-        where T : IAsset<T> => Snapshot.Assets.TryGetValue(asset.Id, out AssetEntry? entry) ? entry.Dependencies : [];
+    public ImmutableArray<ulong> GetDependencies<T>(Handle<T> asset, int levels)
+        where T : IAsset<T> => [.. Database.GetDependencies(asset.Id, levels)];
+
+    /// <summary>
+    /// The ids of what holds handles to <paramref name="asset"/> or was made from it, up to <paramref name="levels"/>
+    /// levels: 1 for what names it itself, <see cref="AllLevels"/> for everything above it. As far as is known now, from
+    /// what has loaded or been found; reading what has not is <see cref="FindDependentsAsync{TAsset}"/>'s.
+    /// </summary>
+    public ImmutableArray<ulong> GetDependents<T>(Handle<T> asset, int levels)
+        where T : IAsset<T> => [.. Database.GetDependents(asset.Id, levels)];
 
     /// <summary>
     /// The asset, or why it could not be loaded. It is read on a worker once every gem is made, and kept, so every
@@ -259,10 +264,10 @@ public sealed class Assets : IDisposable
             : LoadIdAsync<T>(asset.Id, 0, progress, cancel);
 
     /// <summary>
-    /// <paramref name="asset"/>, loaded by an <see cref="IAssetLoader{T}"/> as it makes asset
+    /// <paramref name="asset"/>, loaded by an <see cref="IAssetImporter{T}"/> as it makes asset
     /// <paramref name="dependent"/> (<see cref="AssetFile.Id"/>), as the other overload loads it, and recorded as what
-    /// <paramref name="dependent"/> depends on, so it is made again when <paramref name="asset"/> changes. Refused when
-    /// <paramref name="asset"/> is <paramref name="dependent"/> or depends on it, as each would wait for the other for
+    /// <paramref name="dependent"/> is made from, so it is made again when <paramref name="asset"/> changes. Refused when
+    /// <paramref name="asset"/> is <paramref name="dependent"/> or is made from it, as each would wait for the other for
     /// ever.
     /// </summary>
     public Task<Result<T>> LoadAsync<T>(
@@ -279,8 +284,8 @@ public sealed class Assets : IDisposable
     /// <summary>
     /// The ids of what <paramref name="asset"/> depends on, as its file and theirs name them, down to
     /// <paramref name="levels"/> levels: 1 for what it names itself, <see cref="AllLevels"/> for everything under it.
-    /// Found by reading the file of a type Core reads, and by loading an asset of a type a gem reads; or why one could not
-    /// be read.
+    /// Found by reading the file of a type Core reads, and for a type a gem reads from what its last import kept, else by
+    /// loading it; or why one could not be read.
     /// </summary>
     public Task<Result<ImmutableArray<ulong>>> FindDependenciesAsync<TAsset>(
         Handle<TAsset> asset,
@@ -293,8 +298,9 @@ public sealed class Assets : IDisposable
     /// <summary>
     /// The ids of what depends on <paramref name="asset"/>, as the files under the asset directories name it, up to
     /// <paramref name="levels"/> levels: 1 for what names it itself, <see cref="AllLevels"/> for everything above it.
-    /// Found the first time it is asked by going through every asset: reading the file of a type Core reads, and loading
-    /// an asset of a type a gem reads. One that cannot be read is taken to depend on nothing.
+    /// Found the first time it is asked by going through every asset: reading the file of a type Core reads, and for a
+    /// type a gem reads from what its last import kept, else by loading it. One that cannot be read is taken to depend on
+    /// nothing.
     /// </summary>
     public Task<ImmutableArray<ulong>> FindDependentsAsync<TAsset>(
         Handle<TAsset> asset,
@@ -351,7 +357,7 @@ public sealed class Assets : IDisposable
         where T : IAsset<T>
     {
         if (asset != Handle<T>.None)
-            Changes.RequestAsync(asset.Id, 0, typeof(T), RunLoadAsync<T>, progress).FireAndForget();
+            Changes.RequestAsync(asset.Id, 0, typeof(T), RunImportAsync<T>, progress).FireAndForget();
     }
 
     /// <summary>
@@ -367,17 +373,17 @@ public sealed class Assets : IDisposable
             throw new ArgumentException($"A {typeof(T).Name} is added with no handle.", nameof(handle));
 
         ArgumentNullException.ThrowIfNull(asset);
-        Changes.Push(new AssetAdded(handle.Id, typeof(T), RunLoadAsync<T>, asset));
+        Changes.Push(new AssetAdded(handle.Id, typeof(T), RunImportAsync<T>, asset));
     }
 
     /// <summary>
     /// Writes <paramref name="asset"/> as the asset at <paramref name="path"/>, an asset path under the project's folder,
-    /// through the <see cref="IAssetWriter{T}"/> a gem provides for its type, with the sidecar beside it that makes it
+    /// through the <see cref="IAssetExporter{T}"/> a gem provides for its type, with the sidecar beside it that makes it
     /// an asset, under an id the path decides, so the same path gives the same handle each time: that handle, or why
-    /// it was not written. The path ends in the writer's extension. The asset is found once the directory is indexed
+    /// it was not written. The path ends in the exporter's extension. The asset is found once the directory is indexed
     /// again, or by the next run. Any thread.
     /// </summary>
-    public async Task<Result<Handle<T>>> WriteAsync<T>(
+    public Task<Result<Handle<T>>> SaveAsync<T>(
         T asset,
         string path,
         IProgress<LoadProgress>? progress,
@@ -387,34 +393,10 @@ public sealed class Assets : IDisposable
     {
         ArgumentNullException.ThrowIfNull(asset);
         ArgumentNullException.ThrowIfNull(path);
-        if (Snapshot.Writers.GetValueOrDefault(typeof(T)) is not IAssetWriter<T> writer)
-            return Result.Failure($"no gem the project lists writes {typeof(T).Name}s.");
 
-        if (!path.EndsWith(writer.Extension, StringComparison.OrdinalIgnoreCase))
-            return Result.Failure($"a {typeof(T).Name}'s file ends in {writer.Extension}, not {path}.");
-
-        Result<ReadOnlyMemory<byte>> bytes = await writer.WriteAsync(asset, progress, cancel).ConfigureAwait(false);
-        if (!bytes.Ok)
-            return Result.Failure(bytes.Error);
-
-        string file = Files.Combine(Snapshot.Directories[0], path);
-        Result written = await Files.WriteAsync(file, bytes.Value, cancel).ConfigureAwait(false);
-        if (!written.Ok)
-            return Result.Failure(written.Error);
-
-        ulong id = GetWrittenId(path);
-        Result<JsonElement> sidecar = Json.Write(
-            new Dictionary<string, object> { ["id"] = id, ["type"] = typeof(T).Name },
-            typeof(Dictionary<string, object>)
-        );
-        if (!sidecar.Ok)
-            return Result.Failure(sidecar.Error);
-
-        Result sidecarWritten = await Files
-            .WriteAsync(file + Sidecar, Encoding.UTF8.GetBytes(sidecar.Value.GetRawText()), cancel)
-            .ConfigureAwait(false);
-
-        return sidecarWritten.Ok ? Result.Success(new Handle<T>(id)) : Result.Failure(sidecarWritten.Error);
+        return Loaded.Exporters.GetValueOrDefault(typeof(T)) is IAssetExporter<T> exporter
+            ? ExportPipeline<T>.RunAsync(asset, path, exporter, Database.Directories[0], Files, progress, cancel)
+            : Task.FromResult<Result<Handle<T>>>(Result.Failure($"no gem the project lists writes {typeof(T).Name}s."));
     }
 
     /// <summary>
@@ -428,20 +410,20 @@ public sealed class Assets : IDisposable
         if (!Files.DirectoryExists(directory))
             return;
 
-        AssetSnapshot snapshot = Snapshot;
-        foreach (string added in snapshot.Directories)
+        AssetDatabase database = Database;
+        foreach (string added in database.Directories)
         {
             if (string.Equals(added, directory, StringComparison.OrdinalIgnoreCase))
                 return;
         }
 
         // Watched before it is read, so nothing written meanwhile is missed.
-        Watch(directory);
-        ImmutableArray<string> directories = snapshot.Directories.IsEmpty
+        _watches.Add(directory);
+        ImmutableArray<string> directories = database.Directories.IsEmpty
             ? [directory]
-            : snapshot.Directories.Insert(snapshot.Directories.Length - 1, directory);
-        Snapshot = snapshot with { Directories = directories, Index = AssetIndex.Create(Files, directories, BuiltIn) };
-        Log.Verbose($"Indexed {Snapshot.Index.ById.Count} assets under {directories.Length} folders.");
+            : database.Directories.Insert(database.Directories.Length - 1, directory);
+        Database = database with { Directories = directories, Index = AssetIndex.Create(Files, directories, BuiltIn) };
+        Log.Verbose($"Indexed {Database.Index.ById.Count} assets under {directories.Length} folders.");
     }
 
     /// <summary>
@@ -456,8 +438,8 @@ public sealed class Assets : IDisposable
             if (!type.IsClass || type.IsAbstract || !IsAssetType(type))
                 continue;
 
-            AssetSnapshot snapshot = Snapshot;
-            if (snapshot.Types.TryGetValue(type.Name, out AssetType? other))
+            LoadedAssets loaded = Loaded;
+            if (loaded.Types.TryGetValue(type.Name, out AssetType? other))
             {
                 Log.Error(
                     $"{type.FullName} and {other.Type.FullName} are both asset types named {type.Name}, so a .meta's "
@@ -466,15 +448,15 @@ public sealed class Assets : IDisposable
                 continue;
             }
 
-            AssetReader read = GetGeneric(nameof(RunLoadAsync), type).CreateDelegate<AssetReader>(this);
+            AssetImportRun import = GetGeneric(nameof(RunImportAsync), type).CreateDelegate<AssetImportRun>(this);
             AssetBuiltInReader readBuiltIn = GetGeneric(nameof(ReadBuiltIn), type).CreateDelegate<AssetBuiltInReader>();
-            Snapshot = snapshot with { Types = snapshot.Types.Add(type.Name, new AssetType(type, read, readBuiltIn)) };
+            Loaded = loaded with { Types = loaded.Types.Add(type.Name, new AssetType(type, import, readBuiltIn)) };
         }
     }
 
     /// <summary>
-    /// Has <paramref name="gem"/> read each asset type it implements an <see cref="IAssetLoader{T}"/> of, and write each
-    /// it implements an <see cref="IAssetWriter{T}"/> of, until the subscription is disposed, as the gem ends. A type
+    /// Has <paramref name="gem"/> read each asset type it implements an <see cref="IAssetImporter{T}"/> of, and write each
+    /// it implements an <see cref="IAssetExporter{T}"/> of, until the subscription is disposed, as the gem ends. A type
     /// another gem reads or writes already stays that one's, and is an error.
     /// </summary>
     internal Subscription Register(object gem)
@@ -486,88 +468,91 @@ public sealed class Assets : IDisposable
             if (!contract.IsGenericType)
                 continue;
 
-            if (contract.GetGenericTypeDefinition() == typeof(IAssetLoader<>))
+            if (contract.GetGenericTypeDefinition() == typeof(IAssetImporter<>))
                 reads.Add(contract.GetGenericArguments()[0]);
-            else if (contract.GetGenericTypeDefinition() == typeof(IAssetWriter<>))
+            else if (contract.GetGenericTypeDefinition() == typeof(IAssetExporter<>))
                 writes.Add(contract.GetGenericArguments()[0]);
         }
 
         foreach (Type type in reads)
         {
-            Changes.Push(new AssetLoaderAdded(type, gem));
+            Changes.Push(new AssetImporterAdded(type, gem));
         }
 
         foreach (Type type in writes)
         {
-            Changes.Push(new AssetWriterAdded(type, gem));
+            Changes.Push(new AssetExporterAdded(type, gem));
         }
 
         return new Subscription(() =>
         {
             foreach (Type type in reads)
             {
-                Changes.Push(new AssetLoaderRemoved(type, gem));
+                Changes.Push(new AssetImporterRemoved(type, gem));
             }
 
             foreach (Type type in writes)
             {
-                Changes.Push(new AssetWriterRemoved(type, gem));
+                Changes.Push(new AssetExporterRemoved(type, gem));
             }
         });
     }
 
     /// <summary>
-    /// Takes in what changed, in one go, so what is read holds still until it is all in. Waiters are told last, so the
-    /// snapshot they read has what they waited for. Between frames, so the assets hold still for the frame. Main thread.
+    /// Takes in what changed, in one go, so what is read holds still until it is all in. Waiters are told last, so what
+    /// they read has what they waited for. Between frames, so the assets hold still for the frame. Main thread.
     /// </summary>
     internal void ProcessChanges()
     {
-        AssetSnapshot before = Snapshot;
-        if (!Changes.HasChanges && before.IsLoadingEnabled && before.Touched.IsEmpty)
+        if (!Changes.HasChanges && !_watches.HasWork)
         {
             Reloaded = [];
 
             return;
         }
 
-        AssetSnapshot snapshot = AssetChanges.Take(before, Changes);
-        snapshot = AssetReindex.Take(snapshot, Changes, this);
-        snapshot = AssetLoads.Land(snapshot, Changes);
-        Snapshot = AssetLoads.Start(snapshot, Changes, Stopped);
+        AssetDatabase database = Database;
+        LoadedAssets loaded = Loaded;
+        (database, loaded) = AssetChanges.Take(database, loaded, Changes);
+        (database, loaded) = AssetReindex.Take(database, loaded, _watches, Changes, BuiltIn, Stopped);
+        (database, loaded) = AssetLoads.Land(database, loaded, Changes, Caches, Stopped);
+        loaded = AssetLoads.Start(database, loaded, Changes, Stopped);
+        Database = database;
+        Loaded = loaded;
         Changes.TellWaiters();
         Reloaded = [.. Changes.Reloaded];
         Changes.EndRun();
     }
 
     /// <summary>
-    /// Whether something reads <typeparamref name="T"/>'s files: Core itself, or a gem. Known once its first run has come.
+    /// Whether something reads <typeparamref name="T"/>'s files: Core itself, or a gem. Known once changes are first taken
+    /// in.
     /// </summary>
-    internal bool CanRead<T>()
+    internal bool CanImport<T>()
         where T : IAsset<T> =>
-        typeof(T).GetCustomAttribute<AssetFormatAttribute>() is not null || Snapshot.Loaders.ContainsKey(typeof(T));
+        typeof(T).GetCustomAttribute<AssetFormatAttribute>() is not null || Loaded.Importers.ContainsKey(typeof(T));
 
     /// <summary>
     /// Asset <paramref name="id"/> as <paramref name="type"/>, at once when it has loaded, else once its
-    /// pipeline has it loaded; asked for by asset <paramref name="dependent"/>'s loader when that is not 0.
+    /// pipeline has it loaded; asked for by asset <paramref name="dependent"/>'s importer when that is not 0.
     /// </summary>
     internal async Task<Made> RequestAsync(
         ulong id,
         ulong dependent,
         Type type,
-        AssetReader read,
+        AssetImportRun import,
         IProgress<LoadProgress>? progress,
         CancellationToken cancel
     )
     {
-        AssetSnapshot snapshot = Snapshot;
-        string work = $"Loading {snapshot.GetName(id)}";
+        string work = $"Loading {Database.GetName(id)}";
         progress?.Report(new LoadProgress(work, 0, 1));
 
-        // Loaded already, it needs no run, but a dependency is recorded in one.
+        // Loaded already, it needs no run, but what it was made from is recorded in one.
         Made made;
         if (
             dependent == 0
-            && snapshot.Assets.TryGetValue(id, out AssetEntry? entry)
+            && Loaded.Entries.TryGetValue(id, out AssetEntry? entry)
             && entry.Stage == AssetStage.Loaded
             && entry.Type == type
         )
@@ -577,7 +562,7 @@ public sealed class Assets : IDisposable
         else
         {
             made = await Changes
-                .RequestAsync(id, dependent, type, read, progress)
+                .RequestAsync(id, dependent, type, import, progress)
                 .WaitAsync(cancel)
                 .ConfigureAwait(false);
         }
@@ -588,27 +573,27 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
-    /// Runs the pipeline that loads asset <paramref name="id"/> as a <typeparamref name="T"/>, and says what it made.
+    /// Runs the pipeline that imports asset <paramref name="id"/> as a <typeparamref name="T"/>, and says what it made.
     /// </summary>
-    internal async Task<Made> RunLoadAsync<T>(
+    internal async Task<Made> RunImportAsync<T>(
         ulong id,
         IndexedFile file,
-        object? loader,
+        object? importer,
         IProgress<LoadProgress>? progress,
         CancellationToken cancel
     )
         where T : IAsset<T>
     {
-        AssetLoad<T> load = new()
+        AssetImport<T> import = new()
         {
             Id = id,
             Path = file.Path,
             File = file.File,
             Settings = file.Settings,
-            Loader = loader as IAssetLoader<T>,
+            Importer = importer as IAssetImporter<T>,
             Progress = progress,
         };
-        AssetLoad<T> done = await ImportPipeline<T>.RunAsync(load, Files, _caches, cancel).ConfigureAwait(false);
+        AssetImport<T> done = await ImportPipeline<T>.RunAsync(import, Files, Caches, cancel).ConfigureAwait(false);
 
         return done.Asset is { Ok: true, Value: { } asset }
             ? new Made(Result.Success<object>(asset), done.Version, AssetScan.FindHandles(asset))
@@ -661,15 +646,8 @@ public sealed class Assets : IDisposable
         ).MakeGenericMethod(type);
 
     /// <summary>
-    /// The id of an asset written at the asset path <paramref name="path"/>: the same for it each time, whatever the
-    /// case, and never none.
-    /// </summary>
-    private static ulong GetWrittenId(string path) =>
-        Math.Max(XxHash3.HashToUInt64(Encoding.UTF8.GetBytes(path.ToUpperInvariant())), 1);
-
-    /// <summary>
     /// Asset <paramref name="id"/>, at once when it has loaded, else once its pipeline has it loaded; asked for by asset
-    /// <paramref name="dependent"/>'s loader when that is not 0.
+    /// <paramref name="dependent"/>'s importer when that is not 0.
     /// </summary>
     private async Task<Result<T>> LoadIdAsync<T>(
         ulong id,
@@ -679,7 +657,7 @@ public sealed class Assets : IDisposable
     )
         where T : IAsset<T>
     {
-        Made made = await RequestAsync(id, dependent, typeof(T), RunLoadAsync<T>, progress, cancel)
+        Made made = await RequestAsync(id, dependent, typeof(T), RunImportAsync<T>, progress, cancel)
             .ConfigureAwait(false);
 
         return made.Value.Ok ? Result.Success((T)made.Value.Value) : Result.Failure(made.Value.Error);
@@ -688,12 +666,12 @@ public sealed class Assets : IDisposable
     /// <summary>
     /// The built-in asset named <paramref name="name"/> in <paramref name="folder"/>, as
     /// <see cref="AssetIndex.FindBuiltIn"/> finds it; <paramref name="what"/> says which kind of named asset it is when
-    /// it is missing, which its pipeline says once.
+    /// it is missing, which is said once.
     /// </summary>
     private Handle<T> FindBuiltIn<T>(string folder, string name, string what)
         where T : IAsset<T>
     {
-        if (Snapshot.Index.FindBuiltIn(folder, name) is { } found && found.Type == typeof(T).Name)
+        if (Database.Index.FindBuiltIn(folder, name) is { } found && found.Type == typeof(T).Name)
             return new Handle<T>(found.Id);
 
         Changes.Push(
@@ -705,45 +683,5 @@ public sealed class Assets : IDisposable
         );
 
         return Handle<T>.None;
-    }
-
-    private void Watch(string directory)
-    {
-        Result<IFileWatcher> watched = Files.Watch(directory);
-        if (!watched.Ok)
-        {
-            Log.Warn(
-                $"The assets under {directory} are not watched, so a change there is not taken in: {watched.Error}"
-            );
-
-            return;
-        }
-
-        IFileWatcher watcher = watched.Value;
-        watcher.Created += (_, e) => Touch(directory, e.FullPath);
-        watcher.Changed += (_, e) => Touch(directory, e.FullPath);
-        watcher.Deleted += (_, e) => Touch(directory, e.FullPath);
-        watcher.Renamed += (_, e) =>
-        {
-            Touch(directory, e.OldFullPath);
-            Touch(directory, e.FullPath);
-        };
-        _watches.Add(new Subscription(watcher.Dispose));
-    }
-
-    /// <summary>
-    /// Hands what a watch saw at <paramref name="fullPath"/> under <paramref name="directory"/> to the change list, as a
-    /// path from the asset directory, a sidecar's change being its file's.
-    /// </summary>
-    private void Touch(string directory, string fullPath)
-    {
-        if (fullPath.Length <= directory.Length)
-            return;
-
-        string path = fullPath[(directory.Length + 1)..].Replace('\\', '/');
-        if (path.EndsWith(Sidecar, StringComparison.OrdinalIgnoreCase))
-            path = path[..^Sidecar.Length];
-
-        Changes.PushTouched(path);
     }
 }

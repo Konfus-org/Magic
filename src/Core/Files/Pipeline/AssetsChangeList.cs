@@ -28,24 +28,10 @@ internal sealed class AssetsChangeList
         new UnboundedChannelOptions { SingleReader = true }
     );
 
-    /// <summary>
-    /// The paths the watches saw change, from their asset directories.
-    /// </summary>
-    private readonly Channel<string> _touched = Channel.CreateUnbounded<string>(
-        new UnboundedChannelOptions { SingleReader = true }
-    );
-
-    /// <summary>
-    /// What came of a worker reading the asset directories again.
-    /// </summary>
-    private readonly Channel<AssetDirectoriesReindexed> _reindexed = Channel.CreateUnbounded<AssetDirectoriesReindexed>(
-        new UnboundedChannelOptions { SingleReader = true }
-    );
-
     private readonly List<AssetLoaded> _reloaded = [];
 
     /// <summary>
-    /// What this run has for callers waiting, told once the snapshot they will read holds it.
+    /// What this run has for callers waiting, told once what they will read holds it.
     /// </summary>
     private readonly List<(TaskCompletionSource<Made> Waiter, Made Made)> _answers = [];
 
@@ -56,26 +42,22 @@ internal sealed class AssetsChangeList
     /// </summary>
     public ReadOnlySpan<AssetLoaded> Reloaded => CollectionsMarshal.AsSpan(_reloaded);
 
-    internal bool HasChanges =>
-        _asked.Reader.TryPeek(out _)
-        || _read.Reader.TryPeek(out _)
-        || _touched.Reader.TryPeek(out _)
-        || _reindexed.Reader.TryPeek(out _);
+    internal bool HasChanges => _asked.Reader.TryPeek(out _) || _read.Reader.TryPeek(out _);
 
     /// <summary>
-    /// Asks for asset <paramref name="id"/> as <paramref name="type"/>, by asset <paramref name="dependent"/>'s loader when
-    /// that is not 0: what its load makes.
+    /// Asks for asset <paramref name="id"/> as <paramref name="type"/>, by asset <paramref name="dependent"/>'s importer
+    /// when that is not 0: what its load makes.
     /// </summary>
     internal Task<Made> RequestAsync(
         ulong id,
         ulong dependent,
         Type type,
-        AssetReader read,
+        AssetImportRun import,
         IProgress<LoadProgress>? progress
     )
     {
         TaskCompletionSource<Made> waiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        Push(new AssetRequested(id, type, read, progress, waiter, dependent));
+        Push(new AssetRequested(id, type, import, progress, waiter, dependent));
 
         return waiter.Task;
     }
@@ -90,25 +72,9 @@ internal sealed class AssetsChangeList
     /// </summary>
     internal void PushRead(ulong id, Made made) => _read.Writer.TryWrite(new AssetFileRead(id, made));
 
-    /// <summary>
-    /// A watch saw <paramref name="path"/>, from its asset directory, change.
-    /// </summary>
-    internal void PushTouched(string path) => _touched.Writer.TryWrite(path);
-
-    /// <summary>
-    /// A worker read the asset directories again, as <paramref name="index"/>, none when that failed, after the watches saw
-    /// <paramref name="touched"/>.
-    /// </summary>
-    internal void PushReindexed(AssetIndex? index, ImmutableHashSet<string> touched) =>
-        _reindexed.Writer.TryWrite(new AssetDirectoriesReindexed(index, touched));
-
     internal bool TryTakeAsked([NotNullWhen(true)] out AssetChange? change) => _asked.Reader.TryRead(out change);
 
     internal bool TryTakeRead(out AssetFileRead read) => _read.Reader.TryRead(out read);
-
-    internal bool TryTakeTouched([NotNullWhen(true)] out string? path) => _touched.Reader.TryRead(out path);
-
-    internal bool TryTakeReindexed(out AssetDirectoriesReindexed reindexed) => _reindexed.Reader.TryRead(out reindexed);
 
     internal void AddReloaded(ulong id, object asset) => _reloaded.Add(new AssetLoaded(id, asset));
 
@@ -118,7 +84,7 @@ internal sealed class AssetsChangeList
     internal void Answer(TaskCompletionSource<Made> waiter, Made made) => _answers.Add((waiter, made));
 
     /// <summary>
-    /// Tells the waiters what they get. The snapshot they will read has it by now.
+    /// Tells the waiters what they get. What they will read has it by now.
     /// </summary>
     internal void TellWaiters()
     {
@@ -142,8 +108,6 @@ internal sealed class AssetsChangeList
     {
         _asked.Writer.TryComplete();
         _read.Writer.TryComplete();
-        _touched.Writer.TryComplete();
-        _reindexed.Writer.TryComplete();
         while (_asked.Reader.TryRead(out AssetChange? change))
         {
             if (change is AssetRequested requested)
@@ -159,29 +123,29 @@ internal abstract record AssetChange;
 
 /// <summary>
 /// A caller asked for asset <paramref name="Id"/> as <paramref name="Type"/>, to be told on
-/// <paramref name="Waiter"/>; a loader did, as what asset <paramref name="Dependent"/> depends on, when it is not 0.
+/// <paramref name="Waiter"/>; an importer did, as what asset <paramref name="Dependent"/> is made from, when it is not 0.
 /// </summary>
 internal sealed record AssetRequested(
     ulong Id,
     Type Type,
-    AssetReader Read,
+    AssetImportRun Import,
     IProgress<LoadProgress>? Progress,
     TaskCompletionSource<Made> Waiter,
     ulong Dependent
 ) : AssetChange;
 
-internal sealed record AssetLoaderAdded(Type Type, object Loader) : AssetChange;
+internal sealed record AssetImporterAdded(Type Type, object Importer) : AssetChange;
 
-internal sealed record AssetLoaderRemoved(Type Type, object Loader) : AssetChange;
+internal sealed record AssetImporterRemoved(Type Type, object Importer) : AssetChange;
 
-internal sealed record AssetWriterAdded(Type Type, object Writer) : AssetChange;
+internal sealed record AssetExporterAdded(Type Type, object Exporter) : AssetChange;
 
-internal sealed record AssetWriterRemoved(Type Type, object Writer) : AssetChange;
+internal sealed record AssetExporterRemoved(Type Type, object Exporter) : AssetChange;
 
 /// <summary>
 /// A gem made <paramref name="Asset"/> and hands it out as asset <paramref name="Id"/>.
 /// </summary>
-internal sealed record AssetAdded(ulong Id, Type Type, AssetReader Read, object Asset) : AssetChange;
+internal sealed record AssetAdded(ulong Id, Type Type, AssetImportRun Import, object Asset) : AssetChange;
 
 /// <summary>
 /// A built-in default or failure, <paramref name="Key"/>, was asked for and is missing, as <paramref name="Message"/>
@@ -190,21 +154,17 @@ internal sealed record AssetAdded(ulong Id, Type Type, AssetReader Read, object 
 internal sealed record BuiltInAssetMissing(string Key, string Message) : AssetChange;
 
 /// <summary>
-/// Asset <paramref name="Id"/>'s loader read what is in <paramref name="Folder"/>, so it is made again when that changes.
+/// Asset <paramref name="Id"/>'s importer read what is in <paramref name="Folder"/>, so it is made again when that
+/// changes.
 /// </summary>
 internal sealed record AssetFolderListed(ulong Id, string Folder) : AssetChange;
 
 /// <summary>
-/// A scan of asset <paramref name="Id"/>'s file found what it depends on, without loading them.
+/// What asset <paramref name="Id"/> depends on was found without loading it.
 /// </summary>
-internal sealed record AssetDependenciesScanned(ulong Id, ImmutableArray<ulong> Dependencies) : AssetChange;
+internal sealed record AssetDependenciesFound(ulong Id, ImmutableArray<ulong> Dependencies) : AssetChange;
 
 /// <summary>
 /// A worker finished reading asset <paramref name="Id"/>'s file, which made <paramref name="Made"/>.
 /// </summary>
 internal readonly record struct AssetFileRead(ulong Id, Made Made);
-
-/// <summary>
-/// The asset directories as they were read again, none when that failed, and the paths the watches saw that led to it.
-/// </summary>
-internal readonly record struct AssetDirectoriesReindexed(AssetIndex? Index, ImmutableHashSet<string> Touched);

@@ -66,7 +66,7 @@ internal static class AssetScan
 
     /// <summary>
     /// Adds the ids of the handles in <paramref name="value"/> to <paramref name="found"/>: it, when it is one, else
-    /// what its collection holds, else its public properties.
+    /// what its collection holds, else its public fields, as a component's are, and properties.
     /// </summary>
     private static void Visit(object? value, HashSet<ulong> found, HashSet<object> seen)
     {
@@ -85,6 +85,9 @@ internal static class AssetScan
             return;
         }
 
+        if (type.IsValueType && !CanHoldHandle(type))
+            return;
+
         // A class is visited once, so one that refers back to itself ends.
         if (!type.IsValueType && !seen.Add(value))
             return;
@@ -101,6 +104,12 @@ internal static class AssetScan
             }
 
             return;
+        }
+
+        foreach (FieldInfo field in type.GetFields(BindingFlags.Public | BindingFlags.Instance))
+        {
+            if (!field.FieldType.IsByRefLike && !field.FieldType.IsPointer)
+                Visit(field.GetValue(value), found, seen);
         }
 
         foreach (PropertyInfo property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))

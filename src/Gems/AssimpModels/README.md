@@ -1,6 +1,6 @@
 # AssimpModels
 
-Reads FBX, glTF and OBJ files through assimp: provides `IAssetLoader<Model>`.
+Reads FBX, glTF and OBJ files through assimp: provides `IAssetImporter<Model>`.
 
 To use it, list `AssimpModels` in a project's `.magic` file.
 

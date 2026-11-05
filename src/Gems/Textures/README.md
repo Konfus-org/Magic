@@ -1,7 +1,7 @@
 # Textures
 
 Reads PNG, JPEG, TGA and BMP files into textures ready to upload, and keeps the encoded result in the cache under the
-file's version: provides `IAssetLoader<Texture>`.
+file's version: provides `IAssetImporter<Texture>`.
 
 To use it, list `Textures` in a project's `.magic` file.
 

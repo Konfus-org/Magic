@@ -21,7 +21,7 @@ public enum AssetFileFormat : byte
 
 /// <summary>
 /// Has Core read an asset type's files itself, in <see cref="Format"/>. A type without it is read by the
-/// <see cref="IAssetLoader{T}"/> a gem provides for it.
+/// <see cref="IAssetImporter{T}"/> a gem provides for it.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class, Inherited = false)]
 public sealed class AssetFormatAttribute(AssetFileFormat format) : Attribute

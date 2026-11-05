@@ -1,4 +1,7 @@
+using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
+using Magic.Caching;
 using Magic.Debugging;
 using Magic.Threading;
 using Magic.Utils;
@@ -11,45 +14,90 @@ namespace Magic.Files.Pipeline;
 internal static class AssetLoads
 {
     /// <summary>
-    /// Turns finished reads into the asset: its waiters are told, and one that had loaded is among what reloaded. A read
-    /// whose file changed meanwhile is read again instead.
+    /// Turns finished reads into the asset: its waiters are told, what it depends on goes in the database, and one that
+    /// had loaded is among what reloaded. A read whose file changed meanwhile is read again instead.
     /// </summary>
-    public static AssetSnapshot Land(AssetSnapshot snapshot, AssetsChangeList changes)
+    public static (AssetDatabase, LoadedAssets) Land(
+        AssetDatabase database,
+        LoadedAssets loaded,
+        AssetsChangeList changes,
+        Caches caches,
+        CancellationToken stopped
+    )
     {
-        if (snapshot.Landed.IsEmpty)
-            return snapshot;
+        if (loaded.Landed.IsEmpty)
+            return (database, loaded);
 
-        foreach (ulong id in snapshot.Landed)
+        foreach (ulong id in loaded.Landed)
         {
             // Gone since it finished, with its waiters told as it went.
-            if (!snapshot.Assets.TryGetValue(id, out AssetEntry? entry) || entry.Landing is not { } made)
+            if (!loaded.Entries.TryGetValue(id, out AssetEntry? entry) || entry.Landing is not { } made)
                 continue;
 
-            snapshot = entry.IsStale ? snapshot.Want(id) : Finish(snapshot, id, entry, made, changes);
+            if (entry.IsStale)
+            {
+                loaded = loaded.Want(id);
+                continue;
+            }
+
+            loaded = Finish(loaded, id, entry, made, changes);
+            if (made.Value.Ok && !made.Handles.IsDefault)
+            {
+                ImmutableArray<ulong> dependencies = [.. made.Handles.Union(entry.MadeFrom)];
+                database = database.SetDependencies(id, dependencies);
+                if (loaded.Importers.ContainsKey(entry.Type) && database.Index.ById.ContainsKey(id))
+                    KeepDependencies(id, made.Version, dependencies, caches, stopped);
+            }
         }
 
-        return snapshot with
-        {
-            Landed = [],
-        };
+        return (database, loaded with { Landed = [] });
     }
 
     /// <summary>
-    /// Starts what is wanted on workers, forgetting what each depended on, as its read records its own. One no file has
-    /// fails at once.
+    /// Starts what is wanted on workers, forgetting what each was made from, as its read records its own. One no file
+    /// has fails at once.
     /// </summary>
-    public static AssetSnapshot Start(AssetSnapshot snapshot, AssetsChangeList changes, CancellationToken stopped)
+    public static LoadedAssets Start(
+        AssetDatabase database,
+        LoadedAssets loaded,
+        AssetsChangeList changes,
+        CancellationToken stopped
+    )
     {
-        if (snapshot.Wanted.IsEmpty)
-            return snapshot;
+        if (loaded.Wanted.IsEmpty)
+            return loaded;
 
-        foreach (ulong id in snapshot.Wanted)
+        foreach (ulong id in loaded.Wanted)
         {
-            if (snapshot.Assets.TryGetValue(id, out AssetEntry? entry) && entry.Stage == AssetStage.Wanted)
-                snapshot = StartOne(snapshot, id, entry, changes, stopped);
+            if (!loaded.Entries.TryGetValue(id, out AssetEntry? entry) || entry.Stage != AssetStage.Wanted)
+                continue;
+
+            if (!database.Index.ById.TryGetValue(id, out IndexedFile? file))
+            {
+                Made none = new(Result.Failure($"No asset has the id {id}."), 0);
+                loaded = Finish(loaded, id, entry, none, changes);
+                continue;
+            }
+
+            object? importer = loaded.Importers.GetValueOrDefault(entry.Type);
+            Task.Run(() => ReadFileAsync(id, entry, file, importer, changes, stopped), stopped).FireAndForget();
+            loaded = loaded with
+            {
+                Entries = loaded.Entries.SetItem(
+                    id,
+                    entry with
+                    {
+                        Stage = AssetStage.Loading,
+                        IsStale = false,
+                        MadeFrom = [],
+                        Folders = [],
+                        Progress = null,
+                    }
+                ),
+            };
         }
 
-        return snapshot with
+        return loaded with
         {
             Wanted = [],
         };
@@ -59,8 +107,8 @@ internal static class AssetLoads
     /// Takes in what a load of asset <paramref name="id"/> made and tells its waiters: one that failed while what it made
     /// before is kept leaves that in use, and says so.
     /// </summary>
-    private static AssetSnapshot Finish(
-        AssetSnapshot snapshot,
+    private static LoadedAssets Finish(
+        LoadedAssets loaded,
         ulong id,
         AssetEntry entry,
         Made made,
@@ -91,15 +139,34 @@ internal static class AssetLoads
             changes.Answer(waiter, done.Outcome);
         }
 
-        return snapshot with
+        return loaded with
         {
-            Assets = snapshot.Assets.SetItem(id, done),
-            Scanned =
-                made.Value.Ok && !made.Handles.IsDefault
-                    ? snapshot.Scanned.SetItem(id, made.Handles)
-                    : snapshot.Scanned,
+            Entries = loaded.Entries.SetItem(id, done),
         };
     }
+
+    /// <summary>
+    /// Keeps what a gem-read asset depends on in the cache, by its file's version, so finding that later doesn't load it.
+    /// </summary>
+    private static void KeepDependencies(
+        ulong id,
+        ulong version,
+        ImmutableArray<ulong> dependencies,
+        Caches caches,
+        CancellationToken stopped
+    ) =>
+        Task.Run(
+                () =>
+                    caches.WriteAsync(
+                        id,
+                        version,
+                        new AssetDependencies(dependencies),
+                        AssetDependencyCache.Instance,
+                        stopped
+                    ),
+                stopped
+            )
+            .FireAndForget();
 
     /// <summary>
     /// Reads <paramref name="file"/> and makes its asset, on a worker, and hands what it made to the next run.
@@ -107,13 +174,13 @@ internal static class AssetLoads
     [SuppressMessage(
         "Design",
         "CA1031:Do not catch general exception types",
-        Justification = "A loader that throws on a file fails that file, as content that does not load; the run goes on."
+        Justification = "An importer that throws on a file fails that file, as content that does not load; the run goes on."
     )]
     private static async Task ReadFileAsync(
         ulong id,
         AssetEntry entry,
         IndexedFile file,
-        object? loader,
+        object? importer,
         AssetsChangeList changes,
         CancellationToken stopped
     )
@@ -121,47 +188,13 @@ internal static class AssetLoads
         Made made;
         try
         {
-            made = await entry.Read(id, file, loader, entry.Progress, stopped).ConfigureAwait(false);
+            made = await entry.Import(id, file, importer, entry.Progress, stopped).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            made = new Made(Result.Failure($"{file.Path} is not a {entry.Type.Name}: its loader threw: {ex}"), 0);
+            made = new Made(Result.Failure($"{file.Path} is not a {entry.Type.Name}: its importer threw: {ex}"), 0);
         }
 
         changes.PushRead(id, made);
-    }
-
-    private static AssetSnapshot StartOne(
-        AssetSnapshot snapshot,
-        ulong id,
-        AssetEntry entry,
-        AssetsChangeList changes,
-        CancellationToken stopped
-    )
-    {
-        if (!snapshot.Index.ById.TryGetValue(id, out IndexedFile? file))
-        {
-            Made none = new(Result.Failure($"No asset has the id {id}."), 0);
-
-            return Finish(snapshot, id, entry, none, changes);
-        }
-
-        object? loader = snapshot.Loaders.GetValueOrDefault(entry.Type);
-        Task.Run(() => ReadFileAsync(id, entry, file, loader, changes, stopped), stopped).FireAndForget();
-
-        return snapshot with
-        {
-            Assets = snapshot.Assets.SetItem(
-                id,
-                entry with
-                {
-                    Stage = AssetStage.Loading,
-                    IsStale = false,
-                    Dependencies = [],
-                    Folders = [],
-                    Progress = null,
-                }
-            ),
-        };
     }
 }

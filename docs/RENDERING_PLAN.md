@@ -32,7 +32,7 @@ every term has a world-space source that works when the thing it needs is behind
 ## The shape
 
 ```text
-Core    IGraphicsApi    IShaderCompiler    IRendering  IRenderPipeline    IAssetLoader<Model>    ILoadPostProcessor<Model>
+Core    IGraphicsApi    IShaderCompiler    IRendering  IRenderPipeline    IAssetImporter<Model>    ILoadPostProcessor<Model>
              ▲                ▲                ▲              ▲                   ▲                        ▲
 gems  VulkanGraphics ┘  SlangShaders ┘  WorldRenderer ┴──────┘        AssimpModels ┘        MeshPreprocessor ┘
 ```
@@ -43,7 +43,7 @@ Six gems, each talking to the others only through Core:
 | ------------------ | ------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------ |
 | `VulkanGraphics`   | `IGraphicsApi`                                    | settings, `Threads`, `IWindow?`                                             | Vortice.Vulkan, SDL3     |
 | `SlangShaders`     | `IShaderCompiler`, `ICache<CompiledShader>`       | `Assets`, `Caches`, settings                                                | slang                    |
-| `AssimpModels`     | `IAssetLoader<Model>`                             | nothing                                                                     | assimp                   |
+| `AssimpModels`     | `IAssetImporter<Model>`                             | nothing                                                                     | assimp                   |
 | `MeshPreprocessor` | `ILoadPostProcessor<Model>`, `ICache<MeshDerived>` | `Assets`, `Caches`, `Threads`, settings                                     | meshoptimizer            |
 | `WorldRenderer`    | `IRendering`, `IPreloader`, `ICache<GpuTexture>` | `IGraphicsApi`, `IShaderCompiler`, `Assets`, `Caches`, `World`, `Threads`, `App`, settings, `IWindow?`, `IScripts` | bc7enc |
 | `SdlPlatform`      | already planned; the window and input             |                                                                             |                          |

@@ -16,7 +16,7 @@ namespace AssimpModels;
 /// materials are first used. It is public because nothing in its assembly makes it: Magic does, by reflection, when
 /// a project lists the gem.
 /// </summary>
-public sealed unsafe class AssimpModelsGem : IGem, IAssetLoader<Model>
+public sealed unsafe class AssimpModelsGem : IGem, IAssetImporter<Model>
 {
     /// <summary>
     /// How a file is brought into the engine's frame: left-handed with clockwise triangles, in metres, every node's
@@ -38,7 +38,7 @@ public sealed unsafe class AssimpModelsGem : IGem, IAssetLoader<Model>
 
     public ImmutableArray<string> Extensions { get; } = [".fbx", ".glb", ".gltf", ".obj"];
 
-    public Task<Result<Model>> LoadAsync(AssetFile file, IProgress<LoadProgress>? progress, CancellationToken cancel)
+    public Task<Result<Model>> ImportAsync(AssetFile file, IProgress<LoadProgress>? progress, CancellationToken cancel)
     {
         Vector3 origin = file.Metadata.Get<Vector3>(nameof(Model.Origin));
 

@@ -4,13 +4,13 @@ using Magic.Utils;
 namespace Magic.Files.Pipeline;
 
 /// <summary>
-/// Reads the files of one asset type: an importer, turning a file format on disk into what the engine works with. A
-/// gem provides one for its format by implementing it; the host hands it to <see cref="Assets"/> as the gem is
-/// made, and takes it back as the gem ends. One loader reads a type. A type marked <see cref="AssetFormatAttribute"/> is read
-/// by Core itself. A loader that is also an <see cref="Caching.ICache{T}"/> has what it loads cached by the asset's id and
-/// version, and isn't asked again until the file or its <c>.meta</c> changes.
+/// Reads the files of one asset type, turning a file format on disk into what the engine works with. A gem provides one
+/// for its format by implementing it; the host hands it to <see cref="Assets"/> as the gem is made, and takes it back as
+/// the gem ends. One importer reads a type. A type marked <see cref="AssetFormatAttribute"/> is read by Core itself. An
+/// importer that is also an <see cref="Caching.ICache{T}"/> has what it imports cached by the asset's id and version, and
+/// isn't asked again until the file or its <c>.meta</c> changes.
 /// </summary>
-public interface IAssetLoader<T>
+public interface IAssetImporter<T>
     where T : IAsset<T>
 {
     /// <summary>
@@ -26,5 +26,5 @@ public interface IAssetLoader<T>
     /// <paramref name="file"/>'s id as the dependent, so the asset is made again when one of them changes. On a worker,
     /// for several files at once.
     /// </summary>
-    Task<Result<T>> LoadAsync(AssetFile file, IProgress<LoadProgress>? progress, CancellationToken cancel);
+    Task<Result<T>> ImportAsync(AssetFile file, IProgress<LoadProgress>? progress, CancellationToken cancel);
 }

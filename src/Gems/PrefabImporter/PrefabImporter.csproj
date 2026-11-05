@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- A gem: Magic loads it from Gems/DomainLoader/DomainLoader.dll when a project lists DomainLoader. -->
+  <!-- A gem: Magic loads it from Gems/PrefabImporter/PrefabImporter.dll when a project lists PrefabImporter. -->
   <PropertyGroup>
     <!-- Shown beside the gem as Magic starts it. -->
-    <Description>Reads .domain files and the folders they are in.</Description>
+    <Description>Reads .prefab files.</Description>
     <Version>1.0.0</Version>
   </PropertyGroup>
   <ItemGroup>

@@ -7,18 +7,18 @@ using Magic.Files.Types;
 using Magic.Plugins;
 using Magic.Utils;
 
-namespace DomainLoader;
+namespace DomainImporter;
 
 /// <summary>
 /// Reads <c>.domain</c> files into <see cref="Domain"/>s, each in a folder of its own beside its prefabs: every one in the
 /// folder named <c>x_y_z</c> a chunk, and any other at the domain's origin. The file itself holds nothing, so <c>{}</c>
 /// does. It is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class DomainLoaderGem(Assets assets) : IGem, IAssetLoader<Domain>
+public sealed class DomainImporterGem(Assets assets) : IGem, IAssetImporter<Domain>
 {
     public ImmutableArray<string> Extensions => [".domain"];
 
-    public Task<Result<Domain>> LoadAsync(AssetFile file, IProgress<LoadProgress>? progress, CancellationToken cancel)
+    public Task<Result<Domain>> ImportAsync(AssetFile file, IProgress<LoadProgress>? progress, CancellationToken cancel)
     {
         string work = $"Reading {file.Path}";
         progress?.Report(new LoadProgress(work, 0, 1));

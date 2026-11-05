@@ -81,7 +81,7 @@ public readonly record struct TextureLevel(int Width, int Height, int Offset, in
 
 /// <summary>
 /// An image, decoded and ready to upload: every mip level in <see cref="Pixels"/>, level 0 first, tightly packed. Its
-/// loader has already turned it into <see cref="Format"/> and made its mips, so whatever draws it copies bytes and
+/// importer has already turned it into <see cref="Format"/> and made its mips, so whatever draws it copies bytes and
 /// nothing else.
 /// </summary>
 public sealed class Texture : IAsset<Texture>

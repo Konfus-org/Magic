@@ -5,8 +5,9 @@ using Magic.Utils;
 namespace Magic.Files.Pipeline;
 
 /// <summary>
-/// Walks what assets depend on, down or up to a number of levels, and loads what it finds: what
-/// <see cref="Assets"/>'s dependency calls run. An asset's own handles are found by <see cref="AssetScan"/>.
+/// Walks what assets depend on, down or up to a number of levels, finding what the database does not know yet, and loads
+/// what it finds: what <see cref="Assets"/>'s dependency calls run. An asset's own handles are found by
+/// <see cref="AssetScan"/>.
 /// </summary>
 internal static class AssetCrawl
 {
@@ -21,7 +22,7 @@ internal static class AssetCrawl
         CancellationToken cancel
     )
     {
-        string work = $"Finding what {assets.Snapshot.GetName(id)} depends on";
+        string work = $"Finding what {assets.Database.GetName(id)} depends on";
         HashSet<ulong> found = [];
         List<ulong> level = [id];
         int scanned = 0;
@@ -62,9 +63,9 @@ internal static class AssetCrawl
     )
     {
         // What each asset depends on, turned around: who depends on each.
-        AssetSnapshot snapshot = assets.Snapshot;
-        AssetIndex index = snapshot.Index;
-        string work = $"Finding what depends on {snapshot.GetName(asset)}";
+        AssetDatabase database = assets.Database;
+        AssetIndex index = database.Index;
+        string work = $"Finding what depends on {database.GetName(asset)}";
         Dictionary<ulong, List<ulong>> dependents = [];
         int scanned = 0;
         foreach (ulong id in index.ById.Keys)
@@ -86,7 +87,7 @@ internal static class AssetCrawl
             }
         }
 
-        HashSet<ulong> found = AssetSnapshot.Walk(
+        HashSet<ulong> found = AssetDatabase.Walk(
             [asset],
             levels,
             id => dependents.TryGetValue(id, out List<ulong>? of) ? of : []
@@ -124,9 +125,9 @@ internal static class AssetCrawl
     }
 
     /// <summary>
-    /// The ids of the handles asset <paramref name="id"/> holds, found by reflection: from the last scan of it while its
-    /// file is the same, else from it as it has loaded, else from its file read by Core for a type Core reads, else
-    /// from loading it; or why it could not be read.
+    /// What asset <paramref name="id"/> depends on: from the database when it has been through it while its file is the
+    /// same, else from it as it has loaded, else from its file read by Core for a type Core reads, else from the cache by
+    /// its file's version, else from loading it; or why it could not be read.
     /// </summary>
     private static async Task<Result<ImmutableArray<ulong>>> ScanAsync(
         Assets assets,
@@ -134,20 +135,21 @@ internal static class AssetCrawl
         CancellationToken cancel
     )
     {
-        AssetSnapshot state = assets.Snapshot;
-        if (state.Scanned.TryGetValue(id, out ImmutableArray<ulong> scanned))
-            return Result.Success(scanned);
+        AssetDatabase database = assets.Database;
+        if (database.HasDependencies(id))
+            return Result.Success<ImmutableArray<ulong>>([.. database.GetDependencies(id, 1)]);
 
-        if (!state.Index.ById.TryGetValue(id, out IndexedFile? file))
+        if (!database.Index.ById.TryGetValue(id, out IndexedFile? file))
             return Result.Failure($"No asset has the id {id}.");
 
-        if (!state.Types.TryGetValue(file.Type, out AssetType? type))
+        if (!assets.Loaded.Types.TryGetValue(file.Type, out AssetType? type))
             return Result.Failure(
                 $"{file.Path} is a {file.Type}, which neither Magic nor a gem the project lists holds."
             );
 
-        // Loaded, what it holds is there: scanned as it loaded, or one a gem added.
-        if (state.Assets.TryGetValue(id, out AssetEntry? entry) && entry.Current is { Value: { Ok: true } current })
+        // Loaded, what it holds is there: one a gem added.
+        LoadedAssets loaded = assets.Loaded;
+        if (loaded.Entries.TryGetValue(id, out AssetEntry? entry) && entry.Current is { Value: { Ok: true } current })
             return Result.Success(AssetScan.FindHandles(current.Value));
 
         if (type.Type.GetCustomAttribute<AssetFormatAttribute>() is not null)
@@ -161,20 +163,46 @@ internal static class AssetCrawl
                 return Result.Failure(read.Error);
 
             ImmutableArray<ulong> dependencies = AssetScan.FindHandles(read.Value);
-            assets.Changes.Push(new AssetDependenciesScanned(id, dependencies));
+            assets.Changes.Push(new AssetDependenciesFound(id, dependencies));
 
             return Result.Success(dependencies);
         }
 
         // No gem the project lists reads it, so it names nothing that can be found.
-        if (!state.Loaders.ContainsKey(type.Type))
+        if (!loaded.Importers.ContainsKey(type.Type))
             return Result.Success<ImmutableArray<ulong>>([]);
 
-        // TODO(Konfus): keep each gem-read asset's dependency ids in the disk cache, keyed by its file's version, so finding
-        // them doesn't load it.
-        Made made = await assets.RequestAsync(id, 0, type.Type, type.Read, null, cancel).ConfigureAwait(false);
+        Result<AssetDependencies> kept = await ReadKeptAsync(assets, file, cancel).ConfigureAwait(false);
+        if (kept.Ok)
+        {
+            assets.Changes.Push(new AssetDependenciesFound(id, kept.Value.Ids));
+
+            return Result.Success(kept.Value.Ids);
+        }
+
+        Made made = await assets.RequestAsync(id, 0, type.Type, type.Import, null, cancel).ConfigureAwait(false);
 
         return made.Value.Ok ? Result.Success(made.Handles) : Result.Failure(made.Value.Error);
+    }
+
+    /// <summary>
+    /// What <paramref name="file"/> came to depend on when it was last imported, while it is the same; why not otherwise.
+    /// </summary>
+    private static async Task<Result<AssetDependencies>> ReadKeptAsync(
+        Assets assets,
+        IndexedFile file,
+        CancellationToken cancel
+    )
+    {
+        Result<byte[]> bytes = await assets.Files.ReadBytesAsync(file.File, cancel).ConfigureAwait(false);
+        if (!bytes.Ok)
+            return Result.Failure(bytes.Error);
+
+        ulong version = AssetIndex.ComputeVersion(bytes.Value, file.Settings);
+
+        return await assets
+            .Caches.ReadAsync(file.Id, version, AssetDependencyCache.Instance, cancel)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -187,16 +215,16 @@ internal static class AssetCrawl
         CancellationToken cancel
     )
     {
-        AssetSnapshot state = assets.Snapshot;
-        if (!state.Index.ById.TryGetValue(id, out IndexedFile? file))
+        AssetDatabase database = assets.Database;
+        if (!database.Index.ById.TryGetValue(id, out IndexedFile? file))
             return Result.Failure($"No asset has the id {id}.");
 
-        if (!state.Types.TryGetValue(file.Type, out AssetType? type))
+        if (!assets.Loaded.Types.TryGetValue(file.Type, out AssetType? type))
             return Result.Failure(
                 $"{file.Path} is a {file.Type}, which neither Magic nor a gem the project lists holds."
             );
 
-        Made made = await assets.RequestAsync(id, 0, type.Type, type.Read, progress, cancel).ConfigureAwait(false);
+        Made made = await assets.RequestAsync(id, 0, type.Type, type.Import, progress, cancel).ConfigureAwait(false);
 
         return made.Value;
     }

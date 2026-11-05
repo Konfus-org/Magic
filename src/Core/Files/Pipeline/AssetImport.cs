@@ -4,10 +4,10 @@ using Magic.Utils;
 namespace Magic.Files.Pipeline;
 
 /// <summary>
-/// One <typeparamref name="T"/> being loaded (<see cref="ImportPipeline{T}"/>): the asset's file as far as it has been
+/// One <typeparamref name="T"/> being imported (<see cref="ImportPipeline{T}"/>): the asset's file as far as it has been
 /// read, and what was made of it.
 /// </summary>
-internal readonly record struct AssetLoad<T>
+internal readonly record struct AssetImport<T>
     where T : IAsset<T>
 {
     public required ulong Id { get; init; }
@@ -47,16 +47,16 @@ internal readonly record struct AssetLoad<T>
     /// <summary>
     /// The gem that reads its type; none when Core does.
     /// </summary>
-    internal IAssetLoader<T>? Loader { get; init; }
+    internal IAssetImporter<T>? Importer { get; init; }
 
     internal IProgress<LoadProgress>? Progress { get; init; }
 
     internal bool IsFailed => Asset is { Ok: false };
 
     /// <summary>
-    /// This load, failed: its file is not a <typeparamref name="T"/>, as <paramref name="why"/> says.
+    /// This import, failed: its file is not a <typeparamref name="T"/>, as <paramref name="why"/> says.
     /// </summary>
-    internal AssetLoad<T> ToNotAsset(string why) => ToFailed($"{Path} is not a {typeof(T).Name}: {why}");
+    internal AssetImport<T> ToNotAsset(string why) => ToFailed($"{Path} is not a {typeof(T).Name}: {why}");
 
-    internal AssetLoad<T> ToFailed(string error) => this with { Asset = (Result<T>)Result.Failure(error) };
+    internal AssetImport<T> ToFailed(string error) => this with { Asset = (Result<T>)Result.Failure(error) };
 }
