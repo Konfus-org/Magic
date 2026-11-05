@@ -36,13 +36,21 @@ internal enum PassShaders : byte
 internal sealed class GpuPipelines(IGraphicsApi gpu, IShaderCompiler shaders, Assets assets) : IDisposable
 {
     private const string Folder = "Shaders/";
+
     private const string StandardMaterial = "Shaders/Material/Standard.slang";
+
     private const string AtmosphereSky = "Shaders/Sky/Atmosphere.slang";
+
     private const string GlassMaterial = "Shaders/Material/Glass.slang";
+
     private const string NoEffect = "Shaders/Post/NoEffect.slang";
+
     private const string FieldTracer = "Shaders/Trace/DistanceField.slang";
+
     private const string RayQueryTracer = "Shaders/Trace/RayQuery.slang";
+
     private const string PostModule = "PostPasses";
+
     private const int EffectSlots = 4;
 
     private readonly List<GpuPass> _passes = [];
@@ -63,6 +71,11 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, IShaderCompiler shaders, As
                 gpu.Destroy(pass.RayQueryPipeline);
         }
     }
+
+    /// <summary>
+    /// How many tiles cover <paramref name="pixels"/> along one side.
+    /// </summary>
+    public uint GetTiles(int pixels) => (uint)((pixels + TileSize - 1) / TileSize);
 
     /// <summary>
     /// Declares a compute pass running <paramref name="entry"/> of the gem's shader <paramref name="module"/>;

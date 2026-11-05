@@ -1,0 +1,262 @@
+using System.Numerics;
+using System.Runtime.InteropServices;
+using Magic.Files.Types;
+using Magic.Gpu;
+using Magic.Rendering;
+using Magic.Utils;
+
+namespace GIRendering;
+
+/// <summary>
+/// A view's constants: its matrices, its targets and the frame's tables, jittered for the main view and remembering last
+/// frame's so a thing that moved carries where it was.
+/// </summary>
+internal sealed class FrameView(
+    IGraphicsApi gpu,
+    GeometryPools pools,
+    MaterialTable materials,
+    Visibility visibility,
+    CardTable cards,
+    RayTracing? rayTracing
+) : IDisposable
+{
+    private const float ErrorThresholdPixels = 1;
+    private const float SkyBrightness = 0.3f;
+
+    private GpuSampler _sampler;
+    private GpuSampler _linearSampler;
+    private Matrix4x4 _previousViewProjection;
+    private Vector4 _previousCameraPosition;
+    private bool _hasPreviousFrame;
+
+    /// <summary>
+    /// The main view's constants.
+    /// </summary>
+    public GpuBuffer Constants { get; private set; }
+
+    public void Dispose()
+    {
+        if (!Constants.IsNone)
+            gpu.Destroy(Constants);
+
+        if (!_sampler.IsNone)
+            gpu.Destroy(_sampler);
+
+        if (!_linearSampler.IsNone)
+            gpu.Destroy(_linearSampler);
+    }
+
+    public Result Create()
+    {
+        Result<GpuSampler> sampler = gpu.CreateSampler(new SamplerDescription { Anisotropy = 8 });
+        if (!sampler.Ok)
+            return Result.Failure($"the default sampler was not made: {sampler.Error}");
+
+        _sampler = sampler.Value;
+        Result<GpuSampler> linearSampler = gpu.CreateSampler(
+            new SamplerDescription { Wrap = TextureWrap.Clamp, HasMipmapBlend = false }
+        );
+        if (!linearSampler.Ok)
+            return Result.Failure($"the linear sampler was not made: {linearSampler.Error}");
+
+        _linearSampler = linearSampler.Value;
+        Result<GpuBuffer> constants = gpu.CreateBuffer(
+            new BufferDescription
+            {
+                Bytes = FrameConstants.Bytes,
+                Usage = BufferUsages.Storage,
+                Name = "Frame constants",
+            }
+        );
+        if (!constants.Ok)
+            return Result.Failure($"the Frame constants buffer was not made: {constants.Error}");
+
+        Constants = constants.Value;
+
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// The main view's constants: the camera, the sun and the frame's resources.
+    /// </summary>
+    public FrameConstants GetMain(
+        RenderCamera camera,
+        RenderSun sun,
+        uint frameIndex,
+        FrameTargets targets,
+        GpuBuffer instances,
+        int instanceCount,
+        bool hasHzb
+    )
+    {
+        float aspect = (float)targets.Width / targets.Height;
+        Matrix4x4.Invert(Matrix4x4.CreateFromQuaternion(camera.Transform.Rotation), out Matrix4x4 view);
+        Matrix4x4 projection = CreatePerspective(camera.FieldOfView, aspect, camera.Near);
+        Matrix4x4 unjittered = view * projection;
+        Vector2 jitter = new(GetHalton(frameIndex + 1, 2) - 0.5f, GetHalton(frameIndex + 1, 3) - 0.5f);
+        projection.M31 = jitter.X * 2 / targets.Width;
+        projection.M32 = -jitter.Y * 2 / targets.Height;
+        FrameConstants frame = GetView(
+            view,
+            projection,
+            camera.Transform.Position,
+            camera.Near,
+            targets,
+            instances,
+            instanceCount
+        );
+        frame.SunDirection = new Vector4(sun.Direction, 0);
+        frame.SunRadiance = new Vector4(sun.Radiance, 0);
+        frame.SkyRadiance = new Vector4(SkyBrightness * 0.8f, SkyBrightness * 0.9f, SkyBrightness, 0);
+        frame.HasHzb = hasHzb ? 1u : 0u;
+        frame.PixelsPerRadian = targets.Height / (2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360));
+        frame.ErrorThreshold = ErrorThresholdPixels;
+        frame.FrameIndex = frameIndex;
+        frame.Jitter = jitter;
+        frame.OutputWidth = (uint)targets.OutputWidth;
+        frame.OutputHeight = (uint)targets.OutputHeight;
+        frame.Acceleration = rayTracing?.Acceleration.Id ?? 0;
+        frame.LeafClusters = pools.LeafClusters.Id;
+        if (!_hasPreviousFrame)
+        {
+            _hasPreviousFrame = true;
+            _previousViewProjection = unjittered;
+            _previousCameraPosition = frame.CameraPosition;
+        }
+
+        frame.PreviousViewProjection = _previousViewProjection;
+        frame.PreviousCameraPosition = _previousCameraPosition;
+        _previousViewProjection = unjittered;
+        _previousCameraPosition = frame.CameraPosition;
+
+        return frame;
+    }
+
+    /// <summary>
+    /// What every view's constants share: its matrices, its targets and the frame's tables.
+    /// </summary>
+    public FrameConstants GetView(
+        in Matrix4x4 view,
+        in Matrix4x4 projection,
+        Vector3 cameraPosition,
+        float near,
+        FrameTargets targets,
+        GpuBuffer instances,
+        int instanceCount
+    )
+    {
+        Matrix4x4 viewProjection = view * projection;
+        Matrix4x4.Invert(viewProjection, out Matrix4x4 inverse);
+        FrameConstants frame = new()
+        {
+            View = view,
+            Projection = projection,
+            ViewProjection = viewProjection,
+            InverseViewProjection = inverse,
+            CameraPosition = new Vector4(cameraPosition, 0),
+            Width = (uint)targets.Width,
+            Height = (uint)targets.Height,
+            HzbLevels = (uint)targets.HzbLevels,
+            Near = near,
+            InstanceCount = (uint)instanceCount,
+            MaxVisibleClusters = Visibility.MaxVisibleClusters,
+            DefaultSampler = _sampler.Id,
+            Instances = instances.Id,
+            Clusters = pools.Clusters.Id,
+            Vertices = pools.Vertices.Id,
+            Indices = pools.Indices.Id,
+            Materials = materials.Buffer.Id,
+            VisibleClusters = visibility.VisibleClusters.Id,
+            DrawArguments = visibility.DrawArguments.Id,
+            Counts = visibility.Counts.Id,
+            RetestList = visibility.RetestList.Id,
+            RetestArguments = visibility.RetestArguments.Id,
+            Hzb = targets.Hzb.Id,
+            Visibility = targets.Visibility.Id,
+            Depth = targets.Depth.Id,
+            GBufferNormal = targets.GBufferNormal.Id,
+            GBufferBase = targets.GBufferBase.Id,
+            GBufferSurface = targets.GBufferSurface.Id,
+            Velocity = targets.Velocity.Id,
+            Output = targets.Output.Id,
+            Cards = cards.Buffer.Id,
+            LinearSampler = _linearSampler.Id,
+            CardAlbedo = cards.Albedo.Id,
+            CardNormal = cards.Normal.Id,
+            CardDepth = cards.Depth.Id,
+        };
+        FillFrustum(viewProjection, ref frame);
+
+        return frame;
+    }
+
+    /// <summary>
+    /// <paramref name="frame"/> copied into <paramref name="buffer"/>, in a transfer pass.
+    /// </summary>
+    public void Upload(RenderGraph graph, GpuBuffer buffer, in FrameConstants frame)
+    {
+        GpuUpload upload = gpu.BeginUpload(FrameConstants.Bytes);
+        MemoryMarshal.Write(upload.Bytes, in frame);
+        graph.Use(buffer, GpuAccess.CopyDestination);
+        graph.Recorder.CopyBuffer(upload.Buffer, upload.Offset, buffer, 0, FrameConstants.Bytes);
+    }
+
+    /// <summary>
+    /// The frustum's planes from the view-projection, for row vectors: each a column added to or taken from the last,
+    /// scaled so its normal is a unit; the far plane is the third column alone, which a perspective with no far plane
+    /// never rejects by.
+    /// </summary>
+    private static void FillFrustum(in Matrix4x4 viewProjection, ref FrameConstants frame)
+    {
+        Vector4 c0 = new(viewProjection.M11, viewProjection.M21, viewProjection.M31, viewProjection.M41);
+        Vector4 c1 = new(viewProjection.M12, viewProjection.M22, viewProjection.M32, viewProjection.M42);
+        Vector4 c2 = new(viewProjection.M13, viewProjection.M23, viewProjection.M33, viewProjection.M43);
+        Vector4 c3 = new(viewProjection.M14, viewProjection.M24, viewProjection.M34, viewProjection.M44);
+        frame.FrustumPlane0 = Normalize(c3 + c0);
+        frame.FrustumPlane1 = Normalize(c3 - c0);
+        frame.FrustumPlane2 = Normalize(c3 + c1);
+        frame.FrustumPlane3 = Normalize(c3 - c1);
+        frame.FrustumPlane4 = Normalize(c3 - c2);
+        frame.FrustumPlane5 = Normalize(c2);
+    }
+
+    private static Vector4 Normalize(Vector4 plane)
+    {
+        float length = MathF.Sqrt((plane.X * plane.X) + (plane.Y * plane.Y) + (plane.Z * plane.Z));
+
+        return length > 0 ? plane / length : plane;
+    }
+
+    /// <summary>
+    /// A perspective with no far plane and reversed depth, for row vectors: depth is the near distance over the view
+    /// depth, 1 at the near plane and 0 at infinity.
+    /// </summary>
+    private static Matrix4x4 CreatePerspective(float fieldOfViewDegrees, float aspect, float near)
+    {
+        float focal = 1 / MathF.Tan(fieldOfViewDegrees * MathF.PI / 360);
+        Matrix4x4 projection = default;
+        projection.M11 = focal / aspect;
+        projection.M22 = focal;
+        projection.M34 = 1;
+        projection.M43 = near;
+
+        return projection;
+    }
+
+    /// <summary>
+    /// The Halton sequence's term in a base, 0 to 1: a different one each frame that fills the pixel evenly.
+    /// </summary>
+    private static float GetHalton(uint index, uint radix)
+    {
+        float result = 0;
+        float fraction = 1f / radix;
+        while (index > 0)
+        {
+            result += fraction * (index % radix);
+            index /= radix;
+            fraction /= radix;
+        }
+
+        return result;
+    }
+}
