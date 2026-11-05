@@ -4,7 +4,7 @@ using Magic.CommandLine;
 using Magic.Debugging;
 using Magic.Events;
 using Magic.Files;
-using Magic.Plugins;
+using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;

@@ -2,7 +2,7 @@ using Magic.Debugging;
 using Magic.Files;
 using Magic.Files.Types;
 using Magic.Gpu;
-using Magic.Plugins;
+using Magic.Projects;
 using Magic.Shaders;
 using Magic.Threading;
 using Magic.Utils;
