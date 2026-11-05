@@ -12,8 +12,8 @@ The scripts run under `pwsh` and Windows PowerShell ([Tools](tools/README.md)).
 - **Task complete:** `tools/Scripts/AgentTaskComplete.ps1 -Change <level>` formats, runs the steps of
   `tools/Scripts/Validate.ps1` the level needs and stamps the validated state. Run it when a task is done, and again
   after any later edit or rebase. A state already stamped at that level returns at once.
-- **Validate:** `tools/Scripts/Validate.ps1` builds, runs the tests, runs the sample project headless, then
-  screenshots it and prints the path.
+- **Validate:** `tools/Scripts/Validate.ps1` builds, runs the tests, runs every sample project headless, then
+  screenshots each and prints the paths.
 - **Screenshot:** `tools/Scripts/Screenshot.ps1` runs a project until its world loads and prints the screenshot's
   path. Use `-Domains`, `-Project` and `-Commands` to reach what the samples don't show.
 - **Review:** `plannotator review` opens the change as a diff in the user's browser and returns when they comment or
@@ -25,8 +25,8 @@ unsure:
 | `-Change` | For                                                                               | Runs                                                                 |
 | --------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | `Docs`    | Markdown, comments, docstrings                                                    | The build                                                            |
-| `Code`    | Anything that runs differently but draws the same, refactors and renames included | The build, the tests, the sample project headless                    |
-| `Visual`  | Anything that can change what is drawn                                            | The build, the tests, a screenshot of every sample domain to look at |
+| `Code`    | Anything that runs differently but draws the same, refactors and renames included | The build, the tests, every sample project headless                  |
+| `Visual`  | Anything that can change what is drawn                                            | The build, the tests, a screenshot of every sample project to look at |
 
 Commit or merge only once `tools/Scripts/AgentTaskComplete.ps1` has stamped that exact state.
 
@@ -36,7 +36,7 @@ To run one step of Validate on its own:
 dotnet build src/Magic.slnx
 dotnet test --solution src/Magic.slnx
 'wait loaded', 'wait 10s', 'exit' | Build/bin/Debug/Magic open samples/HelloWorld/HelloWorld.magic --headless --fail-on-error
-tools/Scripts/Screenshot.ps1 -Domains 'Domains/Audio/Audio.domain'
+tools/Scripts/Screenshot.ps1 -Project samples/Forest/Forest.magic
 ```
 
 `--fail-on-error` exits with `2` if anything was logged as an error.

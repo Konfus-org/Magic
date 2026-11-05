@@ -35,7 +35,8 @@ public sealed class WorldRendererGem(
     IEcs ecs,
     IFileSystem files,
     Threads threads,
-    App app
+    App app,
+    EventCoordinator events
 ) : IGem, IDisposable
 {
     private const int MaxVisibleClusters = 1 << 18;
@@ -94,6 +95,7 @@ public sealed class WorldRendererGem(
     /// </summary>
     private CompiledPasses? _compiled;
     private bool _hasHzb;
+    private bool _hasDrawn;
     private DebugView _debugView;
     private Matrix4x4 _previousViewProjection;
     private Vector4 _previousCameraPosition;
@@ -531,6 +533,12 @@ public sealed class WorldRendererGem(
 
         gpu.Submit(_graph.Finish());
         _hasHzb = true;
+        if (!_hasDrawn)
+        {
+            _hasDrawn = true;
+            events.Publish(new FirstFrameDrawn());
+        }
+
         if (requests.Length > 0)
             SaveScreenshotAsync(requests[^1].Path, outputWidth, outputHeight).FireAndForget();
     }

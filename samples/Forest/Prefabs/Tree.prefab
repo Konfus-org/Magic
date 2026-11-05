@@ -1,0 +1,18 @@
+{
+    "entities": [
+        {
+            "name": "Crown",
+            "components": {
+                "Transform": { "position": { "x": 0, "y": 0.45, "z": 0 }, "scale": { "x": 0.35, "y": 1, "z": 0.35 } },
+                "Renderer": { "model": { "id": 513 }, "materials": [ { "id": 100201 } ] }
+            }
+        },
+        {
+            "name": "Trunk",
+            "components": {
+                "Transform": { "position": { "x": 0, "y": 0.2, "z": 0 }, "scale": { "x": 0.06, "y": 0.4, "z": 0.06 } },
+                "Renderer": { "model": { "id": 515 }, "materials": [ { "id": 100202 } ] }
+            }
+        }
+    ]
+}

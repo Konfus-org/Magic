@@ -15,3 +15,6 @@
 *.flac binary
 *.otf binary
 *.ttf binary
+
+# The forest's chunks: text, but a hundred thousand generated placements no diff should show.
+samples/Forest/Domains/Forest/*_0_*.prefab -diff

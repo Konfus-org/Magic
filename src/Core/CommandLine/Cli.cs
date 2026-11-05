@@ -18,7 +18,7 @@ namespace Magic.CommandLine;
 /// Magic's commands, run against the <see cref="App"/>: the command line Magic was launched with is the first of
 /// them, and each line typed into the terminal runs the same commands.
 /// </summary>
-internal sealed class Cli
+internal sealed class Cli : IDisposable
 {
     private readonly App _app;
     private readonly IFileSystem _files;
@@ -35,6 +35,9 @@ internal sealed class Cli
     private bool _isWaitingForWorld;
     private readonly Queue<string> _queued = new();
     private bool _isOpeningDomain;
+    private bool _isWaitingToDraw;
+    private bool _hasDrawn;
+    private readonly Subscription _drawnWatch;
 
     public Cli(App app, IFileSystem files, EventCoordinator events, Assets assets, World world)
     {
@@ -44,7 +47,10 @@ internal sealed class Cli
         _assets = assets;
         _world = world;
         _commands = CreateCommands();
+        _drawnWatch = events.Watch<FirstFrameDrawn>(_ => _hasDrawn = true);
     }
+
+    public void Dispose() => _drawnWatch.Dispose();
 
     /// <summary>
     /// Executes the commands Magic was launched with, or says why they didn't run. Only open runs a project; any other
@@ -109,6 +115,14 @@ internal sealed class Cli
                 return;
 
             _isWaitingForWorld = false;
+        }
+
+        if (_isWaitingToDraw)
+        {
+            if (!_hasDrawn)
+                return;
+
+            _isWaitingToDraw = false;
         }
 
         if (!_queued.TryDequeue(out string? line) && !Terminal.Pump(out line))
@@ -200,7 +214,8 @@ internal sealed class Cli
 
     /// <summary>
     /// Holds the lines after this one until <paramref name="until"/> frames have passed, or that many seconds for a
-    /// number ending in <c>s</c>, or, for <c>loaded</c>, until the world has content and is not loading.
+    /// number ending in <c>s</c>; for <c>loaded</c>, until the world has content and is not loading; for <c>drawn</c>, until
+    /// the first frame is drawn.
     /// </summary>
     private void Wait(string until)
     {
@@ -211,11 +226,20 @@ internal sealed class Cli
             return;
         }
 
+        if (until == "drawn")
+        {
+            _isWaitingToDraw = true;
+
+            return;
+        }
+
         bool isSeconds = until.EndsWith('s');
         string amount = isSeconds ? until[..^1] : until;
         if (!double.TryParse(amount, NumberStyles.Float, CultureInfo.InvariantCulture, out double count) || count < 0)
         {
-            Log.Error($"wait takes a number of frames, a number of seconds ending in s, or loaded, not '{until}'.");
+            Log.Error(
+                $"wait takes a number of frames, a number of seconds ending in s, loaded or drawn, not '{until}'."
+            );
 
             return;
         }
@@ -284,14 +308,14 @@ internal sealed class Cli
                 },
                 new Command(
                     "wait",
-                    "Holds the lines after it for a number of frames, or of seconds ending in s, or until the world has loaded"
+                    "Holds the lines after it for a number of frames, or of seconds ending in s, or until the world has loaded or the first frame is drawn"
                 )
                 {
                     Arguments =
                     {
                         new Argument<string>("until")
                         {
-                            Description = "How many frames pass first, or seconds as 10s, or loaded",
+                            Description = "How many frames pass first, or seconds as 10s, or loaded, or drawn",
                         },
                     },
                     Action = new CliCommand(cmds => Wait(cmds.GetRequiredValue<string>("until"))),

@@ -52,7 +52,7 @@ internal static class Program
             Assemblies assemblies = new(typeof(App).Assembly);
             using Assets assets = new(files, caches);
             using World world = new(assets, threads, app, assemblies);
-            Cli cli = new(app, files, events, assets, world);
+            using Cli cli = new(app, files, events, assets, world);
 
             if (isLaunching)
             {

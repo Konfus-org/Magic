@@ -1,0 +1,1 @@
+{ "name": "Forest", "gems": ["SdlPlatform", "VulkanGraphics", "SlangShaders", "ArchEcs", "AssimpModels", "MeshPreprocessor", "Textures", "WorldRenderer", "PrefabLoader", "DomainLoader"], "entryPoint": { "id": 100101 } }

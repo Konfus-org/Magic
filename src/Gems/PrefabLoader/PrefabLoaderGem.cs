@@ -43,9 +43,12 @@ public sealed class PrefabLoaderGem(Assets assets, Assemblies code) : IGem, IAss
         ImmutableArray<PrefabFileEntity> entities = read.Value.Entities;
         progress?.Report(new LoadProgress(work, 0, entities.Length));
         ImmutableArray<PrefabPart>.Builder parts = ImmutableArray.CreateBuilder<PrefabPart>(entities.Length);
+
+        // Each prefab placed is asked for once, as an ask waits for the assets to take it in, between frames.
+        Dictionary<ulong, Prefab> placed = [];
         foreach (PrefabFileEntity entity in entities)
         {
-            Result<PrefabPart> part = await ReadPartAsync(entity, file, progress, cancel).ConfigureAwait(false);
+            Result<PrefabPart> part = await ReadPartAsync(entity, file, placed, progress, cancel).ConfigureAwait(false);
             if (!part.Ok)
                 return Result.Failure(part.Error);
 
@@ -88,6 +91,7 @@ public sealed class PrefabLoaderGem(Assets assets, Assemblies code) : IGem, IAss
     private async Task<Result<PrefabPart>> ReadPartAsync(
         PrefabFileEntity entity,
         AssetFile file,
+        Dictionary<ulong, Prefab> placed,
         IProgress<LoadProgress>? progress,
         CancellationToken cancel
     )
@@ -110,18 +114,24 @@ public sealed class PrefabLoaderGem(Assets assets, Assemblies code) : IGem, IAss
         ImmutableArray<PrefabPart>.Builder children = ImmutableArray.CreateBuilder<PrefabPart>();
         if (entity.Prefab != Handle<Prefab>.None)
         {
-            Result<Prefab> placed = await assets
-                .LoadAsync(entity.Prefab, file.Id, progress, cancel)
-                .ConfigureAwait(false);
-            if (!placed.Ok)
-                return Result.Failure($"{name} places a prefab that does not load: {placed.Error}");
+            if (!placed.TryGetValue(entity.Prefab.Id, out Prefab? prefab))
+            {
+                Result<Prefab> loaded = await assets
+                    .LoadAsync(entity.Prefab, file.Id, progress, cancel)
+                    .ConfigureAwait(false);
+                if (!loaded.Ok)
+                    return Result.Failure($"{name} places a prefab that does not load: {loaded.Error}");
 
-            children.AddRange(placed.Value.Parts);
+                prefab = loaded.Value;
+                placed.Add(entity.Prefab.Id, prefab);
+            }
+
+            children.AddRange(prefab.Parts);
         }
 
         foreach (PrefabFileEntity child in entity.Children)
         {
-            Result<PrefabPart> part = await ReadPartAsync(child, file, progress, cancel).ConfigureAwait(false);
+            Result<PrefabPart> part = await ReadPartAsync(child, file, placed, progress, cancel).ConfigureAwait(false);
             if (!part.Ok)
                 return Result.Failure(part.Error);
 
