@@ -7,7 +7,6 @@ using Magic.Events;
 using Magic.Files;
 using Magic.Files.Types;
 using Magic.Gpu;
-using Magic.Images;
 using Magic.Projects;
 using Magic.Rendering;
 using Magic.Shaders;

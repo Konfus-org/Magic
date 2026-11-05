@@ -6,7 +6,6 @@ using Magic.Debugging;
 using Magic.Events;
 using Magic.Files;
 using Magic.Files.Types;
-using Magic.Images;
 using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;

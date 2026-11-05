@@ -1,4 +1,4 @@
-namespace Magic.Images;
+namespace Magic.Events;
 
 /// <summary>
 /// The console's <c>screenshot</c> command, as a message: whatever draws the frame saves what it drew as a PNG at

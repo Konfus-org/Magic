@@ -39,4 +39,18 @@ Set these in the console with `set GIRendering.<name>=<value>`. A wrong value lo
 - Each area declares its own passes with `GpuPipelines` and takes what it depends on through its constructor.
 - A pass is one `GpuPass.Run` call saying what it reads and writes, which puts its barriers in.
 - The shaders are the `Shaders/` modules in this gem's `Resources`, built on the shader library
-  ([Shaders](../../Resources/Shaders/README.md)).
+  ([Shaders](../../Resources/Shaders/README.md)). The passes are at the folder's root, and what they share is under it:
+  - `Core/Frame` is what every pass of a frame reads.
+  - `Scene/` is the GPU tables and how to read them: the instance table, the pools of vertices, indices and clusters,
+    the card table and how a point is placed in a card, what the cull leaves for the draw and the resolve, and the
+    cull's tests. `Scene/Post` is what the post passes share.
+  - `Scene/Field` is the global distance field's tables: the atlas of model fields, the clipmaps of bricks around the
+    camera, and how a point's distance and normal are read from them.
+  - `Scene/Probes` is the global illumination's tables: the lit cards, the world probes and the screen probes, and how
+    a direction maps to a probe's texels. `Scene/SurfaceCache` is what a ray reads where it lands, from the lit card of
+    the instance there.
+  - `Shadow/` is the sun's virtual shadow map: its tables, how a page is found, and how a receiver samples it.
+  - `Light/` is what a local light gives a point: a point, spot or rect light's direction and irradiance there.
+  - `Fog/` is the air as a grid of froxels over the view: what each scatters and how the grid is read.
+  - `Trace/` is the tracing contract, `IWorldTracer`, the tracer that marches cones through the distance field for the
+    visibility between two points, and the one that asks the GPU's own acceleration structures, where it has them.

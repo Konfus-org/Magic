@@ -1,4 +1,4 @@
-namespace Magic.Images;
+namespace Magic.Events;
 
 /// <summary>
 /// Whatever draws the frame has drawn its first one, its shaders compiled: what the console's <c>wait drawn</c> holds for.
