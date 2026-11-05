@@ -223,7 +223,7 @@ public readonly record struct GpuCommand
     public GpuConstants Constants { get; init; }
 
     /// <summary>
-    /// A timestamp's name, which <see cref="GpuTimings"/> reports it under.
+    /// A timestamp's name, which the GPU provider measures it under.
     /// </summary>
     public string Label { get; init; } = string.Empty;
 }

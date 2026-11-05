@@ -63,10 +63,6 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
 
     public GpuTexture WindowTarget { get; private set; }
 
-    public GpuTimings Timings => _frames.Timings;
-
-    public long MemoryBytes => _resources.MemoryBytes;
-
     /// <summary>
     /// Whether this is a Debug build, which turns the validation layer on when the Vulkan SDK provides it.
     /// </summary>

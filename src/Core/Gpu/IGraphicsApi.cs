@@ -19,16 +19,6 @@ public interface IGraphicsApi
     /// </summary>
     GpuTexture WindowTarget { get; }
 
-    /// <summary>
-    /// The GPU's own timing of the frame finished two frames ago.
-    /// </summary>
-    GpuTimings Timings { get; }
-
-    /// <summary>
-    /// Bytes of GPU memory Magic's resources hold now, against the <see cref="GpuLimits.DeviceMemoryBytes"/> there are.
-    /// </summary>
-    long MemoryBytes { get; }
-
     TextureDescription GetDescription(GpuTexture texture);
 
     BufferDescription GetDescription(GpuBuffer buffer);
