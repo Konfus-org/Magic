@@ -93,10 +93,13 @@ internal static class Program
             IServiceProvider provider = services.BuildServiceProvider();
 
             Log.Info($"Running {project.Name} in {(app.IsHeadless ? "headless" : "GUI")} mode.");
+
             int run = app.RunVersion;
             using Gems gems = new(registry, provider, app, files, assets, assemblies, world, events);
             using CancellationTokenSource stopping = new();
             world.LoadAsync(kept, stopping.Token).FireAndForget();
+
+            // If we don't have a window and aren't headless something is wrong, early out.
             if (!app.IsHeadless && app.Window is null)
             {
                 Log.Warn(
