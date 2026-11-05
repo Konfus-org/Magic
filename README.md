@@ -22,6 +22,10 @@ them. Without `--headless`, the project must list a gem that provides a window. 
 runs the same commands, and an option may leave out its leading `--`. A typed `open <path>` or `headless false` restarts
 the run. Building a gem the project lists restarts it too, with the new build and the world where it was. The build output goes to `Build/bin/<Configuration>/`.
 
+`set` and `get` reach an entity's values by path, at any depth: the entity is a tag or an id, and each part after it
+a name or its initials, as in `set player.camera.fov 100`, `set player.transform.position 0 2 -4` or
+`get player.transform`.
+
 `Magic new <template> <name>` makes `<name>` with `dotnet new magic-<template>`, passing on any option Magic doesn't
 know, such as `-o <folder>`. Install Magic's templates first with `tools/VS Templates/InstallTemplates.ps1`.
 

@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.CommandLine;
 using System.Diagnostics;
 using System.Globalization;
@@ -175,6 +176,47 @@ internal sealed class Cli : IDisposable
     }
 
     /// <summary>
+    /// Sets the value at <paramref name="path"/> on the entities it names to <paramref name="values"/>
+    /// (<see cref="EntityPaths.Write"/>), logging how many it set or why none.
+    /// </summary>
+    private void SetEntityValue(string path, string[] values)
+    {
+        if (!IsProjectOpen($"set {path} in"))
+            return;
+
+        Result<int> written = EntityPaths.Write(_world, path, values);
+        if (written.Ok)
+            Log.Info(
+                $"Set {path} to {string.Join(' ', values)} on {written.Value} {(written.Value == 1 ? "entity" : "entities")}."
+            );
+        else
+            Log.Error($"{path} was not set: {written.Error}");
+    }
+
+    /// <summary>
+    /// Logs the value at <paramref name="path"/> on each entity it names (<see cref="EntityPaths.Read"/>), or why there
+    /// is none.
+    /// </summary>
+    private void LogEntityValue(string path)
+    {
+        if (!IsProjectOpen($"get {path} in"))
+            return;
+
+        Result<ImmutableArray<string>> read = EntityPaths.Read(_world, path);
+        if (!read.Ok)
+        {
+            Log.Error($"{path} was not read: {read.Error}");
+
+            return;
+        }
+
+        foreach (string line in read.Value)
+        {
+            Log.Info($"{path} of {line}");
+        }
+    }
+
+    /// <summary>
     /// Asks whatever draws the frame to save the next one as a PNG under <c>Screenshots/</c> beside Magic.
     /// </summary>
     private void Screenshot()
@@ -311,13 +353,44 @@ internal sealed class Cli : IDisposable
                 {
                     Action = new CliCommand(cmds => Bake()),
                 },
-                new Command("set", "Sets a gem's setting for the run, as Key=value, which the gem the key names reads")
+                new Command(
+                    "set",
+                    "Sets a gem's setting for the run, as Key=value; or an entity's value, as entity.component.member and on to any depth, then the value"
+                )
                 {
                     Arguments =
                     {
-                        new Argument<string>("setting") { Description = "The key and the value, as Key=value" },
+                        new Argument<string>("setting")
+                        {
+                            Description =
+                                "Key=value, or the path to an entity's value: the entity a tag or an id, each part its name or initials",
+                        },
+                        new Argument<string[]>("value")
+                        {
+                            Description = "The entity's value in JSON, or one per field, as 1 2 3 for a position",
+                            Arity = ArgumentArity.ZeroOrMore,
+                        },
                     },
-                    Action = new CliCommand(cmds => Set(cmds.GetRequiredValue<string>("setting"))),
+                    Action = new CliCommand(cmds =>
+                    {
+                        string setting = cmds.GetRequiredValue<string>("setting");
+                        string[] values = cmds.GetValue<string[]>("value") ?? [];
+                        if (values.Length == 0 && setting.Contains('=', StringComparison.Ordinal))
+                            Set(setting);
+                        else
+                            SetEntityValue(setting, values);
+                    }),
+                },
+                new Command("get", "Logs an entity's value, named as entity.component.member and on to any depth")
+                {
+                    Arguments =
+                    {
+                        new Argument<string>("path")
+                        {
+                            Description = "The entity a tag or an id, then the component and its members",
+                        },
+                    },
+                    Action = new CliCommand(cmds => LogEntityValue(cmds.GetRequiredValue<string>("path"))),
                 },
                 new Command(
                     "wait",
