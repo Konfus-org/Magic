@@ -37,25 +37,14 @@ internal sealed class MaterialTable(
 
     public GpuBuffer Buffer { get; private set; }
 
-    public void Dispose()
-    {
-        if (!Buffer.IsNone)
-            gpu.Destroy(Buffer);
-    }
+    public void Dispose() => gpu.Destroy(Buffer);
 
     public Result Create()
     {
         _rows[0] = GetDefault();
-        Result<GpuBuffer> buffer = gpu.CreateBuffer(
-            new BufferDescription
-            {
-                Bytes = (long)Capacity * GpuMaterial.Bytes,
-                Usage = BufferUsages.Storage,
-                Name = "Material table",
-            }
-        );
+        Result<GpuBuffer> buffer = gpu.CreateBuffer("Material table", (long)Capacity * GpuMaterial.Bytes);
         if (!buffer.Ok)
-            return Result.Failure($"the material table was not made: {buffer.Error}");
+            return Result.Failure(buffer.Error);
 
         Buffer = buffer.Value;
 

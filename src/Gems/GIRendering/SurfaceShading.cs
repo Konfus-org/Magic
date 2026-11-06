@@ -9,8 +9,7 @@ internal sealed class SurfaceShading(GpuPipelines pipelines, Lighting lighting)
         "Shade surfaces",
         "ShadeSurfaces",
         "ShadeSurfaces",
-        PassShaders.Atmosphere,
-        isTiled: true
+        PassShaders.Atmosphere
     );
 
     public void Record(in RenderView view)
@@ -27,6 +26,6 @@ internal sealed class SurfaceShading(GpuPipelines pipelines, Lighting lighting)
                 targets.GBufferSurface
             )
             .Writes(targets.Hdr)
-            .Dispatch(pipelines.GetTiles(targets.Width), pipelines.GetTiles(targets.Height));
+            .DispatchOver(targets.Width, targets.Height);
     }
 }

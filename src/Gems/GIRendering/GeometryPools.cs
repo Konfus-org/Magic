@@ -63,73 +63,37 @@ internal sealed class GeometryPools(
     {
         foreach (ResidentModel resident in _resident.Values)
         {
-            if (!resident.Acceleration.IsNone)
-                gpu.Destroy(resident.Acceleration);
+            gpu.Destroy(resident.Acceleration);
         }
 
-        if (!LeafClusters.IsNone)
-            gpu.Destroy(LeafClusters);
-
-        if (!Vertices.IsNone)
-            gpu.Destroy(Vertices);
-
-        if (!Indices.IsNone)
-            gpu.Destroy(Indices);
-
-        if (!Clusters.IsNone)
-            gpu.Destroy(Clusters);
+        gpu.Destroy(LeafClusters);
+        gpu.Destroy(Vertices);
+        gpu.Destroy(Indices);
+        gpu.Destroy(Clusters);
     }
 
     public Result Create()
     {
-        Result<GpuBuffer> vertices = gpu.CreateBuffer(
-            new BufferDescription
-            {
-                Bytes = (long)VertexCapacity * GpuVertex.Bytes,
-                Usage = BufferUsages.Storage,
-                Name = "Vertex pool",
-            }
-        );
+        Result<GpuBuffer> vertices = gpu.CreateBuffer("Vertex pool", (long)VertexCapacity * GpuVertex.Bytes);
         if (!vertices.Ok)
-            return Result.Failure($"the vertex pool was not made: {vertices.Error}");
+            return Result.Failure(vertices.Error);
 
         Vertices = vertices.Value;
-        Result<GpuBuffer> indices = gpu.CreateBuffer(
-            new BufferDescription
-            {
-                Bytes = (long)IndexCapacity * sizeof(uint),
-                Usage = BufferUsages.Storage,
-                Name = "Index pool",
-            }
-        );
+        Result<GpuBuffer> indices = gpu.CreateBuffer("Index pool", (long)IndexCapacity * sizeof(uint));
         if (!indices.Ok)
-            return Result.Failure($"the index pool was not made: {indices.Error}");
+            return Result.Failure(indices.Error);
 
         Indices = indices.Value;
-        Result<GpuBuffer> clusters = gpu.CreateBuffer(
-            new BufferDescription
-            {
-                Bytes = (long)ClusterCapacity * GpuCluster.Bytes,
-                Usage = BufferUsages.Storage,
-                Name = "Cluster pool",
-            }
-        );
+        Result<GpuBuffer> clusters = gpu.CreateBuffer("Cluster pool", (long)ClusterCapacity * GpuCluster.Bytes);
         if (!clusters.Ok)
-            return Result.Failure($"the cluster pool was not made: {clusters.Error}");
+            return Result.Failure(clusters.Error);
 
         Clusters = clusters.Value;
         if (gpu.Features.HasRayQuery)
         {
-            Result<GpuBuffer> leaves = gpu.CreateBuffer(
-                new BufferDescription
-                {
-                    Bytes = (long)ClusterCapacity * sizeof(uint),
-                    Usage = BufferUsages.Storage,
-                    Name = "Leaf clusters",
-                }
-            );
+            Result<GpuBuffer> leaves = gpu.CreateBuffer("Leaf clusters", (long)ClusterCapacity * sizeof(uint));
             if (!leaves.Ok)
-                return Result.Failure($"the leaf cluster table was not made: {leaves.Error}");
+                return Result.Failure(leaves.Error);
 
             LeafClusters = leaves.Value;
         }

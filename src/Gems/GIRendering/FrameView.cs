@@ -34,11 +34,8 @@ internal sealed class FrameView(
 
     public void Dispose()
     {
-        if (!Constants.IsNone)
-            gpu.Destroy(Constants);
-
-        if (!_sampler.IsNone)
-            gpu.Destroy(_sampler);
+        gpu.Destroy(Constants);
+        gpu.Destroy(_sampler);
     }
 
     public Result Create()
@@ -48,16 +45,9 @@ internal sealed class FrameView(
             return Result.Failure($"the default sampler was not made: {sampler.Error}");
 
         _sampler = sampler.Value;
-        Result<GpuBuffer> constants = gpu.CreateBuffer(
-            new BufferDescription
-            {
-                Bytes = FrameConstants.Bytes,
-                Usage = BufferUsages.Storage,
-                Name = "Frame constants",
-            }
-        );
+        Result<GpuBuffer> constants = gpu.CreateBuffer("Frame constants", FrameConstants.Bytes);
         if (!constants.Ok)
-            return Result.Failure($"the Frame constants buffer was not made: {constants.Error}");
+            return Result.Failure(constants.Error);
 
         Constants = constants.Value;
 

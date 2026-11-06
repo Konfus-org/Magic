@@ -26,25 +26,18 @@ internal sealed class RayTracing(IGraphicsApi gpu, RenderGraph graph) : IDisposa
 
     public void Dispose()
     {
-        if (!_acceleration.IsNone)
-            gpu.Destroy(_acceleration);
-
-        if (!_instances.IsNone)
-            gpu.Destroy(_instances);
+        gpu.Destroy(_acceleration);
+        gpu.Destroy(_instances);
     }
 
     public Result Create()
     {
         Result<GpuBuffer> instances = gpu.CreateBuffer(
-            new BufferDescription
-            {
-                Bytes = (long)InstanceTable.Capacity * GpuAccelerationInstance.Bytes,
-                Usage = BufferUsages.Storage,
-                Name = "Acceleration instances",
-            }
+            "Acceleration instances",
+            (long)InstanceTable.Capacity * GpuAccelerationInstance.Bytes
         );
         if (!instances.Ok)
-            return Result.Failure($"the acceleration instances were not made: {instances.Error}");
+            return Result.Failure(instances.Error);
 
         _instances = instances.Value;
         Result<GpuAcceleration> acceleration = gpu.CreateAcceleration(

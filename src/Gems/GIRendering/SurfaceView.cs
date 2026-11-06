@@ -47,7 +47,7 @@ internal enum DebugView : uint
 /// </summary>
 internal sealed class SurfaceView(GpuPipelines pipelines)
 {
-    private readonly GpuPass _showPass = pipelines.Compute("Show surface", "ShowSurface", "ShowSurface", isTiled: true);
+    private readonly GpuPass _showPass = pipelines.Compute("Show surface", "ShowSurface", "ShowSurface");
 
     public void Record(in RenderView view, DebugView debugView, float exposure)
     {
@@ -72,6 +72,6 @@ internal sealed class SurfaceView(GpuPipelines pipelines)
                 targets.Hdr
             )
             .Writes(targets.Output)
-            .Dispatch(pipelines.GetTiles(targets.Width), pipelines.GetTiles(targets.Height));
+            .DispatchOver(targets.Width, targets.Height);
     }
 }

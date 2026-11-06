@@ -32,8 +32,7 @@ internal sealed class TextureTable(IGraphicsApi gpu, RenderGraph graph, Assets a
     {
         foreach (Entry entry in _entries.Values)
         {
-            if (!entry.Texture.IsNone)
-                gpu.Destroy(entry.Texture);
+            gpu.Destroy(entry.Texture);
         }
 
         foreach (GpuSampler sampler in _samplers.Values)

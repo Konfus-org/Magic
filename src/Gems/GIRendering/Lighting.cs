@@ -22,25 +22,15 @@ internal sealed class Lighting(IGraphicsApi gpu, RenderGraph graph, SkyLuts sky,
 
     public void Dispose()
     {
-        if (!Constants.IsNone)
-            gpu.Destroy(Constants);
-
-        if (!_sampler.IsNone)
-            gpu.Destroy(_sampler);
+        gpu.Destroy(Constants);
+        gpu.Destroy(_sampler);
     }
 
     public Result Create()
     {
-        Result<GpuBuffer> constants = gpu.CreateBuffer(
-            new BufferDescription
-            {
-                Bytes = LightingConstants.Bytes,
-                Usage = BufferUsages.Storage,
-                Name = "Lighting constants",
-            }
-        );
+        Result<GpuBuffer> constants = gpu.CreateBuffer("Lighting constants", LightingConstants.Bytes);
         if (!constants.Ok)
-            return Result.Failure($"the Lighting constants buffer was not made: {constants.Error}");
+            return Result.Failure(constants.Error);
 
         Constants = constants.Value;
         Result<GpuSampler> sampler = gpu.CreateSampler(

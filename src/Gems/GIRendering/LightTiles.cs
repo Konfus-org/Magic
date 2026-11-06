@@ -44,25 +44,15 @@ internal sealed class LightTiles(IGraphicsApi gpu, RenderGraph graph, GpuPipelin
 
     public void Dispose()
     {
-        if (!Table.IsNone)
-            gpu.Destroy(Table);
-
-        if (!Tiles.IsNone)
-            gpu.Destroy(Tiles);
+        gpu.Destroy(Table);
+        gpu.Destroy(Tiles);
     }
 
     public Result Create()
     {
-        Result<GpuBuffer> table = gpu.CreateBuffer(
-            new BufferDescription
-            {
-                Bytes = (long)MaxLights * GpuLight.Bytes,
-                Usage = BufferUsages.Storage,
-                Name = "Light table",
-            }
-        );
+        Result<GpuBuffer> table = gpu.CreateBuffer("Light table", (long)MaxLights * GpuLight.Bytes);
         if (!table.Ok)
-            return Result.Failure($"the light table was not made: {table.Error}");
+            return Result.Failure(table.Error);
 
         Table = table.Value;
 
@@ -74,25 +64,15 @@ internal sealed class LightTiles(IGraphicsApi gpu, RenderGraph graph, GpuPipelin
     /// </summary>
     public Result Resize(int width, int height)
     {
-        if (!Tiles.IsNone)
-        {
-            graph.Forget(Tiles);
-            gpu.Destroy(Tiles);
-            Tiles = GpuBuffer.None;
-        }
-
+        graph.Forget(Tiles);
+        gpu.Destroy(Tiles);
         Result<GpuBuffer> tiles = gpu.CreateBuffer(
-            new BufferDescription
-            {
-                Bytes = (long)GetTiles(width) * GetTiles(height) * Buckets * sizeof(uint),
-                Usage = BufferUsages.Storage,
-                Name = "Light tiles",
-            }
+            "Light tiles",
+            (long)GetTiles(width) * GetTiles(height) * Buckets * sizeof(uint)
         );
-        if (!tiles.Ok)
-            return Result.Failure($"the light tiles were not made: {tiles.Error}");
-
         Tiles = tiles.Value;
+        if (!tiles.Ok)
+            return Result.Failure(tiles.Error);
 
         return Result.Success();
     }

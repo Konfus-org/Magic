@@ -73,24 +73,13 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisp
     /// </summary>
     public ReadOnlySpan<InstanceExtra> Extras => _extras.AsSpan(0, Count);
 
-    public void Dispose()
-    {
-        if (!Buffer.IsNone)
-            gpu.Destroy(Buffer);
-    }
+    public void Dispose() => gpu.Destroy(Buffer);
 
     public Result Create()
     {
-        Result<GpuBuffer> buffer = gpu.CreateBuffer(
-            new BufferDescription
-            {
-                Bytes = (long)Capacity * GpuInstance.Bytes,
-                Usage = BufferUsages.Storage,
-                Name = "Instance table",
-            }
-        );
+        Result<GpuBuffer> buffer = gpu.CreateBuffer("Instance table", (long)Capacity * GpuInstance.Bytes);
         if (!buffer.Ok)
-            return Result.Failure($"the instance table was not made: {buffer.Error}");
+            return Result.Failure(buffer.Error);
 
         Buffer = buffer.Value;
 
