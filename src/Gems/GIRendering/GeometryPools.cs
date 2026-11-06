@@ -54,6 +54,11 @@ internal sealed class GeometryPools(
     /// </summary>
     public bool HasArrivals => _arrived.Count > 0;
 
+    /// <summary>
+    /// How many models were made or failed: when it changes, a renderer waiting for its model may draw now.
+    /// </summary>
+    public int SettledCount => _resident.Count + _failed.Count;
+
     public void Dispose()
     {
         foreach (ResidentModel resident in _resident.Values)
