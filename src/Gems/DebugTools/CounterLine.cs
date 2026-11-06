@@ -5,12 +5,13 @@ namespace Magic.DebugTools;
 
 /// <summary>
 /// The frame rate and the memory in use, as a line in the top left corner, shown from the start in a Debug build:
-/// <c>FPS: 59 (17.0 ms) | Memory: GPU 0.4 GB, RAM 0.9 GB</c>. The frame's duration comes from Core's meter, the GPU's
-/// memory from whatever gem publishes a <c>gpu.memory.usage</c>, and the process's from .NET's meter.
+/// <c>FPS: 59 (17.0 ms) | Memory: GPU 0.4 GB, RAM 0.9 GB</c>. The duration of a frame the render thread draws comes from
+/// Core's meter, the GPU's memory from whatever gem publishes a <c>gpu.memory.usage</c>, and the process's from .NET's
+/// meter.
 /// </summary>
 internal sealed class CounterLine(IDebugUI ui)
 {
-    private const string FrameDuration = "magic.core.frame.duration";
+    private const string FrameDuration = "magic.core.render.frame.duration";
     private const string GpuMemorySuffix = ".gpu.memory.usage";
     private const string ProcessMemory = "dotnet.process.memory.working_set";
     private const double BytesPerGigabyte = 1024 * 1024 * 1024;

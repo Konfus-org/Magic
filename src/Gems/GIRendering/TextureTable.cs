@@ -93,7 +93,7 @@ internal sealed class TextureTable(IGraphicsApi gpu, RenderGraph graph, Assets a
     private async Task LoadAsync(Handle<Texture> handle, Entry entry)
     {
         Result<Texture> loaded = await assets.LoadAsync(handle, null, CancellationToken.None).ConfigureAwait(false);
-        await threads.Enter(EngineThread.Main);
+        await threads.Enter(EngineThread.Render);
         string name = assets.GetPath(handle) ?? $"texture {handle.Id}";
         if (!loaded.Ok)
         {

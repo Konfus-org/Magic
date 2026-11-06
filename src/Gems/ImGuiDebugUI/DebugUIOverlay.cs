@@ -16,7 +16,7 @@ namespace Magic.ImGuiDebugUI;
 /// ImGui's frame drawn over a target from the newest copy the UI published, again until a newer comes: it takes in the
 /// texture changes queued up to that frame, uploads the vertices and indices, and records the draws into a pass of their
 /// own, its shaders reading the vertices, the draw's texture and the constants through the heap. It owns every GPU object
-/// it draws with. Main thread, but the compile on its worker.
+/// it draws with. Render thread, but the compile on its worker.
 /// </summary>
 internal sealed class DebugUIOverlay : IDisposable
 {

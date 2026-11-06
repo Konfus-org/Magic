@@ -323,7 +323,7 @@ internal sealed class GeometryPools(
     private async Task LoadAsync(Handle<Model> model)
     {
         Result<MeshDerived> derived = await meshes.GetAsync(model, null, CancellationToken.None).ConfigureAwait(false);
-        await threads.Enter(EngineThread.Main);
+        await threads.Enter(EngineThread.Render);
         string name = assets.GetPath(model) ?? $"model {model.Id}";
         if (!derived.Ok)
         {

@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Linq;
 using System.Numerics;
+using System.Threading.Channels;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
@@ -19,10 +20,10 @@ using Magic.Worlds;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// Draws the world. <c>Update</c> reads what the frame draws out of the entities; <c>Render</c> records the frame in
-/// order, top to bottom, and shows it. As a domain replaces the world, it forgets what it drew before and holds the
-/// loading screen until what comes is on the GPU. It is public because nothing in its assembly makes it: Magic does, by
-/// reflection, when a project lists the gem.
+/// Draws the world. <c>LateUpdate</c> reads what the frame draws out of the entities and publishes it; <c>Render</c>, on
+/// the render thread, takes the newest published, records the frame in order, top to bottom, and shows it. As a domain
+/// replaces the world, it forgets what it drew before and holds the loading screen until what comes is on the GPU. It is
+/// public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
 public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 {
@@ -34,8 +35,12 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly IEcs _ecs;
     private readonly App _app;
     private readonly EventCoordinator _events;
+    private readonly Threads _threads;
+    private readonly Mailbox<RenderInputs> _inputs = new();
+    private readonly Channel<ScreenshotRequested> _screenshots = Channel.CreateUnbounded<ScreenshotRequested>(
+        new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
+    );
     private readonly RenderGraph _graph;
-    private readonly RenderWorld _world = new();
     private readonly GpuPipelines _pipelines;
     private readonly GeometryPools _pools;
     private readonly TextureTable _textures;
@@ -59,6 +64,11 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly IOverlay? _overlay;
     private readonly RendererDebugWindow? _debugWindow;
     private DebugView _debugView;
+
+    /// <summary>
+    /// The inputs <see cref="Render"/> draws, taken from <see cref="_inputs"/>, until newer are. Render thread.
+    /// </summary>
+    private RenderInputs? _current;
     private bool _isStarting;
     private bool _isReady;
     private bool _hasFailedToStart;
@@ -66,7 +76,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private bool _hasDrawn;
 
     /// <summary>
-    /// What a domain loading needs on the GPU before it shows, until <see cref="Render"/> has uploaded it all. Main thread.
+    /// What a domain loading needs on the GPU before it shows, until <see cref="Render"/> has uploaded it all. Render
+    /// thread.
     /// </summary>
     private Preparing? _preparing;
 
@@ -97,6 +108,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _ecs = ecs;
         _app = app;
         _events = events;
+        _threads = threads;
         _graph = new RenderGraph(gpu);
         _pipelines = new GpuPipelines(gpu, _graph, shaders, assets);
         _pools = new GeometryPools(gpu, _graph, meshes, assets, threads);
@@ -139,13 +151,10 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     }
 
     /// <summary>
-    /// Reads what the frame draws out of the entities, and starts compiling the passes on the first frame.
+    /// Applies the settings, and the debug window's.
     /// </summary>
     public void Update(in Frame frame)
     {
-        StartCompiling();
-        WorldCopy.Read(_ecs, _world);
-        _ecs.Snapshot(_instances.Renderers);
         foreach (SetCliCommand setting in frame.Events.Get<SetCliCommand>())
         {
             ApplySetting(setting);
@@ -156,19 +165,52 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     }
 
     /// <summary>
-    /// Draws the frame and submits it.
+    /// Reads what the frame draws out of the entities, with the window's size and the debug view, and publishes it for
+    /// <see cref="Render"/>, after the screenshots asked for.
+    /// </summary>
+    public void LateUpdate(in Frame frame)
+    {
+        RenderInputs back = _inputs.Back;
+        WorldCopy.Read(_ecs, back.World);
+        _ecs.Snapshot(back.Renderers);
+        back.DebugView = _debugView;
+        (back.Width, back.Height) = _app.Window is { Width: > 0, Height: > 0 } window
+            ? (window.Width, window.Height)
+            : (DefaultWidth, DefaultHeight);
+        foreach (ScreenshotRequested asked in frame.Events.Get<ScreenshotRequested>())
+        {
+            _screenshots.Writer.TryWrite(asked);
+        }
+
+        _inputs.Publish();
+    }
+
+    /// <summary>
+    /// Draws the newest inputs published, or the last again when none are newer, and submits the frame. Starts compiling
+    /// the passes on the first frame.
     /// </summary>
     public void Render(in Frame frame)
     {
+        StartCompiling();
         if (!_isReady && Interlocked.Exchange(ref _compiled, null) is { } compiled)
             Start(compiled.Result);
 
         if (!_isReady)
             return;
 
-        int width = _app.Window is { Width: > 0, Height: > 0 } window ? window.Width : DefaultWidth;
-        int height = _app.Window is { Width: > 0, Height: > 0 } sized ? sized.Height : DefaultHeight;
-        if (!Resize(width, height))
+        RenderInputs? replaced = null;
+        if (_inputs.TryTake(out RenderInputs? newest))
+            (replaced, _current) = (_current, newest);
+
+        if (_current is not { } inputs)
+            return;
+
+        // The rows from what changed since the inputs replaced, which go back once compared.
+        int instanceCount = _instances.Fill(inputs.Renderers, frame.Index, _pools, _materials, _failure);
+        if (replaced is not null)
+            _inputs.Return(replaced);
+
+        if (!Resize(inputs.Width, inputs.Height))
             return;
 
         // What arrived: models into the pools, textures, material rows.
@@ -190,10 +232,10 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         }
 
         // The frame's tables.
-        RenderCamera camera = _world.Camera ?? new RenderCamera(new Transform(), 60, 0.05f);
-        RenderSun sun = _world.Sun ?? new RenderSun(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One, 1);
+        RenderCamera camera = inputs.World.Camera ?? new RenderCamera(new Transform(), 60, 0.05f);
+        RenderSun sun =
+            inputs.World.Sun ?? new RenderSun(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One, 1);
         GpuBuffer constants = _frameView.Constants;
-        int instanceCount = _instances.Fill(frame.Index, _pools, _materials, _failure);
         _graph.BeginTransferPass("Upload frame");
         bool hasChanges = _pools.HasArrivals || _instances.HasChanges;
         _instances.Upload();
@@ -203,7 +245,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             _frameView.GetMain(camera, sun, frame.Index, _targets, _instances.Buffer, instanceCount, _hasHzb)
         );
         _visibility.ResetCounts();
-        _lighting.Prepare(_world, camera, sun, _targets);
+        _lighting.Prepare(inputs.World, camera, sun, _targets);
         _graph.EndPass();
 
         // The passes, in the order they run.
@@ -214,7 +256,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _lighting.RecordTiles(view);
         _lighting.RecordShadows(view);
         _surfaceShading.Record(view);
-        _surfaceView.Record(view, _debugView, sun.Exposure);
+        _surfaceView.Record(view, inputs.DebugView, sun.Exposure);
         _overlay?.Record(_graph, _targets.Output);
 
         GpuTexture target = _gpu.WindowTarget;
@@ -229,8 +271,13 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         }
 
         // One readback buffer, so one screenshot a frame: the last asked for.
-        ReadOnlySpan<ScreenshotRequested> requests = frame.Events.Get<ScreenshotRequested>();
-        if (requests.Length > 0)
+        ScreenshotRequested? shot = null;
+        while (_screenshots.Reader.TryRead(out ScreenshotRequested asked))
+        {
+            shot = asked;
+        }
+
+        if (shot is not null)
             Screenshot.RecordReadback(_graph, _targets);
 
         _gpu.Submit(_graph.Finish());
@@ -241,31 +288,39 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             _events.Publish(new FirstFrameDrawn());
         }
 
-        if (requests.Length > 0)
-            Screenshot.SaveAsync(_gpu, _assets, _targets.Readback, requests[^1].Path, width, height).FireAndForget();
+        if (shot is { } saved)
+        {
+            Screenshot
+                .SaveAsync(_gpu, _assets, _targets.Readback, saved.Path, inputs.Width, inputs.Height)
+                .FireAndForget();
+        }
     }
 
     /// <summary>
     /// Forgets what was drawn before, last frame's depth, camera and shadows, so nothing of it shows in what comes.
     /// </summary>
-    public Task OnDomainUnloadedAsync(CancellationToken cancel)
+    public async Task OnDomainUnloadedAsync(CancellationToken cancel)
     {
+        await _threads.Enter(EngineThread.Render);
         _hasHzb = false;
         _frameView.ClearHistory();
         _shadows?.ClearHistory();
-
-        return Task.CompletedTask;
     }
 
     /// <summary>
     /// Asks for every model and material <paramref name="entities"/> draw, and ends in the frame they are on the GPU, or
     /// failed and drawn as the failure, with the passes made. Materials are asked for at once; models once the pools are
-    /// made, by <see cref="Render"/>. One that comes while another waits ends that one.
+    /// made, by <see cref="Render"/>. One that comes while another waits ends that one. On the render thread, whose
+    /// tables these are.
     /// </summary>
-    public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel)
+    public async Task OnDomainLoadingAsync(
+        ImmutableArray<ImmutableArray<IComponent>> entities,
+        CancellationToken cancel
+    )
     {
+        await _threads.Enter(EngineThread.Render);
         if (_hasFailedToStart)
-            return Task.CompletedTask;
+            return;
 
         HashSet<Handle<Model>> models = [];
         HashSet<Handle<Material>> materials = [];
@@ -281,13 +336,13 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         }
 
         EndPreparing();
-        _preparing = new Preparing(
+        Preparing preparing = new(
             [.. models],
             [.. materials],
             new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
         );
-
-        return _preparing.Done.Task.WaitAsync(cancel);
+        _preparing = preparing;
+        await preparing.Done.Task.WaitAsync(cancel).ConfigureAwait(false);
     }
 
     /// <summary>

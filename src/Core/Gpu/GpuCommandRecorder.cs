@@ -5,7 +5,7 @@ namespace Magic.Gpu;
 /// <summary>
 /// Builds a <see cref="GpuCommands"/>: begin a pass, add its transitions and commands, end it, and take the value with
 /// <see cref="Finish"/>. One per frame, on whatever thread records; the value it makes is handed to
-/// <see cref="IGraphicsApi.Submit"/> on the main thread. Each method's parameters say which of a
+/// <see cref="IGraphicsApi.Submit"/> on the render thread. Each method's parameters say which of a
 /// <see cref="GpuCommand"/>'s fields its kind reads.
 /// </summary>
 public sealed class GpuCommandRecorder

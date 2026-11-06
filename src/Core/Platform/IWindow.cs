@@ -4,8 +4,8 @@ using Magic.Files.Types;
 namespace Magic.Platform;
 
 /// <summary>
-/// The window the game draws into, which a platform gem opens. Its title, icon and size are the main thread's, and a new
-/// title or icon reaches the OS once the gem gets to it.
+/// The window the game draws into, which a platform gem opens. Its title and icon are the main thread's, and a new title
+/// or icon reaches the OS once the gem gets to it. Its size is written whole on the main thread and read from any.
 /// </summary>
 public interface IWindow
 {

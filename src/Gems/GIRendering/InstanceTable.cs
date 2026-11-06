@@ -60,11 +60,6 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph, World w
     public bool HasChanges { get; private set; }
 
     /// <summary>
-    /// The renderers the next <see cref="Fill"/> reads, for the ECS to snapshot into.
-    /// </summary>
-    public EcsSnapshot<Transform, Renderer> Renderers { get; private set; } = new();
-
-    /// <summary>
     /// The rows as the GPU reads them, by instance index.
     /// </summary>
     public ReadOnlySpan<GpuInstance> Rows => _rows.AsSpan(0, Count);
@@ -99,24 +94,34 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph, World w
     }
 
     /// <summary>
-    /// The rows of <see cref="Renderers"/>, from what changed since the last fill: each its model's place in the pools
-    /// and the material rows of its entity's shading, or an empty row while its model is being made. How many rows the
-    /// cull walks.
+    /// The rows of <paramref name="renderers"/>, from what changed since the last fill: each its model's place in the
+    /// pools and the material rows of its entity's shading, or an empty row while its model is being made. How many rows
+    /// the cull walks. The last fill's snapshot must be left as it was until this one.
     /// </summary>
-    public int Fill(uint frameIndex, GeometryPools pools, MaterialTable materials, ShadingInstance? failure)
+    public int Fill(
+        EcsSnapshot<Transform, Renderer> renderers,
+        uint frameIndex,
+        GeometryPools pools,
+        MaterialTable materials,
+        ShadingInstance? failure
+    )
     {
-        if (Renderers.Count > Capacity && !_isFullLogged)
+        // The same snapshot again, with the same models, makes the same rows.
+        bool isRebuild = pools.SettledCount != _settledModels;
+        if (renderers == _last && !isRebuild)
+            return Count;
+
+        if (renderers.Count > Capacity && !_isFullLogged)
         {
             Log.Error($"Some renderers are not drawn: the instance table holds {Capacity}.");
             _isFullLogged = true;
         }
 
         _lastCount = Count;
-        Count = Math.Min(Renderers.Count, Capacity);
+        Count = Math.Min(renderers.Count, Capacity);
         HasChanges |= Count != _lastCount;
-        bool isRebuild = pools.SettledCount != _settledModels;
         _settledModels = pools.SettledCount;
-        RowInputs inputs = new(frameIndex, pools, materials, failure);
+        RowInputs inputs = new(renderers, frameIndex, pools, materials, failure);
         int shift = Count - _lastCount;
         int blocks = (Count + BlockSize - 1) / BlockSize;
 
@@ -126,16 +131,16 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph, World w
         {
             int start = (shift > 0 ? blocks - 1 - i : i) * BlockSize;
             int length = Math.Min(BlockSize, Count - start);
-            if (!isRebuild && IsSameAs(start, start, length))
+            if (!isRebuild && IsSameAs(renderers, start, start, length))
                 continue;
 
-            if (!isRebuild && shift != 0 && IsSameAs(start, start - shift, length))
+            if (!isRebuild && shift != 0 && IsSameAs(renderers, start, start - shift, length))
                 MoveRows(start - shift, start, length);
             else
                 SetRows(start, length, inputs);
         }
 
-        (Renderers, _last) = (_last, Renderers);
+        _last = renderers;
 
         return Count;
     }
@@ -237,15 +242,15 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph, World w
     }
 
     /// <summary>
-    /// Whether the block of renderers at <paramref name="start"/> is byte for byte what the last snapshot had from
-    /// <paramref name="lastStart"/>.
+    /// Whether the block of <paramref name="renderers"/> at <paramref name="start"/> is byte for byte what the last
+    /// snapshot had from <paramref name="lastStart"/>.
     /// </summary>
-    private bool IsSameAs(int start, int lastStart, int length) =>
+    private bool IsSameAs(EcsSnapshot<Transform, Renderer> renderers, int start, int lastStart, int length) =>
         lastStart >= 0
         && lastStart + length <= _lastCount
-        && IsSame(Renderers.Entities.Slice(start, length), _last.Entities.Slice(lastStart, length))
-        && IsSame(Renderers.First.Slice(start, length), _last.First.Slice(lastStart, length))
-        && IsSame(Renderers.Second.Slice(start, length), _last.Second.Slice(lastStart, length));
+        && IsSame(renderers.Entities.Slice(start, length), _last.Entities.Slice(lastStart, length))
+        && IsSame(renderers.First.Slice(start, length), _last.First.Slice(lastStart, length))
+        && IsSame(renderers.Second.Slice(start, length), _last.Second.Slice(lastStart, length));
 
     /// <summary>
     /// The rows of a block that only moved, from <paramref name="from"/> to <paramref name="to"/>.
@@ -265,14 +270,14 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph, World w
     {
         for (int index = start; index < start + length; index++)
         {
-            Renderer renderer = Renderers.Second[index];
+            Renderer renderer = inputs.Renderers.Second[index];
             ResidentModel? resident = renderer.Model == Handle<Model>.None ? null : inputs.Pools.Get(renderer.Model);
             GpuInstance row = resident is { } model
-                ? CreateRow(Renderers.Entities[index], Renderers.First[index], model, inputs)
+                ? CreateRow(inputs.Renderers.Entities[index], inputs.Renderers.First[index], model, inputs)
                 : default;
             bool wasDrawnHere =
                 index < _lastCount
-                && _last.Entities[index] == Renderers.Entities[index]
+                && _last.Entities[index] == inputs.Renderers.Entities[index]
                 && _rows[index].ClusterCount > 0;
             if (wasDrawnHere && _rows[index].World != row.World)
             {
@@ -302,6 +307,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph, World w
     /// with, null when there is none.
     /// </summary>
     private readonly record struct RowInputs(
+        EcsSnapshot<Transform, Renderer> Renderers,
         uint FrameIndex,
         GeometryPools Pools,
         MaterialTable Materials,

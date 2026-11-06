@@ -101,7 +101,7 @@ internal static class Program
             Log.Info($"Running {project.Name} in {(app.IsHeadless ? "headless" : "GUI")} mode.");
 
             app.StartRun();
-            using Gems gems = new(registry, provider, app, files, assets, world, events);
+            using Gems gems = new(registry, provider, app, files, assets, world, events, threads);
             world.StartAsync(kept, app.Lifetime).FireAndForget();
 
             // If we don't have a window and aren't headless something is wrong, early out.

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
@@ -59,9 +60,9 @@ public sealed class World : IEcs, IDisposable
 
     /// <summary>
     /// Each entity's shading by the entity and its renderer's slot: one per material the renderer held as the entity was
-    /// made, gone with it. Main thread.
+    /// made, gone with it. Written on the main thread, read from any.
     /// </summary>
-    private readonly Dictionary<(Entity Entity, int Slot), ShadingInstance> _shading = [];
+    private readonly ConcurrentDictionary<(Entity Entity, int Slot), ShadingInstance> _shading = new();
 
     /// <summary>
     /// The prefabs each open domain placed, as they were read: what its entities are compared with, by a save and as the
@@ -124,6 +125,25 @@ public sealed class World : IEcs, IDisposable
     /// and time scale wait for it.
     /// </summary>
     internal bool IsShowingLoadingScreen { get; private set; }
+
+    /// <summary>
+    /// The last frame whose hooks before Render have run, so what it made of the world is published for the render thread.
+    /// Set on the main thread, read on any.
+    /// </summary>
+    internal uint PublishedFrame
+    {
+        get => Volatile.Read(ref field);
+        set => Volatile.Write(ref field, value);
+    }
+
+    /// <summary>
+    /// The newest published frame the render thread has drawn, or one after it. Set on the render thread, read on any.
+    /// </summary>
+    internal uint DrawnFrame
+    {
+        get => Volatile.Read(ref field);
+        set => Volatile.Write(ref field, value);
+    }
 
     /// <summary>
     /// Whether a gem provides the ECS, so content can come into the world.
@@ -360,7 +380,8 @@ public sealed class World : IEcs, IDisposable
 
     /// <summary>
     /// The entity's own shading in <paramref name="slot"/> of its renderer, made with the entity; null for an empty slot
-    /// or an entity made without a renderer.
+    /// or an entity made without a renderer. Any thread: on another than the main, an entity made or destroyed meanwhile
+    /// may or may not have it yet.
     /// </summary>
     public ShadingInstance? GetShading(Entity entity, int slot) => _shading.GetValueOrDefault((entity, slot));
 
@@ -788,7 +809,7 @@ public sealed class World : IEcs, IDisposable
     {
         for (int slot = 0; slot < MaterialSlots.Capacity; slot++)
         {
-            _shading.Remove((entity, slot));
+            _shading.TryRemove((entity, slot), out _);
         }
     }
 
@@ -947,9 +968,12 @@ public sealed class World : IEcs, IDisposable
         arrive();
         IsShowingLoadingScreen = false;
 
-        // Two frame starts on, a whole frame's hooks have drawn what came, wherever this went on in the frame.
-        await WaitForFrameAsync(cancel).ConfigureAwait(false);
-        await WaitForFrameAsync(cancel).ConfigureAwait(false);
+        // The next frame publishes what came, wherever this went on in the frame; it has shown once that one is drawn.
+        uint arrived = PublishedFrame + 1;
+        while (DrawnFrame < arrived)
+        {
+            await WaitForFrameAsync(cancel).ConfigureAwait(false);
+        }
     }
 
     /// <summary>

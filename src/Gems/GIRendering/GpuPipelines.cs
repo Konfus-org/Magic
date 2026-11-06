@@ -130,7 +130,7 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
     }
 
     /// <summary>
-    /// The pipelines built from what <see cref="CompileAsync"/> gave. Main thread.
+    /// The pipelines built from what <see cref="CompileAsync"/> gave. Render thread.
     /// </summary>
     public Result Create(ImmutableArray<CompiledShader> compiled)
     {

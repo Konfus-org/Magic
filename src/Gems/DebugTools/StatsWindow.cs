@@ -6,8 +6,8 @@ using Magic.Debugging;
 namespace Magic.DebugTools;
 
 /// <summary>
-/// A window of everything the meters measure, in sections that fold: CPU, the main thread's frame with what Core and
-/// each gem spend of it; GPU, what the GPU provider says of the API and the GPU, and its frame and passes; Memory, Core's
+/// A window of everything the meters measure, in sections that fold: CPU, the main thread's frame and the render
+/// thread's, with what Core and each gem spend of them; GPU, what the GPU provider says of the API and the GPU, and its frame and passes; Memory, Core's
 /// and the process's, then each gem's; and Other, the rest by meter. A histogram's row shows its mean, how many a second
 /// and its most; a counter's how much it rose and how much a second; a gauge's its latest value. Seconds show as
 /// milliseconds and bytes as megabytes.
@@ -19,6 +19,7 @@ internal sealed class StatsWindow(IDebugUI ui)
     private const string GemMeterPrefix = "Magic.Gems.";
     private const string FrameDuration = "magic.core.frame.duration";
     private const string FrameWorkDuration = "magic.core.frame.work.duration";
+    private const string RenderFrameDuration = "magic.core.render.frame.duration";
     private const string HookDuration = "magic.core.gem.hook.duration";
     private const string StepDuration = "magic.core.step.duration";
     private const string GemNameTag = "magic.core.gem.name";
@@ -126,7 +127,7 @@ internal sealed class StatsWindow(IDebugUI ui)
                 part.Rows.Add(ToCells(row.GetTag(isHook ? HookTag : StepTag), row));
                 part.Amount += row.Value * row.PerSecond;
             }
-            else if (row.Instrument is FrameDuration or FrameWorkDuration)
+            else if (row.Instrument is FrameDuration or FrameWorkDuration or RenderFrameDuration)
             {
                 cpu.Rows.Add(ToCells(name, row));
                 workSec = row.Instrument == FrameWorkDuration ? row.Value : workSec;

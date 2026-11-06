@@ -68,7 +68,7 @@ internal sealed unsafe class VulkanFrames : IDisposable
 
     /// <summary>
     /// Moves to the next frame: waits for the GPU to finish what that frame last held, frees its trash, finishes its
-    /// readbacks and reads its timestamps, then readies it to record. Main thread.
+    /// readbacks and reads its timestamps, then readies it to record. Render thread.
     /// </summary>
     public void Begin()
     {
@@ -96,7 +96,7 @@ internal sealed unsafe class VulkanFrames : IDisposable
 
     /// <summary>
     /// Finishes every frame the GPU is done with, without waiting: what readbacks and trash wait for while no frame
-    /// begins, as during the awaited start of a run. Main thread.
+    /// begins, as during the awaited start of a run. Render thread.
     /// </summary>
     public void Poll()
     {
@@ -152,7 +152,7 @@ internal sealed unsafe class VulkanFrames : IDisposable
 
     /// <summary>
     /// Promises <paramref name="bytes"/> of <paramref name="buffer"/> once the frames submitted so far are done.
-    /// Main thread.
+    /// Render thread.
     /// </summary>
     public Task<Result<ReadOnlyMemory<byte>>> ReadBackAsync(uint id, VulkanBuffer buffer, long offset, int bytes)
     {

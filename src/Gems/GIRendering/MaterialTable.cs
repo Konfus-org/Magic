@@ -254,7 +254,7 @@ internal sealed class MaterialTable(
     private async Task LoadAsync(Handle<Material> material)
     {
         Result<Material> loaded = await assets.LoadAsync(material, null, CancellationToken.None).ConfigureAwait(false);
-        await threads.Enter(EngineThread.Main);
+        await threads.Enter(EngineThread.Render);
         if (!loaded.Ok)
         {
             Log.Error($"{assets.GetPath(material)} is drawn as a failure: {loaded.Error}");
