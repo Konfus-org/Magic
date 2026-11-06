@@ -142,7 +142,7 @@ code nothing depends on yet is named as a follow-up in the summary, not done in 
 For normal and sweeping changes, present:
 
 1. The approach.
-2. The alternatives you considered, and why the chosen one is the simplest.
+2. The smallest version that could work, the alternatives you considered, and why the chosen one is the simplest.
 3. For anything new, the existing libraries or tools you looked at.
 4. The riskiest assumption, what you haven't verified, and what would change your recommendation.
 5. The slice: its mode, its time-box, its runnable check, the `-Change` level, and what is out of scope (the slice
@@ -180,8 +180,9 @@ assumptions and decisions a reviewer would question as you make them.
    slice. Fix its findings at their cause, or say with evidence why not, then run step 1 again. Another review is
    needed only once fixes add more than about 100 lines.
 4. Summarize what changed, the level you validated at, what you assumed, what you couldn't verify and, for a
-   `Visual` change, what the screenshots show. Keep the fix and the cleanup apart. End with the next slice you
-   propose, in one line.
+   `Visual` change, what the screenshots show. List each type, member, field and parameter you added, with the
+   caller in this slice that needs it; remove any that has none ([Simplest First](#simplest-first)). Keep the fix and
+   the cleanup apart. End with the next slice you propose, in one line.
 5. From the worktree, run `plannotator review --base <merge target>` in the background and wait for it. If it stops
    before the user decides, run it again; their comments are kept. The page shows the worktree's branch, which is the
    session's title ([Worktrees](#worktrees)). `plannotator sessions --json` lists each open review's URL and worktree.
@@ -200,9 +201,40 @@ assumptions and decisions a reviewer would question as you make them.
 
 ## Design Rules
 
-- **Simplest robust solution.** Prefer removing code to adding it. Match the surrounding style. No abstraction
-  before a second real use. A private or internal member needs a caller; public API a gem or game could use stays
-  without one.
+### Simplest First
+
+Agents tend to over-build. Less is more: the best change often removes more code than it adds.
+
+- **Remove before you add.** First look for code the change makes unnecessary, and for a way to do the job by
+  deleting, merging or reusing what exists. A slice that ends with fewer lines than it started with is a good slice.
+- **Look for the elegant version.** Before writing, ask whether there is a more elegant solution, not just a smaller
+  one: a better data shape, an existing service or .NET feature, or a reframing that makes the special cases
+  disappear. Brute force, such as repeated branches, copied blocks or a pile of cases, is a sign to stop and rethink.
+- **Start from the obvious version.** Name the smallest change that could work: extend a method before making a new
+  one, a local before a field. Build that, and add more only when a check fails without it.
+- **No flags that steer behaviour.** No `bool` field or parameter that makes a method do something else, and no
+  field that records what already happened (`_initialized`, `_isDirty`, `_skipNext`, `_hasWarned`). Write two
+  methods, let the caller choose, or derive the answer from data you already have. A field holds data the type
+  owns, never a mode.
+- **No state you can compute.** Never cache, mirror or track a value that can be read or worked out when needed,
+  unless a measurement shows the cost.
+- **Every new member has a caller in this slice.** No property, overload, option, setting, event or parameter for a
+  later need. No property that only wraps a field, no interface or base type with one implementation, no type that
+  forwards calls. Public API a gem or game could use is the one exception.
+- **Don't guard against what can't happen.** No null check on a value that can't be null, no `try`/`catch` that only
+  logs or swallows, no fallback for a case the code never reaches.
+- **Name it for what it is.** Use the words the code already uses ([Naming](docs/CODE_STANDARDS.md#naming)). No
+  `Manager`, `Helper`, `Handler`, `Util`, `Info` or `Impl` names, and no `New`, `2` or `Internal` suffixes. If a name
+  needs a comment to make sense, rename it.
+- **When the simple fix doesn't fit, say so.** If the code around it blocks the obvious change, stop and report that
+  instead of routing around it with a flag, a special case or a parallel path.
+- **Cut before you finish.** Once it works, read your diff as its reviewer, ask again whether there is a more
+  elegant solution, and delete everything the slice runs without: members, parameters, flags, branches, checks,
+  logging, comments. The smaller diff wins.
+
+### Structure
+
+- **Prefer removing code to adding it.** Match the surrounding style. No abstraction before a second real use.
 - **Project conventions first, then .NET's** (the Framework Design Guidelines).
 - **One responsibility each.** Split interfaces by what their user needs. Gems depend on Core's interfaces, never on
   each other.
