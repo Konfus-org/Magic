@@ -73,16 +73,12 @@ internal sealed class MetricsReader : IDisposable
     private static readonly string[] _meters = ["Magic.*", "System.Runtime"];
 
     /// <summary>
-    /// Where the exporter puts each collection's rows, which the provider's exporter outlives no longer than the provider.
+    /// The rows of the last collection, in the order the instruments were published, which the provider's exporter
+    /// refills and outlives no longer than the provider.
     /// </summary>
-    private readonly Collected _collected = new();
+    private readonly List<MetricRow> _rows = [];
 
     private MeterProvider? _provider;
-
-    /// <summary>
-    /// The rows of the last collection, in the order the instruments were published.
-    /// </summary>
-    public IReadOnlyList<MetricRow> Rows => _collected.Rows;
 
     public void Dispose() => Listen(false);
 
@@ -103,7 +99,7 @@ internal sealed class MetricsReader : IDisposable
         {
             _provider?.Dispose();
             _provider = null;
-            _collected.Rows = [];
+            _rows.Clear();
 
             return;
         }
@@ -111,7 +107,7 @@ internal sealed class MetricsReader : IDisposable
         _provider = Sdk.CreateMeterProviderBuilder()
             .AddMeter(_meters)
             .AddReader(
-                new BaseExportingMetricReader(new RowExporter(_collected))
+                new BaseExportingMetricReader(new RowExporter(_rows))
                 {
                     TemporalityPreference = MetricReaderTemporalityPreference.Delta,
                 }
@@ -120,25 +116,15 @@ internal sealed class MetricsReader : IDisposable
     }
 
     /// <summary>
-    /// Sums up what was measured since the last collection into <see cref="Rows"/>, reading the observable instruments
+    /// Sums up what was measured since the last collection into the rows it returns, reading the observable instruments
     /// now. Main thread.
     /// </summary>
-    public void Collect() => _provider?.ForceFlush();
+    public IReadOnlyList<MetricRow> Collect()
+    {
+        _provider?.ForceFlush();
 
-    private static MetricKind GetKind(Metric metric) =>
-        metric.MetricType switch
-        {
-            MetricType.Histogram or MetricType.ExponentialHistogram => MetricKind.Distribution,
-            MetricType.LongSum or MetricType.DoubleSum when metric.Temporality == AggregationTemporality.Delta =>
-                MetricKind.Total,
-            MetricType.LongSum
-            or MetricType.DoubleSum
-            or MetricType.LongSumNonMonotonic
-            or MetricType.DoubleSumNonMonotonic
-            or MetricType.LongGauge
-            or MetricType.DoubleGauge => MetricKind.Latest,
-            _ => MetricKind.Latest,
-        };
+        return _rows;
+    }
 
     private static double ReadSum(MetricType type, in MetricPoint point) =>
         type.IsLong() ? point.GetSumLong() : point.GetSumDouble();
@@ -167,7 +153,16 @@ internal sealed class MetricsReader : IDisposable
         }
 
         double windowSec = Math.Max((point.EndTime - point.StartTime).TotalSeconds, 1e-6);
-        MetricKind kind = GetKind(metric);
+        MetricKind kind = metric.MetricType switch
+        {
+            MetricType.Histogram or MetricType.ExponentialHistogram => MetricKind.Distribution,
+            MetricType.LongSum or MetricType.DoubleSum => MetricKind.Total,
+            MetricType.LongSumNonMonotonic
+            or MetricType.DoubleSumNonMonotonic
+            or MetricType.LongGauge
+            or MetricType.DoubleGauge => MetricKind.Latest,
+            _ => MetricKind.Latest,
+        };
         (double value, double perSecond, double max) = kind switch
         {
             MetricKind.Distribution => (
@@ -184,21 +179,14 @@ internal sealed class MetricsReader : IDisposable
     }
 
     /// <summary>
-    /// The last collection's rows, which the exporter writes and the reader reads.
+    /// Writes <paramref name="rows"/> out again from each batch the reader collects, as it is handed it, on the thread
+    /// that collects it.
     /// </summary>
-    private sealed class Collected
-    {
-        public IReadOnlyList<MetricRow> Rows { get; set; } = [];
-    }
-
-    /// <summary>
-    /// Makes the rows of each batch the reader collects, as it is handed it, on the thread that collects it.
-    /// </summary>
-    private sealed class RowExporter(Collected collected) : BaseExporter<Metric>
+    private sealed class RowExporter(List<MetricRow> rows) : BaseExporter<Metric>
     {
         public override ExportResult Export(in Batch<Metric> batch)
         {
-            List<MetricRow> rows = [];
+            rows.Clear();
             foreach (Metric metric in batch)
             {
                 List<KeyValuePair<string, string>> meterTags = [];
@@ -212,8 +200,6 @@ internal sealed class MetricsReader : IDisposable
                     rows.Add(ToRow(metric, point, meterTags));
                 }
             }
-
-            collected.Rows = rows;
 
             return ExportResult.Success;
         }

@@ -10,7 +10,7 @@ namespace Magic.DebugTools;
 /// each gem spend of it; GPU, what the GPU provider says of the API and the GPU, and its frame and passes; Memory, Core's
 /// and the process's, then each gem's; and Other, the rest by meter. A histogram's row shows its mean, how many a second
 /// and its most; a counter's how much it rose and how much a second; a gauge's its latest value. Seconds show as
-/// milliseconds and bytes as megabytes.
+/// milliseconds and bytes as megabytes. It also writes the <see cref="CounterLine"/> from the same rows.
 /// </summary>
 internal sealed class StatsWindow(IDebugUI ui)
 {
@@ -51,21 +51,14 @@ internal sealed class StatsWindow(IDebugUI ui)
     /// </summary>
     private readonly HashSet<string> _folded = [];
 
-    private bool _isOpen;
-
-    public bool IsOpen
-    {
-        get => _isOpen;
-        set
-        {
-            _isOpen = value;
-            _lines.Clear();
-            _sections.Clear();
-        }
-    }
+    /// <summary>
+    /// The frame rate and the memory in use, as written out at the last refresh:
+    /// <c>FPS: 59 (17.0 ms) | Memory: GPU 0.4 GB, RAM 0.9 GB</c>.
+    /// </summary>
+    public string CounterLine { get; private set; } = string.Empty;
 
     /// <summary>
-    /// The sections written out again from the last collection's <paramref name="rows"/>.
+    /// The sections and the counter line written out again from the last collection's <paramref name="rows"/>.
     /// </summary>
     public void Refresh(IReadOnlyList<MetricRow> rows)
     {
@@ -82,17 +75,15 @@ internal sealed class StatsWindow(IDebugUI ui)
 
         // The meters that measure the GPU are described in its section, the rest above them all.
         HashSet<string> gpuMeters = [];
-        double framesPerSecond = 0;
         foreach (MetricRow row in rows)
         {
             if (StripMeter(row.Meter, row.Instrument).StartsWith(GpuPrefix, StringComparison.Ordinal))
                 gpuMeters.Add(row.Meter);
-
-            if (row.Instrument == FrameDuration)
-                framesPerSecond = row.PerSecond;
         }
 
         HashSet<string> described = [];
+        double framesPerSecond = 0;
+        double frameSec = 0;
         double workSec = 0;
         double gpuSec = 0;
         double processBytes = 0;
@@ -129,7 +120,10 @@ internal sealed class StatsWindow(IDebugUI ui)
             else if (row.Instrument is FrameDuration or FrameWorkDuration)
             {
                 cpu.Rows.Add(ToCells(name, row));
-                workSec = row.Instrument == FrameWorkDuration ? row.Value : workSec;
+                if (row.Instrument == FrameDuration)
+                    (framesPerSecond, frameSec) = (row.PerSecond, row.Value);
+                else
+                    workSec = row.Value;
             }
             else if (name.StartsWith(GpuPrefix, StringComparison.Ordinal))
             {
@@ -140,7 +134,8 @@ internal sealed class StatsWindow(IDebugUI ui)
                 else
                     gpu.GetChild(own).Rows.Add(ToCells(row.TagText, row));
 
-                gpuSec = name == GpuFrameDuration ? row.Value : gpuSec;
+                if (name == GpuFrameDuration)
+                    gpuSec = row.Value;
             }
             else
             {
@@ -148,31 +143,40 @@ internal sealed class StatsWindow(IDebugUI ui)
             }
         }
 
-        cpu.Label = $"CPU: {FormatAmount(workSec, "s")}";
+        cpu.SetLabel($"CPU: {FormatAmount(workSec, "s")}");
 
         // The part that takes the most first, to find what slows a frame at a glance.
         cpu.Children.Sort((a, b) => b.Amount.CompareTo(a.Amount));
         foreach (Section part in cpu.Children)
         {
             double perFrame = framesPerSecond > 0 ? part.Amount / framesPerSecond : 0;
-            part.Label = $"{part.Name}: {FormatAmount(perFrame, "s")}";
+            part.SetLabel($"{part.Name}: {FormatAmount(perFrame, "s")}");
         }
 
-        gpu.Label = $"GPU: {FormatAmount(gpuSec, "s")}";
+        gpu.SetLabel($"GPU: {FormatAmount(gpuSec, "s")}");
         string gpuMemory = gpuBytes > 0 ? FormatGigabytes(", GPU", gpuBytes) : string.Empty;
-        memory.Label = $"Memory: {FormatGigabytes("RAM", processBytes)}{gpuMemory}";
+        memory.SetLabel($"Memory: {FormatGigabytes("RAM", processBytes)}{gpuMemory}");
         foreach (Section part in memory.Children)
         {
-            part.Label = part.Amount > 0 ? $"{part.Name}: {FormatAmount(part.Amount, "By")}" : part.Name;
+            part.SetLabel(part.Amount > 0 ? $"{part.Name}: {FormatAmount(part.Amount, "By")}" : part.Name);
         }
+
+        string gpuCounter = gpuBytes > 0 ? FormatGigabytes("GPU", gpuBytes) + ", " : string.Empty;
+        CounterLine = string.Create(
+            CultureInfo.InvariantCulture,
+            $"FPS: {framesPerSecond:0} ({frameSec * 1000:0.0} ms) | Memory: {gpuCounter}{FormatGigabytes("RAM", processBytes)}"
+        );
     }
 
-    public void Update()
+    /// <summary>
+    /// Draws the window while <paramref name="isOpen"/>, which its close button clears.
+    /// </summary>
+    public void Update(ref bool isOpen)
     {
-        if (!_isOpen)
+        if (!isOpen)
             return;
 
-        ui.Begin("Stats", ref _isOpen, scrollable: true);
+        ui.Begin("Stats", ref isOpen, scrollable: true);
         foreach (string line in _lines)
         {
             ui.Label(line);
@@ -258,7 +262,7 @@ internal sealed class StatsWindow(IDebugUI ui)
             return;
 
         bool folds = section.IsFoldedAtStart && _folded.Add(section.Id);
-        if (!ui.Header(section.HeaderLabel, folds, depth))
+        if (!ui.Header(section.Header, folds, depth))
             return;
 
         foreach (string line in section.Lines)
@@ -268,7 +272,7 @@ internal sealed class StatsWindow(IDebugUI ui)
 
         if (section.Rows.Count > 0)
         {
-            ui.Table(section.TableId, _columns);
+            ui.Table(section.Id, _columns);
             foreach (string[] row in section.Rows)
             {
                 ui.Row(row);
@@ -296,25 +300,10 @@ internal sealed class StatsWindow(IDebugUI ui)
         public bool IsFoldedAtStart => isFoldedAtStart;
 
         /// <summary>
-        /// What its header reads, which sets <see cref="HeaderLabel"/>.
-        /// </summary>
-        public string Label
-        {
-            get;
-            set
-            {
-                field = value;
-                HeaderLabel = $"{value}###{Id}";
-            }
-        } = name;
-
-        /// <summary>
-        /// <see cref="Label"/> with <see cref="Id"/> as its ImGui id, so the header keeps whether it is open as its
+        /// What its header reads, with <see cref="Id"/> as its ImGui id, so the header keeps whether it is open as its
         /// numbers change.
         /// </summary>
-        public string HeaderLabel { get; private set; } = $"{name}###{id}";
-
-        public string TableId { get; } = $"##{id}";
+        public string Header { get; private set; } = $"{name}###{id}";
 
         public double Amount { get; set; }
 
@@ -323,6 +312,8 @@ internal sealed class StatsWindow(IDebugUI ui)
         public List<string[]> Rows { get; } = [];
 
         public List<Section> Children { get; } = [];
+
+        public void SetLabel(string label) => Header = $"{label}###{Id}";
 
         /// <summary>
         /// The section in this one named <paramref name="childName"/>, added the first time.

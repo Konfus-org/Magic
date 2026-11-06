@@ -19,11 +19,19 @@ public sealed class DebugToolsGem(IDebugUI ui, IInput? input = null) : IGem, IDi
     private const string CounterSetting = "DebugTools.counter";
     private const string StatsSetting = "DebugTools.stats";
 
+#if DEBUG
+    private const bool IsCounterShownAtStart = true;
+#else
+    private const bool IsCounterShownAtStart = false;
+#endif
+
     private static readonly TimeSpan _collectEvery = TimeSpan.FromSeconds(0.5);
 
     private readonly MetricsReader _metrics = new();
-    private readonly CounterLine _counter = new(ui);
     private readonly StatsWindow _stats = new(ui);
+
+    private bool _isCounterShown = IsCounterShownAtStart;
+    private bool _isStatsOpen;
 
     /// <summary>
     /// When the meters were last collected, 0 before the first time.
@@ -42,35 +50,29 @@ public sealed class DebugToolsGem(IDebugUI ui, IInput? input = null) : IGem, IDi
             if (!bool.TryParse(setting.Value, out bool isShown))
                 Log.Error($"{setting.Key} takes true or false, not '{setting.Value}'.");
             else if (setting.Key == CounterSetting)
-                _counter.IsShown = isShown;
+                _isCounterShown = isShown;
             else
-                _stats.IsOpen = isShown;
+                _isStatsOpen = isShown;
         }
 
         if (input is not null && input[Control.KeyF1].WasPressed)
-            _counter.IsShown = !_counter.IsShown;
+            _isCounterShown = !_isCounterShown;
 
         if (input is not null && input[Control.KeyF3].WasPressed)
-            _stats.IsOpen = !_stats.IsOpen;
+            _isStatsOpen = !_isStatsOpen;
 
-        Collect();
-        _counter.Update();
-        _stats.Update();
-    }
-
-    /// <summary>
-    /// Listens while anything shows, and hands it what the meters measured each time it is due.
-    /// </summary>
-    private void Collect()
-    {
-        bool isListening = _counter.IsShown || _stats.IsOpen;
+        // Collect what the meters measured twice a second, while anything shows.
+        bool isListening = _isCounterShown || _isStatsOpen;
         _metrics.Listen(isListening);
-        if (!isListening || Stopwatch.GetElapsedTime(_collectedTimestamp) < _collectEvery)
-            return;
+        if (isListening && Stopwatch.GetElapsedTime(_collectedTimestamp) >= _collectEvery)
+        {
+            _collectedTimestamp = Stopwatch.GetTimestamp();
+            _stats.Refresh(_metrics.Collect());
+        }
 
-        _collectedTimestamp = Stopwatch.GetTimestamp();
-        _metrics.Collect();
-        _counter.Refresh(_metrics.Rows);
-        _stats.Refresh(_metrics.Rows);
+        if (_isCounterShown)
+            ui.Text(_stats.CounterLine);
+
+        _stats.Update(ref _isStatsOpen);
     }
 }
