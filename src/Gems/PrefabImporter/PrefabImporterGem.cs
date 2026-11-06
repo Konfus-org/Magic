@@ -1,5 +1,5 @@
-using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Linq;
 using System.Text.Json;
 using Magic.Debugging;
 using Magic.Ecs;
@@ -21,11 +21,6 @@ namespace Magic.PrefabImporter;
 /// </summary>
 public sealed class PrefabImporterGem(Assets assets) : IGem, IAssetImporter<Prefab>
 {
-    /// <summary>
-    /// The components files name that could not be read, each said once. Read on workers.
-    /// </summary>
-    private readonly ConcurrentDictionary<string, bool> _unread = new(StringComparer.Ordinal);
-
     public ImmutableArray<string> Extensions => [".prefab"];
 
     public async Task<Result<Prefab>> ImportAsync(
@@ -60,32 +55,8 @@ public sealed class PrefabImporterGem(Assets assets) : IGem, IAssetImporter<Pref
     }
 
     /// <summary>
-    /// The entity's tags, or none when it has none. Past <see cref="Tags.Capacity"/>, and an empty name, are warned about
-    /// and left out.
-    /// </summary>
-    private static Tags? ParseTags(PrefabFileEntity entity, string name, string path)
-    {
-        if (entity.Tags.IsEmpty)
-            return null;
-
-        Tags tags = default;
-        foreach (string tag in entity.Tags)
-        {
-            // Adding fails for a tag held already, which is no fault, as well as for an empty one or one past the capacity.
-            Tag named = string.IsNullOrEmpty(tag) ? default : Tag.From(tag);
-            if (!tags.Add(named) && !tags.Has(named))
-                Log.Warn(
-                    $"{path}'s {name} is tagged \"{tag}\", which is left out: a tag needs a name, and an entity has at "
-                        + $"most {Tags.Capacity}."
-                );
-        }
-
-        return tags;
-    }
-
-    /// <summary>
     /// The part <paramref name="entity"/> is: its components, its tags among them, and the parts under it, those of the
-    /// prefab it places first. A component no code declares, or whose values aren't its, is an error logged once, and the
+    /// prefab it places first. A component no code declares, or whose values aren't its, is an error logged, and the
     /// part goes without it; a prefab it places that doesn't load fails the file.
     /// </summary>
     private async Task<Result<PrefabPart>> ReadPartAsync(
@@ -104,12 +75,25 @@ public sealed class PrefabImporterGem(Assets assets) : IGem, IAssetImporter<Pref
             Result<object> read = type.Ok ? Json.Read(json, type.Value) : Result.Failure(type.Error);
             if (read is { Ok: true, Value: IComponent made })
                 components.Add(made);
-            else if (_unread.TryAdd(component, true))
+            else
                 Log.Error($"{file.Path}'s {name} goes without component {component}: {read.Error}");
         }
 
-        if (ParseTags(entity, name, file.Path) is { } tags)
+        // Its tags, as one component; an empty name or one past the capacity is left out.
+        if (!entity.Tags.IsEmpty)
+        {
+            Tags tags = default;
+            foreach (string tag in entity.Tags.Distinct(StringComparer.Ordinal))
+            {
+                if (string.IsNullOrEmpty(tag) || !tags.Add(Tag.From(tag)))
+                    Log.Warn(
+                        $"{file.Path}'s {name} is tagged \"{tag}\", which is left out: a tag needs a name, and an entity "
+                            + $"has at most {Tags.Capacity}."
+                    );
+            }
+
             components.Add(tags);
+        }
 
         ImmutableArray<PrefabPart>.Builder children = ImmutableArray.CreateBuilder<PrefabPart>();
         if (entity.Prefab != Handle<Prefab>.None)
