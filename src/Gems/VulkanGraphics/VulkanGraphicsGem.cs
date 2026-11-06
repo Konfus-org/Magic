@@ -84,11 +84,11 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     }
 
     public TextureDescription GetDescription(GpuTexture texture) =>
-        _resources.GetTexture(texture.Id)?.Description
+        _resources.Textures[texture.Id]?.Description
         ?? throw new ArgumentException($"Texture {texture.Id} is gone.", nameof(texture));
 
     public BufferDescription GetDescription(GpuBuffer buffer) =>
-        _resources.GetBuffer(buffer.Id)?.Description
+        _resources.Buffers[buffer.Id]?.Description
         ?? throw new ArgumentException($"Buffer {buffer.Id} is gone.", nameof(buffer));
 
     public Result<GpuBuffer> CreateBuffer(in BufferDescription description)
@@ -129,30 +129,29 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     public void Destroy(GpuBuffer buffer)
     {
         ThrowIfNotOnMain();
-        if (_resources.RemoveBuffer(buffer.Id) is { } removed)
-            _frames.Current.Trash.Add(VulkanFrames.Trash.Of(buffer.Id, removed));
+        if (_resources.Buffers.Remove(buffer.Id) is { } removed)
+            _frames.Current.Trash.Add(new(buffer.Id, removed));
     }
 
     public void Destroy(GpuTexture texture)
     {
         ThrowIfNotOnMain();
-        if (_resources.RemoveTexture(texture.Id) is { } removed)
-            _frames.Current.Trash.Add(VulkanFrames.Trash.Of(texture.Id, removed));
+        if (_resources.Textures.Remove(texture.Id) is { } removed)
+            _frames.Current.Trash.Add(new(texture.Id, removed));
     }
 
     public void Destroy(GpuSampler sampler)
     {
         ThrowIfNotOnMain();
-        VkSampler removed = _resources.RemoveSampler(sampler.Id);
-        if (removed.IsNotNull)
-            _frames.Current.Trash.Add(VulkanFrames.Trash.Of(sampler.Id, removed));
+        if (_resources.Samplers.Remove(sampler.Id) is { } removed)
+            _frames.Current.Trash.Add(new(sampler.Id, removed));
     }
 
     public void Destroy(GpuPipeline pipeline)
     {
         ThrowIfNotOnMain();
-        if (_resources.RemovePipeline(pipeline.Id) is { } removed)
-            _frames.Current.Trash.Add(VulkanFrames.Trash.Of(pipeline.Id, removed));
+        if (_resources.Pipelines.Remove(pipeline.Id) is { } removed)
+            _frames.Current.Trash.Add(new(pipeline.Id, removed));
     }
 
     public Result<GpuAcceleration> CreateAcceleration(in BottomLevelDescription description)
@@ -169,13 +168,13 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
         return _resources.CreateAcceleration(description);
     }
 
-    public ulong GetAddress(GpuAcceleration acceleration) => _resources.GetAcceleration(acceleration.Id)?.Address ?? 0;
+    public ulong GetAddress(GpuAcceleration acceleration) => _resources.Accelerations[acceleration.Id]?.Address ?? 0;
 
     public void Destroy(GpuAcceleration acceleration)
     {
         ThrowIfNotOnMain();
-        if (_resources.RemoveAcceleration(acceleration.Id) is { } removed)
-            _frames.Current.Trash.Add(VulkanFrames.Trash.Of(acceleration.Id, removed));
+        if (_resources.Accelerations.Remove(acceleration.Id) is { } removed)
+            _frames.Current.Trash.Add(new(acceleration.Id, removed));
     }
 
     public GpuUpload BeginUpload(int bytes)
@@ -213,7 +212,7 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
         VulkanFrames.Frame frame = _frames.Current;
         _recorder.Record(frame, commands);
         // The window's image is shown whatever the commands left it as.
-        if (_resources.GetTexture(WindowTarget.Id) is { } window && window.Layouts[0] != VkImageLayout.PresentSrcKHR)
+        if (_resources.Textures[WindowTarget.Id] is { } window && window.Layouts[0] != VkImageLayout.PresentSrcKHR)
             _recorder.TransitionTo(frame.CommandBuffer, window, GpuAccess.Present);
 
         _device.Api.vkEndCommandBuffer(frame.CommandBuffer);
@@ -288,7 +287,7 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
 
     private Task<Result<ReadOnlyMemory<byte>>> ReadBackOnMainAsync(GpuBuffer buffer, long offset, int bytes)
     {
-        if (_resources.GetBuffer(buffer.Id) is not { } vulkanBuffer)
+        if (_resources.Buffers[buffer.Id] is not { } vulkanBuffer)
             return Task.FromResult<Result<ReadOnlyMemory<byte>>>(Result.Failure($"buffer {buffer.Id} is gone."));
 
         BeginFrame();

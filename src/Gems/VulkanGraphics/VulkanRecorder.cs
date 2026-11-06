@@ -110,12 +110,12 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
         {
             if (transition.IsTexture)
             {
-                if (resources.GetTexture(transition.Id) is { } texture)
+                if (resources.Textures[transition.Id] is { } texture)
                     AddImageBarrier(texture, transition.Level, transition.Before, transition.After);
                 else
                     Log.Warn($"A transition names texture {transition.Id}, which is gone.");
             }
-            else if (resources.GetBuffer(transition.Id) is { } buffer)
+            else if (resources.Buffers[transition.Id] is { } buffer)
             {
                 (VkPipelineStageFlags2 beforeStages, VkAccessFlags2 beforeAccess) =
                     transition.Before.ToStageAndAccess();
@@ -221,7 +221,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
         for (int i = 0; i < targets.Colors.Length; i++)
         {
             GpuColorTarget color = targets.Colors[i];
-            if (resources.GetTexture(color.Texture.Id) is not { } texture)
+            if (resources.Textures[color.Texture.Id] is not { } texture)
             {
                 Log.Error($"The pass {pass.Name} draws into texture {color.Texture.Id}, which is gone.");
 
@@ -249,7 +249,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
         VkRenderingAttachmentInfo depth = new();
         if (targets.Depth is { } depthTarget)
         {
-            if (resources.GetTexture(depthTarget.Texture.Id) is not { } texture)
+            if (resources.Textures[depthTarget.Texture.Id] is not { } texture)
             {
                 Log.Error($"The pass {pass.Name} draws depth into texture {depthTarget.Texture.Id}, which is gone.");
 
@@ -310,7 +310,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
         switch (command.Kind)
         {
             case GpuCommandKind.BindPipeline:
-                if (resources.GetPipeline(command.Id) is { } pipeline)
+                if (resources.Pipelines[command.Id] is { } pipeline)
                     api.vkCmdBindPipeline(cmd, pipeline.BindPoint, pipeline.Pipeline);
                 else
                     Log.Warn($"Pipeline {command.Id} is gone and is not bound.");
@@ -335,7 +335,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
                 api.vkCmdDispatch(cmd, command.X, command.Y, command.Z);
                 break;
             case GpuCommandKind.DispatchIndirect:
-                if (resources.GetBuffer(command.Id) is { } arguments)
+                if (resources.Buffers[command.Id] is { } arguments)
                     api.vkCmdDispatchIndirect(cmd, arguments.Buffer, command.Offset);
 
                 break;
@@ -350,7 +350,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
 
                 break;
             case GpuCommandKind.BindIndexBuffer:
-                if (resources.GetBuffer(command.Id) is { } indices)
+                if (resources.Buffers[command.Id] is { } indices)
                     api.vkCmdBindIndexBuffer(cmd, indices.Buffer, command.Offset, VkIndexType.Uint32);
 
                 break;
@@ -361,7 +361,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
                 api.vkCmdDrawIndexed(cmd, command.X, command.Y, command.Z, 0, command.W);
                 break;
             case GpuCommandKind.DrawIndirectCount:
-                if (resources.GetBuffer(command.Id) is { } plain && resources.GetBuffer(command.Id2) is { } plainCount)
+                if (resources.Buffers[command.Id] is { } plain && resources.Buffers[command.Id2] is { } plainCount)
                 {
                     api.vkCmdDrawIndirectCount(
                         cmd,
@@ -376,7 +376,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
 
                 break;
             case GpuCommandKind.DrawIndexedIndirectCount:
-                if (resources.GetBuffer(command.Id) is { } draws && resources.GetBuffer(command.Id2) is { } count)
+                if (resources.Buffers[command.Id] is { } draws && resources.Buffers[command.Id2] is { } count)
                 {
                     api.vkCmdDrawIndexedIndirectCount(
                         cmd,
@@ -391,10 +391,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
 
                 break;
             case GpuCommandKind.CopyBuffer:
-                if (
-                    resources.GetBuffer(command.Id) is { } source
-                    && resources.GetBuffer(command.Id2) is { } destination
-                )
+                if (resources.Buffers[command.Id] is { } source && resources.Buffers[command.Id2] is { } destination)
                 {
                     VkBufferCopy region = new()
                     {
@@ -409,7 +406,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
 
                 break;
             case GpuCommandKind.CopyBufferToTexture:
-                if (resources.GetBuffer(command.Id) is { } from && resources.GetTexture(command.Id2) is { } into)
+                if (resources.Buffers[command.Id] is { } from && resources.Textures[command.Id2] is { } into)
                 {
                     VkBufferImageCopy region = new()
                     {
@@ -431,7 +428,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
 
                 break;
             case GpuCommandKind.CopyTextureToBuffer:
-                if (resources.GetTexture(command.Id) is { } read && resources.GetBuffer(command.Id2) is { } to)
+                if (resources.Textures[command.Id] is { } read && resources.Buffers[command.Id2] is { } to)
                 {
                     VkBufferImageCopy region = new()
                     {
@@ -453,7 +450,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
 
                 break;
             case GpuCommandKind.CopyTexture:
-                if (resources.GetTexture(command.Id) is { } copied && resources.GetTexture(command.Id2) is { } onto)
+                if (resources.Textures[command.Id] is { } copied && resources.Textures[command.Id2] is { } onto)
                 {
                     VkImageCopy region = new()
                     {
@@ -476,7 +473,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
 
                 break;
             case GpuCommandKind.BlitTexture:
-                if (resources.GetTexture(command.Id) is { } blitted && resources.GetTexture(command.Id2) is { } over)
+                if (resources.Textures[command.Id] is { } blitted && resources.Textures[command.Id2] is { } over)
                 {
                     VkExtent3D sourceExtent = GetExtent(blitted, 0);
                     VkExtent3D targetExtent = GetExtent(over, 0);
@@ -501,7 +498,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
 
                 break;
             case GpuCommandKind.FillBuffer:
-                if (resources.GetBuffer(command.Id) is { } filled)
+                if (resources.Buffers[command.Id] is { } filled)
                     api.vkCmdFillBuffer(
                         cmd,
                         filled.Buffer,
@@ -512,7 +509,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
 
                 break;
             case GpuCommandKind.ClearTexture:
-                if (resources.GetTexture(command.Id) is { } cleared)
+                if (resources.Textures[command.Id] is { } cleared)
                     Clear(cmd, cleared, command.Constants);
 
                 break;
@@ -520,7 +517,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
                 frame.WriteTimestamp(device, command.Label, passIndex);
                 break;
             case GpuCommandKind.BuildAcceleration:
-                if (resources.GetAcceleration(command.Id) is { } acceleration)
+                if (resources.Accelerations[command.Id] is { } acceleration)
                     Build(cmd, acceleration, command.X);
                 else
                     Log.Warn($"Acceleration structure {command.Id} is gone and is not built.");

@@ -79,7 +79,7 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
 
         _acquired = (int)index;
         // What the image held is gone with the last present: it is drawn into from nothing.
-        if (resources.GetTexture(_textures[_acquired].Id) is { } texture)
+        if (resources.Textures[_textures[_acquired].Id] is { } texture)
             texture.Layouts[0] = VkImageLayout.Undefined;
 
         return _textures[_acquired];
@@ -109,8 +109,8 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
         device.Api.vkDeviceWaitIdle();
         foreach (GpuTexture texture in _textures)
         {
-            if (resources.RemoveTexture(texture.Id) is { } removed)
-                resources.Free(texture.Id, removed);
+            if (resources.Textures.Remove(texture.Id) is { } removed)
+                resources.Free(new(texture.Id, removed));
         }
 
         foreach (VkSemaphore semaphore in _rendered)
