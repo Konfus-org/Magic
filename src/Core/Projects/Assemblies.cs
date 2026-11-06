@@ -55,21 +55,6 @@ public static class Assemblies
     }
 
     /// <summary>
-    /// Every type <paramref name="assembly"/> holds; those that load, when some don't.
-    /// </summary>
-    private static Type[] GetTypes(Assembly assembly)
-    {
-        try
-        {
-            return assembly.GetTypes();
-        }
-        catch (ReflectionTypeLoadException ex)
-        {
-            return [.. ex.Types.OfType<Type>()];
-        }
-    }
-
-    /// <summary>
     /// The top-level types <paramref name="assemblies"/> hold, by their names.
     /// </summary>
     private static FrozenDictionary<string, ImmutableArray<Type>> Index(ImmutableArray<Assembly> assemblies)
@@ -77,7 +62,7 @@ public static class Assemblies
         Dictionary<string, ImmutableArray<Type>> byName = new(StringComparer.Ordinal);
         foreach (Assembly assembly in assemblies)
         {
-            foreach (Type type in GetTypes(assembly))
+            foreach (Type type in assembly.GetLoadableTypes())
             {
                 if (!type.IsNested)
                     byName[type.Name] = byName.GetValueOrDefault(type.Name, []).Add(type);

@@ -107,7 +107,7 @@ internal sealed class Gems : IDisposable
         for (int i = _loaded.Count - 1; i >= 0; i--)
         {
             Log.Info($"Unloading {_loaded[i].Name}.");
-            _loaded[i].Dispose();
+            _loaded[i].Ends.Dispose();
         }
 
         _loaded.Clear();
@@ -221,10 +221,17 @@ internal sealed class Gems : IDisposable
             if (made is IEcs ecs)
                 _world.Ecs = ecs;
 
-            LoadedGem loaded = new(made, gem);
+            LoadedGem loaded = new(
+                made,
+                gem.Name,
+                [
+                    new Subscription(gem.Context.Unload),
+                    new Subscription(() => (made as IDisposable)?.Dispose()),
+                    code,
+                    _assets.Register(made),
+                ]
+            );
             _loaded.Add(loaded);
-            loaded.Subscriptions.Add(code);
-            loaded.Subscriptions.Add(_assets.Register(made));
 
             // The gem is an IWindow in any mode, but a headless run has no window.
             if (made is IWindow window && !_app.IsHeadless)
@@ -232,14 +239,14 @@ internal sealed class Gems : IDisposable
                 _app.Window = window;
 
                 // The window is the gem, which can't unload while the app holds it.
-                loaded.Subscriptions.Add(new Subscription(() => _app.Window = null));
+                loaded.Ends.Add(new Subscription(() => _app.Window = null));
             }
 
             if (made is ILogSink sink)
-                loaded.Subscriptions.Add(Log.Register(sink));
+                loaded.Ends.Add(Log.Register(sink));
 
             if (made is IHookIntoDomainLoading hooks)
-                loaded.Subscriptions.Add(_world.Register(hooks));
+                loaded.Ends.Add(_world.Register(hooks));
 
             string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
             Log.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");
@@ -312,5 +319,18 @@ internal sealed class Gems : IDisposable
         FixedUpdate,
         LateUpdate,
         Render,
+    }
+
+    /// <summary>
+    /// A gem as made, and what ends with it, last added first: its subscriptions (its place on the log when it is a
+    /// sink, the asset types it reads, the hooks it joined), then the gem itself, then its load context, which frees its
+    /// assemblies once nothing refers to the gem.
+    /// </summary>
+    private sealed record LoadedGem(IGem Instance, string Name, Subscriptions Ends)
+    {
+        /// <summary>
+        /// Whether the gem threw in a hook, so it no longer runs: it is still ended with the others.
+        /// </summary>
+        public bool HasFailed { get; set; }
     }
 }

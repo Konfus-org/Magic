@@ -114,6 +114,13 @@ internal static class Program
 
             while (!app.Lifetime.IsCancellationRequested)
             {
+                // Under --fail-on-error, the first error logged ends the run; the exit code says so below.
+                if (app.HasFailed)
+                {
+                    app.Exit();
+                    continue;
+                }
+
                 // Core's own steps are timed for whatever listens; the gems' pump times its hooks itself.
                 long start = _stepDuration.Start();
                 threads.Pump(EngineThread.Main);

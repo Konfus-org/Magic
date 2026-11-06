@@ -1,6 +1,8 @@
 using System.CommandLine;
+using System.Diagnostics;
 using System.Globalization;
 using Magic.Debugging;
+using Magic.Worlds;
 
 namespace Magic.CommandLine.Commands;
 
@@ -10,7 +12,7 @@ namespace Magic.CommandLine.Commands;
 /// </summary>
 internal static class WaitCommand
 {
-    public static Command Create(CommandQueue queue)
+    public static Command Create(CommandQueue queue, World world)
     {
         Argument<string> until = new("until")
         {
@@ -31,14 +33,14 @@ internal static class WaitCommand
         {
             if (untilWhat == "loaded")
             {
-                queue.WaitForWorld();
+                queue.Hold(() => queue.IsChangingWorld || world.IsLoading || world.Domains.IsEmpty);
 
                 return;
             }
 
             if (untilWhat == "drawn")
             {
-                queue.WaitForDrawn();
+                queue.Hold(() => !queue.HasDrawn);
 
                 return;
             }
@@ -58,9 +60,16 @@ internal static class WaitCommand
             }
 
             if (isSeconds)
-                queue.WaitSeconds(count);
+            {
+                long until = Stopwatch.GetTimestamp() + (long)(count * Stopwatch.Frequency);
+                queue.Hold(() => Stopwatch.GetTimestamp() < until);
+            }
             else
-                queue.WaitFrames((int)count);
+            {
+                // Each TryDequeue counts as one frame.
+                int left = (int)count;
+                queue.Hold(() => left-- > 0);
+            }
         }
     }
 }

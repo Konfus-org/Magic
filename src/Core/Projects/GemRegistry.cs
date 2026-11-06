@@ -157,7 +157,7 @@ internal static class GemRegistry
 
         Assembly assembly = loaded.Value;
         List<Type> gems = [];
-        foreach (Type type in GetTypes(assembly))
+        foreach (Type type in assembly.GetLoadableTypes())
         {
             if (type.IsClass && !type.IsAbstract && type.IsAssignableTo(typeof(IGem)))
                 gems.Add(type);
@@ -226,28 +226,6 @@ internal static class GemRegistry
         catch (Exception ex) when (ex is BadImageFormatException or FileLoadException or IOException)
         {
             return Result.Failure($"Gem {name} could not be loaded from {path}: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Every type <paramref name="assembly"/> holds; those that load, when some don't.
-    /// </summary>
-    private static IReadOnlyList<Type> GetTypes(Assembly assembly)
-    {
-        try
-        {
-            return assembly.GetTypes();
-        }
-        catch (ReflectionTypeLoadException ex)
-        {
-            List<Type> loaded = [];
-            foreach (Type? type in ex.Types)
-            {
-                if (type is not null)
-                    loaded.Add(type);
-            }
-
-            return loaded;
         }
     }
 
