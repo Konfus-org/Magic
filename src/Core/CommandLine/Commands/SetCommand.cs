@@ -14,7 +14,7 @@ using Magic.Worlds;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>set</c>: a gem's setting for the run, as <c>Key=value</c>; or an entity's value, named by a path as
+/// <c>set</c>: <c>Key=value</c> handed to the gem the key names; or an entity's value, named by a path as
 /// <see cref="EntityPaths"/> reads it, to one value in JSON, a bare word for text or a choice, or one per field of a
 /// value with several, in their order (<c>1 2 3</c> for a position).
 /// </summary>
@@ -29,7 +29,7 @@ internal sealed class SetCommand : Command
     public SetCommand(App app, EventCoordinator events, World world)
         : base(
             "set",
-            "Sets a gem's setting for the run, as Key=value; or an entity's value, as entity.component.member and on to any depth, then the value"
+            "Hands Key=value to the gem the key names; or sets an entity's value, as entity.component.member and on to any depth, then the value"
         )
     {
         _app = app;
@@ -164,7 +164,8 @@ internal sealed class SetCommand : Command
     }
 
     /// <summary>
-    /// A setting for one <c>Key=value</c> word; an entity's value for a path and the values after it.
+    /// A <see cref="SetCliCommand"/> for one <c>Key=value</c> word; an entity's value for a path and the values after
+    /// it.
     /// </summary>
     private void Set(string setting, string[] values)
     {
@@ -175,7 +176,7 @@ internal sealed class SetCommand : Command
     }
 
     /// <summary>
-    /// Publishes a setting, <c>Key=value</c>, for the gem its key names.
+    /// Publishes <c>Key=value</c> as a <see cref="SetCliCommand"/>, for the gem its key names.
     /// </summary>
     private void SetSetting(string setting)
     {
