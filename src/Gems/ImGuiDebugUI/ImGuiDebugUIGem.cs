@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Unicode;
+using System.Threading.Channels;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
@@ -14,6 +15,7 @@ using Magic.Platform;
 using Magic.Projects;
 using Magic.Rendering;
 using Magic.Shaders;
+using Magic.Threading;
 using static Magic.ImGuiDebugUI.ImDrawFlags_;
 using static Magic.ImGuiDebugUI.ImGui;
 using static Magic.ImGuiDebugUI.ImGuiBackendFlags_;
@@ -33,6 +35,7 @@ using static Magic.ImGuiDebugUI.ImGuiTableColumnFlags_;
 using static Magic.ImGuiDebugUI.ImGuiTableFlags_;
 using static Magic.ImGuiDebugUI.ImGuiTreeNodeFlags_;
 using static Magic.ImGuiDebugUI.ImGuiWindowFlags_;
+using static Magic.ImGuiDebugUI.ImTextureStatus;
 
 namespace Magic.ImGuiDebugUI;
 
@@ -41,9 +44,9 @@ namespace Magic.ImGuiDebugUI;
 /// world, and the windows gems draw with its widgets (<see cref="IDebugUI"/>).
 /// <para>
 /// ImGui's frame is the main thread's. <see cref="Update"/> hands ImGui the frame's input and starts its frame, so the
-/// widgets gems made after this one call in their Update go into it; <see cref="LateUpdate"/> draws what is reported;
-/// <see cref="Render"/> ends the frame, whether anything draws it or not; and whatever draws the world records it over the
-/// finished picture (<see cref="Record"/>). Reports come from any thread (<see cref="Reports"/>). It is public because
+/// widgets gems made after this one call in their Update go into it; <see cref="LateUpdate"/> draws what is reported, ends
+/// the frame and publishes a copy of it, whether anything draws it or not; and whatever draws the world records the newest
+/// copy over the finished picture (<see cref="Record"/>). Reports come from any thread (<see cref="Reports"/>). It is public because
 /// nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </para>
 /// </summary>
@@ -98,6 +101,10 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     private const bool IsAlwaysShowing = false;
 #endif
 
+    /// <summary>
+    /// The size ImGui lays out in without a window, the one the renderer then draws.
+    /// </summary>
+    private static readonly Vector2 _windowlessSize = new(1280, 720);
     private static readonly Vector2 _platePadding = new(4, 2);
     private static readonly Vector2 _linesMargin = new(8, 8);
 
@@ -106,13 +113,21 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     private static readonly Color _warning = new(1, 0.376f, 0);
     private static readonly Color _error = new(1, 0, 0);
 
-    private readonly IGraphicsApi _gpu;
+    private readonly App _app;
     private readonly IEcs _ecs;
     private readonly IInput? _input;
     private readonly IClipboard? _clipboard;
     private readonly unsafe ImGuiContext_t* _context;
     private readonly DebugUIOverlay _overlay;
     private readonly Reports _reports = new();
+
+    /// <summary>
+    /// Each frame ImGui ends, copied for the overlay, and what ImGui asks of its textures, in the order it asks.
+    /// </summary>
+    private readonly Mailbox<DebugUIFrame> _frames = new();
+    private readonly Channel<DebugUITextureChange> _textureChanges = Channel.CreateUnbounded<DebugUITextureChange>(
+        new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
+    );
 
     /// <summary>
     /// What ImGui is told this frame, as the C strings it reads: labels, the text of fields and lines.
@@ -167,9 +182,9 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     private GCHandle _pasted;
 
     /// <summary>
-    /// The size of the target last drawn over, which ImGui lays out in: a window's until one is known.
+    /// The id the last of ImGui's textures was given, which the overlay knows it by.
     /// </summary>
-    private Vector2 _displaySize = new(1280, 720);
+    private ulong _lastTextureId;
 
     /// <summary>
     /// Where the next new window's left edge goes.
@@ -188,6 +203,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     private int _tableColumns;
 
     public unsafe ImGuiDebugUIGem(
+        App app,
         IGraphicsApi gpu,
         IShaderCompiler shaders,
         Assets assets,
@@ -196,11 +212,11 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
         IClipboard? clipboard = null
     )
     {
-        _gpu = gpu;
+        _app = app;
         _ecs = ecs;
         _input = input;
         _clipboard = clipboard;
-        _overlay = new DebugUIOverlay(gpu, shaders, assets);
+        _overlay = new DebugUIOverlay(gpu, shaders, assets, _frames, _textureChanges.Reader, app.Lifetime);
 
         // ImGui writes no ini file, and is told the overlay takes the textures it makes and changes, and draws by vertex
         // offset; it takes the engine's look, at its size.
@@ -246,7 +262,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
             ImGuiInput.Feed(io, input, _text);
 
         // ImGui needs a time step of more than 0, which a frame's may not be.
-        io->DisplaySize = _displaySize.Im;
+        io->DisplaySize = GetDisplaySize().Im;
         io->DeltaTime = Math.Max((float)frame.AppDeltaSec, 1e-4f);
         ImGui_NewFrame();
         _isInFrame = true;
@@ -254,9 +270,10 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     }
 
     /// <summary>
-    /// Draws what is reported under the frame's windows: the last of the frame's widgets.
+    /// Draws what is reported under the frame's windows, the last of the frame's widgets, then ends ImGui's frame, which
+    /// it needs before the next begins, and publishes a copy of it for the overlay.
     /// </summary>
-    public void LateUpdate(in Frame frame)
+    public unsafe void LateUpdate(in Frame frame)
     {
         if (_depth > 0 && !_hasLoggedUnended)
         {
@@ -275,31 +292,24 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
         _worldTexts.Clear();
         _screenLines.Clear();
         _reports.Take(GetNowSec(), _worldTexts, _screenLines);
-        if (!_isShowing)
-            return;
+        if (_isShowing)
+        {
+            DrawWorld();
+            DrawLines();
+        }
 
-        DrawWorld();
-        DrawLines();
-    }
-
-    /// <summary>
-    /// Ends ImGui's frame, which it needs before the next begins whether or not anything draws this one.
-    /// </summary>
-    public void Render(in Frame frame)
-    {
+        // Ended whether or not anything draws it. Its textures get their ids before the copy, which reads them.
         ImGui_Render();
         _isInFrame = false;
+        QueueTextureChanges(frame.Index);
+        _frames.Back.Copy(ImGui_GetDrawData(), frame.Index);
+        _frames.Publish();
     }
 
     /// <summary>
-    /// The frame ImGui ended this frame over <paramref name="target"/>, in the size it lays out the next one in.
+    /// The newest frame ImGui ended over <paramref name="target"/>.
     /// </summary>
-    public unsafe void Record(RenderGraph graph, GpuTexture target)
-    {
-        TextureDescription description = _gpu.GetDescription(target);
-        _displaySize = new Vector2(description.Width, description.Height);
-        _overlay.Record(ImGui_GetDrawData(), graph, target);
-    }
+    public void Record(RenderGraph graph, GpuTexture target) => _overlay.Record(graph, target);
 
     public void Text(Vector3 position, string text, Color? color = null, string? tooltip = null) =>
         _reports.Add(new Report(text, ReportKind.Plain, color ?? _white, position, tooltip, 0));
@@ -574,9 +584,22 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
         return true;
     }
 
-    public unsafe bool Header(string label, bool folds = false)
+    public unsafe bool Header(string label, bool folds = false, int depth = 0)
     {
         ThrowIfOutsideFrame();
+
+        // Indented a step a level from where the window or view's last header left it; its own Begin starts at none.
+        if (_depth > 0 && _levels[_depth - 1] is { } level && level.Indent != depth)
+        {
+            float steps = (depth - level.Indent) * ImGui_GetStyle()->IndentSpacing;
+            if (steps > 0)
+                ImGui_IndentEx(steps);
+            else
+                ImGui_UnindentEx(-steps);
+
+            level.Indent = depth;
+        }
+
         if (folds)
             ImGui_SetNextItemOpen(false, (int)ImGuiCond_Always);
 
@@ -723,6 +746,44 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     }
 
     /// <summary>
+    /// The window's size in pixels, which ImGui lays out in and the renderer draws the UI over.
+    /// </summary>
+    private Vector2 GetDisplaySize() =>
+        _app.Window is { Width: > 0, Height: > 0 } window ? new Vector2(window.Width, window.Height) : _windowlessSize;
+
+    /// <summary>
+    /// What ImGui asks of its textures, queued for the overlay with <paramref name="frame"/> and done as far as ImGui
+    /// knows: a new one given an id and filled, a changed one filled again, and one it let go of dropped once the frame
+    /// just ended draws nothing with it.
+    /// </summary>
+    private unsafe void QueueTextureChanges(uint frame)
+    {
+        ImVector_ImTextureDataPtr_t* textures = ImGui_GetDrawData()->Textures;
+        for (int i = 0; textures != null && i < textures->Size; i++)
+        {
+            ImTextureData_t* texture = textures->Data[i];
+            if (texture->Status == ImTextureStatus_WantCreate)
+                ImTextureData_SetTexID(texture, ++_lastTextureId);
+
+            // RGBA8 whole, which is how ImGui's atlas holds it.
+            if (texture->Status is ImTextureStatus_WantCreate or ImTextureStatus_WantUpdates)
+            {
+                byte[] pixels = new ReadOnlySpan<byte>(texture->Pixels, texture->Width * texture->Height * 4).ToArray();
+                _textureChanges.Writer.TryWrite(
+                    new DebugUITextureChange(texture->TexID, frame, texture->Width, texture->Height, pixels)
+                );
+                ImTextureData_SetStatus(texture, ImTextureStatus_OK);
+            }
+            else if (texture->Status == ImTextureStatus_WantDestroy && texture->UnusedFrames > 0)
+            {
+                _textureChanges.Writer.TryWrite(new DebugUITextureChange(texture->TexID, frame, 0, 0, null));
+                ImTextureData_SetTexID(texture, 0);
+                ImTextureData_SetStatus(texture, ImTextureStatus_Destroyed);
+            }
+        }
+    }
+
+    /// <summary>
     /// Lays out a field: its label, up to any <c>##</c>, on the left, then the field stretched to the right edge. Returns
     /// the field's hidden ImGui id: the whole label, so fields that share what they show stay apart.
     /// </summary>
@@ -772,6 +833,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
         Level level = _levels[depth];
         level.Closed.Clear();
         level.IsScrollable = scrollable;
+        level.Indent = 0;
         if (depth == 0)
         {
             _isWindowDrawn = true;
@@ -824,8 +886,8 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     }
 
     /// <summary>
-    /// Widgets go into ImGui's frame, which is open from this gem's Update to its Render; called outside it, ImGui would
-    /// stop the process.
+    /// Widgets go into ImGui's frame, which is open from this gem's Update to its LateUpdate; called outside it, ImGui
+    /// would stop the process.
     /// </summary>
     private void ThrowIfOutsideFrame()
     {
@@ -881,7 +943,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
         ImDrawList_t* under = ImGui_GetBackgroundDrawList();
         bool canHover = !ImGui_IsWindowHovered((int)ImGuiHoveredFlags_AnyWindow);
         float lineHeight = ImGui_GetTextLineHeightWithSpacing();
-        int fitting = Math.Max(1, (int)((_displaySize.Y - (2 * _linesMargin.Y)) / lineHeight));
+        int fitting = Math.Max(1, (int)((GetDisplaySize().Y - (2 * _linesMargin.Y)) / lineHeight));
         Vector2 at = _linesMargin;
         for (int i = Math.Max(0, _screenLines.Count - fitting); i < _screenLines.Count; i++)
         {
@@ -924,13 +986,14 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
                 // As the renderer frames a view: the field of view is vertical, and the width follows the target's shape.
                 float tanY = MathF.Tan(camera.FieldOfView * (MathF.PI / 360));
                 Transform transform = chunk.First[i];
+                Vector2 size = GetDisplaySize();
 
                 return new CameraView(
                     transform.Position,
                     Quaternion.Conjugate(transform.Rotation),
-                    new Vector2(tanY * _displaySize.X / _displaySize.Y, tanY),
+                    new Vector2(tanY * size.X / size.Y, tanY),
                     camera.Near,
-                    _displaySize
+                    size
                 );
             }
         }
@@ -950,6 +1013,11 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
         internal uint Id { get; set; }
 
         internal bool IsScrollable { get; set; }
+
+        /// <summary>
+        /// How many steps its last header indented what follows it.
+        /// </summary>
+        internal int Indent { get; set; }
 
         internal List<(uint Id, float ClosedAt)> Closed { get; } = [];
     }

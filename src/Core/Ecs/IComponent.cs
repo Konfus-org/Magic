@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json.Serialization;
 
 namespace Magic.Ecs;
 
@@ -12,4 +13,5 @@ namespace Magic.Ecs;
     "CA1040:Avoid empty interfaces",
     Justification = "A marker the ECS's constraints name, which an attribute could not be."
 )]
+[JsonConverter(typeof(ComponentJsonConverter))]
 public interface IComponent;

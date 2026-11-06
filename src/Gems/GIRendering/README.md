@@ -17,7 +17,7 @@ model reader, the mesh preprocessor and the texture reader.
   1024. On a GPU that traces rays, the first 15 lighting each tile of the screen cast shadows, soft as wide as the
   light, and `IsShadowless` doesn't stop them yet.
 - Shadows are traced one ray a pixel and light, so their soft edges are noisy.
-- Fog, glass and a camera's `PostProcessing` aren't drawn yet: a glass material draws as an opaque one.
+- Fog, glass and `PostProcessing` aren't drawn yet: a glass material draws as an opaque one.
 
 ## Settings
 

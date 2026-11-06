@@ -19,7 +19,7 @@ namespace Magic.PrefabImporter;
 /// reads one is what that one is made from, so it is read again when one of them changes. It is public because nothing in
 /// its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class PrefabImporterGem(Assets assets, Assemblies code) : IGem, IAssetImporter<Prefab>
+public sealed class PrefabImporterGem(Assets assets) : IGem, IAssetImporter<Prefab>
 {
     /// <summary>
     /// The components files name that could not be read, each said once. Read on workers.
@@ -100,7 +100,7 @@ public sealed class PrefabImporterGem(Assets assets, Assemblies code) : IGem, IA
         ImmutableArray<IComponent>.Builder components = ImmutableArray.CreateBuilder<IComponent>();
         foreach ((string component, JsonElement json) in entity.Components)
         {
-            Result<Type> type = code.Get<IComponent>(component);
+            Result<Type> type = Assemblies.Get<IComponent>(component);
             Result<object> read = type.Ok ? Json.Read(json, type.Value) : Result.Failure(type.Error);
             if (read is { Ok: true, Value: IComponent made })
                 components.Add(made);

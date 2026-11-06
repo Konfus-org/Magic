@@ -1,4 +1,4 @@
-// The post effect that leaves the picture as it is: what an empty slot of a camera's effects runs.
+// The post effect that leaves the picture as it is: what an empty slot of a PostProcessing runs.
 module "Post/NoEffect";
 
 import Post.IPixelEffect;

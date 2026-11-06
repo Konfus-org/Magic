@@ -7,32 +7,23 @@ using Magic.Utils;
 namespace Magic.Projects;
 
 /// <summary>
-/// The code loaded for a run, Core's and each gem's, by the name of its types: how what a file names from code, such as a
-/// component's struct, is found. Any thread.
+/// The code loaded in the process, Core's and each gem's, by the name of its types: how what a file names from code, such
+/// as a component's struct, is found. Any thread.
 /// </summary>
-public sealed class Assemblies
+public static class Assemblies
 {
-    private ImmutableArray<Assembly> _assemblies;
+    private static ImmutableArray<Assembly> _assemblies = [typeof(Assemblies).Assembly];
 
     /// <summary>
     /// Replaced whole on the main thread, and read whole on any.
     /// </summary>
-    private FrozenDictionary<string, ImmutableArray<Type>> _byName = FrozenDictionary<
-        string,
-        ImmutableArray<Type>
-    >.Empty;
-
-    internal Assemblies(Assembly core)
-    {
-        _assemblies = [core];
-        Rebuild();
-    }
+    private static FrozenDictionary<string, ImmutableArray<Type>> _byName = Index(_assemblies);
 
     /// <summary>
     /// The one type named <paramref name="name"/> that is a <typeparamref name="T"/>; why not, when no code loaded
     /// declares one or more than one does.
     /// </summary>
-    public Result<Type> Get<T>(string name)
+    public static Result<Type> Get<T>(string name)
     {
         ImmutableArray<Type> named = Volatile.Read(ref _byName).GetValueOrDefault(name, []);
         ImmutableArray<Type> matching = named.RemoveAll(type => !typeof(T).IsAssignableFrom(type));
@@ -51,15 +42,15 @@ public sealed class Assemblies
     /// Adds a gem's <paramref name="assembly"/> until the subscription is disposed, which it must be for the gem's code to
     /// unload. Main thread.
     /// </summary>
-    internal Subscription Register(Assembly assembly)
+    internal static Subscription Register(Assembly assembly)
     {
         _assemblies = _assemblies.Add(assembly);
-        Rebuild();
+        Volatile.Write(ref _byName, Index(_assemblies));
 
         return new Subscription(() =>
         {
             _assemblies = _assemblies.Remove(assembly);
-            Rebuild();
+            Volatile.Write(ref _byName, Index(_assemblies));
         });
     }
 
@@ -78,10 +69,13 @@ public sealed class Assemblies
         }
     }
 
-    private void Rebuild()
+    /// <summary>
+    /// The top-level types <paramref name="assemblies"/> hold, by their names.
+    /// </summary>
+    private static FrozenDictionary<string, ImmutableArray<Type>> Index(ImmutableArray<Assembly> assemblies)
     {
         Dictionary<string, ImmutableArray<Type>> byName = new(StringComparer.Ordinal);
-        foreach (Assembly assembly in _assemblies)
+        foreach (Assembly assembly in assemblies)
         {
             foreach (Type type in GetTypes(assembly))
             {
@@ -90,6 +84,6 @@ public sealed class Assemblies
             }
         }
 
-        Volatile.Write(ref _byName, byName.ToFrozenDictionary(StringComparer.Ordinal));
+        return byName.ToFrozenDictionary(StringComparer.Ordinal);
     }
 }

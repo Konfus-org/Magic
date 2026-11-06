@@ -1,221 +1,344 @@
 using System.Globalization;
+using System.Linq;
+using System.Text.Json;
 using Magic.Debugging;
-using Magic.Gpu;
-using Magic.Projects;
 
 namespace Magic.DebugTools;
 
 /// <summary>
-/// A window of how the run is going: the frame rate, the main thread's and the GPU's time, and the memory in use. It adds
-/// up while it is open and writes its numbers out twice a second, so they can be read and no text is made per frame.
+/// A window of everything the meters measure, in sections that fold: CPU, the main thread's frame with what Core and
+/// each gem spend of it; GPU, what the GPU provider says of the API and the GPU, and its frame and passes; Memory, Core's
+/// and the process's, then each gem's; and Other, the rest by meter. A histogram's row shows its mean, how many a second
+/// and its most; a counter's how much it rose and how much a second; a gauge's its latest value. Seconds show as
+/// milliseconds and bytes as megabytes.
 /// </summary>
-internal sealed class StatsWindow(IDebugUI ui, IGraphicsApi? gpu)
+internal sealed class StatsWindow(IDebugUI ui)
 {
-    private const double RefreshSec = 0.5;
     private const double BytesPerMegabyte = 1024 * 1024;
-
-    private static readonly string[] _columns = ["Name", "Value"];
-
-    private readonly List<string[]> _rows = [];
-    private readonly List<string[]> _passRows = [];
+    private const double BytesPerGigabyte = 1024 * 1024 * 1024;
+    private const string GemMeterPrefix = "Magic.Gems.";
+    private const string FrameDuration = "magic.core.frame.duration";
+    private const string FrameWorkDuration = "magic.core.frame.work.duration";
+    private const string HookDuration = "magic.core.gem.hook.duration";
+    private const string StepDuration = "magic.core.step.duration";
+    private const string GemNameTag = "magic.core.gem.name";
+    private const string HookTag = "magic.core.gem.hook";
+    private const string StepTag = "magic.core.step";
+    private const string ProcessMemory = "dotnet.process.memory.working_set";
+    private const string GpuPrefix = "gpu.";
+    private const string GpuFrameDuration = "gpu.frame.duration";
+    private const string MemoryUsageSuffix = "memory.usage";
 
     /// <summary>
-    /// Each GPU pass's time added up since the last refresh, and how many frames of it, in the order the frame runs them.
+    /// Core's part, in the CPU and Memory sections.
     /// </summary>
-    private readonly List<PassSum> _passes = [];
-    private readonly Dictionary<string, int> _passIndexes = [];
+    private const string Core = "Core";
+
+    private static readonly string[] _columns = ["Name", "Value", "Per second", "Max"];
+
+    /// <summary>
+    /// What the meters say of themselves that isn't the GPU's, above the sections.
+    /// </summary>
+    private readonly List<string> _lines = [];
+
+    /// <summary>
+    /// The sections, written out at the last refresh.
+    /// </summary>
+    private readonly List<Section> _sections = [];
+
+    /// <summary>
+    /// The sections that start folded and were folded once already, which clicks open and fold from then on.
+    /// </summary>
+    private readonly HashSet<string> _folded = [];
 
     private bool _isOpen;
 
-    /// <summary>
-    /// Whether the window has just opened, so it has numbers from its first frame rather than half a second on.
-    /// </summary>
-    private bool _isRefreshDue;
-    private double _sinceRefreshSec;
-    private int _frames;
-    private double _worstFrameSec;
-    private CpuTimings _cpu;
-    private uint _lastGpuFrame;
-
-    /// <summary>
-    /// Whether the window shows. Opened, it starts adding up anew, with numbers from the next frame on.
-    /// </summary>
     public bool IsOpen
     {
         get => _isOpen;
         set
         {
-            if (value == _isOpen)
-                return;
-
             _isOpen = value;
-            Reset();
-            _isRefreshDue = true;
+            _lines.Clear();
+            _sections.Clear();
         }
     }
 
-    public void Update(in Frame frame)
+    /// <summary>
+    /// The sections written out again from the last collection's <paramref name="rows"/>.
+    /// </summary>
+    public void Refresh(IReadOnlyList<MetricRow> rows)
+    {
+        _lines.Clear();
+        _sections.Clear();
+        Section cpu = new("cpu", "CPU", isFoldedAtStart: false);
+        Section gpu = new("gpu", "GPU", isFoldedAtStart: false);
+        Section memory = new("memory", "Memory", isFoldedAtStart: false);
+        Section other = new("other", "Other", isFoldedAtStart: true);
+        _sections.AddRange([cpu, gpu, memory, other]);
+
+        // Core's memory first, ahead of the gems'.
+        memory.GetChild(Core);
+
+        // The meters that measure the GPU are described in its section, the rest above them all.
+        HashSet<string> gpuMeters = [];
+        double framesPerSecond = 0;
+        foreach (MetricRow row in rows)
+        {
+            if (StripMeter(row.Meter, row.Instrument).StartsWith(GpuPrefix, StringComparison.Ordinal))
+                gpuMeters.Add(row.Meter);
+
+            if (row.Instrument == FrameDuration)
+                framesPerSecond = row.PerSecond;
+        }
+
+        HashSet<string> described = [];
+        double workSec = 0;
+        double gpuSec = 0;
+        double processBytes = 0;
+        double gpuBytes = 0;
+        foreach (MetricRow row in rows)
+        {
+            string name = StripMeter(row.Meter, row.Instrument);
+            if (described.Add(row.Meter))
+                (gpuMeters.Contains(row.Meter) ? gpu.Lines : _lines).AddRange(Describe(row));
+
+            if (row.Unit == "By")
+            {
+                Section part = memory.GetChild(GetPart(row.Meter));
+                part.Rows.Add(ToCells(GetLabel(name, row), row));
+                if (name.EndsWith(MemoryUsageSuffix, StringComparison.Ordinal))
+                {
+                    part.Amount += row.Value;
+                    gpuBytes += name.StartsWith(GpuPrefix, StringComparison.Ordinal) ? row.Value : 0;
+                }
+                else if (row.Instrument == ProcessMemory)
+                {
+                    part.Amount += row.Value;
+                    processBytes = row.Value;
+                }
+            }
+            else if (row.Instrument is HookDuration or StepDuration)
+            {
+                // A gem's hook or a step of Core's, which add up to the time a frame it takes.
+                bool isHook = row.Instrument == HookDuration;
+                Section part = cpu.GetChild(isHook ? row.GetTag(GemNameTag) : Core);
+                part.Rows.Add(ToCells(row.GetTag(isHook ? HookTag : StepTag), row));
+                part.Amount += row.Value * row.PerSecond;
+            }
+            else if (row.Instrument is FrameDuration or FrameWorkDuration)
+            {
+                cpu.Rows.Add(ToCells(name, row));
+                workSec = row.Instrument == FrameWorkDuration ? row.Value : workSec;
+            }
+            else if (name.StartsWith(GpuPrefix, StringComparison.Ordinal))
+            {
+                // Tagged, as passes are, each instrument under a header of its own.
+                string own = name[GpuPrefix.Length..];
+                if (row.Tags.Count == 0)
+                    gpu.Rows.Add(ToCells(own, row));
+                else
+                    gpu.GetChild(own).Rows.Add(ToCells(row.TagText, row));
+
+                gpuSec = name == GpuFrameDuration ? row.Value : gpuSec;
+            }
+            else
+            {
+                other.GetChild(row.Meter).Rows.Add(ToCells(GetLabel(name, row), row));
+            }
+        }
+
+        cpu.Label = $"CPU: {FormatAmount(workSec, "s")}";
+
+        // The part that takes the most first, to find what slows a frame at a glance.
+        cpu.Children.Sort((a, b) => b.Amount.CompareTo(a.Amount));
+        foreach (Section part in cpu.Children)
+        {
+            double perFrame = framesPerSecond > 0 ? part.Amount / framesPerSecond : 0;
+            part.Label = $"{part.Name}: {FormatAmount(perFrame, "s")}";
+        }
+
+        gpu.Label = $"GPU: {FormatAmount(gpuSec, "s")}";
+        string gpuMemory = gpuBytes > 0 ? FormatGigabytes(", GPU", gpuBytes) : string.Empty;
+        memory.Label = $"Memory: {FormatGigabytes("RAM", processBytes)}{gpuMemory}";
+        foreach (Section part in memory.Children)
+        {
+            part.Label = part.Amount > 0 ? $"{part.Name}: {FormatAmount(part.Amount, "By")}" : part.Name;
+        }
+    }
+
+    public void Update()
     {
         if (!_isOpen)
             return;
 
-        Accumulate(frame);
-        if (_isRefreshDue || _sinceRefreshSec >= RefreshSec)
-        {
-            Refresh();
-            Reset();
-            _isRefreshDue = false;
-        }
-
-        Draw();
-    }
-
-    private static string FormatMs(double ms) => string.Create(CultureInfo.InvariantCulture, $"{ms:0.00} ms");
-
-    private static string FormatMegabytes(long bytes) =>
-        string.Create(CultureInfo.InvariantCulture, $"{bytes / BytesPerMegabyte:0} MB");
-
-    private void Accumulate(in Frame frame)
-    {
-        _sinceRefreshSec += frame.AppDeltaSec;
-        _frames++;
-        _worstFrameSec = Math.Max(_worstFrameSec, frame.AppDeltaSec);
-        CpuTimings cpu = frame.Cpu;
-        _cpu = new CpuTimings(
-            _cpu.UpdateMs + cpu.UpdateMs,
-            _cpu.FixedUpdateMs + cpu.FixedUpdateMs,
-            _cpu.LateUpdateMs + cpu.LateUpdateMs,
-            _cpu.RenderMs + cpu.RenderMs,
-            _cpu.TotalMs + cpu.TotalMs
-        );
-        AccumulateGpu();
-    }
-
-    /// <summary>
-    /// The GPU's timing of each frame it finished, once each, as a frame may see the same one twice.
-    /// </summary>
-    private void AccumulateGpu()
-    {
-        if (gpu is null || gpu.Timings.FrameIndex == _lastGpuFrame)
-            return;
-
-        GpuTimings timings = gpu.Timings;
-        _lastGpuFrame = timings.FrameIndex;
-        foreach (GpuTiming timing in timings.Passes)
-        {
-            if (!_passIndexes.TryGetValue(timing.Name, out int index))
-            {
-                index = _passes.Count;
-                _passIndexes[timing.Name] = index;
-                _passes.Add(new PassSum(timing.Name));
-            }
-
-            _passes[index].Add(timing.Milliseconds);
-        }
-    }
-
-    /// <summary>
-    /// Writes out what added up since the last refresh.
-    /// </summary>
-    private void Refresh()
-    {
-        double frames = _frames;
-        double averageSec = _sinceRefreshSec / frames;
-        _rows.Clear();
-        _rows.Add(["FPS", string.Create(CultureInfo.InvariantCulture, $"{1 / averageSec:0}")]);
-        _rows.Add(["Frame", FormatMs(averageSec * 1000)]);
-        _rows.Add(["Worst frame", FormatMs(_worstFrameSec * 1000)]);
-        _rows.Add(["CPU total", FormatMs(_cpu.TotalMs / frames)]);
-        _rows.Add(["CPU Update", FormatMs(_cpu.UpdateMs / frames)]);
-        _rows.Add(["CPU FixedUpdate", FormatMs(_cpu.FixedUpdateMs / frames)]);
-        _rows.Add(["CPU LateUpdate", FormatMs(_cpu.LateUpdateMs / frames)]);
-        _rows.Add(["CPU Render, with waits", FormatMs(_cpu.RenderMs / frames)]);
-        RefreshGpuTimes();
-        _rows.Add(["Process memory", FormatMegabytes(Environment.WorkingSet)]);
-        _rows.Add(["Managed heap", FormatMegabytes(GC.GetTotalMemory(false))]);
-        if (gpu is not null)
-        {
-            string used = FormatMegabytes(gpu.MemoryBytes);
-            string total = FormatMegabytes(gpu.Limits.DeviceMemoryBytes);
-            _rows.Add(["GPU memory", $"{used} of {total}"]);
-        }
-    }
-
-    private void RefreshGpuTimes()
-    {
-        _passRows.Clear();
-        if (gpu is null)
-            return;
-
-        double totalMs = 0;
-        foreach (PassSum pass in _passes)
-        {
-            double averageMs = pass.AverageMs;
-            totalMs += averageMs;
-            _passRows.Add([pass.Name, FormatMs(averageMs)]);
-        }
-
-        _rows.Add(["GPU total", FormatMs(totalMs)]);
-    }
-
-    /// <summary>
-    /// Starts adding up again.
-    /// </summary>
-    private void Reset()
-    {
-        _sinceRefreshSec = 0;
-        _frames = 0;
-        _worstFrameSec = 0;
-        _cpu = default;
-        foreach (PassSum pass in _passes)
-        {
-            pass.Reset();
-        }
-    }
-
-    private void Draw()
-    {
         ui.Begin("Stats", ref _isOpen, scrollable: true);
-        DrawTable("##Stats table", _rows);
-        if (gpu is not null && ui.Header(gpu.Limits.DeviceName))
-            DrawTable("##GPU passes table", _passRows);
+        foreach (string line in _lines)
+        {
+            ui.Label(line);
+        }
+
+        foreach (Section section in _sections)
+        {
+            Draw(section, 0);
+        }
 
         ui.End();
     }
 
-    private void DrawTable(string label, List<string[]> rows)
+    /// <summary>
+    /// <paramref name="name"/> without its meter's, as instruments and tags are named after their meter in snake case
+    /// (<c>magic.core.</c> for <c>Magic.Core</c>), or without its first part when named otherwise, as .NET's are.
+    /// </summary>
+    private static string StripMeter(string meter, string name)
     {
-        ui.Table(label, _columns);
-        foreach (string[] row in rows)
-        {
-            ui.Row(row);
-        }
+        string[] parts = Array.ConvertAll(meter.Split('.'), JsonNamingPolicy.SnakeCaseLower.ConvertName);
+        string own = string.Join('.', parts) + ".";
 
-        ui.EndTable();
+        return name.StartsWith(own, StringComparison.Ordinal)
+            ? name[own.Length..]
+            : name[(name.IndexOf('.', StringComparison.Ordinal) + 1)..];
     }
 
     /// <summary>
-    /// One GPU pass's time added up over the frames it ran in.
+    /// The part a meter measures: the gem a <c>Magic.Gems.*</c> meter is named after, or Core for Core's and .NET's.
     /// </summary>
-    private sealed class PassSum(string name)
+    private static string GetPart(string meter) =>
+        meter.StartsWith(GemMeterPrefix, StringComparison.Ordinal) ? meter[GemMeterPrefix.Length..] : Core;
+
+    private static string GetLabel(string name, in MetricRow row) =>
+        row.Tags.Count == 0 ? name : $"{name} {row.TagText}";
+
+    private static string[] ToCells(string label, in MetricRow row) =>
+        [
+            label,
+            FormatAmount(row.Value, row.Unit),
+            row.Kind == MetricKind.Latest ? string.Empty : FormatRate(row),
+            row.Kind == MetricKind.Distribution ? FormatAmount(row.Max, row.Unit) : string.Empty,
+        ];
+
+    /// <summary>
+    /// <paramref name="value"/> in <paramref name="unit"/>: seconds as milliseconds, as most of what is timed in a frame
+    /// takes far less than one, bytes as megabytes, and a count's unit, in braces, left out.
+    /// </summary>
+    private static string FormatAmount(double value, string unit) =>
+        unit switch
+        {
+            "s" => string.Create(CultureInfo.InvariantCulture, $"{value * 1000:0.###} ms"),
+            "By" => string.Create(CultureInfo.InvariantCulture, $"{value / BytesPerMegabyte:0.#} MB"),
+            "" or ['{', ..] => value.ToString("0.###", CultureInfo.InvariantCulture),
+            _ => string.Create(CultureInfo.InvariantCulture, $"{value:0.###} {unit}"),
+        };
+
+    private static string FormatGigabytes(string label, double bytes) =>
+        string.Create(CultureInfo.InvariantCulture, $"{label} {bytes / BytesPerGigabyte:0.0} GB");
+
+    /// <summary>
+    /// How many a second for a histogram, how much a second for a counter.
+    /// </summary>
+    private static string FormatRate(in MetricRow row) =>
+        row.Kind == MetricKind.Distribution
+            ? string.Create(CultureInfo.InvariantCulture, $"{row.PerSecond:0.#}/s")
+            : $"{FormatAmount(row.PerSecond, row.Unit)}/s";
+
+    /// <summary>
+    /// What <paramref name="row"/>'s meter says of itself: <c>device type: discrete</c> for
+    /// <c>magic.gems.vulkan_graphics.device.type</c>.
+    /// </summary>
+    private static IEnumerable<string> Describe(MetricRow row) =>
+        row.MeterTags.Select(tag => $"{StripMeter(row.Meter, tag.Key).Replace('.', ' ')}: {tag.Value}");
+
+    /// <summary>
+    /// <paramref name="section"/>'s header, then, while it is open, its lines, its rows and its sections, a step in.
+    /// An empty section is left out.
+    /// </summary>
+    private void Draw(Section section, int depth)
     {
-        private double _sumMs;
-        private int _count;
+        if (section.Lines.Count == 0 && section.Rows.Count == 0 && section.Children.Count == 0)
+            return;
+
+        bool folds = section.IsFoldedAtStart && _folded.Add(section.Id);
+        if (!ui.Header(section.HeaderLabel, folds, depth))
+            return;
+
+        foreach (string line in section.Lines)
+        {
+            ui.Label(line);
+        }
+
+        if (section.Rows.Count > 0)
+        {
+            ui.Table(section.TableId, _columns);
+            foreach (string[] row in section.Rows)
+            {
+                ui.Row(row);
+            }
+
+            ui.EndTable();
+        }
+
+        foreach (Section child in section.Children)
+        {
+            Draw(child, depth + 1);
+        }
+    }
+
+    /// <summary>
+    /// A part of the window under a header: its lines, its rows, and the sections in it, which start folded. Its
+    /// <see cref="Amount"/> sums what its header shows: seconds a second for a part of the CPU's, bytes for memory.
+    /// </summary>
+    private sealed class Section(string id, string name, bool isFoldedAtStart)
+    {
+        public string Id { get; } = id;
 
         public string Name { get; } = name;
 
-        public double AverageMs => _count > 0 ? _sumMs / _count : 0;
+        public bool IsFoldedAtStart => isFoldedAtStart;
 
-        public void Add(double ms)
+        /// <summary>
+        /// What its header reads, which sets <see cref="HeaderLabel"/>.
+        /// </summary>
+        public string Label
         {
-            _sumMs += ms;
-            _count++;
-        }
+            get;
+            set
+            {
+                field = value;
+                HeaderLabel = $"{value}###{Id}";
+            }
+        } = name;
 
-        public void Reset()
+        /// <summary>
+        /// <see cref="Label"/> with <see cref="Id"/> as its ImGui id, so the header keeps whether it is open as its
+        /// numbers change.
+        /// </summary>
+        public string HeaderLabel { get; private set; } = $"{name}###{id}";
+
+        public string TableId { get; } = $"##{id}";
+
+        public double Amount { get; set; }
+
+        public List<string> Lines { get; } = [];
+
+        public List<string[]> Rows { get; } = [];
+
+        public List<Section> Children { get; } = [];
+
+        /// <summary>
+        /// The section in this one named <paramref name="childName"/>, added the first time.
+        /// </summary>
+        public Section GetChild(string childName)
         {
-            _sumMs = 0;
-            _count = 0;
+            foreach (Section child in Children)
+            {
+                if (child.Name == childName)
+                    return child;
+            }
+
+            Section added = new($"{Id}.{childName}", childName, isFoldedAtStart: true);
+            Children.Add(added);
+
+            return added;
         }
     }
 }

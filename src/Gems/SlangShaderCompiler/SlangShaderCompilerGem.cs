@@ -32,12 +32,19 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
     /// </summary>
     private readonly SemaphoreSlim _compiling = new(1, 1);
 
+    /// <summary>
+    /// The run's <see cref="App.Lifetime"/>, which ends before the gem is disposed, so compiles still waiting for their
+    /// turn give up.
+    /// </summary>
+    private readonly CancellationToken _lifetime;
+
     private readonly nint _globalSession;
 
-    public SlangShaderCompilerGem(Assets assets, Caches caches)
+    public SlangShaderCompilerGem(App app, Assets assets, Caches caches)
     {
         _assets = assets;
         _caches = caches;
+        _lifetime = app.Lifetime;
         _globalSession = Slang.CreateGlobalSession();
         if (_globalSession == 0)
             throw new InvalidOperationException("The Slang compiler could not start.");
@@ -50,6 +57,9 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
 
     public void Dispose()
     {
+        // The compile already running finishes before the session it uses is freed. Waiting for it is safe: the frame loop
+        // has ended, and a compile needs no engine thread.
+        _compiling.Wait();
         Slang.Release(_globalSession);
         Slang.Shutdown();
         _compiling.Dispose();
@@ -87,7 +97,20 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
         Result<CompiledShader> compiled = await Task.Run(
                 async () =>
                 {
-                    await _compiling.WaitAsync(cancel).ConfigureAwait(false);
+                    // A compile that comes once the gem is disposed ends cancelled, as one still waiting for its turn does.
+                    try
+                    {
+                        using CancellationTokenSource waiting = CancellationTokenSource.CreateLinkedTokenSource(
+                            cancel,
+                            _lifetime
+                        );
+                        await _compiling.WaitAsync(waiting.Token).ConfigureAwait(false);
+                    }
+                    catch (ObjectDisposedException) when (_lifetime.IsCancellationRequested)
+                    {
+                        throw new OperationCanceledException("The shader compiler is disposed.");
+                    }
+
                     try
                     {
                         return SlangCompile.Compile(

@@ -369,7 +369,7 @@ public sealed class GpuCommandRecorder
         );
 
     /// <summary>
-    /// The GPU's clock here, reported by <paramref name="label"/> in <see cref="GpuTimings"/> two frames on.
+    /// The GPU's clock here, which the GPU provider measures under <paramref name="label"/> once the frame finishes.
     /// </summary>
     public void Timestamp(string label) => Add(new() { Kind = GpuCommandKind.Timestamp, Label = label });
 

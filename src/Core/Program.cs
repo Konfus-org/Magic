@@ -1,3 +1,4 @@
+using System.Diagnostics.Metrics;
 using System.Runtime;
 using Magic.Caching;
 using Magic.CommandLine;
@@ -5,7 +6,6 @@ using Magic.Debugging;
 using Magic.Events;
 using Magic.Files;
 using Magic.Projects;
-using Magic.Serialization;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
@@ -15,6 +15,12 @@ namespace Magic;
 
 internal static class Program
 {
+    private static readonly Histogram<double> _stepDuration = Metrics.Meter.CreateHistogram<double>(
+        "magic.core.step.duration",
+        "s",
+        "One step of Core's own in the run's loop."
+    );
+
     private static int Main(string[] commandLine)
     {
         GCSettings.LatencyMode = GCLatencyMode.LowLatency;
@@ -38,7 +44,7 @@ internal static class Program
         Log.Verbose($"Command line args: {string.Join(", ", commandLine)}");
 
         // What outlasts a run: the app, which the commands set, and the world the last run kept.
-        App app = new();
+        using App app = new();
         byte[]? kept = null;
         bool isLaunching = true;
 
@@ -50,10 +56,8 @@ internal static class Program
             EventCoordinator events = new();
             Threads threads = new();
             Caches caches = new(files, app);
-            Assemblies assemblies = new(typeof(App).Assembly);
-            Json.Assemblies = assemblies;
-            using Assets assets = new(files, caches);
-            using World world = new(assets, threads, app, assemblies);
+            using Assets assets = new(files, caches, app);
+            using World world = new(assets, files, threads, app);
             using Cli cli = new(app, files, events, assets, world);
 
             if (isLaunching)
@@ -66,6 +70,9 @@ internal static class Program
                     return 1;
                 }
             }
+
+            if (app.HasFailed)
+                return ExitFailed();
 
             // A job, like new or --version, is done once it ran, and failed if it logged an error, as a project that
             // won't open does.
@@ -82,7 +89,6 @@ internal static class Program
             services.AddSingleton(events);
             services.AddSingleton(threads);
             services.AddSingleton(caches);
-            services.AddSingleton(assemblies);
             services.AddSingleton(assets);
             services.AddSingleton(world);
             GemRegistry registry = new(files, project.Gems);
@@ -93,10 +99,12 @@ internal static class Program
             IServiceProvider provider = services.BuildServiceProvider();
 
             Log.Info($"Running {project.Name} in {(app.IsHeadless ? "headless" : "GUI")} mode.");
-            int run = app.RunVersion;
-            using Gems gems = new(registry, provider, app, files, assets, assemblies, world, events);
-            using CancellationTokenSource stopping = new();
-            world.LoadAsync(kept, stopping.Token).FireAndForget();
+
+            app.StartRun();
+            using Gems gems = new(registry, provider, app, files, assets, world, events);
+            world.StartAsync(kept, app.Lifetime).FireAndForget();
+
+            // If we don't have a window and aren't headless something is wrong, early out.
             if (!app.IsHeadless && app.Window is null)
             {
                 Log.Warn(
@@ -105,28 +113,41 @@ internal static class Program
                 app.Exit();
             }
 
-            while (app.IsRunning && app.RunVersion == run && !app.HasFailed)
+            while (!app.Lifetime.IsCancellationRequested)
             {
+                // Core's own steps are timed for whatever listens; the gems' pump times its hooks itself.
+                long start = _stepDuration.Start();
                 threads.Pump(EngineThread.Main);
+                _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "Threads"));
+                start = _stepDuration.Start();
                 assets.ProcessChanges();
-                world.Pump(stopping.Token);
+                _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "Assets"));
+                start = _stepDuration.Start();
+                world.Pump();
+                _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "World"));
                 gems.Pump();
+                start = _stepDuration.Start();
                 cli.Pump();
+                _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "Commands"));
             }
+
+            if (app.HasFailed)
+                return ExitFailed();
 
             // The world is kept while the gems are still whole, for a restart of this same project; they end as this pass
             // does, last made first.
-            stopping.Cancel();
             kept = app.IsExiting || app.Project != project ? null : world.Keep();
-            if (app.HasFailed)
-            {
-                Log.Critical($"Exiting with code 2 due to logged errors. Error count: {Log.ErrorCount}");
-                return 2;
-            }
 
             Log.Info($"Closing {project.Name} and {(app.IsExiting ? "exiting" : "restarting")}.");
             if (app.IsExiting)
                 return 0;
+        }
+
+        static int ExitFailed()
+        {
+            Log.Critical($"Exiting with code 2 due to logged errors. Error count: {Log.ErrorCount}");
+
+            return 2;
         }
     }
 }

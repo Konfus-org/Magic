@@ -9,7 +9,7 @@ namespace Magic.Ecs;
 /// it. Pushing and making box nothing but what is boxed already, and one kept and reused allocates nothing once it has
 /// grown. Main thread.
 /// </summary>
-public sealed class EntitiesChangeList
+public sealed class EntityCommands
 {
     private readonly List<Change> _changes = [];
 

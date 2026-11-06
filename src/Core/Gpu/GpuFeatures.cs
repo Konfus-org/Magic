@@ -1,5 +1,3 @@
-using System.Collections.Immutable;
-
 namespace Magic.Gpu;
 
 /// <summary>
@@ -65,20 +63,6 @@ public readonly record struct GpuLimits
     /// Bytes of device memory the GPU has for the heap's resources.
     /// </summary>
     public required long DeviceMemoryBytes { get; init; }
-}
-
-/// <summary>
-/// How long one named stretch of the frame took on the GPU, in milliseconds.
-/// </summary>
-public readonly record struct GpuTiming(string Name, double Milliseconds);
-
-/// <summary>
-/// The GPU's own timing of a finished frame: each pass by name, and each <see cref="GpuCommandRecorder.Timestamp"/>
-/// as the time since the pass began. Two frames behind what is being recorded, as the GPU is.
-/// </summary>
-public readonly record struct GpuTimings(uint FrameIndex, ImmutableArray<GpuTiming> Passes)
-{
-    public static GpuTimings None => new(0, []);
 }
 
 /// <summary>

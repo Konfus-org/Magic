@@ -8,7 +8,7 @@ and old code catches up when you touch it.
 
 Write the engine as data flowing through functions, not objects calling each other. Everything is one of four things:
 
-- **Data:** plain values, such as `Domain`, `Prefab` and `EntitiesChangeList`.
+- **Data:** plain values, such as `Domain`, `Prefab` and `EntityCommands`.
 - **Databases:** one place that holds state and does little else, such as the assets' database and the ECS's columns.
 - **Services:** what you call, such as `world.Create` and `assets.Find`.
 - **Steps:** work done in an order, as named methods that take values and return values. `Program` and
@@ -51,11 +51,12 @@ Write the engine as data flowing through functions, not objects calling each oth
 - Where Core needs something from a gem, the gem implements an interface and Core calls it, as with `IEcs` and
   `IAssetImporter<T>`. Add one when a gem first needs it.
 - A gem that keeps something for each entity compares what it holds with the entities each frame, adding what came and
-  dropping what went, as the renderer does. It needs no call when content loads or unloads.
+  dropping what went, as the renderer does. One that must also drop what it built up when the world is replaced, or ready
+  what comes before it shows, implements `IHookIntoDomainLoading`; the world awaits it while the loading screen shows.
 - `Program` sets a run up and owns its loop, calling each service's `Pump` in turn. `App` lasts the whole process; what a
   run makes is new for it, and a restart keeps only the world, as JSON. A service starts in its constructor
   and ends in `Dispose`, not with paired start and stop calls. A step is a method. A class of its own is for a substantial piece of work.
-- Push onto an `EntitiesChangeList` for bulk work, and run it with `world.Apply`. A single change is a call on `World`.
+- Push onto an `EntityCommands` for bulk work, and run it with `world.Apply`. A single change is a call on `World`.
 - A method that needs the main thread after an await of its own steps onto it with
   `await threads.Enter(EngineThread.Main)`; nothing hops threads for it.
 - Gems talk through message structs. Publish one from any thread and every gem reads it the next frame, from
