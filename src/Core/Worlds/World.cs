@@ -416,31 +416,38 @@ public sealed class World : IEcs, IDisposable
     {
         if (kept is not null)
         {
-            Result<WorldState> read = Json.Read<WorldState>(kept);
+            Result<SaveFile> read = Json.Read<SaveFile>(kept);
+            Result loaded = Result.Failure(read.Error);
             if (read.Ok)
             {
-                await RunLoadingAsync(() => RestoreKeptAsync(read.Value, cancel), cancel).ConfigureAwait(false);
-
-                return;
+                await RunLoadingAsync(
+                        async () => loaded = await OpenSaveAsync(read.Value, cancel).ConfigureAwait(false),
+                        cancel
+                    )
+                    .ConfigureAwait(false);
             }
 
-            Log.Error($"The world goes back to the entry point: the saved world does not read: {read.Error}");
+            if (loaded.Ok)
+                return;
+
+            Log.Error($"The world goes back to the entry point: the kept world does not open: {loaded.Error}");
         }
 
         await OpenEntryPointAsync(cancel).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// The world as JSON for the next run, with it whole; none while it is still arriving, so the next run opens the entry
-    /// point, or when JSON can't hold it. Main thread.
+    /// The world as JSON for the next run, kept as a save is: what changed against the open domains' prefabs as they were
+    /// read; none while it is still arriving, so the next run opens the entry point, or when JSON can't hold it. Main
+    /// thread.
     /// </summary>
     internal byte[]? Keep()
     {
         if (IsLoading || Domains.IsEmpty)
             return null;
 
-        WorldState saved = Save();
-        Result<JsonElement> json = Json.Write(saved, typeof(WorldState));
+        SaveFile saved = new(Domains, FindChanges(Domains), IsPaused, TimeScale);
+        Result<JsonElement> json = Json.Write(saved, typeof(SaveFile));
         if (!json.Ok)
         {
             Log.Error($"The world goes back to the entry point: it could not be saved: {json.Error}");
@@ -448,9 +455,7 @@ public sealed class World : IEcs, IDisposable
             return null;
         }
 
-        Log.Info(
-            $"Kept the world: {saved.Placed.Length + saved.Entities.Length} entities in {saved.Domains.Length} domains."
-        );
+        Log.Info($"Kept the world: {saved.Changes.Entities.Length} changes in {saved.Domains.Length} domains.");
 
         return Encoding.UTF8.GetBytes(json.Value.GetRawText());
     }
@@ -614,37 +619,6 @@ public sealed class World : IEcs, IDisposable
         }
 
         return placements.ToImmutable();
-    }
-
-    /// <summary>
-    /// The whole world as data, for a restart: the domains open, each entity they placed by its key and the keys of those
-    /// destroyed, every other entity, and its pause and time scale, as of now. Main thread, with no work running, as the
-    /// run's end has it.
-    /// </summary>
-    private WorldState Save()
-    {
-        ImmutableArray<Placement>.Builder placed = ImmutableArray.CreateBuilder<Placement>();
-        ImmutableArray<EntityKey>.Builder destroyed = ImmutableArray.CreateBuilder<EntityKey>();
-        foreach ((EntityKey key, Entity entity) in _placed)
-        {
-            if (_ecs.IsAlive(entity))
-                placed.Add(new Placement(key, [.. _ecs.GetComponents(entity)]));
-            else
-                destroyed.Add(key);
-        }
-
-        HashSet<Entity> owned = [.. _placed.Values];
-        ImmutableArray<Entity> rest = HasEcs ? [.. FindAll().Where(entity => !owned.Contains(entity))] : [];
-
-        return new WorldState
-        {
-            Domains = Domains,
-            Placed = placed.ToImmutable(),
-            Destroyed = destroyed.ToImmutable(),
-            Entities = GetComponents(rest),
-            IsPaused = IsPaused,
-            TimeScale = TimeScale,
-        };
     }
 
     /// <summary>
@@ -866,56 +840,6 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Each domain's prefabs read first on workers, for saves and reloads to compare with, then, in one step on the main
-    /// thread, everything leaves, globals too, and what the saved world holds comes: each domain with its own entities, then
-    /// the rest. Run as work in turn.
-    /// </summary>
-    private async Task RestoreKeptAsync(WorldState saved, CancellationToken cancel)
-    {
-        if (!HasEcs)
-        {
-            Log.Warn("The world is not restored: no gem the project lists provides the ECS.");
-
-            return;
-        }
-
-        Dictionary<Handle<Domain>, ImmutableArray<PlacedPrefab>> read = [];
-        foreach (Handle<Domain> domain in saved.Domains)
-        {
-            Result<ImmutableArray<PlacedPrefab>> prefabs = await ReadDomainAsync(domain, null, cancel)
-                .ConfigureAwait(false);
-            if (prefabs.Ok)
-                read[domain] = prefabs.Value;
-            else
-                Log.Error($"{GetName(domain)}'s changes are not saved, nor kept as it opens again: {prefabs.Error}");
-        }
-
-        await _threads.Enter(EngineThread.Main);
-        IsLoading = true;
-        DestroyEntities(FindAll());
-        _placed.Clear();
-        _read.Clear();
-        foreach ((Handle<Domain> domain, ImmutableArray<PlacedPrefab> prefabs) in read)
-        {
-            _read[domain] = prefabs;
-        }
-
-        Place(saved.Placed);
-        foreach (EntityKey key in saved.Destroyed)
-        {
-            _placed[key] = CreateGone();
-        }
-
-        CreateEntities(saved.Entities);
-        Domains = saved.Domains;
-        IsPaused = saved.IsPaused;
-        TimeScale = saved.TimeScale;
-        Log.Info(
-            $"Restored the world: {saved.Placed.Length + saved.Entities.Length} entities in {saved.Domains.Length} domains."
-        );
-    }
-
-    /// <summary>
     /// Everything leaves, globals too, and <paramref name="saved"/> comes: each of its domains opened from its files, read
     /// first on workers, so one that doesn't open leaves the world as it was, then its changes made.
     /// </summary>
@@ -949,7 +873,7 @@ public sealed class World : IEcs, IDisposable
         saved.Changes.Apply(_ecs, _placed);
         IsPaused = saved.IsPaused;
         TimeScale = saved.TimeScale;
-        Log.Info($"Loaded the game: {saved.Changes.Entities.Length} changes in {domains.Count} domains.");
+        Log.Info($"Put the world back: {saved.Changes.Entities.Length} changes in {domains.Count} domains.");
 
         return Result.Success();
     }
@@ -970,18 +894,6 @@ public sealed class World : IEcs, IDisposable
         }
 
         return new WorldChanges(_ecs, _placed, authored);
-    }
-
-    /// <summary>
-    /// A handle to no entity alive: one made and destroyed at once, which stands for a placed entity that was destroyed.
-    /// Main thread.
-    /// </summary>
-    private Entity CreateGone()
-    {
-        Entity gone = _ecs.Create([]);
-        _ecs.Destroy(gone);
-
-        return gone;
     }
 
     private string GetSavePath(string name) => _files.Combine(AppContext.BaseDirectory, "Saves", name + ".save");
