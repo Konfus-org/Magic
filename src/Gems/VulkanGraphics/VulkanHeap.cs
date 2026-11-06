@@ -101,7 +101,7 @@ internal sealed unsafe class VulkanHeap : IDisposable
                 bindingCount = (uint)bindings.Length,
                 pBindings = bindingsPointer,
             };
-            Check(_api.vkCreateDescriptorSetLayout(&layoutInfo, out _layout), "the heap's layout");
+            _api.vkCreateDescriptorSetLayout(&layoutInfo, out _layout).ThrowIfFailed("the heap's layout");
         }
 
         Span<VkDescriptorPoolSize> sizes =
@@ -124,7 +124,7 @@ internal sealed unsafe class VulkanHeap : IDisposable
                 poolSizeCount = (uint)sizes.Length,
                 pPoolSizes = sizesPointer,
             };
-            Check(_api.vkCreateDescriptorPool(&poolInfo, out _pool), "the heap's pool");
+            _api.vkCreateDescriptorPool(&poolInfo, out _pool).ThrowIfFailed("the heap's pool");
         }
 
         VkDescriptorSetLayout layout = _layout;
@@ -135,7 +135,7 @@ internal sealed unsafe class VulkanHeap : IDisposable
             pSetLayouts = &layout,
         };
         VkDescriptorSet set;
-        Check(_api.vkAllocateDescriptorSets(&setInfo, &set), "the heap's set");
+        _api.vkAllocateDescriptorSets(&setInfo, &set).ThrowIfFailed("the heap's set");
         Set = set;
 
         VkPushConstantRange constants = new()
@@ -151,10 +151,8 @@ internal sealed unsafe class VulkanHeap : IDisposable
             pushConstantRangeCount = 1,
             pPushConstantRanges = &constants,
         };
-        Check(
-            _api.vkCreatePipelineLayout(&pipelineLayoutInfo, out VkPipelineLayout pipelineLayout),
-            "the pipeline layout"
-        );
+        _api.vkCreatePipelineLayout(&pipelineLayoutInfo, out VkPipelineLayout pipelineLayout)
+            .ThrowIfFailed("the pipeline layout");
         PipelineLayout = pipelineLayout;
     }
 
@@ -314,10 +312,4 @@ internal sealed unsafe class VulkanHeap : IDisposable
             descriptorCount = count,
             stageFlags = PushStages,
         };
-
-    private static void Check(VkResult result, string what)
-    {
-        if (result != VkResult.Success)
-            throw new InvalidOperationException($"Vulkan could not make {what}: {result}.");
-    }
 }

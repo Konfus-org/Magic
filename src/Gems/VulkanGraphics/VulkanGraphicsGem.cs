@@ -12,8 +12,9 @@ namespace Magic.VulkanGraphics;
 /// <summary>
 /// The GPU through Vulkan 1.3: one bindless heap, resources made from Core's descriptions, and one frame of commands
 /// submitted at a time. Its <see cref="Render"/> runs before a renderer's, as a renderer is made after it, so it begins
-/// the frame there: waits for the frame two before, takes the window's image, and leaves the staging ring empty for
-/// what records next. The renderer records and submits; a frame nothing submitted still shows the window's image.
+/// each frame there, and the first as it is made: waits for the frame two before, takes the window's image, and leaves
+/// the staging ring empty for what records next. The renderer records and submits; a frame nothing submitted still
+/// shows the window's image.
 /// It is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
 public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
@@ -28,7 +29,6 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     private readonly Meter _meter;
     private readonly Gauge<long> _memoryUsage;
     private readonly Gauge<long> _memoryLimit;
-    private bool _isBegun;
     private bool _isSubmitted;
 
     public VulkanGraphicsGem(App app, Threads threads, IWindow? window = null)
@@ -55,6 +55,8 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
         _recorder = new VulkanRecorder(_device, _resources, _heap);
         if (drawn is not null && _device.Surface.IsNotNull)
             _swapchain = new VulkanSwapchain(_device, _resources, drawn);
+
+        BeginFrame();
     }
 
     public GpuFeatures Features => _device.Features;
@@ -180,28 +182,28 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     public GpuUpload BeginUpload(int bytes)
     {
         ThrowIfNotOnMain();
-        BeginFrame();
 
         return _frames.Upload(bytes, _device.Limits.UploadAlignment);
     }
 
-    public Task<Result<ReadOnlyMemory<byte>>> ReadBackAsync(
+    public async Task<Result<ReadOnlyMemory<byte>>> ReadBackAsync(
         GpuBuffer buffer,
         long offset,
         int bytes,
         CancellationToken cancel
     )
     {
-        if (_threads.IsCurrent(EngineThread.Main))
-            return ReadBackOnMainAsync(buffer, offset, bytes);
+        await _threads.Enter(EngineThread.Main);
+        cancel.ThrowIfCancellationRequested();
+        if (_resources.Buffers[buffer.Id] is not { } read)
+            return Result.Failure($"buffer {buffer.Id} is gone.");
 
-        return ReadBackFromWorkerAsync(buffer, offset, bytes, cancel);
+        return await _frames.ReadBackAsync(buffer.Id, read, offset, bytes).ConfigureAwait(false);
     }
 
     public void Submit(in GpuCommands commands)
     {
         ThrowIfNotOnMain();
-        BeginFrame();
         if (_isSubmitted)
         {
             Log.Warn("The frame was submitted already; a second set of commands is dropped.");
@@ -257,10 +259,9 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     /// </summary>
     public void Render(in Frame frame)
     {
-        if (_isBegun && !_isSubmitted)
+        if (!_isSubmitted)
             Submit(GpuCommands.None);
 
-        _isBegun = false;
         BeginFrame();
     }
 
@@ -276,36 +277,9 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
 
     private void BeginFrame()
     {
-        if (_isBegun)
-            return;
-
-        _isBegun = true;
         _isSubmitted = false;
         _frames.Begin();
         WindowTarget = _swapchain?.Acquire(_frames.Current.Acquired) ?? GpuTexture.None;
-    }
-
-    private Task<Result<ReadOnlyMemory<byte>>> ReadBackOnMainAsync(GpuBuffer buffer, long offset, int bytes)
-    {
-        if (_resources.Buffers[buffer.Id] is not { } vulkanBuffer)
-            return Task.FromResult<Result<ReadOnlyMemory<byte>>>(Result.Failure($"buffer {buffer.Id} is gone."));
-
-        BeginFrame();
-
-        return _frames.ReadBackAsync(buffer.Id, vulkanBuffer, offset, bytes);
-    }
-
-    private async Task<Result<ReadOnlyMemory<byte>>> ReadBackFromWorkerAsync(
-        GpuBuffer buffer,
-        long offset,
-        int bytes,
-        CancellationToken cancel
-    )
-    {
-        await _threads.Enter(EngineThread.Main);
-        cancel.ThrowIfCancellationRequested();
-
-        return await ReadBackOnMainAsync(buffer, offset, bytes).ConfigureAwait(false);
     }
 
     private void ThrowIfNotOnMain()

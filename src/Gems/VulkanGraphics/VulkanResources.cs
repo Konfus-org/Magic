@@ -67,7 +67,10 @@ internal sealed class VulkanTexture
 
     public required TextureDescription Description { get; init; }
 
-    public required VkImageView View { get; init; }
+    /// <summary>
+    /// Null for a texture only copied, which has no views.
+    /// </summary>
+    public VkImageView View { get; set; }
 
     public required VkImageView[] LevelViews { get; init; }
 
@@ -582,18 +585,6 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
         return Result.Success(memory);
     }
 
-    /// <summary>
-    /// Whether shaders or draws reach the texture through a view, which a texture only copied has none of.
-    /// </summary>
-    private static bool HasViews(in TextureDescription description) =>
-        (
-            description.Usage
-            & (TextureUsages.Sampled | TextureUsages.Storage | TextureUsages.ColorTarget | TextureUsages.DepthTarget)
-        ) != 0;
-
-    private static VkImageAspectFlags GetAspect(in TextureDescription description) =>
-        description.Format.IsDepth ? VkImageAspectFlags.Depth : VkImageAspectFlags.Color;
-
     private Result<VulkanBuffer> CreateVulkanBuffer(in BufferDescription description)
     {
         VkBufferCreateInfo createInfo = new()
@@ -836,11 +827,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
                 (uint)(description.Kind == TextureKind.Texture3D ? description.Depth : 1)
             ),
             mipLevels = (uint)description.Levels,
-            arrayLayers = (uint)(
-                isCube ? 6
-                : description.Kind == TextureKind.Texture2DArray ? description.Layers
-                : 1
-            ),
+            arrayLayers = description.GetLayerCount(),
             samples = VkSampleCountFlags.Count1,
             tiling = VkImageTiling.Optimal,
             usage = description.Usage.ToVulkan(),
@@ -867,68 +854,51 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
 
         device.Api.vkBindImageMemory(image, memory.Value, 0);
         // A texture only copied to and from has no view to make: Vulkan refuses one, and nothing reads it through one.
-        if (!HasViews(description))
+        bool isViewed =
+            (
+                description.Usage
+                & (
+                    TextureUsages.Sampled
+                    | TextureUsages.Storage
+                    | TextureUsages.ColorTarget
+                    | TextureUsages.DepthTarget
+                )
+            ) != 0;
+        VulkanTexture texture = new()
         {
-            VkImageLayout[] viewless = new VkImageLayout[description.Levels];
-            Array.Fill(viewless, VkImageLayout.Undefined);
+            Image = image,
+            Memory = memory.Value,
+            Description = description,
+            LevelViews = new VkImageView[isViewed ? description.Levels : 0],
+            Layouts = new VkImageLayout[description.Levels],
+        };
+        if (!isViewed)
+            return Result.Success(texture);
 
-            return Result.Success(
-                new VulkanTexture
-                {
-                    Image = image,
-                    Memory = memory.Value,
-                    Description = description,
-                    View = VkImageView.Null,
-                    LevelViews = [],
-                    Layouts = viewless,
-                }
-            );
-        }
-
+        // A view that fails frees the texture with the views made so far; a null one is nothing to Vulkan.
         Result<VkImageView> view = CreateView(image, description, 0, description.Levels);
         if (!view.Ok)
         {
-            device.Api.vkDestroyImage(image);
-            FreeMemory(memory.Value);
+            Free(texture);
 
             return Result.Failure(view.Error);
         }
 
-        VkImageView[] levelViews = new VkImageView[description.Levels];
+        texture.View = view.Value;
         for (int level = 0; level < description.Levels; level++)
         {
             Result<VkImageView> levelView = CreateView(image, description, level, 1);
             if (!levelView.Ok)
             {
-                for (int made = 0; made < level; made++)
-                {
-                    device.Api.vkDestroyImageView(levelViews[made]);
-                }
-
-                device.Api.vkDestroyImageView(view.Value);
-                device.Api.vkDestroyImage(image);
-                FreeMemory(memory.Value);
+                Free(texture);
 
                 return Result.Failure(levelView.Error);
             }
 
-            levelViews[level] = levelView.Value;
+            texture.LevelViews[level] = levelView.Value;
         }
 
-        VkImageLayout[] layouts = new VkImageLayout[description.Levels];
-        Array.Fill(layouts, VkImageLayout.Undefined);
-
-        return Result.Success(
-            new VulkanTexture
-            {
-                Image = image,
-                Memory = memory.Value,
-                Description = description,
-                View = view.Value,
-                LevelViews = levelViews,
-                Layouts = layouts,
-            }
-        );
+        return Result.Success(texture);
     }
 
     /// <summary>
@@ -940,11 +910,6 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
         bool isWhole = levels == description.Levels && firstLevel == 0;
         bool isCube = description.Kind == TextureKind.Cube;
         VkImageViewType viewType = isWhole || !isCube ? description.Kind.ToViewType() : VkImageViewType.Image2DArray;
-        uint layers = (uint)(
-            isCube ? 6
-            : description.Kind == TextureKind.Texture2DArray ? description.Layers
-            : 1
-        );
         VkImageViewCreateInfo createInfo = new()
         {
             image = image,
@@ -952,11 +917,11 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             format = description.Format.ToVulkan(),
             components = VkComponentMapping.Identity,
             subresourceRange = new VkImageSubresourceRange(
-                GetAspect(description),
+                description.Format.ToAspect(),
                 (uint)firstLevel,
                 (uint)levels,
                 0,
-                layers
+                description.GetLayerCount()
             ),
         };
         VkResult result = device.Api.vkCreateImageView(&createInfo, out VkImageView view);
