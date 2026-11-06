@@ -31,25 +31,25 @@ internal sealed class Gems : IDisposable
     private static readonly string[] _hookNames = Enum.GetNames<Hook>();
 
     private static readonly Histogram<double> _frameDuration = Metrics.Meter.CreateHistogram<double>(
-        "magic.core.frame.duration",
+        Metrics.FrameDuration,
         "s",
         "From one frame to the next."
     );
 
     private static readonly Histogram<double> _frameWorkDuration = Metrics.Meter.CreateHistogram<double>(
-        "magic.core.frame.work.duration",
+        Metrics.FrameWorkDuration,
         "s",
         "The main thread's work on a frame."
     );
 
     private static readonly Histogram<double> _renderFrameDuration = Metrics.Meter.CreateHistogram<double>(
-        "magic.core.render.frame.duration",
+        Metrics.RenderFrameDuration,
         "s",
         "From one frame the render thread draws to the next, the waits for the GPU and the display among it."
     );
 
     private static readonly Histogram<double> _hookDuration = Metrics.Meter.CreateHistogram<double>(
-        "magic.core.gem.hook.duration",
+        Metrics.HookDuration,
         "s",
         "One gem's hook."
     );

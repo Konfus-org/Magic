@@ -13,9 +13,5 @@ public interface IShaderCompiler
     /// <paramref name="entry"/> compiled, or why not: a message with the file and line of each error, logged once by
     /// the caller as it decides what to draw instead.
     /// </summary>
-    Task<Result<CompiledShader>> CompileAsync(
-        ShaderEntry entry,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    );
+    Task<Result<CompiledShader>> CompileAsync(ShaderEntry entry, CancellationToken cancel);
 }

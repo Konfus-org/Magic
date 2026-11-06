@@ -71,11 +71,7 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
         _compiling.Dispose();
     }
 
-    public async Task<Result<CompiledShader>> CompileAsync(
-        ShaderEntry entry,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    )
+    public async Task<Result<CompiledShader>> CompileAsync(ShaderEntry entry, CancellationToken cancel)
     {
         if (_assets.GetPath(entry.Module) is not { } entryPath)
             return Result.Failure($"the shader {entry.Module.Id} is not an asset.");
@@ -89,8 +85,6 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
             typeArguments.Add((path, argument.Type));
         }
 
-        string work = $"Compiling {entryPath}: {entry.Name}";
-        progress?.Report(new LoadProgress(work, 0, 3));
         Result<ImmutableArray<SlangModule>> modules = await LoadModulesAsync(
                 [entryPath, .. typeArguments.Select(argument => argument.Path)],
                 cancel
@@ -99,18 +93,12 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
         if (!modules.Ok)
             return Result.Failure(modules.Error);
 
-        progress?.Report(new LoadProgress(work, 1, 3));
         ulong key = GetKey(entryPath, entry, typeArguments);
         ulong version = GetVersion(modules.Value);
         Result<CompiledShader> cached = await _caches.ReadAsync(key, version, this, cancel).ConfigureAwait(false);
         if (cached.Ok)
-        {
-            progress?.Report(new LoadProgress(work, 3, 3));
-
             return cached;
-        }
 
-        progress?.Report(new LoadProgress(work, 2, 3));
         Result<CompiledShader> compiled = await Task.Run(
                 async () =>
                 {
@@ -140,7 +128,6 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
                 cancel
             )
             .ConfigureAwait(false);
-        progress?.Report(new LoadProgress(work, 3, 3));
         if (!compiled.Ok)
             return Result.Failure($"{entryPath}: {entry.Name} did not compile: {compiled.Error}");
 

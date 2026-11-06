@@ -556,7 +556,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
         return true;
     }
 
-    public unsafe bool Header(string label, bool folds = false, int depth = 0)
+    public unsafe bool Header(string label, bool isOpenAtStart = true, int depth = 0)
     {
         ThrowIfOutsideFrame();
 
@@ -572,10 +572,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
             level.Indent = depth;
         }
 
-        if (folds)
-            ImGui_SetNextItemOpen(false, (int)ImGuiCond_Always);
-
-        return ImGui_CollapsingHeader(_text.Add(label), (int)ImGuiTreeNodeFlags_DefaultOpen);
+        return ImGui_CollapsingHeader(_text.Add(label), isOpenAtStart ? (int)ImGuiTreeNodeFlags_DefaultOpen : 0);
     }
 
     public unsafe void Table(string label, ReadOnlySpan<string> columns)

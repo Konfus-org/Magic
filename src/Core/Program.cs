@@ -16,7 +16,7 @@ namespace Magic;
 internal static class Program
 {
     private static readonly Histogram<double> _stepDuration = Metrics.Meter.CreateHistogram<double>(
-        "magic.core.step.duration",
+        Metrics.StepDuration,
         "s",
         "One step of Core's own in the run's loop."
     );

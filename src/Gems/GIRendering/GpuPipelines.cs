@@ -93,7 +93,7 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
         Task<Result<CompiledShader>>[] compiling = new Task<Result<CompiledShader>>[all.Length];
         for (int i = 0; i < all.Length; i++)
         {
-            compiling[i] = shaders.CompileAsync(all[i], null, cancel);
+            compiling[i] = shaders.CompileAsync(all[i], cancel);
         }
 
         Result<CompiledShader>[] compiled = await Task.WhenAll(compiling).ConfigureAwait(false);
