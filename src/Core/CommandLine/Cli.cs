@@ -15,16 +15,13 @@ namespace Magic.CommandLine;
 /// </summary>
 internal sealed class Cli : IDisposable
 {
-    private readonly App _app;
-
     private readonly CommandQueue _queue;
 
     private readonly RootCommand _cliCommands;
 
     public Cli(App app, IFileSystem files, EventCoordinator events, Assets assets, World world)
     {
-        _app = app;
-        _queue = new CommandQueue(world, events);
+        _queue = new CommandQueue(events);
         _cliCommands = CreateCliCommands(app, files, events, assets, world, _queue);
     }
 
@@ -32,7 +29,7 @@ internal sealed class Cli : IDisposable
 
     /// <summary>
     /// Executes the commands Magic was launched with, or says why they didn't run. Only open runs a project; any other
-    /// command does its job and leaves the app exiting.
+    /// command does its job, and Magic exits after it.
     /// </summary>
     public Result Execute(string[] commands)
     {
@@ -42,11 +39,7 @@ internal sealed class Cli : IDisposable
                 "it has no command; open a project with 'Magic open <project>', or see 'Magic --help'."
             );
 
-        Result ran = Invoke(parsed);
-        if (_app.Project is null)
-            _app.Exit();
-
-        return ran;
+        return Invoke(parsed);
     }
 
     /// <summary>
@@ -135,7 +128,7 @@ internal sealed class Cli : IDisposable
                 GetCommand.Create(app, world),
                 TeleportCommand.Create(app, world, assets, queue),
                 SpawnCommand.Create(app, world, assets, queue),
-                WaitCommand.Create(queue),
+                WaitCommand.Create(queue, world),
                 ExitCommand.Create(app),
             },
             Options = { headless, verbosity, failOnError },
