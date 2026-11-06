@@ -12,7 +12,7 @@ namespace Magic.Files.Types;
 [AssetFormat(AssetFileFormat.Json)]
 public sealed class Material : IAsset<Material>
 {
-    public required MaterialVisuals Visuals { get; init; }
+    public required Shading Visuals { get; init; }
 
     public MaterialPhysics Physics { get; init; } = new();
 

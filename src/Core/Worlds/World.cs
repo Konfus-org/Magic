@@ -58,6 +58,12 @@ public sealed class World : IEcs, IDisposable
     private readonly Dictionary<EntityKey, Entity> _placed = [];
 
     /// <summary>
+    /// Each entity's shading by the entity and its renderer's slot: one per material the renderer held as the entity was
+    /// made, gone with it. Main thread.
+    /// </summary>
+    private readonly Dictionary<(Entity Entity, int Slot), ShadingInstance> _shading = [];
+
+    /// <summary>
     /// The prefabs each open domain placed, as they were read: what its entities are compared with, by a save and as the
     /// domain opens again. Main thread.
     /// </summary>
@@ -213,8 +219,10 @@ public sealed class World : IEcs, IDisposable
     public Entity Create(ReadOnlySpan<IComponent> components, bool makeGlobal = false)
     {
         ThrowIfNoEcs();
+        Entity made = makeGlobal ? _ecs.Create(WithGlobalTag(components).AsSpan()) : _ecs.Create(components);
+        CreateShading([made]);
 
-        return makeGlobal ? _ecs.Create(WithGlobalTag(components).AsSpan()) : _ecs.Create(components);
+        return made;
     }
 
     /// <summary>
@@ -280,7 +288,7 @@ public sealed class World : IEcs, IDisposable
     {
         ArgumentNullException.ThrowIfNull(commands);
         ThrowIfNoEcs();
-        commands.Apply(_ecs);
+        commands.Apply(this);
         commands.Clear();
     }
 
@@ -294,6 +302,7 @@ public sealed class World : IEcs, IDisposable
         ThrowIfNoRoom(first.Length, created);
         ThrowIfNoEcs();
         _ecs.Create(first, created);
+        CreateShading(created);
     }
 
     /// <inheritdoc/>
@@ -304,6 +313,7 @@ public sealed class World : IEcs, IDisposable
         ThrowIfNoRoom(first.Length, created);
         ThrowIfNoEcs();
         _ecs.Create(first, second, created);
+        CreateShading(created);
     }
 
     /// <inheritdoc/>
@@ -311,6 +321,7 @@ public sealed class World : IEcs, IDisposable
     {
         ThrowIfDead(entity);
         _ecs.Destroy(entity);
+        DestroyShading(entity);
     }
 
     /// <inheritdoc/>
@@ -354,6 +365,12 @@ public sealed class World : IEcs, IDisposable
 
     /// <inheritdoc/>
     public IComponent[] GetComponents(Entity entity) => _ecs.GetComponents(entity);
+
+    /// <summary>
+    /// The entity's own shading in <paramref name="slot"/> of its renderer, made with the entity; null for an empty slot
+    /// or an entity made without a renderer.
+    /// </summary>
+    public ShadingInstance? GetShading(Entity entity, int slot) => _shading.GetValueOrDefault((entity, slot));
 
     /// <inheritdoc/>
     public EcsQuery Query() => _ecs.Query();
@@ -704,7 +721,7 @@ public sealed class World : IEcs, IDisposable
         ImmutableArray<Entity>.Builder created = ImmutableArray.CreateBuilder<Entity>(entities.Length);
         foreach (ImmutableArray<IComponent> components in entities)
         {
-            created.Add(_ecs.Create(components.AsSpan()));
+            created.Add(Create(components.AsSpan()));
         }
 
         return created.MoveToImmutable();
@@ -717,7 +734,7 @@ public sealed class World : IEcs, IDisposable
     {
         foreach (Placement placement in placements)
         {
-            _placed[placement.Key] = _ecs.Create(placement.Components.AsSpan());
+            _placed[placement.Key] = Create(placement.Components.AsSpan());
         }
     }
 
@@ -729,7 +746,7 @@ public sealed class World : IEcs, IDisposable
         foreach (EntityKey key in _placed.Keys.Where(key => key.Domain == domain).ToArray())
         {
             if (_ecs.IsAlive(_placed[key]))
-                _ecs.Destroy(_placed[key]);
+                Destroy(_placed[key]);
 
             _placed.Remove(key);
         }
@@ -743,7 +760,38 @@ public sealed class World : IEcs, IDisposable
         foreach (Entity entity in entities)
         {
             if (_ecs.IsAlive(entity))
-                _ecs.Destroy(entity);
+                Destroy(entity);
+        }
+    }
+
+    /// <summary>
+    /// One <see cref="ShadingInstance"/> per filled slot of each entity's renderer, for those made with one. Main thread.
+    /// </summary>
+    private void CreateShading(ReadOnlySpan<Entity> entities)
+    {
+        foreach (Entity entity in entities)
+        {
+            if (!_ecs.Has<Renderer>(entity))
+                continue;
+
+            ReadOnlySpan<Handle<Material>> materials = _ecs.Get<Renderer>(entity).Materials;
+            for (int slot = 0; slot < materials.Length; slot++)
+            {
+                if (materials[slot] == Handle<Material>.None)
+                    continue;
+
+                _shading[(entity, slot)] = new ShadingInstance(materials[slot]);
+                // PROTO: shows each instance until the renderer draws them.
+                Log.Info($"Entity {entity.Id} slot {slot}: a shading instance of {_assets.GetPath(materials[slot])}.");
+            }
+        }
+    }
+
+    private void DestroyShading(Entity entity)
+    {
+        for (int slot = 0; slot < MaterialSlots.Capacity; slot++)
+        {
+            _shading.Remove((entity, slot));
         }
     }
 
@@ -977,7 +1025,7 @@ public sealed class World : IEcs, IDisposable
                         Add(domain, prefabs);
                     }
 
-                    saved.Changes.Apply(_ecs, _placed);
+                    saved.Changes.Apply(this, _placed);
                     IsPaused = saved.IsPaused;
                     TimeScale = saved.TimeScale;
                     Log.Info(
@@ -1089,7 +1137,7 @@ public sealed class World : IEcs, IDisposable
         ImmutableArray<Placement> placements = GetPlacements(domain, read.Value);
         Place(placements);
         _read[domain] = read.Value;
-        kept.Apply(_ecs, _placed);
+        kept.Apply(this, _placed);
         Log.Info(
             $"Opened {GetName(domain)} again: {placements.Length} entities, {kept.Entities.Length} changed ones kept."
         );

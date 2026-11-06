@@ -49,7 +49,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly LightTiles _lightTiles;
     private readonly ShadowMask? _shadows;
     private readonly Lighting _lighting;
-    private readonly Shading _shading;
+    private readonly SurfaceShading _surfaceShading;
     private readonly SurfaceView _surfaceView;
     private readonly IOverlay? _overlay;
     private readonly RendererDebugWindow? _debugWindow;
@@ -107,7 +107,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             ? null
             : new ShadowMask(gpu, _graph, _pipelines, _pools, _visibility, _lightTiles);
         _lighting = new Lighting(gpu, _graph, _sky, _lightTiles, _shadows);
-        _shading = new Shading(_pipelines, _lighting);
+        _surfaceShading = new SurfaceShading(_pipelines, _lighting);
         _surfaceView = new SurfaceView(_pipelines);
     }
 
@@ -205,7 +205,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _visibility.RecordResolve(view);
         _lighting.RecordTiles(view);
         _lighting.RecordShadows(view);
-        _shading.Record(view);
+        _surfaceShading.Record(view);
         _surfaceView.Record(view, _debugView, sun.Exposure);
         _overlay?.Record(_graph, _targets.Output);
 
