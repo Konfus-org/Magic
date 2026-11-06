@@ -1,7 +1,8 @@
 using System.Buffers;
-using System.Buffers.Binary;
 using System.Collections.Immutable;
+using System.Linq;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Caching;
 using Magic.Debugging;
@@ -20,8 +21,6 @@ namespace Magic.MeshPreprocessor;
 /// </summary>
 public sealed class MeshPreprocessorGem(Assets assets, Caches caches) : IGem, IMeshPreprocessor, ICache<MeshDerived>
 {
-    private const int HeaderBytes = 52;
-
     /// <summary>
     /// Raised when the bytes written change shape, or the hierarchy is built otherwise.
     /// </summary>
@@ -51,12 +50,7 @@ public sealed class MeshPreprocessorGem(Assets assets, Caches caches) : IGem, IM
 
         progress?.Report(new LoadProgress(work, 1, 2));
         MeshDerived derived = await Task.Run(() => ClusterBuilder.Build(loaded.Value), cancel).ConfigureAwait(false);
-        int triangles = 0;
-        foreach (Mesh mesh in loaded.Value.Meshes)
-        {
-            triangles += mesh.Indices.Length / 3;
-        }
-
+        int triangles = loaded.Value.Meshes.Sum(mesh => mesh.Indices.Length / 3);
         Log.Info($"{name}: {triangles} triangles clustered into {derived.Clusters.Length} clusters.");
         await caches.WriteAsync(model.Id, version, derived, this, cancel).ConfigureAwait(false);
         progress?.Report(new LoadProgress(work, 2, 2));
@@ -66,21 +60,21 @@ public sealed class MeshPreprocessorGem(Assets assets, Caches caches) : IGem, IM
 
     public void Write(MeshDerived value, IBufferWriter<byte> bytes)
     {
-        Span<byte> header = bytes.GetSpan(HeaderBytes);
-        BinaryPrimitives.WriteInt32LittleEndian(header, value.Vertices.Length);
-        BinaryPrimitives.WriteInt32LittleEndian(header[4..], value.Indices.Length);
-        BinaryPrimitives.WriteInt32LittleEndian(header[8..], value.Clusters.Length);
-        BinaryPrimitives.WriteSingleLittleEndian(header[12..], value.BoundsCenter.X);
-        BinaryPrimitives.WriteSingleLittleEndian(header[16..], value.BoundsCenter.Y);
-        BinaryPrimitives.WriteSingleLittleEndian(header[20..], value.BoundsCenter.Z);
-        BinaryPrimitives.WriteSingleLittleEndian(header[24..], value.BoundsRadius);
-        BinaryPrimitives.WriteSingleLittleEndian(header[28..], value.FieldOrigin.X);
-        BinaryPrimitives.WriteSingleLittleEndian(header[32..], value.FieldOrigin.Y);
-        BinaryPrimitives.WriteSingleLittleEndian(header[36..], value.FieldOrigin.Z);
-        BinaryPrimitives.WriteSingleLittleEndian(header[40..], value.FieldVoxel);
-        BinaryPrimitives.WriteSingleLittleEndian(header[44..], value.FieldBand);
-        BinaryPrimitives.WriteInt32LittleEndian(header[48..], value.Field.Length);
-        bytes.Advance(HeaderBytes);
+        MemoryMarshal.Write(
+            bytes.GetSpan(Unsafe.SizeOf<Header>()),
+            new Header(
+                value.Vertices.Length,
+                value.Indices.Length,
+                value.Clusters.Length,
+                value.BoundsCenter,
+                value.BoundsRadius,
+                value.FieldOrigin,
+                value.FieldVoxel,
+                value.FieldBand,
+                value.Field.Length
+            )
+        );
+        bytes.Advance(Unsafe.SizeOf<Header>());
         bytes.Write(MemoryMarshal.AsBytes(value.Vertices.AsSpan()));
         bytes.Write(MemoryMarshal.AsBytes(value.Indices.AsSpan()));
         bytes.Write(MemoryMarshal.AsBytes(value.Clusters.AsSpan()));
@@ -89,49 +83,28 @@ public sealed class MeshPreprocessorGem(Assets assets, Caches caches) : IGem, IM
 
     public Result<MeshDerived> Read(ReadOnlySpan<byte> bytes)
     {
-        if (bytes.Length < HeaderBytes)
+        if (!MemoryMarshal.TryRead(bytes, out Header header))
             return Result.Failure("the entry is cut short.");
 
-        int vertexCount = BinaryPrimitives.ReadInt32LittleEndian(bytes);
-        int indexCount = BinaryPrimitives.ReadInt32LittleEndian(bytes[4..]);
-        int clusterCount = BinaryPrimitives.ReadInt32LittleEndian(bytes[8..]);
-        Vector3 center = new(
-            BinaryPrimitives.ReadSingleLittleEndian(bytes[12..]),
-            BinaryPrimitives.ReadSingleLittleEndian(bytes[16..]),
-            BinaryPrimitives.ReadSingleLittleEndian(bytes[20..])
-        );
-        float radius = BinaryPrimitives.ReadSingleLittleEndian(bytes[24..]);
-        Vector3 fieldOrigin = new(
-            BinaryPrimitives.ReadSingleLittleEndian(bytes[28..]),
-            BinaryPrimitives.ReadSingleLittleEndian(bytes[32..]),
-            BinaryPrimitives.ReadSingleLittleEndian(bytes[36..])
-        );
-        float fieldVoxel = BinaryPrimitives.ReadSingleLittleEndian(bytes[40..]);
-        float fieldBand = BinaryPrimitives.ReadSingleLittleEndian(bytes[44..]);
-        int fieldBytes = BinaryPrimitives.ReadInt32LittleEndian(bytes[48..]);
-        bytes = bytes[HeaderBytes..];
+        bytes = bytes[Unsafe.SizeOf<Header>()..];
         long needed =
-            ((long)vertexCount * GpuVertex.Bytes)
-            + ((long)indexCount * sizeof(uint))
-            + ((long)clusterCount * GpuCluster.Bytes)
-            + fieldBytes;
-        if (vertexCount < 0 || indexCount < 0 || clusterCount < 0 || fieldBytes < 0 || bytes.Length < needed)
+            ((long)header.VertexCount * GpuVertex.Bytes)
+            + ((long)header.IndexCount * sizeof(uint))
+            + ((long)header.ClusterCount * GpuCluster.Bytes)
+            + header.FieldBytes;
+        if (
+            header.VertexCount < 0
+            || header.IndexCount < 0
+            || header.ClusterCount < 0
+            || header.FieldBytes < 0
+            || bytes.Length < needed
+        )
             return Result.Failure("the entry is cut short.");
 
-        ImmutableArray<GpuVertex> vertices =
-        [
-            .. MemoryMarshal.Cast<byte, GpuVertex>(bytes[..(vertexCount * GpuVertex.Bytes)]),
-        ];
-        bytes = bytes[(vertexCount * GpuVertex.Bytes)..];
-        ImmutableArray<uint> indices = [.. MemoryMarshal.Cast<byte, uint>(bytes[..(indexCount * sizeof(uint))])];
-        bytes = bytes[(indexCount * sizeof(uint))..];
-        ImmutableArray<GpuCluster> clusters =
-        [
-            .. MemoryMarshal.Cast<byte, GpuCluster>(bytes[..(clusterCount * GpuCluster.Bytes)]),
-        ];
-
-        bytes = bytes[(clusterCount * GpuCluster.Bytes)..];
-        ImmutableArray<byte> field = [.. bytes[..fieldBytes]];
+        ImmutableArray<GpuVertex> vertices = Take<GpuVertex>(ref bytes, header.VertexCount);
+        ImmutableArray<uint> indices = Take<uint>(ref bytes, header.IndexCount);
+        ImmutableArray<GpuCluster> clusters = Take<GpuCluster>(ref bytes, header.ClusterCount);
+        ImmutableArray<byte> field = Take<byte>(ref bytes, header.FieldBytes);
 
         return Result.Success(
             new MeshDerived
@@ -139,13 +112,39 @@ public sealed class MeshPreprocessorGem(Assets assets, Caches caches) : IGem, IM
                 Vertices = vertices,
                 Indices = indices,
                 Clusters = clusters,
-                BoundsCenter = center,
-                BoundsRadius = radius,
+                BoundsCenter = header.BoundsCenter,
+                BoundsRadius = header.BoundsRadius,
                 Field = field,
-                FieldOrigin = fieldOrigin,
-                FieldVoxel = fieldVoxel,
-                FieldBand = fieldBand,
+                FieldOrigin = header.FieldOrigin,
+                FieldVoxel = header.FieldVoxel,
+                FieldBand = header.FieldBand,
             }
         );
+
+        static ImmutableArray<T> Take<T>(ref ReadOnlySpan<byte> bytes, int count)
+            where T : struct
+        {
+            int length = count * Unsafe.SizeOf<T>();
+            ImmutableArray<T> items = [.. MemoryMarshal.Cast<byte, T>(bytes[..length])];
+            bytes = bytes[length..];
+
+            return items;
+        }
     }
+
+    /// <summary>
+    /// What leads the cached bytes: the counts of what follows and the model's measures, in native byte order like
+    /// the rest.
+    /// </summary>
+    private readonly record struct Header(
+        int VertexCount,
+        int IndexCount,
+        int ClusterCount,
+        Vector3 BoundsCenter,
+        float BoundsRadius,
+        Vector3 FieldOrigin,
+        float FieldVoxel,
+        float FieldBand,
+        int FieldBytes
+    );
 }
