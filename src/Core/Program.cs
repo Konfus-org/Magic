@@ -91,8 +91,7 @@ internal static class Program
             services.AddSingleton(caches);
             services.AddSingleton(assets);
             services.AddSingleton(world);
-            GemRegistry registry = new(files, project.Gems);
-            registry.Register(services);
+            List<GemInfo> registered = GemRegistry.Register(files, project.Gems, services);
 
             // Never disposed, since its singletons are the gems, which Gems ends.
             services.MakeReadOnly();
@@ -101,7 +100,7 @@ internal static class Program
             Log.Info($"Running {project.Name} in {(app.IsHeadless ? "headless" : "GUI")} mode.");
 
             app.StartRun();
-            using Gems gems = new(registry, provider, app, files, assets, world, events);
+            using Gems gems = new(registered, provider, app, files, assets, world, events);
             world.StartAsync(kept, app.Lifetime).FireAndForget();
 
             // If we don't have a window and aren't headless something is wrong, early out.

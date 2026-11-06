@@ -103,44 +103,42 @@ internal sealed class Cli : IDisposable
         CommandQueue queue
     )
     {
+        Option<bool> headless = new("--headless")
+        {
+            Description = "Run without a GUI (headless mode)",
+            Recursive = true,
+        };
+        headless.Action = new OptionAction(parsed => app.IsHeadless = parsed.GetValue(headless));
+        Option<Log.VerbosityLevel> verbosity = new("--verbosity", "-v")
+        {
+            Description = "How much the log prints",
+            Recursive = true,
+        };
+        verbosity.Action = new OptionAction(parsed => Log.Verbosity = parsed.GetValue(verbosity));
+        Option<bool> failOnError = new("--fail-on-error")
+        {
+            Description = "Exit with code 2 as soon as an error is logged",
+            Recursive = true,
+        };
+        failOnError.Action = new OptionAction(parsed => app.ShouldExitOnError = parsed.GetValue(failOnError));
         RootCommand commands = new("Magic CLI.\nAllows interaction with the Magic game engine from the command line.")
         {
             Subcommands =
             {
-                new OpenCommand(app, files, assets, world, queue),
-                new NewCommand(),
-                new ScreenshotCommand(app, files, events),
-                new SaveCommand(app, world, queue),
-                new LoadCommand(app, world, queue),
-                new BakeCommand(app, assets, queue),
-                new SetCommand(app, events, world),
-                new GetCommand(app, world),
-                new TeleportCommand(app, world, assets, queue),
-                new SpawnCommand(app, world, assets, queue),
-                new WaitCommand(queue),
-                new ExitCommand(app),
+                OpenCommand.Create(app, files, assets, world, queue),
+                NewCommand.Create(),
+                ScreenshotCommand.Create(app, files, events),
+                SaveCommand.Create(app, world, queue),
+                LoadCommand.Create(app, world, queue),
+                BakeCommand.Create(app, assets, queue),
+                SetCommand.Create(app, events, world),
+                GetCommand.Create(app, world),
+                TeleportCommand.Create(app, world, assets, queue),
+                SpawnCommand.Create(app, world, assets, queue),
+                WaitCommand.Create(queue),
+                ExitCommand.Create(app),
             },
-            Options =
-            {
-                new Option<bool>("--headless")
-                {
-                    Description = "Run without a GUI (headless mode)",
-                    Recursive = true,
-                    Action = new CliCommand(cmds => app.IsHeadless = cmds.GetValue<bool>("--headless")),
-                },
-                new Option<Log.VerbosityLevel>("--verbosity", "-v")
-                {
-                    Description = "How much the log prints",
-                    Recursive = true,
-                    Action = new CliCommand(cmds => Log.Verbosity = cmds.GetValue<Log.VerbosityLevel>("--verbosity")),
-                },
-                new Option<bool>("--fail-on-error")
-                {
-                    Description = "Exit with code 2 as soon as an error is logged",
-                    Recursive = true,
-                    Action = new CliCommand(cmds => app.ShouldExitOnError = cmds.GetValue<bool>("--fail-on-error")),
-                },
-            },
+            Options = { headless, verbosity, failOnError },
         };
 
         // An option's action runs only before its command's own, so the root has one, which does nothing.

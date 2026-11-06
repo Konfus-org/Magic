@@ -8,41 +8,34 @@ namespace Magic.CommandLine.Commands;
 /// <c>bake</c>: queues the lines that open every domain under <c>Domains/</c> in turn, wait for each to load and settle,
 /// so their caches are made, and exit.
 /// </summary>
-internal sealed class BakeCommand : Command
+internal static class BakeCommand
 {
-    private readonly App _app;
-
-    private readonly Assets _assets;
-
-    private readonly CommandQueue _queue;
-
-    public BakeCommand(App app, Assets assets, CommandQueue queue)
-        : base("bake", "Opens every domain under Domains/ in turn, so their caches are made, then exits")
+    public static Command Create(App app, Assets assets, CommandQueue queue)
     {
-        _app = app;
-        _assets = assets;
-        _queue = queue;
-        Action = new CliCommand(_ => Bake());
-    }
+        Command bake = new("bake", "Opens every domain under Domains/ in turn, so their caches are made, then exits");
+        bake.SetAction(_ => Bake());
 
-    private void Bake()
-    {
-        if (!CommandLookups.IsProjectOpen(_app, "bake"))
-            return;
+        return bake;
 
-        int domains = 0;
-        foreach (string path in _assets.GetPathsUnder("Domains"))
+        void Bake()
         {
-            if (!path.EndsWith(".domain", StringComparison.OrdinalIgnoreCase))
-                continue;
+            if (!CommandLookups.IsProjectOpen(app, "bake"))
+                return;
 
-            domains++;
-            _queue.Enqueue($"open {path}");
-            _queue.Enqueue("wait loaded");
-            _queue.Enqueue("wait 120");
+            int domains = 0;
+            foreach (string path in assets.GetPathsUnder("Domains"))
+            {
+                if (!path.EndsWith(".domain", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                domains++;
+                queue.Enqueue($"open {path}");
+                queue.Enqueue("wait loaded");
+                queue.Enqueue("wait 120");
+            }
+
+            Log.Info($"Baking {domains} domains.");
+            queue.Enqueue("exit");
         }
-
-        Log.Info($"Baking {domains} domains.");
-        _queue.Enqueue("exit");
     }
 }
