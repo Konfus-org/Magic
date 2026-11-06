@@ -1,3 +1,6 @@
+using Magic.Gpu;
+using Magic.Rendering;
+
 namespace Magic.Projects;
 
 /// <summary>
@@ -27,7 +30,9 @@ public interface IGem
 
     /// <summary>
     /// Drawing the frame, on the render thread, from what <see cref="LateUpdate"/> last handed it: as often as the GPU
-    /// draws, more or less often than the main thread's frames. No messages.
+    /// draws, more or less often than the main thread's frames. The gem records its passes into
+    /// <paramref name="graph"/>, the frame every gem draws into, each in its <see cref="RenderLayer"/>; once every gem
+    /// has, the GPU provider presents it. No messages.
     /// </summary>
-    void Render(in Frame frame) { }
+    void Render(in Frame frame, RenderGraph graph) { }
 }

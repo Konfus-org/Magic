@@ -11,7 +11,6 @@ namespace Magic.GIRendering;
 /// </summary>
 internal sealed class FrameView(
     IGraphicsApi gpu,
-    RenderGraph graph,
     GeometryPools pools,
     MaterialTable materials,
     Visibility visibility,
@@ -67,6 +66,7 @@ internal sealed class FrameView(
     /// in a transfer pass the caller opened.
     /// </summary>
     public void Upload(
+        RenderGraph graph,
         RenderCamera camera,
         RenderSun sun,
         uint frameIndex,

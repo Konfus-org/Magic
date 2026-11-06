@@ -8,7 +8,6 @@ using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
-using Magic.Worlds;
 
 namespace Magic.GIRendering;
 
@@ -18,7 +17,7 @@ namespace Magic.GIRendering;
 /// as renderers were made or destroyed before it, moves its rows, and any other is built again. Every row is built again
 /// once a model is made or fails. Blocks that changed are uploaded in runs; a still scene uploads nothing.
 /// </summary>
-internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph, World world) : IDisposable
+internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
 {
     public const int Capacity = 1 << 18;
 
@@ -84,7 +83,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph, World w
 
     /// <summary>
     /// The rows of <paramref name="renderers"/>, from what changed since the last fill: each its model's place in the
-    /// pools and the material rows of its entity's shading, or an empty row while its model is being made. How many rows
+    /// pools and the material rows of its slots, or an empty row while its model is being made. How many rows
     /// the cull walks. The last fill's snapshot must be left as it was until this one.
     /// </summary>
     public int Fill(
@@ -92,7 +91,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph, World w
         uint frameIndex,
         GeometryPools pools,
         MaterialTable materials,
-        ShadingInstance? failure
+        in MaterialInstance failure
     )
     {
         // The same snapshot again, with the same models, makes the same rows.
@@ -137,7 +136,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph, World w
     /// <summary>
     /// Copies the blocks of rows that changed into the table, each run of them in one copy, in the frame's upload pass.
     /// </summary>
-    public void Upload()
+    public void Upload(RenderGraph graph)
     {
         if (!HasChanges)
             return;
@@ -175,7 +174,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph, World w
             }
 
             _rows.AsSpan(runStart, runRows).CopyTo(staged[stagedRows..]);
-            graph.Recorder.CopyBuffer(
+            graph.CopyBuffer(
                 upload.Buffer,
                 upload.Offset + ((ulong)stagedRows * GpuInstance.Bytes),
                 Buffer,
@@ -193,9 +192,14 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph, World w
 
     /// <summary>
     /// A renderer's row, with its model resident: where it is, its bounds in the world and the material rows of its
-    /// entity's shading, every slot the failure's when the model failed.
+    /// slots, every slot the failure's when the model failed.
     /// </summary>
-    private GpuInstance CreateRow(Entity entity, Transform transform, ResidentModel resident, in RowInputs inputs)
+    private static GpuInstance CreateRow(
+        Transform transform,
+        in Renderer renderer,
+        ResidentModel resident,
+        in RowInputs inputs
+    )
     {
         Matrix4x4 worldMatrix = transform.Matrix;
         Matrix4x4.Invert(worldMatrix, out Matrix4x4 inverseWorld);
@@ -214,7 +218,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph, World w
         for (int slot = 0; slot < MaterialSlots.Capacity; slot++)
         {
             row.Materials[slot] = inputs.Materials.GetRow(
-                resident.IsFailure ? inputs.Failure : world.GetShading(entity, slot)
+                resident.IsFailure ? inputs.Failure : renderer.Materials[slot]
             );
         }
 
@@ -253,7 +257,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph, World w
             Renderer renderer = inputs.Renderers.Second[index];
             ResidentModel? resident = renderer.Model == Handle<Model>.None ? null : inputs.Pools.Get(renderer.Model);
             GpuInstance row = resident is { } model
-                ? CreateRow(inputs.Renderers.Entities[index], inputs.Renderers.First[index], model, inputs)
+                ? CreateRow(inputs.Renderers.First[index], renderer, model, inputs)
                 : default;
             bool wasDrawnHere =
                 index < _lastCount
@@ -283,14 +287,14 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph, World w
     private int GetBlockLength(int block) => Math.Min(BlockSize, Count - (block * BlockSize));
 
     /// <summary>
-    /// What a row is built from beside its renderer: <paramref name="Failure"/> the shading a failed model is drawn
-    /// with, null when there is none.
+    /// What a row is built from beside its renderer: <paramref name="Failure"/> the material a failed model is drawn
+    /// with, an empty slot when there is none.
     /// </summary>
     private readonly record struct RowInputs(
         EcsSnapshot<Transform, Renderer> Renderers,
         uint FrameIndex,
         GeometryPools Pools,
         MaterialTable Materials,
-        ShadingInstance? Failure
+        MaterialInstance Failure
     );
 }

@@ -6,8 +6,8 @@ namespace Magic.VulkanGraphics;
 
 /// <summary>
 /// Turns a frame's <see cref="GpuCommands"/> into Vulkan commands: a debug group and timestamps around each pass,
-/// its transitions as one barrier, its draws inside dynamic rendering, and each command as the call it names. Keeps
-/// each texture level's layout as the transitions move it, so a barrier knows what it moves from.
+/// the barriers its uses need as one, its draws inside dynamic rendering, and each command as the call it names. Keeps
+/// what each buffer and texture level was last used as, so a barrier knows what it moves from.
 /// </summary>
 internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources resources, VulkanHeap heap)
 {
@@ -26,7 +26,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
         {
             GpuPass pass = commands.Passes[passIndex];
             BeginGroup(cmd, pass.Name);
-            Transition(cmd, pass.Transitions.AsSpan());
+            Barrier(cmd, pass.Uses.AsSpan());
             frame.WriteTimestamp(pass.Name, passIndex);
             bool isDrawing = pass.Kind == GpuPassKind.Draw && BeginRendering(cmd, pass);
             foreach (GpuCommand command in pass.Commands)
@@ -47,10 +47,21 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
     /// </summary>
     public void TransitionTo(VkCommandBuffer cmd, VulkanTexture texture, GpuAccess access)
     {
+        _bufferBarriers.Clear();
         _imageBarriers.Clear();
-        AddImageBarrier(texture, -1, GpuAccess.ShaderWrite, access);
+        AddImageBarrier(texture, -1, access);
         Flush(cmd);
     }
+
+    // A write after a write still needs a barrier, so the second sees the first; a read after the same read does not.
+    private static bool IsSameRead(GpuAccess before, GpuAccess access) =>
+        before == access
+        && access
+            is GpuAccess.ShaderRead
+                or GpuAccess.DepthRead
+                or GpuAccess.Indirect
+                or GpuAccess.Index
+                or GpuAccess.CopySource;
 
     private static VkImageSubresourceRange GetRange(VulkanTexture texture) =>
         new(
@@ -95,78 +106,92 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
             device.InstanceApi.vkCmdEndDebugUtilsLabelEXT(cmd);
     }
 
-    private void Transition(VkCommandBuffer cmd, ReadOnlySpan<GpuTransition> transitions)
+    /// <summary>
+    /// The barriers <paramref name="uses"/> need, from what each resource was last used as, put in as one.
+    /// </summary>
+    private void Barrier(VkCommandBuffer cmd, ReadOnlySpan<GpuUse> uses)
     {
         _bufferBarriers.Clear();
         _imageBarriers.Clear();
-        foreach (GpuTransition transition in transitions)
+        foreach (GpuUse use in uses)
         {
-            if (transition.IsTexture)
+            if (use.IsTexture)
             {
-                if (resources.Textures[transition.Id] is { } texture)
-                    AddImageBarrier(texture, transition.Level, transition.Before, transition.After);
+                if (resources.Textures[use.Id] is { } texture)
+                    AddImageBarrier(texture, use.Level, use.Access);
                 else
-                    Log.Warn($"A transition names texture {transition.Id}, which is gone.");
+                    Log.Warn($"A pass uses texture {use.Id}, which is gone.");
             }
-            else if (resources.Buffers[transition.Id] is { } buffer)
+            else if (resources.Buffers[use.Id] is { } buffer)
             {
-                (VkPipelineStageFlags2 beforeStages, VkAccessFlags2 beforeAccess) =
-                    transition.Before.ToStageAndAccess();
-                (VkPipelineStageFlags2 afterStages, VkAccessFlags2 afterAccess) = transition.After.ToStageAndAccess();
-                _bufferBarriers.Add(
-                    new VkBufferMemoryBarrier2(buffer.Buffer, beforeStages, beforeAccess, afterStages, afterAccess)
-                );
+                AddBufferBarrier(buffer, use.Access);
             }
             else
             {
-                Log.Warn($"A transition names buffer {transition.Id}, which is gone.");
+                Log.Warn($"A pass uses buffer {use.Id}, which is gone.");
             }
         }
 
         Flush(cmd);
     }
 
+    private void AddBufferBarrier(VulkanBuffer buffer, GpuAccess access)
+    {
+        GpuAccess before = buffer.Access;
+        buffer.Access = access;
+        if (IsSameRead(before, access))
+            return;
+
+        (VkPipelineStageFlags2 beforeStages, VkAccessFlags2 beforeAccess) = before.ToStageAndAccess();
+        (VkPipelineStageFlags2 afterStages, VkAccessFlags2 afterAccess) = access.ToStageAndAccess();
+        _bufferBarriers.Add(
+            new VkBufferMemoryBarrier2(buffer.Buffer, beforeStages, beforeAccess, afterStages, afterAccess)
+        );
+    }
+
     /// <summary>
-    /// A barrier for one level, or for every level that shares a layout, from the layout the level is in now.
+    /// A barrier for one level, or for every run of levels last used alike, from what they were last used as and the
+    /// layout that follows from it. A read after the same read needs none.
     /// </summary>
-    private void AddImageBarrier(VulkanTexture texture, int level, GpuAccess before, GpuAccess after)
+    private void AddImageBarrier(VulkanTexture texture, int level, GpuAccess access)
     {
         bool isDepth = texture.Description.Format.IsDepth;
-        VkImageLayout newLayout = after.ToLayout(isDepth);
-        (VkPipelineStageFlags2 beforeStages, VkAccessFlags2 beforeAccess) = before.ToStageAndAccess();
-        (VkPipelineStageFlags2 afterStages, VkAccessFlags2 afterAccess) = after.ToStageAndAccess();
+        VkImageLayout newLayout = access.ToLayout(isDepth);
+        (VkPipelineStageFlags2 afterStages, VkAccessFlags2 afterAccess) = access.ToStageAndAccess();
+        GpuAccess[] accesses = texture.Accesses;
         int first = level < 0 ? 0 : level;
-        int last = level < 0 ? texture.Layouts.Length - 1 : level;
+        int last = level < 0 ? accesses.Length - 1 : level;
         int runStart = first;
         for (int i = first; i <= last; i++)
         {
-            bool isRunEnd = i == last || texture.Layouts[i + 1] != texture.Layouts[runStart];
+            bool isRunEnd = i == last || accesses[i + 1] != accesses[runStart];
             if (!isRunEnd)
                 continue;
 
-            VkImageLayout oldLayout = texture.Layouts[runStart];
-            VkImageSubresourceRange range = GetRange(texture) with
+            GpuAccess before = accesses[runStart];
+            if (!IsSameRead(before, access))
             {
-                baseMipLevel = (uint)runStart,
-                levelCount = (uint)(i - runStart + 1),
-            };
-            _imageBarriers.Add(
-                new VkImageMemoryBarrier2(
-                    texture.Image,
-                    range,
-                    beforeStages,
-                    beforeAccess,
-                    afterStages,
-                    afterAccess,
-                    oldLayout,
-                    newLayout
-                )
-            );
-            for (int moved = runStart; moved <= i; moved++)
-            {
-                texture.Layouts[moved] = newLayout;
+                (VkPipelineStageFlags2 beforeStages, VkAccessFlags2 beforeAccess) = before.ToStageAndAccess();
+                VkImageSubresourceRange range = GetRange(texture) with
+                {
+                    baseMipLevel = (uint)runStart,
+                    levelCount = (uint)(i - runStart + 1),
+                };
+                _imageBarriers.Add(
+                    new VkImageMemoryBarrier2(
+                        texture.Image,
+                        range,
+                        beforeStages,
+                        beforeAccess,
+                        afterStages,
+                        afterAccess,
+                        before.ToLayout(isDepth),
+                        newLayout
+                    )
+                );
             }
 
+            Array.Fill(accesses, access, runStart, i - runStart + 1);
             runStart = i + 1;
         }
     }

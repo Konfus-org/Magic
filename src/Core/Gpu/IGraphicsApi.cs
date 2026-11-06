@@ -14,8 +14,8 @@ public interface IGraphicsApi
     GpuLimits Limits { get; }
 
     /// <summary>
-    /// The window's image for this frame, to draw into and transition to <see cref="GpuAccess.Present"/> last;
-    /// <see cref="GpuTexture.None"/> headless, or while the window is minimised. A new one each frame.
+    /// The window's image for this frame, to draw into until <see cref="Present"/> shows it; <see cref="GpuTexture.None"/>
+    /// headless, or while the window is minimised. A new one each frame.
     /// </summary>
     GpuTexture WindowTarget { get; }
 
@@ -27,6 +27,13 @@ public interface IGraphicsApi
 
     Result<GpuTexture> CreateTexture(in TextureDescription description);
 
+    /// <summary>
+    /// A texture for this frame alone, made to <paramref name="description"/> or taken back from an earlier frame's,
+    /// which goes back to the pool as <see cref="Present"/> ends the frame. It comes from the provider, not the graph,
+    /// because a pass records its heap id as it records.
+    /// </summary>
+    Result<GpuTexture> CreateTransient(in TextureDescription description);
+
     Result<GpuSampler> CreateSampler(in SamplerDescription description);
 
     Result<GpuPipeline> CreatePipeline(in ComputePipelineDescription description);
@@ -35,13 +42,13 @@ public interface IGraphicsApi
 
     /// <summary>
     /// A bottom-level acceleration structure over triangles of the heap's buffers, built by
-    /// <see cref="GpuCommandRecorder.BuildAcceleration"/>; only when <see cref="GpuFeatures.HasRayQuery"/>.
+    /// <see cref="Rendering.RenderGraph.BuildAcceleration"/>; only when <see cref="GpuFeatures.HasRayQuery"/>.
     /// </summary>
     Result<GpuAcceleration> CreateAcceleration(in BottomLevelDescription description);
 
     /// <summary>
     /// A top-level acceleration structure over instances of bottom-level ones, built from its instance buffer by
-    /// <see cref="GpuCommandRecorder.BuildAcceleration"/>; only when <see cref="GpuFeatures.HasRayQuery"/>.
+    /// <see cref="Rendering.RenderGraph.BuildAcceleration"/>; only when <see cref="GpuFeatures.HasRayQuery"/>.
     /// </summary>
     Result<GpuAcceleration> CreateAcceleration(in TopLevelDescription description);
 
@@ -70,7 +77,7 @@ public interface IGraphicsApi
     GpuUpload BeginUpload(int bytes);
 
     /// <summary>
-    /// The bytes of a <see cref="BufferUsages.Readback"/> buffer once every frame submitted before this call has
+    /// The bytes of a <see cref="BufferUsages.Readback"/> buffer once the frame being recorded as it is called has
     /// finished on the GPU. Any thread.
     /// </summary>
     Task<Result<ReadOnlyMemory<byte>>> ReadBackAsync(
@@ -81,8 +88,10 @@ public interface IGraphicsApi
     );
 
     /// <summary>
-    /// Runs the frame's commands, once a frame: waits for the frame two before, uploads, records, submits and shows
-    /// the window's image. What was never submitted in a frame still shows the window's image as it was.
+    /// Ends the frame, once a frame, after every gem has recorded into Core's graph: records the passes, each after
+    /// the barriers its uses need, submits them, shows the window's image, takes back the frame's transients, and
+    /// begins the next frame, waiting for the one two before and taking the window's next image. Core calls it; a gem
+    /// never does.
     /// </summary>
-    void Submit(in GpuCommands commands);
+    void Present(in GpuCommands commands);
 }

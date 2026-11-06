@@ -11,10 +11,9 @@ namespace Magic.VulkanGraphics;
 
 /// <summary>
 /// The GPU through Vulkan 1.3: one bindless heap, resources made from Core's descriptions, and one frame of commands
-/// submitted at a time. Its <see cref="Render"/> runs before a renderer's, as a renderer is made after it, so it begins
-/// each frame there, and the first as it is made: waits for the frame two before, takes the window's image, and leaves
-/// the staging ring empty for what records next. The renderer records and submits; a frame nothing submitted still
-/// shows the window's image.
+/// submitted at a time. Core hands it each frame the gems recorded, and <see cref="Present"/> runs it, shows it and
+/// begins the next, as the first begins as it is made: waits for the frame two before, takes the window's image, and
+/// leaves the staging ring empty for what records next.
 /// It is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
 public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
@@ -29,7 +28,16 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     private readonly Meter _meter;
     private readonly Gauge<long> _memoryUsage;
     private readonly Gauge<long> _memoryLimit;
-    private bool _isSubmitted;
+
+    /// <summary>
+    /// The transient textures not lent, by their description: a pool, so a frame makes none it made before.
+    /// </summary>
+    private readonly Dictionary<TextureDescription, Stack<GpuTexture>> _spareTransients = [];
+
+    /// <summary>
+    /// The transient textures lent this frame, which go back to the pool as it ends.
+    /// </summary>
+    private readonly List<(TextureDescription Description, GpuTexture Texture)> _lentTransients = [];
 
     public VulkanGraphicsGem(App app, Threads threads, IWindow? window = null)
     {
@@ -105,6 +113,26 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
         ThrowIfNotOnRender();
 
         return _resources.CreateTexture(description);
+    }
+
+    public Result<GpuTexture> CreateTransient(in TextureDescription description)
+    {
+        ThrowIfNotOnRender();
+        if (
+            _spareTransients.TryGetValue(description, out Stack<GpuTexture>? spare)
+            && spare.TryPop(out GpuTexture pooled)
+        )
+        {
+            _lentTransients.Add((description, pooled));
+
+            return Result.Success(pooled);
+        }
+
+        Result<GpuTexture> made = _resources.CreateTexture(description);
+        if (made.Ok)
+            _lentTransients.Add((description, made.Value));
+
+        return made;
     }
 
     public Result<GpuSampler> CreateSampler(in SamplerDescription description)
@@ -201,20 +229,13 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
         return await _frames.ReadBackAsync(buffer.Id, read, offset, bytes).ConfigureAwait(false);
     }
 
-    public void Submit(in GpuCommands commands)
+    public void Present(in GpuCommands commands)
     {
         ThrowIfNotOnRender();
-        if (_isSubmitted)
-        {
-            Log.Warn("The frame was submitted already; a second set of commands is dropped.");
-
-            return;
-        }
-
         VulkanFrames.Frame frame = _frames.Current;
         _recorder.Record(frame, commands);
-        // The window's image is shown whatever the commands left it as.
-        if (_resources.Textures[WindowTarget.Id] is { } window && window.Layouts[0] != VkImageLayout.PresentSrcKHR)
+        // The window's image is shown whatever the passes left it as.
+        if (_resources.Textures[WindowTarget.Id] is { } window)
             _recorder.TransitionTo(frame.CommandBuffer, window, GpuAccess.Present);
 
         _device.Api.vkEndCommandBuffer(frame.CommandBuffer);
@@ -246,34 +267,39 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
                 Log.Error($"The GPU refused the frame: {result}.");
         }
 
-        _isSubmitted = true;
         if (!WindowTarget.IsNone)
             _swapchain?.Present();
 
-        WindowTarget = GpuTexture.None;
-    }
+        ReturnTransients();
 
-    /// <summary>
-    /// Begins the frame before the renderer's turn: finishes the frames the GPU is done with, so a readback awaited
-    /// completes whether or not the renderer draws, submits last frame's commands if nothing did, then begins the next
-    /// frame and takes the window's image.
-    /// </summary>
-    public void Render(in Frame frame)
-    {
+        // The next frame: what the GPU is done with finished, so a readback awaited completes whether or not anything
+        // draws, then its commands begun and the window's next image taken.
         _frames.Poll();
         _memoryUsage.Record(_resources.MemoryBytes);
         _memoryLimit.Record(_device.Limits.DeviceMemoryBytes);
-        if (!_isSubmitted)
-            Submit(GpuCommands.None);
-
         BeginFrame();
     }
 
     private void BeginFrame()
     {
-        _isSubmitted = false;
         _frames.Begin();
         WindowTarget = _swapchain?.Acquire(_frames.Current.Acquired) ?? GpuTexture.None;
+    }
+
+    private void ReturnTransients()
+    {
+        foreach ((TextureDescription description, GpuTexture texture) in _lentTransients)
+        {
+            if (!_spareTransients.TryGetValue(description, out Stack<GpuTexture>? spare))
+            {
+                spare = new Stack<GpuTexture>();
+                _spareTransients[description] = spare;
+            }
+
+            spare.Push(texture);
+        }
+
+        _lentTransients.Clear();
     }
 
     private void ThrowIfNotOnRender()

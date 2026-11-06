@@ -27,6 +27,11 @@ internal sealed unsafe class VulkanBuffer
     /// Its device address, for what reads it by address, as the acceleration structure builds do; 0 when none.
     /// </summary>
     public ulong Address { get; init; }
+
+    /// <summary>
+    /// What the last pass that used it used it as, which the next one's barrier moves from.
+    /// </summary>
+    public GpuAccess Access { get; set; }
 }
 
 /// <summary>
@@ -55,7 +60,7 @@ internal sealed unsafe class VulkanAcceleration
 
 /// <summary>
 /// A texture as Vulkan holds it: the image, a view of the whole for sampling and one per level for writing and
-/// drawing into, and the layout each level is in now, which the transitions move.
+/// drawing into, and the access each level was last used as, which its layout follows and the barriers move.
 /// </summary>
 internal sealed class VulkanTexture
 {
@@ -75,7 +80,7 @@ internal sealed class VulkanTexture
 
     public required VkImageView[] LevelViews { get; init; }
 
-    public required VkImageLayout[] Layouts { get; init; }
+    public required GpuAccess[] Accesses { get; init; }
 
     public bool IsWindow => Memory.IsNull;
 }
@@ -345,7 +350,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             Description = description,
             View = view.Value,
             LevelViews = [view.Value],
-            Layouts = [VkImageLayout.Undefined],
+            Accesses = [GpuAccess.None],
         };
         if (!Textures.TryAdd(texture, out uint id))
         {
@@ -874,7 +879,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             Memory = memory.Value,
             Description = description,
             LevelViews = new VkImageView[isViewed ? description.Levels : 0],
-            Layouts = new VkImageLayout[description.Levels],
+            Accesses = new GpuAccess[description.Levels],
         };
         if (!isViewed)
             return Result.Success(texture);

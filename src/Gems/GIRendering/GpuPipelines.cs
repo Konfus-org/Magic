@@ -2,7 +2,6 @@ using System.Collections.Immutable;
 using Magic.Files;
 using Magic.Files.Types;
 using Magic.Gpu;
-using Magic.Rendering;
 using Magic.Shaders;
 using Magic.Utils;
 
@@ -23,8 +22,7 @@ internal enum PassShaders : byte
 /// The renderer's pipelines: each area declares its passes here as it is made, and they are all compiled together as the
 /// run starts and built for the GPU.
 /// </summary>
-internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderCompiler shaders, Assets assets)
-    : IDisposable
+internal sealed class GpuPipelines(IGraphicsApi gpu, IShaderCompiler shaders, Assets assets) : IDisposable
 {
     private const string Folder = "Shaders/";
 
@@ -49,7 +47,6 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
         Add(
             new GpuPass
             {
-                Graph = graph,
                 Name = name,
                 Module = module,
                 Entry = entry,
@@ -70,7 +67,6 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
         Add(
             new GpuPass
             {
-                Graph = graph,
                 Name = name,
                 Module = module,
                 Entry = pixelEntry,
