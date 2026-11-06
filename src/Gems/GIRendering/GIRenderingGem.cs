@@ -20,7 +20,7 @@ using Magic.Worlds;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// Draws the world. <c>LateUpdate</c> reads what the frame draws out of the entities and publishes it; <c>Render</c>, on
+/// Draws the world. <c>LateUpdate</c> copies what the frame draws out of the entities and publishes it; <c>Render</c>, on
 /// the render thread, takes the newest published, records the frame in order, top to bottom, and shows it. As a domain
 /// replaces the world, it forgets what it drew before and holds the loading screen until what comes is on the GPU. It is
 /// public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
@@ -29,6 +29,11 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 {
     private const int DefaultWidth = 1280;
     private const int DefaultHeight = 720;
+
+    /// <summary>
+    /// What a surface facing the sun lands at in the picture before the tonemap, with no meter yet.
+    /// </summary>
+    private const float ExposureAtSun = 4;
 
     private readonly IGraphicsApi _gpu;
     private readonly Assets _assets;
@@ -169,14 +174,19 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     }
 
     /// <summary>
-    /// Reads what the frame draws out of the entities, with the window's size and the debug view, and publishes it for
-    /// <see cref="Render"/>, after the screenshots asked for.
+    /// Copies what the frame draws out of the entities and publishes it for <see cref="Render"/>, with the window's size
+    /// and the debug view, after the screenshots asked for.
     /// </summary>
     public void LateUpdate(in Frame frame)
     {
         RenderInputs back = _inputs.Back;
-        WorldCopy.Read(_ecs, back.World);
         _ecs.Snapshot(back.Renderers);
+        _ecs.Snapshot(back.Cameras);
+        _ecs.Snapshot(back.DirectionalLights);
+        _ecs.Snapshot(back.PointLights);
+        _ecs.Snapshot(back.SpotLights);
+        _ecs.Snapshot(back.RectLights);
+        _ecs.Snapshot(back.Skies);
         back.DebugView = _debugView;
         (back.Width, back.Height) = _app.Window is { Width: > 0, Height: > 0 } window
             ? (window.Width, window.Height)
@@ -229,16 +239,16 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _graph.EndPass();
 
         // The frame's tables.
-        RenderCamera camera = inputs.World.Camera ?? new RenderCamera(new Transform(), 60, 0.05f);
-        RenderSun sun =
-            inputs.World.Sun ?? new RenderSun(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One, 1);
+        RenderCamera camera = GetCamera(inputs.Cameras);
+        RenderSun sun = GetSun(inputs.DirectionalLights);
         _graph.BeginTransferPass("Upload frame");
         bool hasChanges = _pools.HasArrivals || _instances.HasChanges;
         _instances.Upload();
         _rayTracing?.Prepare(_instances.Rows, _instances.Extras, hasChanges);
         _frameView.Upload(camera, sun, frame.Index, _targets, _instances.Buffer, instanceCount);
         _visibility.ResetCounts();
-        _lighting.Prepare(inputs.World, camera, sun, _targets);
+        _lightTiles.Prepare(inputs.PointLights, inputs.SpotLights, inputs.RectLights);
+        _lighting.Prepare(inputs.Skies, camera, sun, _targets);
         _graph.EndPass();
 
         // The passes, in the order they run.
@@ -335,6 +345,52 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         );
         _preparing = preparing;
         await preparing.Done.Task.WaitAsync(cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The first camera that draws into the window, else one at the origin.
+    /// </summary>
+    private static RenderCamera GetCamera(EcsSnapshot<Transform, Camera> cameras)
+    {
+        for (int i = 0; i < cameras.Count; i++)
+        {
+            Camera camera = cameras.Second[i];
+            if (camera.Target.IsWindow)
+                return new RenderCamera(cameras.First[i], camera.FieldOfView, camera.Near);
+        }
+
+        return new RenderCamera(new Transform(), 60, 0.05f);
+    }
+
+    /// <summary>
+    /// The directional light the frame is lit by: the sun while it is up, else the moon while it is up, else the first
+    /// there is, else a white light from above.
+    /// </summary>
+    private static RenderSun GetSun(EcsSnapshot<Transform, DirectionalLight> lights)
+    {
+        RenderSun sun = new(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One, 1);
+        int sunRank = -1;
+        for (int i = 0; i < lights.Count; i++)
+        {
+            DirectionalLight light = lights.Second[i];
+            Vector3 towards = -Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, lights.First[i].Rotation));
+            bool isUp = towards.Y > 0;
+            int rank = 0;
+            if (isUp && light.Mode == DirectionalLightMode.Sun)
+                rank = 2;
+            else if (isUp && light.Mode == DirectionalLightMode.Moon)
+                rank = 1;
+
+            if (rank <= sunRank)
+                continue;
+
+            Vector3 illuminance = new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity;
+            float exposure = light.Intensity > 0 ? ExposureAtSun / light.Intensity : 1;
+            sun = new RenderSun(towards, illuminance, exposure);
+            sunRank = rank;
+        }
+
+        return sun;
     }
 
     /// <summary>

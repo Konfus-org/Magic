@@ -1,4 +1,6 @@
 using System.Numerics;
+using Magic.Ecs;
+using Magic.Ecs.Components;
 using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Rendering;
@@ -57,12 +59,12 @@ internal sealed class Lighting(
     }
 
     /// <summary>
-    /// The frame's constants, lights and shadow denoiser's constants uploaded, in a transfer pass the caller opened.
+    /// The frame's constants and shadow denoiser's constants uploaded, in a transfer pass the caller opened, after the
+    /// lights' table.
     /// </summary>
-    public void Prepare(RenderWorld world, RenderCamera camera, RenderSun sun, FrameTargets targets)
+    public void Prepare(EcsSnapshot<Sky> skies, RenderCamera camera, RenderSun sun, FrameTargets targets)
     {
-        _hasSky = world.HasSky;
-        lights.Prepare(world);
+        _hasSky = skies.Count > 0;
         shadows?.Prepare();
         LightingConstants constants = new()
         {
