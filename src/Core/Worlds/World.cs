@@ -128,15 +128,7 @@ public sealed class World : IEcs, IDisposable
     /// <summary>
     /// Whether a gem provides the ECS, so content can come into the world.
     /// </summary>
-    internal bool HasEcs => _ecs is not NoEcs;
-
-    /// <summary>
-    /// The gem that provides the ECS, from when it is made.
-    /// </summary>
-    internal IEcs Ecs
-    {
-        set => _ecs = value;
-    }
+    private bool HasEcs => _ecs is not NoEcs;
 
     public void Dispose() => _turn.Dispose();
 
@@ -432,6 +424,13 @@ public sealed class World : IEcs, IDisposable
         TaskCompletionSource starting = _frameStarting;
         _frameStarting = new TaskCompletionSource();
         starting.SetResult();
+    }
+
+    internal Subscription Register(IEcs ecs)
+    {
+        _ecs = ecs;
+
+        return new Subscription(() => _ecs = new NoEcs());
     }
 
     /// <summary>
