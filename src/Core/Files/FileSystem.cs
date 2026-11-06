@@ -22,6 +22,12 @@ internal sealed class FileSystem : IFileSystem
 
     public bool DirectoryExists(string path) => Directory.Exists(path);
 
+    public Result CreateDirectory(string path) =>
+        Run(() =>
+        {
+            _ = Directory.CreateDirectory(path);
+        });
+
     public Result<string[]> EnumerateFiles(string path, string searchPattern, bool recursive) =>
         Run(() =>
             Directory.GetFiles(
@@ -31,10 +37,24 @@ internal sealed class FileSystem : IFileSystem
             )
         );
 
+    public Result<string[]> EnumerateDirectories(string path) => Run(() => Directory.GetDirectories(path));
+
+    public Result<string[]> ReadLines(string path) => Run(() => File.ReadAllLines(path));
+
+    public Task<Result<string[]>> ReadLinesAsync(string path, CancellationToken cancel) =>
+        RunAsync(() => File.ReadAllLinesAsync(path, cancel));
+
+    public Result<string> ReadText(string path) => Run(() => File.ReadAllText(path));
+
+    public Task<Result<string>> ReadTextAsync(string path, CancellationToken cancel) =>
+        RunAsync(() => File.ReadAllTextAsync(path, cancel));
+
     public Result<byte[]> ReadBytes(string path) => Run(() => File.ReadAllBytes(path));
 
     public Task<Result<byte[]>> ReadBytesAsync(string path, CancellationToken cancel) =>
         RunAsync(() => File.ReadAllBytesAsync(path, cancel));
+
+    public Result Write(string path, string contents) => Run(() => File.WriteAllText(path, contents));
 
     public async Task<Result> WriteAsync(string path, ReadOnlyMemory<byte> bytes, CancellationToken cancel)
     {
@@ -60,6 +80,20 @@ internal sealed class FileSystem : IFileSystem
                 File.Delete(temporary);
         }
     }
+
+    public Result Delete(string path) => Delete(path, recursive: false);
+
+    public Result Delete(string path, bool recursive) =>
+        Run(() =>
+        {
+            if (Directory.Exists(path))
+                Directory.Delete(path, recursive);
+            else
+                File.Delete(path);
+        });
+
+    public Result Copy(string sourceFile, string destinationFile) =>
+        Run(() => File.Copy(sourceFile, destinationFile, overwrite: true));
 
     public Result<IDisposable> Watch(string path, string filter, Action<string> touched) =>
         Run<IDisposable>(() =>
@@ -90,6 +124,20 @@ internal sealed class FileSystem : IFileSystem
         try
         {
             return Result.Success(work());
+        }
+        catch (Exception ex) when (IsRefusal(ex))
+        {
+            return Result.Failure(ex.Message);
+        }
+    }
+
+    /// <inheritdoc cref="Run{T}(Func{T})"/>
+    private static Result Run(Action work)
+    {
+        try
+        {
+            work();
+            return Result.Success();
         }
         catch (Exception ex) when (IsRefusal(ex))
         {

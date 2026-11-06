@@ -56,8 +56,8 @@ internal static class Program
             EventCoordinator events = new();
             Threads threads = new();
             Caches caches = new(files, app);
-            using Assets assets = new(files, caches, app);
-            using World world = new(assets, files, threads, app);
+            using Assets assets = new(files, caches, events, app);
+            using World world = new(assets, files, events, threads, app);
             Cli cli = new(app, files, events, assets, world);
 
             if (isLaunching)

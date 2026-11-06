@@ -22,7 +22,7 @@ public sealed class DomainImporterGem(Assets assets) : IGem, IAssetImporter<Doma
     {
         ImmutableArray<Chunk>.Builder chunks = ImmutableArray.CreateBuilder<Chunk>();
         ImmutableArray<Handle<Prefab>>.Builder globals = ImmutableArray.CreateBuilder<Handle<Prefab>>();
-        foreach (string path in assets.GetPathsBeside(file))
+        foreach (string path in assets.GetNeighbors(file))
         {
             Handle<Prefab> prefab = assets.Find<Prefab>(path);
             if (prefab == Handle<Prefab>.None)

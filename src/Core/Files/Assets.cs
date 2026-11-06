@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Magic.Caching;
 using Magic.Debugging;
+using Magic.Events;
 using Magic.Files.Pipeline;
 using Magic.Serialization;
 using Magic.Utils;
@@ -31,12 +32,12 @@ namespace Magic.Files;
 /// <para>
 /// The asset directories are watched from when they are registered until the assets are disposed. Once their changes settle, they are
 /// indexed again, and every asset loaded whose file changed, or that was made from one that did, is made again, each after
-/// what it was made from: <see cref="GetVersion{T}"/> then says so, and a load gets the new one. One that fails to load
-/// again keeps what loaded before.
+/// what it was made from: <see cref="GetVersion{T}"/> then says so, a load gets the new one, and the next frame hears
+/// an <see cref="AssetReloaded"/>. One that fails to load again keeps what loaded before.
 /// </para>
 /// <para>
-/// What assets there are is its <see cref="AssetDatabase"/>, what was loaded its <see cref="LoadedAssets"/>: values
-/// every call reads as they are. They change in one place,
+/// What assets there are and what depends on what is its <see cref="AssetDatabase"/>, what was loaded its
+/// <see cref="LoadedAssets"/>: values every call reads as they are. They change in one place,
 /// <see cref="ProcessChanges"/>, which runs between frames when something was pushed there. So the assets hold still for
 /// the whole frame, and a load lands, or an asset changes, only between frames.
 /// </para>
@@ -44,19 +45,22 @@ namespace Magic.Files;
 public sealed class Assets : IDisposable
 {
     /// <summary>
+    /// Every level of dependencies or dependents, however deep: what a crawl's <c>levels</c> takes for all of them.
+    /// </summary>
+    public const int AllLevels = int.MaxValue;
+
+    /// <summary>
     /// The assembly metadata a build records the folder of its part's assets in, where it does not copy them beside it
     /// (the root <c>Directory.Build.props</c>).
     /// </summary>
     private const string ResourcesKey = "Magic.Resources";
 
-    private readonly IFileSystem _files;
+    private readonly AssetWatches _watches;
 
     /// <summary>
-    /// Where what is slow to make is kept.
+    /// Where an <see cref="AssetReloaded"/> goes for each asset made again.
     /// </summary>
-    private readonly Caches _caches;
-
-    private readonly AssetWatches _watches;
+    private readonly EventCoordinator _events;
 
     /// <summary>
     /// Whose <see cref="App.Lifetime"/> ends the loads on their way.
@@ -66,10 +70,11 @@ public sealed class Assets : IDisposable
     /// <summary>
     /// The assets, knowing Magic's built-in folder and Core's own asset types: register the rest (<see cref="Register(string)"/>).
     /// </summary>
-    internal Assets(IFileSystem files, Caches caches, App app)
+    internal Assets(IFileSystem files, Caches caches, EventCoordinator events, App app)
     {
-        _files = files;
-        _caches = caches;
+        Files = files;
+        Caches = caches;
+        _events = events;
         _app = app;
         _watches = new AssetWatches(files);
         BuiltIn = GetResources(files, typeof(Assets).Assembly, AppContext.BaseDirectory);
@@ -84,7 +89,7 @@ public sealed class Assets : IDisposable
     internal bool HasLoadsInFlight => Changes.HasChanges || Loaded.Entries.Values.Any(entry => !entry.Waiting.IsEmpty);
 
     /// <summary>
-    /// What assets there are, as of now, as any thread reads it. The main thread alone writes it.
+    /// What assets there are and what depends on what, as of now, as any thread reads it. The main thread alone writes it.
     /// </summary>
     internal AssetDatabase Database
     {
@@ -106,10 +111,12 @@ public sealed class Assets : IDisposable
     /// </summary>
     internal AssetsChangeList Changes { get; } = new();
 
+    internal IFileSystem Files { get; }
+
     /// <summary>
-    /// The assets that had loaded and loaded again as changes were last taken in.
+    /// Where what is slow to make is kept.
     /// </summary>
-    internal ImmutableArray<AssetLoaded> Reloaded { get; private set; } = [];
+    internal Caches Caches { get; }
 
     /// <summary>
     /// Magic's built-in <c>Resources/</c>: where the defaults and failures are, and only there.
@@ -196,13 +203,15 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
-    /// The paths of the assets beside <paramref name="file"/>, those directly in its folder, as <see cref="Find{T}"/>
+    /// The paths of <paramref name="file"/>'s neighbors, the assets directly in its folder, as <see cref="Find{T}"/>
     /// takes them and as the <see cref="IAssetImporter{T}"/> making it reads them: a domain's prefabs. It is made again
     /// when a file in the folder changes.
     /// </summary>
-    public ImmutableArray<string> GetPathsBeside(AssetFile file)
+    public ImmutableArray<string> GetNeighbors(AssetFile file)
     {
-        string folder = AssetIndex.GetFolder(file.Path);
+        string path = file.Path;
+        int slash = path.LastIndexOf('/');
+        string folder = slash < 0 ? string.Empty : path[..slash];
         Changes.Push(new AssetFolderListed(file.Id, folder));
 
         return GetPaths(folder);
@@ -228,10 +237,26 @@ public sealed class Assets : IDisposable
         if (!Database.Index.ById.TryGetValue(asset.Id, out IndexedFile? file))
             return 0;
 
-        Result<byte[]> bytes = _files.ReadBytes(file.File);
+        Result<byte[]> bytes = Files.ReadBytes(file.File);
 
         return bytes.Ok ? AssetIndex.ComputeVersion(bytes.Value, file.Settings) : 0;
     }
+
+    /// <summary>
+    /// The ids of what <paramref name="asset"/> holds handles to or was made from, down to <paramref name="levels"/>
+    /// levels: 1 for its own, <see cref="AllLevels"/> for everything under it. As far as is known now, from what has
+    /// loaded or been found; reading what has not is <see cref="FindDependenciesAsync{TAsset}"/>'s.
+    /// </summary>
+    public ImmutableArray<ulong> GetDependencies<T>(Handle<T> asset, int levels)
+        where T : IAsset<T> => [.. Database.GetDependencies(asset.Id, levels)];
+
+    /// <summary>
+    /// The ids of what holds handles to <paramref name="asset"/> or was made from it, up to <paramref name="levels"/>
+    /// levels: 1 for what names it itself, <see cref="AllLevels"/> for everything above it. As far as is known now, from
+    /// what has loaded or been found; reading what has not is <see cref="FindDependentsAsync{TAsset}"/>'s.
+    /// </summary>
+    public ImmutableArray<ulong> GetDependents<T>(Handle<T> asset, int levels)
+        where T : IAsset<T> => [.. Database.GetDependents(asset.Id, levels)];
 
     /// <summary>
     /// The asset, or why it could not be loaded. It is read on a worker once every gem is made, and kept, so every
@@ -261,6 +286,74 @@ public sealed class Assets : IDisposable
         asset == Handle<T>.None
             ? LoadAsync(asset, progress, cancel)
             : LoadIdAsync<T>(asset.Id, dependent, progress, cancel);
+
+    /// <summary>
+    /// The ids of what <paramref name="asset"/> depends on, as its file and theirs name them, down to
+    /// <paramref name="levels"/> levels: 1 for what it names itself, <see cref="AllLevels"/> for everything under it.
+    /// Found by reading the file of a type Core reads, and for a type a gem reads from what its last import kept, else by
+    /// loading it; or why one could not be read.
+    /// </summary>
+    public Task<Result<ImmutableArray<ulong>>> FindDependenciesAsync<TAsset>(
+        Handle<TAsset> asset,
+        int levels,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
+        where TAsset : IAsset<TAsset> => AssetCrawl.FindDependenciesAsync(this, asset.Id, levels, progress, cancel);
+
+    /// <summary>
+    /// The ids of what depends on <paramref name="asset"/>, as the files under the asset directories name it, up to
+    /// <paramref name="levels"/> levels: 1 for what names it itself, <see cref="AllLevels"/> for everything above it.
+    /// Found the first time it is asked by going through every asset: reading the file of a type Core reads, and for a
+    /// type a gem reads from what its last import kept, else by loading it. One that cannot be read is taken to depend on
+    /// nothing.
+    /// </summary>
+    public Task<ImmutableArray<ulong>> FindDependentsAsync<TAsset>(
+        Handle<TAsset> asset,
+        int levels,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
+        where TAsset : IAsset<TAsset> => AssetCrawl.FindDependentsAsync(this, asset.Id, levels, progress, cancel);
+
+    /// <summary>
+    /// Loads what <paramref name="asset"/> depends on, down to <paramref name="levels"/> levels, as
+    /// <see cref="FindDependenciesAsync{TAsset}"/> finds it, each as the type its <c>.meta</c> names: their ids, or why
+    /// one could not be found or loaded.
+    /// </summary>
+    public async Task<Result<ImmutableArray<ulong>>> LoadDependenciesAsync<TAsset>(
+        Handle<TAsset> asset,
+        int levels,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
+        where TAsset : IAsset<TAsset>
+    {
+        Result<ImmutableArray<ulong>> found = await FindDependenciesAsync(asset, levels, progress, cancel)
+            .ConfigureAwait(false);
+
+        return found.Ok
+            ? await AssetCrawl.LoadAllAsync(this, found.Value, progress, cancel).ConfigureAwait(false)
+            : found;
+    }
+
+    /// <summary>
+    /// Loads what depends on <paramref name="asset"/>, up to <paramref name="levels"/> levels, as
+    /// <see cref="FindDependentsAsync{TAsset}"/> finds it, each as the type its <c>.meta</c> names: their ids, or why
+    /// one could not be loaded.
+    /// </summary>
+    public async Task<Result<ImmutableArray<ulong>>> LoadDependentsAsync<TAsset>(
+        Handle<TAsset> asset,
+        int levels,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
+        where TAsset : IAsset<TAsset>
+    {
+        ImmutableArray<ulong> found = await FindDependentsAsync(asset, levels, progress, cancel).ConfigureAwait(false);
+
+        return await AssetCrawl.LoadAllAsync(this, found, progress, cancel).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Writes <paramref name="asset"/> to <paramref name="file"/>, a path on the machine, through the
@@ -299,7 +392,7 @@ public sealed class Assets : IDisposable
         if (!bytes.Ok)
             return Result.Failure(bytes.Error);
 
-        return await _files.WriteAsync(file, bytes.Value, cancel).ConfigureAwait(false);
+        return await Files.WriteAsync(file, bytes.Value, cancel).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -310,7 +403,7 @@ public sealed class Assets : IDisposable
     internal void Register(string directory)
     {
         directory = directory.TrimEnd('/', '\\');
-        if (!_files.DirectoryExists(directory))
+        if (!Files.DirectoryExists(directory))
             return;
 
         AssetDatabase database = Database;
@@ -325,13 +418,14 @@ public sealed class Assets : IDisposable
         ImmutableArray<string> directories = database.Directories.IsEmpty
             ? [directory]
             : database.Directories.Insert(database.Directories.Length - 1, directory);
-        Database = database with { Directories = directories, Index = AssetIndex.Create(_files, directories, BuiltIn) };
+        Database = database with { Directories = directories, Index = AssetIndex.Create(Files, directories, BuiltIn) };
         Log.Verbose($"Indexed {Database.Index.ById.Count} assets under {directories.Length} folders.");
     }
 
     /// <summary>
-    /// Adds the asset types <paramref name="assembly"/> declares, Magic's or a gem's, so a <c>.meta</c> can name them. A
-    /// name another type has already stays that one's, and is an error. Main thread.
+    /// Adds the asset types <paramref name="assembly"/> declares, Magic's or a gem's, so a <c>.meta</c> can name them and the
+    /// assets can be crawled without knowing them. A name another type has already stays that one's, and is an error. Main
+    /// thread.
     /// </summary>
     internal void Register(Assembly assembly)
     {
@@ -341,16 +435,18 @@ public sealed class Assets : IDisposable
                 continue;
 
             LoadedAssets loaded = Loaded;
-            if (loaded.Types.TryGetValue(type.Name, out Type? other))
+            if (loaded.Types.TryGetValue(type.Name, out AssetType? other))
             {
                 Log.Error(
-                    $"{type.FullName} and {other.FullName} are both asset types named {type.Name}, so a .meta's "
+                    $"{type.FullName} and {other.Type.FullName} are both asset types named {type.Name}, so a .meta's "
                         + "\"type\" names the first."
                 );
                 continue;
             }
 
-            Loaded = loaded with { Types = loaded.Types.Add(type.Name, type) };
+            AssetImportRun import = GetGeneric(nameof(RunImportAsync), type).CreateDelegate<AssetImportRun>(this);
+            AssetBuiltInReader readBuiltIn = GetGeneric(nameof(ReadBuiltIn), type).CreateDelegate<AssetBuiltInReader>();
+            Loaded = loaded with { Types = loaded.Types.Add(type.Name, new AssetType(type, import, readBuiltIn)) };
         }
     }
 
@@ -391,22 +487,16 @@ public sealed class Assets : IDisposable
     internal void ProcessChanges()
     {
         if (!Changes.HasChanges && !_watches.HasWork)
-        {
-            Reloaded = [];
-
             return;
-        }
 
-        AssetDatabase database = Database;
-        LoadedAssets loaded = AssetChanges.Take(database, Loaded, Changes);
+        (AssetDatabase database, LoadedAssets loaded) = Changes.Take(Database, Loaded);
         CancellationToken lifetime = _app.Lifetime;
         (database, loaded) = AssetReindex.Take(database, loaded, _watches, Changes, BuiltIn, lifetime);
-        loaded = AssetLoads.Land(loaded, Changes);
+        (database, loaded) = AssetLoads.Land(database, loaded, Changes, _events, Caches, lifetime);
         loaded = AssetLoads.Start(database, loaded, Changes, lifetime);
         Database = database;
         Loaded = loaded;
         Changes.TellWaiters();
-        Reloaded = Changes.TakeReloaded();
     }
 
     /// <summary>
@@ -486,7 +576,7 @@ public sealed class Assets : IDisposable
             return new Made(Result.Failure($"{notAsset}a {typeof(T).Name}'s file ends in {extensions}."), 0);
         }
 
-        Result<byte[]> bytes = await _files.ReadBytesAsync(file.File, cancel).ConfigureAwait(false);
+        Result<byte[]> bytes = await Files.ReadBytesAsync(file.File, cancel).ConfigureAwait(false);
         if (!bytes.Ok)
             return new Made(Result.Failure($"{file.Path} could not be read: {bytes.Error}"), 0);
 
@@ -499,9 +589,9 @@ public sealed class Assets : IDisposable
         ICache<T>? cache = reader as ICache<T>;
         if (cache is not null)
         {
-            Result<T> cached = await _caches.ReadAsync(id, version, cache, cancel).ConfigureAwait(false);
+            Result<T> cached = await Caches.ReadAsync(id, version, cache, cancel).ConfigureAwait(false);
             if (cached.Ok)
-                return new Made(Result.Success<object>(cached.Value), version);
+                return new Made(Result.Success<object>(cached.Value), version, AssetScan.FindHandles(cached.Value));
         }
 
         Result<T> read = reader is not null
@@ -513,9 +603,25 @@ public sealed class Assets : IDisposable
             return new Made(Result.Failure(notAsset + read.Error), version);
 
         if (cache is not null)
-            await _caches.WriteAsync(id, version, read.Value, cache, cancel).ConfigureAwait(false);
+            await Caches.WriteAsync(id, version, read.Value, cache, cancel).ConfigureAwait(false);
 
-        return new Made(Result.Success<object>(read.Value), version);
+        return new Made(Result.Success<object>(read.Value), version, AssetScan.FindHandles(read.Value));
+    }
+
+    /// <summary>
+    /// <paramref name="bytes"/> read as a <typeparamref name="T"/> by Core itself, with its <c>.meta</c>'s
+    /// <paramref name="settings"/> read against the type first.
+    /// </summary>
+    private static Result<object> ReadBuiltIn<T>(ReadOnlyMemory<byte> bytes, JsonElement settings)
+        where T : IAsset<T>
+    {
+        Result<AssetMetadata> metadata = ReadSettings<T>(settings);
+        if (!metadata.Ok)
+            return Result.Failure(metadata.Error);
+
+        Result<T> read = ReadCoreFormat<T>(bytes, settings);
+
+        return read.Ok ? Result.Success<object>(read.Value) : Result.Failure(read.Error);
     }
 
     /// <summary>
@@ -645,6 +751,15 @@ public sealed class Assets : IDisposable
                 && contract.GetGenericTypeDefinition() == typeof(IAsset<>)
                 && contract.GenericTypeArguments[0] == type
         );
+
+    /// <summary>
+    /// A generic method of this class's, <paramref name="name"/>, made for <paramref name="type"/>.
+    /// </summary>
+    private static MethodInfo GetGeneric(string name, Type type) =>
+        (
+            typeof(Assets).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance)
+            ?? throw new InvalidOperationException($"{nameof(Assets)} has no method {name}.")
+        ).MakeGenericMethod(type);
 
     /// <summary>
     /// Asset <paramref name="id"/>, at once when it has loaded, else once it has been imported; asked for by asset

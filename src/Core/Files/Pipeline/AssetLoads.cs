@@ -1,5 +1,9 @@
+using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
+using Magic.Caching;
 using Magic.Debugging;
+using Magic.Events;
 using Magic.Threading;
 using Magic.Utils;
 
@@ -11,13 +15,20 @@ namespace Magic.Files.Pipeline;
 internal static class AssetLoads
 {
     /// <summary>
-    /// Turns finished reads into the asset: its waiters are told, and one that had loaded is among what reloaded. A read
-    /// whose file changed meanwhile is read again instead.
+    /// Turns finished reads into the asset: its waiters are told, what it depends on goes in the database, and one that
+    /// had loaded is published as <see cref="AssetReloaded"/>. A read whose file changed meanwhile is read again instead.
     /// </summary>
-    public static LoadedAssets Land(LoadedAssets loaded, AssetsChangeList changes)
+    public static (AssetDatabase, LoadedAssets) Land(
+        AssetDatabase database,
+        LoadedAssets loaded,
+        AssetsChangeList changes,
+        EventCoordinator events,
+        Caches caches,
+        CancellationToken stopped
+    )
     {
         if (loaded.Landed.IsEmpty)
-            return loaded;
+            return (database, loaded);
 
         foreach (ulong id in loaded.Landed)
         {
@@ -25,13 +36,26 @@ internal static class AssetLoads
             if (!loaded.Entries.TryGetValue(id, out AssetEntry? entry) || entry.Landing is not { } made)
                 continue;
 
-            loaded = entry.IsStale ? loaded.Want(id) : Finish(loaded, id, entry, made, changes);
+            if (entry.IsStale)
+            {
+                loaded = loaded.Want(id);
+                continue;
+            }
+
+            loaded = Finish(loaded, id, entry, made, changes);
+            if (entry.Current is not null && made.Value is { Ok: true, Value: { } asset })
+                events.Publish(new AssetReloaded(id, asset));
+
+            if (made.Value.Ok && !made.Handles.IsDefault)
+            {
+                ImmutableArray<ulong> dependencies = [.. made.Handles.Union(entry.MadeFrom)];
+                database = database.SetDependencies(id, dependencies);
+                if (loaded.Importers.ContainsKey(entry.Type) && database.Index.ById.ContainsKey(id))
+                    KeepDependencies(id, made.Version, dependencies, caches, stopped);
+            }
         }
 
-        return loaded with
-        {
-            Landed = [],
-        };
+        return (database, loaded with { Landed = [] });
     }
 
     /// <summary>
@@ -111,9 +135,6 @@ internal static class AssetLoads
             done = entry with { Error = made.Value.Error };
         }
 
-        if (entry.Current is not null && made.Value is { Ok: true, Value: { } asset })
-            changes.AddReloaded(id, asset);
-
         done = done with { Stage = AssetStage.Loaded, Landing = null, Waiting = [] };
         foreach (TaskCompletionSource<Made> waiter in entry.Waiting)
         {
@@ -125,6 +146,29 @@ internal static class AssetLoads
             Entries = loaded.Entries.SetItem(id, done),
         };
     }
+
+    /// <summary>
+    /// Keeps what a gem-read asset depends on in the cache, by its file's version, so finding that later doesn't load it.
+    /// </summary>
+    private static void KeepDependencies(
+        ulong id,
+        ulong version,
+        ImmutableArray<ulong> dependencies,
+        Caches caches,
+        CancellationToken stopped
+    ) =>
+        Task.Run(
+                () =>
+                    caches.WriteAsync(
+                        id,
+                        version,
+                        new AssetDependencies(dependencies),
+                        AssetDependencyCache.Instance,
+                        stopped
+                    ),
+                stopped
+            )
+            .FireAndForget();
 
     /// <summary>
     /// Reads <paramref name="file"/> and makes its asset, on a worker, and hands what it made to the next run.

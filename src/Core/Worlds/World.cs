@@ -7,8 +7,8 @@ using System.Text.Json;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
+using Magic.Events;
 using Magic.Files;
-using Magic.Files.Pipeline;
 using Magic.Files.Types;
 using Magic.Serialization;
 using Magic.Threading;
@@ -43,6 +43,8 @@ public sealed class World : IEcs, IDisposable
     private readonly Assets _assets;
 
     private readonly IFileSystem _files;
+
+    private readonly EventCoordinator _events;
 
     private readonly Threads _threads;
 
@@ -86,10 +88,11 @@ public sealed class World : IEcs, IDisposable
     /// </summary>
     private ImmutableArray<IHookIntoDomainLoading> _hooks = [];
 
-    internal World(Assets assets, IFileSystem files, Threads threads, App app)
+    internal World(Assets assets, IFileSystem files, EventCoordinator events, Threads threads, App app)
     {
         _assets = assets;
         _files = files;
+        _events = events;
         _threads = threads;
         _app = app;
     }
@@ -296,16 +299,17 @@ public sealed class World : IEcs, IDisposable
         where T2 : unmanaged, IComponent => Ecs.Query<T1, T2>();
 
     /// <summary>
-    /// Changes the world for the prefabs and domains the assets read again, and lets a replace waiting for this frame go on.
-    /// Main thread, as each frame starts, before the gems' hooks.
+    /// Changes the world for the prefabs and domains the assets read again, as the last frame's take heard it, and lets
+    /// a replace waiting for this frame go on. Main thread, as each frame starts, before the gems' hooks.
     /// </summary>
     internal void Pump()
     {
         // Open again what places a prefab or domain the assets read again.
-        if (!_assets.Reloaded.IsEmpty)
+        ReadOnlySpan<AssetReloaded> reloaded = _events.GetTaken<AssetReloaded>();
+        if (!reloaded.IsEmpty)
         {
             HashSet<ulong> changed = [];
-            foreach (AssetLoaded asset in _assets.Reloaded)
+            foreach (AssetReloaded asset in reloaded)
             {
                 if (asset.Asset is Prefab or Domain)
                     changed.Add(asset.Id);

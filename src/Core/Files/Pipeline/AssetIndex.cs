@@ -93,7 +93,8 @@ internal sealed record AssetIndex
                 if (!byPath.TryAdd(path, indexed))
                     continue;
 
-                string folder = GetFolder(path);
+                int slash = path.LastIndexOf('/');
+                string folder = slash < 0 ? string.Empty : path[..slash];
                 if (!byFolder.TryGetValue(folder, out List<string>? paths))
                 {
                     paths = [];
@@ -154,17 +155,6 @@ internal sealed record AssetIndex
         hash.Append(Encoding.UTF8.GetBytes(settings.GetRawText()));
 
         return hash.GetCurrentHashAsUInt64();
-    }
-
-    /// <summary>
-    /// The folder <paramref name="path"/>, an asset path, is directly in, as <see cref="ByFolder"/> keys it: empty for
-    /// one in the asset directory itself.
-    /// </summary>
-    public static string GetFolder(string path)
-    {
-        int slash = path.LastIndexOf('/');
-
-        return slash < 0 ? string.Empty : path[..slash];
     }
 
     /// <summary>
