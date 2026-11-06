@@ -96,24 +96,6 @@ internal sealed class Cli : IDisposable
         CommandQueue queue
     )
     {
-        Option<bool> headless = new("--headless")
-        {
-            Description = "Run without a GUI (headless mode)",
-            Recursive = true,
-        };
-        headless.Action = new OptionAction(parsed => app.IsHeadless = parsed.GetValue(headless));
-        Option<Log.VerbosityLevel> verbosity = new("--verbosity", "-v")
-        {
-            Description = "How much the log prints",
-            Recursive = true,
-        };
-        verbosity.Action = new OptionAction(parsed => Log.Verbosity = parsed.GetValue(verbosity));
-        Option<bool> failOnError = new("--fail-on-error")
-        {
-            Description = "Exit with code 2 as soon as an error is logged",
-            Recursive = true,
-        };
-        failOnError.Action = new OptionAction(parsed => app.ShouldExitOnError = parsed.GetValue(failOnError));
         RootCommand commands = new("Magic CLI.\nAllows interaction with the Magic game engine from the command line.")
         {
             Subcommands =
@@ -131,12 +113,36 @@ internal sealed class Cli : IDisposable
                 WaitCommand.Create(queue, world),
                 ExitCommand.Create(app),
             },
-            Options = { headless, verbosity, failOnError },
+            Options =
+            {
+                CreateOption<bool>("--headless", "Run without a GUI (headless mode)", value => app.IsHeadless = value),
+                CreateOption<Log.VerbosityLevel>(
+                    "--verbosity",
+                    "How much the log prints",
+                    value => Log.Verbosity = value,
+                    "-v"
+                ),
+                CreateOption<bool>(
+                    "--fail-on-error",
+                    "Exit with code 2 as soon as an error is logged",
+                    value => app.ShouldExitOnError = value
+                ),
+            },
         };
 
         // An option's action runs only before its command's own, so the root has one, which does nothing.
         commands.SetAction(_ => { });
 
         return commands;
+
+        // Every option is recursive, and its action applies its value before the command runs.
+        static Option<T> CreateOption<T>(string name, string description, Action<T> apply, params string[] aliases)
+            where T : struct
+        {
+            Option<T> option = new(name, aliases) { Description = description, Recursive = true };
+            option.Action = new OptionAction(parsed => apply(parsed.GetValue(option)));
+
+            return option;
+        }
     }
 }
