@@ -172,7 +172,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
         void* user
     )
     {
-        string message = $"Vulkan {types}: {NativeStrings.Read(data->pMessage)}";
+        string message = $"Vulkan {types}: {CString.Read(data->pMessage)}";
         if (severity.HasFlag(VkDebugUtilsMessageSeverityFlagsEXT.Error))
             Log.Error(message);
         else if (severity.HasFlag(VkDebugUtilsMessageSeverityFlagsEXT.Warning))
@@ -189,7 +189,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
         VkLayerProperties[] layers = new VkLayerProperties[count];
         vkEnumerateInstanceLayerProperties(layers);
 
-        return layers.Any(layer => NativeStrings.Read(layer.layerName) == name);
+        return layers.Any(layer => CString.Read(layer.layerName) == name);
     }
 
     private static HashSet<string> GetInstanceExtensions()
@@ -202,7 +202,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
     }
 
     private static HashSet<string> GetNames(VkExtensionProperties[] extensions) =>
-        extensions.Select(extension => NativeStrings.Read(extension.extensionName)).ToHashSet(StringComparer.Ordinal);
+        extensions.Select(extension => CString.Read(extension.extensionName)).ToHashSet(StringComparer.Ordinal);
 
     private static VkDebugUtilsMessengerCreateInfoEXT GetMessengerInfo() =>
         new()
@@ -321,7 +321,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
         VkPhysicalDeviceVulkan12Properties properties12 = new();
         VkPhysicalDeviceProperties2 properties = new() { pNext = &properties12 };
         InstanceApi.vkGetPhysicalDeviceProperties2(device, &properties);
-        string name = NativeStrings.Read(properties.properties.deviceName);
+        string name = CString.Read(properties.properties.deviceName);
         HashSet<string> extensions = GetDeviceExtensions(device);
 
         if (properties.properties.apiVersion < VkVersion.Version_1_3)
@@ -409,7 +409,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
                 },
                 ApiVersion = properties.properties.apiVersion,
                 Kind = kind,
-                Driver = $"{NativeStrings.Read(properties12.driverName)} {NativeStrings.Read(properties12.driverInfo)}",
+                Driver = $"{CString.Read(properties12.driverName)} {CString.Read(properties12.driverInfo)}",
                 TimestampPeriod = limits.timestampPeriod,
                 Extensions = extensions,
                 Features = new GpuFeatures
@@ -423,16 +423,6 @@ internal sealed unsafe class VulkanDevice : IDisposable
                 Limits = new GpuLimits
                 {
                     DeviceName = name,
-                    IsSoftware = kind == VkPhysicalDeviceType.Cpu,
-                    HeapCapacity = (int)
-                        Math.Min(
-                            VulkanHeap.Textures,
-                            Math.Min(
-                                properties12.maxDescriptorSetUpdateAfterBindSampledImages,
-                                properties12.maxDescriptorSetUpdateAfterBindStorageBuffers
-                            )
-                        ),
-                    MaxDispatchGroups = limits.maxComputeWorkGroupCount[0],
                     UploadAlignment = (int)Math.Max(limits.optimalBufferCopyOffsetAlignment, 16),
                     DeviceMemoryBytes = GetDeviceMemoryBytes(device),
                 },

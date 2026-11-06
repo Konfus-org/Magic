@@ -10,9 +10,6 @@
     <!-- Dear ImGui's C API: its context, draw lists and textures are pointers. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
-  <ItemGroup>
-    <AssemblyMetadata Include="Magic.Author" Value="$(Authors)" />
-  </ItemGroup>
   <!-- Dear ImGui is C++, which C# cannot call, and ships no build of its own, so it is bound through the C API that
        dear_bindings, the Dear ImGui team's generator, makes of its headers, which it publishes generated for each ImGui
        release: the public API and the internal one, in their own files. Those and ImGui's own sources are compiled into

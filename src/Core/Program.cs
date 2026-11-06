@@ -16,7 +16,7 @@ namespace Magic;
 internal static class Program
 {
     private static readonly Histogram<double> _stepDuration = Metrics.Meter.CreateHistogram<double>(
-        "magic.core.step.duration",
+        Metrics.StepDuration,
         "s",
         "One step of Core's own in the run's loop."
     );
@@ -56,9 +56,9 @@ internal static class Program
             EventCoordinator events = new();
             Threads threads = new();
             Caches caches = new(files, app);
-            using Assets assets = new(files, caches, app);
-            using World world = new(assets, files, threads, app);
-            using Cli cli = new(app, files, events, assets, world);
+            using Assets assets = new(files, caches, events, app);
+            using World world = new(assets, files, events, threads, app);
+            Cli cli = new(app, files, events, assets, world);
 
             if (isLaunching)
             {
@@ -125,9 +125,6 @@ internal static class Program
                 long start = _stepDuration.Start();
                 threads.Pump(EngineThread.Main);
                 _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "Threads"));
-                start = _stepDuration.Start();
-                assets.ProcessChanges();
-                _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "Assets"));
                 start = _stepDuration.Start();
                 world.Pump();
                 _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "World"));

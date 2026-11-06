@@ -31,25 +31,25 @@ internal sealed class Gems : IDisposable
     private static readonly string[] _hookNames = Enum.GetNames<Hook>();
 
     private static readonly Histogram<double> _frameDuration = Metrics.Meter.CreateHistogram<double>(
-        "magic.core.frame.duration",
+        Metrics.FrameDuration,
         "s",
         "From one frame to the next."
     );
 
     private static readonly Histogram<double> _frameWorkDuration = Metrics.Meter.CreateHistogram<double>(
-        "magic.core.frame.work.duration",
+        Metrics.FrameWorkDuration,
         "s",
         "The main thread's work on a frame."
     );
 
     private static readonly Histogram<double> _renderFrameDuration = Metrics.Meter.CreateHistogram<double>(
-        "magic.core.render.frame.duration",
+        Metrics.RenderFrameDuration,
         "s",
         "From one frame the render thread draws to the next, the waits for the GPU and the display among it."
     );
 
     private static readonly Histogram<double> _hookDuration = Metrics.Meter.CreateHistogram<double>(
-        "magic.core.gem.hook.duration",
+        Metrics.HookDuration,
         "s",
         "One gem's hook."
     );
@@ -149,7 +149,7 @@ internal sealed class Gems : IDisposable
         RestartIfBuilt();
 
         // While the loading screen shows, time runs as it is, so it moves however the world it replaces was paused.
-        bool isPaused = _app.IsPaused || (_world.IsPaused && !_world.IsShowingLoadingScreen);
+        bool isPaused = _world.IsPaused && !_world.IsShowingLoadingScreen;
         float timeScale = _world.IsShowingLoadingScreen ? 1 : _world.TimeScale;
         Frame frame = _clock.Advance(isPaused, timeScale, out int fixedSteps) with { Events = _events.Take() };
 
@@ -247,6 +247,8 @@ internal sealed class Gems : IDisposable
     )]
     private void Load(List<GemInfo> registered)
     {
+        // A constructor may load an asset of a type a gem made after it reads.
+        _assets.Expect(registered.ConvertAll(gem => gem.Type));
         foreach (GemInfo gem in registered)
         {
             Watch(gem);
@@ -266,6 +268,7 @@ internal sealed class Gems : IDisposable
                 // anything else is a bug in the gem, and its stack says where.
                 string why = ex is InvalidOperationException ? ex.Message : ex.ToString();
                 Log.Error($"Gem {gem.Name} was not made: {why}");
+                _assets.Drop(gem.Type);
                 code.Dispose();
                 continue;
             }
@@ -344,7 +347,11 @@ internal sealed class Gems : IDisposable
     /// </summary>
     private void Watch(GemInfo gem)
     {
-        Result<IFileWatcher> watched = _files.Watch(gem.Folder, "*.dll");
+        Result<IDisposable> watched = _files.Watch(
+            gem.Folder,
+            "*.dll",
+            _ => Volatile.Write(ref _buildTimestamp, Stopwatch.GetTimestamp())
+        );
         if (!watched.Ok)
         {
             Log.Warn($"Gem {gem.Name} is not watched, so a build of it won't restart the run: {watched.Error}");
@@ -352,15 +359,8 @@ internal sealed class Gems : IDisposable
             return;
         }
 
-        IFileWatcher watcher = watched.Value;
-        watcher.Created += (_, _) => Touch();
-        watcher.Changed += (_, _) => Touch();
-        watcher.Deleted += (_, _) => Touch();
-        watcher.Renamed += (_, _) => Touch();
-        _watches.Add(new Subscription(watcher.Dispose));
+        _watches.Add(new Subscription(watched.Value.Dispose));
     }
-
-    private void Touch() => Volatile.Write(ref _buildTimestamp, Stopwatch.GetTimestamp());
 
     /// <summary>
     /// A hook of <see cref="IGem"/>'s.

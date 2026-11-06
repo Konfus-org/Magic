@@ -8,7 +8,7 @@ and old code catches up when you touch it.
 
 Write the engine as data flowing through functions, not objects calling each other. Everything is one of four things:
 
-- **Data:** plain values, such as `Domain`, `Prefab` and `EntityCommands`.
+- **Data:** plain values, such as `Domain` and `Prefab`.
 - **Databases:** one place that holds state and does little else, such as the assets' database and the ECS's columns.
 - **Services:** what you call, such as `world.Create` and `assets.Find`.
 - **Steps:** work done in an order, as named methods that take values and return values. `Program` and
@@ -58,11 +58,11 @@ Write the engine as data flowing through functions, not objects calling each oth
 - `Program` sets a run up and owns its loop, calling each service's `Pump` in turn. `App` lasts the whole process; what a
   run makes is new for it, and a restart keeps only the world, as JSON. A service starts in its constructor
   and ends in `Dispose`, not with paired start and stop calls. A step is a method. A class of its own is for a substantial piece of work.
-- Push onto an `EntityCommands` for bulk work, and run it with `world.Apply`. A single change is a call on `World`.
+- A change is a call on `World`.
 - A method that needs the main thread after an await of its own steps onto it with
   `await threads.Enter(EngineThread.Main)`; nothing hops threads for it.
 - Gems talk through message structs. Publish one from any thread and every gem reads it the next frame, from
-  `frame.Events` or through `EventCoordinator.Watch`.
+  `frame.Events`.
 - Async work a hook starts arrives in a later frame: by a message, or by work posted with `Threads.Post`. A gem that
   needs slow setup starts it in its constructor and reads what came of it in a hook.
 - `Dispose` frees what the gem started, once none of its work still runs on a worker.
@@ -71,7 +71,7 @@ Write the engine as data flowing through functions, not objects calling each oth
 - A component is an unmanaged struct with public fields that implements `IComponent`, and members for what follows from
   those fields.
 - Work over many entities is a system: a function over chunks a gem calls from a hook, through `IEcs.Query` on its own
-  thread or `IEcs.Run` on the ECS's workers.
+  thread.
 - A game is its assets and scripts, never a gem.
 
 ## Async

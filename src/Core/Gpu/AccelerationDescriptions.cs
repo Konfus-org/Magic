@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Numerics;
 using System.Runtime.InteropServices;
 
 namespace Magic.Gpu;
@@ -60,29 +61,11 @@ public record struct GpuAccelerationInstance
     /// </summary>
     public const uint FlagNoFaceCull = 1;
 
-    public float M00;
+    public Vector4 Row0;
 
-    public float M01;
+    public Vector4 Row1;
 
-    public float M02;
-
-    public float M03;
-
-    public float M10;
-
-    public float M11;
-
-    public float M12;
-
-    public float M13;
-
-    public float M20;
-
-    public float M21;
-
-    public float M22;
-
-    public float M23;
+    public Vector4 Row2;
 
     public uint CustomIndexAndMask;
 

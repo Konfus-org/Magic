@@ -2,7 +2,6 @@ using System.Diagnostics.CodeAnalysis;
 using System.Threading.Channels;
 using Magic.Debugging;
 using Magic.Events;
-using Magic.Utils;
 
 namespace Magic.CommandLine;
 
@@ -10,7 +9,7 @@ namespace Magic.CommandLine;
 /// The lines the console runs next, and what holds them back. Lines a command queues run before the terminal's, in
 /// the order queued. A hold keeps every line after the one that set it back until its condition says no. Main thread.
 /// </summary>
-internal sealed class CommandQueue : IDisposable
+internal sealed class CommandQueue(EventCoordinator events)
 {
     /// <summary>
     /// The lines typed into the terminal, read by one thread for the whole process.
@@ -19,8 +18,6 @@ internal sealed class CommandQueue : IDisposable
 
     private readonly Queue<string> _queued = new();
 
-    private readonly Subscription _drawnWatch;
-
     /// <summary>
     /// The last change to the world a command started; none before the first.
     /// </summary>
@@ -28,10 +25,8 @@ internal sealed class CommandQueue : IDisposable
 
     private Func<bool>? _hold;
 
-    public CommandQueue(EventCoordinator events) => _drawnWatch = events.Watch<FirstFrameDrawn>(_ => HasDrawn = true);
-
     /// <summary>
-    /// Whether the first frame has been drawn.
+    /// Whether the first frame has been drawn, as the frame's messages said by the last <see cref="TryDequeue"/>.
     /// </summary>
     public bool HasDrawn { get; private set; }
 
@@ -39,8 +34,6 @@ internal sealed class CommandQueue : IDisposable
     /// Whether a change to the world a command started is still on its way.
     /// </summary>
     public bool IsChangingWorld => _change is { IsCompleted: false };
-
-    public void Dispose() => _drawnWatch.Dispose();
 
     /// <summary>
     /// Runs <paramref name="line"/> after the lines queued before it, ahead of any typed into the terminal.
@@ -66,11 +59,12 @@ internal sealed class CommandQueue : IDisposable
 
     /// <summary>
     /// The next line to run, once no hold keeps it back: a queued one, else one typed into the terminal. False while a
-    /// hold keeps it, or when no line is waiting.
+    /// hold keeps it, or when no line is waiting. Once a frame, after the frame's messages were taken.
     /// </summary>
     public bool TryDequeue([NotNullWhen(true)] out string? line)
     {
         line = null;
+        HasDrawn |= !events.GetTaken<FirstFrameDrawn>().IsEmpty;
         if (_hold?.Invoke() == true)
             return false;
 

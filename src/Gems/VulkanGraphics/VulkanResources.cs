@@ -1,5 +1,6 @@
 using System.Linq;
 using Magic.Debugging;
+using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Utils;
 using Vortice.Vulkan;
@@ -367,7 +368,10 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             pNext = hasReduction ? &reduction : null,
             magFilter = filter,
             minFilter = filter,
-            mipmapMode = description.HasMipmapBlend ? VkSamplerMipmapMode.Linear : VkSamplerMipmapMode.Nearest,
+            mipmapMode =
+                description.MipFilter == TextureFilter.Linear
+                    ? VkSamplerMipmapMode.Linear
+                    : VkSamplerMipmapMode.Nearest,
             addressModeU = wrap,
             addressModeV = wrap,
             addressModeW = wrap,

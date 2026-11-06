@@ -75,18 +75,9 @@ internal sealed class RayTracing(IGraphicsApi gpu, RenderGraph graph) : IDisposa
             Matrix4x4 world = row.World;
             _rows[_count++] = new GpuAccelerationInstance
             {
-                M00 = world.M11,
-                M01 = world.M21,
-                M02 = world.M31,
-                M03 = world.M41,
-                M10 = world.M12,
-                M11 = world.M22,
-                M12 = world.M32,
-                M13 = world.M42,
-                M20 = world.M13,
-                M21 = world.M23,
-                M22 = world.M33,
-                M23 = world.M43,
+                Row0 = new(world.M11, world.M21, world.M31, world.M41),
+                Row1 = new(world.M12, world.M22, world.M32, world.M42),
+                Row2 = new(world.M13, world.M23, world.M33, world.M43),
                 CustomIndexAndMask = (uint)i | (0xFFu << 24),
                 OffsetAndFlags = extra.LeafOffset | (GpuAccelerationInstance.FlagNoFaceCull << 24),
                 Reference = extra.Acceleration,

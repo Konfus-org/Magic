@@ -134,21 +134,6 @@ public sealed class GpuCommandRecorder
     /// <summary>
     /// The whole target when every argument is 0.
     /// </summary>
-    public void SetViewport(uint x, uint y, uint width, uint height) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.SetViewport,
-                X = x,
-                Y = y,
-                Z = width,
-                W = height,
-            }
-        );
-
-    /// <summary>
-    /// The whole target when every argument is 0.
-    /// </summary>
     public void SetScissor(uint x, uint y, uint width, uint height) =>
         Add(
             new()
@@ -171,18 +156,6 @@ public sealed class GpuCommandRecorder
                 Kind = GpuCommandKind.BindIndexBuffer,
                 Id = indices.Id,
                 Offset = offset,
-            }
-        );
-
-    public void Draw(uint vertices, uint instances = 1, uint firstVertex = 0, uint firstInstance = 0) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.Draw,
-                X = vertices,
-                Y = instances,
-                Z = firstVertex,
-                W = firstInstance,
             }
         );
 
@@ -216,33 +189,6 @@ public sealed class GpuCommandRecorder
             new()
             {
                 Kind = GpuCommandKind.DrawIndirectCount,
-                Id = arguments.Id,
-                Offset = argumentsOffset,
-                Id2 = count.Id,
-                Offset2 = countOffset,
-                X = maxDraws,
-                Y = stride,
-            }
-        );
-
-    /// <summary>
-    /// As many indexed draws as the unsigned count at <paramref name="countOffset"/> in <paramref name="count"/>, up
-    /// to <paramref name="maxDraws"/>, their arguments <paramref name="stride"/> bytes apart from
-    /// <paramref name="argumentsOffset"/> in <paramref name="arguments"/>, each five unsigned integers: indices,
-    /// instances, first index, vertex offset, first instance.
-    /// </summary>
-    public void DrawIndexedIndirectCount(
-        GpuBuffer arguments,
-        ulong argumentsOffset,
-        GpuBuffer count,
-        ulong countOffset,
-        uint maxDraws,
-        uint stride = 20
-    ) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.DrawIndexedIndirectCount,
                 Id = arguments.Id,
                 Offset = argumentsOffset,
                 Id2 = count.Id,
@@ -316,19 +262,6 @@ public sealed class GpuCommandRecorder
         );
 
     /// <summary>
-    /// Level 0 of one texture to level 0 of another of the same size and format.
-    /// </summary>
-    public void CopyTexture(GpuTexture source, GpuTexture destination) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.CopyTexture,
-                Id = source.Id,
-                Id2 = destination.Id,
-            }
-        );
-
-    /// <summary>
     /// Level 0 of one texture stretched over level 0 of another, filtered linearly; the formats may differ.
     /// </summary>
     public void BlitTexture(GpuTexture source, GpuTexture destination) =>
@@ -356,24 +289,6 @@ public sealed class GpuCommandRecorder
                 X = value,
             }
         );
-
-    /// <summary>
-    /// Every level, to <paramref name="color"/> as four floats, or as its first float for a depth texture.
-    /// </summary>
-    public void ClearTexture(GpuTexture texture, in GpuConstants color) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.ClearTexture,
-                Id = texture.Id,
-                Constants = color,
-            }
-        );
-
-    /// <summary>
-    /// The GPU's clock here, which the GPU provider measures under <paramref name="label"/> once the frame finishes.
-    /// </summary>
-    public void Timestamp(string label) => Add(new() { Kind = GpuCommandKind.Timestamp, Label = label });
 
     private void Begin(in GpuPass pass)
     {

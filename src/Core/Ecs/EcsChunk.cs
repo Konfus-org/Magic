@@ -1,8 +1,8 @@
 namespace Magic.Ecs;
 
 /// <summary>
-/// Entities the ECS stores together, as an <see cref="EcsQuery"/> or an <see cref="EcsChunkRun{TState, TChunk}"/> is
-/// handed them, over the ECS's own storage. Good until that loop or call ends.
+/// Entities the ECS stores together, as an <see cref="EcsQuery"/> hands them out, over the ECS's own storage. Good
+/// until that loop ends.
 /// </summary>
 public readonly ref struct EcsChunk(ReadOnlySpan<Entity> entities)
 {
@@ -19,12 +19,6 @@ public readonly ref struct EcsChunk<T1>(ReadOnlySpan<Entity> entities, Span<T1> 
     public ReadOnlySpan<Entity> Entities { get; } = entities;
 
     public Span<T1> First { get; } = first;
-
-    public void Deconstruct(out ReadOnlySpan<Entity> entities, out Span<T1> first)
-    {
-        entities = Entities;
-        first = First;
-    }
 }
 
 /// <summary>
@@ -39,87 +33,4 @@ public readonly ref struct EcsChunk<T1, T2>(ReadOnlySpan<Entity> entities, Span<
     public Span<T1> First { get; } = first;
 
     public Span<T2> Second { get; } = second;
-
-    public void Deconstruct(out ReadOnlySpan<Entity> entities, out Span<T1> first, out Span<T2> second)
-    {
-        entities = Entities;
-        first = First;
-        second = Second;
-    }
-}
-
-/// <summary>
-/// <see cref="EcsChunk{T1}"/> of entities that have all three components.
-/// </summary>
-public readonly ref struct EcsChunk<T1, T2, T3>(
-    ReadOnlySpan<Entity> entities,
-    Span<T1> first,
-    Span<T2> second,
-    Span<T3> third
-)
-    where T1 : unmanaged, IComponent
-    where T2 : unmanaged, IComponent
-    where T3 : unmanaged, IComponent
-{
-    public ReadOnlySpan<Entity> Entities { get; } = entities;
-
-    public Span<T1> First { get; } = first;
-
-    public Span<T2> Second { get; } = second;
-
-    public Span<T3> Third { get; } = third;
-
-    public void Deconstruct(
-        out ReadOnlySpan<Entity> entities,
-        out Span<T1> first,
-        out Span<T2> second,
-        out Span<T3> third
-    )
-    {
-        entities = Entities;
-        first = First;
-        second = Second;
-        third = Third;
-    }
-}
-
-/// <summary>
-/// <see cref="EcsChunk{T1}"/> of entities that have all four components.
-/// </summary>
-public readonly ref struct EcsChunk<T1, T2, T3, T4>(
-    ReadOnlySpan<Entity> entities,
-    Span<T1> first,
-    Span<T2> second,
-    Span<T3> third,
-    Span<T4> fourth
-)
-    where T1 : unmanaged, IComponent
-    where T2 : unmanaged, IComponent
-    where T3 : unmanaged, IComponent
-    where T4 : unmanaged, IComponent
-{
-    public ReadOnlySpan<Entity> Entities { get; } = entities;
-
-    public Span<T1> First { get; } = first;
-
-    public Span<T2> Second { get; } = second;
-
-    public Span<T3> Third { get; } = third;
-
-    public Span<T4> Fourth { get; } = fourth;
-
-    public void Deconstruct(
-        out ReadOnlySpan<Entity> entities,
-        out Span<T1> first,
-        out Span<T2> second,
-        out Span<T3> third,
-        out Span<T4> fourth
-    )
-    {
-        entities = Entities;
-        first = First;
-        second = Second;
-        third = Third;
-        fourth = Fourth;
-    }
 }

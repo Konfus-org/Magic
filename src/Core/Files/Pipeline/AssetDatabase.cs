@@ -4,7 +4,7 @@ namespace Magic.Files.Pipeline;
 
 /// <summary>
 /// What assets there are, where they are, and how they depend on each other, in both directions. A value, replaced whole
-/// on the main thread, and read by any thread as it is.
+/// under the assets' lock, and read by any thread as it is.
 /// </summary>
 internal sealed record AssetDatabase
 {

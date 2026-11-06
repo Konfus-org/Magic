@@ -9,8 +9,7 @@ namespace Magic.Worlds;
 
 /// <summary>
 /// Changes to the world's entities, each with what it was before and what it is after, as plain data: what a save holds
-/// against the domains' files. It finds itself from the world as it is and makes itself on a world; <see cref="Invert"/>
-/// gives the changes that undo it.
+/// against the domains' files. It finds itself from the world as it is and makes itself on a world.
 /// </summary>
 internal readonly record struct WorldChanges(ImmutableArray<EntityChange> Entities)
 {
@@ -32,29 +31,6 @@ internal readonly record struct WorldChanges(ImmutableArray<EntityChange> Entiti
         IReadOnlyDictionary<EntityKey, ImmutableArray<IComponent>> authored
     )
         : this(Find(ecs, placed, authored)) { }
-
-    /// <summary>
-    /// The changes that undo these: in reverse order, a made entity destroyed, a destroyed one made again, and each change
-    /// back to what it was.
-    /// </summary>
-    public WorldChanges Invert()
-    {
-        ImmutableArray<EntityChange>.Builder inverted = ImmutableArray.CreateBuilder<EntityChange>(Entities.Length);
-        for (int i = Entities.Length - 1; i >= 0; i--)
-        {
-            EntityChange change = Entities[i];
-            EntityChangeKind kind = change.Kind switch
-            {
-                EntityChangeKind.Create => EntityChangeKind.Destroy,
-                EntityChangeKind.Destroy => EntityChangeKind.Create,
-                EntityChangeKind.Change => EntityChangeKind.Change,
-                _ => change.Kind,
-            };
-            inverted.Add(new EntityChange(change.Key, kind, change.After, change.Before));
-        }
-
-        return new WorldChanges(inverted.MoveToImmutable());
-    }
 
     /// <summary>
     /// Makes these changes on <paramref name="ecs"/> in order. A made entity a domain placed takes its key in

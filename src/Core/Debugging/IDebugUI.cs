@@ -150,12 +150,12 @@ public interface IDebugUI
     bool Tabs(string label, ref int index, ReadOnlySpan<string> options);
 
     /// <summary>
-    /// A header that folds away what is drawn under it, open until clicked; <paramref name="folds"/> folds it this frame
-    /// as a click would, for whoever draws it to fold it once and leave it to clicks after. True while open: draw what is
-    /// under it only then. <paramref name="depth"/> nests it under the headers before it: it and what follows it are
-    /// indented a step for each, until the next header in the window or view.
+    /// A header that folds away what is drawn under it, open at first as <paramref name="isOpenAtStart"/> says and as
+    /// clicked after. True while open: draw what is under it only then. <paramref name="depth"/> nests it under the
+    /// headers before it: it and what follows it are indented a step for each, until the next header in the window or
+    /// view.
     /// </summary>
-    bool Header(string label, bool folds = false, int depth = 0);
+    bool Header(string label, bool isOpenAtStart = true, int depth = 0);
 
     /// <summary>
     /// Opens a table headed by <paramref name="columns"/>, whose rows are drawn with <see cref="Row"/> until

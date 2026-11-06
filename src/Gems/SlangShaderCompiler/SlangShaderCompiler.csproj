@@ -10,9 +10,6 @@
     <!-- Slang's API is C++ interfaces called through their tables of functions. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
-  <ItemGroup>
-    <AssemblyMetadata Include="Magic.Author" Value="$(Authors)" />
-  </ItemGroup>
   <!-- The compiler alone, built from source: no tools, tests, examples, language server, interpreter, runtime or
        GPU layer, and no glslang or LLVM, as SPIR-V is emitted directly. Its API is C++ interfaces, which the generator
        cannot bind, so it is bound by hand (README) and the item declares the binary alone. -->

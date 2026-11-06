@@ -93,7 +93,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
 
         uint systems = app.IsHeadless ? SDL_INIT_GAMEPAD : SDL_INIT_VIDEO | SDL_INIT_GAMEPAD;
         if (!SDL_Init(systems))
-            throw new InvalidOperationException($"SDL could not start: {CString.Read(SDL_GetError())}");
+            throw new InvalidOperationException($"SDL could not start: {Sdl.Error}");
 
         if (app.IsHeadless)
             return;
@@ -108,7 +108,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
 
         if (_window == null)
         {
-            string error = CString.Read(SDL_GetError());
+            string error = Sdl.Error;
             SDL_Quit();
 
             throw new InvalidOperationException($"SDL could not open a window: {error}");
@@ -122,7 +122,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
         // Typed characters come as text events only while text input is on: always, as a desktop has no on-screen
         // keyboard for it to bring up.
         if (!SDL_StartTextInput(_window))
-            Log.Warn($"Typed text is not read: {CString.Read(SDL_GetError())}");
+            Log.Warn($"Typed text is not read: {Sdl.Error}");
 
         _clipboard = ReadClipboard();
 
@@ -559,7 +559,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
         SDL_Gamepad* gamepad = SDL_OpenGamepad(id);
         if (gamepad == null)
         {
-            Log.Warn($"A gamepad was connected but could not be opened: {CString.Read(SDL_GetError())}");
+            Log.Warn($"A gamepad was connected but could not be opened: {Sdl.Error}");
 
             return;
         }
@@ -630,7 +630,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
                 top.Width * 4
             );
             if (surface == null || !SDL_SetWindowIcon(_window, surface))
-                Log.Warn($"The window's icon is not shown: {CString.Read(SDL_GetError())}");
+                Log.Warn($"The window's icon is not shown: {Sdl.Error}");
 
             SDL_DestroySurface(surface);
         }

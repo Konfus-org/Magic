@@ -1,13 +1,10 @@
 using System.Collections;
-using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Runtime.CompilerServices;
-using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using Arch.Core;
 using Magic.Ecs;
 using Magic.Projects;
-using Schedulers;
 using ArchEntity = Arch.Core.Entity;
 using ArchWorld = Arch.Core.World;
 using Entity = Magic.Ecs.Entity;
@@ -16,10 +13,10 @@ namespace Magic.ArchEcs;
 
 /// <summary>
 /// The entity world, in one Arch world, on the thread that made the gem. Entities are Arch's, bit for bit, and
-/// components live in Arch's chunks, so a query hands out spans straight over them and allocates nothing; a run spreads
-/// its chunks over Arch's job threads. Arch trusts its caller, so this gem checks what Arch would let go wrong silently
-/// (a dead entity, a structural change during a loop, a call from another thread) and throws instead. It is public
-/// because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
+/// components live in Arch's chunks, so a query hands out spans straight over them and allocates nothing. Arch trusts
+/// its caller, so this gem checks what Arch would let go wrong silently (a dead entity, a structural change during a
+/// loop, a call from another thread) and throws instead. It is public because nothing in its assembly makes it: Magic
+/// does, by reflection, when a project lists the gem.
 /// </summary>
 public sealed class ArchEcsGem : IGem, IEcs, IDisposable
 {
@@ -31,25 +28,15 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     private readonly int _worldThreadId;
 
     /// <summary>
-    /// Arch schedules only from the thread that made its job threads, so they are made with the gem and ended with it.
-    /// </summary>
-    private readonly JobScheduler _jobScheduler;
-
-    /// <summary>
     /// One walk per query, by the type of chunk it hands out, made the first time the query is asked for and reused.
     /// </summary>
     private readonly Dictionary<Type, object> _queryWalks = [];
 
     /// <summary>
-    /// How many query loops and runs are open: while any is, an entity's components can't change, as that would move
-    /// it out from under their spans, and the world may be read from a run's job threads.
+    /// How many query loops are open: while any is, an entity's components can't change, as that would move it out
+    /// from under their spans.
     /// </summary>
-    private volatile int _openLoops;
-
-    /// <summary>
-    /// What a run's chunk threw first, thrown on the world's thread once every chunk is done.
-    /// </summary>
-    private Exception? _firstRunError;
+    private int _openLoops;
 
     public ArchEcsGem()
     {
@@ -65,31 +52,9 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
 
         _worldThreadId = Environment.CurrentManagedThreadId;
         _world = ArchWorld.Create();
-
-        // The world's thread and whatever else the engine runs keep their cores; the jobs take the rest.
-        _jobScheduler = new JobScheduler(
-            new JobScheduler.Config
-            {
-                ThreadPrefixName = "Arch job ",
-                ThreadCount = Math.Max(1, Environment.ProcessorCount - 2),
-            }
-        );
-        ArchWorld.SharedJobScheduler = _jobScheduler;
     }
 
-    public void Dispose()
-    {
-        ArchWorld.SharedJobScheduler = null;
-        _jobScheduler.Dispose();
-        _world.Dispose();
-    }
-
-    public Entity Create()
-    {
-        ThrowIfCannotChange();
-
-        return Unsafe.BitCast<ArchEntity, Entity>(_world.Create());
-    }
+    public void Dispose() => _world.Dispose();
 
     public Entity Create(ReadOnlySpan<IComponent> components)
     {
@@ -111,37 +76,6 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     public IComponent[] GetComponents(Entity entity) =>
         [.. _world.GetAllComponents(GetAlive(entity)).Cast<IComponent>()];
 
-    public void Create<T1>(ReadOnlySpan<T1> first, Span<Entity> created)
-        where T1 : unmanaged, IComponent
-    {
-        Span<ArchEntity> made = CreateBatch(created, first.Length, All<T1>.Signature);
-        for (int i = 0; i < made.Length; i++)
-        {
-            _world.Set(made[i], in first[i]);
-        }
-    }
-
-    public void Create<T1, T2>(ReadOnlySpan<T1> first, ReadOnlySpan<T2> second, Span<Entity> created)
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-    {
-        if (second.Length != first.Length)
-        {
-            throw new ArgumentException(
-                $"A batch's spans are the same length: {first.Length} {typeof(T1).Name}, "
-                    + $"{second.Length} {typeof(T2).Name}.",
-                nameof(second)
-            );
-        }
-
-        Span<ArchEntity> made = CreateBatch(created, first.Length, All<T1, T2>.Signature);
-        for (int i = 0; i < made.Length; i++)
-        {
-            _world.Set(made[i], in first[i]);
-            _world.Set(made[i], in second[i]);
-        }
-    }
-
     public void Destroy(Entity entity)
     {
         ThrowIfCannotChange();
@@ -150,7 +84,7 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
 
     public bool IsAlive(Entity entity)
     {
-        ThrowIfCannotRead();
+        ThrowIfNotWorldThread();
 
         return _world.IsAlive(Unsafe.BitCast<Entity, ArchEntity>(entity));
     }
@@ -195,7 +129,7 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     public ref T Get<T>(Entity entity)
         where T : unmanaged, IComponent
     {
-        ThrowIfCannotRead();
+        ThrowIfNotWorldThread();
         ref T component = ref _world.TryGetRef<T>(GetAlive(entity), out bool has);
         if (!has)
             throw new InvalidOperationException($"{entity} has no {typeof(T).Name}.");
@@ -226,48 +160,6 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     public EcsQuery<T1, T2> Query<T1, T2>()
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent => new(GetWalk(All<T1, T2>.Description, All<T1, T2>.Cut));
-
-    public EcsQuery<T1, T2, T3> Query<T1, T2, T3>()
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent => new(GetWalk(All<T1, T2, T3>.Description, All<T1, T2, T3>.Cut));
-
-    public EcsQuery<T1, T2, T3, T4> Query<T1, T2, T3, T4>()
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent
-        where T4 : unmanaged, IComponent => new(GetWalk(All<T1, T2, T3, T4>.Description, All<T1, T2, T3, T4>.Cut));
-
-    public void Run<TState>(in TState state, EcsChunkRun<TState, EcsChunk> run) =>
-        Run(All.Description, new ChunkJob<TState, EcsChunk>(this, state, All.Cut, run));
-
-    public void Run<TState, T1>(in TState state, EcsChunkRun<TState, EcsChunk<T1>> run)
-        where T1 : unmanaged, IComponent =>
-        Run(All<T1>.Description, new ChunkJob<TState, EcsChunk<T1>>(this, state, All<T1>.Cut, run));
-
-    public void Run<TState, T1, T2>(in TState state, EcsChunkRun<TState, EcsChunk<T1, T2>> run)
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent =>
-        Run(All<T1, T2>.Description, new ChunkJob<TState, EcsChunk<T1, T2>>(this, state, All<T1, T2>.Cut, run));
-
-    public void Run<TState, T1, T2, T3>(in TState state, EcsChunkRun<TState, EcsChunk<T1, T2, T3>> run)
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent =>
-        Run(
-            All<T1, T2, T3>.Description,
-            new ChunkJob<TState, EcsChunk<T1, T2, T3>>(this, state, All<T1, T2, T3>.Cut, run)
-        );
-
-    public void Run<TState, T1, T2, T3, T4>(in TState state, EcsChunkRun<TState, EcsChunk<T1, T2, T3, T4>> run)
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent
-        where T4 : unmanaged, IComponent =>
-        Run(
-            All<T1, T2, T3, T4>.Description,
-            new ChunkJob<TState, EcsChunk<T1, T2, T3, T4>>(this, state, All<T1, T2, T3, T4>.Cut, run)
-        );
 
     /// <summary>
     /// A chunk's live entities as Magic's: Arch's arrays run to the chunk's capacity, past its last entity.
@@ -303,50 +195,6 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
         return (Walk<TChunk>)walk;
     }
 
-    /// <summary>
-    /// <paramref name="count"/> new entities of <paramref name="signature"/>, made straight into
-    /// <paramref name="created"/>, as Arch's.
-    /// </summary>
-    private Span<ArchEntity> CreateBatch(Span<Entity> created, int count, in Signature signature)
-    {
-        if (created.Length != count)
-        {
-            throw new ArgumentException(
-                $"A batch makes one entity per component: {count} components, room for {created.Length} entities.",
-                nameof(created)
-            );
-        }
-
-        ThrowIfCannotChange();
-        Span<ArchEntity> made = MemoryMarshal.Cast<Entity, ArchEntity>(created);
-        if (count > 0)
-            _world.Create(made, in signature, count);
-
-        return made;
-    }
-
-    /// <summary>
-    /// Runs <paramref name="job"/> on every chunk <paramref name="description"/> matches, on Arch's job threads, and
-    /// throws what a chunk threw once they are all done.
-    /// </summary>
-    private void Run<TJob>(in QueryDescription description, in TJob job)
-        where TJob : struct, IChunkJob
-    {
-        ThrowIfNotWorldThread();
-        _openLoops++;
-        try
-        {
-            _world.InlineParallelChunkQuery(in description, in job);
-        }
-        finally
-        {
-            _openLoops--;
-        }
-
-        if (Interlocked.Exchange(ref _firstRunError, null) is { } thrown)
-            ExceptionDispatchInfo.Throw(thrown);
-    }
-
     private ArchEntity GetAlive(Entity entity)
     {
         ArchEntity arch = Unsafe.BitCast<Entity, ArchEntity>(entity);
@@ -367,15 +215,6 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     }
 
     /// <summary>
-    /// Reading is the world's thread's too, but during a run, on whichever thread a chunk runs.
-    /// </summary>
-    private void ThrowIfCannotRead()
-    {
-        if (_openLoops == 0)
-            ThrowIfNotWorldThread();
-    }
-
-    /// <summary>
     /// Changing which components an entity has is the world's thread's, and never while a loop is open.
     /// </summary>
     private void ThrowIfCannotChange()
@@ -385,39 +224,8 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
             return;
 
         throw new InvalidOperationException(
-            "An entity's components cannot change during a query's loop or a run: fill a list of your own and apply it "
-                + "after."
+            "An entity's components cannot change during a query's loop: fill a list of your own and apply it after."
         );
-    }
-
-    /// <summary>
-    /// A run over one Arch chunk on one of Arch's job threads, cut down to the components the run looks at. What it
-    /// throws is kept for the world's thread, rather than ending the job thread and the process with it.
-    /// </summary>
-    private readonly struct ChunkJob<TState, TChunk>(
-        ArchEcsGem ecs,
-        TState state,
-        Func<Chunk, TChunk> cut,
-        EcsChunkRun<TState, TChunk> run
-    ) : IChunkJob
-        where TChunk : allows ref struct
-    {
-        [SuppressMessage(
-            "Design",
-            "CA1031:Do not catch general exception types",
-            Justification = "What a chunk throws is thrown on the world's thread once the run is done."
-        )]
-        public void Execute(ref Chunk chunk)
-        {
-            try
-            {
-                run(in state, cut(chunk));
-            }
-            catch (Exception ex)
-            {
-                Interlocked.CompareExchange(ref ecs._firstRunError, ex, null);
-            }
-        }
     }
 
     /// <summary>
@@ -431,15 +239,13 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     }
 
     /// <summary>
-    /// The query over the entities with a <typeparamref name="T1"/> and the signature of an entity with just that,
-    /// described once, and how a chunk is cut down to those components.
+    /// The query over the entities with a <typeparamref name="T1"/>, described once, and how a chunk is cut down to
+    /// those components.
     /// </summary>
     private static class All<T1>
         where T1 : unmanaged, IComponent
     {
         internal static readonly QueryDescription Description = new QueryDescription().WithAll<T1>();
-
-        internal static readonly Signature Signature = new(Component<T1>.ComponentType);
 
         internal static EcsChunk<T1> Cut(Chunk chunk) => new(GetEntities(chunk), GetColumn<T1>(chunk));
     }
@@ -453,45 +259,8 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     {
         internal static readonly QueryDescription Description = new QueryDescription().WithAll<T1, T2>();
 
-        internal static readonly Signature Signature = new(Component<T1>.ComponentType, Component<T2>.ComponentType);
-
         internal static EcsChunk<T1, T2> Cut(Chunk chunk) =>
             new(GetEntities(chunk), GetColumn<T1>(chunk), GetColumn<T2>(chunk));
-    }
-
-    /// <summary>
-    /// <see cref="All{T1}"/> with all three components; no batch makes them, so it has no signature.
-    /// </summary>
-    private static class All<T1, T2, T3>
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent
-    {
-        internal static readonly QueryDescription Description = new QueryDescription().WithAll<T1, T2, T3>();
-
-        internal static EcsChunk<T1, T2, T3> Cut(Chunk chunk) =>
-            new(GetEntities(chunk), GetColumn<T1>(chunk), GetColumn<T2>(chunk), GetColumn<T3>(chunk));
-    }
-
-    /// <summary>
-    /// <see cref="All{T1, T2, T3}"/> with all four components.
-    /// </summary>
-    private static class All<T1, T2, T3, T4>
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent
-        where T4 : unmanaged, IComponent
-    {
-        internal static readonly QueryDescription Description = new QueryDescription().WithAll<T1, T2, T3, T4>();
-
-        internal static EcsChunk<T1, T2, T3, T4> Cut(Chunk chunk) =>
-            new(
-                GetEntities(chunk),
-                GetColumn<T1>(chunk),
-                GetColumn<T2>(chunk),
-                GetColumn<T3>(chunk),
-                GetColumn<T4>(chunk)
-            );
     }
 
     /// <summary>

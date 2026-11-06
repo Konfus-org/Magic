@@ -25,9 +25,9 @@ public readonly record struct SamplerDescription
     public TextureWrap Wrap { get; init; } = TextureWrap.Repeat;
 
     /// <summary>
-    /// Whether samples blend between mip levels; off reads the nearest level.
+    /// How a sample picks between mip levels: a blend of the two nearest, or the nearest alone.
     /// </summary>
-    public bool HasMipmapBlend { get; init; } = true;
+    public TextureFilter MipFilter { get; init; }
 
     /// <summary>
     /// Samples taken along a surface seen at a slant, 1 to 16; 1 is none.
