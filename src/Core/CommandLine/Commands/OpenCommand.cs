@@ -67,7 +67,7 @@ internal static class OpenCommand
             }
 
             Result opened = await queue
-                .ChangeWorldAsync(() => world.OpenAsync(domain, DomainOpenMode.Replace, null, CancellationToken.None))
+                .ChangeWorldAsync(() => world.OpenAsync(domain, null, CancellationToken.None))
                 .ConfigureAwait(false);
             if (!opened.Ok)
                 Log.Error($"{path} did not open: {opened.Error}");

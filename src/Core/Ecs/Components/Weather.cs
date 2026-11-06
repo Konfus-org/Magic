@@ -16,5 +16,5 @@ namespace Magic.Ecs.Components;
 /// </summary>
 public record struct Weather : IComponent
 {
-    public RenderEffects<IWeatherEffect> Effects;
+    public WeatherEffects Effects;
 }
