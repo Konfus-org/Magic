@@ -10,9 +10,6 @@
     <!-- SDL_image and bc7enc are C APIs: their streams, surfaces and blocks are pointers. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
-  <ItemGroup>
-    <AssemblyMetadata Include="Magic.Author" Value="$(Authors)" />
-  </ItemGroup>
   <!-- bc7enc: what encodes the texels into BC7 blocks. One C file with no build of its own, so built from its source, which
        has no tags: pinned to the archive of its repository's last commit. -->
   <ItemGroup>

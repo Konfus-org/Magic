@@ -9,9 +9,6 @@
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>
   <ItemGroup>
-    <AssemblyMetadata Include="Magic.Author" Value="$(Authors)" />
-  </ItemGroup>
-  <ItemGroup>
     <PackageReference Include="Arch" />
   </ItemGroup>
   <ItemGroup>

@@ -11,9 +11,6 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
-    <AssemblyMetadata Include="Magic.Author" Value="$(Authors)" />
-  </ItemGroup>
-  <ItemGroup>
     <!-- The API over the system's Vulkan loader; the one native library that is a package (CODE_STANDARDS, Ground rules). -->
     <PackageReference Include="Vortice.Vulkan" />
   </ItemGroup>

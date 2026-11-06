@@ -333,9 +333,9 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
             {
                 void* loaded;
                 fixed (
-                    byte* name = Encoding.UTF8.GetBytes(source.Name + "\0"),
-                        path = Encoding.UTF8.GetBytes(source.Path + "\0"),
-                        text = Encoding.UTF8.GetBytes(source.Source + "\0")
+                    byte* name = CString.ToBytes(source.Name),
+                        path = CString.ToBytes(source.Path),
+                        text = CString.ToBytes(source.Source)
                 )
                 {
                     loaded = Slang.LoadModuleFromSourceString(session, name, path, text, &diagnostics);
@@ -354,7 +354,7 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
             // The entry point, composed with its module and the type arguments' modules into one program, so a type
             // argument is found in the program's own layout.
             void* entryPoint;
-            fixed (byte* entryName = Encoding.UTF8.GetBytes(entry.Name + "\0"))
+            fixed (byte* entryName = CString.ToBytes(entry.Name))
             {
                 result = Slang.FindEntryPointByName(module, entryName, &entryPoint);
             }
@@ -392,7 +392,7 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
                 for (int i = 0; i < typeArguments.Count; i++)
                 {
                     void* type;
-                    fixed (byte* typeName = Encoding.UTF8.GetBytes(typeArguments[i].Type + "\0"))
+                    fixed (byte* typeName = CString.ToBytes(typeArguments[i].Type))
                     {
                         type = Slang.spReflection_FindTypeByName(layout, typeName);
                     }

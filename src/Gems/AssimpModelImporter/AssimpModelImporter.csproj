@@ -10,9 +10,6 @@
     <!-- assimp is a C API: its scene is a tree of pointers. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
-  <ItemGroup>
-    <AssemblyMetadata Include="Magic.Author" Value="$(Authors)" />
-  </ItemGroup>
   <!-- The three importers alone, with assimp's own zlib, as a shared library named plainly on every platform. The
        headers its build generates from templates are made from those templates for the bindings. Unbound are the
        macros that name an enum's members, which C# cannot make constants of. -->

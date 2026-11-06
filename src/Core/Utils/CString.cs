@@ -1,10 +1,10 @@
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace Magic.SdlBindings;
+namespace Magic.Utils;
 
 /// <summary>
-/// Text at the C boundary: a C string is UTF-8 bytes ending in a zero, which the binding takes and gives as
+/// Text at the C boundary: a C string is UTF-8 bytes ending in a zero, which a native API takes and gives as
 /// <c>byte*</c>.
 /// </summary>
 public static class CString
