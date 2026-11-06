@@ -10,15 +10,14 @@ namespace Magic.Ecs;
 /// </para>
 /// <para>
 /// The world is the thread's that made the gem providing it: every call is made there, or throws. Work on another
-/// thread hands what it built to that thread as data, in a batch where it can (<see cref="Create{T1}"/>). The one
-/// exception is reading: while a <see cref="Run{TState}"/> runs, it may read other entities (<see cref="IsAlive"/>,
-/// <see cref="Has{T}"/>, <see cref="Get{T}"/>) on whichever thread it is on.
+/// thread hands what it built to that thread as data. The one exception is reading: while a <see cref="Run{TState}"/>
+/// runs, it may read other entities (<see cref="IsAlive"/>, <see cref="Has{T}"/>, <see cref="Get{T}"/>) on whichever
+/// thread it is on.
 /// </para>
 /// <para>
 /// Changing which components an entity has (<see cref="Create()"/>, <see cref="Destroy"/>, <see cref="Remove{T}"/>, or
-/// <see cref="Set{T}"/> of one it lacks) moves it between columns, so it throws during a query's loop or a run: record
-/// it in an <see cref="EntityCommands"/>, and apply that after. Every call but <see cref="IsAlive"/> and
-/// <see cref="Has{T}"/> throws for an entity that is not alive.
+/// <see cref="Set{T}"/> of one it lacks) moves it between columns, so it throws during a query's loop or a run; make
+/// it after. Every call but <see cref="IsAlive"/> and <see cref="Has{T}"/> throws for an entity that is not alive.
 /// </para>
 /// </summary>
 public interface IEcs
@@ -30,24 +29,9 @@ public interface IEcs
 
     /// <summary>
     /// A new entity with <paramref name="components"/>, each of its own type: what a file or a save made, known only as
-    /// the program runs. It boxes; a batch <see cref="Create{T1}"/> is for what is built in bulk.
+    /// the program runs. It boxes.
     /// </summary>
     Entity Create(ReadOnlySpan<IComponent> components);
-
-    /// <summary>
-    /// One new entity per element of <paramref name="first"/>, each with the component at its index, written into
-    /// <paramref name="created"/>: a batch made in one go rather than one entity and one component at a time, for what
-    /// was built on another thread. The spans are the same length.
-    /// </summary>
-    void Create<T1>(ReadOnlySpan<T1> first, Span<Entity> created)
-        where T1 : unmanaged, IComponent;
-
-    /// <summary>
-    /// <see cref="Create{T1}"/> with two components each.
-    /// </summary>
-    void Create<T1, T2>(ReadOnlySpan<T1> first, ReadOnlySpan<T2> second, Span<Entity> created)
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent;
 
     /// <summary>
     /// Destroys the entity and its components. Its slot goes to a later entity, with a new

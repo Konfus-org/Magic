@@ -111,37 +111,6 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     public IComponent[] GetComponents(Entity entity) =>
         [.. _world.GetAllComponents(GetAlive(entity)).Cast<IComponent>()];
 
-    public void Create<T1>(ReadOnlySpan<T1> first, Span<Entity> created)
-        where T1 : unmanaged, IComponent
-    {
-        Span<ArchEntity> made = CreateBatch(created, first.Length, All<T1>.Signature);
-        for (int i = 0; i < made.Length; i++)
-        {
-            _world.Set(made[i], in first[i]);
-        }
-    }
-
-    public void Create<T1, T2>(ReadOnlySpan<T1> first, ReadOnlySpan<T2> second, Span<Entity> created)
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-    {
-        if (second.Length != first.Length)
-        {
-            throw new ArgumentException(
-                $"A batch's spans are the same length: {first.Length} {typeof(T1).Name}, "
-                    + $"{second.Length} {typeof(T2).Name}.",
-                nameof(second)
-            );
-        }
-
-        Span<ArchEntity> made = CreateBatch(created, first.Length, All<T1, T2>.Signature);
-        for (int i = 0; i < made.Length; i++)
-        {
-            _world.Set(made[i], in first[i]);
-            _world.Set(made[i], in second[i]);
-        }
-    }
-
     public void Destroy(Entity entity)
     {
         ThrowIfCannotChange();
@@ -304,28 +273,6 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     }
 
     /// <summary>
-    /// <paramref name="count"/> new entities of <paramref name="signature"/>, made straight into
-    /// <paramref name="created"/>, as Arch's.
-    /// </summary>
-    private Span<ArchEntity> CreateBatch(Span<Entity> created, int count, in Signature signature)
-    {
-        if (created.Length != count)
-        {
-            throw new ArgumentException(
-                $"A batch makes one entity per component: {count} components, room for {created.Length} entities.",
-                nameof(created)
-            );
-        }
-
-        ThrowIfCannotChange();
-        Span<ArchEntity> made = MemoryMarshal.Cast<Entity, ArchEntity>(created);
-        if (count > 0)
-            _world.Create(made, in signature, count);
-
-        return made;
-    }
-
-    /// <summary>
     /// Runs <paramref name="job"/> on every chunk <paramref name="description"/> matches, on Arch's job threads, and
     /// throws what a chunk threw once they are all done.
     /// </summary>
@@ -431,15 +378,13 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     }
 
     /// <summary>
-    /// The query over the entities with a <typeparamref name="T1"/> and the signature of an entity with just that,
-    /// described once, and how a chunk is cut down to those components.
+    /// The query over the entities with a <typeparamref name="T1"/>, described once, and how a chunk is cut down to
+    /// those components.
     /// </summary>
     private static class All<T1>
         where T1 : unmanaged, IComponent
     {
         internal static readonly QueryDescription Description = new QueryDescription().WithAll<T1>();
-
-        internal static readonly Signature Signature = new(Component<T1>.ComponentType);
 
         internal static EcsChunk<T1> Cut(Chunk chunk) => new(GetEntities(chunk), GetColumn<T1>(chunk));
     }
@@ -453,14 +398,12 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     {
         internal static readonly QueryDescription Description = new QueryDescription().WithAll<T1, T2>();
 
-        internal static readonly Signature Signature = new(Component<T1>.ComponentType, Component<T2>.ComponentType);
-
         internal static EcsChunk<T1, T2> Cut(Chunk chunk) =>
             new(GetEntities(chunk), GetColumn<T1>(chunk), GetColumn<T2>(chunk));
     }
 
     /// <summary>
-    /// <see cref="All{T1}"/> with all three components; no batch makes them, so it has no signature.
+    /// <see cref="All{T1}"/> with all three components.
     /// </summary>
     private static class All<T1, T2, T3>
         where T1 : unmanaged, IComponent
