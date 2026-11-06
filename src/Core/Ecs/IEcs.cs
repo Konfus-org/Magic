@@ -5,28 +5,21 @@ namespace Magic.Ecs;
 /// that implements <see cref="IComponent"/>, which the ECS stores in columns rather than in managed objects.
 /// <para>
 /// Work over many entities is a system: a function over chunks, the entities stored together, which a gem calls from
-/// its own hook, through <see cref="Query()"/> on its own thread, or through <see cref="Run{TState}"/> on the ECS's
-/// worker threads.
+/// its own hook through <see cref="Query()"/>.
 /// </para>
 /// <para>
 /// The world is the thread's that made the gem providing it: every call is made there, or throws. Work on another
-/// thread hands what it built to that thread as data. The one exception is reading: while a <see cref="Run{TState}"/>
-/// runs, it may read other entities (<see cref="IsAlive"/>, <see cref="Has{T}"/>, <see cref="Get{T}"/>) on whichever
-/// thread it is on.
+/// thread hands what it built to that thread as data.
 /// </para>
 /// <para>
-/// Changing which components an entity has (<see cref="Create()"/>, <see cref="Destroy"/>, <see cref="Remove{T}"/>, or
-/// <see cref="Set{T}"/> of one it lacks) moves it between columns, so it throws during a query's loop or a run; make
-/// it after. Every call but <see cref="IsAlive"/> and <see cref="Has{T}"/> throws for an entity that is not alive.
+/// Changing which components an entity has (<see cref="Create(ReadOnlySpan{IComponent})"/>, <see cref="Destroy"/>,
+/// <see cref="Remove{T}"/>, or <see cref="Set{T}"/> of one it lacks) moves it between columns, so it throws during a
+/// query's loop; make it after. Every call but <see cref="IsAlive"/> and <see cref="Has{T}"/> throws for an entity that
+/// is not alive.
 /// </para>
 /// </summary>
 public interface IEcs
 {
-    /// <summary>
-    /// A new entity, with no components.
-    /// </summary>
-    Entity Create();
-
     /// <summary>
     /// A new entity with <paramref name="components"/>, each of its own type: what a file or a save made, known only as
     /// the program runs. It boxes.
@@ -92,60 +85,4 @@ public interface IEcs
     EcsQuery<T1, T2> Query<T1, T2>()
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent;
-
-    /// <summary>
-    /// <see cref="Query{T1}"/> over the entities that have all three components.
-    /// </summary>
-    EcsQuery<T1, T2, T3> Query<T1, T2, T3>()
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent;
-
-    /// <summary>
-    /// <see cref="Query{T1}"/> over the entities that have all four components.
-    /// </summary>
-    EcsQuery<T1, T2, T3, T4> Query<T1, T2, T3, T4>()
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent
-        where T4 : unmanaged, IComponent;
-
-    /// <summary>
-    /// Runs <paramref name="run"/> on every chunk of entities, spread over the ECS's worker threads, one chunk each,
-    /// and returns once every chunk is done. <paramref name="state"/> is what each run is handed, such as the frame,
-    /// so <paramref name="run"/> can be a delegate made once rather than a closure. A run writes only through its
-    /// chunk and adds up anything shared with <see cref="Interlocked"/>. What a chunk throws is thrown here, once the
-    /// others are done.
-    /// </summary>
-    void Run<TState>(in TState state, EcsChunkRun<TState, EcsChunk> run);
-
-    /// <summary>
-    /// <see cref="Run{TState}"/> over the entities that have a <typeparamref name="T1"/>.
-    /// </summary>
-    void Run<TState, T1>(in TState state, EcsChunkRun<TState, EcsChunk<T1>> run)
-        where T1 : unmanaged, IComponent;
-
-    /// <summary>
-    /// <see cref="Run{TState}"/> over the entities that have both components.
-    /// </summary>
-    void Run<TState, T1, T2>(in TState state, EcsChunkRun<TState, EcsChunk<T1, T2>> run)
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent;
-
-    /// <summary>
-    /// <see cref="Run{TState}"/> over the entities that have all three components.
-    /// </summary>
-    void Run<TState, T1, T2, T3>(in TState state, EcsChunkRun<TState, EcsChunk<T1, T2, T3>> run)
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent;
-
-    /// <summary>
-    /// <see cref="Run{TState}"/> over the entities that have all four components.
-    /// </summary>
-    void Run<TState, T1, T2, T3, T4>(in TState state, EcsChunkRun<TState, EcsChunk<T1, T2, T3, T4>> run)
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent
-        where T4 : unmanaged, IComponent;
 }

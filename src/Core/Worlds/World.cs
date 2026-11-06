@@ -200,7 +200,8 @@ public sealed class World : IEcs, IDisposable
     /// <summary>
     /// Puts <paramref name="prefab"/>, loaded first, in the world at <paramref name="at"/>: the entities it made, which are
     /// the caller's to destroy, and go when a domain replaces the world if they are still there. Why not, when it doesn't load
-    /// or no gem provides the ECS. Single entities need none of this: make them with <see cref="Create()"/>.
+    /// or no gem provides the ECS. Single entities need none of this: make them with
+    /// <see cref="Create(ReadOnlySpan{IComponent}, bool)"/>.
     /// </summary>
     public async Task<Result<ImmutableArray<Entity>>> SpawnAsync(
         Handle<Prefab> prefab,
@@ -265,9 +266,6 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <inheritdoc/>
-    public Entity Create() => Create([]);
-
-    /// <inheritdoc/>
     public void Destroy(Entity entity)
     {
         Ecs.Destroy(entity);
@@ -317,44 +315,6 @@ public sealed class World : IEcs, IDisposable
     public EcsQuery<T1, T2> Query<T1, T2>()
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent => Ecs.Query<T1, T2>();
-
-    /// <inheritdoc/>
-    public EcsQuery<T1, T2, T3> Query<T1, T2, T3>()
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent => Ecs.Query<T1, T2, T3>();
-
-    /// <inheritdoc/>
-    public EcsQuery<T1, T2, T3, T4> Query<T1, T2, T3, T4>()
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent
-        where T4 : unmanaged, IComponent => Ecs.Query<T1, T2, T3, T4>();
-
-    /// <inheritdoc/>
-    public void Run<TState>(in TState state, EcsChunkRun<TState, EcsChunk> run) => Ecs.Run(in state, run);
-
-    /// <inheritdoc/>
-    public void Run<TState, T1>(in TState state, EcsChunkRun<TState, EcsChunk<T1>> run)
-        where T1 : unmanaged, IComponent => Ecs.Run(in state, run);
-
-    /// <inheritdoc/>
-    public void Run<TState, T1, T2>(in TState state, EcsChunkRun<TState, EcsChunk<T1, T2>> run)
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent => Ecs.Run(in state, run);
-
-    /// <inheritdoc/>
-    public void Run<TState, T1, T2, T3>(in TState state, EcsChunkRun<TState, EcsChunk<T1, T2, T3>> run)
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent => Ecs.Run(in state, run);
-
-    /// <inheritdoc/>
-    public void Run<TState, T1, T2, T3, T4>(in TState state, EcsChunkRun<TState, EcsChunk<T1, T2, T3, T4>> run)
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent
-        where T4 : unmanaged, IComponent => Ecs.Run(in state, run);
 
     /// <summary>
     /// Changes the world for the prefabs and domains the assets read again, and lets a replace waiting for this frame go on.

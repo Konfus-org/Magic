@@ -30,26 +30,3 @@ public readonly ref struct EcsQuery<T1, T2>(IEnumerable<EcsChunk<T1, T2>> chunks
 {
     public IEnumerator<EcsChunk<T1, T2>> GetEnumerator() => chunks.GetEnumerator();
 }
-
-/// <summary>
-/// <see cref="EcsQuery"/> over the entities that have all three components.
-/// </summary>
-public readonly ref struct EcsQuery<T1, T2, T3>(IEnumerable<EcsChunk<T1, T2, T3>> chunks)
-    where T1 : unmanaged, IComponent
-    where T2 : unmanaged, IComponent
-    where T3 : unmanaged, IComponent
-{
-    public IEnumerator<EcsChunk<T1, T2, T3>> GetEnumerator() => chunks.GetEnumerator();
-}
-
-/// <summary>
-/// <see cref="EcsQuery"/> over the entities that have all four components.
-/// </summary>
-public readonly ref struct EcsQuery<T1, T2, T3, T4>(IEnumerable<EcsChunk<T1, T2, T3, T4>> chunks)
-    where T1 : unmanaged, IComponent
-    where T2 : unmanaged, IComponent
-    where T3 : unmanaged, IComponent
-    where T4 : unmanaged, IComponent
-{
-    public IEnumerator<EcsChunk<T1, T2, T3, T4>> GetEnumerator() => chunks.GetEnumerator();
-}
