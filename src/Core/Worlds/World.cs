@@ -33,7 +33,7 @@ internal readonly record struct Placement(EntityKey Key, ImmutableArray<ICompone
 
 /// <summary>
 /// The game world: what is in it, the one place to load content into it, and the way to its entities. Every entity call
-/// goes to the ECS a gem provides; for bulk work, fill a list of your own and <see cref="Apply"/> it. What comes and goes
+/// goes to the ECS a gem provides. What comes and goes
 /// does so one at a time, and each entity a domain placed is kept by its key, for saves and for when the domain goes. As the run starts it puts
 /// back the world the last run kept, or opens the entry point, without waiting for it, as frames run while it loads; as the
 /// run ends for a restart it keeps the world for the next; and it changes for what the assets say changed. Entity calls are for the main thread; the others, any.
@@ -231,7 +231,7 @@ public sealed class World : IEcs, IDisposable
     public Entity Create(ReadOnlySpan<IComponent> components, bool makeGlobal = false)
     {
         Entity made = makeGlobal ? Ecs.Create(WithGlobalTag(components).AsSpan()) : Ecs.Create(components);
-        CreateShading([made]);
+        CreateShading(made);
 
         return made;
     }
@@ -264,36 +264,8 @@ public sealed class World : IEcs, IDisposable
         return await RestoreAsync(bytes.Value, cancel).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Makes <paramref name="commands"/> now, then empties it for reuse: for a list of your own, straight after a query's
-    /// loop or a run. Throws during one, as the changes themselves would.
-    /// </summary>
-    public void Apply(EntityCommands commands)
-    {
-        ArgumentNullException.ThrowIfNull(commands);
-        commands.Apply(this);
-        commands.Clear();
-    }
-
     /// <inheritdoc/>
     public Entity Create() => Create([]);
-
-    /// <inheritdoc/>
-    public void Create<T1>(ReadOnlySpan<T1> first, Span<Entity> created)
-        where T1 : unmanaged, IComponent
-    {
-        Ecs.Create(first, created);
-        CreateShading(created);
-    }
-
-    /// <inheritdoc/>
-    public void Create<T1, T2>(ReadOnlySpan<T1> first, ReadOnlySpan<T2> second, Span<Entity> created)
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-    {
-        Ecs.Create(first, second, created);
-        CreateShading(created);
-    }
 
     /// <inheritdoc/>
     public void Destroy(Entity entity)
@@ -730,23 +702,20 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// One <see cref="ShadingInstance"/> per filled slot of each entity's renderer, for those made with one. Main thread.
+    /// One <see cref="ShadingInstance"/> per filled slot of the entity's renderer, when it was made with one. Main thread.
     /// </summary>
-    private void CreateShading(ReadOnlySpan<Entity> entities)
+    private void CreateShading(Entity entity)
     {
-        foreach (Entity entity in entities)
+        if (!Ecs.Has<Renderer>(entity))
+            return;
+
+        ReadOnlySpan<Handle<Material>> materials = Ecs.Get<Renderer>(entity).Materials;
+        for (int slot = 0; slot < materials.Length; slot++)
         {
-            if (!Ecs.Has<Renderer>(entity))
+            if (materials[slot] == Handle<Material>.None)
                 continue;
 
-            ReadOnlySpan<Handle<Material>> materials = Ecs.Get<Renderer>(entity).Materials;
-            for (int slot = 0; slot < materials.Length; slot++)
-            {
-                if (materials[slot] == Handle<Material>.None)
-                    continue;
-
-                _shading[(entity, slot)] = new ShadingInstance(materials[slot]);
-            }
+            _shading[(entity, slot)] = new ShadingInstance(materials[slot]);
         }
     }
 
