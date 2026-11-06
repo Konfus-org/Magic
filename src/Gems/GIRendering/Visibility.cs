@@ -11,7 +11,8 @@ internal readonly record struct RenderView(
     GpuBuffer Constants,
     GpuBuffer Instances,
     int InstanceCount,
-    FrameTargets Targets
+    FrameTargets Targets,
+    RenderGraph Graph
 );
 
 /// <summary>
@@ -19,13 +20,8 @@ internal readonly record struct RenderView(
 /// threshold and last frame's depth pyramid; the visible ones drawn into a visibility buffer; what the old pyramid hid
 /// retested against the new one; and every pixel's material resolved into the GBuffer.
 /// </summary>
-internal sealed class Visibility(
-    IGraphicsApi gpu,
-    RenderGraph graph,
-    GpuPipelines pipelines,
-    GeometryPools pools,
-    MaterialTable materials
-) : IDisposable
+internal sealed class Visibility(IGraphicsApi gpu, GpuPipelines pipelines, GeometryPools pools, MaterialTable materials)
+    : IDisposable
 {
     public const int MaxVisibleClusters = 1 << 18;
 
@@ -117,10 +113,10 @@ internal sealed class Visibility(
     /// <summary>
     /// The counts at zero and the retest dispatch at no groups, in a transfer pass.
     /// </summary>
-    public void ResetCounts()
+    public void ResetCounts(RenderGraph graph)
     {
         graph.Use(Counts, GpuAccess.CopyDestination);
-        graph.Recorder.FillBuffer(Counts, 0);
+        graph.FillBuffer(Counts, 0);
         graph.Upload(gpu, RetestArguments, [0u, 1u, 1u]);
     }
 
@@ -133,7 +129,7 @@ internal sealed class Visibility(
         // Cull: one group an instance over its clusters, what last frame's pyramid hid onto the retest list.
         int rows = (view.InstanceCount + CullGroupsPerRow - 1) / CullGroupsPerRow;
         _cullPass
-            .Run(new GpuConstants(view.Constants.Id, 0))
+            .Run(view.Graph, new GpuConstants(view.Constants.Id, 0))
             .Reads(view.Constants, view.Instances, pools.Clusters, view.Targets.Hzb)
             .Writes(Counts, VisibleClusters, DrawArguments, RetestList, RetestArguments)
             .Dispatch((uint)Math.Min(view.InstanceCount, CullGroupsPerRow), (uint)Math.Max(rows, 1));
@@ -142,7 +138,7 @@ internal sealed class Visibility(
 
         // Retest the list against the new pyramid, as many groups as the cull left in the retest arguments.
         _cullPass
-            .Run(new GpuConstants(view.Constants.Id, 1), "Retest clusters")
+            .Run(view.Graph, new GpuConstants(view.Constants.Id, 1), "Retest clusters")
             .Reads(view.Constants, view.Instances, pools.Clusters, view.Targets.Hzb, RetestList)
             .Writes(Counts, VisibleClusters, DrawArguments)
             .Indirect(RetestArguments)
@@ -158,7 +154,7 @@ internal sealed class Visibility(
 
         // Resolve each pixel's material into the GBuffer.
         _resolvePass
-            .Run(new GpuConstants(view.Constants.Id))
+            .Run(view.Graph, new GpuConstants(view.Constants.Id))
             .Reads(
                 view.Constants,
                 view.Instances,
@@ -184,6 +180,7 @@ internal sealed class Visibility(
     private void RecordDraw(in RenderView view, string name, TargetLoad load, ulong drawsOffset, ulong countOffset) =>
         _drawPass
             .Run(
+                view.Graph,
                 new GpuConstants(view.Constants.Id),
                 new GpuRenderTargets
                 {
@@ -205,7 +202,7 @@ internal sealed class Visibility(
         for (int level = 0; level < targets.HzbLevels; level++)
         {
             GpuPassRun buildHzbRun = _buildHzbPass
-                .Run(new GpuConstants(view.Constants.Id, (uint)level), name: $"Build depth pyramid {level}")
+                .Run(view.Graph, new GpuConstants(view.Constants.Id, (uint)level), name: $"Build depth pyramid {level}")
                 .Reads(view.Constants);
             if (level == 0)
                 buildHzbRun.Reads(targets.Depth);

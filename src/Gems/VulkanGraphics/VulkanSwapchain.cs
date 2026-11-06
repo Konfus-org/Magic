@@ -72,7 +72,7 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
         _acquired = (int)index;
         // What the image held is gone with the last present: it is drawn into from nothing.
         if (resources.Textures[_textures[_acquired].Id] is { } texture)
-            texture.Layouts[0] = VkImageLayout.Undefined;
+            texture.Accesses[0] = GpuAccess.None;
 
         return _textures[_acquired];
     }

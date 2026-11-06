@@ -1,4 +1,5 @@
 using Magic.Gpu;
+using Magic.Rendering;
 using Magic.Utils;
 
 namespace Magic.GIRendering;
@@ -63,16 +64,16 @@ internal sealed class SkyLuts(IGraphicsApi gpu, GpuPipelines pipelines) : IDispo
         return Result.Success();
     }
 
-    public void Record(in GpuConstants header, GpuBuffer frameConstants, GpuBuffer lightingConstants)
+    public void Record(RenderGraph graph, in GpuConstants header, GpuBuffer frameConstants, GpuBuffer lightingConstants)
     {
-        _transmittancePass.Run(header).Reads(lightingConstants).Writes(Transmittance).DispatchOver(256, 64);
+        _transmittancePass.Run(graph, header).Reads(lightingConstants).Writes(Transmittance).DispatchOver(256, 64);
         _multiScatteringPass
-            .Run(header)
+            .Run(graph, header)
             .Reads(lightingConstants, Transmittance)
             .Writes(MultiScattering)
             .DispatchOver(32, 32);
         _viewPass
-            .Run(header)
+            .Run(graph, header)
             .Reads(frameConstants, lightingConstants, Transmittance, MultiScattering)
             .Writes(View)
             .DispatchOver(192, 108);

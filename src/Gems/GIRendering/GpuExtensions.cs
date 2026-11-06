@@ -24,7 +24,7 @@ internal static class GpuExtensions
             GpuUpload upload = gpu.BeginUpload(bytes.Length);
             bytes.CopyTo(upload.Bytes);
             graph.Use(to, GpuAccess.CopyDestination);
-            graph.Recorder.CopyBuffer(upload.Buffer, upload.Offset, to, offset, (ulong)bytes.Length);
+            graph.CopyBuffer(upload.Buffer, upload.Offset, to, offset, (ulong)bytes.Length);
         }
 
         public void Upload<T>(IGraphicsApi gpu, GpuBuffer to, in T value)

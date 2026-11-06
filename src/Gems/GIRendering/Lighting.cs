@@ -1,4 +1,6 @@
 using System.Numerics;
+using Magic.Ecs;
+using Magic.Ecs.Components;
 using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Rendering;
@@ -14,7 +16,6 @@ namespace Magic.GIRendering;
 /// </summary>
 internal sealed class Lighting(
     IGraphicsApi gpu,
-    RenderGraph graph,
     GpuPipelines pipelines,
     SkyLuts sky,
     LightTiles lights,
@@ -57,13 +58,19 @@ internal sealed class Lighting(
     }
 
     /// <summary>
-    /// The frame's constants, lights and shadow denoiser's constants uploaded, in a transfer pass the caller opened.
+    /// The frame's constants and shadow denoiser's constants uploaded, in a transfer pass the caller opened, after the
+    /// lights' table.
     /// </summary>
-    public void Prepare(RenderWorld world, RenderCamera camera, RenderSun sun, FrameTargets targets)
+    public void Prepare(
+        RenderGraph graph,
+        EcsSnapshot<Sky> skies,
+        RenderCamera camera,
+        RenderSun sun,
+        FrameTargets targets
+    )
     {
-        _hasSky = world.HasSky;
-        lights.Prepare(world);
-        shadows?.Prepare();
+        _hasSky = skies.Count > 0;
+        shadows?.Prepare(graph);
         LightingConstants constants = new()
         {
             SunIlluminance = new Vector4(sun.Radiance, 0),
@@ -93,13 +100,13 @@ internal sealed class Lighting(
         FrameTargets targets = view.Targets;
         GpuConstants header = new(view.Constants.Id, 0, _constants.Id);
         if (_hasSky)
-            sky.Record(header, view.Constants, _constants);
+            sky.Record(view.Graph, header, view.Constants, _constants);
 
         lights.Record(view, header, _constants);
         shadows?.Record(view, header, _constants);
 
         GpuPassRun shade = _shadePass
-            .Run(header)
+            .Run(view.Graph, header)
             .Reads(
                 view.Constants,
                 _constants,

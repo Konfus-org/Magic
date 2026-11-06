@@ -20,7 +20,7 @@ using Magic.Worlds;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// Draws the world. <c>LateUpdate</c> reads what the frame draws out of the entities and publishes it; <c>Render</c>, on
+/// Draws the world. <c>LateUpdate</c> copies what the frame draws out of the entities and publishes it; <c>Render</c>, on
 /// the render thread, takes the newest published, records the frame in order, top to bottom, and shows it. As a domain
 /// replaces the world, it forgets what it drew before and holds the loading screen until what comes is on the GPU. It is
 /// public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
@@ -29,6 +29,11 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 {
     private const int DefaultWidth = 1280;
     private const int DefaultHeight = 720;
+
+    /// <summary>
+    /// What a surface facing the sun lands at in the picture before the tonemap, with no meter yet.
+    /// </summary>
+    private const float ExposureAtSun = 4;
 
     private readonly IGraphicsApi _gpu;
     private readonly Assets _assets;
@@ -40,7 +45,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly Channel<ScreenshotRequested> _screenshots = Channel.CreateUnbounded<ScreenshotRequested>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
     );
-    private readonly RenderGraph _graph;
     private readonly GpuPipelines _pipelines;
     private readonly GeometryPools _pools;
     private readonly TextureTable _textures;
@@ -50,9 +54,9 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly InstanceTable _instances;
 
     /// <summary>
-    /// The shading a model that failed is drawn with, every slot; null when there is no failure material.
+    /// The material a model that failed is drawn with, every slot; an empty slot when there is no failure material.
     /// </summary>
-    private readonly ShadingInstance? _failure;
+    private readonly MaterialInstance _failure;
     private readonly Visibility _visibility;
     private readonly FrameView _frameView;
     private readonly SkyLuts _sky;
@@ -60,7 +64,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly ShadowMask? _shadows;
     private readonly Lighting _lighting;
     private readonly SurfaceView _surfaceView;
-    private readonly IOverlay? _overlay;
     private readonly RendererDebugWindow? _debugWindow;
 
     /// <summary>
@@ -94,16 +97,13 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         Assets assets,
         IMeshPreprocessor meshes,
         IEcs ecs,
-        World world,
         Threads threads,
         App app,
         EventCoordinator events,
         IDebugUI? debugUI = null,
-        IOverlay? overlay = null,
         IInput? input = null
     )
     {
-        _overlay = overlay;
         _debugWindow = debugUI is null ? null : new RendererDebugWindow(debugUI, input);
         _gpu = gpu;
         _assets = assets;
@@ -111,24 +111,20 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _app = app;
         _events = events;
         _threads = threads;
-        _graph = new RenderGraph(gpu);
-        _pipelines = new GpuPipelines(gpu, _graph, shaders, assets);
-        _pools = new GeometryPools(gpu, _graph, meshes, assets, threads);
-        _textures = new TextureTable(gpu, _graph, assets, threads);
-        _materials = new MaterialTable(gpu, _graph, assets, _textures, threads);
-        _targets = new FrameTargets(gpu, _graph);
-        _instances = new InstanceTable(gpu, _graph, world);
-        Handle<Material> failure = assets.GetFailure<Material, Model>();
-        _failure = failure == Handle<Material>.None ? null : new ShadingInstance(failure);
-        _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu, _graph) : null;
-        _visibility = new Visibility(gpu, _graph, _pipelines, _pools, _materials);
-        _frameView = new FrameView(gpu, _graph, _pools, _materials, _visibility, _rayTracing);
+        _pipelines = new GpuPipelines(gpu, shaders, assets);
+        _pools = new GeometryPools(gpu, meshes, assets, threads);
+        _textures = new TextureTable(gpu, assets, threads);
+        _materials = new MaterialTable(gpu, assets, _textures, threads);
+        _targets = new FrameTargets(gpu);
+        _instances = new InstanceTable(gpu);
+        _failure = new MaterialInstance { Handle = assets.GetFailure<Material, Model>() };
+        _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu) : null;
+        _visibility = new Visibility(gpu, _pipelines, _pools, _materials);
+        _frameView = new FrameView(gpu, _pools, _materials, _visibility, _rayTracing);
         _sky = new SkyLuts(gpu, _pipelines);
-        _lightTiles = new LightTiles(gpu, _graph, _pipelines);
-        _shadows = _rayTracing is null
-            ? null
-            : new ShadowMask(gpu, _graph, _pipelines, _pools, _visibility, _lightTiles);
-        _lighting = new Lighting(gpu, _graph, _pipelines, _sky, _lightTiles, _shadows);
+        _lightTiles = new LightTiles(gpu, _pipelines);
+        _shadows = _rayTracing is null ? null : new ShadowMask(gpu, _pipelines, _pools, _visibility, _lightTiles);
+        _lighting = new Lighting(gpu, _pipelines, _sky, _lightTiles, _shadows);
         _surfaceView = new SurfaceView(_pipelines);
         StartAsync().FireAndForget();
     }
@@ -138,7 +134,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _stopping.Cancel();
         _stopping.Dispose();
         EndPreparing();
-        _graph.Dispose();
         _pipelines.Dispose();
         _targets.Dispose();
         _materials.Dispose();
@@ -169,14 +164,19 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     }
 
     /// <summary>
-    /// Reads what the frame draws out of the entities, with the window's size and the debug view, and publishes it for
-    /// <see cref="Render"/>, after the screenshots asked for.
+    /// Copies what the frame draws out of the entities and publishes it for <see cref="Render"/>, with the window's size
+    /// and the debug view, after the screenshots asked for.
     /// </summary>
     public void LateUpdate(in Frame frame)
     {
         RenderInputs back = _inputs.Back;
-        WorldCopy.Read(_ecs, back.World);
         _ecs.Snapshot(back.Renderers);
+        _ecs.Snapshot(back.Cameras);
+        _ecs.Snapshot(back.DirectionalLights);
+        _ecs.Snapshot(back.PointLights);
+        _ecs.Snapshot(back.SpotLights);
+        _ecs.Snapshot(back.RectLights);
+        _ecs.Snapshot(back.Skies);
         back.DebugView = _debugView;
         (back.Width, back.Height) = _app.Window is { Width: > 0, Height: > 0 } window
             ? (window.Width, window.Height)
@@ -190,9 +190,9 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     }
 
     /// <summary>
-    /// Draws the newest inputs published, or the last again when none are newer, and submits the frame.
+    /// Records the newest inputs published, or the last again when none are newer, into the frame's graph.
     /// </summary>
-    public void Render(in Frame frame)
+    public void Render(in Frame frame, RenderGraph graph)
     {
         if (_started is not { Ok: true })
             return;
@@ -222,41 +222,39 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             EndPreparing();
         }
 
-        _graph.BeginTransferPass("Upload arrivals");
-        _pools.Upload();
-        _textures.Upload();
-        _materials.Upload();
-        _graph.EndPass();
+        graph.BeginTransferPass("Upload arrivals");
+        _pools.Upload(graph);
+        _textures.Upload(graph);
+        _materials.Upload(graph);
+        graph.EndPass();
 
         // The frame's tables.
-        RenderCamera camera = inputs.World.Camera ?? new RenderCamera(new Transform(), 60, 0.05f);
-        RenderSun sun =
-            inputs.World.Sun ?? new RenderSun(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One, 1);
-        _graph.BeginTransferPass("Upload frame");
+        RenderCamera camera = GetCamera(inputs.Cameras);
+        RenderSun sun = GetSun(inputs.DirectionalLights);
+        graph.BeginTransferPass("Upload frame");
         bool hasChanges = _pools.HasArrivals || _instances.HasChanges;
-        _instances.Upload();
-        _rayTracing?.Prepare(_instances.Rows, _instances.Extras, hasChanges);
-        _frameView.Upload(camera, sun, frame.Index, _targets, _instances.Buffer, instanceCount);
-        _visibility.ResetCounts();
-        _lighting.Prepare(inputs.World, camera, sun, _targets);
-        _graph.EndPass();
+        _instances.Upload(graph);
+        _rayTracing?.Prepare(graph, _instances.Rows, _instances.Extras, hasChanges);
+        _frameView.Upload(graph, camera, sun, frame.Index, _targets, _instances.Buffer, instanceCount);
+        _visibility.ResetCounts(graph);
+        _lightTiles.Prepare(graph, inputs.PointLights, inputs.SpotLights, inputs.RectLights);
+        _lighting.Prepare(graph, inputs.Skies, camera, sun, _targets);
+        graph.EndPass();
 
         // The passes, in the order they run.
-        RenderView view = new(_frameView.Constants, _instances.Buffer, instanceCount, _targets);
+        RenderView view = new(_frameView.Constants, _instances.Buffer, instanceCount, _targets, graph);
         _visibility.Record(view);
         _lighting.Record(view);
         _surfaceView.Record(view, inputs.DebugView, sun.Exposure);
-        _overlay?.Record(_graph, _targets.Output);
 
         GpuTexture target = _gpu.WindowTarget;
         if (!target.IsNone)
         {
-            _graph.Forget(target);
-            _graph.BeginTransferPass("Show");
-            _graph.Use(_targets.Output, GpuAccess.CopySource);
-            _graph.Use(target, GpuAccess.CopyDestination);
-            _graph.Recorder.BlitTexture(_targets.Output, target);
-            _graph.EndPass();
+            graph.BeginTransferPass("Show");
+            graph.Use(_targets.Output, GpuAccess.CopySource);
+            graph.Use(target, GpuAccess.CopyDestination);
+            graph.BlitTexture(_targets.Output, target);
+            graph.EndPass();
         }
 
         // One readback buffer, so one screenshot a frame: the last asked for.
@@ -267,9 +265,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         }
 
         if (shot is not null)
-            Screenshot.RecordReadback(_graph, _targets);
+            Screenshot.RecordReadback(graph, _targets);
 
-        _gpu.Submit(_graph.Finish());
         if (!_hasDrawn)
         {
             _hasDrawn = true;
@@ -318,7 +315,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         ImmutableArray<Handle<Material>> materials =
         [
             .. renderers
-                .SelectMany(renderer => renderer.Materials.All)
+                .SelectMany(renderer => renderer.Materials.All.Select(slot => slot.Handle))
                 .Where(material => material != Handle<Material>.None)
                 .Distinct(),
         ];
@@ -335,6 +332,52 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         );
         _preparing = preparing;
         await preparing.Done.Task.WaitAsync(cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The first camera that draws into the window, else one at the origin.
+    /// </summary>
+    private static RenderCamera GetCamera(EcsSnapshot<Transform, Camera> cameras)
+    {
+        for (int i = 0; i < cameras.Count; i++)
+        {
+            Camera camera = cameras.Second[i];
+            if (camera.Target.IsWindow)
+                return new RenderCamera(cameras.First[i], camera.FieldOfView, camera.Near);
+        }
+
+        return new RenderCamera(new Transform(), 60, 0.05f);
+    }
+
+    /// <summary>
+    /// The directional light the frame is lit by: the sun while it is up, else the moon while it is up, else the first
+    /// there is, else a white light from above.
+    /// </summary>
+    private static RenderSun GetSun(EcsSnapshot<Transform, DirectionalLight> lights)
+    {
+        RenderSun sun = new(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One, 1);
+        int sunRank = -1;
+        for (int i = 0; i < lights.Count; i++)
+        {
+            DirectionalLight light = lights.Second[i];
+            Vector3 towards = -Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, lights.First[i].Rotation));
+            bool isUp = towards.Y > 0;
+            int rank = 0;
+            if (isUp && light.Mode == DirectionalLightMode.Sun)
+                rank = 2;
+            else if (isUp && light.Mode == DirectionalLightMode.Moon)
+                rank = 1;
+
+            if (rank <= sunRank)
+                continue;
+
+            Vector3 illuminance = new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity;
+            float exposure = light.Intensity > 0 ? ExposureAtSun / light.Intensity : 1;
+            sun = new RenderSun(towards, illuminance, exposure);
+            sunRank = rank;
+        }
+
+        return sun;
     }
 
     /// <summary>
@@ -359,12 +402,12 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             isPrepared &= _materials.HasArrived(material);
         }
 
-        if (!hasFailure || _failure is not { } failure)
+        if (!hasFailure || _failure.Handle == Handle<Material>.None)
             return isPrepared;
 
-        _materials.Load(failure.Material);
+        _materials.Load(_failure.Handle);
 
-        return isPrepared && _materials.HasArrived(failure.Material);
+        return isPrepared && _materials.HasArrived(_failure.Handle);
     }
 
     /// <summary>

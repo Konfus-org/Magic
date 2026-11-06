@@ -14,7 +14,6 @@ namespace Magic.GIRendering;
 /// </summary>
 internal sealed class ShadowMask(
     IGraphicsApi gpu,
-    RenderGraph graph,
     GpuPipelines pipelines,
     GeometryPools pools,
     Visibility visibility,
@@ -66,8 +65,7 @@ internal sealed class ShadowMask(
     public void ClearHistory() => _hasHistory = false;
 
     /// <summary>
-    /// The masks and the denoiser's targets made again for a picture of a size, with no history; the old ones destroyed
-    /// and forgotten by the graph.
+    /// The masks and the denoiser's targets made again for a picture of a size, with no history; the old ones destroyed.
     /// </summary>
     public Result Resize(int width, int height)
     {
@@ -136,7 +134,7 @@ internal sealed class ShadowMask(
     /// Last frame's mask and moments kept to blend with, and the denoiser's constants uploaded, in a transfer pass the
     /// caller opened.
     /// </summary>
-    public void Prepare()
+    public void Prepare(RenderGraph graph)
     {
         (Mask, _previousMask) = (_previousMask, Mask);
         (_moments, _previousMoments) = (_previousMoments, _moments);
@@ -162,7 +160,7 @@ internal sealed class ShadowMask(
     {
         FrameTargets targets = view.Targets;
         _tracePass
-            .Run(header)
+            .Run(view.Graph, header)
             .Reads(
                 view.Constants,
                 lightingConstants,
@@ -186,7 +184,7 @@ internal sealed class ShadowMask(
             Y = _constants.Id,
         };
         _classifyPass
-            .Run(denoise)
+            .Run(view.Graph, denoise)
             .Reads(
                 view.Constants,
                 lightingConstants,
@@ -211,14 +209,14 @@ internal sealed class ShadowMask(
                 _ => (_sunBlend, _sunDenoised),
             };
             _filterPass
-                .Run(denoise with { W = (uint)pass }, _filterPassNames[pass])
+                .Run(view.Graph, denoise with { W = (uint)pass }, _filterPassNames[pass])
                 .Reads(view.Constants, _constants, _tileStates, targets.Depth, targets.GBufferNormal, input)
                 .Writes(output)
                 .DispatchOver(targets.Width, targets.Height);
         }
 
         _blendPass
-            .Run(denoise)
+            .Run(view.Graph, denoise)
             .Reads(
                 view.Constants,
                 lightingConstants,
@@ -241,7 +239,6 @@ internal sealed class ShadowMask(
                 [Traced, SunTiles, _constants, _tileStates, Mask, _previousMask]
         )
         {
-            graph.Forget(buffer);
             gpu.Destroy(buffer);
         }
 
@@ -250,7 +247,6 @@ internal sealed class ShadowMask(
                 [_sunBlend, _sunHistory, _sunDenoised, _moments, _previousMoments]
         )
         {
-            graph.Forget(texture);
             gpu.Destroy(texture);
         }
 

@@ -47,6 +47,8 @@ Write the engine as data flowing through functions, not objects calling each oth
   project lists them, and disposed in reverse.
 - A hook is what the engine calls on a gem each frame: `IGem`'s `Update`, `FixedUpdate`, `LateUpdate` and `Render`, in
   that order over the gems. `Render` runs on the render thread, which owns the GPU, and the others on the main thread.
+  `Render` records into the frame's `RenderGraph`, each pass in its `RenderLayer`, and Core hands it to the GPU provider
+  once every gem has.
   `LateUpdate` hands `Render` what it draws as data, the newest through a `Mailbox<T>` and what must not be lost
   through a `Channel<T>`. A gem implements the ones it needs. One that throws in a hook is logged
   and leaves every hook.

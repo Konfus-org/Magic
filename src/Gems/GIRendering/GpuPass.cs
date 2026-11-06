@@ -29,8 +29,6 @@ internal sealed class GpuPass
 
     public uint GroupSizeY { get; internal set; }
 
-    internal required RenderGraph Graph { get; init; }
-
     internal required string Module { get; init; }
 
     /// <summary>
@@ -55,11 +53,11 @@ internal sealed class GpuPass
     /// <summary>
     /// Starts it as a compute pass, under <paramref name="name"/> when one run differs from another.
     /// </summary>
-    public GpuPassRun Run(in GpuConstants header, string? name = null)
+    public GpuPassRun Run(RenderGraph graph, in GpuConstants header, string? name = null)
     {
-        Graph.BeginComputePass(name ?? Name);
+        graph.BeginComputePass(name ?? Name);
 
-        return new GpuPassRun(this, header);
+        return new GpuPassRun(graph, this, header);
     }
 
     /// <summary>
@@ -71,11 +69,11 @@ internal sealed class GpuPass
     /// <summary>
     /// Starts it as a draw pass into <paramref name="targets"/>.
     /// </summary>
-    public GpuPassRun Run(in GpuConstants header, in GpuRenderTargets targets, string? name = null)
+    public GpuPassRun Run(RenderGraph graph, in GpuConstants header, in GpuRenderTargets targets, string? name = null)
     {
-        Graph.BeginDrawPass(name ?? Name, targets);
+        graph.BeginDrawPass(name ?? Name, targets);
 
-        return new GpuPassRun(this, header);
+        return new GpuPassRun(graph, this, header);
     }
 }
 
@@ -84,14 +82,14 @@ internal sealed class GpuPass
 /// </summary>
 internal readonly ref struct GpuPassRun
 {
-    private readonly GpuPass _pass;
     private readonly RenderGraph _graph;
+    private readonly GpuPass _pass;
     private readonly GpuConstants _header;
 
-    internal GpuPassRun(GpuPass pass, in GpuConstants header)
+    internal GpuPassRun(RenderGraph graph, GpuPass pass, in GpuConstants header)
     {
         _pass = pass;
-        _graph = pass.Graph;
+        _graph = graph;
         _header = header;
     }
 
@@ -118,7 +116,7 @@ internal readonly ref struct GpuPassRun
     public void Dispatch(uint groupsX, uint groupsY = 1, uint groupsZ = 1)
     {
         Bind();
-        _graph.Recorder.Dispatch(groupsX, groupsY, groupsZ);
+        _graph.Dispatch(groupsX, groupsY, groupsZ);
         _graph.EndPass();
     }
 
@@ -134,7 +132,7 @@ internal readonly ref struct GpuPassRun
     public void DispatchIndirect(GpuBuffer arguments, ulong offset)
     {
         Bind();
-        _graph.Recorder.DispatchIndirect(arguments, offset);
+        _graph.DispatchIndirect(arguments, offset);
         _graph.EndPass();
     }
 
@@ -148,7 +146,7 @@ internal readonly ref struct GpuPassRun
     )
     {
         Bind();
-        _graph.Recorder.DrawIndirectCount(arguments, argumentsOffset, counts, countOffset, maxDraws, stride);
+        _graph.DrawIndirectCount(arguments, argumentsOffset, counts, countOffset, maxDraws, stride);
         _graph.EndPass();
     }
 
@@ -167,7 +165,7 @@ internal readonly ref struct GpuPassRun
 
     private void Bind()
     {
-        _graph.Recorder.BindPipeline(_pass.Pipeline);
-        _graph.Recorder.PushConstants(_header);
+        _graph.BindPipeline(_pass.Pipeline);
+        _graph.PushConstants(_header);
     }
 }

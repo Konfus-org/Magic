@@ -54,6 +54,7 @@ internal sealed class SurfaceView(GpuPipelines pipelines)
         FrameTargets targets = view.Targets;
         _showPass
             .Run(
+                view.Graph,
                 new GpuConstants(
                     view.Constants.Id,
                     (uint)debugView,

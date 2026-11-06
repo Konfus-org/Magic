@@ -31,8 +31,8 @@ Set these in the console with `set GIRendering.<name>=<value>`. A wrong value lo
 - `window` is `true` or `false`, and opens the Rendering window.
 
 With a gem that provides the debug UI, F2 opens the Rendering window, which chooses the view. F5 and F6 step through the
-views, and a line on screen names any view but the finished frame. With a gem that provides `IOverlay`, it is drawn over
-the finished picture.
+views, and a line on screen names any view but the finished frame. A screenshot is of the renderer's picture alone,
+without what other gems draw over it.
 
 `bake` in the console opens every domain under `Domains/` in turn and exits, so a release ships with the caches full.
 

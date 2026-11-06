@@ -13,7 +13,8 @@ using Magic.Utils;
 namespace Magic.ImGuiDebugUI;
 
 /// <summary>
-/// ImGui's frame drawn over a target from the newest copy the UI published, again until a newer comes: it takes in the
+/// ImGui's frame drawn over the window's image from the newest copy the UI published, again until a newer comes, in the
+/// overlay layer so it shows over the picture whichever gem drew it: it takes in the
 /// texture changes queued up to that frame, uploads the vertices and indices, and records the draws into a pass of their
 /// own, its shaders reading the vertices, the draw's texture and the constants through the heap. It owns every GPU object
 /// it draws with. Render thread, but the compile on its worker.
@@ -84,10 +85,10 @@ internal sealed class DebugUIOverlay : IDisposable
     }
 
     /// <summary>
-    /// The newest frame the UI published over <paramref name="target"/>, the texture changes up to it taken in first, and
-    /// nothing drawn while there is nothing to draw or the pipeline isn't made.
+    /// The newest frame the UI published over the window's image, the texture changes up to it taken in first, and
+    /// nothing drawn while there is no window, nothing to draw or the pipeline isn't made.
     /// </summary>
-    public void Record(RenderGraph graph, GpuTexture target)
+    public void Record(RenderGraph graph)
     {
         if (_frames.TryTake(out DebugUIFrame? newest))
         {
@@ -97,12 +98,20 @@ internal sealed class DebugUIOverlay : IDisposable
             _frame = newest;
         }
 
-        TextureDescription description = _gpu.GetDescription(target);
-        if (_frame is not { } frame || !TryCreateResources(description.Format))
+        if (_frame is not { } frame)
             return;
 
-        graph.BeginTransferPass("Debug UI: upload");
+        // The texture changes are taken whether or not there is a window to draw over, so none wait for good.
         TakeTextureChanges(frame.Index, graph);
+        GpuTexture target = _gpu.WindowTarget;
+        if (target.IsNone)
+            return;
+
+        TextureDescription description = _gpu.GetDescription(target);
+        if (!TryCreateResources(description.Format))
+            return;
+
+        graph.BeginTransferPass("Debug UI: upload", RenderLayer.Overlay);
         bool canDraw = frame.Indices.Count > 0 && TryUpload(frame, graph, description);
         graph.EndPass();
         if (canDraw)
@@ -215,8 +224,7 @@ internal sealed class DebugUIOverlay : IDisposable
     }
 
     /// <summary>
-    /// The texture changes queued up to <paramref name="frame"/>, in the transfer pass open: a texture made or filled
-    /// again, or destroyed. One let go of in a later frame may still be drawn in this one, so later changes wait.
+    /// The texture changes queued up to <paramref name="frame"/>: a texture made or filled again, or destroyed. One let go of in a later frame may still be drawn in this one, so later changes wait.
     /// </summary>
     private void TakeTextureChanges(uint frame, RenderGraph graph)
     {
@@ -226,7 +234,7 @@ internal sealed class DebugUIOverlay : IDisposable
             if (change.Pixels is { } pixels)
                 FillTexture(change, pixels, graph);
             else
-                DestroyTexture(change.Texture, graph);
+                DestroyTexture(change.Texture);
         }
     }
 
@@ -260,16 +268,18 @@ internal sealed class DebugUIOverlay : IDisposable
 
         GpuUpload upload = _gpu.BeginUpload(pixels.Length);
         pixels.CopyTo(upload.Bytes);
+        // A pass each, as a pass's barriers come before all of it and a texture filled twice in a frame needs one between.
+        graph.BeginTransferPass("Debug UI: texture", RenderLayer.Overlay);
         graph.Use(texture, GpuAccess.CopyDestination);
-        graph.Recorder.CopyBufferToTexture(upload.Buffer, upload.Offset, texture);
+        graph.CopyBufferToTexture(upload.Buffer, upload.Offset, texture);
+        graph.EndPass();
     }
 
-    private void DestroyTexture(ulong id, RenderGraph graph)
+    private void DestroyTexture(ulong id)
     {
         if (!_textures.Remove(id, out GpuTexture gone))
             return;
 
-        graph.Forget(gone);
         _gpu.Destroy(gone);
     }
 
@@ -283,10 +293,10 @@ internal sealed class DebugUIOverlay : IDisposable
         ReadOnlySpan<byte> indices = MemoryMarshal.AsBytes(CollectionsMarshal.AsSpan(frame.Indices));
         int vertexBytes = vertices.Length;
         int indexBytes = indices.Length;
-        if (!TryFit(ref _vertices, vertexBytes, BufferUsages.Storage, "Debug UI vertices", graph))
+        if (!TryFit(ref _vertices, vertexBytes, BufferUsages.Storage, "Debug UI vertices"))
             return false;
 
-        if (!TryFit(ref _indices, indexBytes, BufferUsages.Index, "Debug UI indices", graph))
+        if (!TryFit(ref _indices, indexBytes, BufferUsages.Index, "Debug UI indices"))
             return false;
 
         GpuUpload vertexUpload = _gpu.BeginUpload(vertexBytes);
@@ -294,9 +304,9 @@ internal sealed class DebugUIOverlay : IDisposable
         vertices.CopyTo(vertexUpload.Bytes);
         indices.CopyTo(indexUpload.Bytes);
         graph.Use(_vertices, GpuAccess.CopyDestination);
-        graph.Recorder.CopyBuffer(vertexUpload.Buffer, vertexUpload.Offset, _vertices, 0, (ulong)vertexBytes);
+        graph.CopyBuffer(vertexUpload.Buffer, vertexUpload.Offset, _vertices, 0, (ulong)vertexBytes);
         graph.Use(_indices, GpuAccess.CopyDestination);
-        graph.Recorder.CopyBuffer(indexUpload.Buffer, indexUpload.Offset, _indices, 0, (ulong)indexBytes);
+        graph.CopyBuffer(indexUpload.Buffer, indexUpload.Offset, _indices, 0, (ulong)indexBytes);
 
         DebugUIConstants constants = new()
         {
@@ -307,7 +317,7 @@ internal sealed class DebugUIOverlay : IDisposable
         GpuUpload constantUpload = _gpu.BeginUpload(DebugUIConstants.Bytes);
         MemoryMarshal.Write(constantUpload.Bytes, in constants);
         graph.Use(_constants, GpuAccess.CopyDestination);
-        graph.Recorder.CopyBuffer(constantUpload.Buffer, constantUpload.Offset, _constants, 0, DebugUIConstants.Bytes);
+        graph.CopyBuffer(constantUpload.Buffer, constantUpload.Offset, _constants, 0, DebugUIConstants.Bytes);
 
         return true;
     }
@@ -316,7 +326,7 @@ internal sealed class DebugUIOverlay : IDisposable
     /// Whether <paramref name="buffer"/> holds <paramref name="bytes"/>, made again at the power of two that does when it
     /// doesn't, so it seldom has to grow.
     /// </summary>
-    private bool TryFit(ref GpuBuffer buffer, int bytes, BufferUsages usage, string name, RenderGraph graph)
+    private bool TryFit(ref GpuBuffer buffer, int bytes, BufferUsages usage, string name)
     {
         if (!buffer.IsNone && _gpu.GetDescription(buffer).Bytes >= bytes)
             return true;
@@ -336,7 +346,6 @@ internal sealed class DebugUIOverlay : IDisposable
             return false;
         }
 
-        graph.Forget(buffer);
         _gpu.Destroy(buffer);
         buffer = made.Value;
 
@@ -356,7 +365,8 @@ internal sealed class DebugUIOverlay : IDisposable
     {
         graph.BeginDrawPass(
             "Debug UI",
-            new GpuRenderTargets { Colors = [new GpuTarget { Texture = target, Load = TargetLoad.Keep }] }
+            new GpuRenderTargets { Colors = [new GpuTarget { Texture = target, Load = TargetLoad.Keep }] },
+            RenderLayer.Overlay
         );
         graph.Use(_constants, GpuAccess.ShaderRead);
         graph.Use(_vertices, GpuAccess.ShaderRead);
@@ -366,8 +376,8 @@ internal sealed class DebugUIOverlay : IDisposable
             graph.Use(texture, GpuAccess.ShaderRead);
         }
 
-        graph.Recorder.BindPipeline(_pipeline);
-        graph.Recorder.BindIndexBuffer(_indices);
+        graph.BindPipeline(_pipeline);
+        graph.BindIndexBuffer(_indices);
         foreach (DebugUIDraw draw in frame.Draws)
         {
             RecordDraw(graph, draw, description);
@@ -390,9 +400,9 @@ internal sealed class DebugUIOverlay : IDisposable
         if (!_textures.TryGetValue(draw.Texture, out GpuTexture texture))
             return;
 
-        graph.Recorder.SetScissor((uint)left, (uint)top, (uint)(right - left), (uint)(bottom - top));
-        graph.Recorder.PushConstants(new GpuConstants(_constants.Id, draw.FirstVertex, texture.Id));
-        graph.Recorder.DrawIndexed(draw.IndexCount, firstIndex: draw.FirstIndex);
+        graph.SetScissor((uint)left, (uint)top, (uint)(right - left), (uint)(bottom - top));
+        graph.PushConstants(new GpuConstants(_constants.Id, draw.FirstVertex, texture.Id));
+        graph.DrawIndexed(draw.IndexCount, firstIndex: draw.FirstIndex);
     }
 
     /// <summary>
