@@ -8,6 +8,7 @@ using Magic.Files;
 using Magic.Files.Pipeline;
 using Magic.Files.Types;
 using Magic.Projects;
+using Magic.Serialization;
 using Magic.Utils;
 
 namespace Magic.PrefabImporter;
