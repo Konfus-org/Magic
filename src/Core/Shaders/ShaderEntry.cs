@@ -47,8 +47,6 @@ public sealed class CompiledShader
 
     public required string EntryPoint { get; init; }
 
-    public required ShaderStage Stage { get; init; }
-
     /// <summary>
     /// A compute entry's threads per group along each axis; 0 for another stage.
     /// </summary>

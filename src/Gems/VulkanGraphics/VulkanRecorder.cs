@@ -31,7 +31,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
             bool isDrawing = pass.Kind == GpuPassKind.Draw && BeginRendering(cmd, pass);
             foreach (GpuCommand command in pass.Commands)
             {
-                Run(frame, passIndex, command);
+                Run(frame, command);
             }
 
             if (isDrawing)
@@ -299,7 +299,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
     private void SetViewport(VkCommandBuffer cmd, uint x, uint y, uint width, uint height) =>
         device.Api.vkCmdSetViewport(cmd, x, y + height, width, -(float)height, 0, 1);
 
-    private void Run(VulkanFrames.Frame frame, int passIndex, in GpuCommand command)
+    private void Run(VulkanFrames.Frame frame, in GpuCommand command)
     {
         VkCommandBuffer cmd = frame.CommandBuffer;
         VkDeviceApi api = device.Api;
@@ -335,11 +335,6 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
                     api.vkCmdDispatchIndirect(cmd, arguments.Buffer, command.Offset);
 
                 break;
-            case GpuCommandKind.SetViewport:
-                if (command.Z > 0 && command.W > 0)
-                    SetViewport(cmd, command.X, command.Y, command.Z, command.W);
-
-                break;
             case GpuCommandKind.SetScissor:
                 if (command.Z > 0 && command.W > 0)
                     api.vkCmdSetScissor(cmd, (int)command.X, (int)command.Y, command.Z, command.W);
@@ -349,9 +344,6 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
                 if (resources.Buffers[command.Id] is { } indices)
                     api.vkCmdBindIndexBuffer(cmd, indices.Buffer, command.Offset, VkIndexType.Uint32);
 
-                break;
-            case GpuCommandKind.Draw:
-                api.vkCmdDraw(cmd, command.X, command.Y, command.Z, command.W);
                 break;
             case GpuCommandKind.DrawIndexed:
                 api.vkCmdDrawIndexed(cmd, command.X, command.Y, command.Z, 0, command.W);
@@ -364,21 +356,6 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
                         plain.Buffer,
                         command.Offset,
                         plainCount.Buffer,
-                        command.Offset2,
-                        command.X,
-                        command.Y
-                    );
-                }
-
-                break;
-            case GpuCommandKind.DrawIndexedIndirectCount:
-                if (resources.Buffers[command.Id] is { } draws && resources.Buffers[command.Id2] is { } count)
-                {
-                    api.vkCmdDrawIndexedIndirectCount(
-                        cmd,
-                        draws.Buffer,
-                        command.Offset,
-                        count.Buffer,
                         command.Offset2,
                         command.X,
                         command.Y
@@ -445,29 +422,6 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
                     LogMissing("CopyTextureToBuffer", command);
 
                 break;
-            case GpuCommandKind.CopyTexture:
-                if (resources.Textures[command.Id] is { } copied && resources.Textures[command.Id2] is { } onto)
-                {
-                    VkImageCopy region = new()
-                    {
-                        srcSubresource = GetLayers(copied, 0, 0),
-                        dstSubresource = GetLayers(onto, 0, 0),
-                        extent = GetExtent(copied, 0),
-                    };
-                    api.vkCmdCopyImage(
-                        cmd,
-                        copied.Image,
-                        VkImageLayout.TransferSrcOptimal,
-                        onto.Image,
-                        VkImageLayout.TransferDstOptimal,
-                        1,
-                        &region
-                    );
-                }
-                else
-                    LogMissing("CopyTexture", command);
-
-                break;
             case GpuCommandKind.BlitTexture:
                 if (resources.Textures[command.Id] is { } blitted && resources.Textures[command.Id2] is { } over)
                 {
@@ -503,14 +457,6 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
                         command.X
                     );
 
-                break;
-            case GpuCommandKind.ClearTexture:
-                if (resources.Textures[command.Id] is { } cleared)
-                    Clear(cmd, cleared, command.Constants);
-
-                break;
-            case GpuCommandKind.Timestamp:
-                frame.WriteTimestamp(command.Label, passIndex);
                 break;
             case GpuCommandKind.BuildAcceleration:
                 if (resources.Accelerations[command.Id] is { } acceleration)
@@ -580,30 +526,5 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
         };
         VkDependencyInfo afterInfo = new() { memoryBarrierCount = 1, pMemoryBarriers = &after };
         device.Api.vkCmdPipelineBarrier2(cmd, &afterInfo);
-    }
-
-    /// <summary>
-    /// Clears every level to the constants' bits, which Vulkan's union reads as whatever the format holds.
-    /// </summary>
-    private void Clear(VkCommandBuffer cmd, VulkanTexture texture, in GpuConstants constants)
-    {
-        VkImageSubresourceRange range = GetRange(texture);
-        if (texture.Description.Format.IsDepth)
-        {
-            VkClearDepthStencilValue depth = new(BitConverter.UInt32BitsToSingle(constants.X), 0);
-            device.Api.vkCmdClearDepthStencilImage(
-                cmd,
-                texture.Image,
-                VkImageLayout.TransferDstOptimal,
-                &depth,
-                1,
-                &range
-            );
-
-            return;
-        }
-
-        VkClearColorValue color = new(constants.X, constants.Y, constants.Z, constants.W);
-        device.Api.vkCmdClearColorImage(cmd, texture.Image, VkImageLayout.TransferDstOptimal, &color, 1, &range);
     }
 }

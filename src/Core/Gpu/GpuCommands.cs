@@ -24,12 +24,12 @@ public enum GpuPassKind : byte
     Compute,
 
     /// <summary>
-    /// Draws into <see cref="GpuPass.Targets"/>, with the pipelines, constants, viewport and index buffer they take.
+    /// Draws into <see cref="GpuPass.Targets"/>, with the pipelines, constants, scissor and index buffer they take.
     /// </summary>
     Draw,
 
     /// <summary>
-    /// Copies, clears and fills.
+    /// Copies, blits and fills.
     /// </summary>
     Transfer,
 }
@@ -174,21 +174,15 @@ public enum GpuCommandKind : byte
     PushConstants,
     Dispatch,
     DispatchIndirect,
-    SetViewport,
     SetScissor,
     BindIndexBuffer,
-    Draw,
     DrawIndexed,
     DrawIndirectCount,
-    DrawIndexedIndirectCount,
     CopyBuffer,
     CopyBufferToTexture,
     CopyTextureToBuffer,
-    CopyTexture,
     BlitTexture,
     FillBuffer,
-    ClearTexture,
-    Timestamp,
     BuildAcceleration,
 }
 
@@ -198,8 +192,6 @@ public enum GpuCommandKind : byte
 /// </summary>
 public readonly record struct GpuCommand
 {
-    public GpuCommand() { }
-
     public required GpuCommandKind Kind { get; init; }
 
     public uint Id { get; init; }
@@ -221,9 +213,4 @@ public readonly record struct GpuCommand
     public uint W { get; init; }
 
     public GpuConstants Constants { get; init; }
-
-    /// <summary>
-    /// A timestamp's name, which the GPU provider measures it under.
-    /// </summary>
-    public string Label { get; init; } = string.Empty;
 }

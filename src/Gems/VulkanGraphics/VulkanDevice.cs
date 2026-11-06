@@ -423,16 +423,6 @@ internal sealed unsafe class VulkanDevice : IDisposable
                 Limits = new GpuLimits
                 {
                     DeviceName = name,
-                    IsSoftware = kind == VkPhysicalDeviceType.Cpu,
-                    HeapCapacity = (int)
-                        Math.Min(
-                            VulkanHeap.Textures,
-                            Math.Min(
-                                properties12.maxDescriptorSetUpdateAfterBindSampledImages,
-                                properties12.maxDescriptorSetUpdateAfterBindStorageBuffers
-                            )
-                        ),
-                    MaxDispatchGroups = limits.maxComputeWorkGroupCount[0],
                     UploadAlignment = (int)Math.Max(limits.optimalBufferCopyOffsetAlignment, 16),
                     DeviceMemoryBytes = GetDeviceMemoryBytes(device),
                 },

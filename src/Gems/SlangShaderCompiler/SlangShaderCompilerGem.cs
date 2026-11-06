@@ -59,7 +59,7 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
     /// <summary>
     /// Raised when the bytes written change shape, and when the compiler's options or tag change.
     /// </summary>
-    public int Version => 2;
+    public int Version => 3;
 
     public unsafe void Dispose()
     {
@@ -139,13 +139,12 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
     public void Write(CompiledShader value, IBufferWriter<byte> bytes)
     {
         byte[] name = Encoding.UTF8.GetBytes(value.EntryPoint);
-        Span<byte> header = bytes.GetSpan(20);
-        BinaryPrimitives.WriteInt32LittleEndian(header, (int)value.Stage);
-        BinaryPrimitives.WriteUInt32LittleEndian(header[4..], value.GroupSizeX);
-        BinaryPrimitives.WriteUInt32LittleEndian(header[8..], value.GroupSizeY);
-        BinaryPrimitives.WriteUInt32LittleEndian(header[12..], value.GroupSizeZ);
-        BinaryPrimitives.WriteInt32LittleEndian(header[16..], name.Length);
-        bytes.Advance(20);
+        Span<byte> header = bytes.GetSpan(16);
+        BinaryPrimitives.WriteUInt32LittleEndian(header, value.GroupSizeX);
+        BinaryPrimitives.WriteUInt32LittleEndian(header[4..], value.GroupSizeY);
+        BinaryPrimitives.WriteUInt32LittleEndian(header[8..], value.GroupSizeZ);
+        BinaryPrimitives.WriteInt32LittleEndian(header[12..], name.Length);
+        bytes.Advance(16);
         bytes.Write(name);
         bytes.Write(value.Spirv.Span);
     }
@@ -153,17 +152,16 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
     public Result<CompiledShader> Read(ReadOnlySpan<byte> bytes)
     {
         // Bytes cut short throw from a slice, which the caches take as a dirty entry.
-        int nameLength = BinaryPrimitives.ReadInt32LittleEndian(bytes[16..]);
+        int nameLength = BinaryPrimitives.ReadInt32LittleEndian(bytes[12..]);
 
         return Result.Success(
             new CompiledShader
             {
-                Stage = (ShaderStage)BinaryPrimitives.ReadInt32LittleEndian(bytes),
-                GroupSizeX = BinaryPrimitives.ReadUInt32LittleEndian(bytes[4..]),
-                GroupSizeY = BinaryPrimitives.ReadUInt32LittleEndian(bytes[8..]),
-                GroupSizeZ = BinaryPrimitives.ReadUInt32LittleEndian(bytes[12..]),
-                EntryPoint = Encoding.UTF8.GetString(bytes.Slice(20, nameLength)),
-                Spirv = bytes[(20 + nameLength)..].ToArray(),
+                GroupSizeX = BinaryPrimitives.ReadUInt32LittleEndian(bytes),
+                GroupSizeY = BinaryPrimitives.ReadUInt32LittleEndian(bytes[4..]),
+                GroupSizeZ = BinaryPrimitives.ReadUInt32LittleEndian(bytes[8..]),
+                EntryPoint = Encoding.UTF8.GetString(bytes.Slice(16, nameLength)),
+                Spirv = bytes[(16 + nameLength)..].ToArray(),
             }
         );
     }
@@ -433,7 +431,6 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
                 {
                     Spirv = spirv,
                     EntryPoint = entry.Name,
-                    Stage = entry.Stage,
                     GroupSizeX = (uint)sizes[0],
                     GroupSizeY = (uint)sizes[1],
                     GroupSizeZ = (uint)sizes[2],
