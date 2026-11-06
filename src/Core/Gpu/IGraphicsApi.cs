@@ -51,7 +51,8 @@ public interface IGraphicsApi
     ulong GetAddress(GpuAcceleration acceleration);
 
     /// <summary>
-    /// Frees a resource once no frame in flight uses it. The handle is gone at once.
+    /// Frees a resource once no frame in flight uses it. The handle is gone at once. Destroying <c>None</c> does
+    /// nothing.
     /// </summary>
     void Destroy(GpuBuffer buffer);
 

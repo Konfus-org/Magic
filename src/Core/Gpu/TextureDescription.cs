@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace Magic.Gpu;
 
 /// <summary>
@@ -102,5 +104,5 @@ public readonly record struct TextureDescription
     /// <summary>
     /// How many levels a texture of <paramref name="width"/> by <paramref name="height"/> has down to one texel.
     /// </summary>
-    public static int GetFullLevels(int width, int height) => 1 + (int)Math.Floor(Math.Log2(Math.Max(width, height)));
+    public static int GetFullLevels(int width, int height) => 1 + BitOperations.Log2((uint)Math.Max(width, height));
 }
