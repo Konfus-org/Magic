@@ -187,8 +187,8 @@ internal sealed class Visibility(
                 new GpuConstants(view.Constants.Id),
                 new GpuRenderTargets
                 {
-                    Colors = [new GpuColorTarget { Texture = view.Targets.Visibility, Load = load }],
-                    Depth = new GpuDepthTarget { Texture = view.Targets.Depth, Load = load },
+                    Colors = [new GpuTarget { Texture = view.Targets.Visibility, Load = load }],
+                    Depth = new GpuTarget { Texture = view.Targets.Depth, Load = load },
                 },
                 name: name
             )

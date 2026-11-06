@@ -187,7 +187,7 @@ internal sealed class DebugUIOverlay : IDisposable
         if (_sampler.IsNone)
         {
             Result<GpuSampler> sampler = _gpu.CreateSampler(
-                new SamplerDescription { Wrap = TextureWrap.Clamp, HasMipmapBlend = false }
+                new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
             );
             if (!sampler.Ok)
                 return Result.Failure(sampler.Error);
@@ -356,7 +356,7 @@ internal sealed class DebugUIOverlay : IDisposable
     {
         graph.BeginDrawPass(
             "Debug UI",
-            new GpuRenderTargets { Colors = [new GpuColorTarget { Texture = target, Load = TargetLoad.Keep }] }
+            new GpuRenderTargets { Colors = [new GpuTarget { Texture = target, Load = TargetLoad.Keep }] }
         );
         graph.Use(_constants, GpuAccess.ShaderRead);
         graph.Use(_vertices, GpuAccess.ShaderRead);

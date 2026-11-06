@@ -138,7 +138,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _stopping.Cancel();
         _stopping.Dispose();
         EndPreparing();
-        _graph.Clear();
+        _graph.Dispose();
         _pipelines.Dispose();
         _targets.Dispose();
         _materials.Dispose();
@@ -251,7 +251,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         GpuTexture target = _gpu.WindowTarget;
         if (!target.IsNone)
         {
-            _graph.Import(target, GpuAccess.None);
+            _graph.Forget(target);
             _graph.BeginTransferPass("Show");
             _graph.Use(_targets.Output, GpuAccess.CopySource);
             _graph.Use(target, GpuAccess.CopyDestination);
