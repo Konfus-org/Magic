@@ -11,8 +11,6 @@ import Core.Frame;
 import Core.Math;
 import Core.Pack;
 import Scene.Instances;
-import Scene.Clusters;
-import Scene.Vertices;
 import Scene.Materials;
 import Scene.Visibility;
 import Surface.Surface;
@@ -42,42 +40,26 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
         return;
     }
 
-    ArrayRef<VisibleCluster> visible = { frame.visibleClusters };
-    VisibleCluster entry = visible[visibleIndex];
-    GpuInstance instance = LoadInstance(frame.instances, entry.instance);
-    GpuCluster cluster = LoadCluster(frame.clusters, entry.cluster);
-    float2 ndc = ToClip(GetTexelCenterUv(thread.xy, size));
-
-    uint first = cluster.indexOffset + triangle * 3u;
-    Vertex v0 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first));
-    Vertex v1 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first + 1u));
-    Vertex v2 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first + 2u));
-    float3 p0 = Relative(frame, ToWorld(instance.world, v0.position));
-    float3 p1 = Relative(frame, ToWorld(instance.world, v1.position));
-    float3 p2 = Relative(frame, ToWorld(instance.world, v2.position));
-    Barycentrics bary = ComputeBarycentrics(
-        mul(float4(p0, 1.0), frame.viewProjection),
-        mul(float4(p1, 1.0), frame.viewProjection),
-        mul(float4(p2, 1.0), frame.viewProjection),
-        ndc,
-        float2(size)
-    );
+    PixelTriangle shown = LoadPixelTriangle(frame, visibleIndex, triangle, ToClip(GetTexelCenterUv(thread.xy, size)));
+    float3 lambda = shown.bary.lambda;
 
     SurfaceInputs inputs;
-    inputs.position = Interpolate(p0, p1, p2, bary.lambda);
-    inputs.normal = ToWorldNormal(instance.world, Interpolate(v0.normal, v1.normal, v2.normal, bary.lambda));
-    inputs.tangent = ToWorldDirection(instance.world, Interpolate(v0.tangent, v1.tangent, v2.tangent, bary.lambda));
-    inputs.tangentSign = v0.tangentSign;
-    inputs.uv = Interpolate(v0.uv, v1.uv, v2.uv, bary.lambda);
-    inputs.uvDdx = Interpolate(v0.uv, v1.uv, v2.uv, bary.ddx);
-    inputs.uvDdy = Interpolate(v0.uv, v1.uv, v2.uv, bary.ddy);
+    inputs.position = Interpolate(shown.p0, shown.p1, shown.p2, lambda);
+    float3 normal = Interpolate(shown.v0.normal, shown.v1.normal, shown.v2.normal, lambda);
+    float3 tangent = Interpolate(shown.v0.tangent, shown.v1.tangent, shown.v2.tangent, lambda);
+    inputs.normal = ToWorldNormal(shown.instance.world, normal);
+    inputs.tangent = ToWorldDirection(shown.instance.world, tangent);
+    inputs.tangentSign = shown.v0.tangentSign;
+    inputs.uv = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, lambda);
+    inputs.uvDdx = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, shown.bary.ddx);
+    inputs.uvDdy = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, shown.bary.ddy);
     inputs.viewDirection = NormalizeSafe(-inputs.position, float3(0.0, 0.0, -1.0));
-    inputs.material = LoadMaterial(frame.materials, GetMaterial(instance, cluster.materialSlot));
+    inputs.material = LoadMaterial(frame.materials, GetMaterial(shown.instance, shown.cluster.materialSlot));
     inputs.sampler = inputs.material.baseColorSampler != 0u ? inputs.material.baseColorSampler : frame.defaultSampler;
     SurfaceOutputs surface = inputs.material.kind == MaterialKindFailure ? Failure.Evaluate(inputs) : M.Evaluate(inputs);
 
-    float3 model = Interpolate(v0.position, v1.position, v2.position, bary.lambda);
-    float3 previous = ToWorld(instance.previousWorld, model) - frame.previousCameraPosition.xyz;
+    float3 model = Interpolate(shown.v0.position, shown.v1.position, shown.v2.position, lambda);
+    float3 previous = ToWorld(shown.instance.previousWorld, model) - frame.previousCameraPosition.xyz;
     float4 previousClip = mul(float4(previous, 1.0), frame.previousViewProjection);
     float2 previousUv = ToUv(previousClip.xy / max(previousClip.w, Epsilon));
     velocityTarget.Store(thread.xy, float4(previousUv - unjittered, previousClip.w, 0.0));

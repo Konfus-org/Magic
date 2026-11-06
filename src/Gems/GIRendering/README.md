@@ -44,7 +44,7 @@ the finished picture.
   ([Shaders](../../Resources/Shaders/README.md)). The passes are at the folder's root, and what they share is under it:
   - `Core/Frame` is what every pass of a frame reads.
   - `Scene/` is the GPU tables and how to read them: the instance table, the pools of vertices, indices and clusters,
-    what the cull leaves for the draw and the resolve, and the cull's tests.
+    what the cull leaves for the draw and the resolve, the triangle a pixel shows, and the cull's tests.
   - `Scene/Lighting` is what the lighting passes share beyond the frame: the sun, the sky's tables and the HDR picture.
   - `Scene/Lights` is the light table and the bits of each tile of the screen that say which lights reach it.
   - `Scene/Shadows` is the shadow mask: how much of the sun and of each of its tile's first lights reaches a pixel,

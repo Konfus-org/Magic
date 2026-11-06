@@ -12,8 +12,6 @@ import Core.Pack;
 import Core.Random;
 import Core.Sampling;
 import Scene.Instances;
-import Scene.Clusters;
-import Scene.Vertices;
 import Scene.Visibility;
 import Scene.Lighting;
 import Scene.Lights;
@@ -56,30 +54,12 @@ float3 LiftOffTriangle(FrameConstants frame, uint id, float2 uv, float3 relative
     uint visibleIndex;
     uint triangle;
     DecodeVisibilityId(id, visibleIndex, triangle);
-    ArrayRef<VisibleCluster> visible = { frame.visibleClusters };
-    VisibleCluster entry = visible[visibleIndex];
-    GpuInstance instance = LoadInstance(frame.instances, entry.instance);
-    GpuCluster cluster = LoadCluster(frame.clusters, entry.cluster);
-
-    uint first = cluster.indexOffset + triangle * 3u;
-    Vertex v0 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first));
-    Vertex v1 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first + 1u));
-    Vertex v2 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first + 2u));
-    float3 p0 = Relative(frame, ToWorld(instance.world, v0.position));
-    float3 p1 = Relative(frame, ToWorld(instance.world, v1.position));
-    float3 p2 = Relative(frame, ToWorld(instance.world, v2.position));
-    float3 lambda = ComputeBarycentrics(
-        mul(float4(p0, 1.0), frame.viewProjection),
-        mul(float4(p1, 1.0), frame.viewProjection),
-        mul(float4(p2, 1.0), frame.viewProjection),
-        ToClip(uv),
-        float2(frame.width, frame.height)
-    ).lambda;
-
+    PixelTriangle shown = LoadPixelTriangle(frame, visibleIndex, triangle, ToClip(uv));
+    float3 lambda = shown.bary.lambda;
     return relative
-        + lambda.x * GetLift(relative - p0, ToWorldNormal(instance.world, v0.normal))
-        + lambda.y * GetLift(relative - p1, ToWorldNormal(instance.world, v1.normal))
-        + lambda.z * GetLift(relative - p2, ToWorldNormal(instance.world, v2.normal));
+        + lambda.x * GetLift(relative - shown.p0, ToWorldNormal(shown.instance.world, shown.v0.normal))
+        + lambda.y * GetLift(relative - shown.p1, ToWorldNormal(shown.instance.world, shown.v1.normal))
+        + lambda.z * GetLift(relative - shown.p2, ToWorldNormal(shown.instance.world, shown.v2.normal));
 }
 
 // A pixel's words: all lit for the sky and where there is nothing to hit.
