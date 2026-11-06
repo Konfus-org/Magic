@@ -63,17 +63,6 @@ public sealed class App : IDisposable
     public bool ShouldExitOnError { get; set; }
 
     /// <summary>
-    /// Pauses the application, simulation systems will not be run until this is set back to true.
-    /// Should not be used for a gameplay pause.
-    /// </summary>
-    public bool IsPaused { get; set; }
-
-    /// <summary>
-    /// Whether the app runs its project: from the command that opens one until <see cref="Exit"/>, across restarts.
-    /// </summary>
-    public bool IsRunning => Project is not null && !IsExiting;
-
-    /// <summary>
     /// Whether the process ends once the run does.
     /// </summary>
     public bool IsExiting => _exiting.IsCancellationRequested;

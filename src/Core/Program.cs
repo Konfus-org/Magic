@@ -58,7 +58,7 @@ internal static class Program
             Caches caches = new(files, app);
             using Assets assets = new(files, caches, app);
             using World world = new(assets, files, threads, app);
-            using Cli cli = new(app, files, events, assets, world);
+            Cli cli = new(app, files, events, assets, world);
 
             if (isLaunching)
             {

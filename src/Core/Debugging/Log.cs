@@ -244,7 +244,6 @@ public static class Log
         Minimal,
         Normal,
         Detailed,
-        Diagnostic,
     }
 
     public enum LoggingLevel
