@@ -23,7 +23,7 @@ internal record struct GpuInstance
     public Matrix4x4 InverseWorld;
 
     /// <summary>
-    /// <see cref="World"/> as it was last frame, for motion.
+    /// <see cref="World"/> before it last changed, for motion in the frame <see cref="MovedFrame"/>.
     /// </summary>
     public Matrix4x4 PreviousWorld;
 
@@ -41,7 +41,10 @@ internal record struct GpuInstance
 
     public uint ClusterCount;
 
-    public uint Padding0;
+    /// <summary>
+    /// The frame <see cref="World"/> last changed in: in any other, the instance stood still.
+    /// </summary>
+    public uint MovedFrame;
 
     public uint Padding1;
 

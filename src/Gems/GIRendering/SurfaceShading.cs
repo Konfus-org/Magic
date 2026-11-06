@@ -3,7 +3,7 @@ namespace Magic.GIRendering;
 /// <summary>
 /// The view's surfaces lit into the HDR picture, and the sky drawn where nothing was.
 /// </summary>
-internal sealed class Shading(GpuPipelines pipelines, Lighting lighting)
+internal sealed class SurfaceShading(GpuPipelines pipelines, Lighting lighting)
 {
     private readonly GpuPass _shadePass = pipelines.Compute(
         "Shade surfaces",

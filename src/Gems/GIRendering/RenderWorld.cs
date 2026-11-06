@@ -1,21 +1,15 @@
 using System.Numerics;
-using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Ecs.Components.Effects;
-using Magic.Files;
-using Magic.Files.Types;
 
 namespace Magic.GIRendering;
 
 /// <summary>
-/// What the frame draws, read out of the entities in <c>Update</c> so <c>Render</c> never touches the ECS: every
-/// renderer with its transform, the camera that draws into the window, and the first directional light. Filled again
-/// each frame, into the same lists.
+/// What the frame draws beside the renderers, read out of the entities in <c>Update</c> so <c>Render</c> never touches
+/// the ECS: the camera that draws into the window, the sun and the lights. Filled again each frame, into the same lists.
 /// </summary>
 internal sealed class RenderWorld
 {
-    public List<RenderInstance> Instances { get; } = [];
-
     public List<GpuLight> Lights { get; } = [];
 
     public RenderCamera? Camera { get; set; }
@@ -34,7 +28,6 @@ internal sealed class RenderWorld
 
     public void Clear()
     {
-        Instances.Clear();
         Lights.Clear();
         Camera = null;
         Sun = null;
@@ -43,13 +36,6 @@ internal sealed class RenderWorld
         Post = new PostProcessing();
     }
 }
-
-internal readonly record struct RenderInstance(
-    Entity Entity,
-    Handle<Model> Model,
-    MaterialSlots Materials,
-    Transform Transform
-);
 
 /// <param name="Transform">Where the camera is and which way it looks.</param>
 /// <param name="FieldOfView">Vertical, in degrees.</param>

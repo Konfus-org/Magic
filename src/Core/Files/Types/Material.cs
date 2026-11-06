@@ -4,15 +4,15 @@ using System.Numerics;
 namespace Magic.Files.Types;
 
 /// <summary>
-/// What a surface is made of, in one place: how it looks (<see cref="Visuals"/>), how a body grips and bounces off it
+/// What a surface is made of, in one place: how it looks (<see cref="Shading"/>), how a body grips and bounces off it
 /// (<see cref="Physics"/>), and how it sounds (<see cref="Acoustics"/>). Whatever draws, simulates or plays the world
 /// reads its own section from the materials of an entity's renderer. A <c>.mat</c> file is this class as JSON:
-/// <c>{ "visuals": { "shader": { "id": 10001 } }, "physics": { "grip": "slippery" }, "acoustics": "carpet" }</c>.
+/// <c>{ "shading": { "shader": { "id": 10001 } }, "physics": { "grip": "slippery" }, "acoustics": "carpet" }</c>.
 /// </summary>
 [AssetFormat(AssetFileFormat.Json)]
 public sealed class Material : IAsset<Material>
 {
-    public required MaterialVisuals Visuals { get; init; }
+    public required Shading Shading { get; init; }
 
     public MaterialPhysics Physics { get; init; } = new();
 

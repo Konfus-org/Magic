@@ -16,18 +16,12 @@ internal sealed class FrameClock
 
     private const int MaxFixedSteps = 4;
 
-    /// <summary>
-    /// How long a frame is, as nothing sets the pace yet.
-    /// </summary>
-    private const double FrameSec = 1.0 / 60;
-
     private readonly Stopwatch _clock = new();
     private uint _index;
     private double _lastSec;
     private double _simSec;
     private double _fixedSec;
     private double _owedSec;
-    private double _dueSec;
 
     /// <summary>
     /// The next frame's clocks, and how many fixed steps catch the simulation up with it, at most
@@ -71,19 +65,4 @@ internal sealed class FrameClock
         };
 
     public void EndFixedSteps(int steps) => _fixedSec += steps * FixedStepSec;
-
-    /// <summary>
-    /// Sleeps until the next frame is due: when it is due, as fixed steps of <see cref="FrameSec"/>, so a sleep the OS rounds
-    /// up to its timer's tick is made up by the next one; a frame late by more than a frame starts the count again rather
-    /// than run frames back to back.
-    /// </summary>
-    public void SleepUntilDue()
-    {
-        _dueSec += FrameSec;
-        double leftSec = _dueSec - _clock.Elapsed.TotalSeconds;
-        if (leftSec > 0)
-            Thread.Sleep(TimeSpan.FromSeconds(leftSec));
-        else if (leftSec < -FrameSec)
-            _dueSec = _clock.Elapsed.TotalSeconds;
-    }
 }

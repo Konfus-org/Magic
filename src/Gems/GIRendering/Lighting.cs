@@ -55,12 +55,13 @@ internal sealed class Lighting(IGraphicsApi gpu, RenderGraph graph, SkyLuts sky,
     }
 
     /// <summary>
-    /// The frame's constants and lights uploaded, in a transfer pass the caller opened.
+    /// The frame's constants, lights and shadow denoiser's constants uploaded, in a transfer pass the caller opened.
     /// </summary>
     public void Prepare(RenderWorld world, RenderCamera camera, RenderSun sun, FrameTargets targets)
     {
         _hasSky = world.HasSky;
         lights.Prepare(world);
+        shadows?.Prepare();
         LightingConstants constants = new()
         {
             SunIlluminance = new Vector4(sun.Radiance, 0),
@@ -75,6 +76,8 @@ internal sealed class Lighting(IGraphicsApi gpu, RenderGraph graph, SkyLuts sky,
             LightCount = (uint)lights.Count,
             LightTiles = lights.Tiles.Id,
             ShadowMask = shadows?.Mask.Id ?? 0,
+            TracedShadows = shadows?.Traced.Id ?? 0,
+            SunTiles = shadows?.SunTiles.Id ?? 0,
         };
         GpuUpload upload = gpu.BeginUpload(LightingConstants.Bytes);
         MemoryMarshal.Write(upload.Bytes, in constants);

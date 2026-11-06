@@ -2,13 +2,11 @@ using System.Numerics;
 using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Ecs.Components.Effects;
-using Magic.Files;
-using Magic.Files.Types;
 
 namespace Magic.GIRendering;
 
 /// <summary>
-/// Reads what a frame draws out of the entities into a <see cref="RenderWorld"/>.
+/// Reads what a frame draws beside the renderers out of the entities into a <see cref="RenderWorld"/>.
 /// </summary>
 internal static class WorldCopy
 {
@@ -20,7 +18,6 @@ internal static class WorldCopy
     public static void Read(IEcs ecs, RenderWorld world)
     {
         world.Clear();
-        ReadRenderers(ecs, world);
         ReadCamera(ecs, world);
         ReadSun(ecs, world);
         ReadLights(ecs, world);
@@ -42,23 +39,6 @@ internal static class WorldCopy
 
             world.Post = chunk.First[0];
             break;
-        }
-    }
-
-    private static void ReadRenderers(IEcs ecs, RenderWorld world)
-    {
-        foreach (EcsChunk<Transform, Renderer> chunk in ecs.Query<Transform, Renderer>())
-        {
-            for (int i = 0; i < chunk.Entities.Length; i++)
-            {
-                Renderer renderer = chunk.Second[i];
-                if (renderer.Model != Handle<Model>.None)
-                {
-                    world.Instances.Add(
-                        new RenderInstance(chunk.Entities[i], renderer.Model, renderer.Materials, chunk.First[i])
-                    );
-                }
-            }
         }
     }
 

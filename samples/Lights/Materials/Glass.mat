@@ -1,5 +1,5 @@
 {
-    "visuals": {
+    "shading": {
         "shader": { "id": 10004 },
         "params": {
             "color": { "r": 0.55, "g": 0.75, "b": 1.0, "a": 0.4 },

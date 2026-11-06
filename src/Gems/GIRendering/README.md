@@ -10,13 +10,17 @@ model reader, the mesh preprocessor and the texture reader.
 
 - A model shows once the preprocessor has made its clusters. One that doesn't load is drawn as the failure model, and
   a material or texture that doesn't load as the magenta failure material.
+- As a domain replaces the world, the loading screen stays until the models, materials and textures of what comes are
+  on the GPU, or failed, and nothing drawn before carries into the frames after.
 - The directional light is the sun while it is above the horizon, else the moon while it is, else the first there is.
   On a GPU that traces rays it casts shadows, soft as wide as the sun's disc.
 - A sky entity's material draws the sky and colours the sun through the air, and the sky lights what it shines on.
 - Point, spot and rect lights are in physical units: lux for the sun, candela for the rest. A frame draws the first
   1024. On a GPU that traces rays, the first 15 lighting each tile of the screen cast shadows, soft as wide as the
   light, and `IsShadowless` doesn't stop them yet.
-- Shadows are traced one ray a pixel and light, so their soft edges are noisy.
+- Shadows are traced one ray a pixel and light, then denoised. The sun's are smoothed over frames and across the
+  screen. The tile lights' are only smoothed over frames, so their soft edges stay grainy, and one can trail for a moment
+  where a tile's lights change.
 - Fog, glass and `PostProcessing` aren't drawn yet: a glass material draws as an opaque one.
 
 ## Settings
@@ -42,9 +46,10 @@ the finished picture.
   ([Shaders](../../Resources/Shaders/README.md)). The passes are at the folder's root, and what they share is under it:
   - `Core/Frame` is what every pass of a frame reads.
   - `Scene/` is the GPU tables and how to read them: the instance table, the pools of vertices, indices and clusters,
-    what the cull leaves for the draw and the resolve, and the cull's tests.
+    what the cull leaves for the draw and the resolve, the triangle a pixel shows, and the cull's tests.
   - `Scene/Lighting` is what the lighting passes share beyond the frame: the sun, the sky's tables and the HDR picture.
   - `Scene/Lights` is the light table and the bits of each tile of the screen that say which lights reach it.
-  - `Scene/Shadows` is the shadow mask: how much of the sun and of each of its tile's first lights reaches a pixel.
+  - `Scene/Shadows` is the shadow mask: how much of the sun and of each of its tile's first lights reaches a pixel,
+    and the sun's tiles the denoiser reads.
   - `Light/` is what a local light gives a point: a point, spot or rect light's direction and irradiance there.
 - Parts of the lighting are adapted from another engine under the MIT licence; `THIRD-PARTY-NOTICES.md` holds it.
