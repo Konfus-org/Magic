@@ -10,31 +10,30 @@ using Magic.Utils;
 namespace Magic.GpuChecks;
 
 /// <summary>
-/// Proves the GPU provider and the shader compiler work together, before any renderer draws: from the first frame, a
+/// Proves the GPU provider and the shader compiler work together, before any renderer draws: as the run starts, a
 /// compute entry is compiled, fills a texture with a gradient through the heap, the texture is read back and its
-/// corners checked, and each is an error under --fail-on-error when wrong. Every GPU call is made in the frame, from
-/// <see cref="Render"/>; the compile and the readback wait on workers. It is public because nothing in its assembly
-/// makes it: Magic does, by reflection, when a project lists the gem.
+/// corners checked, and each is an error under --fail-on-error when wrong. The compile and the readback wait on
+/// workers; every GPU call is made on the main thread. It is public because nothing in its assembly makes it: Magic
+/// does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, Assets assets) : IGem, IDisposable
+public sealed class GpuChecksGem : IGem, IDisposable
 {
     private const int Size = 256;
+    private const int Bytes = Size * Size * 4;
     private const string ShaderPath = "Shaders/Gradient.slang";
 
-    private readonly GpuCommandRecorder _recorder = new();
+    private readonly IGraphicsApi _gpu;
+    private readonly Task _check;
     private GpuPipeline _pipeline;
     private GpuTexture _gradient;
     private GpuBuffer _readback;
-    private uint _groupsX;
-    private uint _groupsY;
-    private bool _isStarted;
-    private bool _isRecorded;
-    private bool _isChecked;
 
-    /// <summary>
-    /// What the entry compiled into, written whole by the compile on its worker and taken by <see cref="Render"/>.
-    /// </summary>
-    private CompiledEntry? _compiled;
+    public GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, Assets assets, Threads threads)
+    {
+        _gpu = gpu;
+        _check = CheckAsync(shaders, assets, threads);
+        _check.FireAndForget();
+    }
 
     /// <summary>
     /// A run that ends before the check has finished checked nothing, which is an error: a run that validates waits
@@ -42,92 +41,128 @@ public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, Asse
     /// </summary>
     public void Dispose()
     {
-        if (_isStarted && !_isChecked)
+        if (!_check.IsCompleted)
             Log.Error("GPU check: the run ended before the check finished, so nothing was checked.");
 
-        if (!_pipeline.IsNone)
-            gpu.Destroy(_pipeline);
-
-        if (!_gradient.IsNone)
-            gpu.Destroy(_gradient);
-
-        if (!_readback.IsNone)
-            gpu.Destroy(_readback);
+        _gpu.Destroy(_pipeline);
+        _gpu.Destroy(_gradient);
+        _gpu.Destroy(_readback);
     }
 
-    /// <summary>
-    /// Starts compiling the entry on the first frame, once.
-    /// </summary>
-    public void Update(in Frame frame)
+    private async Task CheckAsync(IShaderCompiler shaders, Assets assets, Threads threads)
     {
-        if (_isStarted)
-            return;
-
-        _isStarted = true;
+        // Compile the entry on a worker.
         Handle<Shader> shader = assets.Find<Shader>(ShaderPath);
         if (shader == Handle<Shader>.None)
         {
             Log.Error($"GPU check: there is no {ShaderPath}.");
-            _isChecked = true;
 
             return;
         }
 
-        CompileAsync(shader).FireAndForget();
-    }
-
-    /// <summary>
-    /// Once the entry has compiled: makes the texture, computes the gradient and submits it, then reads it back and
-    /// checks it on a worker.
-    /// </summary>
-    public void Render(in Frame frame)
-    {
-        if (_isRecorded || Interlocked.Exchange(ref _compiled, null) is not { } compiled)
-            return;
-
-        _isRecorded = true;
-        if (!compiled.Result.Ok)
+        Result<CompiledShader> compiled = await shaders
+            .CompileAsync(
+                new ShaderEntry
+                {
+                    Module = shader,
+                    Name = "FillGradient",
+                    Stage = ShaderStage.Compute,
+                },
+                null,
+                CancellationToken.None
+            )
+            .ConfigureAwait(false);
+        if (!compiled.Ok)
         {
-            Log.Error($"GPU check: the gradient shader did not compile: {compiled.Result.Error}");
-            _isChecked = true;
+            Log.Error($"GPU check: the gradient shader did not compile: {compiled.Error}");
 
             return;
         }
 
-        CompiledShader entry = compiled.Result.Value;
-        if (entry.GroupSizeX == 0 || entry.GroupSizeY == 0)
+        // Make the pipeline, the texture and the readback buffer, on the main thread.
+        await threads.Enter(EngineThread.Main);
+        CompiledShader entry = compiled.Value;
+        Result<GpuPipeline> pipeline = _gpu.CreatePipeline(
+            new ComputePipelineDescription
+            {
+                Spirv = entry.Spirv,
+                EntryPoint = entry.EntryPoint,
+                Name = "FillGradient",
+            }
+        );
+        if (!pipeline.Ok)
         {
-            Log.Error($"GPU check: the compiler reported a group size of {entry.GroupSizeX} by {entry.GroupSizeY}.");
-            _isChecked = true;
+            Log.Error($"GPU check: the gradient pipeline was not built: {pipeline.Error}");
 
             return;
         }
 
-        _groupsX = (Size + entry.GroupSizeX - 1) / entry.GroupSizeX;
-        _groupsY = (Size + entry.GroupSizeY - 1) / entry.GroupSizeY;
-        if (!TryCreateResources(entry))
+        _pipeline = pipeline.Value;
+        Result<GpuTexture> gradient = _gpu.CreateTexture(
+            new TextureDescription
+            {
+                Width = Size,
+                Height = Size,
+                Format = GpuFormat.R8G8B8A8Unorm,
+                Usage = TextureUsages.Storage | TextureUsages.CopySource,
+                Name = "Gradient",
+            }
+        );
+        if (!gradient.Ok)
         {
-            _isChecked = true;
+            Log.Error($"GPU check: the gradient texture was not made: {gradient.Error}");
 
             return;
         }
 
-        RecordGradient();
-        _recorder.BeginTransferPass("Read gradient back");
-        _recorder.Transition(_gradient, GpuAccess.ShaderWrite, GpuAccess.CopySource);
-        _recorder.Transition(_readback, GpuAccess.None, GpuAccess.CopyDestination);
-        _recorder.CopyTextureToBuffer(_gradient, 0, 0, _readback, 0);
-        _recorder.Transition(_readback, GpuAccess.CopyDestination, GpuAccess.HostRead);
-        _recorder.EndPass();
-        gpu.Submit(_recorder.Finish());
-        ReadBackAsync().FireAndForget();
-    }
+        _gradient = gradient.Value;
+        Result<GpuBuffer> readback = _gpu.CreateBuffer(
+            new BufferDescription
+            {
+                Bytes = Bytes,
+                Usage = BufferUsages.Readback,
+                Name = "Gradient readback",
+            }
+        );
+        if (!readback.Ok)
+        {
+            Log.Error($"GPU check: the readback buffer was not made: {readback.Error}");
 
-    /// <summary>
-    /// The gradient is red along x, green along y, a quarter blue and opaque; each corner and the centre must read so.
-    /// </summary>
-    private static void Check(ReadOnlySpan<byte> pixels)
-    {
+            return;
+        }
+
+        _readback = readback.Value;
+
+        // Record the gradient's dispatch and its copy into the buffer, and submit them.
+        GpuCommandRecorder recorder = new();
+        recorder.BeginComputePass("Fill gradient");
+        recorder.Transition(_gradient, GpuAccess.None, GpuAccess.ShaderWrite);
+        recorder.BindPipeline(_pipeline);
+        recorder.PushConstants(new GpuConstants(_gradient.Id, Size, Size));
+        recorder.Dispatch(
+            (Size + entry.GroupSizeX - 1) / entry.GroupSizeX,
+            (Size + entry.GroupSizeY - 1) / entry.GroupSizeY
+        );
+        recorder.EndPass();
+        recorder.BeginTransferPass("Read gradient back");
+        recorder.Transition(_gradient, GpuAccess.ShaderWrite, GpuAccess.CopySource);
+        recorder.Transition(_readback, GpuAccess.None, GpuAccess.CopyDestination);
+        recorder.CopyTextureToBuffer(_gradient, 0, 0, _readback, 0);
+        recorder.Transition(_readback, GpuAccess.CopyDestination, GpuAccess.HostRead);
+        recorder.EndPass();
+        _gpu.Submit(recorder.Finish());
+
+        // Read the gradient back once the GPU has computed it. It is red along x, green along y, a quarter blue and
+        // opaque; each corner and the centre must read so.
+        Result<ReadOnlyMemory<byte>> pixels = await _gpu.ReadBackAsync(_readback, 0, Bytes, CancellationToken.None)
+            .ConfigureAwait(false);
+        if (!pixels.Ok)
+        {
+            Log.Error($"GPU check: the gradient could not be read back: {pixels.Error}");
+
+            return;
+        }
+
         ReadOnlySpan<(int X, int Y)> probes =
         [
             (0, 0),
@@ -136,14 +171,15 @@ public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, Asse
             (Size - 1, Size - 1),
             (Size / 2, Size / 2),
         ];
+        ReadOnlySpan<byte> bytes = pixels.Value.Span;
         int wrong = 0;
         foreach ((int x, int y) in probes)
         {
             int at = ((y * Size) + x) * 4;
-            byte red = pixels[at];
-            byte green = pixels[at + 1];
-            byte blue = pixels[at + 2];
-            byte alpha = pixels[at + 3];
+            byte red = bytes[at];
+            byte green = bytes[at + 1];
+            byte blue = bytes[at + 2];
+            byte alpha = bytes[at + 3];
             int expectedRed = x * 255 / (Size - 1);
             int expectedGreen = y * 255 / (Size - 1);
             bool isRight =
@@ -162,129 +198,5 @@ public sealed class GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, Asse
 
         if (wrong == 0)
             Log.Info($"GPU check passed: a {Size} by {Size} gradient computed through the heap and read back.");
-    }
-
-    private async Task CompileAsync(Handle<Shader> shader)
-    {
-        Result<CompiledShader> compiled = await shaders
-            .CompileAsync(
-                new ShaderEntry
-                {
-                    Module = shader,
-                    Name = "FillGradient",
-                    Stage = ShaderStage.Compute,
-                },
-                null,
-                CancellationToken.None
-            )
-            .ConfigureAwait(false);
-        Interlocked.Exchange(ref _compiled, new CompiledEntry(compiled));
-    }
-
-    /// <summary>
-    /// Reads the gradient back once the GPU has computed it, and checks it. Checked once it has reported, right or
-    /// wrong.
-    /// </summary>
-    private async Task ReadBackAsync()
-    {
-        try
-        {
-            Result<ReadOnlyMemory<byte>> pixels = await gpu.ReadBackAsync(
-                    _readback,
-                    0,
-                    Size * Size * 4,
-                    CancellationToken.None
-                )
-                .ConfigureAwait(false);
-            if (!pixels.Ok)
-            {
-                Log.Error($"GPU check: the gradient could not be read back: {pixels.Error}");
-
-                return;
-            }
-
-            Check(pixels.Value.Span);
-        }
-        finally
-        {
-            _isChecked = true;
-        }
-    }
-
-    private bool TryCreateResources(CompiledShader compiled)
-    {
-        Result<GpuPipeline> pipeline = gpu.CreatePipeline(
-            new ComputePipelineDescription
-            {
-                Spirv = compiled.Spirv,
-                EntryPoint = compiled.EntryPoint,
-                Name = "FillGradient",
-            }
-        );
-        if (!pipeline.Ok)
-        {
-            Log.Error($"GPU check: the gradient pipeline was not built: {pipeline.Error}");
-
-            return false;
-        }
-
-        _pipeline = pipeline.Value;
-        Result<GpuTexture> gradient = gpu.CreateTexture(
-            new TextureDescription
-            {
-                Width = Size,
-                Height = Size,
-                Format = GpuFormat.R8G8B8A8Unorm,
-                Usage = TextureUsages.Storage | TextureUsages.CopySource,
-                Name = "Gradient",
-            }
-        );
-        if (!gradient.Ok)
-        {
-            Log.Error($"GPU check: the gradient texture was not made: {gradient.Error}");
-
-            return false;
-        }
-
-        _gradient = gradient.Value;
-        Result<GpuBuffer> readback = gpu.CreateBuffer(
-            new BufferDescription
-            {
-                Bytes = Size * Size * 4,
-                Usage = BufferUsages.Readback,
-                Name = "Gradient readback",
-            }
-        );
-        if (!readback.Ok)
-        {
-            Log.Error($"GPU check: the readback buffer was not made: {readback.Error}");
-
-            return false;
-        }
-
-        _readback = readback.Value;
-
-        return true;
-    }
-
-    /// <summary>
-    /// Records the gradient's dispatch into the gradient texture.
-    /// </summary>
-    private void RecordGradient()
-    {
-        _recorder.BeginComputePass("Fill gradient");
-        _recorder.Transition(_gradient, GpuAccess.None, GpuAccess.ShaderWrite);
-        _recorder.BindPipeline(_pipeline);
-        _recorder.PushConstants(new GpuConstants(_gradient.Id, Size, Size));
-        _recorder.Dispatch(_groupsX, _groupsY);
-        _recorder.EndPass();
-    }
-
-    /// <summary>
-    /// What the entry compiled into, boxed so it is written whole from the compile's worker.
-    /// </summary>
-    private sealed class CompiledEntry(Result<CompiledShader> result)
-    {
-        public Result<CompiledShader> Result { get; } = result;
     }
 }
