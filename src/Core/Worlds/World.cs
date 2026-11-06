@@ -726,23 +726,6 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Each of <paramref name="entities"/> still alive, as its components.
-    /// </summary>
-    private ImmutableArray<ImmutableArray<IComponent>> GetComponents(ImmutableArray<Entity> entities)
-    {
-        ImmutableArray<ImmutableArray<IComponent>>.Builder components = ImmutableArray.CreateBuilder<
-            ImmutableArray<IComponent>
-        >(entities.Length);
-        foreach (Entity entity in entities)
-        {
-            if (_ecs.IsAlive(entity))
-                components.Add([.. _ecs.GetComponents(entity)]);
-        }
-
-        return components.ToImmutable();
-    }
-
-    /// <summary>
     /// Runs <paramref name="change"/> as a change, which may set <see cref="IsLoading"/>, and ends with it unset.
     /// </summary>
     private Task RunLoadingAsync(Func<Task> change, CancellationToken cancel) =>
