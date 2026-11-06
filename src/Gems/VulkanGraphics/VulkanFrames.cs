@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using Magic.Debugging;
 using Magic.Gpu;
@@ -74,7 +75,7 @@ internal sealed unsafe class VulkanFrames : IDisposable
     {
         _current = (_current + 1) % InFlight;
         Frame frame = _frames[_current];
-        if (frame.Serial > 0 && !frame.IsCompleted)
+        if (frame.Serial > 0)
         {
             VkResult waited = _device.Api.vkWaitForFences(frame.Fence, true, ulong.MaxValue);
             if (waited != VkResult.Success)
@@ -86,9 +87,7 @@ internal sealed unsafe class VulkanFrames : IDisposable
         _device.Api.vkResetFences(frame.Fence);
         _device.Api.vkResetCommandPool(frame.Pool, VkCommandPoolResetFlags.None);
         frame.Serial = ++_serial;
-        frame.IsCompleted = false;
         frame.StagingOffset = 0;
-        frame.Timestamps.Clear();
         VkCommandBufferBeginInfo beginInfo = new() { flags = VkCommandBufferUsageFlags.OneTimeSubmit };
         _device.Api.vkBeginCommandBuffer(frame.CommandBuffer, &beginInfo);
         _device.Api.vkCmdResetQueryPool(frame.CommandBuffer, frame.Queries, 0, TimestampCapacity);
@@ -102,7 +101,7 @@ internal sealed unsafe class VulkanFrames : IDisposable
     {
         foreach (Frame frame in _frames)
         {
-            if (frame.Serial == 0 || frame.IsCompleted)
+            if (frame.Serial == 0)
                 continue;
 
             if (_device.Api.vkGetFenceStatus(frame.Fence) == VkResult.Success)
@@ -119,25 +118,10 @@ internal sealed unsafe class VulkanFrames : IDisposable
         long offset = (frame.StagingOffset + alignment - 1) / alignment * alignment;
         if (offset + bytes > frame.Staging.Description.Bytes)
         {
-            long wanted = Math.Max(frame.Staging.Description.Bytes * 2, offset + bytes);
-            Result<VulkanBuffer> grown = _resources.CreateVulkanBuffer(
-                new BufferDescription
-                {
-                    Bytes = wanted,
-                    Usage = BufferUsages.Upload,
-                    Name = $"Staging {frame.Index}",
-                }
-            );
-            if (!grown.Ok)
-                throw new InvalidOperationException(
-                    $"The staging ring could not grow to {wanted} bytes: {grown.Error}"
-                );
-
             // The old ring stays in the heap until the frame has run: the copies recorded so far name it by its id
             // when the frame's commands are translated at submit.
-            frame.Trash.Add(Trash.Of(frame.StagingId, frame.Staging));
-            frame.Staging = grown.Value;
-            frame.StagingId = Register(grown.Value);
+            frame.Trash.Add(new(frame.StagingId, frame.Staging));
+            frame.Restage(Math.Max(frame.Staging.Description.Bytes * 2, offset + bytes));
             offset = 0;
         }
 
@@ -181,11 +165,11 @@ internal sealed unsafe class VulkanFrames : IDisposable
     /// </summary>
     private void Complete(Frame frame)
     {
-        frame.IsCompleted = true;
         _completedSerial = Math.Max(_completedSerial, frame.Serial);
+        frame.Serial = 0;
         foreach (Trash trash in frame.Trash)
         {
-            trash.Free(_resources);
+            _resources.Free(trash);
         }
 
         frame.Trash.Clear();
@@ -204,54 +188,16 @@ internal sealed unsafe class VulkanFrames : IDisposable
         // Read back only while something listens to the meter.
         if (_passDuration.Enabled)
             frame.RecordTimings(_device, _frameDuration, _passDuration);
-    }
 
-    private uint Register(VulkanBuffer buffer)
-    {
-        Result<GpuBuffer> registered = _resources.Adopt(buffer);
-        if (!registered.Ok)
-            throw new InvalidOperationException($"The staging ring has no place in the heap: {registered.Error}");
-
-        return registered.Value.Id;
+        frame.Timestamps.Clear();
     }
 
     /// <summary>
-    /// A resource freed by a frame, to die once the frame has run: whichever of its fields its kind uses.
+    /// A resource freed by a frame, to die once the frame has run: a <see cref="VulkanBuffer"/>,
+    /// <see cref="VulkanTexture"/>, <see cref="VkSampler"/>, <see cref="VulkanPipeline"/> or
+    /// <see cref="VulkanAcceleration"/>, with the id it held.
     /// </summary>
-    public readonly record struct Trash(
-        uint Id,
-        VulkanBuffer? Buffer,
-        VulkanTexture? Texture,
-        VkSampler Sampler,
-        VulkanPipeline? Pipeline,
-        VulkanAcceleration? Acceleration = null
-    )
-    {
-        public static Trash Of(uint id, VulkanBuffer buffer) => new(id, buffer, null, VkSampler.Null, null);
-
-        public static Trash Of(uint id, VulkanTexture texture) => new(id, null, texture, VkSampler.Null, null);
-
-        public static Trash Of(uint id, VkSampler sampler) => new(id, null, null, sampler, null);
-
-        public static Trash Of(uint id, VulkanPipeline pipeline) => new(id, null, null, VkSampler.Null, pipeline);
-
-        public static Trash Of(uint id, VulkanAcceleration acceleration) =>
-            new(id, null, null, VkSampler.Null, null, acceleration);
-
-        public void Free(VulkanResources resources)
-        {
-            if (Buffer is not null)
-                resources.Free(Id, Buffer);
-            else if (Texture is not null)
-                resources.Free(Id, Texture);
-            else if (Pipeline is not null)
-                resources.Free(Id, Pipeline);
-            else if (Acceleration is not null)
-                resources.Free(Id, Acceleration);
-            else if (Sampler.IsNotNull)
-                resources.Free(Id, Sampler);
-        }
-    }
+    public readonly record struct Trash(uint Id, object Resource);
 
     /// <summary>
     /// A promise of a buffer's bytes once frame <paramref name="Serial"/> is done.
@@ -270,10 +216,12 @@ internal sealed unsafe class VulkanFrames : IDisposable
     public sealed class Frame : IDisposable
     {
         private readonly VulkanDevice _device;
+        private readonly VulkanResources _resources;
 
         public Frame(VulkanDevice device, VulkanResources resources, int index)
         {
             _device = device;
+            _resources = resources;
             Index = index;
             VkResult made = device.Api.vkCreateCommandPool(
                 VkCommandPoolCreateFlags.Transient,
@@ -302,23 +250,7 @@ internal sealed unsafe class VulkanFrames : IDisposable
             };
             Check(device.Api.vkCreateQueryPool(&queryInfo, out VkQueryPool queries), "a query pool");
             Queries = queries;
-            Result<VulkanBuffer> staging = resources.CreateVulkanBuffer(
-                new BufferDescription
-                {
-                    Bytes = StagingBytes,
-                    Usage = BufferUsages.Upload,
-                    Name = $"Staging {index}",
-                }
-            );
-            if (!staging.Ok)
-                throw new InvalidOperationException($"The staging ring was not made: {staging.Error}");
-
-            Staging = staging.Value;
-            Result<GpuBuffer> adopted = resources.Adopt(staging.Value);
-            if (!adopted.Ok)
-                throw new InvalidOperationException($"The staging ring has no place in the heap: {adopted.Error}");
-
-            StagingId = adopted.Value.Id;
+            Restage(StagingBytes);
         }
 
         public int Index { get; }
@@ -336,21 +268,16 @@ internal sealed unsafe class VulkanFrames : IDisposable
 
         public VkQueryPool Queries { get; }
 
-        public VulkanBuffer Staging { get; set; }
+        public VulkanBuffer Staging { get; private set; }
 
-        public uint StagingId { get; set; }
+        public uint StagingId { get; private set; }
 
         public long StagingOffset { get; set; }
 
         /// <summary>
-        /// Which submission the frame holds; 0 before its first.
+        /// The submission the GPU may still be running; 0 when none.
         /// </summary>
         public ulong Serial { get; set; }
-
-        /// <summary>
-        /// Whether what the frame last held was finished with, so it is not finished twice.
-        /// </summary>
-        public bool IsCompleted { get; set; }
 
         /// <summary>
         /// Resources freed while the frame recorded, which die once it has run.
@@ -368,6 +295,28 @@ internal sealed unsafe class VulkanFrames : IDisposable
             _device.Api.vkDestroySemaphore(Acquired);
             _device.Api.vkDestroyFence(Fence);
             _device.Api.vkDestroyCommandPool(Pool);
+        }
+
+        /// <summary>
+        /// A new staging ring of <paramref name="bytes"/>, in the heap; the old one, if any, is the caller's to trash.
+        /// </summary>
+        [MemberNotNull(nameof(Staging))]
+        public void Restage(long bytes)
+        {
+            Result<GpuBuffer> made = _resources.CreateBuffer(
+                new BufferDescription
+                {
+                    Bytes = bytes,
+                    Usage = BufferUsages.Upload,
+                    Name = $"Staging {Index}",
+                }
+            );
+            if (!made.Ok)
+                throw new InvalidOperationException($"The staging ring of {bytes} bytes was not made: {made.Error}");
+
+            StagingId = made.Value.Id;
+            Staging =
+                _resources.Buffers[StagingId] ?? throw new InvalidOperationException("The staging ring left the heap.");
         }
 
         /// <summary>
