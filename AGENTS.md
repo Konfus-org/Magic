@@ -183,11 +183,12 @@ assumptions and decisions a reviewer would question as you make them.
    `Visual` change, what the screenshots show. Keep the fix and the cleanup apart. End with the next slice you
    propose, in one line.
 5. From the worktree, run `plannotator review --base <merge target>` in the background and wait for it. If it stops
-   before the user decides, run it again; their comments are kept.
+   before the user decides, run it again; their comments are kept. The page shows the worktree's branch, which is the
+   session's title ([Worktrees](#worktrees)). `plannotator sessions --json` lists each open review's URL and worktree.
 6. Address each comment, or say with evidence why not, validate again, and go back to step 4. If the
    review closes with neither comments nor approval, ask what the user wants.
 7. Approval, in the review or typed as "approved", means commit and merge ([Worktrees](#worktrees)). Don't ask again.
-   Then stop ([Slices](#slices)).
+   An approval typed in the chat leaves the review open: stop it. Then stop ([Slices](#slices)).
 
 ### When Blocked
 
@@ -227,7 +228,8 @@ Every task runs in its own worktree. Never edit or commit in the main checkout.
 
 - **Name:** `<type>/<feature>` in kebab-case, for example `fix/material-cache-leak`. Types: `feature`, `fix`,
   `refactor`, `docs`, `test`, `build`, `ci`. The worktree folder has the branch's name.
-- **Start:** branch from the branch checked out in the main checkout. That branch is the merge target.
+- **Start:** branch from the branch checked out in the main checkout. That branch is the merge target. Title the
+  session with the branch's name, as `fix/material-cache-leak`.
 - **Finish,** once the user approves:
   1. Commit on the worktree branch.
   2. Rebase onto the merge target and run `tools/Scripts/AgentTaskComplete.ps1` again at the same level. If nothing
