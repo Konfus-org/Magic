@@ -68,7 +68,6 @@ public sealed class GpuChecksGem : IGem, IDisposable
                     Name = "FillGradient",
                     Stage = ShaderStage.Compute,
                 },
-                null,
                 CancellationToken.None
             )
             .ConfigureAwait(false);

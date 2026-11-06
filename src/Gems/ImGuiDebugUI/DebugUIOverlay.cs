@@ -127,8 +127,8 @@ internal sealed class DebugUIOverlay : IDisposable
             Name = "DrawDebugUIPixel",
             Stage = ShaderStage.Pixel,
         };
-        Task<Result<CompiledShader>> vertexCompile = shaders.CompileAsync(vertex, null, cancel);
-        Task<Result<CompiledShader>> pixelCompile = shaders.CompileAsync(pixel, null, cancel);
+        Task<Result<CompiledShader>> vertexCompile = shaders.CompileAsync(vertex, cancel);
+        Task<Result<CompiledShader>> pixelCompile = shaders.CompileAsync(pixel, cancel);
         Result<CompiledShader> vertexResult = await vertexCompile.ConfigureAwait(false);
         Result<CompiledShader> pixelResult = await pixelCompile.ConfigureAwait(false);
         if (!vertexResult.Ok || !pixelResult.Ok)
