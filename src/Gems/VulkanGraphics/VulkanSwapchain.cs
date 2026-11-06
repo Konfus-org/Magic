@@ -14,6 +14,16 @@ namespace Magic.VulkanGraphics;
 internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResources resources, IWindow window)
     : IDisposable
 {
+    /// <summary>
+    /// How frames reach the window, most wanted first. A Debug build shows them as fast as they are drawn, so its frame
+    /// times are what the frame costs: mailbox, which never tears, else immediate. A release waits for the display.
+    /// </summary>
+#if DEBUG
+    private static readonly VkPresentModeKHR[] _presentModes = [VkPresentModeKHR.Mailbox, VkPresentModeKHR.Immediate];
+#else
+    private static readonly VkPresentModeKHR[] _presentModes = [VkPresentModeKHR.Fifo];
+#endif
+
     private VkSwapchainKHR _swapchain = VkSwapchainKHR.Null;
     private GpuTexture[] _textures = [];
     private VkSemaphore[] _rendered = [];
@@ -161,7 +171,7 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
             imageSharingMode = VkSharingMode.Exclusive,
             preTransform = capabilities.currentTransform,
             compositeAlpha = VkCompositeAlphaFlagsKHR.Opaque,
-            presentMode = VkPresentModeKHR.Fifo,
+            presentMode = PickPresentMode(surface),
             clipped = true,
         };
         VkResult result = device.Api.vkCreateSwapchainKHR(&createInfo, out VkSwapchainKHR swapchain);
@@ -227,5 +237,22 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
         return formats.Length > 0
             ? formats[0]
             : new VkSurfaceFormatKHR(VkFormat.B8G8R8A8Unorm, VkColorSpaceKHR.SrgbNonLinear);
+    }
+
+    /// <summary>
+    /// The first of <see cref="_presentModes"/> the surface has, else FIFO, which every surface has.
+    /// </summary>
+    private VkPresentModeKHR PickPresentMode(VkSurfaceKHR surface)
+    {
+        device.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(device.PhysicalDevice, surface, out uint count);
+        Span<VkPresentModeKHR> modes = new VkPresentModeKHR[count];
+        device.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(device.PhysicalDevice, surface, modes);
+        foreach (VkPresentModeKHR mode in _presentModes)
+        {
+            if (modes.Contains(mode))
+                return mode;
+        }
+
+        return VkPresentModeKHR.Fifo;
     }
 }

@@ -10,6 +10,8 @@ To use it, list `VulkanGraphics` in a project's `.magic` file after the gem that
   the GPU has them. With ray queries, acceleration structures join the heap: a bottom-level one over triangles of its
   buffers, a top-level one over instances of those, each built by a command of the frame.
 - It draws into the window through a surface it makes from the window's OS handles, on Windows, X11, Wayland and macOS.
+  The window sets the frame rate: a release waits for the display, and a Debug build shows each frame as soon as it
+  is drawn, so its frame rate is what the frame costs.
 - It publishes each pass's and each frame's time on the GPU, and the device memory it holds and has, on its
   `Magic.Gems.VulkanGraphics` meter, whose tags name the Vulkan version, the GPU, its kind and its driver.
 - A Debug build turns on the Khronos validation layer when the Vulkan SDK is installed, and logs what it reports.

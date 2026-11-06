@@ -118,8 +118,8 @@ internal sealed class Gems : IDisposable
 
     /// <summary>
     /// One frame: restarts the run if a gem was built, works out the clocks, turns what spins, runs every gem's hooks in
-    /// order with the fixed steps the clock owes, and sleeps until the next frame is due. Time begins with the first frame, not with what was
-    /// loaded before it.
+    /// order with the fixed steps the clock owes. Presenting to the window sets the pace; with no window, frames run as
+    /// fast as they go. Time begins with the first frame, not with what was loaded before it.
     /// </summary>
     public void Pump()
     {
@@ -146,7 +146,6 @@ internal sealed class Gems : IDisposable
         RunHook(Hook.LateUpdate, frame);
         RunHook(Hook.Render, frame);
         _frameWorkDuration.RecordSince(_frameStart == 0 ? hooksStart : _frameStart);
-        _clock.SleepUntilDue();
         _frameStart = Stopwatch.GetTimestamp();
     }
 
