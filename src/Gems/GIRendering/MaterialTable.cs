@@ -147,9 +147,9 @@ internal sealed class MaterialTable(
         if (_assets[row] is not { } material)
             return;
 
-        Shading visuals = material.Visuals;
-        GpuMaterial made = visuals.Shader == assets.Find<Shader>(FailureShader) ? GetFailure() : GetDefault();
-        MaterialParamDictionary parameters = visuals.Params;
+        Shading shading = material.Shading;
+        GpuMaterial made = shading.Shader == assets.Find<Shader>(FailureShader) ? GetFailure() : GetDefault();
+        MaterialParamDictionary parameters = shading.Params;
         if (parameters.TryGetValue("color", out MaterialParam? color))
             made.BaseColor = new Vector4(color.R, color.G, color.B, color.A);
 
@@ -201,7 +201,7 @@ internal sealed class MaterialTable(
         if (!loaded.Ok)
         {
             Log.Error($"{assets.GetPath(material)} is drawn as a failure: {loaded.Error}");
-            _assets[row] = new Material { Visuals = new Shading { Shader = assets.Find<Shader>(FailureShader) } };
+            _assets[row] = new Material { Shading = new Shading { Shader = assets.Find<Shader>(FailureShader) } };
             Rebuild(row);
 
             return;
