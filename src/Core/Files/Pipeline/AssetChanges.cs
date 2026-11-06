@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Magic.Debugging;
 using Magic.Utils;
 
@@ -23,16 +24,16 @@ internal static class AssetChanges
                     loaded = Request(database, loaded, requested, changes);
                     break;
                 case AssetImporterAdded added:
-                    loaded = AddImporter(loaded, added);
+                    loaded = loaded with { Importers = Claim(loaded.Importers, added.Type, added.Importer, "reads") };
                     break;
                 case AssetImporterRemoved removed:
-                    loaded = RemoveImporter(loaded, removed);
+                    loaded = loaded with { Importers = Release(loaded.Importers, removed.Type, removed.Importer) };
                     break;
                 case AssetExporterAdded added:
-                    loaded = AddExporter(loaded, added);
+                    loaded = loaded with { Exporters = Claim(loaded.Exporters, added.Type, added.Exporter, "writes") };
                     break;
                 case AssetExporterRemoved removed:
-                    loaded = RemoveExporter(loaded, removed);
+                    loaded = loaded with { Exporters = Release(loaded.Exporters, removed.Type, removed.Exporter) };
                     break;
                 case AssetAdded added:
                     loaded = Add(database, loaded, added);
@@ -137,60 +138,34 @@ internal static class AssetChanges
     }
 
     /// <summary>
-    /// Has <paramref name="added"/>'s importer read its type; a type another reads already stays that one's, and is an
-    /// error.
+    /// <paramref name="gems"/> with <paramref name="gem"/> as the one that <paramref name="verb"/> <paramref name="type"/>;
+    /// a type another gem has already stays that one's, and is an error.
     /// </summary>
-    private static LoadedAssets AddImporter(LoadedAssets loaded, AssetImporterAdded added)
+    private static ImmutableDictionary<Type, object> Claim(
+        ImmutableDictionary<Type, object> gems,
+        Type type,
+        object gem,
+        string verb
+    )
     {
-        if (loaded.Importers.TryGetValue(added.Type, out object? reads))
-        {
-            Log.Error(
-                $"{added.Importer.GetType().Name} reads {added.Type.Name}s, which {reads.GetType().Name} reads already, "
-                    + "so it does not."
-            );
+        if (!gems.TryGetValue(type, out object? other))
+            return gems.Add(type, gem);
 
-            return loaded;
-        }
+        Log.Error(
+            $"{gem.GetType().Name} {verb} {type.Name}s, which {other.GetType().Name} {verb} already, so it does not."
+        );
 
-        return loaded with
-        {
-            Importers = loaded.Importers.Add(added.Type, added.Importer),
-        };
+        return gems;
     }
 
-    private static LoadedAssets RemoveImporter(LoadedAssets loaded, AssetImporterRemoved removed) =>
-        loaded.Importers.TryGetValue(removed.Type, out object? reads) && ReferenceEquals(reads, removed.Importer)
-            ? loaded with
-            {
-                Importers = loaded.Importers.Remove(removed.Type),
-            }
-            : loaded;
-
-    private static LoadedAssets AddExporter(LoadedAssets loaded, AssetExporterAdded added)
-    {
-        if (loaded.Exporters.TryGetValue(added.Type, out object? writes))
-        {
-            Log.Error(
-                $"{added.Exporter.GetType().Name} writes {added.Type.Name}s, which {writes.GetType().Name} writes already, "
-                    + "so it does not."
-            );
-
-            return loaded;
-        }
-
-        return loaded with
-        {
-            Exporters = loaded.Exporters.Add(added.Type, added.Exporter),
-        };
-    }
-
-    private static LoadedAssets RemoveExporter(LoadedAssets loaded, AssetExporterRemoved removed) =>
-        loaded.Exporters.TryGetValue(removed.Type, out object? writes) && ReferenceEquals(writes, removed.Exporter)
-            ? loaded with
-            {
-                Exporters = loaded.Exporters.Remove(removed.Type),
-            }
-            : loaded;
+    /// <summary>
+    /// <paramref name="gems"/> without <paramref name="gem"/> as the one that has <paramref name="type"/>, if it is.
+    /// </summary>
+    private static ImmutableDictionary<Type, object> Release(
+        ImmutableDictionary<Type, object> gems,
+        Type type,
+        object gem
+    ) => gems.TryGetValue(type, out object? other) && ReferenceEquals(other, gem) ? gems.Remove(type) : gems;
 
     /// <summary>
     /// Hands out an asset a gem made, replacing any it added under the id before, a version later; refused when a file

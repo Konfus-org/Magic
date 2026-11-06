@@ -1,5 +1,4 @@
 using System.Numerics;
-using System.Runtime.InteropServices;
 using Magic.Debugging;
 using Magic.Files;
 using Magic.Files.Types;
@@ -37,25 +36,14 @@ internal sealed class MaterialTable(
 
     public GpuBuffer Buffer { get; private set; }
 
-    public void Dispose()
-    {
-        if (!Buffer.IsNone)
-            gpu.Destroy(Buffer);
-    }
+    public void Dispose() => gpu.Destroy(Buffer);
 
     public Result Create()
     {
         _rows[0] = GetDefault();
-        Result<GpuBuffer> buffer = gpu.CreateBuffer(
-            new BufferDescription
-            {
-                Bytes = (long)Capacity * GpuMaterial.Bytes,
-                Usage = BufferUsages.Storage,
-                Name = "Material table",
-            }
-        );
+        Result<GpuBuffer> buffer = gpu.CreateBuffer("Material table", (long)Capacity * GpuMaterial.Bytes);
         if (!buffer.Ok)
-            return Result.Failure($"the material table was not made: {buffer.Error}");
+            return Result.Failure(buffer.Error);
 
         Buffer = buffer.Value;
 
@@ -121,11 +109,7 @@ internal sealed class MaterialTable(
             return;
 
         _isDirty = false;
-        int bytes = _count * GpuMaterial.Bytes;
-        GpuUpload upload = gpu.BeginUpload(bytes);
-        MemoryMarshal.AsBytes(_rows.AsSpan(0, _count)).CopyTo(upload.Bytes);
-        graph.Use(Buffer, GpuAccess.CopyDestination);
-        graph.Recorder.CopyBuffer(upload.Buffer, upload.Offset, Buffer, 0, (ulong)bytes);
+        graph.Upload(gpu, Buffer, _rows.AsSpan(0, _count));
     }
 
     private static GpuMaterial GetDefault() => new() { BaseColor = new Vector4(0.8f, 0.8f, 0.8f, 1), Roughness = 0.6f };

@@ -1,7 +1,6 @@
 using System.Numerics;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Ecs.Components.Effects;
 
 namespace Magic.GIRendering;
 
@@ -21,24 +20,9 @@ internal static class WorldCopy
         ReadCamera(ecs, world);
         ReadSun(ecs, world);
         ReadLights(ecs, world);
-        foreach (EcsChunk<Weather> chunk in ecs.Query<Weather>())
-        {
-            if (chunk.Entities.Length > 0 && world.Fog is null && chunk.First[0].Effects.TryGet(out Fog fog))
-                world.Fog = fog;
-        }
-
         foreach (EcsChunk<Sky> chunk in ecs.Query<Sky>())
         {
             world.HasSky |= chunk.Entities.Length > 0;
-        }
-
-        foreach (EcsChunk<PostProcessing> chunk in ecs.Query<PostProcessing>())
-        {
-            if (chunk.Entities.Length == 0)
-                continue;
-
-            world.Post = chunk.First[0];
-            break;
         }
     }
 

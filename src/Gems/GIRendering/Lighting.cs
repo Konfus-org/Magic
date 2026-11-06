@@ -1,5 +1,4 @@
 using System.Numerics;
-using System.Runtime.InteropServices;
 using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Rendering;
@@ -8,41 +7,44 @@ using Magic.Utils;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// What everything that lights a surface shares: the lighting constants, naming the sky's tables, the lights and the
-/// shadow mask, which it fills before the view is drawn, the sky's tables made again each frame while there is a sky,
-/// each tile's lights, and each pixel's shadows on a GPU that traces rays.
+/// The view's surfaces lit into the HDR picture, and the sky drawn where nothing was: the lighting constants, naming
+/// the sky's tables, the lights and the shadow mask, which it fills before the view is drawn; then the sky's tables
+/// made again while there is a sky, each tile's lights, each pixel's shadows on a GPU that traces rays, and the
+/// shading.
 /// </summary>
-internal sealed class Lighting(IGraphicsApi gpu, RenderGraph graph, SkyLuts sky, LightTiles lights, ShadowMask? shadows)
-    : IDisposable
+internal sealed class Lighting(
+    IGraphicsApi gpu,
+    RenderGraph graph,
+    GpuPipelines pipelines,
+    SkyLuts sky,
+    LightTiles lights,
+    ShadowMask? shadows
+) : IDisposable
 {
+    private readonly GpuPass _shadePass = pipelines.Compute(
+        "Shade surfaces",
+        "ShadeSurfaces",
+        "ShadeSurfaces",
+        PassShaders.Atmosphere
+    );
+
+    private GpuBuffer _constants;
     private GpuSampler _sampler;
     private bool _hasSky;
 
-    public GpuBuffer Constants { get; private set; }
-
     public void Dispose()
     {
-        if (!Constants.IsNone)
-            gpu.Destroy(Constants);
-
-        if (!_sampler.IsNone)
-            gpu.Destroy(_sampler);
+        gpu.Destroy(_constants);
+        gpu.Destroy(_sampler);
     }
 
     public Result Create()
     {
-        Result<GpuBuffer> constants = gpu.CreateBuffer(
-            new BufferDescription
-            {
-                Bytes = LightingConstants.Bytes,
-                Usage = BufferUsages.Storage,
-                Name = "Lighting constants",
-            }
-        );
+        Result<GpuBuffer> constants = gpu.CreateBuffer("Lighting constants", LightingConstants.Bytes);
         if (!constants.Ok)
-            return Result.Failure($"the Lighting constants buffer was not made: {constants.Error}");
+            return Result.Failure(constants.Error);
 
-        Constants = constants.Value;
+        _constants = constants.Value;
         Result<GpuSampler> sampler = gpu.CreateSampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, HasMipmapBlend = false }
         );
@@ -79,45 +81,42 @@ internal sealed class Lighting(IGraphicsApi gpu, RenderGraph graph, SkyLuts sky,
             TracedShadows = shadows?.Traced.Id ?? 0,
             SunTiles = shadows?.SunTiles.Id ?? 0,
         };
-        GpuUpload upload = gpu.BeginUpload(LightingConstants.Bytes);
-        MemoryMarshal.Write(upload.Bytes, in constants);
-        graph.Use(Constants, GpuAccess.CopyDestination);
-        graph.Recorder.CopyBuffer(upload.Buffer, upload.Offset, Constants, 0, LightingConstants.Bytes);
+        graph.Upload(gpu, _constants, in constants);
     }
 
     /// <summary>
-    /// What a pass that lights surfaces is told of the frame.
+    /// The view lit: the sky's tables while there is a sky, each tile's lights from the view's depth, each pixel's
+    /// shadows on a GPU that traces rays, then every pixel's surface shaded, and the sky where there is none.
     /// </summary>
-    public GpuConstants GetHeader(GpuBuffer frameConstants) => new(frameConstants.Id, 0, Constants.Id);
-
-    /// <summary>
-    /// The sky's tables, while there is a sky.
-    /// </summary>
-    public void RecordTables(GpuBuffer frameConstants)
+    public void Record(in RenderView view)
     {
+        FrameTargets targets = view.Targets;
+        GpuConstants header = new(view.Constants.Id, 0, _constants.Id);
         if (_hasSky)
-            sky.Record(GetHeader(frameConstants), frameConstants, Constants);
-    }
+            sky.Record(header, view.Constants, _constants);
 
-    /// <summary>
-    /// Each tile's lights, from the view's depth.
-    /// </summary>
-    public void RecordTiles(in RenderView view) => lights.Record(view, GetHeader(view.Constants), Constants);
+        lights.Record(view, header, _constants);
+        shadows?.Record(view, header, _constants);
 
-    /// <summary>
-    /// Each pixel's shadows, on a GPU that traces rays.
-    /// </summary>
-    public void RecordShadows(in RenderView view) => shadows?.Record(view, GetHeader(view.Constants), Constants);
-
-    /// <summary>
-    /// Says a pass reads the constants, the sky's tables, the lights and the shadows.
-    /// </summary>
-    public void UseForShading()
-    {
-        graph.Use(Constants, GpuAccess.ShaderRead);
-        sky.UseForReading();
-        lights.UseForReading();
+        GpuPassRun shade = _shadePass
+            .Run(header)
+            .Reads(
+                view.Constants,
+                _constants,
+                sky.Transmittance,
+                sky.MultiScattering,
+                sky.View,
+                lights.Table,
+                lights.Tiles,
+                targets.Visibility,
+                targets.Depth,
+                targets.GBufferNormal,
+                targets.GBufferBase,
+                targets.GBufferSurface
+            );
         if (shadows is not null)
-            graph.Use(shadows.Mask, GpuAccess.ShaderRead);
+            shade.Reads(shadows.Mask);
+
+        shade.Writes(targets.Hdr).DispatchOver(targets.Width, targets.Height);
     }
 }

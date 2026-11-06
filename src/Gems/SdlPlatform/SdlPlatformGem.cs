@@ -1,6 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
-using System.Text;
 using Magic.Debugging;
 using Magic.Files;
 using Magic.Files.Types;
@@ -24,9 +23,9 @@ namespace Magic.SdlPlatform;
 /// to itself and reads gamepads only: keyboards and mice need a window to type and point into.
 /// <para>
 /// SDL's windows and events belong to the process's main thread, which everything here runs on: <see cref="Update"/>
-/// turns SDL's events into changes and applies them, before any gem that takes the input runs, as they are made after
-/// this one, so input stays fixed for the rest of a frame. It is public because nothing in its assembly makes it: Magic
-/// does, by reflection, when a project lists the gem.
+/// applies SDL's events to the controls, before any gem that takes the input runs, as they are made after this one, so
+/// input stays fixed for the rest of a frame. It is public because nothing in its assembly makes it: Magic does, by
+/// reflection, when a project lists the gem.
 /// </para>
 /// </summary>
 public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposable
@@ -41,17 +40,17 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
     private const float StickDeadZone = 0.15f;
 
     /// <summary>
-    /// Each stick and trigger: the control it sets, SDL's axis it is read from, and whether it is a stick's y, which
-    /// SDL grows downward.
+    /// Each stick and trigger: the control it sets, SDL's axis it is read from, and the sign the value takes. SDL's stick
+    /// y grows downward; Magic's is up positive.
     /// </summary>
-    private static readonly (Control Control, SDL_GamepadAxis Axis, bool IsY)[] _axes =
+    private static readonly (Control Control, SDL_GamepadAxis Axis, float Sign)[] _axes =
     [
-        (Control.GamepadLeftX, SDL_GAMEPAD_AXIS_LEFTX, false),
-        (Control.GamepadLeftY, SDL_GAMEPAD_AXIS_LEFTY, true),
-        (Control.GamepadRightX, SDL_GAMEPAD_AXIS_RIGHTX, false),
-        (Control.GamepadRightY, SDL_GAMEPAD_AXIS_RIGHTY, true),
-        (Control.GamepadLeftTrigger, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, false),
-        (Control.GamepadRightTrigger, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, false),
+        (Control.GamepadLeftX, SDL_GAMEPAD_AXIS_LEFTX, 1),
+        (Control.GamepadLeftY, SDL_GAMEPAD_AXIS_LEFTY, -1),
+        (Control.GamepadRightX, SDL_GAMEPAD_AXIS_RIGHTX, 1),
+        (Control.GamepadRightY, SDL_GAMEPAD_AXIS_RIGHTY, -1),
+        (Control.GamepadLeftTrigger, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 1),
+        (Control.GamepadRightTrigger, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, 1),
     ];
 
     private readonly App _app;
@@ -63,11 +62,6 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
     private readonly unsafe SDL_Window* _window;
 
     /// <summary>
-    /// What the pump saw since the last frame, in the order it happened.
-    /// </summary>
-    private readonly List<Change> _changes = [];
-
-    /// <summary>
     /// The devices as of this frame, and their controls by <see cref="ControlExtensions"/>' Index, at the same indexes.
     /// </summary>
     private readonly List<InputDevice> _devices = [];
@@ -75,20 +69,9 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
     private readonly List<ControlState[]> _controls = [];
 
     /// <summary>
-    /// The keyboards and mice the pump has seen: input can arrive before its device does, and some from no device at all
-    /// (id 0).
-    /// </summary>
-    private readonly HashSet<(DeviceKind Kind, uint Id)> _announced = [];
-
-    /// <summary>
     /// The open gamepads, by SDL's id.
     /// </summary>
     private readonly Dictionary<uint, nint> _gamepads = [];
-
-    /// <summary>
-    /// What was typed this frame, put together from the pump's pieces.
-    /// </summary>
-    private readonly StringBuilder _typed = new();
 
     /// <summary>
     /// What holds the window's Metal layer on macOS, so its handle has one to name; null elsewhere.
@@ -100,16 +83,6 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
     private string _clipboard = string.Empty;
 
     private string _text = string.Empty;
-
-    /// <summary>
-    /// An icon that has loaded, for the next frame to give the window: set by a worker, taken on the main thread.
-    /// </summary>
-    private WantedIcon? _wantedIcon;
-
-    /// <summary>
-    /// Window pixels per screen point, which SDL's mouse positions are in.
-    /// </summary>
-    private float _pixelDensity = 1;
 
     public unsafe SdlPlatformGem(App app, Threads threads, Assets assets)
     {
@@ -151,8 +124,6 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
         if (!SDL_StartTextInput(_window))
             Log.Warn($"Typed text is not read: {CString.Read(SDL_GetError())}");
 
-        _pixelDensity = ReadPixelDensity();
-        ReadWindowSize();
         _clipboard = ReadClipboard();
 
         // The keyboards and mice plugged in as the window opens; those plugged in later arrive as events.
@@ -160,7 +131,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
         uint* keyboards = SDL_GetKeyboards(&keyboardsCount);
         for (int i = 0; i < keyboardsCount; i++)
         {
-            Announce(DeviceKind.Keyboard, keyboards[i]);
+            GetOrAddDevice(DeviceKind.Keyboard, keyboards[i]);
         }
 
         SDL_free(keyboards);
@@ -169,7 +140,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
         uint* mice = SDL_GetMice(&miceCount);
         for (int i = 0; i < miceCount; i++)
         {
-            Announce(DeviceKind.Mouse, mice[i]);
+            GetOrAddDevice(DeviceKind.Mouse, mice[i]);
         }
 
         SDL_free(mice);
@@ -211,12 +182,30 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
     /// <summary>
     /// 0 when headless.
     /// </summary>
-    public int Width { get; private set; }
+    public unsafe int Width
+    {
+        get
+        {
+            int width = 0;
+            SDL_GetWindowSizeInPixels(_window, &width, null);
+
+            return width;
+        }
+    }
 
     /// <summary>
     /// 0 when headless.
     /// </summary>
-    public int Height { get; private set; }
+    public unsafe int Height
+    {
+        get
+        {
+            int height = 0;
+            SDL_GetWindowSizeInPixels(_window, null, &height);
+
+            return height;
+        }
+    }
 
     public WindowHandle Handle { get; }
 
@@ -298,51 +287,41 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
     }
 
     /// <summary>
-    /// Makes input this frame's: what happened last frame is over, SDL's events since are turned into changes and
-    /// applied, and sticks and triggers are read as they stand now, rather than added up from events.
+    /// Makes input this frame's: what happened last frame is over, SDL's events since are applied, and sticks and
+    /// triggers are read as they stand now.
     /// </summary>
     public unsafe void Update(in Frame frame)
     {
-        if (Interlocked.Exchange(ref _wantedIcon, null) is { } wanted && wanted.Icon == Icon)
-            SetIcon(wanted.Image);
-
+        // What happened last frame is over: pressed and released clear, and a mouse's motion and wheel go back to 0.
         for (int i = 0; i < _devices.Count; i++)
         {
-            StartFrame(_devices[i].Kind, _controls[i]);
+            ControlState[] states = _controls[i];
+            for (int c = 0; c < states.Length; c++)
+            {
+                states[c] = states[c] with { WasPressed = false, WasReleased = false };
+            }
+
+            if (_devices[i].Kind != DeviceKind.Mouse)
+                continue;
+
+            states[Control.MouseMotionX.Index] = default;
+            states[Control.MouseMotionY.Index] = default;
+            states[Control.MouseWheelX.Index] = default;
+            states[Control.MouseWheelY.Index] = default;
         }
 
+        _text = string.Empty;
         PollEvents();
-        _typed.Clear();
-        foreach (Change change in _changes)
-        {
-            Apply(change);
-        }
 
-        _changes.Clear();
-        _text = _typed.Length == 0 ? string.Empty : _typed.ToString();
+        // Sticks and triggers as they stand now, rather than added up from events.
         foreach ((uint id, nint gamepad) in _gamepads)
         {
-            ReadAxes(id, (SDL_Gamepad*)gamepad);
+            ControlState[] states = _controls[FindIndex(DeviceKind.Gamepad, id)];
+            foreach ((Control control, SDL_GamepadAxis axis, float sign) in _axes)
+            {
+                SetState(states, control, sign * ToStick(SDL_GetGamepadAxis((SDL_Gamepad*)gamepad, axis)));
+            }
         }
-    }
-
-    /// <summary>
-    /// What happened last frame is over: pressed and released clear, and a mouse's motion and wheel go back to 0.
-    /// </summary>
-    private static void StartFrame(DeviceKind kind, ControlState[] states)
-    {
-        for (int i = 0; i < states.Length; i++)
-        {
-            states[i] = states[i] with { WasPressed = false, WasReleased = false };
-        }
-
-        if (kind != DeviceKind.Mouse)
-            return;
-
-        states[Control.MouseMotionX.Index] = default;
-        states[Control.MouseMotionY.Index] = default;
-        states[Control.MouseWheelX.Index] = default;
-        states[Control.MouseWheelY.Index] = default;
     }
 
     /// <summary>
@@ -397,7 +376,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
     }
 
     /// <summary>
-    /// Turns SDL's events since the last frame into changes, in the order they happened.
+    /// Applies SDL's events since the last frame to the devices and their controls, in the order they happened.
     /// </summary>
     [SuppressMessage(
         "Style",
@@ -412,26 +391,20 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
             switch ((SDL_EventType)sdlEvent.type)
             {
                 case SDL_EVENT_QUIT:
-                    ExitOnce("the system asked Magic to quit");
-                    break;
-                case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
-                    ExitOnce("the window was closed");
-                    break;
-                case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                    _pixelDensity = ReadPixelDensity();
-                    ReadWindowSize();
+                    Log.Info("Exiting: the window was closed or the system asked Magic to quit.");
+                    _app.Exit();
                     break;
                 case SDL_EVENT_KEYBOARD_ADDED:
-                    Announce(DeviceKind.Keyboard, sdlEvent.kdevice.which);
+                    GetOrAddDevice(DeviceKind.Keyboard, sdlEvent.kdevice.which);
                     break;
                 case SDL_EVENT_KEYBOARD_REMOVED:
-                    Forget(DeviceKind.Keyboard, sdlEvent.kdevice.which);
+                    RemoveDevice(DeviceKind.Keyboard, sdlEvent.kdevice.which);
                     break;
                 case SDL_EVENT_MOUSE_ADDED:
-                    Announce(DeviceKind.Mouse, sdlEvent.mdevice.which);
+                    GetOrAddDevice(DeviceKind.Mouse, sdlEvent.mdevice.which);
                     break;
                 case SDL_EVENT_MOUSE_REMOVED:
-                    Forget(DeviceKind.Mouse, sdlEvent.mdevice.which);
+                    RemoveDevice(DeviceKind.Mouse, sdlEvent.mdevice.which);
                     break;
                 case SDL_EVENT_GAMEPAD_ADDED:
                     OpenGamepad(sdlEvent.gdevice.which);
@@ -442,23 +415,42 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
                 case SDL_EVENT_KEY_DOWN:
                 case SDL_EVENT_KEY_UP:
                     if (!sdlEvent.key.repeat && sdlEvent.key.scancode.Control is { } key)
-                        Set(DeviceKind.Keyboard, sdlEvent.key.which, key, sdlEvent.key.down ? 1 : 0);
+                        SetState(
+                            GetOrAddDevice(DeviceKind.Keyboard, sdlEvent.key.which),
+                            key,
+                            sdlEvent.key.down ? 1 : 0
+                        );
 
                     break;
                 case SDL_EVENT_MOUSE_BUTTON_DOWN:
                 case SDL_EVENT_MOUSE_BUTTON_UP:
                     if (SdlControlExtensions.ToMouseControl(sdlEvent.button.button) is { } button)
-                        Set(DeviceKind.Mouse, sdlEvent.button.which, button, sdlEvent.button.down ? 1 : 0);
+                    {
+                        SetState(
+                            GetOrAddDevice(DeviceKind.Mouse, sdlEvent.button.which),
+                            button,
+                            sdlEvent.button.down ? 1 : 0
+                        );
+                    }
 
                     break;
                 case SDL_EVENT_MOUSE_MOTION:
                 {
-                    // SDL's points as window pixels.
-                    uint mouse = sdlEvent.motion.which;
-                    Set(DeviceKind.Mouse, mouse, Control.MouseX, sdlEvent.motion.x * _pixelDensity);
-                    Set(DeviceKind.Mouse, mouse, Control.MouseY, sdlEvent.motion.y * _pixelDensity);
-                    Add(mouse, Control.MouseMotionX, sdlEvent.motion.xrel * _pixelDensity);
-                    Add(mouse, Control.MouseMotionY, sdlEvent.motion.yrel * _pixelDensity);
+                    // SDL's points as window pixels; motion and wheel count up over the frame.
+                    float density = SDL_GetWindowPixelDensity(_window);
+                    ControlState[] mouse = GetOrAddDevice(DeviceKind.Mouse, sdlEvent.motion.which);
+                    SetState(mouse, Control.MouseX, sdlEvent.motion.x * density);
+                    SetState(mouse, Control.MouseY, sdlEvent.motion.y * density);
+                    SetState(
+                        mouse,
+                        Control.MouseMotionX,
+                        mouse[Control.MouseMotionX.Index].Value + (sdlEvent.motion.xrel * density)
+                    );
+                    SetState(
+                        mouse,
+                        Control.MouseMotionY,
+                        mouse[Control.MouseMotionY.Index].Value + (sdlEvent.motion.yrel * density)
+                    );
 
                     break;
                 }
@@ -467,32 +459,38 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
                 {
                     // A wheel the OS flips (natural scrolling) is flipped back, so away from the player is positive on
                     // every system.
-                    uint mouse = sdlEvent.wheel.which;
+                    ControlState[] mouse = GetOrAddDevice(DeviceKind.Mouse, sdlEvent.wheel.which);
                     float direction = sdlEvent.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1 : 1;
-                    Add(mouse, Control.MouseWheelX, sdlEvent.wheel.x * direction);
-                    Add(mouse, Control.MouseWheelY, sdlEvent.wheel.y * direction);
+                    SetState(
+                        mouse,
+                        Control.MouseWheelX,
+                        mouse[Control.MouseWheelX.Index].Value + (sdlEvent.wheel.x * direction)
+                    );
+                    SetState(
+                        mouse,
+                        Control.MouseWheelY,
+                        mouse[Control.MouseWheelY.Index].Value + (sdlEvent.wheel.y * direction)
+                    );
 
                     break;
                 }
 
                 case SDL_EVENT_TEXT_INPUT:
-                    _changes.Add(new Change(ChangeKind.Typed, Text: CString.Read(sdlEvent.text.text)));
+                    _text += CString.Read(sdlEvent.text.text);
                     break;
                 case SDL_EVENT_CLIPBOARD_UPDATE:
                     _clipboard = ReadClipboard();
                     break;
                 case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
                 case SDL_EVENT_GAMEPAD_BUTTON_UP:
+                {
                     // Only a pad that is open: one that could not be opened is no device.
-                    if (
-                        _gamepads.ContainsKey(sdlEvent.gbutton.which)
-                        && ((SDL_GamepadButton)sdlEvent.gbutton.button).Control is { } gamepadButton
-                    )
-                    {
-                        Set(DeviceKind.Gamepad, sdlEvent.gbutton.which, gamepadButton, sdlEvent.gbutton.down ? 1 : 0);
-                    }
+                    int pad = FindIndex(DeviceKind.Gamepad, sdlEvent.gbutton.which);
+                    if (pad >= 0 && ((SDL_GamepadButton)sdlEvent.gbutton.button).Control is { } gamepadButton)
+                        SetState(_controls[pad], gamepadButton, sdlEvent.gbutton.down ? 1 : 0);
 
                     break;
+                }
             }
         }
     }
@@ -507,70 +505,6 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
             throw new InvalidOperationException("The window and clipboard are the main thread's.");
     }
 
-    /// <summary>
-    /// Ends the run once: closing the last window is both a close and a quit.
-    /// </summary>
-    private void ExitOnce(string why)
-    {
-        if (_app.IsExiting)
-            return;
-
-        Log.Info($"Exiting: {why}.");
-        _app.Exit();
-    }
-
-    /// <summary>
-    /// One change, as a frame begins.
-    /// </summary>
-    private void Apply(in Change change)
-    {
-        int index;
-        switch (change.Kind)
-        {
-            case ChangeKind.Added:
-                index = FindIndex(change.Device, change.Id);
-                if (index < 0)
-                {
-                    // A device that gives no name is shown as what it is. Its controls are its kind's block of 256, at
-                    // each control's index.
-                    string name = string.IsNullOrEmpty(change.Name) ? change.Device.ToString() : change.Name;
-                    _devices.Add(new InputDevice(change.Device, change.Id, name));
-                    _controls.Add(new ControlState[256]);
-                }
-
-                break;
-            case ChangeKind.Removed:
-                index = FindIndex(change.Device, change.Id);
-                if (index >= 0)
-                {
-                    _devices.RemoveAt(index);
-                    _controls.RemoveAt(index);
-                }
-
-                break;
-            case ChangeKind.Set:
-                index = FindIndex(change.Device, change.Id);
-                if (index >= 0)
-                    SetState(_controls[index], change.Control, change.Value);
-
-                break;
-            case ChangeKind.Add:
-                index = FindIndex(change.Device, change.Id);
-                if (index >= 0)
-                {
-                    ControlState[] states = _controls[index];
-                    SetState(states, change.Control, states[change.Control.Index].Value + change.Value);
-                }
-
-                break;
-            case ChangeKind.Typed:
-                _typed.Append(change.Text);
-                break;
-            default:
-                throw new ArgumentOutOfRangeException(nameof(change), change.Kind, "There is no such input change.");
-        }
-    }
-
     private int FindIndex(DeviceKind kind, uint id)
     {
         for (int i = 0; i < _devices.Count; i++)
@@ -583,42 +517,38 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
     }
 
     /// <summary>
-    /// A control's new value. A keyboard or mouse is announced first if this is the first heard of it; a gamepad was as it
-    /// opened.
+    /// A keyboard's or mouse's controls, adding it, named as SDL names it, the first time it is heard of: input can
+    /// arrive before its device does, and some from no device at all (id 0).
     /// </summary>
-    private void Set(DeviceKind kind, uint id, Control control, float value)
+    private unsafe ControlState[] GetOrAddDevice(DeviceKind kind, uint id)
     {
-        if (kind != DeviceKind.Gamepad)
-            Announce(kind, id);
+        int index = FindIndex(kind, id);
+        if (index >= 0)
+            return _controls[index];
 
-        _changes.Add(new Change(ChangeKind.Set, kind, id, control, value));
+        byte* name = kind == DeviceKind.Keyboard ? SDL_GetKeyboardNameForID(id) : SDL_GetMouseNameForID(id);
+
+        return AddDevice(kind, id, CString.Read(name));
     }
 
     /// <summary>
-    /// Adds to a mouse control that counts up over the frame: motion and wheel.
+    /// Adds a device and its controls: its kind's block of 256, at each control's index. One that gives no name is
+    /// shown as what it is.
     /// </summary>
-    private void Add(uint mouse, Control control, float amount)
+    private ControlState[] AddDevice(DeviceKind kind, uint id, string name)
     {
-        Announce(DeviceKind.Mouse, mouse);
-        _changes.Add(new Change(ChangeKind.Add, DeviceKind.Mouse, mouse, control, amount));
+        _devices.Add(new InputDevice(kind, id, string.IsNullOrEmpty(name) ? kind.ToString() : name));
+        ControlState[] states = new ControlState[256];
+        _controls.Add(states);
+
+        return states;
     }
 
-    /// <summary>
-    /// Adds a keyboard or mouse, named as SDL names it, unless it is known already.
-    /// </summary>
-    private unsafe void Announce(DeviceKind kind, uint id)
+    private void RemoveDevice(DeviceKind kind, uint id)
     {
-        if (!_announced.Add((kind, id)))
-            return;
-
-        byte* named = kind == DeviceKind.Keyboard ? SDL_GetKeyboardNameForID(id) : SDL_GetMouseNameForID(id);
-        _changes.Add(new Change(ChangeKind.Added, kind, id, Name: CString.Read(named)));
-    }
-
-    private void Forget(DeviceKind kind, uint id)
-    {
-        if (_announced.Remove((kind, id)))
-            _changes.Add(new Change(ChangeKind.Removed, kind, id));
+        int index = FindIndex(kind, id);
+        _devices.RemoveAt(index);
+        _controls.RemoveAt(index);
     }
 
     private unsafe void OpenGamepad(uint id)
@@ -636,7 +566,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
 
         _gamepads[id] = (nint)gamepad;
         string name = CString.Read(SDL_GetGamepadName(gamepad));
-        _changes.Add(new Change(ChangeKind.Added, DeviceKind.Gamepad, id, Name: name));
+        AddDevice(DeviceKind.Gamepad, id, name);
         Log.Info($"Gamepad connected: {name}");
     }
 
@@ -647,47 +577,13 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
 
         Log.Info($"Gamepad disconnected: {CString.Read(SDL_GetGamepadName((SDL_Gamepad*)gamepad))}");
         SDL_CloseGamepad((SDL_Gamepad*)gamepad);
-        _changes.Add(new Change(ChangeKind.Removed, DeviceKind.Gamepad, id));
-    }
-
-    private unsafe void ReadAxes(uint id, SDL_Gamepad* gamepad)
-    {
-        int index = FindIndex(DeviceKind.Gamepad, id);
-        if (index < 0)
-            return;
-
-        foreach ((Control control, SDL_GamepadAxis axis, bool isY) in _axes)
-        {
-            // SDL's stick y grows downward; Magic's is up positive.
-            float value = ToStick(SDL_GetGamepadAxis(gamepad, axis));
-            SetState(_controls[index], control, isY ? -value : value);
-        }
+        RemoveDevice(DeviceKind.Gamepad, id);
     }
 
     /// <summary>
-    /// Window pixels per screen point, which SDL's mouse positions are in; 1 when SDL cannot say.
-    /// </summary>
-    private unsafe float ReadPixelDensity()
-    {
-        float density = SDL_GetWindowPixelDensity(_window);
-
-        return density > 0 ? density : 1;
-    }
-
-    private unsafe void ReadWindowSize()
-    {
-        int width;
-        int height;
-        if (!SDL_GetWindowSizeInPixels(_window, &width, &height))
-            return;
-
-        Width = width;
-        Height = height;
-    }
-
-    /// <summary>
-    /// Loads <paramref name="icon"/> and its image on workers, for the next frame to give the image to the window. One that
-    /// does not load is a warning, and the window keeps what it shows.
+    /// Loads <paramref name="icon"/> and its image on workers, then gives the image to the window on the main thread,
+    /// unless the run ended or another icon was set meanwhile. One that does not load is a warning, and the window keeps
+    /// what it shows.
     /// </summary>
     private async Task ShowAsync(Handle<Icon> icon)
     {
@@ -706,7 +602,9 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
             return;
         }
 
-        Volatile.Write(ref _wantedIcon, new WantedIcon(icon, image.Value));
+        await _threads.Enter(EngineThread.Main);
+        if (!lifetime.IsCancellationRequested && Icon == icon)
+            SetIcon(image.Value);
     }
 
     /// <summary>
@@ -774,50 +672,4 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
             );
         }
     }
-
-    /// <summary>
-    /// What a <see cref="Change"/> does; each says which fields it uses.
-    /// </summary>
-    private enum ChangeKind : byte
-    {
-        /// <summary>
-        /// A device, with its <see cref="Change.Name"/>.
-        /// </summary>
-        Added,
-
-        Removed,
-
-        /// <summary>
-        /// A control's new <see cref="Change.Value"/>.
-        /// </summary>
-        Set,
-
-        /// <summary>
-        /// Added to a control's value, for what counts up over the frame.
-        /// </summary>
-        Add,
-
-        /// <summary>
-        /// Characters typed, in <see cref="Change.Text"/>.
-        /// </summary>
-        Typed,
-    }
-
-    /// <summary>
-    /// One thing the pump saw, as plain data for the frame: which fields mean something depends on <see cref="Kind"/>.
-    /// </summary>
-    private readonly record struct Change(
-        ChangeKind Kind,
-        DeviceKind Device = default,
-        uint Id = 0,
-        Control Control = default,
-        float Value = 0,
-        string? Name = null,
-        string? Text = null
-    );
-
-    /// <summary>
-    /// An icon and the image it names, loaded.
-    /// </summary>
-    private sealed record WantedIcon(Handle<Icon> Icon, Texture Image);
 }

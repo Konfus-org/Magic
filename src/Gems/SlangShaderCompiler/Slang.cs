@@ -17,19 +17,15 @@ internal static unsafe partial class Slang
     private const long ApiVersion = 0;
 
     /// <summary>
-    /// What slang_createGlobalSession makes; freed with <see cref="Release(nint)"/>.
+    /// What slang_createGlobalSession makes, or null; freed with <see cref="Release"/>.
     /// </summary>
-    public static nint CreateGlobalSession()
+    public static void* CreateGlobalSession()
     {
         void* session;
         int result = slang_createGlobalSession(ApiVersion, &session);
 
-        return result >= 0 ? (nint)session : 0;
+        return result >= 0 ? session : null;
     }
-
-    public static void Shutdown() => slang_shutdown();
-
-    public static void Release(nint unknown) => Release((void*)unknown);
 
     public static void Release(void* unknown) => ((delegate* unmanaged<void*, uint>)VTable(unknown)[2])(unknown);
 
@@ -145,11 +141,11 @@ internal static unsafe partial class Slang
 
     [LibraryImport(Library)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-    private static partial int slang_createGlobalSession(long apiVersion, void** outGlobalSession);
+    public static partial void slang_shutdown();
 
     [LibraryImport(Library)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-    private static partial void slang_shutdown();
+    private static partial int slang_createGlobalSession(long apiVersion, void** outGlobalSession);
 
     private static void** VTable(void* unknown) => *(void***)unknown;
 
@@ -235,7 +231,6 @@ internal static unsafe partial class Slang
         public const int WarningsAsErrors = 19;
         public const int DisableWarning = 22;
         public const int DefaultImageFormatUnknown = 40;
-        public const int DebugInformation = 44;
         public const int Optimization = 46;
         public const int VulkanUseEntryPointName = 52;
         public const int EmitSpirvDirectly = 58;

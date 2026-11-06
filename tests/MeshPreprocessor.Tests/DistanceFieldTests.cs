@@ -1,4 +1,5 @@
 using System.Numerics;
+using Magic.Rendering;
 using Xunit;
 
 namespace Magic.MeshPreprocessor.Tests;
@@ -40,10 +41,7 @@ public sealed class DistanceFieldTests
             Assert.InRange(unchecked((sbyte)voxel), -127, 127);
         }
 
-        Assert.Equal(
-            DistanceFieldBuilder.Size * DistanceFieldBuilder.Size * DistanceFieldBuilder.Size,
-            field.Voxels.Length
-        );
+        Assert.Equal(MeshDerived.FieldSize * MeshDerived.FieldSize * MeshDerived.FieldSize, field.Voxels.Length);
     }
 
     /// <summary>
@@ -55,7 +53,7 @@ public sealed class DistanceFieldTests
         int x = (int)MathF.Round(cell.X);
         int y = (int)MathF.Round(cell.Y);
         int z = (int)MathF.Round(cell.Z);
-        int size = DistanceFieldBuilder.Size;
+        int size = MeshDerived.FieldSize;
         sbyte value = unchecked((sbyte)field.Voxels[(((z * size) + y) * size) + x]);
 
         return value / 127f * field.Band;

@@ -10,34 +10,26 @@ namespace Magic.CommandLine.Commands;
 /// <c>load</c>: puts the game back as <c>Saves/&lt;name&gt;.save</c> beside Magic holds it, holding <c>wait loaded</c>
 /// meanwhile.
 /// </summary>
-internal sealed class LoadCommand : Command
+internal static class LoadCommand
 {
-    private readonly App _app;
-
-    private readonly World _world;
-
-    private readonly CommandQueue _queue;
-
-    public LoadCommand(App app, World world, CommandQueue queue)
-        : base("load", "Puts the game back as Saves/<name>.save beside Magic holds it")
+    public static Command Create(App app, World world, CommandQueue queue)
     {
-        _app = app;
-        _world = world;
-        _queue = queue;
         Argument<string> name = new("name") { Description = "The save's name" };
-        Arguments.Add(name);
-        Action = new CliCommand(parsed => LoadGameAsync(parsed.GetRequiredValue(name)).FireAndForget());
-    }
+        Command load = new("load", "Puts the game back as Saves/<name>.save beside Magic holds it") { name };
+        load.SetAction(parsed => LoadGameAsync(parsed.GetRequiredValue(name)).FireAndForget());
 
-    private async Task LoadGameAsync(string name)
-    {
-        if (!CommandLookups.IsProjectOpen(_app, $"load {name} in"))
-            return;
+        return load;
 
-        Result loaded = await _queue
-            .ChangeWorldAsync(() => _world.RestoreAsync(name, CancellationToken.None))
-            .ConfigureAwait(false);
-        if (!loaded.Ok)
-            Log.Error($"The save {name} was not loaded: {loaded.Error}");
+        async Task LoadGameAsync(string saveName)
+        {
+            if (!CommandLookups.IsProjectOpen(app, $"load {saveName} in"))
+                return;
+
+            Result loaded = await queue
+                .ChangeWorldAsync(() => world.RestoreAsync(saveName, CancellationToken.None))
+                .ConfigureAwait(false);
+            if (!loaded.Ok)
+                Log.Error($"The save {saveName} was not loaded: {loaded.Error}");
+        }
     }
 }

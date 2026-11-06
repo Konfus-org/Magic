@@ -13,10 +13,9 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Magic.Projects;
 
 /// <summary>
-/// The run's gems: makes the ones the registry found as it is made, each after the gems it needs, drives them through the
-/// frame, restarts the run once a build of one has settled, and ends them as it is disposed. A gem that can't be made is
-/// logged, and the others go on without it; one that throws in a hook is logged and leaves every hook, and the frame goes
-/// on.
+/// The run's gems: makes the ones registered, in their order, as it is made, drives them through the frame, restarts
+/// the run once a build of one has settled, and ends them as it is disposed. A gem that can't be made is logged, and the
+/// others go on without it; one that throws in a hook is logged and leaves every hook, and the frame goes on.
 /// </summary>
 internal sealed class Gems : IDisposable
 {
@@ -48,8 +47,6 @@ internal sealed class Gems : IDisposable
         "One gem's hook."
     );
 
-    private readonly GemRegistry _registry;
-
     private readonly IServiceProvider _provider;
 
     private readonly App _app;
@@ -79,10 +76,11 @@ internal sealed class Gems : IDisposable
     private long _frameStart;
 
     /// <summary>
-    /// Makes the gems through <paramref name="provider"/>, which was built from the services they were registered with.
+    /// Makes the gems <paramref name="registered"/> through <paramref name="provider"/>, which was built from the services
+    /// they were registered with.
     /// </summary>
     public Gems(
-        GemRegistry registry,
+        List<GemInfo> registered,
         IServiceProvider provider,
         App app,
         IFileSystem files,
@@ -91,14 +89,13 @@ internal sealed class Gems : IDisposable
         EventCoordinator events
     )
     {
-        _registry = registry;
         _provider = provider;
         _app = app;
         _files = files;
         _assets = assets;
         _world = world;
         _events = events;
-        Load();
+        Load(registered);
     }
 
     /// <summary>
@@ -110,7 +107,7 @@ internal sealed class Gems : IDisposable
         for (int i = _loaded.Count - 1; i >= 0; i--)
         {
             Log.Info($"Unloading {_loaded[i].Name}.");
-            _loaded[i].Dispose();
+            _loaded[i].Ends.Dispose();
         }
 
         _loaded.Clear();
@@ -196,9 +193,9 @@ internal sealed class Gems : IDisposable
         "CA1031:Do not catch general exception types",
         Justification = "Whatever a gem's constructor throws, it is logged and the gem is not made; the others go on."
     )]
-    private void Load()
+    private void Load(List<GemInfo> registered)
     {
-        foreach (GemInfo gem in GetSorted())
+        foreach (GemInfo gem in registered)
         {
             Watch(gem);
             if (gem.Resources is not null)
@@ -221,13 +218,17 @@ internal sealed class Gems : IDisposable
                 continue;
             }
 
-            if (made is IEcs ecs)
-                _world.Ecs = ecs;
-
-            LoadedGem loaded = new(made, gem);
+            LoadedGem loaded = new(
+                made,
+                gem.Name,
+                [
+                    new Subscription(gem.Context.Unload),
+                    new Subscription(() => (made as IDisposable)?.Dispose()),
+                    code,
+                    _assets.Register(made),
+                ]
+            );
             _loaded.Add(loaded);
-            loaded.Subscriptions.Add(code);
-            loaded.Subscriptions.Add(_assets.Register(made));
 
             // The gem is an IWindow in any mode, but a headless run has no window.
             if (made is IWindow window && !_app.IsHeadless)
@@ -235,14 +236,17 @@ internal sealed class Gems : IDisposable
                 _app.Window = window;
 
                 // The window is the gem, which can't unload while the app holds it.
-                loaded.Subscriptions.Add(new Subscription(() => _app.Window = null));
+                loaded.Ends.Add(new Subscription(() => _app.Window = null));
             }
 
             if (made is ILogSink sink)
-                loaded.Subscriptions.Add(Log.Register(sink));
+                loaded.Ends.Add(Log.Register(sink));
+
+            if (made is IEcs ecs)
+                loaded.Ends.Add(_world.Register(ecs));
 
             if (made is IHookIntoDomainLoading hooks)
-                loaded.Subscriptions.Add(_world.Register(hooks));
+                loaded.Ends.Add(_world.Register(hooks));
 
             string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
             Log.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");
@@ -307,60 +311,6 @@ internal sealed class Gems : IDisposable
     private void Touch() => Volatile.Write(ref _buildTimestamp, Stopwatch.GetTimestamp());
 
     /// <summary>
-    /// The gems the registry found, each after the gems it needs. A gem in a cycle, or one that needs it, is logged and
-    /// left out, since the provider hangs making a cycle.
-    /// </summary>
-    private List<GemInfo> GetSorted()
-    {
-        List<GemInfo> sorted = [];
-        HashSet<string> placed = new(StringComparer.OrdinalIgnoreCase);
-        HashSet<string> refused = new(StringComparer.OrdinalIgnoreCase);
-        HashSet<string> visiting = new(StringComparer.OrdinalIgnoreCase);
-        foreach (GemInfo gem in _registry.Gems)
-        {
-            Place(gem, sorted, placed, refused, visiting);
-        }
-
-        return sorted;
-    }
-
-    /// <summary>
-    /// Places <paramref name="gem"/> in <paramref name="sorted"/> after the gems it needs: whether it was.
-    /// </summary>
-    private bool Place(
-        GemInfo gem,
-        List<GemInfo> sorted,
-        HashSet<string> placed,
-        HashSet<string> refused,
-        HashSet<string> visiting
-    )
-    {
-        if (placed.Contains(gem.Name))
-            return true;
-
-        // A gem visited again before it is placed is in a cycle; the gem that needs it says so.
-        if (refused.Contains(gem.Name) || !visiting.Add(gem.Name))
-            return false;
-
-        foreach (string name in gem.Needs)
-        {
-            if (_registry.Find(name) is not { } need || Place(need, sorted, placed, refused, visiting))
-                continue;
-
-            string why = visiting.Contains(name) ? "which needs it: a cycle" : "which was not made";
-            Log.Error($"Gem {gem.Name} was not made: it needs {name}, {why}.");
-            visiting.Remove(gem.Name);
-            refused.Add(gem.Name);
-            return false;
-        }
-
-        visiting.Remove(gem.Name);
-        placed.Add(gem.Name);
-        sorted.Add(gem);
-        return true;
-    }
-
-    /// <summary>
     /// A hook of <see cref="IGem"/>'s.
     /// </summary>
     private enum Hook : byte
@@ -369,5 +319,18 @@ internal sealed class Gems : IDisposable
         FixedUpdate,
         LateUpdate,
         Render,
+    }
+
+    /// <summary>
+    /// A gem as made, and what ends with it, last added first: its subscriptions (its place on the log when it is a
+    /// sink, the asset types it reads, the hooks it joined), then the gem itself, then its load context, which frees its
+    /// assemblies once nothing refers to the gem.
+    /// </summary>
+    private sealed record LoadedGem(IGem Instance, string Name, Subscriptions Ends)
+    {
+        /// <summary>
+        /// Whether the gem threw in a hook, so it no longer runs: it is still ended with the others.
+        /// </summary>
+        public bool HasFailed { get; set; }
     }
 }

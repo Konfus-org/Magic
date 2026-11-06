@@ -15,16 +15,13 @@ namespace Magic.CommandLine;
 /// </summary>
 internal sealed class Cli : IDisposable
 {
-    private readonly App _app;
-
     private readonly CommandQueue _queue;
 
     private readonly RootCommand _cliCommands;
 
     public Cli(App app, IFileSystem files, EventCoordinator events, Assets assets, World world)
     {
-        _app = app;
-        _queue = new CommandQueue(world, events);
+        _queue = new CommandQueue(events);
         _cliCommands = CreateCliCommands(app, files, events, assets, world, _queue);
     }
 
@@ -32,7 +29,7 @@ internal sealed class Cli : IDisposable
 
     /// <summary>
     /// Executes the commands Magic was launched with, or says why they didn't run. Only open runs a project; any other
-    /// command does its job and leaves the app exiting.
+    /// command does its job, and Magic exits after it.
     /// </summary>
     public Result Execute(string[] commands)
     {
@@ -42,11 +39,7 @@ internal sealed class Cli : IDisposable
                 "it has no command; open a project with 'Magic open <project>', or see 'Magic --help'."
             );
 
-        Result ran = Invoke(parsed);
-        if (_app.Project is null)
-            _app.Exit();
-
-        return ran;
+        return Invoke(parsed);
     }
 
     /// <summary>
@@ -107,39 +100,33 @@ internal sealed class Cli : IDisposable
         {
             Subcommands =
             {
-                new OpenCommand(app, files, assets, world, queue),
-                new NewCommand(),
-                new ScreenshotCommand(app, files, events),
-                new SaveCommand(app, world, queue),
-                new LoadCommand(app, world, queue),
-                new BakeCommand(app, assets, queue),
-                new SetCommand(app, events, world),
-                new GetCommand(app, world),
-                new TeleportCommand(app, world, assets, queue),
-                new SpawnCommand(app, world, assets, queue),
-                new WaitCommand(queue),
-                new ExitCommand(app),
+                OpenCommand.Create(app, files, assets, world, queue),
+                NewCommand.Create(),
+                ScreenshotCommand.Create(app, files, events),
+                SaveCommand.Create(app, world, queue),
+                LoadCommand.Create(app, world, queue),
+                BakeCommand.Create(app, assets, queue),
+                SetCommand.Create(app, events, world),
+                GetCommand.Create(app, world),
+                TeleportCommand.Create(app, world, assets, queue),
+                SpawnCommand.Create(app, world, assets, queue),
+                WaitCommand.Create(queue, world),
+                ExitCommand.Create(app),
             },
             Options =
             {
-                new Option<bool>("--headless")
-                {
-                    Description = "Run without a GUI (headless mode)",
-                    Recursive = true,
-                    Action = new CliCommand(cmds => app.IsHeadless = cmds.GetValue<bool>("--headless")),
-                },
-                new Option<Log.VerbosityLevel>("--verbosity", "-v")
-                {
-                    Description = "How much the log prints",
-                    Recursive = true,
-                    Action = new CliCommand(cmds => Log.Verbosity = cmds.GetValue<Log.VerbosityLevel>("--verbosity")),
-                },
-                new Option<bool>("--fail-on-error")
-                {
-                    Description = "Exit with code 2 as soon as an error is logged",
-                    Recursive = true,
-                    Action = new CliCommand(cmds => app.ShouldExitOnError = cmds.GetValue<bool>("--fail-on-error")),
-                },
+                CreateOption<bool>("--headless", "Run without a GUI (headless mode)", value => app.IsHeadless = value),
+                CreateOption<Log.VerbosityLevel>(
+                    "--verbosity",
+                    "How much the log prints",
+                    value => Log.Verbosity = value,
+                    "-v"
+                ),
+                CreateOption<bool>(
+                    "--fail-on-error",
+                    "Exit with code 2 as soon as an error is logged",
+                    value => app.ShouldExitOnError = value
+                ),
             },
         };
 
@@ -147,5 +134,15 @@ internal sealed class Cli : IDisposable
         commands.SetAction(_ => { });
 
         return commands;
+
+        // Every option is recursive, and its action applies its value before the command runs.
+        static Option<T> CreateOption<T>(string name, string description, Action<T> apply, params string[] aliases)
+            where T : struct
+        {
+            Option<T> option = new(name, aliases) { Description = description, Recursive = true };
+            option.Action = new OptionAction(parsed => apply(parsed.GetValue(option)));
+
+            return option;
+        }
     }
 }

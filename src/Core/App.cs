@@ -1,8 +1,6 @@
 using Magic.Debugging;
 using Magic.Platform;
 using Magic.Projects;
-using Magic.Threading;
-using Magic.Utils;
 
 namespace Magic;
 
@@ -13,20 +11,13 @@ namespace Magic;
 public sealed class App : IDisposable
 {
     /// <summary>
-    /// Cancelled once the process is to end: by <see cref="Exit"/>, or by an error under --fail-on-error. Every run's
-    /// <see cref="Lifetime"/> is linked to it.
+    /// Cancelled once the process is to end, by <see cref="Exit"/>. Every run's <see cref="Lifetime"/> is linked to it.
     /// </summary>
     private readonly CancellationTokenSource _exiting = new();
 
-    private readonly Subscription _logging;
-
     private CancellationTokenSource _lifetime;
 
-    internal App()
-    {
-        _lifetime = CancellationTokenSource.CreateLinkedTokenSource(_exiting.Token);
-        _logging = Log.Register(new FailOnError(this));
-    }
+    internal App() => _lifetime = CancellationTokenSource.CreateLinkedTokenSource(_exiting.Token);
 
     /// <summary>
     /// The project to run, as read from its <c>.magic</c> file; none until one is opened. Opening another ends the run,
@@ -67,18 +58,9 @@ public sealed class App : IDisposable
     }
 
     /// <summary>
-    /// Whether the process exits with 2 as soon as an error is logged, or at once if one already was.
+    /// Whether the process exits with 2 once an error is logged.
     /// </summary>
-    public bool ShouldExitOnError
-    {
-        get;
-        set
-        {
-            field = value;
-            if (HasFailed)
-                Fail();
-        }
-    }
+    public bool ShouldExitOnError { get; set; }
 
     /// <summary>
     /// Pauses the application, simulation systems will not be run until this is set back to true.
@@ -109,7 +91,6 @@ public sealed class App : IDisposable
 
     public void Dispose()
     {
-        _logging.Dispose();
         _lifetime.Dispose();
         _exiting.Dispose();
     }
@@ -128,25 +109,5 @@ public sealed class App : IDisposable
     {
         _lifetime.Dispose();
         _lifetime = CancellationTokenSource.CreateLinkedTokenSource(_exiting.Token);
-    }
-
-    /// <summary>
-    /// Exits for --fail-on-error's error. It comes from whichever thread logged it, inside the log's lock, so what waits
-    /// on the run runs on a worker, not there.
-    /// </summary>
-    private void Fail() => _exiting.CancelAsync().FireAndForget();
-
-    /// <summary>
-    /// Fails the app at the first error logged under --fail-on-error.
-    /// </summary>
-    private sealed class FailOnError(App app) : ILogSink
-    {
-        public void Write(in Log.Line line)
-        {
-            if (line.Level >= Log.LoggingLevel.Error && app.ShouldExitOnError)
-                app.Fail();
-        }
-
-        public void Flush() { }
     }
 }

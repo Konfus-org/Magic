@@ -1,44 +1,44 @@
-using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Threading.Channels;
+using Magic.Debugging;
 using Magic.Events;
 using Magic.Utils;
-using Magic.Worlds;
 
 namespace Magic.CommandLine;
 
 /// <summary>
 /// The lines the console runs next, and what holds them back. Lines a command queues run before the terminal's, in
-/// the order queued. A wait holds every line after it: for a number of frames or seconds, until the world has loaded,
-/// or until the first frame is drawn. A change to the world on its way counts as loading. Main thread.
+/// the order queued. A hold keeps every line after the one that set it back until its condition says no. Main thread.
 /// </summary>
 internal sealed class CommandQueue : IDisposable
 {
-    private readonly World _world;
+    /// <summary>
+    /// The lines typed into the terminal, read by one thread for the whole process.
+    /// </summary>
+    private static readonly ChannelReader<string> _typed = StartReadingTerminal();
 
     private readonly Queue<string> _queued = new();
 
     private readonly Subscription _drawnWatch;
 
-    private int _waitFrames;
+    /// <summary>
+    /// The last change to the world a command started; none before the first.
+    /// </summary>
+    private Task? _change;
+
+    private Func<bool>? _hold;
+
+    public CommandQueue(EventCoordinator events) => _drawnWatch = events.Watch<FirstFrameDrawn>(_ => HasDrawn = true);
 
     /// <summary>
-    /// When a wait in seconds ends, as <see cref="Stopwatch.GetTimestamp"/> counts; 0 when none is on.
+    /// Whether the first frame has been drawn.
     /// </summary>
-    private long _waitUntilTimestamp;
+    public bool HasDrawn { get; private set; }
 
-    private bool _isWaitingForWorld;
-
-    private bool _isWaitingToDraw;
-
-    private bool _hasDrawn;
-
-    private bool _isChangingWorld;
-
-    public CommandQueue(World world, EventCoordinator events)
-    {
-        _world = world;
-        _drawnWatch = events.Watch<FirstFrameDrawn>(_ => _hasDrawn = true);
-    }
+    /// <summary>
+    /// Whether a change to the world a command started is still on its way.
+    /// </summary>
+    public bool IsChangingWorld => _change is { IsCompleted: false };
 
     public void Dispose() => _drawnWatch.Dispose();
 
@@ -48,92 +48,55 @@ internal sealed class CommandQueue : IDisposable
     public void Enqueue(string line) => _queued.Enqueue(line);
 
     /// <summary>
-    /// Holds the lines after this one for <paramref name="frames"/> frames.
+    /// Holds the lines after this one while <paramref name="isHeld"/> says so, asked once per <see cref="TryDequeue"/>.
     /// </summary>
-    public void WaitFrames(int frames) => _waitFrames = frames;
+    public void Hold(Func<bool> isHeld) => _hold = isHeld;
 
     /// <summary>
-    /// Holds the lines after this one for <paramref name="seconds"/> of real time.
+    /// Runs <paramref name="change"/>, a change to the world, and returns what it returns: <see cref="IsChangingWorld"/>
+    /// holds until it ends.
     /// </summary>
-    public void WaitSeconds(double seconds) =>
-        _waitUntilTimestamp = Stopwatch.GetTimestamp() + (long)(seconds * Stopwatch.Frequency);
-
-    /// <summary>
-    /// Holds the lines after this one until the world has content, is not loading, and no change to it is on its way.
-    /// </summary>
-    public void WaitForWorld() => _isWaitingForWorld = true;
-
-    /// <summary>
-    /// Holds the lines after this one until the first frame is drawn.
-    /// </summary>
-    public void WaitForDrawn() => _isWaitingToDraw = true;
-
-    /// <summary>
-    /// Runs <paramref name="change"/>, a change to the world, and returns what it returns: a wait for the world holds
-    /// until it ends. It counts from this call, before the change's first await.
-    /// </summary>
-    public async Task<T> ChangeWorldAsync<T>(Func<Task<T>> change)
+    public Task<T> ChangeWorldAsync<T>(Func<Task<T>> change)
     {
-        _isChangingWorld = true;
-        try
-        {
-            return await change().ConfigureAwait(false);
-        }
-        finally
-        {
-            _isChangingWorld = false;
-        }
+        Task<T> changing = change();
+        _change = changing;
+
+        return changing;
     }
 
     /// <summary>
-    /// The next line to run, once no wait holds it back: a queued one, else one typed into the terminal. False while a
-    /// wait holds, or when no line is waiting; a wait for frames counts this call as one.
+    /// The next line to run, once no hold keeps it back: a queued one, else one typed into the terminal. False while a
+    /// hold keeps it, or when no line is waiting.
     /// </summary>
     public bool TryDequeue([NotNullWhen(true)] out string? line)
     {
         line = null;
-        if (IsHeld())
+        if (_hold?.Invoke() == true)
             return false;
 
-        return _queued.TryDequeue(out line) || Terminal.Pump(out line);
+        _hold = null;
+
+        return _queued.TryDequeue(out line) || _typed.TryRead(out line);
     }
 
-    /// <summary>
-    /// Whether a wait still holds this frame, ending each wait whose time has come; a wait for frames counts one.
-    /// </summary>
-    private bool IsHeld()
+    [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "Must read console for CLI")]
+    private static ChannelReader<string> StartReadingTerminal()
     {
-        if (_waitFrames > 0)
+        Channel<string> lines = Channel.CreateUnbounded<string>(new() { SingleReader = true, SingleWriter = true });
+        Thread reader = new(() =>
         {
-            _waitFrames--;
-
-            return true;
-        }
-
-        if (_waitUntilTimestamp != 0)
+            // Text piped in can start with a byte order mark.
+            while (Console.ReadLine() is { } line)
+                lines.Writer.TryWrite(line.TrimStart('\uFEFF'));
+            lines.Writer.Complete();
+        })
         {
-            if (Stopwatch.GetTimestamp() < _waitUntilTimestamp)
-                return true;
+            IsBackground = true,
+            Name = "CLI Reader",
+        };
+        reader.Start();
+        Log.Info("Welcome to the magic CLI, type 'help' for commands.");
 
-            _waitUntilTimestamp = 0;
-        }
-
-        if (_isWaitingForWorld)
-        {
-            if (_isChangingWorld || _world.IsLoading || _world.Domains.IsEmpty)
-                return true;
-
-            _isWaitingForWorld = false;
-        }
-
-        if (_isWaitingToDraw)
-        {
-            if (!_hasDrawn)
-                return true;
-
-            _isWaitingToDraw = false;
-        }
-
-        return false;
+        return lines.Reader;
     }
 }

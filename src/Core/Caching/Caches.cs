@@ -17,10 +17,10 @@ namespace Magic.Caching;
 /// another, it is dirty: the read fails, and the caller makes it again and writes it over it. Any thread.
 /// <para>
 /// Entries are files in one folder per machine, shared by every checkout and copy of Magic that runs the project, so
-/// what one made the others read: <c>&lt;project&gt;/&lt;Type&gt;/&lt;key&gt;</c> under <see cref="GetRoot"/>. A project
-/// has its own, as two projects' assets can share an id. An entry holds the version it was made from and its type's
-/// <see cref="ICache{T}.Version"/>, then the bytes its <see cref="ICache{T}"/> wrote. Nothing is kept in memory:
-/// whoever reads an entry keeps what it needs of it.
+/// what one made the others read: <c>Magic/Cache/&lt;project&gt;/&lt;Type&gt;/&lt;key&gt;</c> under the user's local
+/// application data. A project has its own, as two projects' assets can share an id. An entry holds the version it
+/// was made from and its type's <see cref="ICache{T}.Version"/>, then the bytes its <see cref="ICache{T}"/> wrote.
+/// Nothing is kept in memory: whoever reads an entry keeps what it needs of it.
 /// </para>
 /// <para>
 /// A project can bring its entries with it: <c>Cache/&lt;Type&gt;/&lt;key&gt;</c> in the project's own folder, read
@@ -50,12 +50,13 @@ public sealed class Caches
     /// This user's cache folder for the project, a folder per type under it: read after the project's, and the one
     /// written.
     /// </summary>
-    private string UserCacheFolder => _files.Combine(GetRoot(_files), Project.Name);
-
-    /// <summary>
-    /// The cache folder the project brings with it, a folder per type under it: read first and never written.
-    /// </summary>
-    private string ProjectCacheFolder => _files.Combine(_files.GetParent(Project.Path), "Cache");
+    private string UserCacheFolder =>
+        _files.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Magic",
+            "Cache",
+            Project.Name
+        );
 
     /// <summary>
     /// The project this run's caches are for, as it was when first asked: another opened as the run ends is the next run's.
@@ -70,7 +71,9 @@ public sealed class Caches
     /// </summary>
     public async Task<Result<T>> ReadAsync<T>(ulong key, ulong version, ICache<T> cache, CancellationToken cancel)
     {
-        Result<T> fromProject = await ReadEntryAsync(GetEntryFile<T>(ProjectCacheFolder, key), version, cache, cancel)
+        // The cache folder the project brings with it is read first, and never written.
+        string projectCache = _files.Combine(_files.GetParent(Project.Path), "Cache");
+        Result<T> fromProject = await ReadEntryAsync(GetEntryFile<T>(projectCache, key), version, cache, cancel)
             .ConfigureAwait(false);
 
         return fromProject.Ok
@@ -85,24 +88,7 @@ public sealed class Caches
     /// </summary>
     public async Task WriteAsync<T>(ulong key, ulong version, T value, ICache<T> cache, CancellationToken cancel)
     {
-        string file = GetEntryFile<T>(UserCacheFolder, key);
-        Result written = await _files.WriteAsync(file, ToEntry(version, value, cache), cancel).ConfigureAwait(false);
-        if (!written.Ok)
-            Log.Warn($"{file} could not be written, so it is made again next time: {written.Error}");
-    }
-
-    /// <summary>
-    /// The folder every project's cache is under on this machine: <c>Magic/Cache/</c> under the user's local
-    /// application data.
-    /// </summary>
-    private static string GetRoot(IFileSystem files) =>
-        files.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Magic", "Cache");
-
-    /// <summary>
-    /// <paramref name="value"/> as an entry: the versions, then what <paramref name="cache"/> writes of it.
-    /// </summary>
-    private static ReadOnlyMemory<byte> ToEntry<T>(ulong version, T value, ICache<T> cache)
-    {
+        // The versions, then what the type's cache writes.
         ArrayBufferWriter<byte> entry = new();
         Span<byte> header = entry.GetSpan(HeaderSize);
         BinaryPrimitives.WriteUInt64LittleEndian(header, version);
@@ -110,37 +96,10 @@ public sealed class Caches
         entry.Advance(HeaderSize);
         cache.Write(value, entry);
 
-        return entry.WrittenMemory;
-    }
-
-    /// <summary>
-    /// What <paramref name="entry"/> holds, read by <paramref name="cache"/>, when it was made from
-    /// <paramref name="version"/> by the cache's version; why not otherwise.
-    /// </summary>
-    [SuppressMessage(
-        "Design",
-        "CA1031:Do not catch general exception types",
-        Justification = "Bytes a type's cache cannot read, whatever it throws, are dirty: they are made again."
-    )]
-    private static Result<T> FromEntry<T>(ReadOnlySpan<byte> entry, ulong version, ICache<T> cache)
-    {
-        if (
-            entry.Length < HeaderSize
-            || BinaryPrimitives.ReadUInt64LittleEndian(entry) != version
-            || BinaryPrimitives.ReadInt32LittleEndian(entry[sizeof(ulong)..]) != cache.Version
-        )
-        {
-            return Result.Failure("it was made from something else.");
-        }
-
-        try
-        {
-            return cache.Read(entry[HeaderSize..]);
-        }
-        catch (Exception ex)
-        {
-            return Result.Failure($"its bytes are not a {typeof(T).Name}: {ex.Message}");
-        }
+        string file = GetEntryFile<T>(UserCacheFolder, key);
+        Result written = await _files.WriteAsync(file, entry.WrittenMemory, cancel).ConfigureAwait(false);
+        if (!written.Ok)
+            Log.Warn($"{file} could not be written, so it is made again next time: {written.Error}");
     }
 
     /// <summary>
@@ -153,6 +112,11 @@ public sealed class Caches
     /// What the entry at <paramref name="file"/> holds, read by <paramref name="cache"/>, made from
     /// <paramref name="version"/>; why not when there is none, or it was made from something else.
     /// </summary>
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Bytes a type's cache cannot read, whatever it throws, are dirty: they are made again."
+    )]
     private async Task<Result<T>> ReadEntryAsync<T>(
         string file,
         ulong version,
@@ -163,14 +127,31 @@ public sealed class Caches
         if (!_files.FileExists(file))
             return Result.Failure($"nothing is cached at {file}.");
 
-        Result<byte[]> bytes = await _files.ReadBytesAsync(file, cancel).ConfigureAwait(false);
-        if (!bytes.Ok)
-            return Result.Failure($"{file} could not be read: {bytes.Error}");
+        Result<byte[]> read = await _files.ReadBytesAsync(file, cancel).ConfigureAwait(false);
+        if (!read.Ok)
+            return Result.Failure($"{file} could not be read: {read.Error}");
 
-        // A dirty entry is left for the write that follows to replace: deleting it here would collide with another
-        // reader of the same entry, and it is never read as valid anyway.
-        Result<T> read = FromEntry(bytes.Value, version, cache);
+        // The header: the version it was made from, and its type's cache's. A dirty entry is left for the write that
+        // follows to replace: deleting it here would collide with another reader of the same entry, and it is never
+        // read as valid anyway.
+        byte[] entry = read.Value;
+        if (
+            entry.Length < HeaderSize
+            || BinaryPrimitives.ReadUInt64LittleEndian(entry) != version
+            || BinaryPrimitives.ReadInt32LittleEndian(entry.AsSpan(sizeof(ulong))) != cache.Version
+        )
+        {
+            return Result.Failure($"{file} is dirty: it was made from something else.");
+        }
 
-        return read.Ok ? read : Result.Failure($"{file} is dirty: {read.Error}");
+        // Then the bytes the type's cache wrote.
+        try
+        {
+            return cache.Read(entry.AsSpan(HeaderSize));
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure($"{file} is dirty: its bytes are not a {typeof(T).Name}: {ex.Message}");
+        }
     }
 }

@@ -1,5 +1,4 @@
 using System.Numerics;
-using System.Runtime.InteropServices;
 using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
@@ -26,25 +25,18 @@ internal sealed class RayTracing(IGraphicsApi gpu, RenderGraph graph) : IDisposa
 
     public void Dispose()
     {
-        if (!_acceleration.IsNone)
-            gpu.Destroy(_acceleration);
-
-        if (!_instances.IsNone)
-            gpu.Destroy(_instances);
+        gpu.Destroy(_acceleration);
+        gpu.Destroy(_instances);
     }
 
     public Result Create()
     {
         Result<GpuBuffer> instances = gpu.CreateBuffer(
-            new BufferDescription
-            {
-                Bytes = (long)InstanceTable.Capacity * GpuAccelerationInstance.Bytes,
-                Usage = BufferUsages.Storage,
-                Name = "Acceleration instances",
-            }
+            "Acceleration instances",
+            (long)InstanceTable.Capacity * GpuAccelerationInstance.Bytes
         );
         if (!instances.Ok)
-            return Result.Failure($"the acceleration instances were not made: {instances.Error}");
+            return Result.Failure(instances.Error);
 
         _instances = instances.Value;
         Result<GpuAcceleration> acceleration = gpu.CreateAcceleration(
@@ -105,11 +97,7 @@ internal sealed class RayTracing(IGraphicsApi gpu, RenderGraph graph) : IDisposa
         if (!_isBuilt)
             return;
 
-        int bytes = _count * GpuAccelerationInstance.Bytes;
-        GpuUpload upload = gpu.BeginUpload(bytes);
-        MemoryMarshal.AsBytes(_rows.AsSpan(0, _count)).CopyTo(upload.Bytes);
-        graph.Use(_instances, GpuAccess.CopyDestination);
-        graph.Recorder.CopyBuffer(upload.Buffer, upload.Offset, _instances, 0, (ulong)bytes);
+        graph.Upload(gpu, _instances, _rows.AsSpan(0, _count));
         graph.Recorder.BuildAcceleration(_acceleration, (uint)_count);
     }
 }

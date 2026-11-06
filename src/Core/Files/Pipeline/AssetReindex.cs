@@ -22,8 +22,7 @@ internal static class AssetReindex
     {
         while (watches.TryTakeRead(out AssetDirectoriesReindexed read))
         {
-            if (read.Index is { } index)
-                (database, loaded) = Reindex(database, loaded, index, read.Touched, changes);
+            (database, loaded) = Reindex(database, loaded, read.Index, read.Touched, changes);
         }
 
         watches.ReadOnceSettled(database.Directories, builtIn, stopped);

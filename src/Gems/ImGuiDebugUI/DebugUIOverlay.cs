@@ -44,10 +44,10 @@ internal sealed class DebugUIOverlay : IDisposable
     private DebugUIFrame? _frame;
 
     /// <summary>
-    /// Both stages, written whole by the compile on its worker and read by <see cref="Record"/>.
+    /// Both stages, written whole by the compile on its worker and read by <see cref="Record"/>: null while it compiles,
+    /// and for good once it or the pipeline fails, which is logged.
     /// </summary>
     private volatile CompiledStages? _compiled;
-    private bool _hasFailed;
 
     /// <summary>
     /// Starts compiling the overlay's shaders, which stop with <paramref name="lifetime"/>.
@@ -76,15 +76,11 @@ internal sealed class DebugUIOverlay : IDisposable
 
         foreach (GpuBuffer buffer in (ReadOnlySpan<GpuBuffer>)[_constants, _vertices, _indices])
         {
-            if (!buffer.IsNone)
-                _gpu.Destroy(buffer);
+            _gpu.Destroy(buffer);
         }
 
-        if (!_sampler.IsNone)
-            _gpu.Destroy(_sampler);
-
-        if (!_pipeline.IsNone)
-            _gpu.Destroy(_pipeline);
+        _gpu.Destroy(_sampler);
+        _gpu.Destroy(_pipeline);
     }
 
     /// <summary>
@@ -110,11 +106,12 @@ internal sealed class DebugUIOverlay : IDisposable
         bool canDraw = frame.Indices.Count > 0 && TryUpload(frame, graph, description);
         graph.EndPass();
         if (canDraw)
-            RecordDraws(frame, graph, target);
+            RecordDraws(frame, graph, target, description);
     }
 
     /// <summary>
-    /// The compiled stages, compiling one each from <paramref name="shader"/>.
+    /// The compiled stages, compiling one each from <paramref name="shader"/>; a stage that fails is logged, and the UI
+    /// stays undrawn.
     /// </summary>
     private async Task CompileAsync(IShaderCompiler shaders, Handle<Shader> shader, CancellationToken cancel)
     {
@@ -134,7 +131,14 @@ internal sealed class DebugUIOverlay : IDisposable
         Task<Result<CompiledShader>> pixelCompile = shaders.CompileAsync(pixel, null, cancel);
         Result<CompiledShader> vertexResult = await vertexCompile.ConfigureAwait(false);
         Result<CompiledShader> pixelResult = await pixelCompile.ConfigureAwait(false);
-        _compiled = new CompiledStages(vertexResult, pixelResult);
+        if (!vertexResult.Ok || !pixelResult.Ok)
+        {
+            Log.Error($"The debug UI is not drawn: {(vertexResult.Ok ? pixelResult.Error : vertexResult.Error)}");
+
+            return;
+        }
+
+        _compiled = new CompiledStages(vertexResult.Value, pixelResult.Value);
     }
 
     /// <summary>
@@ -143,7 +147,7 @@ internal sealed class DebugUIOverlay : IDisposable
     /// </summary>
     private bool TryCreateResources(GpuFormat format)
     {
-        if (_hasFailed || _compiled is not { } compiled)
+        if (_compiled is not { } compiled)
             return false;
 
         if (!_pipeline.IsNone && _pipelineFormat == format)
@@ -154,26 +158,20 @@ internal sealed class DebugUIOverlay : IDisposable
             return true;
 
         Log.Error($"The debug UI is not drawn: {made.Error}");
-        _hasFailed = true;
+        _compiled = null;
 
         return false;
     }
 
     private Result CreateResources(CompiledStages compiled, GpuFormat format)
     {
-        if (!compiled.Vertex.Ok)
-            return Result.Failure(compiled.Vertex.Error);
-
-        if (!compiled.Pixel.Ok)
-            return Result.Failure(compiled.Pixel.Error);
-
         Result<GpuPipeline> pipeline = _gpu.CreatePipeline(
             new GraphicsPipelineDescription
             {
-                VertexSpirv = compiled.Vertex.Value.Spirv,
-                VertexEntryPoint = compiled.Vertex.Value.EntryPoint,
-                PixelSpirv = compiled.Pixel.Value.Spirv,
-                PixelEntryPoint = compiled.Pixel.Value.EntryPoint,
+                VertexSpirv = compiled.Vertex.Spirv,
+                VertexEntryPoint = compiled.Vertex.EntryPoint,
+                PixelSpirv = compiled.Pixel.Spirv,
+                PixelEntryPoint = compiled.Pixel.EntryPoint,
                 ColorFormats = [format],
                 Blend = BlendMode.Alpha,
                 Cull = CullMode.None,
@@ -183,9 +181,7 @@ internal sealed class DebugUIOverlay : IDisposable
         if (!pipeline.Ok)
             return Result.Failure(pipeline.Error);
 
-        if (!_pipeline.IsNone)
-            _gpu.Destroy(_pipeline);
-
+        _gpu.Destroy(_pipeline);
         _pipeline = pipeline.Value;
         _pipelineFormat = format;
         if (_sampler.IsNone)
@@ -340,12 +336,8 @@ internal sealed class DebugUIOverlay : IDisposable
             return false;
         }
 
-        if (!buffer.IsNone)
-        {
-            graph.Forget(buffer);
-            _gpu.Destroy(buffer);
-        }
-
+        graph.Forget(buffer);
+        _gpu.Destroy(buffer);
         buffer = made.Value;
 
         return true;
@@ -355,7 +347,12 @@ internal sealed class DebugUIOverlay : IDisposable
     /// Each draw clipped to its rectangle, its vertices counted from its first and its texture read: a pass that draws
     /// over what the target holds.
     /// </summary>
-    private void RecordDraws(DebugUIFrame frame, RenderGraph graph, GpuTexture target)
+    private void RecordDraws(
+        DebugUIFrame frame,
+        RenderGraph graph,
+        GpuTexture target,
+        in TextureDescription description
+    )
     {
         graph.BeginDrawPass(
             "Debug UI",
@@ -371,7 +368,6 @@ internal sealed class DebugUIOverlay : IDisposable
 
         graph.Recorder.BindPipeline(_pipeline);
         graph.Recorder.BindIndexBuffer(_indices);
-        TextureDescription description = _gpu.GetDescription(target);
         foreach (DebugUIDraw draw in frame.Draws)
         {
             RecordDraw(graph, draw, description);
@@ -400,9 +396,9 @@ internal sealed class DebugUIOverlay : IDisposable
     }
 
     /// <summary>
-    /// The two stages as compiled, or why each did not, boxed so it is written whole from the compile's worker.
+    /// The two stages as compiled, boxed so they are written whole from the compile's worker.
     /// </summary>
-    private sealed record CompiledStages(Result<CompiledShader> Vertex, Result<CompiledShader> Pixel);
+    private sealed record CompiledStages(CompiledShader Vertex, CompiledShader Pixel);
 }
 
 /// <summary>

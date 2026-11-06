@@ -525,41 +525,27 @@ public sealed class Assets : IDisposable
     /// </summary>
     internal Subscription Register(object gem)
     {
-        List<Type> reads = [];
-        List<Type> writes = [];
+        List<AssetChange> removals = [];
         foreach (Type contract in gem.GetType().GetInterfaces())
         {
             if (!contract.IsGenericType)
                 continue;
 
-            if (contract.GetGenericTypeDefinition() == typeof(IAssetImporter<>))
-                reads.Add(contract.GetGenericArguments()[0]);
-            else if (contract.GetGenericTypeDefinition() == typeof(IAssetExporter<>))
-                writes.Add(contract.GetGenericArguments()[0]);
-        }
-
-        foreach (Type type in reads)
-        {
-            Changes.Push(new AssetImporterAdded(type, gem));
-        }
-
-        foreach (Type type in writes)
-        {
-            Changes.Push(new AssetExporterAdded(type, gem));
-        }
-
-        return new Subscription(() =>
-        {
-            foreach (Type type in reads)
+            Type definition = contract.GetGenericTypeDefinition();
+            Type type = contract.GenericTypeArguments[0];
+            if (definition == typeof(IAssetImporter<>))
             {
-                Changes.Push(new AssetImporterRemoved(type, gem));
+                Changes.Push(new AssetImporterAdded(type, gem));
+                removals.Add(new AssetImporterRemoved(type, gem));
             }
-
-            foreach (Type type in writes)
+            else if (definition == typeof(IAssetExporter<>))
             {
-                Changes.Push(new AssetExporterRemoved(type, gem));
+                Changes.Push(new AssetExporterAdded(type, gem));
+                removals.Add(new AssetExporterRemoved(type, gem));
             }
-        });
+        }
+
+        return new Subscription(() => removals.ForEach(Changes.Push));
     }
 
     /// <summary>
@@ -575,9 +561,7 @@ public sealed class Assets : IDisposable
             return;
         }
 
-        AssetDatabase database = Database;
-        LoadedAssets loaded = Loaded;
-        (database, loaded) = AssetChanges.Take(database, loaded, Changes);
+        (AssetDatabase database, LoadedAssets loaded) = AssetChanges.Take(Database, Loaded, Changes);
         CancellationToken lifetime = _app.Lifetime;
         (database, loaded) = AssetReindex.Take(database, loaded, _watches, Changes, BuiltIn, lifetime);
         (database, loaded) = AssetLoads.Land(database, loaded, Changes, Caches, lifetime);
@@ -585,8 +569,7 @@ public sealed class Assets : IDisposable
         Database = database;
         Loaded = loaded;
         Changes.TellWaiters();
-        Reloaded = [.. Changes.Reloaded];
-        Changes.EndRun();
+        Reloaded = Changes.TakeReloaded();
     }
 
     /// <summary>
@@ -834,22 +817,14 @@ public sealed class Assets : IDisposable
     /// <summary>
     /// Whether <paramref name="type"/> implements <see cref="IAsset{TSelf}"/> of itself.
     /// </summary>
-    private static bool IsAssetType(Type type)
-    {
-        foreach (Type contract in type.GetInterfaces())
-        {
-            if (
+    private static bool IsAssetType(Type type) =>
+        Array.Exists(
+            type.GetInterfaces(),
+            contract =>
                 contract.IsGenericType
                 && contract.GetGenericTypeDefinition() == typeof(IAsset<>)
-                && contract.GetGenericArguments()[0] == type
-            )
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+                && contract.GenericTypeArguments[0] == type
+        );
 
     /// <summary>
     /// A generic method of this class's, <paramref name="name"/>, made for <paramref name="type"/>.

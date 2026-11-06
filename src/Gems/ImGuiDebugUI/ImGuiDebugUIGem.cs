@@ -157,11 +157,6 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     private readonly Dictionary<string, DocumentBuffer> _documents = [];
 
     /// <summary>
-    /// The windows given their first place, each to the right of the last.
-    /// </summary>
-    private readonly HashSet<string> _placed = [];
-
-    /// <summary>
     /// By a row of tabs' ImGui id, the tab ImGui showed last frame.
     /// </summary>
     private readonly Dictionary<uint, int> _tabs = [];
@@ -174,12 +169,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     /// <summary>
     /// This gem, for ImGui's clipboard callbacks.
     /// </summary>
-    private GCHandle _self;
-
-    /// <summary>
-    /// The clipboard's text as the NUL-terminated UTF-8 ImGui reads, pinned until it asks again.
-    /// </summary>
-    private GCHandle _pasted;
+    private readonly GCHandle<ImGuiDebugUIGem> _self;
 
     /// <summary>
     /// The id the last of ImGui's textures was given, which the overlay knows it by.
@@ -192,15 +182,12 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     private float _nextWindowX = FontSize * 2;
     private int _depth;
     private bool _isWindowDrawn;
-    private bool _isInFrame;
-    private bool _hasLoggedUnended;
     private volatile bool _isShowing;
 
     /// <summary>
-    /// Whether ImGui shows the table open, and how many columns it has; rows go nowhere while it does not.
+    /// Whether ImGui shows the table open; rows go nowhere while it does not.
     /// </summary>
     private bool _isTableShown;
-    private int _tableColumns;
 
     public unsafe ImGuiDebugUIGem(
         App app,
@@ -231,9 +218,9 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
         style->FontSizeBase = FontSize;
 
         // ImGui's clipboard is the platform's, through callbacks that find this gem by the handle in the user data.
-        _self = GCHandle.Alloc(this);
+        _self = new GCHandle<ImGuiDebugUIGem>(this);
         ImGuiPlatformIO_t* platform = ImGui_GetPlatformIO();
-        platform->Platform_ClipboardUserData = (void*)GCHandle.ToIntPtr(_self);
+        platform->Platform_ClipboardUserData = (void*)GCHandle<ImGuiDebugUIGem>.ToIntPtr(_self);
         platform->Platform_SetClipboardTextFn = &SetClipboard;
         platform->Platform_GetClipboardTextFn = &GetClipboard;
         _isShowing = IsAlwaysShowing;
@@ -246,9 +233,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
         ImGui_DestroyContext(_context);
         _overlay.Dispose();
         _text.Dispose();
-        _self.Free();
-        if (_pasted.IsAllocated)
-            _pasted.Free();
+        _self.Dispose();
     }
 
     /// <summary>
@@ -265,7 +250,6 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
         io->DisplaySize = GetDisplaySize().Im;
         io->DeltaTime = Math.Max((float)frame.AppDeltaSec, 1e-4f);
         ImGui_NewFrame();
-        _isInFrame = true;
         _isWindowDrawn = false;
     }
 
@@ -275,11 +259,8 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     /// </summary>
     public unsafe void LateUpdate(in Frame frame)
     {
-        if (_depth > 0 && !_hasLoggedUnended)
-        {
-            Log.Error("A debug UI window was begun and not ended; it is ended for it.");
-            _hasLoggedUnended = true;
-        }
+        if (_depth > 0)
+            Error("A debug UI window was begun and not ended; it is ended for it.", staySec: 0);
 
         while (_depth > 0)
         {
@@ -291,16 +272,12 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
         _isShowing = IsAlwaysShowing || _isWindowDrawn;
         _worldTexts.Clear();
         _screenLines.Clear();
-        _reports.Take(GetNowSec(), _worldTexts, _screenLines);
+        _reports.Take(frame.AppSec, _worldTexts, _screenLines);
         if (_isShowing)
-        {
-            DrawWorld();
-            DrawLines();
-        }
+            DrawReports();
 
         // Ended whether or not anything draws it. Its textures get their ids before the copy, which reads them.
         ImGui_Render();
-        _isInFrame = false;
         QueueTextureChanges(frame.Index);
         _frames.Back.Copy(ImGui_GetDrawData(), frame.Index);
         _frames.Publish();
@@ -439,10 +416,9 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
                     InputBytes,
                     (int)ImGuiInputTextFlags_EnterReturnsTrue
                 );
+            if (isEntered || ImGui_IsItemEdited())
+                text = Marshal.PtrToStringUTF8((nint)buffer) ?? string.Empty;
         }
-
-        if (isEntered || ImGui_IsItemEdited())
-            text = Encoding.UTF8.GetString(_typed, 0, Array.IndexOf(_typed, (byte)0));
 
         // The field keeps the keyboard, to type the next line.
         if (isEntered)
@@ -481,15 +457,11 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
                 null,
                 null
             );
+            if (isChanged)
+                text = Marshal.PtrToStringUTF8((nint)buffer) ?? string.Empty;
         }
 
-        if (!isChanged)
-            return false;
-
-        text = Encoding.UTF8.GetString(document.Bytes, 0, Array.IndexOf(document.Bytes, (byte)0));
-        _documents[label] = new DocumentBuffer(text, readOnly);
-
-        return true;
+        return isChanged;
     }
 
     public unsafe bool Checkbox(string label, ref bool value)
@@ -609,7 +581,6 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     public unsafe void Table(string label, ReadOnlySpan<string> columns)
     {
         ThrowIfOutsideFrame();
-        _tableColumns = columns.Length;
         _isTableShown = ImGui_BeginTable(
             _text.Add(label),
             columns.Length,
@@ -633,7 +604,8 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
             return;
 
         ImGui_TableNextRow();
-        for (int i = 1; i < cells.Length && i < _tableColumns; i++)
+        int columns = ImGui_TableGetColumnCount();
+        for (int i = 1; i < cells.Length && i < columns; i++)
         {
             ImGui_TableSetColumnIndex(i);
             ImGui_TextUnformatted(_text.Add(cells[i]));
@@ -641,7 +613,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
 
         // The first cell last, spanning the row, so the row is the item a tooltip after it rests on. Rows may start with
         // the same text, so the row's index, not its text, is its id.
-        if (cells.Length == 0 || _tableColumns <= 0)
+        if (cells.Length == 0)
             return;
 
         ImGui_TableSetColumnIndex(0);
@@ -689,11 +661,6 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     }
 
     /// <summary>
-    /// The time reports are kept by, in seconds.
-    /// </summary>
-    private static double GetNowSec() => Environment.TickCount64 / 1000d;
-
-    /// <summary>
     /// A linear colour as ImGui packs one, encoded to sRGB as the target wants: alpha, blue, green, red from the top byte
     /// down.
     /// </summary>
@@ -720,29 +687,25 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     /// <summary>
     /// The gem ImGui's clipboard callbacks are for: the one the platform's user data names, set as the context is made.
     /// </summary>
-    private static unsafe ImGuiDebugUIGem? GetSelf() =>
-        GCHandle.FromIntPtr((nint)ImGui_GetPlatformIO()->Platform_ClipboardUserData).Target as ImGuiDebugUIGem;
+    private static unsafe ImGuiDebugUIGem GetSelf() =>
+        GCHandle<ImGuiDebugUIGem>.FromIntPtr((nint)ImGui_GetPlatformIO()->Platform_ClipboardUserData).Target;
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static unsafe void SetClipboard(ImGuiContext_t* context, byte* text)
     {
-        if (GetSelf() is { _clipboard: { } clipboard })
+        if (GetSelf()._clipboard is { } clipboard)
             clipboard.Text = Marshal.PtrToStringUTF8((nint)text) ?? string.Empty;
     }
 
+    /// <summary>
+    /// The clipboard's text from the frame's arena: ImGui copies it within the call, which a widget makes during the frame.
+    /// </summary>
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static unsafe byte* GetClipboard(ImGuiContext_t* context)
     {
-        if (GetSelf() is not { _clipboard: { } clipboard } gem)
-            return null;
+        ImGuiDebugUIGem gem = GetSelf();
 
-        if (gem._pasted.IsAllocated)
-            gem._pasted.Free();
-
-        byte[] bytes = Encoding.UTF8.GetBytes(clipboard.Text + '\0');
-        gem._pasted = GCHandle.Alloc(bytes, GCHandleType.Pinned);
-
-        return (byte*)gem._pasted.AddrOfPinnedObject();
+        return gem._clipboard is { } clipboard ? gem._text.Add(clipboard.Text) : null;
     }
 
     /// <summary>
@@ -834,14 +797,15 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
         level.Closed.Clear();
         level.IsScrollable = scrollable;
         level.Indent = 0;
+        byte* name = _text.Add(title);
         if (depth == 0)
         {
             _isWindowDrawn = true;
 
-            // Each new window to the right of the last, so none opens on top of another. Sizes go by the font, which says
-            // how big the UI is.
+            // Each new window to the right of the last, so none opens on top of another: ImGui keeps a window from its first
+            // Begin, so one it does not know is new. Sizes go by the font, which says how big the UI is.
             float width = (scrollable ? ScrollableWindowWidth : FittedWindowWidth) * FontSize;
-            if (_placed.Add(title))
+            if (ImGui_FindWindowByName(name) == null)
             {
                 ImGui_SetNextWindowPos(new Vector2(_nextWindowX, FontSize * 2).Im, (int)ImGuiCond_FirstUseEver);
                 _nextWindowX += width + FontSize;
@@ -866,7 +830,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
             }
 
             ImGui_Begin(
-                _text.Add(title),
+                name,
                 visible,
                 scrollable ? (int)ImGuiWindowFlags_None : (int)ImGuiWindowFlags_AlwaysAutoResize
             );
@@ -876,7 +840,6 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
 
         // As tall as the parent's room less what followed this view last frame: all of it, the first time. The view's id is
         // the one ImGui gives it, from the title and the window it is in.
-        byte* name = _text.Add(title);
         level.Id = ImGui_GetID(name);
         float reserved = _reserved.GetValueOrDefault(level.Id);
         ImGuiWindowFlags_ flags = scrollable
@@ -889,9 +852,9 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     /// Widgets go into ImGui's frame, which is open from this gem's Update to its LateUpdate; called outside it, ImGui
     /// would stop the process.
     /// </summary>
-    private void ThrowIfOutsideFrame()
+    private unsafe void ThrowIfOutsideFrame()
     {
-        if (_isInFrame)
+        if (_context->WithinFrameScope)
             return;
 
         throw new InvalidOperationException(
@@ -900,27 +863,63 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     }
 
     /// <summary>
-    /// Text in the world, where the window's camera shows it within <see cref="TextDistance"/>, on its plate, with its
-    /// tooltip while the mouse rests on the plate and on no window. ImGui draws its background under every window, so the
-    /// windows stay readable over what is reported.
+    /// What is reported, each on a dark plate with its tooltip while the mouse rests on the plate and on no window: text in
+    /// the world where the window's camera shows it within <see cref="TextDistance"/>, and the lines down the left of the
+    /// picture, oldest first, as many of the last as fit. ImGui draws its background under every window, so the windows
+    /// stay readable over what is reported.
     /// </summary>
-    private unsafe void DrawWorld()
+    private unsafe void DrawReports()
     {
-        if (_worldTexts.Count == 0 || FindCameraView() is not { } view)
-            return;
-
         ImDrawList_t* under = ImGui_GetBackgroundDrawList();
         bool canHover = !ImGui_IsWindowHovered((int)ImGuiHoveredFlags_AnyWindow);
-        foreach (ShownReport report in _worldTexts)
-        {
-            if (!view.TryProject(report.Position, TextDistance, out Vector2 center))
-                continue;
+        Vector2 size = GetDisplaySize();
 
-            byte* label = _text.Add(report.Label);
-            Vector2 size = ImGui_CalcTextSize(label).Vector;
-            Vector2 corner = center - (size * 0.5f);
+        // Text in the world, as the renderer frames the window's view: the field of view is vertical, and the width follows
+        // the target's shape.
+        if (_worldTexts.Count > 0 && FindWindowCamera() is (Transform eye, Camera camera))
+        {
+            Quaternion inverse = Quaternion.Conjugate(eye.Rotation);
+            float tanY = MathF.Tan(camera.FieldOfView * (MathF.PI / 360));
+            Vector2 tangents = new(tanY * size.X / size.Y, tanY);
+            foreach (ShownReport report in _worldTexts)
+            {
+                // Within reach and in front of the camera, which looks along its +Z with +Y up.
+                Vector3 relative = report.Position - eye.Position;
+                if (relative.LengthSquared() > TextDistance * TextDistance)
+                    continue;
+
+                Vector3 local = Vector3.Transform(relative, inverse);
+                if (local.Z <= camera.Near)
+                    continue;
+
+                // Across and up the view at its depth, -1 to 1 from edge to edge, then pixels, which count down from the top.
+                Vector2 ndc = new Vector2(local.X, local.Y) / (local.Z * tangents);
+                if (MathF.Abs(ndc.X) > 1 || MathF.Abs(ndc.Y) > 1)
+                    continue;
+
+                Vector2 center = new Vector2((ndc.X * 0.5f) + 0.5f, 0.5f - (ndc.Y * 0.5f)) * size;
+                byte* label = _text.Add(report.Label);
+                Vector2 extent = ImGui_CalcTextSize(label).Vector;
+                DrawPlate(center - (extent * 0.5f), extent, label, report);
+            }
+        }
+
+        // The lines.
+        float lineHeight = ImGui_GetTextLineHeightWithSpacing();
+        int fitting = Math.Max(1, (int)((size.Y - (2 * _linesMargin.Y)) / lineHeight));
+        Vector2 at = _linesMargin;
+        for (int i = Math.Max(0, _screenLines.Count - fitting); i < _screenLines.Count; i++)
+        {
+            ShownReport line = _screenLines[i];
+            byte* label = _text.Add(line.Label);
+            DrawPlate(at, ImGui_CalcTextSize(label).Vector, label, line);
+            at.Y += lineHeight;
+        }
+
+        void DrawPlate(Vector2 corner, Vector2 extent, byte* label, in ShownReport report)
+        {
             Vector2 min = corner - _platePadding;
-            Vector2 max = corner + size + _platePadding;
+            Vector2 max = corner + extent + _platePadding;
             ImDrawList_AddRectFilledEx(under, min.Im, max.Im, Plate, 3f, (int)ImDrawFlags_None);
             ImDrawList_AddText(under, corner.Im, PackColor(report.Color), label);
             if (report.Tooltip is { } tooltip && canHover && ImGui_IsMouseHoveringRect(min.Im, max.Im))
@@ -932,69 +931,17 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     }
 
     /// <summary>
-    /// The lines down the left of the picture, oldest first, as many of the last as fit, with a line's tooltip while the
-    /// mouse rests on it and on no window.
+    /// The camera that draws into the window, as the renderer picks it: the first there is, with where it stands; none when
+    /// no camera does.
     /// </summary>
-    private unsafe void DrawLines()
-    {
-        if (_screenLines.Count == 0)
-            return;
-
-        ImDrawList_t* under = ImGui_GetBackgroundDrawList();
-        bool canHover = !ImGui_IsWindowHovered((int)ImGuiHoveredFlags_AnyWindow);
-        float lineHeight = ImGui_GetTextLineHeightWithSpacing();
-        int fitting = Math.Max(1, (int)((GetDisplaySize().Y - (2 * _linesMargin.Y)) / lineHeight));
-        Vector2 at = _linesMargin;
-        for (int i = Math.Max(0, _screenLines.Count - fitting); i < _screenLines.Count; i++)
-        {
-            ShownReport line = _screenLines[i];
-            byte* label = _text.Add(line.Label);
-            Vector2 size = ImGui_CalcTextSize(label).Vector;
-            ImDrawList_AddRectFilledEx(
-                under,
-                (at - _platePadding).Im,
-                (at + size + _platePadding).Im,
-                Plate,
-                3f,
-                (int)ImDrawFlags_None
-            );
-            ImDrawList_AddText(under, at.Im, PackColor(line.Color), label);
-            if (line.Tooltip is { } tooltip && canHover && ImGui_IsMouseHoveringRect(at.Im, (at + size).Im))
-            {
-                ImGui_BeginTooltip();
-                WriteTooltip(tooltip);
-            }
-
-            at.Y += lineHeight;
-        }
-    }
-
-    /// <summary>
-    /// The view of the camera that draws into the window, as the renderer picks it: the first there is; none when no
-    /// camera does.
-    /// </summary>
-    private CameraView? FindCameraView()
+    private (Transform Eye, Camera Camera)? FindWindowCamera()
     {
         foreach (EcsChunk<Transform, Camera> chunk in _ecs.Query<Transform, Camera>())
         {
             for (int i = 0; i < chunk.Entities.Length; i++)
             {
-                Camera camera = chunk.Second[i];
-                if (!camera.Target.IsWindow)
-                    continue;
-
-                // As the renderer frames a view: the field of view is vertical, and the width follows the target's shape.
-                float tanY = MathF.Tan(camera.FieldOfView * (MathF.PI / 360));
-                Transform transform = chunk.First[i];
-                Vector2 size = GetDisplaySize();
-
-                return new CameraView(
-                    transform.Position,
-                    Quaternion.Conjugate(transform.Rotation),
-                    new Vector2(tanY * size.X / size.Y, tanY),
-                    camera.Near,
-                    size
-                );
+                if (chunk.Second[i].Target.IsWindow)
+                    return (chunk.First[i], chunk.Second[i]);
             }
         }
 
@@ -1043,45 +990,5 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
         internal byte[] Bytes { get; }
 
         internal int Lines { get; }
-    }
-}
-
-/// <summary>
-/// The window's camera as text in the world needs it: where it is, the turn that takes the world into its frame, the
-/// tangents of half its field of view across and up, how near it sees, and the target's size in pixels.
-/// </summary>
-internal readonly record struct CameraView(
-    Vector3 Position,
-    Quaternion Inverse,
-    Vector2 Tangents,
-    float Near,
-    Vector2 Size
-)
-{
-    /// <summary>
-    /// The pixel <paramref name="point"/> shows at; false when it is behind the camera, outside the view or farther than
-    /// <paramref name="distance"/> metres from the camera.
-    /// </summary>
-    internal bool TryProject(Vector3 point, float distance, out Vector2 pixel)
-    {
-        pixel = default;
-        Vector3 relative = point - Position;
-        if (relative.LengthSquared() > distance * distance)
-            return false;
-
-        // The camera looks along its +Z, +Y up.
-        Vector3 local = Vector3.Transform(relative, Inverse);
-        if (local.Z <= Near)
-            return false;
-
-        // Across and up the view at its depth, -1 to 1 from edge to edge.
-        Vector2 ndc = new(local.X / (local.Z * Tangents.X), local.Y / (local.Z * Tangents.Y));
-        if (MathF.Abs(ndc.X) > 1 || MathF.Abs(ndc.Y) > 1)
-            return false;
-
-        // Into pixels, which count down from the top.
-        pixel = new Vector2(((ndc.X * 0.5f) + 0.5f) * Size.X, (0.5f - (ndc.Y * 0.5f)) * Size.Y);
-
-        return true;
     }
 }

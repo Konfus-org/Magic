@@ -70,9 +70,9 @@ public sealed class World : IEcs, IDisposable
     private readonly Dictionary<Handle<Domain>, ImmutableArray<PlacedPrefab>> _read = [];
 
     /// <summary>
-    /// The ECS a gem provides, as soon as it is made.
+    /// The ECS a gem provides, from when it is made until it goes; null while none does.
     /// </summary>
-    private IEcs _ecs = new NoEcs();
+    private IEcs? _ecs;
 
     /// <summary>
     /// Completed as the next frame starts, and replaced for the one after, by <see cref="Pump"/>: what a replace waits on
@@ -128,15 +128,16 @@ public sealed class World : IEcs, IDisposable
     /// <summary>
     /// Whether a gem provides the ECS, so content can come into the world.
     /// </summary>
-    internal bool HasEcs => _ecs is not NoEcs;
+    private bool HasEcs => _ecs is not null;
 
     /// <summary>
-    /// The gem that provides the ECS, from when it is made.
+    /// The ECS a gem provides; throws when none does.
     /// </summary>
-    internal IEcs Ecs
-    {
-        set => _ecs = value;
-    }
+    private IEcs Ecs =>
+        _ecs
+        ?? throw new InvalidOperationException(
+            "No gem the project lists provides the ECS, so the world holds no entities."
+        );
 
     public void Dispose() => _turn.Dispose();
 
@@ -151,11 +152,7 @@ public sealed class World : IEcs, IDisposable
         CancellationToken cancel
     )
     {
-        Result opened = Result.Failure("it was not opened.");
-        await RunLoadingAsync(
-                async () => opened = await OpenDomainAsync(domain, mode, progress, cancel).ConfigureAwait(false),
-                cancel
-            )
+        Result opened = await RunLoadingAsync(() => OpenDomainAsync(domain, mode, progress, cancel), cancel)
             .ConfigureAwait(false);
 
         return opened.Ok ? opened : Result.Failure($"The domain does not open: {opened.Error}");
@@ -169,7 +166,11 @@ public sealed class World : IEcs, IDisposable
             () =>
             {
                 if (Domains.Contains(domain))
-                    Remove(domain);
+                {
+                    Unplace(domain);
+                    _read.Remove(domain);
+                    Domains = Domains.Remove(domain);
+                }
 
                 return Task.CompletedTask;
             },
@@ -196,19 +197,10 @@ public sealed class World : IEcs, IDisposable
             return Result.Failure(loaded.Error);
 
         ImmutableArray<ImmutableArray<IComponent>> coming = GetEntities(loaded.Value, at);
-        ImmutableArray<Entity> spawned = [];
-        await RunInTurnAsync(
-                () =>
-                {
-                    spawned = CreateEntities(coming);
 
-                    return Task.CompletedTask;
-                },
-                cancel
-            )
-            .ConfigureAwait(false);
-
-        return Result.Success(spawned);
+        return Result.Success(
+            await RunInTurnAsync(() => Task.FromResult(CreateEntities(coming)), cancel).ConfigureAwait(false)
+        );
     }
 
     /// <summary>
@@ -218,8 +210,7 @@ public sealed class World : IEcs, IDisposable
     /// </summary>
     public Entity Create(ReadOnlySpan<IComponent> components, bool makeGlobal = false)
     {
-        ThrowIfNoEcs();
-        Entity made = makeGlobal ? _ecs.Create(WithGlobalTag(components).AsSpan()) : _ecs.Create(components);
+        Entity made = makeGlobal ? Ecs.Create(WithGlobalTag(components).AsSpan()) : Ecs.Create(components);
         CreateShading([made]);
 
         return made;
@@ -231,28 +222,12 @@ public sealed class World : IEcs, IDisposable
     /// </summary>
     public async Task<Result> SaveAsync(string name, CancellationToken cancel)
     {
-        SaveFile? saving = null;
-        await RunInTurnAsync(
-                () =>
-                {
-                    saving = new SaveFile(Domains, FindChanges(Domains), IsPaused, TimeScale);
+        SaveFile saving = await RunInTurnAsync(() => Task.FromResult(GetSaveFile()), cancel).ConfigureAwait(false);
+        Result<byte[]> bytes = await Task.Run(() => ToBytes(saving), cancel).ConfigureAwait(false);
+        if (!bytes.Ok)
+            return Result.Failure(bytes.Error);
 
-                    return Task.CompletedTask;
-                },
-                cancel
-            )
-            .ConfigureAwait(false);
-        if (saving is null)
-            return Result.Failure("the world was not read.");
-
-        Result<JsonElement> json = await Task.Run(() => Json.Write(saving, typeof(SaveFile)), cancel)
-            .ConfigureAwait(false);
-        if (!json.Ok)
-            return Result.Failure(json.Error);
-
-        return await _files
-            .WriteAsync(GetSavePath(name), Encoding.UTF8.GetBytes(json.Value.GetRawText()), cancel)
-            .ConfigureAwait(false);
+        return await _files.WriteAsync(GetSavePath(name), bytes.Value, cancel).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -266,18 +241,7 @@ public sealed class World : IEcs, IDisposable
         if (!bytes.Ok)
             return Result.Failure(bytes.Error);
 
-        Result<SaveFile> saved = Json.Read<SaveFile>(bytes.Value);
-        if (!saved.Ok)
-            return Result.Failure(saved.Error);
-
-        Result loaded = Result.Failure("it was not loaded.");
-        await RunLoadingAsync(
-                async () => loaded = await OpenSaveAsync(saved.Value, cancel).ConfigureAwait(false),
-                cancel
-            )
-            .ConfigureAwait(false);
-
-        return loaded;
+        return await RestoreAsync(bytes.Value, cancel).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -287,7 +251,6 @@ public sealed class World : IEcs, IDisposable
     public void Apply(EntityCommands commands)
     {
         ArgumentNullException.ThrowIfNull(commands);
-        ThrowIfNoEcs();
         commands.Apply(this);
         commands.Clear();
     }
@@ -299,9 +262,7 @@ public sealed class World : IEcs, IDisposable
     public void Create<T1>(ReadOnlySpan<T1> first, Span<Entity> created)
         where T1 : unmanaged, IComponent
     {
-        ThrowIfNoRoom(first.Length, created);
-        ThrowIfNoEcs();
-        _ecs.Create(first, created);
+        Ecs.Create(first, created);
         CreateShading(created);
     }
 
@@ -310,61 +271,41 @@ public sealed class World : IEcs, IDisposable
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
     {
-        ThrowIfNoRoom(first.Length, created);
-        ThrowIfNoEcs();
-        _ecs.Create(first, second, created);
+        Ecs.Create(first, second, created);
         CreateShading(created);
     }
 
     /// <inheritdoc/>
     public void Destroy(Entity entity)
     {
-        ThrowIfDead(entity);
-        _ecs.Destroy(entity);
+        Ecs.Destroy(entity);
         DestroyShading(entity);
     }
 
     /// <inheritdoc/>
-    public bool IsAlive(Entity entity) => _ecs.IsAlive(entity);
+    public bool IsAlive(Entity entity) => Ecs.IsAlive(entity);
 
-    /// <summary>
-    /// Gives the entity <paramref name="component"/>, or overwrites the one it has.
-    /// </summary>
+    /// <inheritdoc/>
     public void Set<T>(Entity entity, in T component)
-        where T : unmanaged, IComponent
-    {
-        ThrowIfDead(entity);
-        _ecs.Set(entity, in component);
-    }
+        where T : unmanaged, IComponent => Ecs.Set(entity, in component);
 
-    /// <summary>
-    /// Gives the entity each of <paramref name="components"/>, or overwrites the one it has.
-    /// </summary>
-    public void Set(Entity entity, ReadOnlySpan<IComponent> components)
-    {
-        ThrowIfDead(entity);
-        _ecs.Set(entity, components);
-    }
+    /// <inheritdoc/>
+    public void Set(Entity entity, ReadOnlySpan<IComponent> components) => Ecs.Set(entity, components);
 
     /// <inheritdoc/>
     public ref T Get<T>(Entity entity)
-        where T : unmanaged, IComponent => ref _ecs.Get<T>(entity);
+        where T : unmanaged, IComponent => ref Ecs.Get<T>(entity);
 
     /// <inheritdoc/>
     public bool Has<T>(Entity entity)
-        where T : unmanaged, IComponent => _ecs.Has<T>(entity);
+        where T : unmanaged, IComponent => Ecs.Has<T>(entity);
 
     /// <inheritdoc/>
     public void Remove<T>(Entity entity)
-        where T : unmanaged, IComponent
-    {
-        ThrowIfDead(entity);
-        if (_ecs.Has<T>(entity))
-            _ecs.Remove<T>(entity);
-    }
+        where T : unmanaged, IComponent => Ecs.Remove<T>(entity);
 
     /// <inheritdoc/>
-    public IComponent[] GetComponents(Entity entity) => _ecs.GetComponents(entity);
+    public IComponent[] GetComponents(Entity entity) => Ecs.GetComponents(entity);
 
     /// <summary>
     /// The entity's own shading in <paramref name="slot"/> of its renderer, made with the entity; null for an empty slot
@@ -373,54 +314,54 @@ public sealed class World : IEcs, IDisposable
     public ShadingInstance? GetShading(Entity entity, int slot) => _shading.GetValueOrDefault((entity, slot));
 
     /// <inheritdoc/>
-    public EcsQuery Query() => _ecs.Query();
+    public EcsQuery Query() => Ecs.Query();
 
     /// <inheritdoc/>
     public EcsQuery<T1> Query<T1>()
-        where T1 : unmanaged, IComponent => _ecs.Query<T1>();
+        where T1 : unmanaged, IComponent => Ecs.Query<T1>();
 
     /// <inheritdoc/>
     public EcsQuery<T1, T2> Query<T1, T2>()
         where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent => _ecs.Query<T1, T2>();
+        where T2 : unmanaged, IComponent => Ecs.Query<T1, T2>();
 
     /// <inheritdoc/>
     public EcsQuery<T1, T2, T3> Query<T1, T2, T3>()
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent => _ecs.Query<T1, T2, T3>();
+        where T3 : unmanaged, IComponent => Ecs.Query<T1, T2, T3>();
 
     /// <inheritdoc/>
     public EcsQuery<T1, T2, T3, T4> Query<T1, T2, T3, T4>()
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent
-        where T4 : unmanaged, IComponent => _ecs.Query<T1, T2, T3, T4>();
+        where T4 : unmanaged, IComponent => Ecs.Query<T1, T2, T3, T4>();
 
     /// <inheritdoc/>
-    public void Run<TState>(in TState state, EcsChunkRun<TState, EcsChunk> run) => _ecs.Run(in state, run);
+    public void Run<TState>(in TState state, EcsChunkRun<TState, EcsChunk> run) => Ecs.Run(in state, run);
 
     /// <inheritdoc/>
     public void Run<TState, T1>(in TState state, EcsChunkRun<TState, EcsChunk<T1>> run)
-        where T1 : unmanaged, IComponent => _ecs.Run(in state, run);
+        where T1 : unmanaged, IComponent => Ecs.Run(in state, run);
 
     /// <inheritdoc/>
     public void Run<TState, T1, T2>(in TState state, EcsChunkRun<TState, EcsChunk<T1, T2>> run)
         where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent => _ecs.Run(in state, run);
+        where T2 : unmanaged, IComponent => Ecs.Run(in state, run);
 
     /// <inheritdoc/>
     public void Run<TState, T1, T2, T3>(in TState state, EcsChunkRun<TState, EcsChunk<T1, T2, T3>> run)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent => _ecs.Run(in state, run);
+        where T3 : unmanaged, IComponent => Ecs.Run(in state, run);
 
     /// <inheritdoc/>
     public void Run<TState, T1, T2, T3, T4>(in TState state, EcsChunkRun<TState, EcsChunk<T1, T2, T3, T4>> run)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent
-        where T4 : unmanaged, IComponent => _ecs.Run(in state, run);
+        where T4 : unmanaged, IComponent => Ecs.Run(in state, run);
 
     /// <summary>
     /// Changes the world for the prefabs and domains the assets read again, and lets a replace waiting for this frame go on.
@@ -428,10 +369,34 @@ public sealed class World : IEcs, IDisposable
     /// </summary>
     internal void Pump()
     {
-        ProcessReloads(_assets.Reloaded, _app.Lifetime);
+        // Open again what places a prefab or domain the assets read again.
+        if (!_assets.Reloaded.IsEmpty)
+        {
+            HashSet<ulong> changed = [];
+            foreach (AssetLoaded asset in _assets.Reloaded)
+            {
+                if (asset.Asset is Prefab or Domain)
+                    changed.Add(asset.Id);
+            }
+
+            if (changed.Count > 0)
+                ReopenAsync(changed, _app.Lifetime).FireAndForget();
+        }
+
+        // Let a replace waiting for this frame go on.
         TaskCompletionSource starting = _frameStarting;
         _frameStarting = new TaskCompletionSource();
         starting.SetResult();
+    }
+
+    /// <summary>
+    /// Has <paramref name="ecs"/> hold the world's entities, until the subscription is disposed. Main thread.
+    /// </summary>
+    internal Subscription Register(IEcs ecs)
+    {
+        _ecs = ecs;
+
+        return new Subscription(() => _ecs = null);
     }
 
     /// <summary>
@@ -463,30 +428,41 @@ public sealed class World : IEcs, IDisposable
 
     /// <summary>
     /// Puts back the JSON <paramref name="kept"/>; the entry point opens when there is none or it doesn't read, which is an
-    /// error.
+    /// error. That is the project's, or the default one when it names none or that doesn't open. With no ECS, nothing
+    /// opens, which is warned about.
     /// </summary>
     internal async Task StartAsync(byte[]? kept, CancellationToken cancel)
     {
         if (kept is not null)
         {
-            Result<SaveFile> read = Json.Read<SaveFile>(kept);
-            Result loaded = Result.Failure(read.Error);
-            if (read.Ok)
-            {
-                await RunLoadingAsync(
-                        async () => loaded = await OpenSaveAsync(read.Value, cancel).ConfigureAwait(false),
-                        cancel
-                    )
-                    .ConfigureAwait(false);
-            }
-
-            if (loaded.Ok)
+            Result restored = await RestoreAsync(kept, cancel).ConfigureAwait(false);
+            if (restored.Ok)
                 return;
 
-            Log.Error($"The world goes back to the entry point: the kept world does not open: {loaded.Error}");
+            Log.Error($"The world goes back to the entry point: the kept world does not open: {restored.Error}");
         }
 
-        await OpenEntryPointAsync(cancel).ConfigureAwait(false);
+        if (!HasEcs)
+        {
+            Log.Warn("No gem the project lists provides the ECS, so the world holds no entities, and no domain opens.");
+
+            return;
+        }
+
+        Handle<Domain> fallback = _assets.GetDefault<Domain>();
+        Handle<Domain> entry = _app.Project?.EntryPoint ?? Handle<Domain>.None;
+        Handle<Domain> first = entry == Handle<Domain>.None ? fallback : entry;
+        Result opened = await OpenAsync(first, DomainOpenMode.Replace, null, cancel).ConfigureAwait(false);
+        if (opened.Ok)
+            return;
+
+        Log.Error(opened.Error);
+        if (first == fallback)
+            return;
+
+        Result second = await OpenAsync(fallback, DomainOpenMode.Replace, null, cancel).ConfigureAwait(false);
+        if (!second.Ok)
+            Log.Error($"The default domain does not open either: {second.Error}");
     }
 
     /// <summary>
@@ -499,18 +475,18 @@ public sealed class World : IEcs, IDisposable
         if (IsLoading || Domains.IsEmpty)
             return null;
 
-        SaveFile saved = new(Domains, FindChanges(Domains), IsPaused, TimeScale);
-        Result<JsonElement> json = Json.Write(saved, typeof(SaveFile));
-        if (!json.Ok)
+        SaveFile saved = GetSaveFile();
+        Result<byte[]> bytes = ToBytes(saved);
+        if (!bytes.Ok)
         {
-            Log.Error($"The world goes back to the entry point: it could not be saved: {json.Error}");
+            Log.Error($"The world goes back to the entry point: it could not be saved: {bytes.Error}");
 
             return null;
         }
 
         Log.Info($"Kept the world: {saved.Changes.Entities.Length} changes in {saved.Domains.Length} domains.");
 
-        return Encoding.UTF8.GetBytes(json.Value.GetRawText());
+        return bytes.Value;
     }
 
     /// <summary>
@@ -543,15 +519,14 @@ public sealed class World : IEcs, IDisposable
         );
     }
 
-    private static void ThrowIfNoRoom(int count, Span<Entity> created)
+    /// <summary>
+    /// <paramref name="saved"/> as UTF-8 JSON; why not, when JSON can't hold it.
+    /// </summary>
+    private static Result<byte[]> ToBytes(SaveFile saved)
     {
-        if (created.Length != count)
-        {
-            throw new ArgumentException(
-                $"A batch makes one entity per component: {count} components, room for {created.Length} entities.",
-                nameof(created)
-            );
-        }
+        Result<JsonElement> json = Json.Write(saved, typeof(SaveFile));
+
+        return json.Ok ? Result.Success(Encoding.UTF8.GetBytes(json.Value.GetRawText())) : Result.Failure(json.Error);
     }
 
     /// <summary>
@@ -576,7 +551,11 @@ public sealed class World : IEcs, IDisposable
     {
         foreach (PrefabPart part in parts)
         {
-            Transform placed = PlaceUnder(part, parent);
+            // The part's transform placed under its parent's, or the parent's place when it has none.
+            Transform placed = part
+                .Components.OfType<Transform>()
+                .Select(local => local.Under(parent))
+                .FirstOrDefault(parent);
             ImmutableArray<IComponent>.Builder components = ImmutableArray.CreateBuilder<IComponent>(
                 part.Components.Length
             );
@@ -588,48 +567,6 @@ public sealed class World : IEcs, IDisposable
             entities.Add(components.MoveToImmutable());
             AddEntities(part.Children, placed, entities);
         }
-    }
-
-    /// <summary>
-    /// Where <paramref name="part"/> is under <paramref name="parent"/>: its transform placed there, or the parent's
-    /// place when it has none.
-    /// </summary>
-    private static Transform PlaceUnder(PrefabPart part, Transform parent)
-    {
-        foreach (IComponent component in part.Components)
-        {
-            if (component is Transform local)
-                return local.Under(parent);
-        }
-
-        return parent;
-    }
-
-    /// <summary>
-    /// Where a player goes: the first of <paramref name="entities"/> tagged spawn, so a domain's globals before its chunks;
-    /// else the origin, which is warned about.
-    /// </summary>
-    private static Transform FindSpawn(string path, ImmutableArray<ImmutableArray<IComponent>> entities)
-    {
-        foreach (ImmutableArray<IComponent> entity in entities)
-        {
-            bool isSpawn = false;
-            Transform? place = null;
-            foreach (IComponent component in entity)
-            {
-                if (component is Tags tags)
-                    isSpawn = tags.Has(Tag.Spawn);
-                else if (component is Transform transform)
-                    place = transform;
-            }
-
-            if (isSpawn && place is { } spawn)
-                return new Transform { Position = spawn.Position, Rotation = spawn.Rotation };
-        }
-
-        Log.Warn($"{path} has no entity tagged spawn, so the player is put at its origin.");
-
-        return new Transform();
     }
 
     /// <summary>
@@ -675,21 +612,38 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Runs <paramref name="work"/> on the main thread once no other work on the world is running.
+    /// Runs <paramref name="work"/> on the main thread once no other work on the world is running, and gives what it
+    /// returns.
     /// </summary>
-    private async Task RunInTurnAsync(Func<Task> work, CancellationToken cancel)
+    private async Task<T> RunInTurnAsync<T>(Func<Task<T>> work, CancellationToken cancel)
     {
         await _turn.WaitAsync(cancel).ConfigureAwait(false);
         try
         {
             await _threads.Enter(EngineThread.Main);
-            await work().ConfigureAwait(false);
+
+            return await work().ConfigureAwait(false);
         }
         finally
         {
             _turn.Release();
         }
     }
+
+    /// <summary>
+    /// <see cref="RunInTurnAsync{T}"/> for work that returns nothing.
+    /// </summary>
+    private async Task RunInTurnAsync(Func<Task> work, CancellationToken cancel) =>
+        await RunInTurnAsync(
+                async () =>
+                {
+                    await work().ConfigureAwait(false);
+
+                    return true;
+                },
+                cancel
+            )
+            .ConfigureAwait(false);
 
     /// <summary>
     /// <paramref name="domain"/> comes, and is in the world from then on. Main thread.
@@ -701,16 +655,6 @@ public sealed class World : IEcs, IDisposable
         _read[domain] = prefabs;
         Domains = Domains.Add(domain);
         Log.Info($"Opened {GetName(domain)}: {coming.Length} entities.");
-    }
-
-    /// <summary>
-    /// <paramref name="domain"/>'s entities go, and it is no longer in the world. Main thread.
-    /// </summary>
-    private void Remove(Handle<Domain> domain)
-    {
-        Unplace(domain);
-        _read.Remove(domain);
-        Domains = Domains.Remove(domain);
     }
 
     /// <summary>
@@ -745,7 +689,7 @@ public sealed class World : IEcs, IDisposable
     {
         foreach (EntityKey key in _placed.Keys.Where(key => key.Domain == domain).ToArray())
         {
-            if (_ecs.IsAlive(_placed[key]))
+            if (Ecs.IsAlive(_placed[key]))
                 Destroy(_placed[key]);
 
             _placed.Remove(key);
@@ -759,7 +703,7 @@ public sealed class World : IEcs, IDisposable
     {
         foreach (Entity entity in entities)
         {
-            if (_ecs.IsAlive(entity))
+            if (Ecs.IsAlive(entity))
                 Destroy(entity);
         }
     }
@@ -771,10 +715,10 @@ public sealed class World : IEcs, IDisposable
     {
         foreach (Entity entity in entities)
         {
-            if (!_ecs.Has<Renderer>(entity))
+            if (!Ecs.Has<Renderer>(entity))
                 continue;
 
-            ReadOnlySpan<Handle<Material>> materials = _ecs.Get<Renderer>(entity).Materials;
+            ReadOnlySpan<Handle<Material>> materials = Ecs.Get<Renderer>(entity).Materials;
             for (int slot = 0; slot < materials.Length; slot++)
             {
                 if (materials[slot] == Handle<Material>.None)
@@ -795,30 +739,16 @@ public sealed class World : IEcs, IDisposable
         }
     }
 
-    private ImmutableArray<Entity> FindAll()
-    {
-        ImmutableArray<Entity>.Builder all = ImmutableArray.CreateBuilder<Entity>();
-        foreach (EcsChunk chunk in Query())
-        {
-            foreach (Entity entity in chunk.Entities)
-            {
-                all.Add(entity);
-            }
-        }
-
-        return all.ToImmutable();
-    }
-
     /// <summary>
     /// Runs <paramref name="change"/> as a change, which may set <see cref="IsLoading"/>, and ends with it unset.
     /// </summary>
-    private Task RunLoadingAsync(Func<Task> change, CancellationToken cancel) =>
+    private Task<Result> RunLoadingAsync(Func<Task<Result>> change, CancellationToken cancel) =>
         RunInTurnAsync(
             async () =>
             {
                 try
                 {
-                    await change().ConfigureAwait(false);
+                    return await change().ConfigureAwait(false);
                 }
                 finally
                 {
@@ -829,38 +759,26 @@ public sealed class World : IEcs, IDisposable
             cancel
         );
 
-    private string GetName(Handle<Domain> domain) => _assets.GetPath(domain) ?? "a domain";
-
-    private void ThrowIfNoEcs()
+    /// <summary>
+    /// Puts the world back as the JSON <paramref name="bytes"/> hold it, in place of everything in the world. Why not,
+    /// when it doesn't read or one of its domains doesn't open, which leaves the world as it was.
+    /// </summary>
+    private async Task<Result> RestoreAsync(byte[] bytes, CancellationToken cancel)
     {
-        if (!HasEcs)
-            throw NoEcs.GetMissing();
-    }
+        Result<SaveFile> saved = Json.Read<SaveFile>(bytes);
+        if (!saved.Ok)
+            return Result.Failure(saved.Error);
 
-    private void ThrowIfDead(Entity entity)
-    {
-        if (!_ecs.IsAlive(entity))
-            throw new InvalidOperationException($"{entity} is not alive.");
+        return await RunLoadingAsync(() => OpenSaveAsync(saved.Value, cancel), cancel).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Opens again what places the prefabs and domains that were read again.
+    /// The world as a save holds it: the domains open, what changed against their files, and the pause and time scale.
+    /// Main thread.
     /// </summary>
-    private void ProcessReloads(ImmutableArray<AssetLoaded> reloaded, CancellationToken cancel)
-    {
-        if (reloaded.IsEmpty)
-            return;
+    private SaveFile GetSaveFile() => new(Domains, FindChanges(Domains), IsPaused, TimeScale);
 
-        HashSet<ulong> changed = [];
-        foreach (AssetLoaded asset in reloaded)
-        {
-            if (asset.Asset is Prefab or Domain)
-                changed.Add(asset.Id);
-        }
-
-        if (changed.Count > 0)
-            ReopenAsync(changed, cancel).FireAndForget();
-    }
+    private string GetName(Handle<Domain> domain) => _assets.GetPath(domain) ?? "a domain";
 
     /// <summary>
     /// Reads the domain on workers, so one that doesn't load leaves the world as it was. One already open beside the others
@@ -926,9 +844,40 @@ public sealed class World : IEcs, IDisposable
     )
     {
         IsLoading = true;
-        ImmutableArray<ImmutableArray<IComponent>> screen = await ReadLoadingScreenAsync(cancel).ConfigureAwait(false);
+
+        // The project's loading screen, else the engine's, a black void: the entities it is; none, which is warned
+        // about, when it doesn't load.
+        Handle<Domain> project = _app.Project?.LoadingScreen ?? Handle<Domain>.None;
+        Handle<Domain> screenDomain =
+            project == Handle<Domain>.None ? _assets.Find<Domain>("Domains/Loading/Loading.domain") : project;
+        ImmutableArray<ImmutableArray<IComponent>> screen = [];
+        if (screenDomain != Handle<Domain>.None)
+        {
+            Result<ImmutableArray<PlacedPrefab>> read = await ReadDomainAsync(screenDomain, null, cancel)
+                .ConfigureAwait(false);
+            if (read.Ok)
+                screen = GetComponents(GetPlacements(screenDomain, read.Value));
+            else
+                Log.Warn($"No loading screen is shown: {read.Error}");
+        }
+
+        // Everything in the world leaves but its globals, those too with isClearingGlobals.
         await _threads.Enter(EngineThread.Main);
-        Clear(isClearingGlobals);
+        ImmutableArray<Entity>.Builder leaving = ImmutableArray.CreateBuilder<Entity>();
+        foreach (EcsChunk chunk in Query())
+        {
+            foreach (Entity entity in chunk.Entities)
+            {
+                bool isGlobal = Has<Tags>(entity) && Get<Tags>(entity).Has(Tag.Global);
+                if (isClearingGlobals || !isGlobal)
+                    leaving.Add(entity);
+            }
+        }
+
+        DestroyEntities(leaving.ToImmutable());
+        _placed.Clear();
+        _read.Clear();
+        Domains = [];
         await RunHooksAsync(hooks => hooks.OnDomainUnloadedAsync(cancel), "cleaning up").ConfigureAwait(false);
 
         await _threads.Enter(EngineThread.Main);
@@ -1054,39 +1003,10 @@ public sealed class World : IEcs, IDisposable
             }
         }
 
-        return new WorldChanges(_ecs, _placed, authored);
+        return new WorldChanges(Ecs, _placed, authored);
     }
 
     private string GetSavePath(string name) => _files.Combine(AppContext.BaseDirectory, "Saves", name + ".save");
-
-    /// <summary>
-    /// Opens the project's entry point in place of the world, or the default one when it names none or that doesn't
-    /// open. With no ECS, nothing opens, which is warned about.
-    /// </summary>
-    private async Task OpenEntryPointAsync(CancellationToken cancel)
-    {
-        if (!HasEcs)
-        {
-            Log.Warn("No gem the project lists provides the ECS, so the world holds no entities, and no domain opens.");
-
-            return;
-        }
-
-        Handle<Domain> fallback = _assets.GetDefault<Domain>();
-        Handle<Domain> entry = _app.Project?.EntryPoint ?? Handle<Domain>.None;
-        Handle<Domain> first = entry == Handle<Domain>.None ? fallback : entry;
-        Result opened = await OpenAsync(first, DomainOpenMode.Replace, null, cancel).ConfigureAwait(false);
-        if (opened.Ok)
-            return;
-
-        Log.Error(opened.Error);
-        if (first == fallback)
-            return;
-
-        Result second = await OpenAsync(fallback, DomainOpenMode.Replace, null, cancel).ConfigureAwait(false);
-        if (!second.Ok)
-            Log.Error($"The default domain does not open either: {second.Error}");
-    }
 
     /// <summary>
     /// Each open domain that is or places one of <paramref name="changed"/> makes its entities again as its files now say,
@@ -1157,22 +1077,39 @@ public sealed class World : IEcs, IDisposable
         if (!domain.Ok)
             return Result.Failure(domain.Error);
 
-        string path = _assets.GetPath(handle) ?? "A domain";
         ImmutableArray<DomainPlace> places = GetPlaces(domain.Value);
         if (places.Length > 0 && !_assets.CanImport<Prefab>())
-            return Result.Failure($"{path} holds prefabs, and no gem the project lists reads them.");
+            return Result.Failure($"{GetName(handle)} holds prefabs, and no gem the project lists reads them.");
 
-        Result<Prefab>[] prefabs = await LoadPrefabsAsync(places, progress, cancel).ConfigureAwait(false);
+        // The prefabs of the places, loaded at once, telling how far that is, at the same indexes.
+        const string Work = "Reading prefabs";
+        int done = 0;
+        progress?.Report(new LoadProgress(Work, 0, places.Length));
+        Task<Result<Prefab>>[] loading = new Task<Result<Prefab>>[places.Length];
+        for (int i = 0; i < loading.Length; i++)
+        {
+            loading[i] = LoadOneAsync(places[i].Prefab);
+        }
+
+        Result<Prefab>[] prefabs = await Task.WhenAll(loading).ConfigureAwait(false);
         ImmutableArray<PlacedPrefab>.Builder read = ImmutableArray.CreateBuilder<PlacedPrefab>(places.Length);
         for (int i = 0; i < places.Length; i++)
         {
             if (prefabs[i] is { Ok: true, Value: { } prefab })
                 read.Add(new PlacedPrefab(places[i], prefab));
             else
-                Log.Error($"{path} goes without a prefab: {prefabs[i].Error}");
+                Log.Error($"{GetName(handle)} goes without a prefab: {prefabs[i].Error}");
         }
 
         return Result.Success(read.ToImmutable());
+
+        async Task<Result<Prefab>> LoadOneAsync(Handle<Prefab> prefab)
+        {
+            Result<Prefab> one = await _assets.LoadAsync(prefab, null, cancel).ConfigureAwait(false);
+            progress?.Report(new LoadProgress(Work, Interlocked.Increment(ref done), places.Length));
+
+            return one;
+        }
     }
 
     /// <summary>
@@ -1199,79 +1136,32 @@ public sealed class World : IEcs, IDisposable
             return [];
         }
 
-        return GetEntities(loaded.Value, FindSpawn(_assets.GetPath(domain) ?? "A domain", placed));
-    }
-
-    /// <summary>
-    /// The prefabs of <paramref name="places"/>, loaded at once, telling how far that is, at the same indexes.
-    /// </summary>
-    private async Task<Result<Prefab>[]> LoadPrefabsAsync(
-        ImmutableArray<DomainPlace> places,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    )
-    {
-        const string Work = "Reading prefabs";
-
-        int done = 0;
-        progress?.Report(new LoadProgress(Work, 0, places.Length));
-        Task<Result<Prefab>>[] loading = new Task<Result<Prefab>>[places.Length];
-        for (int i = 0; i < loading.Length; i++)
+        // Where the player goes: the first of the placed tagged spawn, so a domain's globals before its chunks; else the
+        // origin, which is warned about.
+        Transform? spawn = null;
+        foreach (ImmutableArray<IComponent> entity in placed)
         {
-            loading[i] = LoadOneAsync(places[i].Prefab);
+            bool isSpawn = false;
+            Transform? place = null;
+            foreach (IComponent component in entity)
+            {
+                if (component is Tags tags)
+                    isSpawn = tags.Has(Tag.Spawn);
+                else if (component is Transform transform)
+                    place = transform;
+            }
+
+            if (isSpawn && place is { } at)
+            {
+                spawn = new Transform { Position = at.Position, Rotation = at.Rotation };
+                break;
+            }
         }
 
-        return await Task.WhenAll(loading).ConfigureAwait(false);
+        if (spawn is null)
+            Log.Warn($"{GetName(domain)} has no entity tagged spawn, so the player is put at its origin.");
 
-        async Task<Result<Prefab>> LoadOneAsync(Handle<Prefab> prefab)
-        {
-            Result<Prefab> one = await _assets.LoadAsync(prefab, null, cancel).ConfigureAwait(false);
-            progress?.Report(new LoadProgress(Work, Interlocked.Increment(ref done), places.Length));
-
-            return one;
-        }
-    }
-
-    /// <summary>
-    /// The project's loading screen, else the engine's, a black void: the entities it is; none, which is warned about, when
-    /// it doesn't load.
-    /// </summary>
-    private async Task<ImmutableArray<ImmutableArray<IComponent>>> ReadLoadingScreenAsync(CancellationToken cancel)
-    {
-        Handle<Domain> project = _app.Project?.LoadingScreen ?? Handle<Domain>.None;
-        Handle<Domain> domain =
-            project == Handle<Domain>.None ? _assets.Find<Domain>("Domains/Loading/Loading.domain") : project;
-        if (domain == Handle<Domain>.None)
-            return [];
-
-        Result<ImmutableArray<PlacedPrefab>> read = await ReadDomainAsync(domain, null, cancel).ConfigureAwait(false);
-        if (!read.Ok)
-        {
-            Log.Warn($"No loading screen is shown: {read.Error}");
-
-            return [];
-        }
-
-        return GetComponents(GetPlacements(domain, read.Value));
-    }
-
-    /// <summary>
-    /// Everything in the world leaves but its globals, those too with <paramref name="isClearingGlobals"/>. Main thread.
-    /// </summary>
-    private void Clear(bool isClearingGlobals)
-    {
-        ImmutableArray<Entity>.Builder leaving = ImmutableArray.CreateBuilder<Entity>();
-        foreach (Entity entity in FindAll())
-        {
-            bool isGlobal = Has<Tags>(entity) && Get<Tags>(entity).Has(Tag.Global);
-            if (isClearingGlobals || !isGlobal)
-                leaving.Add(entity);
-        }
-
-        DestroyEntities(leaving.ToImmutable());
-        _placed.Clear();
-        _read.Clear();
-        Domains = [];
+        return GetEntities(loaded.Value, spawn ?? new Transform());
     }
 
     /// <inheritdoc/>

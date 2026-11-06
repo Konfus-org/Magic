@@ -18,23 +18,10 @@ namespace Magic.CommandLine.Commands;
 /// <see cref="EntityPaths"/> reads it, to one value in JSON, a bare word for text or a choice, or one per field of a
 /// value with several, in their order (<c>1 2 3</c> for a position).
 /// </summary>
-internal sealed class SetCommand : Command
+internal static class SetCommand
 {
-    private readonly App _app;
-
-    private readonly EventCoordinator _events;
-
-    private readonly World _world;
-
-    public SetCommand(App app, EventCoordinator events, World world)
-        : base(
-            "set",
-            "Hands Key=value to the gem the key names; or sets an entity's value, as entity.component.member and on to any depth, then the value"
-        )
+    public static Command Create(App app, EventCoordinator events, World world)
     {
-        _app = app;
-        _events = events;
-        _world = world;
         Argument<string> setting = new("setting")
         {
             Description =
@@ -45,9 +32,85 @@ internal sealed class SetCommand : Command
             Description = "The entity's value in JSON, or one per field, as 1 2 3 for a position",
             Arity = ArgumentArity.ZeroOrMore,
         };
-        Arguments.Add(setting);
-        Arguments.Add(value);
-        Action = new CliCommand(parsed => Set(parsed.GetRequiredValue(setting), parsed.GetValue(value) ?? []));
+        Command set = new(
+            "set",
+            "Hands Key=value to the gem the key names; or sets an entity's value, as entity.component.member and on to any depth, then the value"
+        )
+        {
+            setting,
+            value,
+        };
+        set.SetAction(parsed => Set(parsed.GetRequiredValue(setting), parsed.GetValue(value) ?? []));
+
+        return set;
+
+        // A SetCliCommand for one Key=value word; an entity's value for a path and the values after it.
+        void Set(string what, string[] values)
+        {
+            if (values.Length == 0 && what.Contains('=', StringComparison.Ordinal))
+                SetSetting(what);
+            else
+                SetEntityValue(what, values);
+        }
+
+        // Publishes Key=value as a SetCliCommand, for the gem its key names.
+        void SetSetting(string keyValue)
+        {
+            int equals = keyValue.IndexOf('=', StringComparison.Ordinal);
+            if (equals <= 0)
+            {
+                Log.Error($"set takes Key=value, not '{keyValue}'.");
+
+                return;
+            }
+
+            if (!CommandLookups.IsProjectOpen(app, $"set {keyValue} in"))
+                return;
+
+            events.Publish(new SetCliCommand(keyValue[..equals].Trim(), keyValue[(equals + 1)..].Trim()));
+        }
+
+        // Sets the value at the path on each entity it names that has the component, logging how many it set or why
+        // none.
+        void SetEntityValue(string path, string[] values)
+        {
+            if (!CommandLookups.IsProjectOpen(app, $"set {path} in"))
+                return;
+
+            Result<int> written = WriteEntityValue(path, values);
+            if (written.Ok)
+                Log.Info(
+                    $"Set {path} to {string.Join(' ', values)} on {written.Value} {(written.Value == 1 ? "entity" : "entities")}."
+                );
+            else
+                Log.Error($"{path} was not set: {written.Error}");
+        }
+
+        // Writes the values at the path on each entity it names that has the component: how many it wrote, or why none.
+        Result<int> WriteEntityValue(string path, ReadOnlySpan<string> values)
+        {
+            Result<ImmutableArray<(Entity Entity, IComponent Component)>> found = EntityPaths.FindComponents(
+                world,
+                path
+            );
+            if (!found.Ok)
+                return Result.Failure(found.Error);
+
+            string[] members = path.Split('.')[2..];
+            if (members.Length == 0)
+                return Result.Failure($"{path} names a component; name one of its members to set.");
+
+            foreach ((Entity entity, IComponent component) in found.Value)
+            {
+                Result written = WriteMembers(component, members, values);
+                if (!written.Ok)
+                    return Result.Failure(written.Error);
+
+                world.Set(entity, [component]);
+            }
+
+            return Result.Success(found.Value.Length);
+        }
     }
 
     /// <summary>
@@ -161,80 +224,5 @@ internal sealed class SetCommand : Command
             field.SetValue(owner, value);
         else
             ((PropertyInfo)member).SetValue(owner, value);
-    }
-
-    /// <summary>
-    /// A <see cref="SetCliCommand"/> for one <c>Key=value</c> word; an entity's value for a path and the values after
-    /// it.
-    /// </summary>
-    private void Set(string setting, string[] values)
-    {
-        if (values.Length == 0 && setting.Contains('=', StringComparison.Ordinal))
-            SetSetting(setting);
-        else
-            SetEntityValue(setting, values);
-    }
-
-    /// <summary>
-    /// Publishes <c>Key=value</c> as a <see cref="SetCliCommand"/>, for the gem its key names.
-    /// </summary>
-    private void SetSetting(string setting)
-    {
-        int equals = setting.IndexOf('=', StringComparison.Ordinal);
-        if (equals <= 0)
-        {
-            Log.Error($"set takes Key=value, not '{setting}'.");
-
-            return;
-        }
-
-        if (!CommandLookups.IsProjectOpen(_app, $"set {setting} in"))
-            return;
-
-        _events.Publish(new SetCliCommand(setting[..equals].Trim(), setting[(equals + 1)..].Trim()));
-    }
-
-    /// <summary>
-    /// Sets the value at <paramref name="path"/> on each entity it names that has the component to
-    /// <paramref name="values"/>, logging how many it set or why none.
-    /// </summary>
-    private void SetEntityValue(string path, string[] values)
-    {
-        if (!CommandLookups.IsProjectOpen(_app, $"set {path} in"))
-            return;
-
-        Result<int> written = WriteEntityValue(path, values);
-        if (written.Ok)
-            Log.Info(
-                $"Set {path} to {string.Join(' ', values)} on {written.Value} {(written.Value == 1 ? "entity" : "entities")}."
-            );
-        else
-            Log.Error($"{path} was not set: {written.Error}");
-    }
-
-    /// <summary>
-    /// Writes <paramref name="values"/> at <paramref name="path"/> on each entity it names that has the component: how
-    /// many it wrote, or why none.
-    /// </summary>
-    private Result<int> WriteEntityValue(string path, ReadOnlySpan<string> values)
-    {
-        Result<ImmutableArray<(Entity Entity, IComponent Component)>> found = EntityPaths.FindComponents(_world, path);
-        if (!found.Ok)
-            return Result.Failure(found.Error);
-
-        string[] members = path.Split('.')[2..];
-        if (members.Length == 0)
-            return Result.Failure($"{path} names a component; name one of its members to set.");
-
-        foreach ((Entity entity, IComponent component) in found.Value)
-        {
-            Result written = WriteMembers(component, members, values);
-            if (!written.Ok)
-                return Result.Failure(written.Error);
-
-            _world.Set(entity, [component]);
-        }
-
-        return Result.Success(found.Value.Length);
     }
 }
