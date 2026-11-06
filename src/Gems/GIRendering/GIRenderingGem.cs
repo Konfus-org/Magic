@@ -185,7 +185,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         RenderCamera camera = _world.Camera ?? new RenderCamera(new Transform(), 60, 0.05f);
         RenderSun sun = _world.Sun ?? new RenderSun(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One, 1);
         GpuBuffer constants = _frameView.Constants;
-        int instanceCount = _instances.Fill(_pools, _materials, _assets.GetFailure<Material, Model>());
+        int instanceCount = _instances.Fill(frame.Index, _pools, _materials, _assets.GetFailure<Material, Model>());
         _graph.BeginTransferPass("Upload frame");
         bool hasChanges = _pools.HasArrivals || _instances.HasChanges;
         _instances.Upload();

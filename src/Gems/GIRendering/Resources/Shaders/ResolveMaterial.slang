@@ -59,7 +59,7 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
     SurfaceOutputs surface = inputs.material.kind == MaterialKindFailure ? Failure.Evaluate(inputs) : M.Evaluate(inputs);
 
     float3 model = Interpolate(shown.v0.position, shown.v1.position, shown.v2.position, lambda);
-    float3 previous = ToWorld(shown.instance.previousWorld, model) - frame.previousCameraPosition.xyz;
+    float3 previous = ToWorld(GetPreviousWorld(shown.instance, frame.frameIndex), model) - frame.previousCameraPosition.xyz;
     float4 previousClip = mul(float4(previous, 1.0), frame.previousViewProjection);
     float2 previousUv = ToUv(previousClip.xy / max(previousClip.w, Epsilon));
     velocityTarget.Store(thread.xy, float4(previousUv - unjittered, previousClip.w, 0.0));
