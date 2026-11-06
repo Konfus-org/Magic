@@ -218,9 +218,6 @@ internal sealed class Gems : IDisposable
                 continue;
             }
 
-            if (made is IEcs ecs)
-                _world.Ecs = ecs;
-
             LoadedGem loaded = new(made, gem);
             _loaded.Add(loaded);
             loaded.Subscriptions.Add(code);
@@ -237,6 +234,9 @@ internal sealed class Gems : IDisposable
 
             if (made is ILogSink sink)
                 loaded.Subscriptions.Add(Log.Register(sink));
+
+            if (made is IEcs ecs)
+                loaded.Subscriptions.Add(_world.Register(ecs));
 
             if (made is IHookIntoDomainLoading hooks)
                 loaded.Subscriptions.Add(_world.Register(hooks));
