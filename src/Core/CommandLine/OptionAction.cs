@@ -4,10 +4,9 @@ using System.CommandLine.Invocation;
 namespace Magic.CommandLine;
 
 /// <summary>
-/// An option's or a command's effect as a lambda. Non-terminating, so a command's own action still runs after its
-/// options'.
+/// An option's effect as a lambda. Non-terminating, so the command's own action still runs after it.
 /// </summary>
-internal sealed class CliCommand(Action<ParseResult> run) : SynchronousCommandLineAction
+internal sealed class OptionAction(Action<ParseResult> run) : SynchronousCommandLineAction
 {
     public override bool Terminating => false;
 

@@ -1,6 +1,7 @@
 using System.CommandLine;
+using System.ComponentModel;
+using System.Diagnostics;
 using Magic.Debugging;
-using Magic.Utils;
 
 namespace Magic.CommandLine.Commands;
 
@@ -8,28 +9,39 @@ namespace Magic.CommandLine.Commands;
 /// <c>new</c>: makes a project or gem from Magic's <c>dotnet new</c> templates, passing on any option Magic doesn't know,
 /// such as <c>-o</c>.
 /// </summary>
-internal sealed class NewCommand : Command
+internal static class NewCommand
 {
-    public NewCommand()
-        : base("new", "Makes a project or gem from Magic's dotnet new templates")
+    public static Command Create()
     {
         Argument<string> template = new("template") { Description = "Which template: X in dotnet new magic-X" };
         Argument<string> name = new("name") { Description = "What to call it" };
-        Arguments.Add(template);
-        Arguments.Add(name);
+        Command make = new("new", "Makes a project or gem from Magic's dotnet new templates") { template, name };
 
         // Options Magic doesn't know, like -o or --force, go to dotnet new.
-        TreatUnmatchedTokensAsErrors = false;
-        Action = new CliCommand(parsed =>
-            Create(parsed.GetRequiredValue(template), parsed.GetRequiredValue(name), parsed.UnmatchedTokens)
+        make.TreatUnmatchedTokensAsErrors = false;
+        make.SetAction(parsed =>
+            CreateFromTemplate(parsed.GetRequiredValue(template), parsed.GetRequiredValue(name), parsed.UnmatchedTokens)
         );
-    }
 
-    private static void Create(string template, string name, IReadOnlyList<string> options)
-    {
-        string fullTemplate = $"magic-{template}";
-        Result created = Processes.Run("dotnet", ["new", fullTemplate, "--name", name, .. options]);
-        if (!created.Ok)
-            Log.Error($"Couldn't make {name} from {fullTemplate}: {created.Error}");
+        return make;
+
+        static void CreateFromTemplate(string template, string name, IReadOnlyList<string> options)
+        {
+            string fullTemplate = $"magic-{template}";
+            try
+            {
+                using Process process = Process.Start("dotnet", ["new", fullTemplate, "--name", name, .. options]);
+
+                // Holds the terminal until dotnet new ends: at launch nothing else runs yet, and typed while a project
+                // runs it pauses only the terminal's pump.
+                process.WaitForExit();
+                if (process.ExitCode != 0)
+                    Log.Error($"Couldn't make {name} from {fullTemplate}: dotnet exited with code {process.ExitCode}.");
+            }
+            catch (Win32Exception ex)
+            {
+                Log.Error($"Couldn't make {name} from {fullTemplate}: dotnet didn't start: {ex.Message}");
+            }
+        }
     }
 }

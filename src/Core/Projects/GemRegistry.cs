@@ -14,67 +14,57 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Magic.Projects;
 
 /// <summary>
-/// The gems a project lists, found, then registered with the services as their class and every interface they provide,
+/// The gems a project lists, found and registered with the services as their class and every interface they provide,
 /// but not yet made. A gem that can't be found or registered is logged, and the others go on without it.
 /// </summary>
-internal sealed class GemRegistry
+internal static class GemRegistry
 {
-    private readonly List<GemInfo> _found = [];
-    private Dictionary<string, GemInfo> _byName = [];
-
     /// <summary>
-    /// Finds the <paramref name="gemsToLoad"/> beside Magic. A name listed twice or the wrong version is refused.
+    /// Finds the gems <paramref name="listed"/> beside Magic and registers each with <paramref name="services"/>, which
+    /// already holds what the host provides: the gems to make, each after the gems its constructor takes. A name listed
+    /// twice, the wrong version, an interface already provided or a cycle is refused. Each gem is made by the provider
+    /// built from <paramref name="services"/>, once: asked for again after it failed, it throws.
     /// </summary>
-    public GemRegistry(IFileSystem files, ImmutableArray<string> gemsToLoad)
+    public static List<GemInfo> Register(IFileSystem files, ImmutableArray<string> listed, ServiceCollection services)
     {
-        if (gemsToLoad.Any())
-            Log.Info($"Loading {string.Join(", ", gemsToLoad)}.");
+        if (listed.Any())
+            Log.Info($"Loading {string.Join(", ", listed)}.");
 
-        HashSet<string> listed = new(StringComparer.OrdinalIgnoreCase);
-        foreach (string listing in gemsToLoad)
+        // Find each listed gem beside Magic.
+        List<GemInfo> found = [];
+        HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string listing in listed)
         {
             // A gem is listed by its name, then @ and the version it must be where that matters.
             int at = listing.IndexOf('@', StringComparison.Ordinal);
             string name = at < 0 ? listing : listing[..at];
             string wanted = at < 0 ? string.Empty : listing[(at + 1)..];
-            if (!listed.Add(name))
+            if (!names.Add(name))
             {
                 Log.Error($"Gem {name} is listed twice; it is made once.");
                 continue;
             }
 
-            Result<GemInfo> found = Find(files, name);
-            if (!found.Ok)
+            Result<GemInfo> gem = Find(files, name);
+            if (!gem.Ok)
             {
-                Log.Error(found.Error);
+                Log.Error(gem.Error);
                 continue;
             }
 
-            GemInfo gem = found.Value;
-            if (wanted.Length > 0 && !IsVersion(gem.Version, wanted))
+            if (wanted.Length > 0 && !IsVersion(gem.Value.Version, wanted))
             {
-                Log.Error($"Gem {name} is {gem.Version.ToString(3)}, but the project asks for {wanted}.");
+                Log.Error($"Gem {name} is {gem.Value.Version.ToString(3)}, but the project asks for {wanted}.");
                 continue;
             }
 
-            _found.Add(gem);
+            found.Add(gem.Value);
         }
-    }
 
-    /// <summary>
-    /// The gems registered, in the order the project lists them.
-    /// </summary>
-    public IReadOnlyList<GemInfo> Gems { get; private set; } = [];
-
-    /// <summary>
-    /// Registers each gem found with <paramref name="services"/>, which already holds what the host provides, as its class
-    /// and every interface it provides. An interface already provided is refused. Each gem is made by the provider built
-    /// from <paramref name="services"/>, once: asked for again after it failed, it throws.
-    /// </summary>
-    public void Register(ServiceCollection services)
-    {
+        // Register each with the services as its class and every interface it provides.
         List<GemInfo> registered = [];
-        foreach (GemInfo gem in _found)
+        Dictionary<Type, GemInfo> providers = [];
+        foreach (GemInfo gem in found)
         {
             if (FindClash(services, gem) is { } clash)
             {
@@ -95,22 +85,60 @@ internal sealed class GemRegistry
                     return ActivatorUtilities.CreateInstance(provider, gem.Type);
                 }
             );
+            providers[gem.Type] = gem;
             foreach (Type contract in gem.Provides)
             {
                 services.AddSingleton(contract, provider => provider.GetRequiredService(gem.Type));
+                providers[contract] = gem;
             }
 
             registered.Add(gem);
         }
 
-        Gems = GetNeeds(registered);
-        _byName = Gems.ToDictionary(gem => gem.Name, StringComparer.OrdinalIgnoreCase);
-    }
+        // A gem that takes the world needs what the world is made from.
+        if (providers.TryGetValue(typeof(IEcs), out GemInfo? ecs))
+            providers[typeof(World)] = ecs;
 
-    /// <summary>
-    /// The gem registered as <paramref name="name"/>; null when there is none.
-    /// </summary>
-    public GemInfo? Find(string name) => _byName.GetValueOrDefault(name);
+        // Sort each after the gems its constructor takes, by their class or an interface they provide. A gem in a cycle,
+        // or one that needs it, is logged and left out, since the provider hangs making a cycle.
+        List<GemInfo> sorted = [];
+        HashSet<GemInfo> placed = [];
+        HashSet<GemInfo> refused = [];
+        HashSet<GemInfo> visiting = [];
+        foreach (GemInfo gem in registered)
+        {
+            Place(gem);
+        }
+
+        return sorted;
+
+        bool Place(GemInfo gem)
+        {
+            if (placed.Contains(gem))
+                return true;
+
+            // A gem visited again before it is placed is in a cycle; the gem that needs it says so.
+            if (refused.Contains(gem) || !visiting.Add(gem))
+                return false;
+
+            foreach (ParameterInfo parameter in gem.Type.GetConstructors()[0].GetParameters())
+            {
+                if (!providers.TryGetValue(parameter.ParameterType, out GemInfo? need) || need == gem || Place(need))
+                    continue;
+
+                string why = visiting.Contains(need) ? "which needs it: a cycle" : "which was not made";
+                Log.Error($"Gem {gem.Name} was not made: it needs {need.Name}, {why}.");
+                visiting.Remove(gem);
+                refused.Add(gem);
+                return false;
+            }
+
+            visiting.Remove(gem);
+            placed.Add(gem);
+            sorted.Add(gem);
+            return true;
+        }
+    }
 
     /// <summary>
     /// The gem <paramref name="name"/> from <c>Gems/&lt;name&gt;/&lt;name&gt;.dll</c> beside Magic, or why it can't be
@@ -171,7 +199,6 @@ internal sealed class GemRegistry
                 version,
                 gem,
                 provides,
-                [],
                 hasResources ? resources : null,
                 folder,
                 context
@@ -184,45 +211,6 @@ internal sealed class GemRegistry
     /// </summary>
     private static bool IsHostContract(Type contract) =>
         contract == typeof(IAssetImporter<>) || contract == typeof(IAssetExporter<>);
-
-    /// <summary>
-    /// <paramref name="gems"/>, each with the names of the others its constructor asks for, by their class or an
-    /// interface they provide.
-    /// </summary>
-    private static List<GemInfo> GetNeeds(List<GemInfo> gems)
-    {
-        Dictionary<Type, string> providers = [];
-        foreach (GemInfo gem in gems)
-        {
-            providers[gem.Type] = gem.Name;
-            foreach (Type contract in gem.Provides)
-            {
-                providers[contract] = gem.Name;
-            }
-        }
-
-        // A gem that takes the world needs what the world is made from.
-        if (providers.TryGetValue(typeof(IEcs), out string? ecs))
-            providers[typeof(World)] = ecs;
-
-        List<GemInfo> withNeeds = [];
-        foreach (GemInfo gem in gems)
-        {
-            List<string> needs = [];
-            foreach (ParameterInfo parameter in gem.Type.GetConstructors()[0].GetParameters())
-            {
-                if (!providers.TryGetValue(parameter.ParameterType, out string? provider))
-                    continue;
-
-                if (provider != gem.Name && !needs.Contains(provider))
-                    needs.Add(provider);
-            }
-
-            withNeeds.Add(gem with { Needs = needs });
-        }
-
-        return withNeeds;
-    }
 
     /// <summary>
     /// The assembly at <paramref name="path"/>, loaded from its file into <paramref name="context"/>.
