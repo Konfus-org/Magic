@@ -46,7 +46,7 @@ internal sealed class Lighting(
 
         _constants = constants.Value;
         Result<GpuSampler> sampler = gpu.CreateSampler(
-            new SamplerDescription { Wrap = TextureWrap.Clamp, HasMipmapBlend = false }
+            new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
         if (!sampler.Ok)
             return Result.Failure($"the lighting sampler was not made: {sampler.Error}");

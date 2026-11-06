@@ -10,7 +10,7 @@ namespace Magic.Rendering;
 /// to it as the frame ends, so a frame makes nothing. What the passes record goes through <see cref="Recorder"/>,
 /// and <see cref="Finish"/> is the frame's <see cref="GpuCommands"/>.
 /// </summary>
-public sealed class RenderGraph(IGraphicsApi gpu)
+public sealed class RenderGraph(IGraphicsApi gpu) : IDisposable
 {
     private readonly Dictionary<uint, GpuAccess> _bufferAccess = [];
     private readonly Dictionary<uint, GpuAccess[]> _textureAccess = [];
@@ -22,6 +22,23 @@ public sealed class RenderGraph(IGraphicsApi gpu)
     /// </summary>
     public GpuCommandRecorder Recorder { get; } = new();
 
+    /// <summary>
+    /// Frees every pooled texture.
+    /// </summary>
+    public void Dispose()
+    {
+        foreach (Stack<GpuTexture> spare in _pool.Values)
+        {
+            while (spare.TryPop(out GpuTexture texture))
+            {
+                gpu.Destroy(texture);
+                _textureAccess.Remove(texture.Id);
+            }
+        }
+
+        _pool.Clear();
+    }
+
     public void BeginComputePass(string name) => Recorder.BeginComputePass(name);
 
     public void BeginTransferPass(string name) => Recorder.BeginTransferPass(name);
@@ -32,7 +49,7 @@ public sealed class RenderGraph(IGraphicsApi gpu)
     public void BeginDrawPass(string name, in GpuRenderTargets targets)
     {
         Recorder.BeginDrawPass(name, targets);
-        foreach (GpuColorTarget color in targets.Colors)
+        foreach (GpuTarget color in targets.Colors)
         {
             Use(color.Texture, GpuAccess.ColorTarget, color.Level);
         }
@@ -81,21 +98,8 @@ public sealed class RenderGraph(IGraphicsApi gpu)
     }
 
     /// <summary>
-    /// Tells the graph a texture's access as something else left it: the window's image, none as the frame begins.
-    /// </summary>
-    public void Import(GpuTexture texture, GpuAccess access)
-    {
-        if (!_textureAccess.TryGetValue(texture.Id, out GpuAccess[]? levels))
-        {
-            levels = new GpuAccess[gpu.GetDescription(texture).Levels];
-            _textureAccess[texture.Id] = levels;
-        }
-
-        Array.Fill(levels, access);
-    }
-
-    /// <summary>
-    /// Forgets a resource that was destroyed, so a new one with its id starts untouched.
+    /// Forgets a resource that was destroyed, or that something else left untouched, so the next use starts from
+    /// nothing.
     /// </summary>
     public void Forget(GpuTexture texture) => _textureAccess.Remove(texture.Id);
 
@@ -140,23 +144,6 @@ public sealed class RenderGraph(IGraphicsApi gpu)
         _lent.Clear();
 
         return Recorder.Finish();
-    }
-
-    /// <summary>
-    /// Frees every pooled texture: what a graph does as its owner ends.
-    /// </summary>
-    public void Clear()
-    {
-        foreach (Stack<GpuTexture> spare in _pool.Values)
-        {
-            while (spare.TryPop(out GpuTexture texture))
-            {
-                gpu.Destroy(texture);
-                _textureAccess.Remove(texture.Id);
-            }
-        }
-
-        _pool.Clear();
     }
 
     // A write after a write still needs a barrier, so the second sees the first; a read after the same read does not.

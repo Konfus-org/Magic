@@ -92,41 +92,18 @@ public enum TargetLoad : byte
 }
 
 /// <summary>
-/// One colour target of a draw pass: a texture's level, and what to do with what it holds.
+/// One colour or depth target of a draw pass: a texture's level, and what to do with what it holds. A clear is to
+/// zero, which is black, or infinitely far as depth is reversed.
 /// </summary>
-public readonly record struct GpuColorTarget
+public readonly record struct GpuTarget
 {
-    public GpuColorTarget() { }
+    public GpuTarget() { }
 
     public required GpuTexture Texture { get; init; }
 
     public int Level { get; init; }
 
     public TargetLoad Load { get; init; } = TargetLoad.Keep;
-
-    /// <summary>
-    /// What <see cref="TargetLoad.Clear"/> clears to, as four floats.
-    /// </summary>
-    public GpuConstants ClearColor { get; init; }
-}
-
-/// <summary>
-/// The depth target of a draw pass: a texture's level, and what to do with what it holds.
-/// </summary>
-public readonly record struct GpuDepthTarget
-{
-    public GpuDepthTarget() { }
-
-    public required GpuTexture Texture { get; init; }
-
-    public int Level { get; init; }
-
-    public TargetLoad Load { get; init; } = TargetLoad.Keep;
-
-    /// <summary>
-    /// What <see cref="TargetLoad.Clear"/> clears to; 0 is infinitely far, as depth is reversed.
-    /// </summary>
-    public float ClearDepth { get; init; }
 }
 
 /// <summary>
@@ -138,9 +115,9 @@ public readonly record struct GpuRenderTargets
 {
     public GpuRenderTargets() { }
 
-    public ImmutableArray<GpuColorTarget> Colors { get; init; } = [];
+    public ImmutableArray<GpuTarget> Colors { get; init; } = [];
 
-    public GpuDepthTarget? Depth { get; init; }
+    public GpuTarget? Depth { get; init; }
 
     public int Width { get; init; }
 
@@ -149,8 +126,8 @@ public readonly record struct GpuRenderTargets
 
 /// <summary>
 /// The 16 bytes a pass pushes to its shaders, read there as <c>Core/Pass.slang</c>'s header with the same four names:
-/// what a small pass needs, or in <see cref="X"/> the heap id of the buffer its constants struct is in. Also a colour,
-/// as a clear's. Built from unsigned integers or floats, whichever the shader reads.
+/// what a small pass needs, or in <see cref="X"/> the heap id of the buffer its constants struct is in. Built from
+/// unsigned integers or floats, whichever the shader reads.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 public readonly record struct GpuConstants(uint X, uint Y = 0, uint Z = 0, uint W = 0)

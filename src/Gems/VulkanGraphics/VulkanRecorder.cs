@@ -211,58 +211,20 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
         VkRenderingAttachmentInfo* colors = stackalloc VkRenderingAttachmentInfo[MaxTargets];
         uint width = 0;
         uint height = 0;
+        string name = pass.Name;
         for (int i = 0; i < targets.Colors.Length; i++)
         {
-            GpuColorTarget color = targets.Colors[i];
-            if (resources.Textures[color.Texture.Id] is not { } texture)
-            {
-                Log.Error($"The pass {pass.Name} draws into texture {color.Texture.Id}, which is gone.");
-
+            if (!TryAttach(targets.Colors[i], VkImageLayout.ColorAttachmentOptimal, out colors[i]))
                 return false;
-            }
-
-            VkExtent3D extent = GetExtent(texture, (uint)color.Level);
-            width = extent.width;
-            height = extent.height;
-            colors[i] = new VkRenderingAttachmentInfo
-            {
-                imageView = texture.LevelViews[color.Level],
-                imageLayout = VkImageLayout.ColorAttachmentOptimal,
-                loadOp = color.Load.ToVulkan(),
-                storeOp = VkAttachmentStoreOp.Store,
-                clearValue = new VkClearValue
-                {
-                    color = new VkClearColorValue(
-                        color.ClearColor.X,
-                        color.ClearColor.Y,
-                        color.ClearColor.Z,
-                        color.ClearColor.W
-                    ),
-                },
-            };
         }
 
         VkRenderingAttachmentInfo depth = new();
-        if (targets.Depth is { } depthTarget)
+        if (
+            targets.Depth is { } depthTarget
+            && !TryAttach(depthTarget, VkImageLayout.DepthAttachmentOptimal, out depth)
+        )
         {
-            if (resources.Textures[depthTarget.Texture.Id] is not { } texture)
-            {
-                Log.Error($"The pass {pass.Name} draws depth into texture {depthTarget.Texture.Id}, which is gone.");
-
-                return false;
-            }
-
-            VkExtent3D extent = GetExtent(texture, (uint)depthTarget.Level);
-            width = extent.width;
-            height = extent.height;
-            depth = new VkRenderingAttachmentInfo
-            {
-                imageView = texture.LevelViews[depthTarget.Level],
-                imageLayout = VkImageLayout.DepthAttachmentOptimal,
-                loadOp = depthTarget.Load.ToVulkan(),
-                storeOp = VkAttachmentStoreOp.Store,
-                clearValue = new VkClearValue(depthTarget.ClearDepth, 0),
-            };
+            return false;
         }
 
         if (targets.Colors.Length == 0 && targets.Depth is null)
@@ -291,6 +253,31 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
         device.Api.vkCmdSetScissor(cmd, 0, 0, width, height);
 
         return true;
+
+        // The attachment over a target's level, cleared to zero if it clears; the pass is the level's size.
+        bool TryAttach(in GpuTarget target, VkImageLayout layout, out VkRenderingAttachmentInfo attachment)
+        {
+            attachment = default;
+            if (resources.Textures[target.Texture.Id] is not { } texture)
+            {
+                Log.Error($"The pass {name} draws into texture {target.Texture.Id}, which is gone.");
+
+                return false;
+            }
+
+            VkExtent3D extent = GetExtent(texture, (uint)target.Level);
+            width = extent.width;
+            height = extent.height;
+            attachment = new VkRenderingAttachmentInfo
+            {
+                imageView = texture.LevelViews[target.Level],
+                imageLayout = layout,
+                loadOp = target.Load.ToVulkan(),
+                storeOp = VkAttachmentStoreOp.Store,
+            };
+
+            return true;
+        }
     }
 
     /// <summary>
