@@ -183,7 +183,7 @@ internal static class GemRegistry
                 provides.Add(contract);
         }
 
-        string author = assembly.GetMetadata("Magic.Author") ?? name;
+        string author = assembly.GetCustomAttribute<AssemblyCompanyAttribute>()?.Company ?? name;
         string description = assembly.GetCustomAttribute<AssemblyDescriptionAttribute>()?.Description ?? string.Empty;
         Version version = assembly.GetName().Version ?? new Version(1, 0, 0);
 

@@ -8,6 +8,8 @@
     <VersionPrefix>0.1</VersionPrefix>
     <!-- The engine's own assets, every project's: Resources/ beside Magic in a release, else read where they are. -->
     <MagicResources>$(MagicRoot)src/Resources</MagicResources>
+    <!-- For CString alone: a C string is a byte*, which every native gem reads through it. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <!-- Magic's own: no gem compiles against them or inherits them. -->

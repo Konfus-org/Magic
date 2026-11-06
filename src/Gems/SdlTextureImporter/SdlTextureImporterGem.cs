@@ -134,7 +134,7 @@ public sealed unsafe class SdlTextureImporterGem
         {
             SDL_IOStream* io = SDL_IOFromConstMem(bytes, (nuint)file.Bytes.Length);
             if (io == null)
-                return Result.Failure($"{file.Path} did not decode: {CString.Read(SDL_GetError())}");
+                return Result.Failure($"{file.Path} did not decode: {Sdl.Error}");
 
             if (file.Path.EndsWith(".svg", StringComparison.OrdinalIgnoreCase))
             {
@@ -153,13 +153,13 @@ public sealed unsafe class SdlTextureImporterGem
         }
 
         if (decoded == null)
-            return Result.Failure($"{file.Path} did not decode: {CString.Read(SDL_GetError())}");
+            return Result.Failure($"{file.Path} did not decode: {Sdl.Error}");
 
         // R, G, B, A bytes in memory whatever the machine's byte order: what the formats below are.
         SDL_Surface* surface = SDL_ConvertSurface(decoded, SDL_PIXELFORMAT_RGBA32);
         SDL_DestroySurface(decoded);
         if (surface == null)
-            return Result.Failure($"{file.Path} did not convert to RGBA8: {CString.Read(SDL_GetError())}");
+            return Result.Failure($"{file.Path} did not convert to RGBA8: {Sdl.Error}");
 
         // Where each level goes: half the one above, down to one texel.
         int count = hasMipmaps ? 1 + BitOperations.Log2((uint)Math.Max(surface->w, surface->h)) : 1;
@@ -189,7 +189,7 @@ public sealed unsafe class SdlTextureImporterGem
                 surface = SDL_ScaleSurface(above, level.Width, level.Height, SDL_SCALEMODE_LINEAR);
                 SDL_DestroySurface(above);
                 if (surface == null)
-                    return Result.Failure($"{file.Path} did not scale to mip {i}: {CString.Read(SDL_GetError())}");
+                    return Result.Failure($"{file.Path} did not scale to mip {i}: {Sdl.Error}");
             }
 
             byte* source = (byte*)surface->pixels;
@@ -279,7 +279,7 @@ public sealed unsafe class SdlTextureImporterGem
         // Written to a stream in memory, then read back out of it.
         SDL_IOStream* io = SDL_IOFromDynamicMem();
         if (io == null)
-            return Result.Failure($"No memory stream was made: {CString.Read(SDL_GetError())}");
+            return Result.Failure($"No memory stream was made: {Sdl.Error}");
 
         TextureLevel top = texture.Levels[0];
         bool saved;
@@ -298,7 +298,7 @@ public sealed unsafe class SdlTextureImporterGem
 
         if (!saved)
         {
-            string error = CString.Read(SDL_GetError());
+            string error = Sdl.Error;
             SDL_CloseIO(io);
 
             return Result.Failure($"The PNG was not written: {error}");

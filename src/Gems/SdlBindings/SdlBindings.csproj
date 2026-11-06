@@ -41,4 +41,8 @@
       IncludePath="include"
     />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Built against, never copied: the bindings read C strings through the Magic they run in. -->
+    <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" Private="false" />
+  </ItemGroup>
 </Project>

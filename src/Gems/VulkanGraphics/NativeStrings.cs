@@ -27,12 +27,6 @@ internal sealed unsafe class NativeStrings : IDisposable
 
     public byte** Pointers { get; }
 
-    /// <summary>
-    /// The text at <paramref name="text"/> up to its 0, as Vulkan hands names back; empty for null.
-    /// </summary>
-    public static string Read(byte* text) =>
-        text == null ? string.Empty : Marshal.PtrToStringUTF8((nint)text) ?? string.Empty;
-
     public void Dispose()
     {
         for (uint i = 0; i < Count; i++)
