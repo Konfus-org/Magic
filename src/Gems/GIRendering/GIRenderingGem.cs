@@ -55,9 +55,9 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly InstanceTable _instances;
 
     /// <summary>
-    /// The shading a model that failed is drawn with, every slot; null when there is no failure material.
+    /// The material a model that failed is drawn with, every slot; an empty slot when there is no failure material.
     /// </summary>
-    private readonly ShadingInstance? _failure;
+    private readonly MaterialInstance _failure;
     private readonly Visibility _visibility;
     private readonly FrameView _frameView;
     private readonly SkyLuts _sky;
@@ -99,7 +99,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         Assets assets,
         IMeshPreprocessor meshes,
         IEcs ecs,
-        World world,
         Threads threads,
         App app,
         EventCoordinator events,
@@ -122,9 +121,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _textures = new TextureTable(gpu, _graph, assets, threads);
         _materials = new MaterialTable(gpu, _graph, assets, _textures, threads);
         _targets = new FrameTargets(gpu, _graph);
-        _instances = new InstanceTable(gpu, _graph, world);
-        Handle<Material> failure = assets.GetFailure<Material, Model>();
-        _failure = failure == Handle<Material>.None ? null : new ShadingInstance(failure);
+        _instances = new InstanceTable(gpu, _graph);
+        _failure = new MaterialInstance { Handle = assets.GetFailure<Material, Model>() };
         _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu, _graph) : null;
         _visibility = new Visibility(gpu, _graph, _pipelines, _pools, _materials);
         _frameView = new FrameView(gpu, _graph, _pools, _materials, _visibility, _rayTracing);
@@ -328,7 +326,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         ImmutableArray<Handle<Material>> materials =
         [
             .. renderers
-                .SelectMany(renderer => renderer.Materials.All)
+                .SelectMany(renderer => renderer.Materials.All.Select(slot => slot.Handle))
                 .Where(material => material != Handle<Material>.None)
                 .Distinct(),
         ];
@@ -415,12 +413,12 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             isPrepared &= _materials.HasArrived(material);
         }
 
-        if (!hasFailure || _failure is not { } failure)
+        if (!hasFailure || _failure.Handle == Handle<Material>.None)
             return isPrepared;
 
-        _materials.Load(failure.Material);
+        _materials.Load(_failure.Handle);
 
-        return isPrepared && _materials.HasArrived(failure.Material);
+        return isPrepared && _materials.HasArrived(_failure.Handle);
     }
 
     /// <summary>

@@ -4,22 +4,50 @@ using System.Numerics;
 namespace Magic.Files.Types;
 
 /// <summary>
-/// What a surface is made of, in one place: how it looks (<see cref="Shading"/>), how a body grips and bounces off it
-/// (<see cref="Physics"/>), and how it sounds (<see cref="Acoustics"/>). Whatever draws, simulates or plays the world
-/// reads its own section from the materials of an entity's renderer. A <c>.mat</c> file is this class as JSON:
-/// <c>{ "shading": { "shader": { "id": 10001 } }, "physics": { "grip": "slippery" }, "acoustics": "carpet" }</c>.
+/// How much of what is behind a <see cref="Material"/> shows through it, which picks the pipeline it is drawn with.
+/// </summary>
+public enum Transparency : byte
+{
+    Opaque,
+
+    /// <summary>
+    /// Opaque, but pixels the surface makes less opaque than its alpha cutoff are not drawn.
+    /// </summary>
+    Masked,
+
+    /// <summary>
+    /// Blended over what is behind it, drawn after everything opaque.
+    /// </summary>
+    Transparent,
+}
+
+/// <summary>
+/// What a surface looks like: a material shader, a module implementing the shader library's material contract, values
+/// for the parameters its struct declares, and how much shows through it. A <c>.mat</c> file is this class as JSON:
+/// <c>{ "shader": { "id": 10001 }, "params": { "roughness": { "x": 0.8 } } }</c>. Its params, its transparency and
+/// its sides may be set while it is drawn, on the main thread, and are drawn so from the next frame; what is set holds
+/// until the material is made again, as its file changes, and is not saved with the world.
 /// </summary>
 [AssetFormat(AssetFileFormat.Json)]
 public sealed class Material : IAsset<Material>
 {
-    public required Shading Shading { get; init; }
-
-    public MaterialPhysics Physics { get; init; } = new();
+    public required Handle<Shader> Shader { get; init; }
 
     /// <summary>
-    /// How much of a sound it soaks up, how it scatters the rest and how much passes through it.
+    /// How much of what is behind it shows through.
     /// </summary>
-    public AcousticMaterial Acoustics { get; set; }
+    public Transparency Transparency { get; set; }
+
+    /// <summary>
+    /// Its back faces are drawn too.
+    /// </summary>
+    public bool IsDoubleSided { get; set; }
+
+    /// <summary>
+    /// Values by the names of the fields of the shader's struct, case and all; one left out takes the field's
+    /// initializer. Its values change, never the dictionary, so whatever draws it sees each change.
+    /// </summary>
+    public MaterialParamDictionary Params { get; init; } = [];
 }
 
 /// <summary>

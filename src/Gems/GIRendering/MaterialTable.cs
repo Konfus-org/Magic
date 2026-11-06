@@ -1,21 +1,22 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using Magic.Debugging;
+using Magic.Ecs.Components;
 using Magic.Files;
 using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Threading;
 using Magic.Utils;
-using Magic.Worlds;
 
 namespace Magic.GIRendering;
 
 /// <summary>
-/// The material table: a row per <see cref="ShadingInstance"/> drawn, made from its material's params with the
-/// instance's over them as the material arrives and made again as the textures it names arrive; row 0 the default a
-/// row is drawn with until then. A material that does not load, names the failure shader or a texture that does not
-/// load is drawn as the failure kind. The whole table is uploaded again in the frame after a row changes.
+/// The material table: a row per distinct <see cref="MaterialInstance"/> drawn, a slot's material with the params
+/// the slot sets, made from the material's params with the slot's over them as the material arrives and made again
+/// as the textures it names arrive; row 0 the default a row is drawn with until then. A material that does not load,
+/// names the failure shader or a texture that does not load is drawn as the failure kind. The whole table is uploaded
+/// again in the frame after a row changes.
 /// </summary>
 internal sealed class MaterialTable(
     IGraphicsApi gpu,
@@ -33,8 +34,8 @@ internal sealed class MaterialTable(
     private const string FailureShader = "Shaders/Material/Failure.slang";
 
     private readonly GpuMaterial[] _rows = new GpuMaterial[Capacity];
-    private readonly ShadingInstance?[] _instances = new ShadingInstance?[Capacity];
-    private readonly Dictionary<ShadingInstance, uint> _rowOf = [];
+    private readonly MaterialInstance[] _instances = new MaterialInstance[Capacity];
+    private readonly Dictionary<MaterialInstance, uint> _rowOf = [];
 
     /// <summary>
     /// Each material loaded, by its id, null while it loads; one that did not load is the failure material.
@@ -62,11 +63,12 @@ internal sealed class MaterialTable(
     }
 
     /// <summary>
-    /// The instance's row, 0 for none; an instance first seen gets a row, and its material is loaded if it is not yet.
+    /// The slot's row, 0 for an empty slot; a value first seen gets a row, which every slot holding it shares, and its
+    /// material is loaded if it is not yet. A slot whose params change takes another row; rows are never given back.
     /// </summary>
-    public uint GetRow(ShadingInstance? instance)
+    public uint GetRow(in MaterialInstance instance)
     {
-        if (instance is null)
+        if (instance.Handle == Handle<Material>.None)
             return 0;
 
         if (_rowOf.TryGetValue(instance, out uint row))
@@ -75,7 +77,7 @@ internal sealed class MaterialTable(
         if (_count >= Capacity)
         {
             Log.Error(
-                $"{assets.GetPath(instance.Material)} is drawn as the default material: the material table is full."
+                $"{assets.GetPath(instance.Handle)} is drawn as the default material: the material table is full."
             );
             _rowOf[instance] = 0;
 
@@ -86,7 +88,7 @@ internal sealed class MaterialTable(
         _rows[row] = GetDefault();
         _instances[row] = instance;
         _rowOf[instance] = row;
-        Load(instance.Material);
+        Load(instance.Handle);
         Rebuild(row);
 
         return row;
@@ -110,7 +112,7 @@ internal sealed class MaterialTable(
     /// </summary>
     public bool HasArrived(Handle<Material> material) =>
         _materials.GetValueOrDefault(material.Id) is { } loaded
-        && GetColorMap(loaded.Shading.Params, out _, out _) != TextureState.Loading;
+        && GetColorMap(loaded.Params, out _, out _) != TextureState.Loading;
 
     /// <summary>
     /// Makes again the rows whose textures were loading, once a frame.
@@ -171,14 +173,11 @@ internal sealed class MaterialTable(
     /// </summary>
     private void Rebuild(uint row)
     {
-        if (_instances[row] is not { } instance)
+        MaterialInstance instance = _instances[row];
+        if (_materials.GetValueOrDefault(instance.Handle.Id) is not { } material)
             return;
 
-        if (_materials.GetValueOrDefault(instance.Material.Id) is not { } material)
-            return;
-
-        Shading shading = material.Shading;
-        GpuMaterial made = shading.Shader == assets.Find<Shader>(FailureShader) ? GetFailure() : GetDefault();
+        GpuMaterial made = material.Shader == assets.Find<Shader>(FailureShader) ? GetFailure() : GetDefault();
         if (TryGet("color", out MaterialParam? color))
             made.BaseColor = new Vector4(color.R, color.G, color.B, color.A);
 
@@ -192,7 +191,7 @@ internal sealed class MaterialTable(
             made.Emissive = new Vector3(emissive.R, emissive.G, emissive.B);
 
         bool isWaiting = false;
-        switch (GetColorMap(shading.Params, out uint texture, out uint sampler))
+        switch (GetColorMap(material.Params, out uint texture, out uint sampler))
         {
             case TextureState.Ready:
                 made.BaseColorTexture = texture;
@@ -220,7 +219,7 @@ internal sealed class MaterialTable(
         _isDirty = true;
 
         bool TryGet(string name, [MaybeNullWhen(false)] out MaterialParam param) =>
-            instance.Params.TryGetValue(name, out param) || shading.Params.TryGetValue(name, out param);
+            instance.Overrides.TryGet(name, out param) || material.Params.TryGetValue(name, out param);
     }
 
     /// <summary>
@@ -230,7 +229,7 @@ internal sealed class MaterialTable(
     {
         for (uint row = 1; row < _count; row++)
         {
-            if (_instances[row] is { } instance && instance.Material == material)
+            if (_instances[row].Handle == material)
                 Rebuild(row);
         }
     }
@@ -242,10 +241,7 @@ internal sealed class MaterialTable(
         if (!loaded.Ok)
         {
             Log.Error($"{assets.GetPath(material)} is drawn as a failure: {loaded.Error}");
-            _materials[material.Id] = new Material
-            {
-                Shading = new Shading { Shader = assets.Find<Shader>(FailureShader) },
-            };
+            _materials[material.Id] = new Material { Shader = assets.Find<Shader>(FailureShader) };
             RebuildRowsOf(material);
 
             return;
@@ -253,7 +249,7 @@ internal sealed class MaterialTable(
 
         _materials[material.Id] = loaded.Value;
         // Asks the texture table for its texture now, so the loading gate waits for it before any row needs it.
-        GetColorMap(loaded.Value.Shading.Params, out _, out _);
+        GetColorMap(loaded.Value.Params, out _, out _);
         RebuildRowsOf(material);
     }
 }

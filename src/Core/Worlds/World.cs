@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
@@ -57,12 +56,6 @@ public sealed class World : IEcs, IDisposable
     /// Each entity the open domains placed, by its key. A destroyed one keeps its key, with a handle to nothing. Main thread.
     /// </summary>
     private readonly Dictionary<EntityKey, Entity> _placed = [];
-
-    /// <summary>
-    /// Each entity's shading by the entity and its renderer's slot: one per material the renderer held as the entity was
-    /// made, gone with it. Written on the main thread, read from any.
-    /// </summary>
-    private readonly ConcurrentDictionary<(Entity Entity, int Slot), ShadingInstance> _shading = new();
 
     /// <summary>
     /// The prefabs each open domain placed, as they were read: what its entities are compared with, by a save and as the
@@ -231,7 +224,6 @@ public sealed class World : IEcs, IDisposable
     public Entity Create(ReadOnlySpan<IComponent> components, bool makeGlobal = false)
     {
         Entity made = makeGlobal ? Ecs.Create(WithGlobalTag(components).AsSpan()) : Ecs.Create(components);
-        CreateShading([made]);
 
         return made;
     }
@@ -280,27 +272,15 @@ public sealed class World : IEcs, IDisposable
 
     /// <inheritdoc/>
     public void Create<T1>(ReadOnlySpan<T1> first, Span<Entity> created)
-        where T1 : unmanaged, IComponent
-    {
-        Ecs.Create(first, created);
-        CreateShading(created);
-    }
+        where T1 : unmanaged, IComponent => Ecs.Create(first, created);
 
     /// <inheritdoc/>
     public void Create<T1, T2>(ReadOnlySpan<T1> first, ReadOnlySpan<T2> second, Span<Entity> created)
         where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-    {
-        Ecs.Create(first, second, created);
-        CreateShading(created);
-    }
+        where T2 : unmanaged, IComponent => Ecs.Create(first, second, created);
 
     /// <inheritdoc/>
-    public void Destroy(Entity entity)
-    {
-        Ecs.Destroy(entity);
-        DestroyShading(entity);
-    }
+    public void Destroy(Entity entity) => Ecs.Destroy(entity);
 
     /// <inheritdoc/>
     public bool IsAlive(Entity entity) => Ecs.IsAlive(entity);
@@ -326,13 +306,6 @@ public sealed class World : IEcs, IDisposable
 
     /// <inheritdoc/>
     public IComponent[] GetComponents(Entity entity) => Ecs.GetComponents(entity);
-
-    /// <summary>
-    /// The entity's own shading in <paramref name="slot"/> of its renderer, made with the entity; null for an empty slot
-    /// or an entity made without a renderer. Any thread: on another than the main, an entity made or destroyed meanwhile
-    /// may or may not have it yet.
-    /// </summary>
-    public ShadingInstance? GetShading(Entity entity, int slot) => _shading.GetValueOrDefault((entity, slot));
 
     /// <inheritdoc/>
     public EcsQuery Query() => Ecs.Query();
@@ -726,35 +699,6 @@ public sealed class World : IEcs, IDisposable
         {
             if (Ecs.IsAlive(entity))
                 Destroy(entity);
-        }
-    }
-
-    /// <summary>
-    /// One <see cref="ShadingInstance"/> per filled slot of each entity's renderer, for those made with one. Main thread.
-    /// </summary>
-    private void CreateShading(ReadOnlySpan<Entity> entities)
-    {
-        foreach (Entity entity in entities)
-        {
-            if (!Ecs.Has<Renderer>(entity))
-                continue;
-
-            ReadOnlySpan<Handle<Material>> materials = Ecs.Get<Renderer>(entity).Materials;
-            for (int slot = 0; slot < materials.Length; slot++)
-            {
-                if (materials[slot] == Handle<Material>.None)
-                    continue;
-
-                _shading[(entity, slot)] = new ShadingInstance(materials[slot]);
-            }
-        }
-    }
-
-    private void DestroyShading(Entity entity)
-    {
-        for (int slot = 0; slot < MaterialSlots.Capacity; slot++)
-        {
-            _shading.TryRemove((entity, slot), out _);
         }
     }
 

@@ -5,8 +5,7 @@ namespace Magic.GIRendering;
 
 /// <summary>
 /// Everything a frame draws, copied on the main thread as its frame ends and published for the render thread, which
-/// reads nothing else of the main thread's but each entity's shading (<c>World.GetShading</c>). Filled whole each time,
-/// into the same lists.
+/// reads nothing else of the main thread's. Filled whole each time, into the same lists.
 /// </summary>
 internal sealed class RenderInputs
 {
