@@ -62,7 +62,7 @@ Write the engine as data flowing through functions, not objects calling each oth
 - A method that needs the main thread after an await of its own steps onto it with
   `await threads.Enter(EngineThread.Main)`; nothing hops threads for it.
 - Gems talk through message structs. Publish one from any thread and every gem reads it the next frame, from
-  `frame.Events` or through `EventCoordinator.Watch`.
+  `frame.Events`.
 - Async work a hook starts arrives in a later frame: by a message, or by work posted with `Threads.Post`. A gem that
   needs slow setup starts it in its constructor and reads what came of it in a hook.
 - `Dispose` frees what the gem started, once none of its work still runs on a worker.

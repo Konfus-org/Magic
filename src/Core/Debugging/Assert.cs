@@ -15,40 +15,6 @@ public static class Assert
     private static int _crashing;
 
     /// <summary>
-    /// State that cannot be: when <paramref name="condition"/> is false, the run crashes <see cref="Now"/>, with the
-    /// condition's source as the message, and <paramref name="message"/> after it. On in every build.
-    /// </summary>
-    public static void True(
-        [DoesNotReturnIf(false)] bool condition,
-        string message = "",
-        [CallerArgumentExpression(nameof(condition))] string expression = "",
-        [CallerMemberName] string member = "",
-        [CallerFilePath] string file = "",
-        [CallerLineNumber] int line = 0
-    )
-    {
-        if (!condition)
-            Now(FormatFailed(expression, message), member, file, line);
-    }
-
-    /// <summary>
-    /// State that cannot be: when <paramref name="condition"/> is true, the run crashes <see cref="Now"/>, with the
-    /// condition's source as the message, and <paramref name="message"/> after it. On in every build.
-    /// </summary>
-    public static void False(
-        [DoesNotReturnIf(true)] bool condition,
-        string message = "",
-        [CallerArgumentExpression(nameof(condition))] string expression = "",
-        [CallerMemberName] string member = "",
-        [CallerFilePath] string file = "",
-        [CallerLineNumber] int line = 0
-    )
-    {
-        if (condition)
-            Now(FormatFailed(expression, message), member, file, line);
-    }
-
-    /// <summary>
     /// Logs <paramref name="message"/> as <see cref="Log.Critical"/>, writes it, the stack it was called from and the
     /// lines no sink has printed to Logs/&lt;time&gt;.crash beside Magic, tells the terminal where, breaks an attached
     /// debugger and ends the process. Nothing else runs: no gem is disposed.
@@ -105,9 +71,6 @@ public static class Assert
 
         Environment.FailFast(message);
     }
-
-    private static string FormatFailed(string expression, string message) =>
-        message.Length == 0 ? $"Assert failed: {expression}" : $"Assert failed: {expression}: {message}";
 
     /// <summary>
     /// Writes <paramref name="text"/> to Logs/&lt;time&gt;.crash beside Magic, and says where it went or why it could

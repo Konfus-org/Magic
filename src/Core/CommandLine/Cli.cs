@@ -13,7 +13,7 @@ namespace Magic.CommandLine;
 /// Magic's commands, run against the <see cref="App"/>: the command line Magic was launched with is the first of
 /// them, and each line typed into the terminal runs the same commands.
 /// </summary>
-internal sealed class Cli : IDisposable
+internal sealed class Cli
 {
     private readonly CommandQueue _queue;
 
@@ -24,8 +24,6 @@ internal sealed class Cli : IDisposable
         _queue = new CommandQueue(events);
         _cliCommands = CreateCliCommands(app, files, events, assets, world, _queue);
     }
-
-    public void Dispose() => _queue.Dispose();
 
     /// <summary>
     /// Executes the commands Magic was launched with, or says why they didn't run. Only open runs a project; any other

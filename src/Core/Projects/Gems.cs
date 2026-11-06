@@ -149,7 +149,7 @@ internal sealed class Gems : IDisposable
         RestartIfBuilt();
 
         // While the loading screen shows, time runs as it is, so it moves however the world it replaces was paused.
-        bool isPaused = _app.IsPaused || (_world.IsPaused && !_world.IsShowingLoadingScreen);
+        bool isPaused = _world.IsPaused && !_world.IsShowingLoadingScreen;
         float timeScale = _world.IsShowingLoadingScreen ? 1 : _world.TimeScale;
         Frame frame = _clock.Advance(isPaused, timeScale, out int fixedSteps) with { Events = _events.Take() };
 
