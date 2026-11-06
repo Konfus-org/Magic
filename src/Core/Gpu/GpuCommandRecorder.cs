@@ -14,31 +14,33 @@ public sealed class GpuCommandRecorder
     private readonly ImmutableArray<GpuTransition>.Builder _transitions = ImmutableArray.CreateBuilder<GpuTransition>();
     private readonly ImmutableArray<GpuCommand>.Builder _commands = ImmutableArray.CreateBuilder<GpuCommand>();
 
-    private string _name = string.Empty;
-    private GpuPassKind _kind;
-    private GpuRenderTargets _targets;
-    private bool _isInPass;
+    private GpuPass? _pass;
 
-    public void BeginComputePass(string name) => Begin(name, GpuPassKind.Compute, default);
+    public void BeginComputePass(string name) => Begin(new() { Name = name, Kind = GpuPassKind.Compute });
 
-    public void BeginDrawPass(string name, in GpuRenderTargets targets) => Begin(name, GpuPassKind.Draw, targets);
+    public void BeginDrawPass(string name, in GpuRenderTargets targets) =>
+        Begin(
+            new()
+            {
+                Name = name,
+                Kind = GpuPassKind.Draw,
+                Targets = targets,
+            }
+        );
 
-    public void BeginTransferPass(string name) => Begin(name, GpuPassKind.Transfer, default);
+    public void BeginTransferPass(string name) => Begin(new() { Name = name, Kind = GpuPassKind.Transfer });
 
     public void EndPass()
     {
-        ThrowIfNotInPass();
+        GpuPass pass = _pass ?? throw new InvalidOperationException("No pass has begun.");
         _passes.Add(
-            new()
+            pass with
             {
-                Name = _name,
-                Kind = _kind,
                 Transitions = _transitions.DrainToImmutable(),
                 Commands = _commands.DrainToImmutable(),
-                Targets = _targets,
             }
         );
-        _isInPass = false;
+        _pass = null;
     }
 
     /// <summary>
@@ -46,8 +48,8 @@ public sealed class GpuCommandRecorder
     /// </summary>
     public GpuCommands Finish()
     {
-        if (_isInPass)
-            throw new InvalidOperationException($"The pass {_name} was not ended.");
+        if (_pass is { } open)
+            throw new InvalidOperationException($"The pass {open.Name} was not ended.");
 
         return new(_passes.DrainToImmutable());
     }
@@ -373,15 +375,12 @@ public sealed class GpuCommandRecorder
     /// </summary>
     public void Timestamp(string label) => Add(new() { Kind = GpuCommandKind.Timestamp, Label = label });
 
-    private void Begin(string name, GpuPassKind kind, in GpuRenderTargets targets)
+    private void Begin(in GpuPass pass)
     {
-        if (_isInPass)
-            throw new InvalidOperationException($"The pass {_name} was not ended before {name} began.");
+        if (_pass is { } open)
+            throw new InvalidOperationException($"The pass {open.Name} was not ended before {pass.Name} began.");
 
-        _name = name;
-        _kind = kind;
-        _targets = targets;
-        _isInPass = true;
+        _pass = pass;
     }
 
     private void Add(in GpuCommand command)
@@ -392,7 +391,7 @@ public sealed class GpuCommandRecorder
 
     private void ThrowIfNotInPass()
     {
-        if (!_isInPass)
+        if (_pass is null)
             throw new InvalidOperationException("No pass has begun.");
     }
 }
