@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using System.Runtime.InteropServices;
 using Magic.Debugging;
 using Magic.Gpu;
@@ -185,30 +186,23 @@ internal sealed unsafe class VulkanDevice : IDisposable
     private static bool HasLayer(string name)
     {
         vkEnumerateInstanceLayerProperties(out uint count);
-        Span<VkLayerProperties> layers = new VkLayerProperties[count];
+        VkLayerProperties[] layers = new VkLayerProperties[count];
         vkEnumerateInstanceLayerProperties(layers);
-        foreach (VkLayerProperties layer in layers)
-        {
-            if (NativeStrings.Read(layer.layerName) == name)
-                return true;
-        }
 
-        return false;
+        return layers.Any(layer => NativeStrings.Read(layer.layerName) == name);
     }
 
     private static HashSet<string> GetInstanceExtensions()
     {
         vkEnumerateInstanceExtensionProperties(out uint count);
-        Span<VkExtensionProperties> extensions = new VkExtensionProperties[count];
+        VkExtensionProperties[] extensions = new VkExtensionProperties[count];
         vkEnumerateInstanceExtensionProperties(extensions);
-        HashSet<string> names = new(StringComparer.Ordinal);
-        foreach (VkExtensionProperties extension in extensions)
-        {
-            names.Add(NativeStrings.Read(extension.extensionName));
-        }
 
-        return names;
+        return GetNames(extensions);
     }
+
+    private static HashSet<string> GetNames(VkExtensionProperties[] extensions) =>
+        extensions.Select(extension => NativeStrings.Read(extension.extensionName)).ToHashSet(StringComparer.Ordinal);
 
     private static VkDebugUtilsMessengerCreateInfoEXT GetMessengerInfo() =>
         new()
@@ -256,9 +250,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
                 // The messenger in the chain catches what the instance's own creation reports.
                 pNext = HasValidation && HasDebugUtils ? &messenger : null,
             };
-            VkResult result = vkCreateInstance(&createInfo, out VkInstance instance);
-            if (result != VkResult.Success)
-                throw new InvalidOperationException($"Vulkan gave no instance: {result}.");
+            vkCreateInstance(&createInfo, out VkInstance instance).ThrowIfFailed("an instance");
 
             return instance;
         }
@@ -451,15 +443,10 @@ internal sealed unsafe class VulkanDevice : IDisposable
     private HashSet<string> GetDeviceExtensions(VkPhysicalDevice device)
     {
         InstanceApi.vkEnumerateDeviceExtensionProperties(device, out uint count);
-        Span<VkExtensionProperties> extensions = new VkExtensionProperties[count];
+        VkExtensionProperties[] extensions = new VkExtensionProperties[count];
         InstanceApi.vkEnumerateDeviceExtensionProperties(device, extensions);
-        HashSet<string> names = new(StringComparer.Ordinal);
-        foreach (VkExtensionProperties extension in extensions)
-        {
-            names.Add(NativeStrings.Read(extension.extensionName));
-        }
 
-        return names;
+        return GetNames(extensions);
     }
 
     /// <summary>
@@ -604,9 +591,9 @@ internal sealed unsafe class VulkanDevice : IDisposable
             enabledExtensionCount = extensionNames.Count,
             ppEnabledExtensionNames = extensionNames.Pointers,
         };
-        VkResult result = InstanceApi.vkCreateDevice(pick.Device, &createInfo, out VkDevice device);
-        if (result != VkResult.Success)
-            throw new InvalidOperationException($"{pick.Limits.DeviceName} gave no Vulkan device: {result}.");
+        InstanceApi
+            .vkCreateDevice(pick.Device, &createInfo, out VkDevice device)
+            .ThrowIfFailed($"a device on {pick.Limits.DeviceName}");
 
         return device;
     }

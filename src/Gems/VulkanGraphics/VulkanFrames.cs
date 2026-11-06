@@ -187,7 +187,7 @@ internal sealed unsafe class VulkanFrames : IDisposable
 
         // Read back only while something listens to the meter.
         if (_passDuration.Enabled)
-            frame.RecordTimings(_device, _frameDuration, _passDuration);
+            frame.RecordTimings(_frameDuration, _passDuration);
 
         frame.Timestamps.Clear();
     }
@@ -223,12 +223,9 @@ internal sealed unsafe class VulkanFrames : IDisposable
             _device = device;
             _resources = resources;
             Index = index;
-            VkResult made = device.Api.vkCreateCommandPool(
-                VkCommandPoolCreateFlags.Transient,
-                device.QueueFamily,
-                out VkCommandPool pool
-            );
-            Check(made, "a command pool");
+            device
+                .Api.vkCreateCommandPool(VkCommandPoolCreateFlags.Transient, device.QueueFamily, out VkCommandPool pool)
+                .ThrowIfFailed("a frame's command pool");
             Pool = pool;
             VkCommandBufferAllocateInfo allocateInfo = new()
             {
@@ -237,18 +234,20 @@ internal sealed unsafe class VulkanFrames : IDisposable
                 commandBufferCount = 1,
             };
             VkCommandBuffer commandBuffer;
-            Check(device.Api.vkAllocateCommandBuffers(&allocateInfo, &commandBuffer), "a command buffer");
+            device
+                .Api.vkAllocateCommandBuffers(&allocateInfo, &commandBuffer)
+                .ThrowIfFailed("a frame's command buffer");
             CommandBuffer = commandBuffer;
-            Check(device.Api.vkCreateFence(VkFenceCreateFlags.Signaled, out VkFence fence), "a fence");
+            device.Api.vkCreateFence(VkFenceCreateFlags.Signaled, out VkFence fence).ThrowIfFailed("a frame's fence");
             Fence = fence;
-            Check(device.Api.vkCreateSemaphore(out VkSemaphore acquired), "a semaphore");
+            device.Api.vkCreateSemaphore(out VkSemaphore acquired).ThrowIfFailed("a frame's semaphore");
             Acquired = acquired;
             VkQueryPoolCreateInfo queryInfo = new()
             {
                 queryType = VkQueryType.Timestamp,
                 queryCount = TimestampCapacity,
             };
-            Check(device.Api.vkCreateQueryPool(&queryInfo, out VkQueryPool queries), "a query pool");
+            device.Api.vkCreateQueryPool(&queryInfo, out VkQueryPool queries).ThrowIfFailed("a frame's query pool");
             Queries = queries;
             Restage(StagingBytes);
         }
@@ -320,18 +319,16 @@ internal sealed unsafe class VulkanFrames : IDisposable
         }
 
         /// <summary>
-        /// Writes the next timestamp, named, and says which query it is; -1 when the frame has no room for more.
+        /// Writes the next timestamp, named; nothing when the frame has no room for more.
         /// </summary>
-        public int WriteTimestamp(VulkanDevice device, string name, int pass)
+        public void WriteTimestamp(string name, int pass)
         {
             if (Timestamps.Count >= TimestampCapacity)
-                return -1;
+                return;
 
-            int query = Timestamps.Count;
+            uint query = (uint)Timestamps.Count;
             Timestamps.Add((name, pass));
-            device.Api.vkCmdWriteTimestamp2(CommandBuffer, VkPipelineStageFlags2.AllCommands, Queries, (uint)query);
-
-            return query;
+            _device.Api.vkCmdWriteTimestamp2(CommandBuffer, VkPipelineStageFlags2.AllCommands, Queries, query);
         }
 
         /// <summary>
@@ -339,14 +336,14 @@ internal sealed unsafe class VulkanFrames : IDisposable
         /// last, and into <paramref name="passDuration"/> each pass's from its first timestamp to its last and each named
         /// stamp's from its pass's first, under its name. A frame with no timestamps records nothing.
         /// </summary>
-        public void RecordTimings(VulkanDevice device, Histogram<double> frameDuration, Histogram<double> passDuration)
+        public void RecordTimings(Histogram<double> frameDuration, Histogram<double> passDuration)
         {
             int count = Timestamps.Count;
             if (count == 0)
                 return;
 
             ulong* ticks = stackalloc ulong[count];
-            VkResult read = device.Api.vkGetQueryPoolResults(
+            VkResult read = _device.Api.vkGetQueryPoolResults(
                 Queries,
                 0,
                 (uint)count,
@@ -358,7 +355,7 @@ internal sealed unsafe class VulkanFrames : IDisposable
             if (read != VkResult.Success)
                 return;
 
-            double secPerTick = device.TimestampPeriod / 1_000_000_000.0;
+            double secPerTick = _device.TimestampPeriod / 1_000_000_000.0;
             frameDuration.Record((ticks[count - 1] - ticks[0]) * secPerTick);
             int passStart = 0;
             for (int i = 0; i < count; i++)
@@ -378,12 +375,6 @@ internal sealed unsafe class VulkanFrames : IDisposable
                     );
                 }
             }
-        }
-
-        private static void Check(VkResult result, string what)
-        {
-            if (result != VkResult.Success)
-                throw new InvalidOperationException($"Vulkan could not make {what} for a frame: {result}.");
         }
     }
 }

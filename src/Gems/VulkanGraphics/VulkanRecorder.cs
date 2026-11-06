@@ -27,7 +27,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
             GpuPass pass = commands.Passes[passIndex];
             BeginGroup(cmd, pass.Name);
             Transition(cmd, pass.Transitions.AsSpan());
-            frame.WriteTimestamp(device, pass.Name, passIndex);
+            frame.WriteTimestamp(pass.Name, passIndex);
             bool isDrawing = pass.Kind == GpuPassKind.Draw && BeginRendering(cmd, pass);
             foreach (GpuCommand command in pass.Commands)
             {
@@ -37,7 +37,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
             if (isDrawing)
                 api.vkCmdEndRendering(cmd);
 
-            frame.WriteTimestamp(device, pass.Name, passIndex);
+            frame.WriteTimestamp(pass.Name, passIndex);
             EndGroup(cmd);
         }
     }
@@ -52,21 +52,14 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
         Flush(cmd);
     }
 
-    private static VkImageSubresourceRange GetRange(VulkanTexture texture, int level)
-    {
-        VkImageAspectFlags aspect = texture.Description.Format.IsDepth
-            ? VkImageAspectFlags.Depth
-            : VkImageAspectFlags.Color;
-        uint layers = (uint)(
-            texture.Description.Kind == TextureKind.Cube ? 6
-            : texture.Description.Kind == TextureKind.Texture2DArray ? texture.Description.Layers
-            : 1
+    private static VkImageSubresourceRange GetRange(VulkanTexture texture) =>
+        new(
+            texture.Description.Format.ToAspect(),
+            0,
+            (uint)texture.Description.Levels,
+            0,
+            texture.Description.GetLayerCount()
         );
-
-        return level < 0
-            ? new VkImageSubresourceRange(aspect, 0, (uint)texture.Description.Levels, 0, layers)
-            : new VkImageSubresourceRange(aspect, (uint)level, 1, 0, layers);
-    }
 
     /// <summary>
     /// Says a copy was not recorded: one of what it names has left the heap, so what it would have moved is lost.
@@ -77,7 +70,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
         );
 
     private static VkImageSubresourceLayers GetLayers(VulkanTexture texture, uint level, uint layer) =>
-        new(texture.Description.Format.IsDepth ? VkImageAspectFlags.Depth : VkImageAspectFlags.Color, level, layer, 1);
+        new(texture.Description.Format.ToAspect(), level, layer, 1);
 
     private static VkExtent3D GetExtent(VulkanTexture texture, uint level) =>
         new(
@@ -152,7 +145,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
                 continue;
 
             VkImageLayout oldLayout = texture.Layouts[runStart];
-            VkImageSubresourceRange range = GetRange(texture, -1) with
+            VkImageSubresourceRange range = GetRange(texture) with
             {
                 baseMipLevel = (uint)runStart,
                 levelCount = (uint)(i - runStart + 1),
@@ -237,12 +230,15 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
                 imageLayout = VkImageLayout.ColorAttachmentOptimal,
                 loadOp = color.Load.ToVulkan(),
                 storeOp = VkAttachmentStoreOp.Store,
-                clearValue = new VkClearValue(
-                    BitConverter.UInt32BitsToSingle(color.ClearColor.X),
-                    BitConverter.UInt32BitsToSingle(color.ClearColor.Y),
-                    BitConverter.UInt32BitsToSingle(color.ClearColor.Z),
-                    BitConverter.UInt32BitsToSingle(color.ClearColor.W)
-                ),
+                clearValue = new VkClearValue
+                {
+                    color = new VkClearColorValue(
+                        color.ClearColor.X,
+                        color.ClearColor.Y,
+                        color.ClearColor.Z,
+                        color.ClearColor.W
+                    ),
+                },
             };
         }
 
@@ -514,7 +510,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
 
                 break;
             case GpuCommandKind.Timestamp:
-                frame.WriteTimestamp(device, command.Label, passIndex);
+                frame.WriteTimestamp(command.Label, passIndex);
                 break;
             case GpuCommandKind.BuildAcceleration:
                 if (resources.Accelerations[command.Id] is { } acceleration)
@@ -586,9 +582,12 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
         device.Api.vkCmdPipelineBarrier2(cmd, &afterInfo);
     }
 
+    /// <summary>
+    /// Clears every level to the constants' bits, which Vulkan's union reads as whatever the format holds.
+    /// </summary>
     private void Clear(VkCommandBuffer cmd, VulkanTexture texture, in GpuConstants constants)
     {
-        VkImageSubresourceRange range = GetRange(texture, -1);
+        VkImageSubresourceRange range = GetRange(texture);
         if (texture.Description.Format.IsDepth)
         {
             VkClearDepthStencilValue depth = new(BitConverter.UInt32BitsToSingle(constants.X), 0);
@@ -604,14 +603,7 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
             return;
         }
 
-        VkClearColorValue color = texture.Description.Format.IsInteger
-            ? new VkClearColorValue(constants.X, constants.Y, constants.Z, constants.W)
-            : new VkClearColorValue(
-                BitConverter.UInt32BitsToSingle(constants.X),
-                BitConverter.UInt32BitsToSingle(constants.Y),
-                BitConverter.UInt32BitsToSingle(constants.Z),
-                BitConverter.UInt32BitsToSingle(constants.W)
-            );
+        VkClearColorValue color = new(constants.X, constants.Y, constants.Z, constants.W);
         device.Api.vkCmdClearColorImage(cmd, texture.Image, VkImageLayout.TransferDstOptimal, &color, 1, &range);
     }
 }

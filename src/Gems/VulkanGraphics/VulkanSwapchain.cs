@@ -27,17 +27,9 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
     private VkSwapchainKHR _swapchain = VkSwapchainKHR.Null;
     private GpuTexture[] _textures = [];
     private VkSemaphore[] _rendered = [];
-    private VkImage[] _images = [];
     private int _width;
     private int _height;
     private int _acquired = -1;
-
-    public GpuFormat Format { get; private set; }
-
-    /// <summary>
-    /// The image acquired for this frame; none while the window has no size, or until it was acquired.
-    /// </summary>
-    public GpuTexture Current => _acquired < 0 ? GpuTexture.None : _textures[_acquired];
 
     /// <summary>
     /// Signalled when the current image is drawn, which presenting waits for.
@@ -122,7 +114,6 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
         _swapchain = VkSwapchainKHR.Null;
         _textures = [];
         _rendered = [];
-        _images = [];
     }
 
     private void Recreate()
@@ -183,23 +174,23 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
         }
 
         _swapchain = swapchain;
-        Format = format.format.ToGpu();
         device.Api.vkGetSwapchainImagesKHR(_swapchain, out uint imageCount);
-        _images = new VkImage[imageCount];
-        device.Api.vkGetSwapchainImagesKHR(_swapchain, _images);
+        VkImage[] images = new VkImage[imageCount];
+        device.Api.vkGetSwapchainImagesKHR(_swapchain, images);
         _textures = new GpuTexture[imageCount];
         _rendered = new VkSemaphore[imageCount];
         TextureDescription description = new()
         {
             Width = (int)width,
             Height = (int)height,
-            Format = Format,
+            Format = format.format.ToGpu(),
             Usage = TextureUsages.ColorTarget | TextureUsages.CopyDestination | TextureUsages.CopySource,
             Name = "Window",
         };
         for (int i = 0; i < imageCount; i++)
         {
-            Result<GpuTexture> texture = resources.AddWindowTexture(_images[i], description);
+            Result<GpuTexture> texture = resources.AddWindowTexture(images[i], description);
+
             if (!texture.Ok)
             {
                 Log.Error($"The window's image {i} has no place in the heap: {texture.Error}");
