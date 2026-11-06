@@ -5,11 +5,11 @@ provides `IDebugUI`.
 
 To use it, list `DebugTools` in a project's `.magic` file.
 
-- **Counter**, on F1 or `set DebugTools.counter=true|false`: the frame rate and frame time, then the GPU's memory and
+- **Counter**, on F1 or `set DebugTools.counter=true|false`: the drawn frame rate and frame time, then the GPU's memory and
   the process's, as a line in the top left corner. It shows from the start in a Debug build. In other builds the debug
   UI shows lines only while a debug window is open.
 - **Stats**, on F3 or `set DebugTools.stats=true`: every instrument of the `Magic.*` meters and .NET's `System.Runtime`,
-  in sections that fold. **CPU** shows the main thread's frame, then what Core's own steps and each gem's hooks take
+  in sections that fold. **CPU** shows the main thread's frame and the render thread's, then what Core's own steps and each gem's hooks take
   of it, each a fold of its own, the slowest first. **GPU** shows what the GPU provider says of the API and the GPU, its frame and its
   passes. **Memory** shows the process's and the GPU's, then Core's and the process's instruments, and each gem's.
   **Other** holds the rest, by meter. A histogram shows its mean, how many a second and its most, a counter how much it

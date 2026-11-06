@@ -95,77 +95,77 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
 
     public Result<GpuBuffer> CreateBuffer(in BufferDescription description)
     {
-        ThrowIfNotOnMain();
+        ThrowIfNotOnRender();
 
         return _resources.CreateBuffer(description);
     }
 
     public Result<GpuTexture> CreateTexture(in TextureDescription description)
     {
-        ThrowIfNotOnMain();
+        ThrowIfNotOnRender();
 
         return _resources.CreateTexture(description);
     }
 
     public Result<GpuSampler> CreateSampler(in SamplerDescription description)
     {
-        ThrowIfNotOnMain();
+        ThrowIfNotOnRender();
 
         return _resources.CreateSampler(description);
     }
 
     public Result<GpuPipeline> CreatePipeline(in ComputePipelineDescription description)
     {
-        ThrowIfNotOnMain();
+        ThrowIfNotOnRender();
 
         return _resources.CreatePipeline(description);
     }
 
     public Result<GpuPipeline> CreatePipeline(in GraphicsPipelineDescription description)
     {
-        ThrowIfNotOnMain();
+        ThrowIfNotOnRender();
 
         return _resources.CreatePipeline(description);
     }
 
     public void Destroy(GpuBuffer buffer)
     {
-        ThrowIfNotOnMain();
+        ThrowIfNotOnRender();
         if (_resources.Buffers.Remove(buffer.Id) is { } removed)
             _frames.Current.Trash.Add(new(buffer.Id, removed));
     }
 
     public void Destroy(GpuTexture texture)
     {
-        ThrowIfNotOnMain();
+        ThrowIfNotOnRender();
         if (_resources.Textures.Remove(texture.Id) is { } removed)
             _frames.Current.Trash.Add(new(texture.Id, removed));
     }
 
     public void Destroy(GpuSampler sampler)
     {
-        ThrowIfNotOnMain();
+        ThrowIfNotOnRender();
         if (_resources.Samplers.Remove(sampler.Id) is { } removed)
             _frames.Current.Trash.Add(new(sampler.Id, removed));
     }
 
     public void Destroy(GpuPipeline pipeline)
     {
-        ThrowIfNotOnMain();
+        ThrowIfNotOnRender();
         if (_resources.Pipelines.Remove(pipeline.Id) is { } removed)
             _frames.Current.Trash.Add(new(pipeline.Id, removed));
     }
 
     public Result<GpuAcceleration> CreateAcceleration(in BottomLevelDescription description)
     {
-        ThrowIfNotOnMain();
+        ThrowIfNotOnRender();
 
         return _resources.CreateAcceleration(description);
     }
 
     public Result<GpuAcceleration> CreateAcceleration(in TopLevelDescription description)
     {
-        ThrowIfNotOnMain();
+        ThrowIfNotOnRender();
 
         return _resources.CreateAcceleration(description);
     }
@@ -174,14 +174,14 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
 
     public void Destroy(GpuAcceleration acceleration)
     {
-        ThrowIfNotOnMain();
+        ThrowIfNotOnRender();
         if (_resources.Accelerations.Remove(acceleration.Id) is { } removed)
             _frames.Current.Trash.Add(new(acceleration.Id, removed));
     }
 
     public GpuUpload BeginUpload(int bytes)
     {
-        ThrowIfNotOnMain();
+        ThrowIfNotOnRender();
 
         return _frames.Upload(bytes, _device.Limits.UploadAlignment);
     }
@@ -193,7 +193,7 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
         CancellationToken cancel
     )
     {
-        await _threads.Enter(EngineThread.Main);
+        await _threads.Enter(EngineThread.Render);
         cancel.ThrowIfCancellationRequested();
         if (_resources.Buffers[buffer.Id] is not { } read)
             return Result.Failure($"buffer {buffer.Id} is gone.");
@@ -203,7 +203,7 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
 
     public void Submit(in GpuCommands commands)
     {
-        ThrowIfNotOnMain();
+        ThrowIfNotOnRender();
         if (_isSubmitted)
         {
             Log.Warn("The frame was submitted already; a second set of commands is dropped.");
@@ -254,25 +254,19 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     }
 
     /// <summary>
-    /// Begins the frame before the renderer's turn: last frame's commands if nothing submitted them, then the next
-    /// frame and the window's image.
+    /// Begins the frame before the renderer's turn: finishes the frames the GPU is done with, so a readback awaited
+    /// completes whether or not the renderer draws, submits last frame's commands if nothing did, then begins the next
+    /// frame and takes the window's image.
     /// </summary>
     public void Render(in Frame frame)
-    {
-        if (!_isSubmitted)
-            Submit(GpuCommands.None);
-
-        BeginFrame();
-    }
-
-    /// <summary>
-    /// Finishes the frames the GPU is done with, so a readback awaited completes whether or not the renderer draws.
-    /// </summary>
-    public void Update(in Frame frame)
     {
         _frames.Poll();
         _memoryUsage.Record(_resources.MemoryBytes);
         _memoryLimit.Record(_device.Limits.DeviceMemoryBytes);
+        if (!_isSubmitted)
+            Submit(GpuCommands.None);
+
+        BeginFrame();
     }
 
     private void BeginFrame()
@@ -282,9 +276,9 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
         WindowTarget = _swapchain?.Acquire(_frames.Current.Acquired) ?? GpuTexture.None;
     }
 
-    private void ThrowIfNotOnMain()
+    private void ThrowIfNotOnRender()
     {
-        if (!_threads.IsCurrent(EngineThread.Main))
-            throw new InvalidOperationException("The GPU's resources and frames are the main thread's.");
+        if (!_threads.IsCurrent(EngineThread.Render))
+            throw new InvalidOperationException("The GPU's resources and frames are the render thread's.");
     }
 }

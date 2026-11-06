@@ -19,6 +19,11 @@ public sealed class ShadingInstance(Handle<Material> material)
     /// </summary>
     public Handle<Material> Material { get; } = material;
 
+    /// <summary>
+    /// The params it sets, for whatever draws it to read over the material's.
+    /// </summary>
+    public IReadOnlyDictionary<string, MaterialParam> Params => _params;
+
     public MaterialParam this[string name]
     {
         get => _params[name];

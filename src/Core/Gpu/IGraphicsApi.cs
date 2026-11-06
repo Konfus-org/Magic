@@ -5,7 +5,7 @@ namespace Magic.Gpu;
 /// <summary>
 /// The GPU, as a gem that provides it: resources made from descriptions into one bindless heap, pipelines built from
 /// SPIR-V, and one <see cref="GpuCommands"/> a frame, recorded as data and submitted whole. A gem never sees the API
-/// behind it. Main thread, but where a member says otherwise.
+/// behind it. Render thread, but where a member says otherwise.
 /// </summary>
 public interface IGraphicsApi
 {
