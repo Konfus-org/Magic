@@ -39,7 +39,7 @@ public sealed class PrefabImporterGem(Assets assets) : IGem, IAssetImporter<Pref
         progress?.Report(new LoadProgress(work, 0, entities.Length));
         ImmutableArray<PrefabPart>.Builder parts = ImmutableArray.CreateBuilder<PrefabPart>(entities.Length);
 
-        // Each prefab placed is asked for once, as an ask waits for the assets to take it in, between frames.
+        // Each prefab placed is loaded once, however many entities place it.
         Dictionary<ulong, Prefab> placed = [];
         foreach (PrefabFileEntity entity in entities)
         {

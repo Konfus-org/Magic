@@ -126,9 +126,6 @@ internal static class Program
                 threads.Pump(EngineThread.Main);
                 _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "Threads"));
                 start = _stepDuration.Start();
-                assets.ProcessChanges();
-                _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "Assets"));
-                start = _stepDuration.Start();
                 world.Pump();
                 _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "World"));
                 gems.Pump();

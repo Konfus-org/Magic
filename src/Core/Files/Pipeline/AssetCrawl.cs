@@ -163,7 +163,7 @@ internal static class AssetCrawl
                 return Result.Failure(read.Error);
 
             ImmutableArray<ulong> dependencies = AssetScan.FindHandles(read.Value);
-            assets.Changes.Push(new AssetDependenciesFound(id, dependencies));
+            assets.SetDependencies(id, dependencies);
 
             return Result.Success(dependencies);
         }
@@ -175,7 +175,7 @@ internal static class AssetCrawl
         Result<AssetDependencies> kept = await ReadKeptAsync(assets, file, cancel).ConfigureAwait(false);
         if (kept.Ok)
         {
-            assets.Changes.Push(new AssetDependenciesFound(id, kept.Value.Ids));
+            assets.SetDependencies(id, kept.Value.Ids);
 
             return Result.Success(kept.Value.Ids);
         }

@@ -10,7 +10,7 @@ namespace Magic.Files.Pipeline;
 internal enum AssetStage : byte
 {
     /// <summary>
-    /// To be read, once every gem is made.
+    /// To be read once the gem expected to read its type registers, or is not made.
     /// </summary>
     Wanted,
 
@@ -18,11 +18,6 @@ internal enum AssetStage : byte
     /// Being read on a worker.
     /// </summary>
     Loading,
-
-    /// <summary>
-    /// Read, and about to become what callers get.
-    /// </summary>
-    Landed,
 
     /// <summary>
     /// Made, or failed, and kept.
@@ -78,11 +73,6 @@ internal sealed record AssetEntry
     public Made? Current { get; init; }
 
     /// <summary>
-    /// What a load just made, while it is <see cref="AssetStage.Landed"/>.
-    /// </summary>
-    public Made? Landing { get; init; }
-
-    /// <summary>
     /// Why it failed, when it has never loaded; kept until its file changes.
     /// </summary>
     public string Error { get; init; } = string.Empty;
@@ -122,23 +112,13 @@ internal sealed record AssetEntry
 
 /// <summary>
 /// What has been asked for and made, and what makes it: which assets there are is <see cref="AssetDatabase"/>'s. A value,
-/// replaced whole on the main thread, and read by any thread as it is.
+/// replaced whole under the assets' lock, and read by any thread as it is.
 /// </summary>
 internal sealed record LoadedAssets
 {
     public static LoadedAssets Empty { get; } = new();
 
     public ImmutableDictionary<ulong, AssetEntry> Entries { get; init; } = [];
-
-    /// <summary>
-    /// The assets to start reading, so a run with none costs nothing. One that has moved on since is passed over.
-    /// </summary>
-    public ImmutableHashSet<ulong> Wanted { get; init; } = [];
-
-    /// <summary>
-    /// The assets whose reads have finished, in the order they did, so what depends on one lands after it.
-    /// </summary>
-    public ImmutableArray<ulong> Landed { get; init; } = [];
 
     /// <summary>
     /// Every asset type Magic and the gems hold, by the name a <c>.meta</c> gives it.
@@ -154,6 +134,11 @@ internal sealed record LoadedAssets
     /// The gem that writes each asset type.
     /// </summary>
     public ImmutableDictionary<Type, object> Exporters { get; init; } = [];
+
+    /// <summary>
+    /// The asset types each gem not made yet will read, by the gem's type: a load of one waits for it.
+    /// </summary>
+    public ImmutableDictionary<Type, ImmutableArray<Type>> Expected { get; init; } = [];
 
     /// <summary>
     /// The defaults and failures found missing, each said once.
@@ -220,24 +205,4 @@ internal sealed record LoadedAssets
             }
         }
     }
-
-    /// <summary>
-    /// These assets with asset <paramref name="id"/> to be read.
-    /// </summary>
-    public LoadedAssets Want(ulong id) =>
-        this with
-        {
-            Entries = Entries.SetItem(id, Entries[id] with { Stage = AssetStage.Wanted, Landing = null }),
-            Wanted = Wanted.Add(id),
-        };
-
-    /// <summary>
-    /// These assets with what a load of asset <paramref name="id"/> made about to land, in place of what was about to.
-    /// </summary>
-    public LoadedAssets Land(ulong id, AssetEntry entry, Made made) =>
-        this with
-        {
-            Entries = Entries.SetItem(id, entry with { Stage = AssetStage.Landed, Landing = made }),
-            Landed = Landed.Contains(id) ? Landed : Landed.Add(id),
-        };
 }

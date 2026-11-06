@@ -247,6 +247,8 @@ internal sealed class Gems : IDisposable
     )]
     private void Load(List<GemInfo> registered)
     {
+        // A constructor may load an asset of a type a gem made after it reads.
+        _assets.Expect(registered.ConvertAll(gem => gem.Type));
         foreach (GemInfo gem in registered)
         {
             Watch(gem);
@@ -266,6 +268,7 @@ internal sealed class Gems : IDisposable
                 // anything else is a bug in the gem, and its stack says where.
                 string why = ex is InvalidOperationException ? ex.Message : ex.ToString();
                 Log.Error($"Gem {gem.Name} was not made: {why}");
+                _assets.Drop(gem.Type);
                 code.Dispose();
                 continue;
             }

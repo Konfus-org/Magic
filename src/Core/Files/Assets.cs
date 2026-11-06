@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -9,6 +10,7 @@ using Magic.Debugging;
 using Magic.Events;
 using Magic.Files.Pipeline;
 using Magic.Serialization;
+using Magic.Threading;
 using Magic.Utils;
 
 namespace Magic.Files;
@@ -21,8 +23,8 @@ namespace Magic.Files;
 /// folders on every OS. Any thread.
 /// <para>
 /// Every asset directory is indexed as it is registered, a gem's before the gem is made, so finding an asset works in a
-/// constructor; a load asked for before changes are first taken in,
-/// which comes once every gem is made, waits for it, as the gem that reads its type may be made after the one asking.
+/// constructor, and so does loading one: a load of a type a gem reads, asked for before that gem is made, starts as the
+/// gem registers.
 /// </para>
 /// <para>
 /// Each file is imported on a worker by <see cref="RunImportAsync{T}"/>: read it, read its <c>.meta</c>, look in the
@@ -37,9 +39,9 @@ namespace Magic.Files;
 /// </para>
 /// <para>
 /// What assets there are and what depends on what is its <see cref="AssetDatabase"/>, what was loaded its
-/// <see cref="LoadedAssets"/>: values every call reads as they are. They change in one place,
-/// <see cref="ProcessChanges"/>, which runs between frames when something was pushed there. So the assets hold still for
-/// the whole frame, and a load lands, or an asset changes, only between frames.
+/// <see cref="LoadedAssets"/>: values every call reads as they are, each ask replacing them whole under one lock, held
+/// only for the swap. A load lands as its worker finishes, and a change to the files is taken in as the watches see it
+/// settle, so two calls in one frame can see different assets, each a whole one.
 /// </para>
 /// </summary>
 public sealed class Assets : IDisposable
@@ -54,6 +56,11 @@ public sealed class Assets : IDisposable
     /// (the root <c>Directory.Build.props</c>).
     /// </summary>
     private const string ResourcesKey = "Magic.Resources";
+
+    /// <summary>
+    /// Held to swap <see cref="Database"/> and <see cref="Loaded"/>, never across a wait, a file read or an importer.
+    /// </summary>
+    private readonly Lock _gate = new();
 
     private readonly AssetWatches _watches;
 
@@ -76,20 +83,21 @@ public sealed class Assets : IDisposable
         Caches = caches;
         _events = events;
         _app = app;
-        _watches = new AssetWatches(files);
+        _watches = new AssetWatches(files, this);
         BuiltIn = GetResources(files, typeof(Assets).Assembly, AppContext.BaseDirectory);
         Register(BuiltIn);
         Register(typeof(Assets).Assembly);
     }
 
     /// <summary>
-    /// Whether a load is on its way, as a replace of the world waits for none to be: something asked that is not yet
-    /// taken in, or a caller waiting for what it asked for. Any thread.
+    /// Whether a load is on its way, as a replace of the world waits for none to be: an asset asked for that has not
+    /// landed. Any thread.
     /// </summary>
-    internal bool HasLoadsInFlight => Changes.HasChanges || Loaded.Entries.Values.Any(entry => !entry.Waiting.IsEmpty);
+    internal bool HasLoadsInFlight => Loaded.Entries.Values.Any(entry => entry.Stage != AssetStage.Loaded);
 
     /// <summary>
-    /// What assets there are and what depends on what, as of now, as any thread reads it. The main thread alone writes it.
+    /// What assets there are and what depends on what, as of now, as any thread reads it. Written under
+    /// <see cref="_gate"/> alone.
     /// </summary>
     internal AssetDatabase Database
     {
@@ -98,18 +106,13 @@ public sealed class Assets : IDisposable
     } = AssetDatabase.Empty;
 
     /// <summary>
-    /// What was asked for and made, as of now, as any thread reads it. The main thread alone writes it.
+    /// What was asked for and made, as of now, as any thread reads it. Written under <see cref="_gate"/> alone.
     /// </summary>
     internal LoadedAssets Loaded
     {
         get => Volatile.Read(ref field);
         private set => Volatile.Write(ref field, value);
     } = LoadedAssets.Empty;
-
-    /// <summary>
-    /// What is asked of the assets, as data: every change to them goes through here. Any thread.
-    /// </summary>
-    internal AssetsChangeList Changes { get; } = new();
 
     internal IFileSystem Files { get; }
 
@@ -133,18 +136,21 @@ public sealed class Assets : IDisposable
 
     /// <summary>
     /// Stops the watching: the host's to call, at the end of the run, on its thread. The loads on their way stopped with
-    /// the run's <see cref="App.Lifetime"/>, and a load still waited for ends cancelled.
+    /// the run's <see cref="App.Lifetime"/>, one landing after it is dropped, and a load still waited for ends cancelled,
+    /// as one asked for after it does.
     /// </summary>
     public void Dispose()
     {
         _watches.Dispose();
-        Changes.Close(_app.Lifetime);
-        foreach (AssetEntry entry in Loaded.Entries.Values)
+        List<TaskCompletionSource<Made>> waiting;
+        lock (_gate)
         {
-            foreach (TaskCompletionSource<Made> waiter in entry.Waiting)
-            {
-                waiter.TrySetCanceled(_app.Lifetime);
-            }
+            waiting = [.. Loaded.Entries.Values.SelectMany(entry => entry.Waiting)];
+        }
+
+        foreach (TaskCompletionSource<Made> waiter in waiting)
+        {
+            waiter.TrySetCanceled(_app.Lifetime);
         }
     }
 
@@ -212,7 +218,17 @@ public sealed class Assets : IDisposable
         string path = file.Path;
         int slash = path.LastIndexOf('/');
         string folder = slash < 0 ? string.Empty : path[..slash];
-        Changes.Push(new AssetFolderListed(file.Id, folder));
+        lock (_gate)
+        {
+            LoadedAssets loaded = Loaded;
+            if (loaded.Entries.TryGetValue(file.Id, out AssetEntry? entry) && !entry.Folders.Contains(folder))
+            {
+                Loaded = loaded with
+                {
+                    Entries = loaded.Entries.SetItem(file.Id, entry with { Folders = entry.Folders.Add(folder) }),
+                };
+            }
+        }
 
         return GetPaths(folder);
     }
@@ -259,8 +275,8 @@ public sealed class Assets : IDisposable
         where T : IAsset<T> => [.. Database.GetDependents(asset.Id, levels)];
 
     /// <summary>
-    /// The asset, or why it could not be loaded. It is read on a worker once every gem is made, and kept, so every
-    /// caller gets the same object; one asking while it is made again waits for what it is made into. A load that
+    /// The asset, or why it could not be loaded. It is read on a worker, from now, or once the gem that reads its type
+    /// registers when it is not made yet, and kept, so every caller gets the same object; one asking while it is made again waits for what it is made into. A load that
     /// fails is remembered until its file changes. <paramref name="cancel"/> only stops this caller's wait.
     /// </summary>
     public Task<Result<T>> LoadAsync<T>(Handle<T> asset, IProgress<LoadProgress>? progress, CancellationToken cancel)
@@ -406,8 +422,7 @@ public sealed class Assets : IDisposable
         if (!Files.DirectoryExists(directory))
             return;
 
-        AssetDatabase database = Database;
-        foreach (string added in database.Directories)
+        foreach (string added in Database.Directories)
         {
             if (string.Equals(added, directory, StringComparison.OrdinalIgnoreCase))
                 return;
@@ -415,11 +430,26 @@ public sealed class Assets : IDisposable
 
         // Watched before it is read, so nothing written meanwhile is missed.
         _watches.Add(directory);
-        ImmutableArray<string> directories = database.Directories.IsEmpty
-            ? [directory]
-            : database.Directories.Insert(database.Directories.Length - 1, directory);
-        Database = database with { Directories = directories, Index = AssetIndex.Create(Files, directories, BuiltIn) };
-        Log.Verbose($"Indexed {Database.Index.ById.Count} assets under {directories.Length} folders.");
+        while (true)
+        {
+            AssetDatabase database = Database;
+            ImmutableArray<string> directories = database.Directories.IsEmpty
+                ? [directory]
+                : database.Directories.Insert(database.Directories.Length - 1, directory);
+            AssetIndex index = AssetIndex.Create(Files, directories, BuiltIn);
+            lock (_gate)
+            {
+                // Indexed again meanwhile, they are read again, so neither read loses what the other found.
+                if (!ReferenceEquals(Database.Index, database.Index))
+                    continue;
+
+                Database = Database with { Directories = directories, Index = index };
+            }
+
+            Log.Verbose($"Indexed {index.ById.Count} assets under {directories.Length} folders.");
+
+            return;
+        }
     }
 
     /// <summary>
@@ -429,83 +459,200 @@ public sealed class Assets : IDisposable
     /// </summary>
     internal void Register(Assembly assembly)
     {
+        List<AssetType> declared = [];
         foreach (Type type in assembly.GetExportedTypes())
         {
             if (!type.IsClass || type.IsAbstract || !IsAssetType(type))
                 continue;
 
-            LoadedAssets loaded = Loaded;
-            if (loaded.Types.TryGetValue(type.Name, out AssetType? other))
-            {
-                Log.Error(
-                    $"{type.FullName} and {other.Type.FullName} are both asset types named {type.Name}, so a .meta's "
-                        + "\"type\" names the first."
-                );
-                continue;
-            }
-
             AssetImportRun import = GetGeneric(nameof(RunImportAsync), type).CreateDelegate<AssetImportRun>(this);
             AssetBuiltInReader readBuiltIn = GetGeneric(nameof(ReadBuiltIn), type).CreateDelegate<AssetBuiltInReader>();
-            Loaded = loaded with { Types = loaded.Types.Add(type.Name, new AssetType(type, import, readBuiltIn)) };
+            declared.Add(new AssetType(type, import, readBuiltIn));
+        }
+
+        LoadedAssets added;
+        lock (_gate)
+        {
+            added = Loaded;
+            foreach (AssetType type in declared)
+            {
+                if (!added.Types.ContainsKey(type.Type.Name))
+                    added = added with { Types = added.Types.Add(type.Type.Name, type) };
+            }
+
+            Loaded = added;
+        }
+
+        foreach (AssetType type in declared)
+        {
+            Type first = added.Types[type.Type.Name].Type;
+            if (first != type.Type)
+            {
+                Log.Error(
+                    $"{type.Type.FullName} and {first.FullName} are both asset types named {type.Type.Name}, so a "
+                        + ".meta's \"type\" names the first."
+                );
+            }
+        }
+    }
+
+    /// <summary>
+    /// Has a load of an asset type one of <paramref name="gems"/> reads, as its <see cref="IAssetImporter{T}"/>s say,
+    /// wait for that gem until it registers (<see cref="Register(object)"/>) or is not made (<see cref="Drop"/>), as a
+    /// gem made before it may load one. Main thread.
+    /// </summary>
+    internal void Expect(IEnumerable<Type> gems)
+    {
+        List<KeyValuePair<Type, ImmutableArray<Type>>> expected =
+        [
+            .. gems.Select(gem => KeyValuePair.Create(gem, GetAssetTypes(gem, typeof(IAssetImporter<>)))),
+        ];
+        lock (_gate)
+        {
+            Loaded = Loaded with { Expected = Loaded.Expected.SetItems(expected) };
+        }
+    }
+
+    /// <summary>
+    /// Stops waiting for <paramref name="gem"/>, which was not made: what was asked for as a type only it would read is
+    /// read now, and fails as a type no gem reads. Main thread.
+    /// </summary>
+    internal void Drop(Type gem)
+    {
+        lock (_gate)
+        {
+            Loaded = StartWanted(Database, Loaded with { Expected = Loaded.Expected.Remove(gem) });
         }
     }
 
     /// <summary>
     /// Has <paramref name="gem"/> read each asset type it implements an <see cref="IAssetImporter{T}"/> of, and write each
     /// it implements an <see cref="IAssetExporter{T}"/> of, until the subscription is disposed, as the gem ends. A type
-    /// another gem reads or writes already stays that one's, and is an error.
+    /// another gem reads or writes already stays that one's, and is an error. What was asked for as a type it reads
+    /// before anything read it starts now.
     /// </summary>
     internal Subscription Register(object gem)
     {
-        List<AssetChange> removals = [];
-        foreach (Type contract in gem.GetType().GetInterfaces())
+        ImmutableArray<Type> reads = GetAssetTypes(gem.GetType(), typeof(IAssetImporter<>));
+        ImmutableArray<Type> writes = GetAssetTypes(gem.GetType(), typeof(IAssetExporter<>));
+        LoadedAssets claimed;
+        lock (_gate)
         {
-            if (!contract.IsGenericType)
-                continue;
-
-            Type definition = contract.GetGenericTypeDefinition();
-            Type type = contract.GenericTypeArguments[0];
-            if (definition == typeof(IAssetImporter<>))
+            LoadedAssets loaded = Loaded;
+            claimed = loaded with
             {
-                Changes.Push(new AssetImporterAdded(type, gem));
-                removals.Add(new AssetImporterRemoved(type, gem));
-            }
-            else if (definition == typeof(IAssetExporter<>))
-            {
-                Changes.Push(new AssetExporterAdded(type, gem));
-                removals.Add(new AssetExporterRemoved(type, gem));
-            }
+                Importers = Claim(loaded.Importers, reads, gem),
+                Exporters = Claim(loaded.Exporters, writes, gem),
+                Expected = loaded.Expected.Remove(gem.GetType()),
+            };
+            Loaded = StartWanted(Database, claimed);
         }
 
-        return new Subscription(() => removals.ForEach(Changes.Push));
+        LogClaimedByOthers(claimed.Importers, reads, gem, "reads");
+        LogClaimedByOthers(claimed.Exporters, writes, gem, "writes");
+
+        return new Subscription(() =>
+        {
+            lock (_gate)
+            {
+                LoadedAssets loaded = Loaded;
+                Loaded = loaded with
+                {
+                    Importers = Release(loaded.Importers, reads, gem),
+                    Exporters = Release(loaded.Exporters, writes, gem),
+                };
+            }
+        });
     }
 
     /// <summary>
-    /// Takes in what changed, in one go, so what is read holds still until it is all in. Waiters are told last, so what
-    /// they read has what they waited for. Between frames, so the assets hold still for the frame. Main thread.
+    /// Takes in the asset directories as the watches had them read again, <paramref name="now"/>, after they saw
+    /// <paramref name="touched"/>, paths from their asset directories: each asset loaded whose file changed, is another
+    /// file now, lists a folder that changed, or was made from one of those, and so on out, is read again, each after
+    /// what it was made from, as a load waits for those on their way; one whose file is gone is let go, and its waiters
+    /// told. Refused, false, when the asset directories are no longer <paramref name="directories"/>, the ones read: a
+    /// directory was added meanwhile. Any thread.
     /// </summary>
-    internal void ProcessChanges()
+    internal bool Reindex(ImmutableArray<string> directories, AssetIndex now, ImmutableHashSet<string> touched)
     {
-        if (!Changes.HasChanges && !_watches.HasWork)
-            return;
+        List<(TaskCompletionSource<Made> Waiter, Made Gone)> told = [];
+        int reloading = 0;
+        lock (_gate)
+        {
+            AssetDatabase database = Database;
+            if (database.Directories != directories)
+                return false;
 
-        (AssetDatabase database, LoadedAssets loaded) = Changes.Take(Database, Loaded);
-        CancellationToken lifetime = _app.Lifetime;
-        (database, loaded) = AssetReindex.Take(database, loaded, _watches, Changes, BuiltIn, lifetime);
-        (database, loaded) = AssetLoads.Land(database, loaded, Changes, _events, Caches, lifetime);
-        loaded = AssetLoads.Start(database, loaded, Changes, lifetime);
-        Database = database;
-        Loaded = loaded;
-        Changes.TellWaiters();
+            LoadedAssets loaded = Loaded;
+            AssetIndex before = database.Index;
+            HashSet<ulong> changed = AssetIndex.Diff(before, now, touched);
+            changed.UnionWith(loaded.GetListersOf(touched));
+            HashSet<ulong> reload = [.. changed, .. loaded.GetMadeFromThese(changed)];
+            database = database with { Index = now };
+            foreach (ulong id in changed)
+            {
+                database = database.RemoveDependencies(id);
+            }
+
+            foreach (ulong id in reload)
+            {
+                if (!loaded.Entries.TryGetValue(id, out AssetEntry? entry))
+                    continue;
+
+                if (!now.ById.ContainsKey(id))
+                {
+                    Made gone = Fail($"{before.ById[id].Path} is gone.");
+                    told.AddRange(entry.Waiting.Select(waiter => (waiter, gone)));
+                    loaded = loaded with { Entries = loaded.Entries.Remove(id) };
+                    continue;
+                }
+
+                // One not read yet reads the file as it is now; one being read is read again as that lands.
+                if (entry.Stage == AssetStage.Wanted)
+                    continue;
+
+                reloading++;
+                loaded =
+                    entry.Stage == AssetStage.Loaded
+                        ? StartRead(database, loaded, id, entry)
+                        : loaded with
+                        {
+                            Entries = loaded.Entries.SetItem(id, entry with { IsStale = true }),
+                        };
+            }
+
+            Database = database;
+            Loaded = loaded;
+        }
+
+        foreach ((TaskCompletionSource<Made> waiter, Made gone) in told)
+        {
+            waiter.TrySetResult(gone);
+        }
+
+        if (reloading > 0)
+            Log.Info($"Reloading {reloading} assets.");
+
+        return true;
     }
 
     /// <summary>
-    /// Whether something reads <typeparamref name="T"/>'s files: Core itself, or a gem. Known once changes are first taken
-    /// in.
+    /// Keeps <paramref name="dependencies"/> as all asset <paramref name="id"/> depends on, found without loading it.
+    /// Any thread.
+    /// </summary>
+    internal void SetDependencies(ulong id, ImmutableArray<ulong> dependencies)
+    {
+        lock (_gate)
+        {
+            Database = Database.SetDependencies(id, dependencies);
+        }
+    }
+
+    /// <summary>
+    /// Whether something reads <typeparamref name="T"/>'s files: Core itself, or a gem that is made.
     /// </summary>
     internal bool CanImport<T>()
-        where T : IAsset<T> =>
-        typeof(T).GetCustomAttribute<AssetFormatAttribute>() is not null || Loaded.Importers.ContainsKey(typeof(T));
+        where T : IAsset<T> => CanImport(typeof(T), Loaded);
 
     /// <summary>
     /// Asset <paramref name="id"/> as <paramref name="type"/>, at once when it has loaded, else once it has been
@@ -523,25 +670,13 @@ public sealed class Assets : IDisposable
         string work = $"Loading {Database.GetName(id)}";
         progress?.Report(new LoadProgress(work, 0, 1));
 
-        // Loaded already, it needs no run, but what it was made from is recorded in one.
-        Made made;
-        if (
-            dependent == 0
-            && Loaded.Entries.TryGetValue(id, out AssetEntry? entry)
-            && entry.Stage == AssetStage.Loaded
-            && entry.Type == type
-        )
+        Task<Made> answer;
+        lock (_gate)
         {
-            made = entry.Outcome;
-        }
-        else
-        {
-            made = await Changes
-                .RequestAsync(id, dependent, type, import, progress)
-                .WaitAsync(cancel)
-                .ConfigureAwait(false);
+            (Loaded, answer) = Request(Database, Loaded, id, dependent, type, import, progress);
         }
 
+        Made made = await answer.WaitAsync(cancel).ConfigureAwait(false);
         progress?.Report(new LoadProgress(work, 1, 1));
 
         return made;
@@ -762,6 +897,83 @@ public sealed class Assets : IDisposable
         ).MakeGenericMethod(type);
 
     /// <summary>
+    /// Whether something reads <paramref name="type"/>'s files: Core itself, or a gem <paramref name="loaded"/> has.
+    /// </summary>
+    private static bool CanImport(Type type, LoadedAssets loaded) =>
+        type.GetCustomAttribute<AssetFormatAttribute>() is not null || loaded.Importers.ContainsKey(type);
+
+    /// <summary>
+    /// What a load that made nothing gives: why not.
+    /// </summary>
+    private static Made Fail(string error) => new(Result.Failure(error), 0);
+
+    /// <summary>
+    /// Whether a load of <paramref name="type"/> waits for a gem: nothing reads it yet, and a gem not made yet will.
+    /// </summary>
+    private static bool WaitsForGem(Type type, LoadedAssets loaded) =>
+        !CanImport(type, loaded) && loaded.Expected.Values.Any(reads => reads.Contains(type));
+
+    /// <summary>
+    /// The asset types <paramref name="gem"/> implements <paramref name="contract"/> of, <see cref="IAssetImporter{T}"/>
+    /// or <see cref="IAssetExporter{T}"/>.
+    /// </summary>
+    private static ImmutableArray<Type> GetAssetTypes(Type gem, Type contract) =>
+        [
+            .. gem.GetInterfaces()
+                .Where(one => one.IsGenericType && one.GetGenericTypeDefinition() == contract)
+                .Select(one => one.GenericTypeArguments[0]),
+        ];
+
+    /// <summary>
+    /// <paramref name="gems"/> with <paramref name="gem"/> as the one that has each of <paramref name="types"/> no other
+    /// gem has already.
+    /// </summary>
+    private static ImmutableDictionary<Type, object> Claim(
+        ImmutableDictionary<Type, object> gems,
+        ImmutableArray<Type> types,
+        object gem
+    ) => types.Aggregate(gems, (held, type) => held.ContainsKey(type) ? held : held.Add(type, gem));
+
+    /// <summary>
+    /// <paramref name="gems"/> without <paramref name="gem"/> as the one that has each of <paramref name="types"/>, where
+    /// it is.
+    /// </summary>
+    private static ImmutableDictionary<Type, object> Release(
+        ImmutableDictionary<Type, object> gems,
+        ImmutableArray<Type> types,
+        object gem
+    ) =>
+        types.Aggregate(
+            gems,
+            (held, type) =>
+                held.TryGetValue(type, out object? other) && ReferenceEquals(other, gem) ? held.Remove(type) : held
+        );
+
+    /// <summary>
+    /// Logs each of <paramref name="types"/> that <paramref name="gems"/>, as <see cref="Claim"/> left them, has another
+    /// gem than <paramref name="gem"/> for: that one <paramref name="verb"/> it, and this one does not.
+    /// </summary>
+    private static void LogClaimedByOthers(
+        ImmutableDictionary<Type, object> gems,
+        ImmutableArray<Type> types,
+        object gem,
+        string verb
+    )
+    {
+        foreach (Type type in types)
+        {
+            object other = gems[type];
+            if (!ReferenceEquals(other, gem))
+            {
+                Log.Error(
+                    $"{gem.GetType().Name} {verb} {type.Name}s, which {other.GetType().Name} {verb} already, so it "
+                        + "does not."
+                );
+            }
+        }
+    }
+
+    /// <summary>
     /// Asset <paramref name="id"/>, at once when it has loaded, else once it has been imported; asked for by asset
     /// <paramref name="dependent"/>'s importer when that is not 0.
     /// </summary>
@@ -790,14 +1002,255 @@ public sealed class Assets : IDisposable
         if (Database.Index.FindBuiltIn(folder, name) is { } found && found.Type == typeof(T).Name)
             return new Handle<T>(found.Id);
 
-        Changes.Push(
-            new BuiltInAssetMissing(
-                $"{folder}/{name}",
-                $"There is no {what} {typeof(T).Name}: no {typeof(T).Name} is {folder}/{name} or {folder}/{name}/{name} "
-                    + $"under {BuiltIn}."
-            )
+        lock (_gate)
+        {
+            LoadedAssets loaded = Loaded;
+            if (loaded.ReportedMissing.Contains($"{folder}/{name}"))
+                return Handle<T>.None;
+
+            Loaded = loaded with { ReportedMissing = loaded.ReportedMissing.Add($"{folder}/{name}") };
+        }
+
+        Log.Error(
+            $"There is no {what} {typeof(T).Name}: no {typeof(T).Name} is {folder}/{name} or {folder}/{name}/{name} "
+                + $"under {BuiltIn}."
         );
 
         return Handle<T>.None;
+    }
+
+    /// <summary>
+    /// What an ask for asset <paramref name="id"/> as <paramref name="type"/> gets, and <paramref name="loaded"/> with
+    /// what it asked: a failure when no file has the id, when it is another type, or, asked for by asset
+    /// <paramref name="dependent"/>'s importer, when it depends on what asks for it; what loaded; a wait with the others
+    /// for a load on its way; else a new entry, read now, or once the gem expected to read its type registers, as the one
+    /// asking may be made before it. Cancelled once the run has ended, as nothing reads it then. Under
+    /// <see cref="_gate"/>.
+    /// </summary>
+    private (LoadedAssets, Task<Made>) Request(
+        AssetDatabase database,
+        LoadedAssets loaded,
+        ulong id,
+        ulong dependent,
+        Type type,
+        AssetImportRun import,
+        IProgress<LoadProgress>? progress
+    )
+    {
+        if (_app.Lifetime.IsCancellationRequested)
+            return (loaded, Task.FromCanceled<Made>(_app.Lifetime));
+
+        if (dependent != 0)
+        {
+            if (id == dependent || loaded.IsMadeFrom(id, dependent))
+            {
+                string name = database.GetName(dependent);
+
+                return (
+                    loaded,
+                    Task.FromResult(Fail($"{name} depends on itself: something it loads as it is made loads it."))
+                );
+            }
+
+            // Recorded as what the dependent is made from, so it is made again when this is.
+            if (loaded.Entries.TryGetValue(dependent, out AssetEntry? by) && !by.MadeFrom.Contains(id))
+            {
+                loaded = loaded with
+                {
+                    Entries = loaded.Entries.SetItem(dependent, by with { MadeFrom = by.MadeFrom.Add(id) }),
+                };
+            }
+        }
+
+        if (!database.Index.ById.TryGetValue(id, out IndexedFile? file))
+            return (loaded, Task.FromResult(Fail($"No asset has the id {id}.")));
+
+        if (file.Type != type.Name)
+            return (loaded, Task.FromResult(Fail($"{file.Path} is a {file.Type}, so it is not a {type.Name}.")));
+
+        loaded.Entries.TryGetValue(id, out AssetEntry? entry);
+        if (entry is not null && entry.Type != type)
+            return (
+                loaded,
+                Task.FromResult(Fail($"{file.Path} is loaded as a {entry.Type.Name}, so it is not a {type.Name}."))
+            );
+
+        if (entry is { Stage: AssetStage.Loaded })
+            return (loaded, Task.FromResult(entry.Outcome));
+
+        TaskCompletionSource<Made> waiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (entry is not null)
+        {
+            entry = entry with { Waiting = entry.Waiting.Add(waiter) };
+
+            return (loaded with { Entries = loaded.Entries.SetItem(id, entry) }, waiter.Task);
+        }
+
+        entry = new AssetEntry
+        {
+            Type = type,
+            Import = import,
+            Stage = AssetStage.Wanted,
+            Progress = progress,
+            Waiting = [waiter],
+        };
+        loaded = loaded with { Entries = loaded.Entries.SetItem(id, entry) };
+
+        return (WaitsForGem(type, loaded) ? loaded : StartRead(database, loaded, id, entry), waiter.Task);
+    }
+
+    /// <summary>
+    /// <paramref name="loaded"/> with every asset asked for that waited for a gem and no longer does being read: by the
+    /// gem that reads its type now, else failing as a type no gem reads. Under <see cref="_gate"/>.
+    /// </summary>
+    private LoadedAssets StartWanted(AssetDatabase database, LoadedAssets loaded)
+    {
+        foreach ((ulong id, AssetEntry entry) in loaded.Entries)
+        {
+            if (entry.Stage == AssetStage.Wanted && !WaitsForGem(entry.Type, loaded))
+                loaded = StartRead(database, loaded, id, entry);
+        }
+
+        return loaded;
+    }
+
+    /// <summary>
+    /// <paramref name="loaded"/> with asset <paramref name="id"/>'s <paramref name="entry"/> being read on a worker, by
+    /// the gem that reads its type when one does, to land by <see cref="Land"/>; forgetting what it was made from, as
+    /// its read records its own. Under <see cref="_gate"/>.
+    /// </summary>
+    private LoadedAssets StartRead(AssetDatabase database, LoadedAssets loaded, ulong id, AssetEntry entry)
+    {
+        IndexedFile? file = database.Index.ById.GetValueOrDefault(id);
+        object? importer = loaded.Importers.GetValueOrDefault(entry.Type);
+        CancellationToken stopped = _app.Lifetime;
+        Task.Run(() => ReadFileAsync(id, entry, file, importer, stopped), stopped).FireAndForget();
+
+        return loaded with
+        {
+            Entries = loaded.Entries.SetItem(
+                id,
+                entry with
+                {
+                    Stage = AssetStage.Loading,
+                    IsStale = false,
+                    MadeFrom = [],
+                    Folders = [],
+                    Progress = null,
+                }
+            ),
+        };
+    }
+
+    /// <summary>
+    /// Reads <paramref name="file"/> and makes its asset, on a worker, and lands what it made; one no file has any more
+    /// fails.
+    /// </summary>
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "An importer that throws on a file fails that file, as content that does not load; the run goes on."
+    )]
+    private async Task ReadFileAsync(
+        ulong id,
+        AssetEntry entry,
+        IndexedFile? file,
+        object? importer,
+        CancellationToken stopped
+    )
+    {
+        if (file is null)
+        {
+            Land(id, Fail($"No asset has the id {id}."));
+
+            return;
+        }
+
+        Made made;
+        try
+        {
+            made = await entry.Import(id, file, importer, entry.Progress, stopped).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // A cancel as the run ends lands too, and is dropped there with the run's lifetime ended.
+            made = Fail($"{file.Path} is not a {entry.Type.Name}: its importer threw: {ex}");
+        }
+
+        Land(id, made);
+    }
+
+    /// <summary>
+    /// Takes in what a worker's read of asset <paramref name="id"/> made: it is loaded, its waiters are told, what it
+    /// depends on goes in the database and, for a type a gem reads, the cache, by its file's version, so finding that
+    /// later doesn't load it; and one that had loaded is published as <see cref="AssetReloaded"/>. One that failed while
+    /// what it made before is kept leaves that in use, and says so. One whose file changed meanwhile is read again
+    /// instead; one gone meanwhile was told as it went, and one landing after the run is dropped.
+    /// </summary>
+    private void Land(ulong id, Made made)
+    {
+        AssetEntry? entry;
+        AssetEntry done;
+        ImmutableArray<ulong> dependencies = default;
+        lock (_gate)
+        {
+            if (!Loaded.Entries.TryGetValue(id, out entry) || _app.Lifetime.IsCancellationRequested)
+                return;
+
+            if (entry.IsStale)
+            {
+                Loaded = StartRead(Database, Loaded, id, entry);
+
+                return;
+            }
+
+            if (made.Value.Ok)
+                done = entry with { Current = made, Error = string.Empty };
+            else if (entry.Current is not null)
+                done = entry;
+            else
+                done = entry with { Error = made.Value.Error };
+
+            done = done with { Stage = AssetStage.Loaded, Waiting = [] };
+            LoadedAssets loaded = Loaded with { Entries = Loaded.Entries.SetItem(id, done) };
+            AssetDatabase database = Database;
+            if (made.Value.Ok && !made.Handles.IsDefault)
+            {
+                dependencies = [.. made.Handles.Union(entry.MadeFrom)];
+                database = database.SetDependencies(id, dependencies);
+            }
+
+            Database = database;
+            Loaded = loaded;
+        }
+
+        if (!made.Value.Ok && entry.Current is not null)
+            Log.Error($"{made.Value.Error} What loaded before stays in use.");
+
+        foreach (TaskCompletionSource<Made> waiter in entry.Waiting)
+        {
+            waiter.TrySetResult(done.Outcome);
+        }
+
+        if (entry.Current is not null && made.Value is { Ok: true, Value: { } asset })
+            _events.Publish(new AssetReloaded(id, asset));
+
+        // What a gem-read asset depends on is kept by its file's version, so finding that later doesn't load it.
+        if (dependencies.IsDefault || !Loaded.Importers.ContainsKey(entry.Type))
+            return;
+
+        CancellationToken stopped = _app.Lifetime;
+        Task.Run(
+                () =>
+                    Caches.WriteAsync(
+                        id,
+                        made.Version,
+                        new AssetDependencies(dependencies),
+                        AssetDependencyCache.Instance,
+                        stopped
+                    ),
+                stopped
+            )
+            .FireAndForget();
     }
 }
