@@ -46,7 +46,9 @@ Write the engine as data flowing through functions, not objects calling each oth
   builds objects from constructors takes `IServiceProvider`. Gems are made in dependency order, then in the order the
   project lists them, and disposed in reverse.
 - A hook is what the engine calls on a gem each frame: `IGem`'s `Update`, `FixedUpdate`, `LateUpdate` and `Render`, in
-  that order over the gems, on the main thread. A gem implements the ones it needs. One that throws in a hook is logged
+  that order over the gems. `Render` runs on the render thread, which owns the GPU, and the others on the main thread.
+  `LateUpdate` hands `Render` what it draws as data, the newest through a `Mailbox<T>` and what must not be lost
+  through a `Channel<T>`. A gem implements the ones it needs. One that throws in a hook is logged
   and leaves every hook.
 - Where Core needs something from a gem, the gem implements an interface and Core calls it, as with `IEcs` and
   `IAssetImporter<T>`. Add one when a gem first needs it.
@@ -90,8 +92,9 @@ Write the engine as data flowing through functions, not objects calling each oth
   `async void`.
 - Cancellation ends the task with `OperationCanceledException`, never a failed `Result`.
 - Nothing blocks the main or render thread: no `.Result`, `.Wait()` or `.GetAwaiter().GetResult()`, and no waiting on
-  the other engine thread. The one allowed wait is at a boundary where every thread it could hold up has ended, with a
-  comment saying so.
+  the other engine thread. Two waits are allowed, each with a comment saying so: at a boundary where every thread it
+  could hold up has ended, and Core's main thread waiting at the end of a frame until the render thread has drawn the
+  frame before. The render thread never waits for the main thread.
 - A worker hands an engine thread data (a message, a `Channel<T>`, a value written whole) or work
   (`Threads.Post`). No locks on collections two threads share.
 - Background work is a task. `Threads` is for the engine's own threads.

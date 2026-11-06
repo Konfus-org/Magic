@@ -6,6 +6,7 @@ using Magic.Ecs;
 using Magic.Events;
 using Magic.Files;
 using Magic.Platform;
+using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
 using Microsoft.Extensions.DependencyInjection;
@@ -38,7 +39,13 @@ internal sealed class Gems : IDisposable
     private static readonly Histogram<double> _frameWorkDuration = Metrics.Meter.CreateHistogram<double>(
         "magic.core.frame.work.duration",
         "s",
-        "The main thread's work on a frame, the waits for the GPU and the display among it."
+        "The main thread's work on a frame."
+    );
+
+    private static readonly Histogram<double> _renderFrameDuration = Metrics.Meter.CreateHistogram<double>(
+        "magic.core.render.frame.duration",
+        "s",
+        "From one frame the render thread draws to the next, the waits for the GPU and the display among it."
     );
 
     private static readonly Histogram<double> _hookDuration = Metrics.Meter.CreateHistogram<double>(
@@ -59,6 +66,8 @@ internal sealed class Gems : IDisposable
 
     private readonly EventCoordinator _events;
 
+    private readonly Threads _threads;
+
     private readonly FrameClock _clock = new();
 
     private readonly List<LoadedGem> _loaded = [];
@@ -66,12 +75,22 @@ internal sealed class Gems : IDisposable
     private readonly Subscriptions _watches = [];
 
     /// <summary>
+    /// The render thread's own clocks, for the frames it draws.
+    /// </summary>
+    private readonly FrameClock _renderClock = new();
+
+    /// <summary>
+    /// Set by the render thread each time it has drawn a frame, for the main thread waiting to stay one frame ahead.
+    /// </summary>
+    private readonly AutoResetEvent _drawn = new(initialState: false);
+
+    /// <summary>
     /// When a watch last saw a build write a gem's files, 0 when none has: written whole from the watches' threads.
     /// </summary>
     private long _buildTimestamp;
 
     /// <summary>
-    /// When the last sleep ended, 0 before the first frame's: where a frame's work starts.
+    /// When the last wait for the render thread ended, 0 before the first frame's: where a frame's work starts.
     /// </summary>
     private long _frameStart;
 
@@ -86,7 +105,8 @@ internal sealed class Gems : IDisposable
         IFileSystem files,
         Assets assets,
         World world,
-        EventCoordinator events
+        EventCoordinator events,
+        Threads threads
     )
     {
         _provider = provider;
@@ -95,14 +115,19 @@ internal sealed class Gems : IDisposable
         _assets = assets;
         _world = world;
         _events = events;
+        _threads = threads;
         Load(registered);
+        _threads.Start(EngineThread.Render, Render);
     }
 
     /// <summary>
-    /// Ends the gems, last made first, so no gem outlives one it was made after.
+    /// Stops the render thread, then ends the gems on this one, which is the render thread from then on, last made first,
+    /// so no gem outlives one it was made after.
     /// </summary>
     public void Dispose()
     {
+        _threads.Stop(EngineThread.Render);
+        _drawn.Dispose();
         _watches.Dispose();
         for (int i = _loaded.Count - 1; i >= 0; i--)
         {
@@ -114,9 +139,10 @@ internal sealed class Gems : IDisposable
     }
 
     /// <summary>
-    /// One frame: restarts the run if a gem was built, works out the clocks, turns what spins, runs every gem's hooks in
-    /// order with the fixed steps the clock owes. Presenting to the window sets the pace; with no window, frames run as
-    /// fast as they go. Time begins with the first frame, not with what was loaded before it.
+    /// One frame: restarts the run if a gem was built, works out the clocks, turns what spins, runs every gem's hooks but
+    /// Render in order with the fixed steps the clock owes, and tells the world the frame is published. Then it waits until
+    /// the render thread has drawn the frame before, so the next frame is worked out while this one draws, and the frames
+    /// run at the render thread's pace. Time begins with the first frame, not with what was loaded before it.
     /// </summary>
     public void Pump()
     {
@@ -141,8 +167,16 @@ internal sealed class Gems : IDisposable
 
         _clock.EndFixedSteps(fixedSteps);
         RunHook(Hook.LateUpdate, frame);
-        RunHook(Hook.Render, frame);
+        _world.PublishedFrame = frame.Index;
         _frameWorkDuration.RecordSince(_frameStart == 0 ? hooksStart : _frameStart);
+
+        // The one wait on the render thread in a frame, so the main thread never runs more than a frame ahead of it; the
+        // render thread never waits for this one.
+        while (_world.DrawnFrame + 1 < frame.Index)
+        {
+            _drawn.WaitOne();
+        }
+
         _frameStart = Stopwatch.GetTimestamp();
     }
 
@@ -181,6 +215,24 @@ internal sealed class Gems : IDisposable
             Log.Error($"Gem {gem.Name} failed in {hook} and stops running: {ex}");
             gem.HasFailed = true;
         }
+    }
+
+    /// <summary>
+    /// One frame of the render thread, which runs them as fast as the GPU and the display let it, never waiting for the
+    /// main thread: every gem's Render. It tells the world which published frame it drew at least, the gems taking what
+    /// was published when it began or newer, and wakes the main thread if it waits for that. A render frame has no
+    /// messages.
+    /// </summary>
+    private void Render()
+    {
+        uint published = _world.PublishedFrame;
+        Frame frame = _renderClock.Advance(isPaused: false, timeScale: 1, out _);
+        if (frame.Index > 0)
+            _renderFrameDuration.Record(frame.AppDeltaSec);
+
+        RunHook(Hook.Render, frame);
+        _world.DrawnFrame = published;
+        _drawn.Set();
     }
 
     /// <summary>

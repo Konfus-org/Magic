@@ -13,7 +13,7 @@ namespace Magic.GpuChecks;
 /// Proves the GPU provider and the shader compiler work together, before any renderer draws: as the run starts, a
 /// compute entry is compiled, fills a texture with a gradient through the heap, the texture is read back and its
 /// corners checked, and each is an error under --fail-on-error when wrong. The compile and the readback wait on
-/// workers; every GPU call is made on the main thread. It is public because nothing in its assembly makes it: Magic
+/// workers; every GPU call is made on the render thread. It is public because nothing in its assembly makes it: Magic
 /// does, by reflection, when a project lists the gem.
 /// </summary>
 public sealed class GpuChecksGem : IGem, IDisposable
@@ -79,8 +79,8 @@ public sealed class GpuChecksGem : IGem, IDisposable
             return;
         }
 
-        // Make the pipeline, the texture and the readback buffer, on the main thread.
-        await threads.Enter(EngineThread.Main);
+        // Make the pipeline, the texture and the readback buffer, on the render thread, whose the GPU is.
+        await threads.Enter(EngineThread.Render);
         CompiledShader entry = compiled.Value;
         Result<GpuPipeline> pipeline = _gpu.CreatePipeline(
             new ComputePipelineDescription

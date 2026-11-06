@@ -10,7 +10,7 @@ public interface IOverlay
 {
     /// <summary>
     /// Records the overlay's passes over <paramref name="target"/>, keeping what it holds. The target is drawable as a
-    /// colour target; ask it for its format and size. Main thread.
+    /// colour target; ask it for its format and size. Render thread.
     /// </summary>
     void Record(RenderGraph graph, GpuTexture target);
 }
