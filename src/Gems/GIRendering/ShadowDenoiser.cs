@@ -56,6 +56,11 @@ internal sealed class ShadowDenoiser(IGraphicsApi gpu, RenderGraph graph, GpuPip
     public void Dispose() => Destroy(null);
 
     /// <summary>
+    /// Forgets the shadows of frames gone, so none blend into what is drawn next.
+    /// </summary>
+    public void ClearHistory() => _hasHistory = false;
+
+    /// <summary>
     /// The targets made again for a picture of a size, with no history; the old ones destroyed and forgotten by the
     /// graph.
     /// </summary>

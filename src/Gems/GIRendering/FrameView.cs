@@ -65,6 +65,11 @@ internal sealed class FrameView(
     }
 
     /// <summary>
+    /// Forgets the last frame's camera, so the next frame moves nothing on from where a view that is gone looked.
+    /// </summary>
+    public void ClearHistory() => _hasPreviousFrame = false;
+
+    /// <summary>
     /// The main view's constants: the camera, the sun and the frame's resources.
     /// </summary>
     public FrameConstants GetMain(

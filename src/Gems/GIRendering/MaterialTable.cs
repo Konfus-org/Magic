@@ -90,6 +90,14 @@ internal sealed class MaterialTable(
     }
 
     /// <summary>
+    /// Whether the material's row is made from its asset and the textures it names, or as the failure kind: what it is
+    /// drawn as from the next upload pass on.
+    /// </summary>
+    public bool HasArrived(Handle<Material> material) =>
+        _rowOf.TryGetValue(material.Id, out uint row)
+        && (row == 0 || (_assets[row] is not null && !_waiting.Contains(row)));
+
+    /// <summary>
     /// Makes again the rows whose textures were loading, once a frame.
     /// </summary>
     public void Refresh()

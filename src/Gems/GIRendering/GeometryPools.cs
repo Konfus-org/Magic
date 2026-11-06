@@ -162,6 +162,28 @@ internal sealed class GeometryPools(
     }
 
     /// <summary>
+    /// Whether the model is in the pools, copied up in the last upload pass at the latest, or could not be made and the
+    /// failure model it is drawn as has arrived in its place, or has no place to arrive in.
+    /// </summary>
+    public bool HasArrived(Handle<Model> model)
+    {
+        if (_resident.ContainsKey(model.Id))
+            return true;
+
+        if (!HasFailed(model))
+            return false;
+
+        Handle<Model> failure = assets.GetFailure<Model, Model>();
+
+        return failure == Handle<Model>.None || failure == model || HasArrived(failure);
+    }
+
+    /// <summary>
+    /// Whether the model could not be made, and is drawn as the failure model.
+    /// </summary>
+    public bool HasFailed(Handle<Model> model) => _failed.Contains(model.Id);
+
+    /// <summary>
     /// Copies what arrived since the last frame into the pools, in the frame's upload pass.
     /// </summary>
     public void Upload()

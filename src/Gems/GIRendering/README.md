@@ -10,6 +10,8 @@ model reader, the mesh preprocessor and the texture reader.
 
 - A model shows once the preprocessor has made its clusters. One that doesn't load is drawn as the failure model, and
   a material or texture that doesn't load as the magenta failure material.
+- As a domain replaces the world, the loading screen stays until the models, materials and textures of what comes are
+  on the GPU, or failed, and nothing drawn before carries into the frames after.
 - The directional light is the sun while it is above the horizon, else the moon while it is, else the first there is.
   On a GPU that traces rays it casts shadows, soft as wide as the sun's disc.
 - A sky entity's material draws the sky and colours the sun through the air, and the sky lights what it shines on.

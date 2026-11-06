@@ -75,6 +75,11 @@ internal sealed class ShadowMask(
     public void Prepare() => _denoiser.Prepare();
 
     /// <summary>
+    /// Forgets the shadows of frames gone, so none blend into what is drawn next.
+    /// </summary>
+    public void ClearHistory() => _denoiser.ClearHistory();
+
+    /// <summary>
     /// Each pixel's shadows, from the view's surfaces.
     /// </summary>
     public void Record(in RenderView view, in GpuConstants header, GpuBuffer lightingConstants)
