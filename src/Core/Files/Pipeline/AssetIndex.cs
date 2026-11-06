@@ -4,7 +4,6 @@ using System.IO.Hashing;
 using System.Text;
 using System.Text.Json;
 using Magic.Debugging;
-using Magic.Serialization;
 using Magic.Utils;
 
 namespace Magic.Files.Pipeline;

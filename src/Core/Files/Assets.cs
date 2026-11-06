@@ -8,7 +8,6 @@ using System.Text.Json.Nodes;
 using Magic.Caching;
 using Magic.Debugging;
 using Magic.Files.Pipeline;
-using Magic.Serialization;
 using Magic.Threading;
 using Magic.Utils;
 
@@ -59,33 +58,23 @@ public sealed class Assets : IDisposable
     private readonly AssetWatches _watches;
 
     /// <summary>
-    /// Whose <see cref="App.Lifetime"/> ends the loads on their way.
+    /// Ends the loads on their way and the watching, as the assets are disposed.
     /// </summary>
-    private readonly App _app;
-
-    /// <summary>
-    /// How many loads are on their way: written from any thread with <see cref="Interlocked"/>.
-    /// </summary>
-    private int _loadsInFlight;
+    private readonly CancellationTokenSource _stopping = new();
 
     /// <summary>
     /// The assets, knowing Magic's built-in folder and Core's own asset types: register the rest (<see cref="Register(string)"/>).
     /// </summary>
-    internal Assets(IFileSystem files, Caches caches, App app)
+    internal Assets(IFileSystem files, Caches caches)
     {
         Files = files;
         Caches = caches;
-        _app = app;
         _watches = new AssetWatches(files);
+        Stopped = _stopping.Token;
         BuiltIn = GetResources(files, typeof(Assets).Assembly, AppContext.BaseDirectory);
         Register(BuiltIn);
         Register(typeof(Assets).Assembly);
     }
-
-    /// <summary>
-    /// Whether a load is on its way, as a replace of the world waits for none to be. Any thread.
-    /// </summary>
-    internal bool HasLoadsInFlight => Volatile.Read(ref _loadsInFlight) > 0;
 
     /// <summary>
     /// What assets there are and what depends on what, as of now, as any thread reads it. The main thread alone writes it.
@@ -128,6 +117,11 @@ public sealed class Assets : IDisposable
     internal string BuiltIn { get; }
 
     /// <summary>
+    /// <see cref="_stopping"/>'s token, kept so a load still on its way as the assets are disposed reads it.
+    /// </summary>
+    internal CancellationToken Stopped { get; }
+
+    /// <summary>
     /// Where the part built as <paramref name="assembly"/> keeps its own assets: the folder its build recorded, its
     /// source <c>Resources/</c>, which every build but a release does; else <c>Resources/</c> in
     /// <paramref name="folder"/>, the assembly's, where a release copies them.
@@ -136,20 +130,23 @@ public sealed class Assets : IDisposable
         assembly.GetMetadata(ResourcesKey) ?? files.Combine(folder, "Resources");
 
     /// <summary>
-    /// Stops the watching: the host's to call, at the end of the run, on its thread. The loads on their way stopped with
-    /// the run's <see cref="App.Lifetime"/>, and a load still waited for ends cancelled.
+    /// Stops the loads on their way and the watching: the host's to call, at the end of the run, on its thread. A load
+    /// still waited for ends cancelled.
     /// </summary>
     public void Dispose()
     {
         _watches.Dispose();
-        Changes.Close(_app.Lifetime);
+        Changes.Close(Stopped);
+        _stopping.Cancel();
         foreach (AssetEntry entry in Loaded.Entries.Values)
         {
             foreach (TaskCompletionSource<Made> waiter in entry.Waiting)
             {
-                waiter.TrySetCanceled(_app.Lifetime);
+                waiter.TrySetCanceled(Stopped);
             }
         }
+
+        _stopping.Dispose();
     }
 
     /// <summary>
@@ -364,8 +361,7 @@ public sealed class Assets : IDisposable
         where T : IAsset<T>
     {
         if (asset != Handle<T>.None)
-            CountInFlightAsync(Changes.RequestAsync(asset.Id, 0, typeof(T), RunImportAsync<T>, progress))
-                .FireAndForget();
+            Changes.RequestAsync(asset.Id, 0, typeof(T), RunImportAsync<T>, progress).FireAndForget();
     }
 
     /// <summary>
@@ -578,10 +574,9 @@ public sealed class Assets : IDisposable
         AssetDatabase database = Database;
         LoadedAssets loaded = Loaded;
         (database, loaded) = AssetChanges.Take(database, loaded, Changes);
-        CancellationToken lifetime = _app.Lifetime;
-        (database, loaded) = AssetReindex.Take(database, loaded, _watches, Changes, BuiltIn, lifetime);
-        (database, loaded) = AssetLoads.Land(database, loaded, Changes, Caches, lifetime);
-        loaded = AssetLoads.Start(database, loaded, Changes, lifetime);
+        (database, loaded) = AssetReindex.Take(database, loaded, _watches, Changes, BuiltIn, Stopped);
+        (database, loaded) = AssetLoads.Land(database, loaded, Changes, Caches, Stopped);
+        loaded = AssetLoads.Start(database, loaded, Changes, Stopped);
         Database = database;
         Loaded = loaded;
         Changes.TellWaiters();
@@ -626,7 +621,8 @@ public sealed class Assets : IDisposable
         }
         else
         {
-            made = await CountInFlightAsync(Changes.RequestAsync(id, dependent, type, import, progress))
+            made = await Changes
+                .RequestAsync(id, dependent, type, import, progress)
                 .WaitAsync(cancel)
                 .ConfigureAwait(false);
         }
@@ -876,22 +872,6 @@ public sealed class Assets : IDisposable
             .ConfigureAwait(false);
 
         return made.Value.Ok ? Result.Success((T)made.Value.Value) : Result.Failure(made.Value.Error);
-    }
-
-    /// <summary>
-    /// <paramref name="loading"/>, counted in <see cref="HasLoadsInFlight"/> until it ends.
-    /// </summary>
-    private async Task<Made> CountInFlightAsync(Task<Made> loading)
-    {
-        Interlocked.Increment(ref _loadsInFlight);
-        try
-        {
-            return await loading.ConfigureAwait(false);
-        }
-        finally
-        {
-            Interlocked.Decrement(ref _loadsInFlight);
-        }
     }
 
     /// <summary>
