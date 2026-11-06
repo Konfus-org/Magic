@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
@@ -67,6 +68,17 @@ public sealed class World : IEcs, IDisposable
     /// </summary>
     private IEcs _ecs = new NoEcs();
 
+    /// <summary>
+    /// Completed as the next frame starts, and replaced for the one after, by <see cref="Pump"/>: what a replace waits on
+    /// frame by frame. Main thread.
+    /// </summary>
+    private TaskCompletionSource _frameStarting = new();
+
+    /// <summary>
+    /// The gems that hook into domain loading, in the order they were made. Main thread.
+    /// </summary>
+    private ImmutableArray<IHookIntoDomainLoading> _hooks = [];
+
     internal World(Assets assets, IFileSystem files, Threads threads, App app)
     {
         _assets = assets;
@@ -81,7 +93,8 @@ public sealed class World : IEcs, IDisposable
     public ImmutableArray<Handle<Domain>> Domains { get; private set; } = [];
 
     /// <summary>
-    /// Whether a domain is replacing what is in the world, or a saved world being put back.
+    /// Whether a domain or a saved world is replacing what is in the world: from when the loading screen shows until a
+    /// frame has drawn what replaced it.
     /// </summary>
     public bool IsLoading { get; private set; }
 
@@ -99,6 +112,12 @@ public sealed class World : IEcs, IDisposable
         get;
         set => field = Math.Max(value, 0);
     } = 1;
+
+    /// <summary>
+    /// Whether the loading screen is what the world holds, until what replaces it comes: while it is, the world's own pause
+    /// and time scale wait for it.
+    /// </summary>
+    internal bool IsShowingLoadingScreen { get; private set; }
 
     /// <summary>
     /// Whether a gem provides the ECS, so content can come into the world.
@@ -387,9 +406,26 @@ public sealed class World : IEcs, IDisposable
         where T4 : unmanaged, IComponent => _ecs.Run(in state, run);
 
     /// <summary>
-    /// Changes the world for the prefabs and domains the assets read again. Main thread.
+    /// Changes the world for the prefabs and domains the assets read again, and lets a replace waiting for this frame go on.
+    /// Main thread, as each frame starts, before the gems' hooks.
     /// </summary>
-    internal void Pump() => ProcessReloads(_assets.Reloaded, _app.Lifetime);
+    internal void Pump()
+    {
+        ProcessReloads(_assets.Reloaded, _app.Lifetime);
+        TaskCompletionSource starting = _frameStarting;
+        _frameStarting = new TaskCompletionSource();
+        starting.SetResult();
+    }
+
+    /// <summary>
+    /// Has <paramref name="hooks"/> take part as domains replace the world, until the subscription is disposed. Main thread.
+    /// </summary>
+    internal Subscription Register(IHookIntoDomainLoading hooks)
+    {
+        _hooks = _hooks.Add(hooks);
+
+        return new Subscription(() => _hooks = _hooks.Remove(hooks));
+    }
 
     /// <summary>
     /// Every entity with a <see cref="Spin"/> turned on by <paramref name="deltaSec"/> of the world's time. Main thread.
@@ -739,6 +775,7 @@ public sealed class World : IEcs, IDisposable
                 finally
                 {
                     IsLoading = false;
+                    IsShowingLoadingScreen = false;
                 }
             },
             cancel
@@ -779,7 +816,7 @@ public sealed class World : IEcs, IDisposable
 
     /// <summary>
     /// Reads the domain on workers, so one that doesn't load leaves the world as it was. One already open beside the others
-    /// is just found. A replace shows the loading screen and clears the world around bringing it in.
+    /// is just found. A replace comes with the project's player, through the loading screen (<see cref="ReplaceAsync"/>).
     /// </summary>
     private async Task<Result> OpenDomainAsync(
         Handle<Domain> domain,
@@ -800,26 +837,109 @@ public sealed class World : IEcs, IDisposable
         if (!read.Ok)
             return Result.Failure(read.Error);
 
-        ImmutableArray<ImmutableArray<IComponent>> player = isReplace
-            ? await ReadPlayerAsync(domain, GetComponents(GetPlacements(domain, read.Value)), progress, cancel)
-                .ConfigureAwait(false)
-            : [];
-        ImmutableArray<Entity> loading = [];
-        if (isReplace)
+        if (!isReplace)
         {
-            IsLoading = true;
-            loading = await ShowLoadingScreenAsync(cancel).ConfigureAwait(false);
+            await _threads.Enter(EngineThread.Main);
+            Add(domain, read.Value);
+
+            return Result.Success();
+        }
+
+        ImmutableArray<ImmutableArray<IComponent>> placed = GetComponents(GetPlacements(domain, read.Value));
+        ImmutableArray<ImmutableArray<IComponent>> player = await ReadPlayerAsync(domain, placed, progress, cancel)
+            .ConfigureAwait(false);
+        await ReplaceAsync(
+                [.. placed, .. player],
+                isClearingGlobals: false,
+                () =>
+                {
+                    Add(domain, read.Value);
+                    CreateEntities(player);
+                },
+                cancel
+            )
+            .ConfigureAwait(false);
+
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Puts <paramref name="arriving"/> in place of the world with nothing of it shown half ready, nor anything of what was
+    /// there before: what is there leaves, globals too with <paramref name="isClearingGlobals"/>, the gems clean up after it,
+    /// and the loading screen shows while they prepare what comes. Once they have and no asset is on its way, the loading
+    /// screen leaves, the gems clean up after it, <paramref name="arrive"/> makes what comes, and the replace ends after a
+    /// frame has drawn it. Sets <see cref="IsLoading"/>, for the caller to unset.
+    /// </summary>
+    private async Task ReplaceAsync(
+        ImmutableArray<ImmutableArray<IComponent>> arriving,
+        bool isClearingGlobals,
+        Action arrive,
+        CancellationToken cancel
+    )
+    {
+        IsLoading = true;
+        ImmutableArray<ImmutableArray<IComponent>> screen = await ReadLoadingScreenAsync(cancel).ConfigureAwait(false);
+        await _threads.Enter(EngineThread.Main);
+        Clear(isClearingGlobals);
+        await RunHooksAsync(hooks => hooks.OnDomainUnloadedAsync(cancel), "cleaning up").ConfigureAwait(false);
+
+        await _threads.Enter(EngineThread.Main);
+        ImmutableArray<Entity> loading = CreateEntities(screen);
+        IsShowingLoadingScreen = true;
+        await RunHooksAsync(hooks => hooks.OnDomainLoadingAsync(arriving, cancel), "preparing").ConfigureAwait(false);
+
+        // A gem that doesn't hook into domain loading may still be loading what comes.
+        while (_assets.HasLoadsInFlight)
+        {
+            await WaitForFrameAsync(cancel).ConfigureAwait(false);
         }
 
         await _threads.Enter(EngineThread.Main);
-        if (isReplace)
-            Clear(loading);
-
-        Add(domain, read.Value);
-        CreateEntities(player);
         DestroyEntities(loading);
+        await RunHooksAsync(hooks => hooks.OnDomainUnloadedAsync(cancel), "cleaning up").ConfigureAwait(false);
 
-        return Result.Success();
+        await _threads.Enter(EngineThread.Main);
+        arrive();
+        IsShowingLoadingScreen = false;
+
+        // Two frame starts on, a whole frame's hooks have drawn what came, wherever this went on in the frame.
+        await WaitForFrameAsync(cancel).ConfigureAwait(false);
+        await WaitForFrameAsync(cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Runs <paramref name="hook"/> on every gem that hooks into domain loading, all at once, and waits for them. One that
+    /// fails is logged as failing at <paramref name="doing"/>, and the replace goes on without it.
+    /// </summary>
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Whatever a gem's hook throws, it is logged and the replace goes on; the other gems' hooks still run."
+    )]
+    private async Task RunHooksAsync(Func<IHookIntoDomainLoading, Task> hook, string doing)
+    {
+        await Task.WhenAll(_hooks.Select(RunOneAsync)).ConfigureAwait(false);
+
+        async Task RunOneAsync(IHookIntoDomainLoading gem)
+        {
+            try
+            {
+                await hook(gem).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Log.Error($"{gem.GetType().Name} failed {doing} as the world changed, and it goes on without it: {ex}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Waits for the next frame to start, and goes on there, on the main thread.
+    /// </summary>
+    private async Task WaitForFrameAsync(CancellationToken cancel)
+    {
+        await _frameStarting.Task.WaitAsync(cancel).ConfigureAwait(false);
+        await _threads.Enter(EngineThread.Main);
     }
 
     /// <summary>
@@ -842,21 +962,31 @@ public sealed class World : IEcs, IDisposable
             domains.Add((domain, read.Value));
         }
 
-        await _threads.Enter(EngineThread.Main);
-        IsLoading = true;
-        DestroyEntities(FindAll());
-        _placed.Clear();
-        _read.Clear();
-        Domains = [];
-        foreach ((Handle<Domain> domain, ImmutableArray<PlacedPrefab> prefabs) in domains)
-        {
-            Add(domain, prefabs);
-        }
+        await ReplaceAsync(
+                [
+                    .. domains.SelectMany(domain => GetComponents(GetPlacements(domain.Domain, domain.Prefabs))),
+                    .. saved
+                        .Changes.Entities.Where(change => change.Kind != EntityChangeKind.Destroy)
+                        .Select(change => change.After),
+                ],
+                isClearingGlobals: true,
+                () =>
+                {
+                    foreach ((Handle<Domain> domain, ImmutableArray<PlacedPrefab> prefabs) in domains)
+                    {
+                        Add(domain, prefabs);
+                    }
 
-        saved.Changes.Apply(_ecs, _placed);
-        IsPaused = saved.IsPaused;
-        TimeScale = saved.TimeScale;
-        Log.Info($"Put the world back: {saved.Changes.Entities.Length} changes in {domains.Count} domains.");
+                    saved.Changes.Apply(_ecs, _placed);
+                    IsPaused = saved.IsPaused;
+                    TimeScale = saved.TimeScale;
+                    Log.Info(
+                        $"Put the world back: {saved.Changes.Entities.Length} changes in {domains.Count} domains."
+                    );
+                },
+                cancel
+            )
+            .ConfigureAwait(false);
 
         return Result.Success();
     }
@@ -1055,10 +1185,10 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Brings in the project's loading screen, else the engine's: the entities it is; none, which is warned about, when it
-    /// doesn't load.
+    /// The project's loading screen, else the engine's, a black void: the entities it is; none, which is warned about, when
+    /// it doesn't load.
     /// </summary>
-    private async Task<ImmutableArray<Entity>> ShowLoadingScreenAsync(CancellationToken cancel)
+    private async Task<ImmutableArray<ImmutableArray<IComponent>>> ReadLoadingScreenAsync(CancellationToken cancel)
     {
         Handle<Domain> project = _app.Project?.LoadingScreen ?? Handle<Domain>.None;
         Handle<Domain> domain =
@@ -1074,21 +1204,19 @@ public sealed class World : IEcs, IDisposable
             return [];
         }
 
-        await _threads.Enter(EngineThread.Main);
-
-        return CreateEntities(GetComponents(GetPlacements(domain, read.Value)));
+        return GetComponents(GetPlacements(domain, read.Value));
     }
 
     /// <summary>
-    /// Everything in the world leaves but its globals and <paramref name="keeping"/>.
+    /// Everything in the world leaves but its globals, those too with <paramref name="isClearingGlobals"/>. Main thread.
     /// </summary>
-    private void Clear(ImmutableArray<Entity> keeping)
+    private void Clear(bool isClearingGlobals)
     {
         ImmutableArray<Entity>.Builder leaving = ImmutableArray.CreateBuilder<Entity>();
         foreach (Entity entity in FindAll())
         {
             bool isGlobal = Has<Tags>(entity) && Get<Tags>(entity).Has(Tag.Global);
-            if (!isGlobal && !keeping.Contains(entity))
+            if (isClearingGlobals || !isGlobal)
                 leaving.Add(entity);
         }
 

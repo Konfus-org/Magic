@@ -125,9 +125,9 @@ internal sealed class Gems : IDisposable
     {
         RestartIfBuilt();
 
-        // While the world loads, its time runs as it is, as the gems may need steps to get ready.
-        bool isPaused = _app.IsPaused || (_world.IsPaused && !_world.IsLoading);
-        float timeScale = _world.IsLoading ? 1 : _world.TimeScale;
+        // While the loading screen shows, time runs as it is, so it moves however the world it replaces was paused.
+        bool isPaused = _app.IsPaused || (_world.IsPaused && !_world.IsShowingLoadingScreen);
+        float timeScale = _world.IsShowingLoadingScreen ? 1 : _world.TimeScale;
         Frame frame = _clock.Advance(isPaused, timeScale, out int fixedSteps) with { Events = _events.Take() };
 
         // The first frame's time is the load's before it, not a frame's.
@@ -190,7 +190,7 @@ internal sealed class Gems : IDisposable
     /// <summary>
     /// Makes each gem, after registering what it brings so its constructor can find it: its folder of assets, its asset
     /// types and its code, which goes when it does. Then it sets the gem up: the app's window for as long as it lasts when it provides one, the world's ECS, its
-    /// place on the log when it is a sink, and the asset types it reads and writes.
+    /// place on the log when it is a sink, its hooks into domain loading, and the asset types it reads and writes.
     /// </summary>
     [SuppressMessage(
         "Design",
@@ -241,6 +241,9 @@ internal sealed class Gems : IDisposable
 
             if (made is ILogSink sink)
                 loaded.Subscriptions.Add(Log.Register(sink));
+
+            if (made is IHookIntoDomainLoading hooks)
+                loaded.Subscriptions.Add(_world.Register(hooks));
 
             string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
             Log.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");

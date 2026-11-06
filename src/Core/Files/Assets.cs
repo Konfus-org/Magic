@@ -64,6 +64,11 @@ public sealed class Assets : IDisposable
     private readonly App _app;
 
     /// <summary>
+    /// How many loads are on their way: written from any thread with <see cref="Interlocked"/>.
+    /// </summary>
+    private int _loadsInFlight;
+
+    /// <summary>
     /// The assets, knowing Magic's built-in folder and Core's own asset types: register the rest (<see cref="Register(string)"/>).
     /// </summary>
     internal Assets(IFileSystem files, Caches caches, App app)
@@ -76,6 +81,11 @@ public sealed class Assets : IDisposable
         Register(BuiltIn);
         Register(typeof(Assets).Assembly);
     }
+
+    /// <summary>
+    /// Whether a load is on its way, as a replace of the world waits for none to be. Any thread.
+    /// </summary>
+    internal bool HasLoadsInFlight => Volatile.Read(ref _loadsInFlight) > 0;
 
     /// <summary>
     /// What assets there are and what depends on what, as of now, as any thread reads it. The main thread alone writes it.
@@ -354,7 +364,8 @@ public sealed class Assets : IDisposable
         where T : IAsset<T>
     {
         if (asset != Handle<T>.None)
-            Changes.RequestAsync(asset.Id, 0, typeof(T), RunImportAsync<T>, progress).FireAndForget();
+            CountInFlightAsync(Changes.RequestAsync(asset.Id, 0, typeof(T), RunImportAsync<T>, progress))
+                .FireAndForget();
     }
 
     /// <summary>
@@ -615,8 +626,7 @@ public sealed class Assets : IDisposable
         }
         else
         {
-            made = await Changes
-                .RequestAsync(id, dependent, type, import, progress)
+            made = await CountInFlightAsync(Changes.RequestAsync(id, dependent, type, import, progress))
                 .WaitAsync(cancel)
                 .ConfigureAwait(false);
         }
@@ -866,6 +876,22 @@ public sealed class Assets : IDisposable
             .ConfigureAwait(false);
 
         return made.Value.Ok ? Result.Success((T)made.Value.Value) : Result.Failure(made.Value.Error);
+    }
+
+    /// <summary>
+    /// <paramref name="loading"/>, counted in <see cref="HasLoadsInFlight"/> until it ends.
+    /// </summary>
+    private async Task<Made> CountInFlightAsync(Task<Made> loading)
+    {
+        Interlocked.Increment(ref _loadsInFlight);
+        try
+        {
+            return await loading.ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _loadsInFlight);
+        }
     }
 
     /// <summary>
