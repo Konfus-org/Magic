@@ -180,8 +180,9 @@ built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
 
 - A method reads top to bottom: guard clauses, setup with `using` declarations, the main path kept flat with early
   `continue` and `return`, the result, then local functions.
-- Keep methods small. Split a long run of steps into methods called in order, so the caller reads like the pipeline. A
-  method that is one big `switch` stays whole.
+- A method may be long when it is one flow. Split it into sections under short comments, not into methods with one
+  caller; a step becomes a method of its own when a second caller needs it. A method that is one big `switch` stays
+  whole.
 - Nothing nests three deep: use a guard clause, an early `continue`, or a method named for the step.
 - Two values: `?:`. More: a switch expression or early returns. Never a `?:` inside a `?:`.
 - A one-statement body uses `=>`, which ends its line when the body wraps. A primary constructor only keeps its

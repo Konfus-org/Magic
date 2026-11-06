@@ -28,13 +28,13 @@ Cache/
 # not a machine's local settings or worktrees), the git hooks that write and check each commit's subject (.githooks),
 # and the dotnet tools the scripts run (.config/dotnet-tools.json).
 .*/
-!.claude/
-.claude/*
-!.claude/settings.json
-!.claude/hooks/
-!.claude/agents/
-!.claude/skills/
-!.claude/statusline.ps1
+!/.claude/
+/.claude/*
+!/.claude/settings.json
+!/.claude/hooks/
+!/.claude/agents/
+!/.claude/skills/
+!/.claude/statusline.ps1
 !.config/
 !.github/
 !.githooks/

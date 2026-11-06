@@ -1,4 +1,4 @@
-# SessionStart: puts the checkout and PLAN.md's state in Claude's context, so the workflow starts without a command.
+# SessionStart: puts the checkout and its merge target in Claude's context, so the workflow starts without a command.
 . (Join-Path $PSScriptRoot 'common.ps1')
 try {
     $hook = Read-HookInput
@@ -14,36 +14,8 @@ try {
     } else {
         $out.Add("- Main checkout, on $($checkout.Target). Edits here are refused: make a worktree before the first edit (AGENTS.md, Worktrees).")
     }
-
-    $plan = Join-Path $checkout.Top 'PLAN.md'
-    if (-not (Test-Path -LiteralPath $plan)) {
-        $out.Add('- There is no PLAN.md. Run the kickoff interview (the kickoff skill) before any other work.')
-    } else {
-        $section = ''
-        $goalOpen = $false
-        $inCurrent = $false
-        $bucket = $null
-        $next = $null
-        foreach ($line in Get-Content -LiteralPath $plan) {
-            if ($line -match '^## (.+)$') { $section = $Matches[1].Trim(); $inCurrent = $false; continue }
-            if ($line -match '^### (.+)$') {
-                $inCurrent = $Matches[1] -like 'Current*'
-                if ($inCurrent) { $bucket = ($Matches[1] -replace '^Current:\s*', '').Trim() }
-                continue
-            }
-            if ($section -eq 'Goal' -and $line -match 'TODO') { $goalOpen = $true }
-            if ($inCurrent -and -not $next -and $line -match '^\s*- \[ \] (.+)$') { $next = $Matches[1].Trim() }
-        }
-        if ($goalOpen) {
-            $out.Add('- PLAN.md has no goal yet. Before any other work, run the kickoff interview (the kickoff skill), one question at a time.')
-        } else {
-            $out.Add("- Current bucket: $bucket")
-            if ($next) { $out.Add("- Next slice: $next") }
-            else { $out.Add('- The current bucket has no open slice: propose the next bucket (the kickoff skill).') }
-            $out.Add('- Map any request for work to a PLAN.md slice and present it with the slice skill before the first edit.')
-        }
-    }
-    $out.Add('- Ending a turn with changes in a worktree needs AgentTaskComplete and then the slice-reviewer subagent. When you stop to ask the user or report a block, start that line with NEEDS-USER:.')
+    $out.Add('- A clear request starts after a short brief (the slice skill); a new effort too big for one slice starts with the kickoff skill.')
+    $out.Add('- git commit needs AgentTaskComplete and one slice-reviewer review first.')
     [Console]::Out.Write(($out -join "`n"))
 } catch {
     exit 0
