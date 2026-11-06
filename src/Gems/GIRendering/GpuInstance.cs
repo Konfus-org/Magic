@@ -1,5 +1,7 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Magic.Ecs.Components;
 
 namespace Magic.GIRendering;
 
@@ -49,21 +51,17 @@ internal record struct GpuInstance
     public uint Padding1;
 
     /// <summary>
-    /// The material table's row for each of the instance's 8 slots.
+    /// The material table's row for each of the instance's slots.
     /// </summary>
-    public uint Material0;
+    public GpuMaterialRows Materials;
+}
 
-    public uint Material1;
-
-    public uint Material2;
-
-    public uint Material3;
-
-    public uint Material4;
-
-    public uint Material5;
-
-    public uint Material6;
-
-    public uint Material7;
+/// <summary>
+/// A material table row for each of a renderer's <see cref="MaterialSlots"/>, inline so the instance stays one block of
+/// bytes.
+/// </summary>
+[InlineArray(MaterialSlots.Capacity)]
+internal struct GpuMaterialRows
+{
+    private uint _first;
 }

@@ -49,26 +49,28 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly LightTiles _lightTiles;
     private readonly ShadowMask? _shadows;
     private readonly Lighting _lighting;
-    private readonly SurfaceShading _surfaceShading;
     private readonly SurfaceView _surfaceView;
     private readonly IOverlay? _overlay;
     private readonly RendererDebugWindow? _debugWindow;
+
+    /// <summary>
+    /// Ends the start when the gem is disposed before it is done, so nothing is made for a gem that is gone.
+    /// </summary>
+    private readonly CancellationTokenSource _stopping = new();
+
     private DebugView _debugView;
-    private bool _isStarting;
-    private bool _isReady;
-    private bool _hasFailedToStart;
-    private bool _hasHzb;
     private bool _hasDrawn;
+
+    /// <summary>
+    /// How the start ended: null while the passes compile, then whether the pipelines, the pools and the tables were
+    /// made. Main thread.
+    /// </summary>
+    private Result? _started;
 
     /// <summary>
     /// What a domain loading needs on the GPU before it shows, until <see cref="Render"/> has uploaded it all. Main thread.
     /// </summary>
     private Preparing? _preparing;
-
-    /// <summary>
-    /// What the passes compiled into, written whole by the compile on its worker and taken by <see cref="Render"/>.
-    /// </summary>
-    private CompiledPasses? _compiled;
 
     public GIRenderingGem(
         IGraphicsApi gpu,
@@ -101,18 +103,20 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu, _graph) : null;
         _visibility = new Visibility(gpu, _graph, _pipelines, _pools, _materials);
         _frameView = new FrameView(gpu, _graph, _pools, _materials, _visibility, _rayTracing);
-        _sky = new SkyLuts(gpu, _graph, _pipelines);
+        _sky = new SkyLuts(gpu, _pipelines);
         _lightTiles = new LightTiles(gpu, _graph, _pipelines);
         _shadows = _rayTracing is null
             ? null
             : new ShadowMask(gpu, _graph, _pipelines, _pools, _visibility, _lightTiles);
-        _lighting = new Lighting(gpu, _graph, _sky, _lightTiles, _shadows);
-        _surfaceShading = new SurfaceShading(_pipelines, _lighting);
+        _lighting = new Lighting(gpu, _graph, _pipelines, _sky, _lightTiles, _shadows);
         _surfaceView = new SurfaceView(_pipelines);
+        StartAsync(threads).FireAndForget();
     }
 
     public void Dispose()
     {
+        _stopping.Cancel();
+        _stopping.Dispose();
         EndPreparing();
         _graph.Clear();
         _pipelines.Dispose();
@@ -131,11 +135,10 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     }
 
     /// <summary>
-    /// Reads what the frame draws out of the entities, and starts compiling the passes on the first frame.
+    /// Reads what the frame draws out of the entities.
     /// </summary>
     public void Update(in Frame frame)
     {
-        StartCompiling();
         WorldCopy.Read(_ecs, _world);
         _ecs.Snapshot(_instances.Renderers);
         foreach (SetCliCommand setting in frame.Events.Get<SetCliCommand>())
@@ -152,10 +155,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     /// </summary>
     public void Render(in Frame frame)
     {
-        if (!_isReady && Interlocked.Exchange(ref _compiled, null) is { } compiled)
-            Start(compiled.Result);
-
-        if (!_isReady)
+        if (_started is not { Ok: true })
             return;
 
         int width = _app.Window is { Width: > 0, Height: > 0 } window ? window.Width : DefaultWidth;
@@ -164,16 +164,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             return;
 
         // What arrived: models into the pools, textures, material rows.
-        if (_preparing is { } asking)
-            AskFor(asking);
-
         _materials.Refresh();
-        _graph.BeginTransferPass("Upload arrivals");
-        _pools.Upload();
-        _textures.Upload();
-        _materials.Upload();
-        _graph.EndPass();
-        if (_preparing is { } preparing && HasArrived(preparing))
+        if (_preparing is { } preparing && IsPrepared(preparing))
         {
             Log.Info(
                 $"What the domain draws is on the GPU: {preparing.Models.Length} models, {preparing.Materials.Length} materials."
@@ -181,31 +173,29 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             EndPreparing();
         }
 
+        _graph.BeginTransferPass("Upload arrivals");
+        _pools.Upload();
+        _textures.Upload();
+        _materials.Upload();
+        _graph.EndPass();
+
         // The frame's tables.
         RenderCamera camera = _world.Camera ?? new RenderCamera(new Transform(), 60, 0.05f);
         RenderSun sun = _world.Sun ?? new RenderSun(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One, 1);
-        GpuBuffer constants = _frameView.Constants;
         int instanceCount = _instances.Fill(frame.Index, _pools, _materials, _assets.GetFailure<Material, Model>());
         _graph.BeginTransferPass("Upload frame");
         bool hasChanges = _pools.HasArrivals || _instances.HasChanges;
         _instances.Upload();
         _rayTracing?.Prepare(_instances.Rows, _instances.Extras, hasChanges);
-        _frameView.Upload(
-            constants,
-            _frameView.GetMain(camera, sun, frame.Index, _targets, _instances.Buffer, instanceCount, _hasHzb)
-        );
+        _frameView.Upload(camera, sun, frame.Index, _targets, _instances.Buffer, instanceCount);
         _visibility.ResetCounts();
         _lighting.Prepare(_world, camera, sun, _targets);
         _graph.EndPass();
 
         // The passes, in the order they run.
-        RenderView view = new(constants, _instances.Buffer, instanceCount, _targets);
-        _lighting.RecordTables(constants);
-        _visibility.RecordMain(view);
-        _visibility.RecordResolve(view);
-        _lighting.RecordTiles(view);
-        _lighting.RecordShadows(view);
-        _surfaceShading.Record(view);
+        RenderView view = new(_frameView.Constants, _instances.Buffer, instanceCount, _targets);
+        _visibility.Record(view);
+        _lighting.Record(view);
         _surfaceView.Record(view, _debugView, sun.Exposure);
         _overlay?.Record(_graph, _targets.Output);
 
@@ -226,7 +216,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             Screenshot.RecordReadback(_graph, _targets);
 
         _gpu.Submit(_graph.Finish());
-        _hasHzb = true;
         if (!_hasDrawn)
         {
             _hasDrawn = true;
@@ -242,7 +231,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     /// </summary>
     public Task OnDomainUnloadedAsync(CancellationToken cancel)
     {
-        _hasHzb = false;
         _frameView.ClearHistory();
         _shadows?.ClearHistory();
 
@@ -256,17 +244,22 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     /// </summary>
     public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel)
     {
-        if (_hasFailedToStart)
+        if (_started is { Ok: false })
             return Task.CompletedTask;
 
-        HashSet<Handle<Model>> models = [];
-        HashSet<Handle<Material>> materials = [];
-        foreach (ImmutableArray<IComponent> entity in entities)
-        {
-            AddWhatDraws(entity, models, materials);
-        }
-
-        StartCompiling();
+        Renderer[] renderers =
+        [
+            .. entities
+                .SelectMany(entity => entity.OfType<Renderer>())
+                .Where(renderer => renderer.Model != Handle<Model>.None),
+        ];
+        ImmutableArray<Handle<Material>> materials =
+        [
+            .. renderers
+                .SelectMany(renderer => renderer.Materials.All)
+                .Where(material => material != Handle<Material>.None)
+                .Distinct(),
+        ];
         foreach (Handle<Material> material in materials)
         {
             _materials.GetRow(material);
@@ -274,8 +267,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
         EndPreparing();
         _preparing = new Preparing(
-            [.. models],
-            [.. materials],
+            [.. renderers.Select(renderer => renderer.Model).Distinct()],
+            materials,
             new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
         );
 
@@ -283,79 +276,34 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     }
 
     /// <summary>
-    /// The model and the materials of <paramref name="entity"/>'s renderer, when it has one that draws.
-    /// </summary>
-    private static void AddWhatDraws(
-        ImmutableArray<IComponent> entity,
-        HashSet<Handle<Model>> models,
-        HashSet<Handle<Material>> materials
-    )
-    {
-        foreach (IComponent component in entity)
-        {
-            if (component is not Renderer renderer || renderer.Model == Handle<Model>.None)
-                continue;
-
-            models.Add(renderer.Model);
-            materials.UnionWith(renderer.Materials.All.Where(material => material != Handle<Material>.None));
-        }
-    }
-
-    /// <summary>
-    /// Starts compiling the passes, once.
-    /// </summary>
-    private void StartCompiling()
-    {
-        if (_isStarting)
-            return;
-
-        _isStarting = true;
-        CompileAsync().FireAndForget();
-    }
-
-    /// <summary>
     /// Asks for the models <paramref name="preparing"/> waits for, which the pools only take once they are made, and for
-    /// the failure material a model that failed is drawn with. Each frame while it waits, before the uploads; an ask for
-    /// one asked for already does nothing.
+    /// the failure material a model that failed is drawn with, an ask for one asked for already doing nothing; then
+    /// whether every one of them and every material is on the GPU, or failed and drawn as the failure, which is on the
+    /// GPU too.
     /// </summary>
-    private void AskFor(Preparing preparing)
+    private bool IsPrepared(Preparing preparing)
     {
+        bool isPrepared = true;
         bool hasFailure = false;
         foreach (Handle<Model> model in preparing.Models)
         {
             _pools.Get(model);
-            hasFailure |= _pools.HasFailed(model);
-        }
-
-        Handle<Material> failure = _assets.GetFailure<Material, Model>();
-        if (hasFailure && failure != Handle<Material>.None)
-            _materials.GetRow(failure);
-    }
-
-    /// <summary>
-    /// Whether every model and material <paramref name="preparing"/> waits for is on the GPU, or failed and drawn as the
-    /// failure, which is on the GPU too.
-    /// </summary>
-    private bool HasArrived(Preparing preparing)
-    {
-        bool hasFailure = false;
-        foreach (Handle<Model> model in preparing.Models)
-        {
-            if (!_pools.HasArrived(model))
-                return false;
-
+            isPrepared &= _pools.HasArrived(model);
             hasFailure |= _pools.HasFailed(model);
         }
 
         foreach (Handle<Material> material in preparing.Materials)
         {
-            if (!_materials.HasArrived(material))
-                return false;
+            isPrepared &= _materials.HasArrived(material);
         }
 
         Handle<Material> failure = _assets.GetFailure<Material, Model>();
+        if (!hasFailure || failure == Handle<Material>.None)
+            return isPrepared;
 
-        return !hasFailure || failure == Handle<Material>.None || _materials.HasArrived(failure);
+        _materials.GetRow(failure);
+
+        return isPrepared && _materials.HasArrived(failure);
     }
 
     /// <summary>
@@ -368,22 +316,16 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     }
 
     /// <summary>
-    /// Compiles the passes on a worker, for <see cref="Render"/> to make the pipelines from.
+    /// Compiles the passes on a worker, then makes the pipelines, the pools and the tables from them on the main thread:
+    /// a run that ends before that draws nothing, and finds a shader that does not compile only if it runs long enough
+    /// to.
     /// </summary>
-    private async Task CompileAsync()
+    private async Task StartAsync(Threads threads)
     {
-        Result<ImmutableArray<CompiledShader>> compiled = await _pipelines
-            .CompileAsync(CancellationToken.None)
-            .ConfigureAwait(false);
-        Interlocked.Exchange(ref _compiled, new CompiledPasses(compiled));
-    }
-
-    /// <summary>
-    /// Makes the pipelines, the pools and the tables from what the passes compiled into, in the frame, once: a run that
-    /// ends before that draws nothing, and finds a shader that does not compile only if it runs long enough to.
-    /// </summary>
-    private void Start(Result<ImmutableArray<CompiledShader>> compiled)
-    {
+        CancellationToken stopping = _stopping.Token;
+        Result<ImmutableArray<CompiledShader>> compiled = await _pipelines.CompileAsync(stopping).ConfigureAwait(false);
+        await threads.Enter(EngineThread.Main);
+        stopping.ThrowIfCancellationRequested();
         Result made = compiled.Ok ? _pipelines.Create(compiled.Value) : Result.Failure(compiled.Error);
         foreach (
             Func<Result> step in (ReadOnlySpan<Func<Result>>)
@@ -408,13 +350,10 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         if (!made.Ok)
         {
             Log.Error($"The renderer draws nothing: {made.Error}");
-            _hasFailedToStart = true;
             EndPreparing();
-
-            return;
         }
 
-        _isReady = true;
+        _started = made;
     }
 
     /// <summary>
@@ -440,7 +379,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             return false;
         }
 
-        _hasHzb = false;
+        _frameView.ClearHistory();
 
         return true;
     }
@@ -465,14 +404,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             _debugView = view;
         else
             Log.Error($"{setting.Key} takes {string.Join(", ", Enum.GetNames<DebugView>())}, not '{setting.Value}'.");
-    }
-
-    /// <summary>
-    /// What the passes compiled into, boxed so it is written whole from the compile's worker.
-    /// </summary>
-    private sealed class CompiledPasses(Result<ImmutableArray<CompiledShader>> result)
-    {
-        public Result<ImmutableArray<CompiledShader>> Result { get; } = result;
     }
 
     /// <summary>

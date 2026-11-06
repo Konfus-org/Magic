@@ -1,5 +1,4 @@
 using System.Numerics;
-using System.Runtime.InteropServices;
 using Magic.Debugging;
 using Magic.Files;
 using Magic.Files.Types;
@@ -110,11 +109,7 @@ internal sealed class MaterialTable(
             return;
 
         _isDirty = false;
-        int bytes = _count * GpuMaterial.Bytes;
-        GpuUpload upload = gpu.BeginUpload(bytes);
-        MemoryMarshal.AsBytes(_rows.AsSpan(0, _count)).CopyTo(upload.Bytes);
-        graph.Use(Buffer, GpuAccess.CopyDestination);
-        graph.Recorder.CopyBuffer(upload.Buffer, upload.Offset, Buffer, 0, (ulong)bytes);
+        graph.Upload(gpu, Buffer, _rows.AsSpan(0, _count));
     }
 
     private static GpuMaterial GetDefault() => new() { BaseColor = new Vector4(0.8f, 0.8f, 0.8f, 1), Roughness = 0.6f };

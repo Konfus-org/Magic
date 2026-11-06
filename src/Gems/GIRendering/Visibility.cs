@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
@@ -122,24 +121,32 @@ internal sealed class Visibility(
     {
         graph.Use(Counts, GpuAccess.CopyDestination);
         graph.Recorder.FillBuffer(Counts, 0);
-        GpuUpload retest = gpu.BeginUpload(RetestArgumentsBytes);
-        Span<uint> words = MemoryMarshal.Cast<byte, uint>(retest.Bytes);
-        words[0] = 0;
-        words[1] = 1;
-        words[2] = 1;
-        graph.Use(RetestArguments, GpuAccess.CopyDestination);
-        graph.Recorder.CopyBuffer(retest.Buffer, retest.Offset, RetestArguments, 0, RetestArgumentsBytes);
+        graph.Upload(gpu, RetestArguments, [0u, 1u, 1u]);
     }
 
     /// <summary>
-    /// The main view drawn twice: what last frame's pyramid shows, then what it hid and this frame's shows.
+    /// The main view drawn twice, what last frame's pyramid shows, then what it hid and this frame's shows, and every
+    /// pixel's material resolved into the GBuffer.
     /// </summary>
-    public void RecordMain(in RenderView view)
+    public void Record(in RenderView view)
     {
-        RecordCull(view, "Cull clusters", mode: 0);
+        // Cull: one group an instance over its clusters, what last frame's pyramid hid onto the retest list.
+        int rows = (view.InstanceCount + CullGroupsPerRow - 1) / CullGroupsPerRow;
+        _cullPass
+            .Run(new GpuConstants(view.Constants.Id, 0))
+            .Reads(view.Constants, view.Instances, pools.Clusters, view.Targets.Hzb)
+            .Writes(Counts, VisibleClusters, DrawArguments, RetestList, RetestArguments)
+            .Dispatch((uint)Math.Min(view.InstanceCount, CullGroupsPerRow), (uint)Math.Max(rows, 1));
         RecordDraw(view, "Draw visibility", TargetLoad.Clear, drawsOffset: 0, countOffset: 0);
         RecordHzb(view);
-        RecordCull(view, "Retest clusters", mode: 1);
+
+        // Retest the list against the new pyramid, as many groups as the cull left in the retest arguments.
+        _cullPass
+            .Run(new GpuConstants(view.Constants.Id, 1), "Retest clusters")
+            .Reads(view.Constants, view.Instances, pools.Clusters, view.Targets.Hzb, RetestList)
+            .Writes(Counts, VisibleClusters, DrawArguments)
+            .Indirect(RetestArguments)
+            .DispatchIndirect(RetestArguments, 0);
         RecordDraw(
             view,
             "Draw retested",
@@ -148,9 +155,8 @@ internal sealed class Visibility(
             countOffset: 8
         );
         RecordHzb(view);
-    }
 
-    public void RecordResolve(in RenderView view) =>
+        // Resolve each pixel's material into the GBuffer.
         _resolvePass
             .Run(new GpuConstants(view.Constants.Id))
             .Reads(
@@ -170,29 +176,6 @@ internal sealed class Visibility(
                 view.Targets.Velocity
             )
             .DispatchOver(view.Targets.Width, view.Targets.Height);
-
-    /// <summary>
-    /// The cluster cull: mode 0 one group an instance over its clusters, mode 1 the retest list, as many groups as
-    /// mode 0 left in the retest arguments.
-    /// </summary>
-    private void RecordCull(in RenderView view, string name, uint mode)
-    {
-        GpuPassRun cullRun = _cullPass
-            .Run(new GpuConstants(view.Constants.Id, mode), name: name)
-            .Reads(view.Constants, view.Instances, pools.Clusters)
-            .Writes(Counts, VisibleClusters, DrawArguments)
-            .Reads(view.Targets.Hzb);
-        if (mode == 0)
-        {
-            int rows = (view.InstanceCount + CullGroupsPerRow - 1) / CullGroupsPerRow;
-            cullRun
-                .Writes(RetestList, RetestArguments)
-                .Dispatch((uint)Math.Min(view.InstanceCount, CullGroupsPerRow), (uint)Math.Max(rows, 1));
-        }
-        else
-        {
-            cullRun.Reads(RetestList).Indirect(RetestArguments).DispatchIndirect(RetestArguments, 0);
-        }
     }
 
     /// <summary>

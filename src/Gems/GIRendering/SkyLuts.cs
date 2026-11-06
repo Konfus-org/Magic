@@ -1,5 +1,4 @@
 using Magic.Gpu;
-using Magic.Rendering;
 using Magic.Utils;
 
 namespace Magic.GIRendering;
@@ -8,7 +7,7 @@ namespace Magic.GIRendering;
 /// The sky's three tables, made each frame while there is a sky: how much of the sun gets through the air, what the air
 /// scatters back into itself, and the sky as the camera sees it.
 /// </summary>
-internal sealed class SkyLuts(IGraphicsApi gpu, RenderGraph graph, GpuPipelines pipelines) : IDisposable
+internal sealed class SkyLuts(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposable
 {
     private readonly GpuPass _transmittancePass = pipelines.Compute(
         "Sky: transmittance",
@@ -62,16 +61,6 @@ internal sealed class SkyLuts(IGraphicsApi gpu, RenderGraph graph, GpuPipelines 
         View = view.Value;
 
         return Result.Success();
-    }
-
-    /// <summary>
-    /// Says a pass reads the tables.
-    /// </summary>
-    public void UseForReading()
-    {
-        graph.Use(Transmittance, GpuAccess.ShaderRead);
-        graph.Use(MultiScattering, GpuAccess.ShaderRead);
-        graph.Use(View, GpuAccess.ShaderRead);
     }
 
     public void Record(in GpuConstants header, GpuBuffer frameConstants, GpuBuffer lightingConstants)

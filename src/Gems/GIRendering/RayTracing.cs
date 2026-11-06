@@ -1,5 +1,4 @@
 using System.Numerics;
-using System.Runtime.InteropServices;
 using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
@@ -98,11 +97,7 @@ internal sealed class RayTracing(IGraphicsApi gpu, RenderGraph graph) : IDisposa
         if (!_isBuilt)
             return;
 
-        int bytes = _count * GpuAccelerationInstance.Bytes;
-        GpuUpload upload = gpu.BeginUpload(bytes);
-        MemoryMarshal.AsBytes(_rows.AsSpan(0, _count)).CopyTo(upload.Bytes);
-        graph.Use(_instances, GpuAccess.CopyDestination);
-        graph.Recorder.CopyBuffer(upload.Buffer, upload.Offset, _instances, 0, (ulong)bytes);
+        graph.Upload(gpu, _instances, _rows.AsSpan(0, _count));
         graph.Recorder.BuildAcceleration(_acceleration, (uint)_count);
     }
 }
