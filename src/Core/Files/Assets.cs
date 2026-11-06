@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.IO.Hashing;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -9,7 +8,6 @@ using Magic.Caching;
 using Magic.Debugging;
 using Magic.Files.Pipeline;
 using Magic.Serialization;
-using Magic.Threading;
 using Magic.Utils;
 
 namespace Magic.Files;
@@ -66,11 +64,6 @@ public sealed class Assets : IDisposable
     private readonly App _app;
 
     /// <summary>
-    /// How many loads are on their way: written from any thread with <see cref="Interlocked"/>.
-    /// </summary>
-    private int _loadsInFlight;
-
-    /// <summary>
     /// The assets, knowing Magic's built-in folder and Core's own asset types: register the rest (<see cref="Register(string)"/>).
     /// </summary>
     internal Assets(IFileSystem files, Caches caches, App app)
@@ -85,9 +78,10 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
-    /// Whether a load is on its way, as a replace of the world waits for none to be. Any thread.
+    /// Whether a load is on its way, as a replace of the world waits for none to be: something asked that is not yet
+    /// taken in, or a caller waiting for what it asked for. Any thread.
     /// </summary>
-    internal bool HasLoadsInFlight => Volatile.Read(ref _loadsInFlight) > 0;
+    internal bool HasLoadsInFlight => Changes.HasChanges || Loaded.Entries.Values.Any(entry => !entry.Waiting.IsEmpty);
 
     /// <summary>
     /// What assets there are, as of now, as any thread reads it. The main thread alone writes it.
@@ -177,8 +171,7 @@ public sealed class Assets : IDisposable
         FindBuiltIn<T>($"{typeof(T).Name}s/Failures", typeof(TBroken).Name, $"{typeof(TBroken).Name} failure");
 
     /// <summary>
-    /// The paths of the assets directly in <paramref name="folder"/>, as <see cref="Find{T}"/> takes them: a domain's
-    /// prefabs.
+    /// The paths of the assets directly in <paramref name="folder"/>, as <see cref="Find{T}"/> takes them.
     /// </summary>
     public ImmutableArray<string> GetPaths(string folder) =>
         Database.Index.ByFolder.TryGetValue(folder, out ImmutableArray<string> paths) ? paths : [];
@@ -203,12 +196,14 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
-    /// <see cref="GetPaths(string)"/>, as an <see cref="IAssetImporter{T}"/> reads it while making asset
-    /// <paramref name="dependent"/> (<see cref="AssetFile.Id"/>), which is made again when a file in the folder changes.
+    /// The paths of the assets beside <paramref name="file"/>, those directly in its folder, as <see cref="Find{T}"/>
+    /// takes them and as the <see cref="IAssetImporter{T}"/> making it reads them: a domain's prefabs. It is made again
+    /// when a file in the folder changes.
     /// </summary>
-    public ImmutableArray<string> GetPaths(string folder, ulong dependent)
+    public ImmutableArray<string> GetPathsBeside(AssetFile file)
     {
-        Changes.Push(new AssetFolderListed(dependent, folder));
+        string folder = AssetIndex.GetFolder(file.Path);
+        Changes.Push(new AssetFolderListed(file.Id, folder));
 
         return GetPaths(folder);
     }
@@ -220,9 +215,9 @@ public sealed class Assets : IDisposable
         where T : IAsset<T> => Database.Index.ById.TryGetValue(asset.Id, out IndexedFile? found) ? found.Path : null;
 
     /// <summary>
-    /// Which make of <paramref name="asset"/> a load gets: for one read from a file, a hash of the file and its
-    /// <c>.meta</c>, which changes when either does; for one added, a count of the times it was. Compare it with the
-    /// version an asset was loaded at to know whether to load it again. 0 when no file and nothing added has it.
+    /// Which make of <paramref name="asset"/> a load gets: a hash of its file and its <c>.meta</c>, which changes when
+    /// either does. Compare it with the version an asset was loaded at to know whether to load it again. 0 when no file
+    /// has it.
     /// </summary>
     public ulong GetVersion<T>(Handle<T> asset)
         where T : IAsset<T>
@@ -266,73 +261,6 @@ public sealed class Assets : IDisposable
         asset == Handle<T>.None
             ? LoadAsync(asset, progress, cancel)
             : LoadIdAsync<T>(asset.Id, dependent, progress, cancel);
-
-    /// <summary>
-    /// Has <paramref name="asset"/> loaded, for whoever asks for it next, without waiting for it, as
-    /// <see cref="LoadAsync{T}(Handle{T}, IProgress{LoadProgress}, CancellationToken)"/> does.
-    /// </summary>
-    public void Preload<T>(Handle<T> asset, IProgress<LoadProgress>? progress)
-        where T : IAsset<T>
-    {
-        if (asset != Handle<T>.None)
-            CountInFlightAsync(Changes.RequestAsync(asset.Id, 0, typeof(T), RunImportAsync<T>, progress))
-                .FireAndForget();
-    }
-
-    /// <summary>
-    /// Hands out <paramref name="asset"/>, one a gem made rather than read from a file, under <paramref name="handle"/>,
-    /// which the gem derives from what it made it from, so that making it again gives the same one: loading the handle
-    /// gets it. Adding another under it replaces it, as a reload does. A handle a file has is an error, and the asset is
-    /// not added.
-    /// </summary>
-    public void Add<T>(Handle<T> handle, T asset)
-        where T : IAsset<T>
-    {
-        if (handle == Handle<T>.None)
-            throw new ArgumentException($"A {typeof(T).Name} is added with no handle.", nameof(handle));
-
-        ArgumentNullException.ThrowIfNull(asset);
-        Changes.Push(new AssetAdded(handle.Id, typeof(T), RunImportAsync<T>, asset));
-    }
-
-    /// <summary>
-    /// Writes <paramref name="asset"/> as the asset at <paramref name="path"/>, an asset path under the project's folder,
-    /// through the <see cref="IAssetExporter{T}"/> a gem provides for its type, with the sidecar beside it that makes it
-    /// an asset, under an id the path decides, so the same path gives the same handle each time: that handle, or why
-    /// it was not written. The path ends in the exporter's extension. The asset is found once the directory is indexed
-    /// again, or by the next run. Any thread.
-    /// </summary>
-    public async Task<Result<Handle<T>>> SaveAsync<T>(
-        T asset,
-        string path,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    )
-        where T : IAsset<T>
-    {
-        ArgumentNullException.ThrowIfNull(path);
-
-        string file = _files.Combine(Database.Directories[0], path);
-        Result written = await ExportAsync(asset, file, progress, cancel).ConfigureAwait(false);
-        if (!written.Ok)
-            return Result.Failure(written.Error);
-
-        // The same whatever the path's case, and never none.
-        ulong id = Math.Max(XxHash3.HashToUInt64(Encoding.UTF8.GetBytes(path.ToUpperInvariant())), 1);
-        Result<JsonElement> sidecar = Json.Write(
-            new Dictionary<string, object> { ["id"] = id, ["type"] = typeof(T).Name },
-            typeof(Dictionary<string, object>)
-        );
-        if (!sidecar.Ok)
-            return Result.Failure(sidecar.Error);
-
-        byte[] sidecarBytes = Encoding.UTF8.GetBytes(sidecar.Value.GetRawText());
-        Result sidecarWritten = await _files
-            .WriteAsync(file + AssetIndex.Sidecar, sidecarBytes, cancel)
-            .ConfigureAwait(false);
-
-        return sidecarWritten.Ok ? Result.Success(new Handle<T>(id)) : Result.Failure(sidecarWritten.Error);
-    }
 
     /// <summary>
     /// Writes <paramref name="asset"/> to <paramref name="file"/>, a path on the machine, through the
@@ -518,7 +446,8 @@ public sealed class Assets : IDisposable
         }
         else
         {
-            made = await CountInFlightAsync(Changes.RequestAsync(id, dependent, type, import, progress))
+            made = await Changes
+                .RequestAsync(id, dependent, type, import, progress)
                 .WaitAsync(cancel)
                 .ConfigureAwait(false);
         }
@@ -674,9 +603,7 @@ public sealed class Assets : IDisposable
             json[setting.Name] = JsonNode.Parse(setting.Value.GetRawText());
         }
 
-        Result<JsonElement> element = Json.Write(json, typeof(JsonObject));
-
-        return element.Ok ? Json.Read<T>(element.Value) : Result.Failure(element.Error);
+        return Json.Read<T>(Encoding.UTF8.GetBytes(json.ToJsonString(Json.Options)));
     }
 
     /// <summary>
@@ -735,22 +662,6 @@ public sealed class Assets : IDisposable
             .ConfigureAwait(false);
 
         return made.Value.Ok ? Result.Success((T)made.Value.Value) : Result.Failure(made.Value.Error);
-    }
-
-    /// <summary>
-    /// <paramref name="loading"/>, counted in <see cref="HasLoadsInFlight"/> until it ends.
-    /// </summary>
-    private async Task<Made> CountInFlightAsync(Task<Made> loading)
-    {
-        Interlocked.Increment(ref _loadsInFlight);
-        try
-        {
-            return await loading.ConfigureAwait(false);
-        }
-        finally
-        {
-            Interlocked.Decrement(ref _loadsInFlight);
-        }
     }
 
     /// <summary>

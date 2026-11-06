@@ -6,8 +6,7 @@ namespace Magic.Files.Pipeline;
 /// Writes the files of one asset type, turning what the engine works with into its file format on disk, as
 /// <see cref="IAssetImporter{T}"/> turns the format back. A gem provides one for its format by implementing it; the host
 /// hands it to <see cref="Assets"/> as the gem is made, and takes it back as the gem ends. One exporter writes a type. It
-/// makes the bytes alone: Core puts them on disk with the sidecar that makes them an asset
-/// (<see cref="Assets.SaveAsync{T}"/>).
+/// makes the bytes alone: Core puts them on disk (<see cref="Assets.ExportAsync{T}"/>).
 /// </summary>
 public interface IAssetExporter<T>
     where T : IAsset<T>

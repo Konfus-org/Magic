@@ -66,7 +66,7 @@ internal sealed class AssetWatches(IFileSystem files) : IDisposable
     /// </summary>
     public void Add(string directory)
     {
-        Result<IFileWatcher> watched = files.Watch(directory);
+        Result<IDisposable> watched = files.Watch(directory, "*.*", fullPath => Touch(directory, fullPath));
         if (!watched.Ok)
         {
             Log.Warn(
@@ -76,16 +76,7 @@ internal sealed class AssetWatches(IFileSystem files) : IDisposable
             return;
         }
 
-        IFileWatcher watcher = watched.Value;
-        watcher.Created += (_, e) => Touch(directory, e.FullPath);
-        watcher.Changed += (_, e) => Touch(directory, e.FullPath);
-        watcher.Deleted += (_, e) => Touch(directory, e.FullPath);
-        watcher.Renamed += (_, e) =>
-        {
-            Touch(directory, e.OldFullPath);
-            Touch(directory, e.FullPath);
-        };
-        _watchers.Add(new Subscription(watcher.Dispose));
+        _watchers.Add(new Subscription(watched.Value.Dispose));
     }
 
     /// <summary>

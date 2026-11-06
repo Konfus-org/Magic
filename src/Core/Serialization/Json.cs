@@ -40,19 +40,6 @@ public static class Json
         }
     }
 
-    /// <inheritdoc cref="Read{T}(ReadOnlySpan{byte})"/>
-    public static Result<T> Read<T>(JsonElement json)
-    {
-        try
-        {
-            return ToResult(json.Deserialize<T>(Options));
-        }
-        catch (Exception ex) when (ex is NotSupportedException or JsonException)
-        {
-            return Result.Failure(ex.Message);
-        }
-    }
-
     /// <summary>
     /// <paramref name="json"/> as a <paramref name="type"/> known only at run time, or why it is not one.
     /// </summary>

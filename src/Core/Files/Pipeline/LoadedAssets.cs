@@ -48,7 +48,7 @@ internal delegate Task<Made> AssetImportRun(
 internal readonly record struct Made(Result<object> Value, ulong Version);
 
 /// <summary>
-/// One asset asked for or added, and where it is in being loaded.
+/// One asset asked for, and where it is in being loaded.
 /// </summary>
 internal sealed record AssetEntry
 {
@@ -187,8 +187,7 @@ internal sealed record LoadedAssets
         HashSet<string> folders = new(StringComparer.OrdinalIgnoreCase);
         foreach (string path in touched)
         {
-            int slash = path.LastIndexOf('/');
-            folders.Add(slash < 0 ? string.Empty : path[..slash]);
+            folders.Add(AssetIndex.GetFolder(path));
         }
 
         foreach ((ulong id, AssetEntry entry) in Entries)
