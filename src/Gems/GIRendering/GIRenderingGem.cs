@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Linq;
 using System.Numerics;
 using Magic.Debugging;
 using Magic.Ecs;
@@ -13,15 +14,17 @@ using Magic.Rendering;
 using Magic.Shaders;
 using Magic.Threading;
 using Magic.Utils;
+using Magic.Worlds;
 
 namespace Magic.GIRendering;
 
 /// <summary>
 /// Draws the world. <c>Update</c> reads what the frame draws out of the entities; <c>Render</c> records the frame in
-/// order, top to bottom, and shows it. It is public because nothing in its assembly makes it: Magic does, by reflection,
-/// when a project lists the gem.
+/// order, top to bottom, and shows it. As a domain replaces the world, it forgets what it drew before and holds the
+/// loading screen until what comes is on the GPU. It is public because nothing in its assembly makes it: Magic does, by
+/// reflection, when a project lists the gem.
 /// </summary>
-public sealed class GIRenderingGem : IGem, IDisposable
+public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 {
     private const int DefaultWidth = 1280;
     private const int DefaultHeight = 720;
@@ -46,20 +49,28 @@ public sealed class GIRenderingGem : IGem, IDisposable
     private readonly LightTiles _lightTiles;
     private readonly ShadowMask? _shadows;
     private readonly Lighting _lighting;
-    private readonly Shading _shading;
     private readonly SurfaceView _surfaceView;
     private readonly IOverlay? _overlay;
     private readonly RendererDebugWindow? _debugWindow;
+
+    /// <summary>
+    /// Ends the start when the gem is disposed before it is done, so nothing is made for a gem that is gone.
+    /// </summary>
+    private readonly CancellationTokenSource _stopping = new();
+
     private DebugView _debugView;
-    private bool _isStarting;
-    private bool _isReady;
-    private bool _hasHzb;
     private bool _hasDrawn;
 
     /// <summary>
-    /// What the passes compiled into, written whole by the compile on its worker and taken by <see cref="Render"/>.
+    /// How the start ended: null while the passes compile, then whether the pipelines, the pools and the tables were
+    /// made. Main thread.
     /// </summary>
-    private CompiledPasses? _compiled;
+    private Result? _started;
+
+    /// <summary>
+    /// What a domain loading needs on the GPU before it shows, until <see cref="Render"/> has uploaded it all. Main thread.
+    /// </summary>
+    private Preparing? _preparing;
 
     public GIRenderingGem(
         IGraphicsApi gpu,
@@ -92,16 +103,21 @@ public sealed class GIRenderingGem : IGem, IDisposable
         _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu, _graph) : null;
         _visibility = new Visibility(gpu, _graph, _pipelines, _pools, _materials);
         _frameView = new FrameView(gpu, _graph, _pools, _materials, _visibility, _rayTracing);
-        _sky = new SkyLuts(gpu, _graph, _pipelines);
+        _sky = new SkyLuts(gpu, _pipelines);
         _lightTiles = new LightTiles(gpu, _graph, _pipelines);
-        _shadows = _rayTracing is null ? null : new ShadowMask(gpu, _graph, _pipelines, _lightTiles);
-        _lighting = new Lighting(gpu, _graph, _sky, _lightTiles, _shadows);
-        _shading = new Shading(_pipelines, _lighting);
+        _shadows = _rayTracing is null
+            ? null
+            : new ShadowMask(gpu, _graph, _pipelines, _pools, _visibility, _lightTiles);
+        _lighting = new Lighting(gpu, _graph, _pipelines, _sky, _lightTiles, _shadows);
         _surfaceView = new SurfaceView(_pipelines);
+        StartAsync(threads).FireAndForget();
     }
 
     public void Dispose()
     {
+        _stopping.Cancel();
+        _stopping.Dispose();
+        EndPreparing();
         _graph.Clear();
         _pipelines.Dispose();
         _targets.Dispose();
@@ -119,18 +135,13 @@ public sealed class GIRenderingGem : IGem, IDisposable
     }
 
     /// <summary>
-    /// Reads what the frame draws out of the entities, and starts compiling the passes on the first frame.
+    /// Reads what the frame draws out of the entities.
     /// </summary>
     public void Update(in Frame frame)
     {
-        if (!_isStarting)
-        {
-            _isStarting = true;
-            CompileAsync().FireAndForget();
-        }
-
         WorldCopy.Read(_ecs, _world);
-        foreach (SettingChanged setting in frame.Events.Get<SettingChanged>())
+        _ecs.Snapshot(_instances.Renderers);
+        foreach (SetCliCommand setting in frame.Events.Get<SetCliCommand>())
         {
             ApplySetting(setting);
         }
@@ -144,10 +155,7 @@ public sealed class GIRenderingGem : IGem, IDisposable
     /// </summary>
     public void Render(in Frame frame)
     {
-        if (!_isReady && Interlocked.Exchange(ref _compiled, null) is { } compiled)
-            Start(compiled.Result);
-
-        if (!_isReady)
+        if (_started is not { Ok: true })
             return;
 
         int width = _app.Window is { Width: > 0, Height: > 0 } window ? window.Width : DefaultWidth;
@@ -157,6 +165,14 @@ public sealed class GIRenderingGem : IGem, IDisposable
 
         // What arrived: models into the pools, textures, material rows.
         _materials.Refresh();
+        if (_preparing is { } preparing && IsPrepared(preparing))
+        {
+            Log.Info(
+                $"What the domain draws is on the GPU: {preparing.Models.Length} models, {preparing.Materials.Length} materials."
+            );
+            EndPreparing();
+        }
+
         _graph.BeginTransferPass("Upload arrivals");
         _pools.Upload();
         _textures.Upload();
@@ -166,28 +182,20 @@ public sealed class GIRenderingGem : IGem, IDisposable
         // The frame's tables.
         RenderCamera camera = _world.Camera ?? new RenderCamera(new Transform(), 60, 0.05f);
         RenderSun sun = _world.Sun ?? new RenderSun(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One, 1);
-        GpuBuffer constants = _frameView.Constants;
-        int instanceCount = _instances.Fill(_world, _pools, _materials, _assets.GetFailure<Material, Model>());
+        int instanceCount = _instances.Fill(frame.Index, _pools, _materials, _assets.GetFailure<Material, Model>());
         _graph.BeginTransferPass("Upload frame");
         bool hasChanges = _pools.HasArrivals || _instances.HasChanges;
         _instances.Upload();
         _rayTracing?.Prepare(_instances.Rows, _instances.Extras, hasChanges);
-        _frameView.Upload(
-            constants,
-            _frameView.GetMain(camera, sun, frame.Index, _targets, _instances.Buffer, instanceCount, _hasHzb)
-        );
+        _frameView.Upload(camera, sun, frame.Index, _targets, _instances.Buffer, instanceCount);
         _visibility.ResetCounts();
         _lighting.Prepare(_world, camera, sun, _targets);
         _graph.EndPass();
 
         // The passes, in the order they run.
-        RenderView view = new(constants, _instances.Buffer, instanceCount, _targets);
-        _lighting.RecordTables(constants);
-        _visibility.RecordMain(view);
-        _visibility.RecordResolve(view);
-        _lighting.RecordTiles(view);
-        _lighting.RecordShadows(view);
-        _shading.Record(view);
+        RenderView view = new(_frameView.Constants, _instances.Buffer, instanceCount, _targets);
+        _visibility.Record(view);
+        _lighting.Record(view);
         _surfaceView.Record(view, _debugView, sun.Exposure);
         _overlay?.Record(_graph, _targets.Output);
 
@@ -208,7 +216,6 @@ public sealed class GIRenderingGem : IGem, IDisposable
             Screenshot.RecordReadback(_graph, _targets);
 
         _gpu.Submit(_graph.Finish());
-        _hasHzb = true;
         if (!_hasDrawn)
         {
             _hasDrawn = true;
@@ -220,30 +227,106 @@ public sealed class GIRenderingGem : IGem, IDisposable
     }
 
     /// <summary>
-    /// Compiles the passes on a worker, for <see cref="Render"/> to make the pipelines from.
+    /// Forgets what was drawn before, last frame's depth, camera and shadows, so nothing of it shows in what comes.
     /// </summary>
-    private async Task CompileAsync()
+    public Task OnDomainUnloadedAsync(CancellationToken cancel)
     {
-        Result<ImmutableArray<CompiledShader>> compiled = await _pipelines
-            .CompileAsync(CancellationToken.None)
-            .ConfigureAwait(false);
-        Interlocked.Exchange(ref _compiled, new CompiledPasses(compiled));
+        _frameView.ClearHistory();
+        _shadows?.ClearHistory();
+
+        return Task.CompletedTask;
     }
 
     /// <summary>
-    /// Makes the pipelines, the pools and the tables from what the passes compiled into, in the frame, once: a run that
-    /// ends before that draws nothing, and finds a shader that does not compile only if it runs long enough to.
+    /// Asks for every model and material <paramref name="entities"/> draw, and ends in the frame they are on the GPU, or
+    /// failed and drawn as the failure, with the passes made. Materials are asked for at once; models once the pools are
+    /// made, by <see cref="Render"/>. One that comes while another waits ends that one.
     /// </summary>
-    private void Start(Result<ImmutableArray<CompiledShader>> compiled)
+    public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel)
     {
-        if (!compiled.Ok)
-        {
-            Log.Error($"The renderer draws nothing: {compiled.Error}");
+        if (_started is { Ok: false })
+            return Task.CompletedTask;
 
-            return;
+        Renderer[] renderers =
+        [
+            .. entities
+                .SelectMany(entity => entity.OfType<Renderer>())
+                .Where(renderer => renderer.Model != Handle<Model>.None),
+        ];
+        ImmutableArray<Handle<Material>> materials =
+        [
+            .. renderers
+                .SelectMany(renderer => renderer.Materials.All)
+                .Where(material => material != Handle<Material>.None)
+                .Distinct(),
+        ];
+        foreach (Handle<Material> material in materials)
+        {
+            _materials.GetRow(material);
         }
 
-        Result made = _pipelines.Create(compiled.Value);
+        EndPreparing();
+        _preparing = new Preparing(
+            [.. renderers.Select(renderer => renderer.Model).Distinct()],
+            materials,
+            new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+        );
+
+        return _preparing.Done.Task.WaitAsync(cancel);
+    }
+
+    /// <summary>
+    /// Asks for the models <paramref name="preparing"/> waits for, which the pools only take once they are made, and for
+    /// the failure material a model that failed is drawn with, an ask for one asked for already doing nothing; then
+    /// whether every one of them and every material is on the GPU, or failed and drawn as the failure, which is on the
+    /// GPU too.
+    /// </summary>
+    private bool IsPrepared(Preparing preparing)
+    {
+        bool isPrepared = true;
+        bool hasFailure = false;
+        foreach (Handle<Model> model in preparing.Models)
+        {
+            _pools.Get(model);
+            isPrepared &= _pools.HasArrived(model);
+            hasFailure |= _pools.HasFailed(model);
+        }
+
+        foreach (Handle<Material> material in preparing.Materials)
+        {
+            isPrepared &= _materials.HasArrived(material);
+        }
+
+        Handle<Material> failure = _assets.GetFailure<Material, Model>();
+        if (!hasFailure || failure == Handle<Material>.None)
+            return isPrepared;
+
+        _materials.GetRow(failure);
+
+        return isPrepared && _materials.HasArrived(failure);
+    }
+
+    /// <summary>
+    /// Lets the domain waiting on what it draws show.
+    /// </summary>
+    private void EndPreparing()
+    {
+        _preparing?.Done.TrySetResult();
+        _preparing = null;
+    }
+
+    /// <summary>
+    /// Compiles the passes on a worker, then makes the pipelines, the pools and the tables from them on the main thread:
+    /// a run that ends before that draws nothing, and finds a shader that does not compile only if it runs long enough
+    /// to.
+    /// </summary>
+    private async Task StartAsync(Threads threads)
+    {
+        CancellationToken stopping = _stopping.Token;
+        Result<ImmutableArray<CompiledShader>> compiled = await _pipelines.CompileAsync(stopping).ConfigureAwait(false);
+        await threads.Enter(EngineThread.Main);
+        stopping.ThrowIfCancellationRequested();
+        Result made = compiled.Ok ? _pipelines.Create(compiled.Value) : Result.Failure(compiled.Error);
         foreach (
             Func<Result> step in (ReadOnlySpan<Func<Result>>)
                 [
@@ -263,14 +346,14 @@ public sealed class GIRenderingGem : IGem, IDisposable
                 made = step();
         }
 
+        // A renderer that draws nothing holds no domain back.
         if (!made.Ok)
         {
             Log.Error($"The renderer draws nothing: {made.Error}");
-
-            return;
+            EndPreparing();
         }
 
-        _isReady = true;
+        _started = made;
     }
 
     /// <summary>
@@ -296,12 +379,12 @@ public sealed class GIRenderingGem : IGem, IDisposable
             return false;
         }
 
-        _hasHzb = false;
+        _frameView.ClearHistory();
 
         return true;
     }
 
-    private void ApplySetting(in SettingChanged setting)
+    private void ApplySetting(in SetCliCommand setting)
     {
         if (setting.Key == "GIRendering.window")
         {
@@ -324,10 +407,11 @@ public sealed class GIRenderingGem : IGem, IDisposable
     }
 
     /// <summary>
-    /// What the passes compiled into, boxed so it is written whole from the compile's worker.
+    /// The models and materials a domain loading draws, and what ends once they are all on the GPU.
     /// </summary>
-    private sealed class CompiledPasses(Result<ImmutableArray<CompiledShader>> result)
-    {
-        public Result<ImmutableArray<CompiledShader>> Result { get; } = result;
-    }
+    private sealed record Preparing(
+        ImmutableArray<Handle<Model>> Models,
+        ImmutableArray<Handle<Material>> Materials,
+        TaskCompletionSource Done
+    );
 }

@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
@@ -22,10 +23,6 @@ namespace Magic.ArchEcs;
 /// </summary>
 public sealed class ArchEcsGem : IGem, IEcs, IDisposable
 {
-    private const string CannotChangeInLoop =
-        "An entity's components cannot change during a query's loop or a run: fill a list of your own and apply it "
-        + "after.";
-
     private readonly ArchWorld _world;
 
     /// <summary>
@@ -111,21 +108,8 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
         return Unsafe.BitCast<ArchEntity, Entity>(created);
     }
 
-    public IComponent[] GetComponents(Entity entity)
-    {
-        object?[] held = _world.GetAllComponents(GetAlive(entity));
-        IComponent[] components = new IComponent[held.Length];
-        for (int i = 0; i < held.Length; i++)
-        {
-            components[i] =
-                held[i] as IComponent
-                ?? throw new InvalidOperationException(
-                    $"{entity} holds a {held[i]?.GetType().Name ?? "null"}, which is no component."
-                );
-        }
-
-        return components;
-    }
+    public IComponent[] GetComponents(Entity entity) =>
+        [.. _world.GetAllComponents(GetAlive(entity)).Cast<IComponent>()];
 
     public void Create<T1>(ReadOnlySpan<T1> first, Span<Entity> created)
         where T1 : unmanaged, IComponent
@@ -291,7 +275,7 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     private static ReadOnlySpan<Entity> GetEntities(Chunk chunk) =>
         MemoryMarshal.Cast<ArchEntity, Entity>(chunk.Entities.AsSpan(0, chunk.Count));
 
-    private static Span<T> GetComponents<T>(Chunk chunk) => chunk.GetArray<T>().AsSpan(0, chunk.Count);
+    private static Span<T> GetColumn<T>(Chunk chunk) => chunk.GetArray<T>().AsSpan(0, chunk.Count);
 
     /// <summary>
     /// The ECS's type of <paramref name="type"/>, a component known only as the program runs, from its typed registration
@@ -400,7 +384,10 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
         if (_openLoops == 0)
             return;
 
-        throw new InvalidOperationException(CannotChangeInLoop);
+        throw new InvalidOperationException(
+            "An entity's components cannot change during a query's loop or a run: fill a list of your own and apply it "
+                + "after."
+        );
     }
 
     /// <summary>
@@ -454,7 +441,7 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
 
         internal static readonly Signature Signature = new(Component<T1>.ComponentType);
 
-        internal static EcsChunk<T1> Cut(Chunk chunk) => new(GetEntities(chunk), GetComponents<T1>(chunk));
+        internal static EcsChunk<T1> Cut(Chunk chunk) => new(GetEntities(chunk), GetColumn<T1>(chunk));
     }
 
     /// <summary>
@@ -469,7 +456,7 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
         internal static readonly Signature Signature = new(Component<T1>.ComponentType, Component<T2>.ComponentType);
 
         internal static EcsChunk<T1, T2> Cut(Chunk chunk) =>
-            new(GetEntities(chunk), GetComponents<T1>(chunk), GetComponents<T2>(chunk));
+            new(GetEntities(chunk), GetColumn<T1>(chunk), GetColumn<T2>(chunk));
     }
 
     /// <summary>
@@ -483,7 +470,7 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
         internal static readonly QueryDescription Description = new QueryDescription().WithAll<T1, T2, T3>();
 
         internal static EcsChunk<T1, T2, T3> Cut(Chunk chunk) =>
-            new(GetEntities(chunk), GetComponents<T1>(chunk), GetComponents<T2>(chunk), GetComponents<T3>(chunk));
+            new(GetEntities(chunk), GetColumn<T1>(chunk), GetColumn<T2>(chunk), GetColumn<T3>(chunk));
     }
 
     /// <summary>
@@ -500,10 +487,10 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
         internal static EcsChunk<T1, T2, T3, T4> Cut(Chunk chunk) =>
             new(
                 GetEntities(chunk),
-                GetComponents<T1>(chunk),
-                GetComponents<T2>(chunk),
-                GetComponents<T3>(chunk),
-                GetComponents<T4>(chunk)
+                GetColumn<T1>(chunk),
+                GetColumn<T2>(chunk),
+                GetColumn<T3>(chunk),
+                GetColumn<T4>(chunk)
             );
     }
 
@@ -528,9 +515,6 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
 
         public void Dispose()
         {
-            if (!_isWalking)
-                return;
-
             _isWalking = false;
             ecs._openLoops--;
         }

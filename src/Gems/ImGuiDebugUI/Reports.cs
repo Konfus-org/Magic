@@ -80,11 +80,49 @@ internal sealed class Reports
     /// </summary>
     internal void Take(double nowSec, List<ShownReport> world, List<ShownReport> lines)
     {
+        // What arrived keeps what shows the same up for its seconds from now, or starts showing.
         while (_arrived.Reader.TryRead(out Report report))
         {
-            Apply(report, nowSec);
+            if (_showing.TryGetValue((report.Text, report.Position), out Showing? showing))
+            {
+                showing.Color = report.Color;
+                showing.Tooltip = report.Tooltip;
+                showing.ExpiresSec = nowSec + report.StaySec;
+                showing.IsFresh = true;
+                if (report.Kind == ReportKind.Plain)
+                    showing.Order = _reported++;
+
+                if (report.Kind == ReportKind.Counted)
+                {
+                    showing.Count++;
+                    showing.Label = string.Create(CultureInfo.InvariantCulture, $"{report.Text} (x{showing.Count})");
+                }
+
+                continue;
+            }
+
+            // A warning or error is logged as it appears, unless its text shows somewhere already.
+            bool isAlarm = report.Kind is ReportKind.Warning or ReportKind.Error;
+            bool isNewAlarm = isAlarm && !IsShowing(report.Text);
+            if (isNewAlarm && report.Kind == ReportKind.Error)
+                Log.Error(report.Text, report.Member, report.File, report.Line);
+            else if (isNewAlarm)
+                Log.Warn(report.Text, report.Member, report.File, report.Line);
+
+            _showing[(report.Text, report.Position)] = new Showing
+            {
+                Label = isAlarm ? $"!!! {report.Text} !!!" : report.Text,
+                Color = report.Color,
+                Tooltip = report.Tooltip,
+                ExpiresSec = nowSec + report.StaySec,
+                IsFresh = true,
+                Count = 1,
+                Kind = report.Kind,
+                Order = _reported++,
+            };
         }
 
+        // What has had its time goes; the rest shows, and is taken as not reported since.
         foreach (((string text, Vector3? position), Showing showing) in _showing)
         {
             if (!showing.IsFresh && nowSec >= showing.ExpiresSec)
@@ -109,54 +147,6 @@ internal sealed class Reports
 
         world.Sort(static (left, right) => left.Order.CompareTo(right.Order));
         lines.Sort(static (left, right) => left.Order.CompareTo(right.Order));
-    }
-
-    /// <summary>
-    /// A report that arrived: it starts showing, or keeps what shows up for its seconds from <paramref name="nowSec"/>.
-    /// </summary>
-    private void Apply(in Report report, double nowSec)
-    {
-        if (_showing.TryGetValue((report.Text, report.Position), out Showing? showing))
-        {
-            showing.Color = report.Color;
-            showing.Tooltip = report.Tooltip;
-            showing.ExpiresSec = nowSec + report.StaySec;
-            showing.IsFresh = true;
-            if (report.Kind == ReportKind.Plain)
-                showing.Order = _reported++;
-
-            if (report.Kind == ReportKind.Counted)
-            {
-                showing.Count++;
-                showing.Label = string.Create(CultureInfo.InvariantCulture, $"{report.Text} (x{showing.Count})");
-            }
-
-            return;
-        }
-
-        bool isAlarm = report.Kind is ReportKind.Warning or ReportKind.Error;
-        if (isAlarm && !IsShowing(report.Text))
-            LogAlarm(report);
-
-        _showing[(report.Text, report.Position)] = new Showing
-        {
-            Label = isAlarm ? $"!!! {report.Text} !!!" : report.Text,
-            Color = report.Color,
-            Tooltip = report.Tooltip,
-            ExpiresSec = nowSec + report.StaySec,
-            IsFresh = true,
-            Count = 1,
-            Kind = report.Kind,
-            Order = _reported++,
-        };
-    }
-
-    private static void LogAlarm(in Report report)
-    {
-        if (report.Kind == ReportKind.Error)
-            Log.Error(report.Text, report.Member, report.File, report.Line);
-        else
-            Log.Warn(report.Text, report.Member, report.File, report.Line);
     }
 
     /// <summary>

@@ -23,9 +23,11 @@ internal sealed class GpuPass
     public required string Name { get; init; }
 
     /// <summary>
-    /// What a compute entry's dispatches are sized by, along x.
+    /// A compute pass's threads per group; a draw pass has none.
     /// </summary>
     public uint GroupSizeX { get; internal set; }
+
+    public uint GroupSizeY { get; internal set; }
 
     internal required RenderGraph Graph { get; init; }
 
@@ -48,11 +50,6 @@ internal sealed class GpuPass
     /// </summary>
     internal Func<GraphicsPipelineDescription, GraphicsPipelineDescription>? DrawState { get; init; }
 
-    /// <summary>
-    /// Whether it is one of the full-screen passes, which all run in tiles of one size.
-    /// </summary>
-    internal bool IsTiled { get; init; }
-
     internal GpuPipeline Pipeline { get; set; }
 
     /// <summary>
@@ -62,8 +59,14 @@ internal sealed class GpuPass
     {
         Graph.BeginComputePass(name ?? Name);
 
-        return new GpuPassRun(Graph, header, Pipeline);
+        return new GpuPassRun(this, header);
     }
+
+    /// <summary>
+    /// How many groups cover <paramref name="width"/> by <paramref name="height"/>, a thread a pixel.
+    /// </summary>
+    public (uint X, uint Y) GetGroups(int width, int height) =>
+        ((uint)((width + GroupSizeX - 1) / GroupSizeX), (uint)((height + GroupSizeY - 1) / GroupSizeY));
 
     /// <summary>
     /// Starts it as a draw pass into <paramref name="targets"/>.
@@ -72,7 +75,7 @@ internal sealed class GpuPass
     {
         Graph.BeginDrawPass(name ?? Name, targets);
 
-        return new GpuPassRun(Graph, header, Pipeline);
+        return new GpuPassRun(this, header);
     }
 }
 
@@ -81,15 +84,15 @@ internal sealed class GpuPass
 /// </summary>
 internal readonly ref struct GpuPassRun
 {
+    private readonly GpuPass _pass;
     private readonly RenderGraph _graph;
     private readonly GpuConstants _header;
-    private readonly GpuPipeline _pipeline;
 
-    internal GpuPassRun(RenderGraph graph, in GpuConstants header, GpuPipeline pipeline)
+    internal GpuPassRun(GpuPass pass, in GpuConstants header)
     {
-        _graph = graph;
+        _pass = pass;
+        _graph = pass.Graph;
         _header = header;
-        _pipeline = pipeline;
     }
 
     public GpuPassRun Reads(params ReadOnlySpan<GpuResource> resources) => Use(resources, GpuAccess.ShaderRead);
@@ -117,6 +120,15 @@ internal readonly ref struct GpuPassRun
         Bind();
         _graph.Recorder.Dispatch(groupsX, groupsY, groupsZ);
         _graph.EndPass();
+    }
+
+    /// <summary>
+    /// Dispatches a thread a pixel over <paramref name="width"/> by <paramref name="height"/>.
+    /// </summary>
+    public void DispatchOver(int width, int height)
+    {
+        (uint groupsX, uint groupsY) = _pass.GetGroups(width, height);
+        Dispatch(groupsX, groupsY);
     }
 
     public void DispatchIndirect(GpuBuffer arguments, ulong offset)
@@ -155,7 +167,7 @@ internal readonly ref struct GpuPassRun
 
     private void Bind()
     {
-        _graph.Recorder.BindPipeline(_pipeline);
+        _graph.Recorder.BindPipeline(_pass.Pipeline);
         _graph.Recorder.PushConstants(_header);
     }
 }

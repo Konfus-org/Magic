@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using System.Runtime.InteropServices;
 using Magic.Debugging;
 using Magic.Gpu;
@@ -17,14 +18,23 @@ namespace Magic.VulkanGraphics;
 internal sealed unsafe class VulkanDevice : IDisposable
 {
     private const string ValidationLayer = "VK_LAYER_KHRONOS_validation";
+
     private const string DebugUtilsExtension = "VK_EXT_debug_utils";
+
     private const string PortabilityEnumerationExtension = "VK_KHR_portability_enumeration";
+
     private const string PortabilitySubsetExtension = "VK_KHR_portability_subset";
+
     private const string SwapchainExtension = "VK_KHR_swapchain";
+
     private const string MeshShaderExtension = "VK_EXT_mesh_shader";
+
     private const string RayQueryExtension = "VK_KHR_ray_query";
+
     private const string AccelerationStructureExtension = "VK_KHR_acceleration_structure";
+
     private const string DeferredHostOperationsExtension = "VK_KHR_deferred_host_operations";
+
     private const string ImageAtomicInt64Extension = "VK_EXT_shader_image_atomic_int64";
 
     private readonly VkDebugUtilsMessengerEXT _messenger;
@@ -73,9 +83,15 @@ internal sealed unsafe class VulkanDevice : IDisposable
         Api = new VkDeviceApi(InstanceApi, Device);
         Api.vkGetDeviceQueue(QueueFamily, 0, out VkQueue queue);
         Queue = queue;
-        Log.Info(
-            $"GPU: {Limits.DeviceName}, Vulkan {picked.ApiVersion.Major}.{picked.ApiVersion.Minor}.{picked.ApiVersion.Patch}{(HasValidation ? ", validating" : string.Empty)}."
-        );
+        string api = $"Vulkan {picked.ApiVersion.Major}.{picked.ApiVersion.Minor}.{picked.ApiVersion.Patch}";
+        Description =
+        [
+            new("magic.gems.vulkan_graphics.api", api),
+            new("magic.gems.vulkan_graphics.device", Limits.DeviceName),
+            new("magic.gems.vulkan_graphics.device.type", GetKindName(picked.Kind)),
+            new("magic.gems.vulkan_graphics.driver", picked.Driver),
+        ];
+        Log.Info($"GPU: {Limits.DeviceName}, {api}{(HasValidation ? ", validating" : string.Empty)}.");
     }
 
     public VkInstance Instance { get; }
@@ -109,6 +125,12 @@ internal sealed unsafe class VulkanDevice : IDisposable
     public float TimestampPeriod { get; }
 
     public bool HasValidation { get; }
+
+    /// <summary>
+    /// The API and the GPU, as the tags of the gem's meter: the API's version, the device's name and kind, and its
+    /// driver.
+    /// </summary>
+    public IReadOnlyList<KeyValuePair<string, object?>> Description { get; }
 
     public bool HasDebugUtils { get; }
 
@@ -164,30 +186,23 @@ internal sealed unsafe class VulkanDevice : IDisposable
     private static bool HasLayer(string name)
     {
         vkEnumerateInstanceLayerProperties(out uint count);
-        Span<VkLayerProperties> layers = new VkLayerProperties[count];
+        VkLayerProperties[] layers = new VkLayerProperties[count];
         vkEnumerateInstanceLayerProperties(layers);
-        foreach (VkLayerProperties layer in layers)
-        {
-            if (NativeStrings.Read(layer.layerName) == name)
-                return true;
-        }
 
-        return false;
+        return layers.Any(layer => NativeStrings.Read(layer.layerName) == name);
     }
 
     private static HashSet<string> GetInstanceExtensions()
     {
         vkEnumerateInstanceExtensionProperties(out uint count);
-        Span<VkExtensionProperties> extensions = new VkExtensionProperties[count];
+        VkExtensionProperties[] extensions = new VkExtensionProperties[count];
         vkEnumerateInstanceExtensionProperties(extensions);
-        HashSet<string> names = new(StringComparer.Ordinal);
-        foreach (VkExtensionProperties extension in extensions)
-        {
-            names.Add(NativeStrings.Read(extension.extensionName));
-        }
 
-        return names;
+        return GetNames(extensions);
     }
+
+    private static HashSet<string> GetNames(VkExtensionProperties[] extensions) =>
+        extensions.Select(extension => NativeStrings.Read(extension.extensionName)).ToHashSet(StringComparer.Ordinal);
 
     private static VkDebugUtilsMessengerCreateInfoEXT GetMessengerInfo() =>
         new()
@@ -198,6 +213,17 @@ internal sealed unsafe class VulkanDevice : IDisposable
                 | VkDebugUtilsMessageTypeFlagsEXT.Performance
                 | VkDebugUtilsMessageTypeFlagsEXT.General,
             pfnUserCallback = &OnMessage,
+        };
+
+    private static string GetKindName(VkPhysicalDeviceType kind) =>
+        kind switch
+        {
+            VkPhysicalDeviceType.DiscreteGpu => "discrete",
+            VkPhysicalDeviceType.IntegratedGpu => "integrated",
+            VkPhysicalDeviceType.VirtualGpu => "virtual",
+            VkPhysicalDeviceType.Cpu => "software",
+            VkPhysicalDeviceType.Other => "other",
+            _ => "other",
         };
 
     private VkInstance CreateInstance(List<string> extensions, bool hasPortability)
@@ -224,9 +250,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
                 // The messenger in the chain catches what the instance's own creation reports.
                 pNext = HasValidation && HasDebugUtils ? &messenger : null,
             };
-            VkResult result = vkCreateInstance(&createInfo, out VkInstance instance);
-            if (result != VkResult.Success)
-                throw new InvalidOperationException($"Vulkan gave no instance: {result}.");
+            vkCreateInstance(&createInfo, out VkInstance instance).ThrowIfFailed("an instance");
 
             return instance;
         }
@@ -384,6 +408,8 @@ internal sealed unsafe class VulkanDevice : IDisposable
                     _ => 1,
                 },
                 ApiVersion = properties.properties.apiVersion,
+                Kind = kind,
+                Driver = $"{NativeStrings.Read(properties12.driverName)} {NativeStrings.Read(properties12.driverInfo)}",
                 TimestampPeriod = limits.timestampPeriod,
                 Extensions = extensions,
                 Features = new GpuFeatures
@@ -417,15 +443,10 @@ internal sealed unsafe class VulkanDevice : IDisposable
     private HashSet<string> GetDeviceExtensions(VkPhysicalDevice device)
     {
         InstanceApi.vkEnumerateDeviceExtensionProperties(device, out uint count);
-        Span<VkExtensionProperties> extensions = new VkExtensionProperties[count];
+        VkExtensionProperties[] extensions = new VkExtensionProperties[count];
         InstanceApi.vkEnumerateDeviceExtensionProperties(device, extensions);
-        HashSet<string> names = new(StringComparer.Ordinal);
-        foreach (VkExtensionProperties extension in extensions)
-        {
-            names.Add(NativeStrings.Read(extension.extensionName));
-        }
 
-        return names;
+        return GetNames(extensions);
     }
 
     /// <summary>
@@ -570,9 +591,9 @@ internal sealed unsafe class VulkanDevice : IDisposable
             enabledExtensionCount = extensionNames.Count,
             ppEnabledExtensionNames = extensionNames.Pointers,
         };
-        VkResult result = InstanceApi.vkCreateDevice(pick.Device, &createInfo, out VkDevice device);
-        if (result != VkResult.Success)
-            throw new InvalidOperationException($"{pick.Limits.DeviceName} gave no Vulkan device: {result}.");
+        InstanceApi
+            .vkCreateDevice(pick.Device, &createInfo, out VkDevice device)
+            .ThrowIfFailed($"a device on {pick.Limits.DeviceName}");
 
         return device;
     }
@@ -589,6 +610,13 @@ internal sealed unsafe class VulkanDevice : IDisposable
         public required int Score { get; init; }
 
         public required VkVersion ApiVersion { get; init; }
+
+        public required VkPhysicalDeviceType Kind { get; init; }
+
+        /// <summary>
+        /// The driver's name and version, as it gives them.
+        /// </summary>
+        public required string Driver { get; init; }
 
         public required float TimestampPeriod { get; init; }
 

@@ -20,8 +20,6 @@ public sealed class DomainImporterGem(Assets assets) : IGem, IAssetImporter<Doma
 
     public Task<Result<Domain>> ImportAsync(AssetFile file, IProgress<LoadProgress>? progress, CancellationToken cancel)
     {
-        string work = $"Reading {file.Path}";
-        progress?.Report(new LoadProgress(work, 0, 1));
         int slash = file.Path.LastIndexOf('/');
         string folder = slash < 0 ? string.Empty : file.Path[..slash];
         ImmutableArray<Chunk>.Builder chunks = ImmutableArray.CreateBuilder<Chunk>();
@@ -32,31 +30,20 @@ public sealed class DomainImporterGem(Assets assets) : IGem, IAssetImporter<Doma
             if (prefab == Handle<Prefab>.None)
                 continue;
 
-            if (ParseChunk(path, prefab) is { } chunk)
-                chunks.Add(chunk);
+            // A prefab named x_y_z is that chunk; any other is at the domain's origin.
+            if (
+                Path.GetFileNameWithoutExtension(path).Split('_') is [string xs, string ys, string zs]
+                && int.TryParse(xs, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int x)
+                && int.TryParse(ys, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int y)
+                && int.TryParse(zs, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int z)
+            )
+                chunks.Add(new Chunk(x, y, z, prefab));
             else
                 globals.Add(prefab);
         }
 
         Domain domain = new() { Chunks = chunks.ToImmutable(), Globals = globals.ToImmutable() };
-        progress?.Report(new LoadProgress(work, 1, 1));
 
         return Task.FromResult(Result.Success(domain));
-    }
-
-    /// <summary>
-    /// The chunk <paramref name="prefab"/> is, by a file named <c>x_y_z</c>; none for any other name.
-    /// </summary>
-    private static Chunk? ParseChunk(string path, Handle<Prefab> prefab)
-    {
-        string[] parts = Path.GetFileNameWithoutExtension(path).Split('_');
-
-        return
-            parts.Length == 3
-            && int.TryParse(parts[0], NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int x)
-            && int.TryParse(parts[1], NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int y)
-            && int.TryParse(parts[2], NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int z)
-            ? new Chunk(x, y, z, prefab)
-            : null;
     }
 }

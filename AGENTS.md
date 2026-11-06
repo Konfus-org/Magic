@@ -48,14 +48,13 @@ tools/Scripts/Screenshot.ps1 -Project samples/Forest/Forest.magic
 
 The hooks in `.claude/settings.json` hold the workflow without anyone typing a command:
 
-- Each session, and each `/clear` or compaction, starts with the checkout and PLAN.md's next step in context.
+- Each session, and each `/clear` or compaction, starts with the checkout and its merge target in context.
 - An edit to a file in the main checkout is refused. Starting Claude Code with `MAGIC_ALLOW_MAIN_EDITS=1` allows it
   for that session; only the user sets it.
-- Past about 300 changed lines, every edit warns that the slice is over its size.
-- A turn that leaves changes in a worktree can't end until `tools/Scripts/AgentTaskComplete.ps1` stamped that exact
-  state and the `slice-reviewer` subagent reviewed it. When you stop to ask the user or to report a block, start that
-  line with `NEEDS-USER:`.
-- `git commit` and `git merge` are refused for a state `tools/Scripts/AgentTaskComplete.ps1` hasn't stamped.
+- The status line shows the slice's size against its limit of 300 lines, and how full the context is.
+- `git commit` and `git merge` are refused for a state `tools/Scripts/AgentTaskComplete.ps1` hasn't stamped, and for
+  a slice the `slice-reviewer` subagent hasn't reviewed. One review covers the slice until fixes add more than about
+  100 lines.
 - A plan opens in plannotator for the user's approval.
 - C# diagnostics reach you after every edit through the C# language server plugin.
 
@@ -63,7 +62,6 @@ The hooks in `.claude/settings.json` hold the workflow without anyone typing a c
 
 | Document                                 | Read                                  |
 | ---------------------------------------- | ------------------------------------- |
-| [Plan](PLAN.md)                          | At the start of every session         |
 | [README](README.md)                      | Once per session                      |
 | [Code Standards](docs/CODE_STANDARDS.md) | Before editing any `.cs` file         |
 | [Contributing](docs/CONTRIBUTING.md)     | Before presenting a change for review |
@@ -77,37 +75,42 @@ Before changing an area, read every `README.md` from that area's root folder dow
 | Size     | What counts                                                                | Process                                                        |
 | -------- | -------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | Small    | One file, about 20 lines or fewer, no public API change, no new dependency | In a worktree: change, validate, open the review               |
-| Normal   | Anything larger                                                            | Proposal first, in plan mode; no edits until the user approves |
+| Normal   | Anything larger                                                            | A clear slice starts after its brief; anything else, proposal  |
 | Sweeping | Multi-file architectural or data-flow changes                              | Proposal with before/after snippets and a data-flow diagram    |
 
 ### Slices
 
-Work moves one slice at a time. [PLAN.md](PLAN.md) holds the goal, the decisions, the buckets of slices and the log.
+Work moves one slice at a time. The conversation holds the plan; no file does.
 
-- **Only slices in PLAN.md.** A request that isn't one becomes a proposed slice first. A sweeping change is planned
-  as a bucket of slices in PLAN.md and never done as one task.
+- **A request is a slice, or gets split into slices.** A sweeping change becomes a list of slices you propose in the
+  chat, and is never done as one task.
 - **One slice is one task:** one worktree, one review, one merge.
+- **Approved once.** The user's request, or their yes to a list of slices, is the approval. A clear slice starts as
+  soon as you state its brief in a few lines (the slice skill). A proposal in plan mode is only for a vague request,
+  or a slice that needs a hard-to-reverse decision.
+- **Iterate on the narrowest check.** While building, run one step of Validate, one test project or one sample.
+  Run `tools/Scripts/AgentTaskComplete.ps1` once, when the slice is done.
 - **Size:** reviewable in about 15 minutes, under about 300 changed lines, one area or one seam between two, and
   one runnable check that shows it works. A request that needs "and" more than once, or a design doc first, is too
   big: say so plainly and propose the split.
-- **Check for drift.** Before each slice, check it against the goal and decisions in PLAN.md. Say so if it doesn't
-  serve them.
+- **Check for drift.** Before each slice, check it against the goal and decisions agreed in the conversation. Say so
+  if it doesn't serve them.
 - **Stop after each slice.** Once it merges, propose the next slice and wait. Never start it on your own.
 - **Suggest `/goal` when it fits.** When a slice will take many turns toward an end state its own output can show,
   such as a migration until every call site compiles and the tests pass, offer a ready-to-paste `/goal` line in the
-  proposal. Write it with one end state, how you'll show it (`tools/Scripts/AgentTaskComplete.ps1 -Change <level>`
+  brief. Write it with one end state, how you'll show it (`tools/Scripts/AgentTaskComplete.ps1 -Change <level>`
   stamps the state and the `slice-reviewer` returns `VERDICT: PASS`), what must not change, and a bound such as `or
   stop after 20 turns`. Don't offer one for a slice a single turn finishes, or one that needs the user's decisions.
   You can't set it yourself; the user types it.
-- **One slice per session.** After a merge, suggest the user start the next slice fresh with `/clear`; PLAN.md and
-  the session start carry everything it needs. When compacting, keep the slice, its worktree path, the files it
-  changed and its `-Change` level.
+- **One slice per session.** After a merge, suggest the user start the next slice fresh with `/clear`, and give them
+  the next slice's brief in one or two lines to paste. When compacting, keep the slice list, the current slice, its
+  worktree path, the files it changed and its `-Change` level.
 
 ### Kickoff
 
-When PLAN.md has no goal, or a new bucket starts, interview the user one question at a time before any code: what
-the work is for, the one decision it should drive, what the user does first, the riskiest unknown and what is out of
-scope. Then propose small buckets ordered by risk, and slice only the current one (the kickoff skill).
+When a request starts a new effort too big for one slice, interview the user one question at a time before any
+code: what the work is for, the one decision it should drive, what the user does first, the riskiest unknown and
+what is out of scope. Then propose its slices, riskiest first, in the chat (the kickoff skill).
 
 ### Modes
 
@@ -115,16 +118,16 @@ Every slice names its mode.
 
 | Mode         | For                                      | Allowed                                                | Not allowed                                              |
 | ------------ | ---------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------- |
-| `spike`      | Answering one question                   | Hard-coded values, copy-paste, no tests, no cleanup    | Merging: the answer goes in PLAN.md                      |
+| `spike`      | Answering one question                   | Hard-coded values, copy-paste, no tests, no cleanup    | Merging: the answer goes in the summary                  |
 | `prototype`  | Proving a feature works end to end       | Hard-coded values behind one member, marked `// PROTO` | New abstractions, generic systems, work for later needs  |
-| `production` | Code a second feature already depends on | Everything these docs ask for                          | Anything hacky without a line under Cleanup in PLAN.md   |
+| `production` | Code a second feature already depends on | Everything these docs ask for                          | Anything hacky the summary doesn't name                  |
 
 `prototype` is the default. A prototype becomes `production` only when a second feature depends on it, in a slice of
 its own. In a `spike`, skip [Leave it cleaner](#implement). In a `prototype`, it covers only the lines the slice
 itself writes.
 
 Push back when the user polishes early: a refactor, rename, generalization or doc rewrite of `spike` or `prototype`
-code nothing depends on yet goes under Cleanup in PLAN.md, not into the current slice.
+code nothing depends on yet is named as a follow-up in the summary, not done in the current slice.
 
 ### Check the Request
 
@@ -139,15 +142,15 @@ code nothing depends on yet goes under Cleanup in PLAN.md, not into the current 
 For normal and sweeping changes, present:
 
 1. The approach.
-2. The alternatives you considered, and why the chosen one is the simplest.
+2. The smallest version that could work, the alternatives you considered, and why the chosen one is the simplest.
 3. For anything new, the existing libraries or tools you looked at.
 4. The riskiest assumption, what you haven't verified, and what would change your recommendation.
 5. The slice: its mode, its time-box, its runnable check, the `-Change` level, and what is out of scope (the slice
    skill).
 
 Hard-to-reverse decisions need an explicit yes before you build on them: public API, file formats, a new
-dependency or gem, and the architecture. State the decision and the alternative, then log it in PLAN.md with its
-reason.
+dependency or gem, and the architecture. State the decision and the alternative, and put the decision and its reason
+in the commit message.
 
 ### Implement
 
@@ -168,25 +171,25 @@ assumptions and decisions a reviewer would question as you make them.
 
 ### Finish
 
-1. Update PLAN.md in the change: tick the slice, add its log line, its decisions and anything noticed under
-   Cleanup.
-2. Run `git rebase --autostash <merge target>`, then `tools/Scripts/AgentTaskComplete.ps1 -Change <level>`. If
+1. Run `git rebase --autostash <merge target>`, then `tools/Scripts/AgentTaskComplete.ps1 -Change <level>`. If
    putting your work back conflicts, resolve it in your own changes and drop the stash. Fix a failing test at its
    cause; never loosen, skip or delete it.
-3. For a `Visual` change, open and look at every screenshot it printed. If the change only shows somewhere the
+2. For a `Visual` change, open and look at every screenshot it printed. If the change only shows somewhere the
    samples don't reach, screenshot that too with `tools/Scripts/Screenshot.ps1 -Project` or `-Commands`.
-4. Have the `slice-reviewer` subagent review the validated state, naming the worktree, the merge target and the
-   slice. Fix its findings at their cause, or say with evidence why not. A fix goes back to step 2, then to another
-   review.
-5. Summarize what changed, the level you validated at, what you assumed, what you couldn't verify and, for a
-   `Visual` change, what the screenshots show. Keep the fix and the cleanup apart. End with the next slice you
-   propose, in one line.
-6. From the worktree, run `plannotator review --base <merge target>` in the background and wait for it. If it stops
-   before the user decides, run it again; their comments are kept.
-7. Address each comment, or say with evidence why not, validate and review again, and go back to step 5. If the
+3. Have the `slice-reviewer` subagent review the validated state, naming the worktree, the merge target and the
+   slice. Fix its findings at their cause, or say with evidence why not, then run step 1 again. Another review is
+   needed only once fixes add more than about 100 lines.
+4. Summarize what changed, the level you validated at, what you assumed, what you couldn't verify and, for a
+   `Visual` change, what the screenshots show. List each type, member, field and parameter you added, with the
+   caller in this slice that needs it; remove any that has none ([Simplest First](#simplest-first)). Keep the fix and
+   the cleanup apart. End with the next slice you propose, in one line.
+5. From the worktree, run `plannotator review --base <merge target>` in the background and wait for it. If it stops
+   before the user decides, run it again; their comments are kept. The page shows the worktree's branch, which is the
+   session's title ([Worktrees](#worktrees)). `plannotator sessions --json` lists each open review's URL and worktree.
+6. Address each comment, or say with evidence why not, validate again, and go back to step 4. If the
    review closes with neither comments nor approval, ask what the user wants.
-8. Approval, in the review or typed as "approved", means commit and merge ([Worktrees](#worktrees)). Don't ask again.
-   Then stop ([Slices](#slices)).
+7. Approval, in the review or typed as "approved", means commit and merge ([Worktrees](#worktrees)). Don't ask again.
+   An approval typed in the chat leaves the review open: stop it. Then stop ([Slices](#slices)).
 
 ### When Blocked
 
@@ -198,9 +201,40 @@ assumptions and decisions a reviewer would question as you make them.
 
 ## Design Rules
 
-- **Simplest robust solution.** Prefer removing code to adding it. Match the surrounding style. No abstraction
-  before a second real use. A private or internal member needs a caller; public API a gem or game could use stays
-  without one.
+### Simplest First
+
+Agents tend to over-build. Less is more: the best change often removes more code than it adds.
+
+- **Remove before you add.** First look for code the change makes unnecessary, and for a way to do the job by
+  deleting, merging or reusing what exists. A slice that ends with fewer lines than it started with is a good slice.
+- **Look for the elegant version.** Before writing, ask whether there is a more elegant solution, not just a smaller
+  one: a better data shape, an existing service or .NET feature, or a reframing that makes the special cases
+  disappear. Brute force, such as repeated branches, copied blocks or a pile of cases, is a sign to stop and rethink.
+- **Start from the obvious version.** Name the smallest change that could work: extend a method before making a new
+  one, a local before a field. Build that, and add more only when a check fails without it.
+- **No flags that steer behaviour.** No `bool` field or parameter that makes a method do something else, and no
+  field that records what already happened (`_initialized`, `_isDirty`, `_skipNext`, `_hasWarned`). Write two
+  methods, let the caller choose, or derive the answer from data you already have. A field holds data the type
+  owns, never a mode.
+- **No state you can compute.** Never cache, mirror or track a value that can be read or worked out when needed,
+  unless a measurement shows the cost.
+- **Every new member has a caller in this slice.** No property, overload, option, setting, event or parameter for a
+  later need. No property that only wraps a field, no interface or base type with one implementation, no type that
+  forwards calls. Public API a gem or game could use is the one exception.
+- **Don't guard against what can't happen.** No null check on a value that can't be null, no `try`/`catch` that only
+  logs or swallows, no fallback for a case the code never reaches.
+- **Name it for what it is.** Use the words the code already uses ([Naming](docs/CODE_STANDARDS.md#naming)). No
+  `Manager`, `Helper`, `Handler`, `Util`, `Info` or `Impl` names, and no `New`, `2` or `Internal` suffixes. If a name
+  needs a comment to make sense, rename it.
+- **When the simple fix doesn't fit, say so.** If the code around it blocks the obvious change, stop and report that
+  instead of routing around it with a flag, a special case or a parallel path.
+- **Cut before you finish.** Once it works, read your diff as its reviewer, ask again whether there is a more
+  elegant solution, and delete everything the slice runs without: members, parameters, flags, branches, checks,
+  logging, comments. The smaller diff wins.
+
+### Structure
+
+- **Prefer removing code to adding it.** Match the surrounding style. No abstraction before a second real use.
 - **Project conventions first, then .NET's** (the Framework Design Guidelines).
 - **One responsibility each.** Split interfaces by what their user needs. Gems depend on Core's interfaces, never on
   each other.
@@ -217,7 +251,6 @@ assumptions and decisions a reviewer would question as you make them.
 - No copies of code: no member, option or default lists; point to the code, `--help` or the settings class.
 - Outside configuration files, name another gem by its role ("the GPU provider"), never by its name.
 - Docs change in the same change as the code.
-- PLAN.md is the working plan, not a doc: its decisions keep their reasons, and its log is history on purpose.
 
 ## Git
 
@@ -227,7 +260,8 @@ Every task runs in its own worktree. Never edit or commit in the main checkout.
 
 - **Name:** `<type>/<feature>` in kebab-case, for example `fix/material-cache-leak`. Types: `feature`, `fix`,
   `refactor`, `docs`, `test`, `build`, `ci`. The worktree folder has the branch's name.
-- **Start:** branch from the branch checked out in the main checkout. That branch is the merge target.
+- **Start:** branch from the branch checked out in the main checkout. That branch is the merge target. Title the
+  session with the branch's name, as `fix/material-cache-leak`.
 - **Finish,** once the user approves:
   1. Commit on the worktree branch.
   2. Rebase onto the merge target and run `tools/Scripts/AgentTaskComplete.ps1` again at the same level. If nothing

@@ -1,3 +1,4 @@
 {
-    // Shown while another domain replaces the world. It has no chunks, only its globals: a camera and a sky.
+    // Shown while another domain replaces the world, when the project names no loading screen of its own. It has no
+    // chunks, only its globals: a camera in a black void.
 }

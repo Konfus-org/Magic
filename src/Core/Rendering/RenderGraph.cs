@@ -16,24 +16,15 @@ public sealed class RenderGraph(IGraphicsApi gpu)
     private readonly Dictionary<uint, GpuAccess[]> _textureAccess = [];
     private readonly Dictionary<TextureDescription, Stack<GpuTexture>> _pool = [];
     private readonly List<(TextureDescription Description, GpuTexture Texture)> _lent = [];
-    private readonly HashSet<uint> _usedThisPass = [];
 
     /// <summary>
     /// What the passes record their commands with, between <see cref="BeginComputePass"/> and <see cref="EndPass"/>.
     /// </summary>
     public GpuCommandRecorder Recorder { get; } = new();
 
-    public void BeginComputePass(string name)
-    {
-        Recorder.BeginComputePass(name);
-        _usedThisPass.Clear();
-    }
+    public void BeginComputePass(string name) => Recorder.BeginComputePass(name);
 
-    public void BeginTransferPass(string name)
-    {
-        Recorder.BeginTransferPass(name);
-        _usedThisPass.Clear();
-    }
+    public void BeginTransferPass(string name) => Recorder.BeginTransferPass(name);
 
     /// <summary>
     /// Begins a draw pass into <paramref name="targets"/>, each target used as a colour or depth target.
@@ -41,7 +32,6 @@ public sealed class RenderGraph(IGraphicsApi gpu)
     public void BeginDrawPass(string name, in GpuRenderTargets targets)
     {
         Recorder.BeginDrawPass(name, targets);
-        _usedThisPass.Clear();
         foreach (GpuColorTarget color in targets.Colors)
         {
             Use(color.Texture, GpuAccess.ColorTarget, color.Level);
@@ -59,11 +49,7 @@ public sealed class RenderGraph(IGraphicsApi gpu)
     public void Use(GpuBuffer buffer, GpuAccess access)
     {
         GpuAccess before = _bufferAccess.GetValueOrDefault(buffer.Id, GpuAccess.None);
-        // A write after a write still needs a barrier, so the second sees the first; a read after the same read does not.
-        bool isSameRead =
-            before == access
-            && access is GpuAccess.ShaderRead or GpuAccess.Indirect or GpuAccess.Index or GpuAccess.CopySource;
-        if (isSameRead)
+        if (IsSameRead(before, access))
             return;
 
         Recorder.Transition(buffer, before, access);
@@ -86,9 +72,7 @@ public sealed class RenderGraph(IGraphicsApi gpu)
         int last = level < 0 ? levels.Length - 1 : level;
         for (int i = first; i <= last; i++)
         {
-            bool isSameRead =
-                levels[i] == access && access is GpuAccess.ShaderRead or GpuAccess.CopySource or GpuAccess.DepthRead;
-            if (isSameRead)
+            if (IsSameRead(levels[i], access))
                 continue;
 
             Recorder.Transition(texture, levels[i], access, i);
@@ -174,4 +158,14 @@ public sealed class RenderGraph(IGraphicsApi gpu)
 
         _pool.Clear();
     }
+
+    // A write after a write still needs a barrier, so the second sees the first; a read after the same read does not.
+    private static bool IsSameRead(GpuAccess before, GpuAccess access) =>
+        before == access
+        && access
+            is GpuAccess.ShaderRead
+                or GpuAccess.DepthRead
+                or GpuAccess.Indirect
+                or GpuAccess.Index
+                or GpuAccess.CopySource;
 }

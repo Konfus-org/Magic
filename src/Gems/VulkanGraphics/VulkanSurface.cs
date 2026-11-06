@@ -32,46 +32,45 @@ internal static unsafe class VulkanSurface
     public static Result<VkSurfaceKHR> Create(VkInstanceApi api, WindowHandle handle)
     {
         VkSurfaceKHR surface = VkSurfaceKHR.Null;
-        VkResult result = handle.System switch
+        VkResult result;
+        switch (handle.System)
         {
-            WindowSystem.Windows => CreateOnWindows(api, handle, out surface),
-            WindowSystem.X11 => CreateOnX11(api, handle, out surface),
-            WindowSystem.Wayland => CreateOnWayland(api, handle, out surface),
-            WindowSystem.Cocoa => CreateOnCocoa(api, handle, out surface),
-            WindowSystem.None => VkResult.ErrorInitializationFailed,
-            _ => VkResult.ErrorInitializationFailed,
-        };
+            case WindowSystem.Windows:
+            {
+                VkWin32SurfaceCreateInfoKHR info = new() { hinstance = handle.Display, hwnd = handle.Window };
+                result = api.vkCreateWin32SurfaceKHR(&info, out surface);
+                break;
+            }
+
+            case WindowSystem.X11:
+            {
+                VkXlibSurfaceCreateInfoKHR info = new() { dpy = handle.Display, window = (ulong)handle.Window };
+                result = api.vkCreateXlibSurfaceKHR(&info, out surface);
+                break;
+            }
+
+            case WindowSystem.Wayland:
+            {
+                VkWaylandSurfaceCreateInfoKHR info = new() { display = handle.Display, surface = handle.Window };
+                result = api.vkCreateWaylandSurfaceKHR(&info, out surface);
+                break;
+            }
+
+            case WindowSystem.Cocoa:
+            {
+                VkMetalSurfaceCreateInfoEXT info = new() { pLayer = handle.Window };
+                result = api.vkCreateMetalSurfaceEXT(&info, out surface);
+                break;
+            }
+
+            case WindowSystem.None:
+            default:
+                result = VkResult.ErrorInitializationFailed;
+                break;
+        }
 
         return result == VkResult.Success
             ? Result.Success(surface)
             : Result.Failure($"a {handle.System} window gave no surface: {result}.");
-    }
-
-    private static VkResult CreateOnWindows(VkInstanceApi api, WindowHandle handle, out VkSurfaceKHR surface)
-    {
-        VkWin32SurfaceCreateInfoKHR info = new() { hinstance = handle.Display, hwnd = handle.Window };
-
-        return api.vkCreateWin32SurfaceKHR(&info, out surface);
-    }
-
-    private static VkResult CreateOnX11(VkInstanceApi api, WindowHandle handle, out VkSurfaceKHR surface)
-    {
-        VkXlibSurfaceCreateInfoKHR info = new() { dpy = handle.Display, window = (ulong)handle.Window };
-
-        return api.vkCreateXlibSurfaceKHR(&info, out surface);
-    }
-
-    private static VkResult CreateOnWayland(VkInstanceApi api, WindowHandle handle, out VkSurfaceKHR surface)
-    {
-        VkWaylandSurfaceCreateInfoKHR info = new() { display = handle.Display, surface = handle.Window };
-
-        return api.vkCreateWaylandSurfaceKHR(&info, out surface);
-    }
-
-    private static VkResult CreateOnCocoa(VkInstanceApi api, WindowHandle handle, out VkSurfaceKHR surface)
-    {
-        VkMetalSurfaceCreateInfoEXT info = new() { pLayer = handle.Window };
-
-        return api.vkCreateMetalSurfaceEXT(&info, out surface);
     }
 }

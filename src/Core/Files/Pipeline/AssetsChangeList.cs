@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
-using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Magic.Utils;
 
@@ -36,11 +35,6 @@ internal sealed class AssetsChangeList
     private readonly List<(TaskCompletionSource<Made> Waiter, Made Made)> _answers = [];
 
     internal AssetsChangeList() { }
-
-    /// <summary>
-    /// The assets that had loaded and loaded again in this run.
-    /// </summary>
-    public ReadOnlySpan<AssetLoaded> Reloaded => CollectionsMarshal.AsSpan(_reloaded);
 
     internal bool HasChanges => _asked.Reader.TryPeek(out _) || _read.Reader.TryPeek(out _);
 
@@ -97,9 +91,15 @@ internal sealed class AssetsChangeList
     }
 
     /// <summary>
-    /// Forgets what came of the run that just ended.
+    /// The assets that had loaded and loaded again in this run, taken once as it ends.
     /// </summary>
-    internal void EndRun() => _reloaded.Clear();
+    internal ImmutableArray<AssetLoaded> TakeReloaded()
+    {
+        ImmutableArray<AssetLoaded> reloaded = [.. _reloaded];
+        _reloaded.Clear();
+
+        return reloaded;
+    }
 
     /// <summary>
     /// Takes no more, and ends the wait of whoever asked for what is still on the list.

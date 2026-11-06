@@ -4,7 +4,7 @@ namespace Magic.Ecs;
 /// Every entity, as <see cref="IEcs.Query()"/> returns them: <c>foreach</c> over it for each <see cref="EcsChunk"/>,
 /// the entities stored together. The ECS keeps entities in chunks, each its own storage, so no one span covers them
 /// all. The chunks are gathered as the loop starts, and no entity's components can be added or taken off until it
-/// ends (<see cref="EntitiesChangeList"/>).
+/// ends (<see cref="EntityCommands"/>).
 /// </summary>
 /// <param name="chunks">The ECS gem's walk over its chunks.</param>
 public readonly ref struct EcsQuery(IEnumerable<EcsChunk> chunks)

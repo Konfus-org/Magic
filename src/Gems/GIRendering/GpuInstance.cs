@@ -1,5 +1,7 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Magic.Ecs.Components;
 
 namespace Magic.GIRendering;
 
@@ -23,7 +25,7 @@ internal record struct GpuInstance
     public Matrix4x4 InverseWorld;
 
     /// <summary>
-    /// <see cref="World"/> as it was last frame, for motion.
+    /// <see cref="World"/> before it last changed, for motion in the frame <see cref="MovedFrame"/>.
     /// </summary>
     public Matrix4x4 PreviousWorld;
 
@@ -41,26 +43,25 @@ internal record struct GpuInstance
 
     public uint ClusterCount;
 
-    public uint Padding0;
+    /// <summary>
+    /// The frame <see cref="World"/> last changed in: in any other, the instance stood still.
+    /// </summary>
+    public uint MovedFrame;
 
     public uint Padding1;
 
     /// <summary>
-    /// The material table's row for each of the instance's 8 slots.
+    /// The material table's row for each of the instance's slots.
     /// </summary>
-    public uint Material0;
+    public GpuMaterialRows Materials;
+}
 
-    public uint Material1;
-
-    public uint Material2;
-
-    public uint Material3;
-
-    public uint Material4;
-
-    public uint Material5;
-
-    public uint Material6;
-
-    public uint Material7;
+/// <summary>
+/// A material table row for each of a renderer's <see cref="MaterialSlots"/>, inline so the instance stays one block of
+/// bytes.
+/// </summary>
+[InlineArray(MaterialSlots.Capacity)]
+internal struct GpuMaterialRows
+{
+    private uint _first;
 }

@@ -42,7 +42,7 @@ public static class Log
     public static int ErrorCount => Volatile.Read(ref _errorCount);
 
     /// <summary>
-    /// Detail that is usually noise: logged only under --verbose, and otherwise not even queued.
+    /// Detail that is usually noise: logged only at detailed verbosity or above, and otherwise not even queued.
     /// </summary>
     public static void Verbose(
         string message,
@@ -51,7 +51,7 @@ public static class Log
         [CallerLineNumber] int line = 0
     )
     {
-        if (Verbosity == VerbosityLevel.Detailed)
+        if (Verbosity >= VerbosityLevel.Detailed)
             Write(LoggingLevel.Verbose, message, member, file, line);
     }
 
@@ -81,7 +81,8 @@ public static class Log
     }
 
     /// <summary>
-    /// Something failed: what it was is skipped or stood in for, and the frame goes on.
+    /// Something failed: what it was is skipped or stood in for, and the frame goes on. Counted as an error at any
+    /// verbosity.
     /// </summary>
     public static void Error(
         string message,
@@ -90,11 +91,9 @@ public static class Log
         [CallerLineNumber] int line = 0
     )
     {
-        if (Verbosity < VerbosityLevel.Minimal)
-            return;
-
         Interlocked.Increment(ref _errorCount);
-        Write(LoggingLevel.Error, message, member, file, line);
+        if (Verbosity >= VerbosityLevel.Minimal)
+            Write(LoggingLevel.Error, message, member, file, line);
     }
 
     /// <summary>
@@ -178,9 +177,6 @@ public static class Log
             _sinks.Remove(sink);
     }
 
-    private static Line CreateLine(LoggingLevel level, string message, string member, string file, int line) =>
-        new(DateTime.Now, level, message, Environment.CurrentManagedThreadId, file, line, member);
-
     [SuppressMessage(
         "ApiDesign",
         "RS0030:Do not use banned APIs",
@@ -188,32 +184,26 @@ public static class Log
     )]
     private static void Write(LoggingLevel level, string message, string member, string file, int line)
     {
-        Line lineStruct = CreateLine(level, message, member, file, line);
+        Line logged = new(DateTime.Now, level, message, Environment.CurrentManagedThreadId, file, line, member);
         lock (_lock)
         {
             if (_history.Count == HistorySize)
                 _history.Dequeue();
-            _history.Enqueue(lineStruct);
-            WriteSinks(lineStruct);
+            _history.Enqueue(logged);
+
+            // A copy, since a sink that throws is dropped, and logs an error.
+            foreach (ILogSink sink in _sinks.ToArray())
+            {
+                Write(logged, sink);
+            }
         }
 
         // Log always writes to console
-        string text = lineStruct.ToString();
+        string text = logged.ToString();
         if (level >= LoggingLevel.Error)
             Console.Error.WriteLine(Console.IsErrorRedirected ? text : Colorize(level, text));
         else
             Console.WriteLine(Console.IsOutputRedirected ? text : Colorize(level, text));
-    }
-
-    /// <summary>
-    /// Gives <paramref name="line"/> to every sink. A sink that throws is logged and dropped; the log goes on.
-    /// </summary>
-    private static void WriteSinks(in Line line)
-    {
-        foreach (var sink in _sinks.ToArray())
-        {
-            Write(line, sink);
-        }
     }
 
     [SuppressMessage(

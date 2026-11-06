@@ -2,8 +2,6 @@ using System.Collections.Immutable;
 using System.Text.Json.Serialization;
 using Magic.Files;
 using Magic.Files.Types;
-using Magic.Serialization;
-using Magic.Utils;
 
 namespace Magic.Projects;
 
@@ -32,21 +30,8 @@ public readonly record struct Project
     public Handle<Prefab> Player { get; init; }
 
     /// <summary>
-    /// The <c>.magic</c> file it was read from, which <see cref="Load"/> gives it; never read from the file.
+    /// The <c>.magic</c> file it was read from, which the open command gives it; never read from the file.
     /// </summary>
     [JsonIgnore]
     public string Path { get; init; }
-
-    internal static Result<Project> Load(string projectPath, IFileSystem fileSystem)
-    {
-        var byteReadResult = fileSystem.ReadBytes(projectPath);
-        if (!byteReadResult.Ok)
-            return Result.Failure($"Failed to load the project file from {projectPath}. Ex: {byteReadResult.Error}");
-
-        var jsonReadResult = Json.Read<Project>(byteReadResult.Value);
-        if (!jsonReadResult.Ok)
-            return Result.Failure($"Failed to load the project file from {projectPath}. Ex: {jsonReadResult.Error}");
-
-        return Result.Success(jsonReadResult.Value with { Path = projectPath });
-    }
 }

@@ -1,5 +1,5 @@
 // What the lighting passes read beyond the frame: the sun above the air, the viewer's height, the sky's tables, the HDR
-// picture they light, the light table and its tiles, and the shadow mask, C#'s LightingConstants, in the buffer whose heap id is the
+// picture they light, the light table and its tiles, and the shadow masks, C#'s LightingConstants, in the buffer whose heap id is the
 // pass header's z.
 module "Scene/Lighting";
 
@@ -24,10 +24,11 @@ public struct LightingConstants
     public uint lights;
     public uint lightCount;
     public uint lightTiles;
-    // 0 on a GPU that traces no rays: nothing is shadowed.
+    // The denoised mask shading reads; 0 on a GPU that traces no rays: nothing is shadowed.
     public uint shadowMask;
-    public uint padding1;
-    public uint padding2;
+    // The mask and the sun's tiles as the rays left them, for the denoiser.
+    public uint tracedShadows;
+    public uint sunTiles;
 }
 
 public LightingConstants GetLighting() { return LoadConstants<LightingConstants>(GetPassHeader().z); }

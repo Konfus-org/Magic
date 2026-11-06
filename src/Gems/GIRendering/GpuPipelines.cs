@@ -34,36 +34,18 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
 
     private readonly List<GpuPass> _passes = [];
 
-    /// <summary>
-    /// The tile every full-screen pass runs in, known once they are built.
-    /// </summary>
-    public uint TileSize { get; private set; }
-
     public void Dispose()
     {
         foreach (GpuPass pass in _passes)
         {
-            if (!pass.Pipeline.IsNone)
-                gpu.Destroy(pass.Pipeline);
+            gpu.Destroy(pass.Pipeline);
         }
     }
 
     /// <summary>
-    /// How many tiles cover <paramref name="pixels"/> along one side.
+    /// Declares a compute pass running <paramref name="entry"/> of the gem's shader <paramref name="module"/>.
     /// </summary>
-    public uint GetTiles(int pixels) => (uint)((pixels + TileSize - 1) / TileSize);
-
-    /// <summary>
-    /// Declares a compute pass running <paramref name="entry"/> of the gem's shader <paramref name="module"/>;
-    /// <paramref name="isTiled"/> for a full-screen one.
-    /// </summary>
-    public GpuPass Compute(
-        string name,
-        string module,
-        string entry,
-        PassShaders passShaders = PassShaders.None,
-        bool isTiled = false
-    ) =>
+    public GpuPass Compute(string name, string module, string entry, PassShaders passShaders = PassShaders.None) =>
         Add(
             new GpuPass
             {
@@ -72,7 +54,6 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
                 Module = module,
                 Entry = entry,
                 Shaders = passShaders,
-                IsTiled = isTiled,
             }
         );
 
@@ -137,27 +118,49 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
         int next = 0;
         foreach (GpuPass pass in _passes)
         {
-            Result made = pass.DrawState is not { } state
-                ? CreateCompute(pass, compiled, ref next)
-                : CreateDraw(pass, state, compiled, ref next);
+            CompiledShader entry = compiled[next++];
+            pass.GroupSizeX = entry.GroupSizeX;
+            pass.GroupSizeY = entry.GroupSizeY;
+            Result<GpuPipeline> made;
+            if (pass.DrawState is { } state)
+            {
+                // A draw pass's pixel entry was compiled after its vertex entry.
+                CompiledShader pixel = compiled[next++];
+                made = gpu.CreatePipeline(
+                    state(
+                        new GraphicsPipelineDescription
+                        {
+                            VertexSpirv = entry.Spirv,
+                            VertexEntryPoint = entry.EntryPoint,
+                            PixelSpirv = pixel.Spirv,
+                            PixelEntryPoint = pixel.EntryPoint,
+                            Name = pass.Name,
+                        }
+                    )
+                );
+            }
+            else
+            {
+                if (entry.GroupSizeX == 0)
+                    return Result.Failure($"{pass.Name} reported no group size.");
+
+                made = gpu.CreatePipeline(
+                    new ComputePipelineDescription
+                    {
+                        Spirv = entry.Spirv,
+                        EntryPoint = entry.EntryPoint,
+                        Name = pass.Name,
+                    }
+                );
+            }
+
             if (!made.Ok)
-                return made;
+                return Result.Failure($"the {pass.Name} pipeline was not built: {made.Error}");
+
+            pass.Pipeline = made.Value;
         }
 
-        foreach (GpuPass pass in _passes)
-        {
-            if (pass.DrawState is null && pass.GroupSizeX == 0)
-                return Result.Failure($"{pass.Name} reported no group size.");
-
-            if (!pass.IsTiled)
-                continue;
-
-            TileSize = TileSize == 0 ? pass.GroupSizeX : TileSize;
-            if (pass.GroupSizeX != TileSize)
-                return Result.Failure($"{pass.Name} runs in tiles of {pass.GroupSizeX}, not {TileSize}.");
-        }
-
-        return TileSize > 0 ? Result.Success() : Result.Failure("no full-screen pass reported a group size.");
+        return Result.Success();
     }
 
     /// <summary>
@@ -184,52 +187,6 @@ internal sealed class GpuPipelines(IGraphicsApi gpu, RenderGraph graph, IShaderC
         _passes.Add(pass);
 
         return pass;
-    }
-
-    private Result CreateCompute(GpuPass pass, ImmutableArray<CompiledShader> compiled, ref int next)
-    {
-        CompiledShader entry = compiled[next++];
-        pass.GroupSizeX = entry.GroupSizeX;
-        Result<GpuPipeline> made = gpu.CreatePipeline(
-            new ComputePipelineDescription
-            {
-                Spirv = entry.Spirv,
-                EntryPoint = entry.EntryPoint,
-                Name = pass.Name,
-            }
-        );
-        if (!made.Ok)
-            return Result.Failure($"the {pass.Name} pipeline was not built: {made.Error}");
-
-        pass.Pipeline = made.Value;
-
-        return Result.Success();
-    }
-
-    private Result CreateDraw(
-        GpuPass pass,
-        Func<GraphicsPipelineDescription, GraphicsPipelineDescription> state,
-        ImmutableArray<CompiledShader> compiled,
-        ref int next
-    )
-    {
-        CompiledShader vertex = compiled[next++];
-        CompiledShader pixel = compiled[next++];
-        GraphicsPipelineDescription description = new()
-        {
-            VertexSpirv = vertex.Spirv,
-            VertexEntryPoint = vertex.EntryPoint,
-            PixelSpirv = pixel.Spirv,
-            PixelEntryPoint = pixel.EntryPoint,
-            Name = pass.Name,
-        };
-        Result<GpuPipeline> made = gpu.CreatePipeline(state(description));
-        if (!made.Ok)
-            return Result.Failure($"the {pass.Name} pipeline was not built: {made.Error}");
-
-        pass.Pipeline = made.Value;
-
-        return Result.Success();
     }
 
     /// <summary>

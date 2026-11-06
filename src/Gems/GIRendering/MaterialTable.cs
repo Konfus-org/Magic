@@ -1,5 +1,4 @@
 using System.Numerics;
-using System.Runtime.InteropServices;
 using Magic.Debugging;
 using Magic.Files;
 using Magic.Files.Types;
@@ -37,25 +36,14 @@ internal sealed class MaterialTable(
 
     public GpuBuffer Buffer { get; private set; }
 
-    public void Dispose()
-    {
-        if (!Buffer.IsNone)
-            gpu.Destroy(Buffer);
-    }
+    public void Dispose() => gpu.Destroy(Buffer);
 
     public Result Create()
     {
         _rows[0] = GetDefault();
-        Result<GpuBuffer> buffer = gpu.CreateBuffer(
-            new BufferDescription
-            {
-                Bytes = (long)Capacity * GpuMaterial.Bytes,
-                Usage = BufferUsages.Storage,
-                Name = "Material table",
-            }
-        );
+        Result<GpuBuffer> buffer = gpu.CreateBuffer("Material table", (long)Capacity * GpuMaterial.Bytes);
         if (!buffer.Ok)
-            return Result.Failure($"the material table was not made: {buffer.Error}");
+            return Result.Failure(buffer.Error);
 
         Buffer = buffer.Value;
 
@@ -90,6 +78,14 @@ internal sealed class MaterialTable(
     }
 
     /// <summary>
+    /// Whether the material's row is made from its asset and the textures it names, or as the failure kind: what it is
+    /// drawn as from the next upload pass on.
+    /// </summary>
+    public bool HasArrived(Handle<Material> material) =>
+        _rowOf.TryGetValue(material.Id, out uint row)
+        && (row == 0 || (_assets[row] is not null && !_waiting.Contains(row)));
+
+    /// <summary>
     /// Makes again the rows whose textures were loading, once a frame.
     /// </summary>
     public void Refresh()
@@ -113,11 +109,7 @@ internal sealed class MaterialTable(
             return;
 
         _isDirty = false;
-        int bytes = _count * GpuMaterial.Bytes;
-        GpuUpload upload = gpu.BeginUpload(bytes);
-        MemoryMarshal.AsBytes(_rows.AsSpan(0, _count)).CopyTo(upload.Bytes);
-        graph.Use(Buffer, GpuAccess.CopyDestination);
-        graph.Recorder.CopyBuffer(upload.Buffer, upload.Offset, Buffer, 0, (ulong)bytes);
+        graph.Upload(gpu, Buffer, _rows.AsSpan(0, _count));
     }
 
     private static GpuMaterial GetDefault() => new() { BaseColor = new Vector4(0.8f, 0.8f, 0.8f, 1), Roughness = 0.6f };
@@ -139,9 +131,9 @@ internal sealed class MaterialTable(
         if (_assets[row] is not { } material)
             return;
 
-        MaterialVisuals visuals = material.Visuals;
-        GpuMaterial made = visuals.Shader == assets.Find<Shader>(FailureShader) ? GetFailure() : GetDefault();
-        MaterialParamDictionary parameters = visuals.Params;
+        Shading shading = material.Shading;
+        GpuMaterial made = shading.Shader == assets.Find<Shader>(FailureShader) ? GetFailure() : GetDefault();
+        MaterialParamDictionary parameters = shading.Params;
         if (parameters.TryGetValue("color", out MaterialParam? color))
             made.BaseColor = new Vector4(color.R, color.G, color.B, color.A);
 
@@ -193,10 +185,7 @@ internal sealed class MaterialTable(
         if (!loaded.Ok)
         {
             Log.Error($"{assets.GetPath(material)} is drawn as a failure: {loaded.Error}");
-            _assets[row] = new Material
-            {
-                Visuals = new MaterialVisuals { Shader = assets.Find<Shader>(FailureShader) },
-            };
+            _assets[row] = new Material { Shading = new Shading { Shader = assets.Find<Shader>(FailureShader) } };
             Rebuild(row);
 
             return;

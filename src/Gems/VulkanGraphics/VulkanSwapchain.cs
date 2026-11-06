@@ -14,20 +14,22 @@ namespace Magic.VulkanGraphics;
 internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResources resources, IWindow window)
     : IDisposable
 {
+    /// <summary>
+    /// How frames reach the window, most wanted first. A Debug build shows them as fast as they are drawn, so its frame
+    /// times are what the frame costs: mailbox, which never tears, else immediate. A release waits for the display.
+    /// </summary>
+#if DEBUG
+    private static readonly VkPresentModeKHR[] _presentModes = [VkPresentModeKHR.Mailbox, VkPresentModeKHR.Immediate];
+#else
+    private static readonly VkPresentModeKHR[] _presentModes = [VkPresentModeKHR.Fifo];
+#endif
+
     private VkSwapchainKHR _swapchain = VkSwapchainKHR.Null;
     private GpuTexture[] _textures = [];
     private VkSemaphore[] _rendered = [];
-    private VkImage[] _images = [];
     private int _width;
     private int _height;
     private int _acquired = -1;
-
-    public GpuFormat Format { get; private set; }
-
-    /// <summary>
-    /// The image acquired for this frame; none while the window has no size, or until it was acquired.
-    /// </summary>
-    public GpuTexture Current => _acquired < 0 ? GpuTexture.None : _textures[_acquired];
 
     /// <summary>
     /// Signalled when the current image is drawn, which presenting waits for.
@@ -69,7 +71,7 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
 
         _acquired = (int)index;
         // What the image held is gone with the last present: it is drawn into from nothing.
-        if (resources.GetTexture(_textures[_acquired].Id) is { } texture)
+        if (resources.Textures[_textures[_acquired].Id] is { } texture)
             texture.Layouts[0] = VkImageLayout.Undefined;
 
         return _textures[_acquired];
@@ -99,8 +101,8 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
         device.Api.vkDeviceWaitIdle();
         foreach (GpuTexture texture in _textures)
         {
-            if (resources.RemoveTexture(texture.Id) is { } removed)
-                resources.Free(texture.Id, removed);
+            if (resources.Textures.Remove(texture.Id) is { } removed)
+                resources.Free(new(texture.Id, removed));
         }
 
         foreach (VkSemaphore semaphore in _rendered)
@@ -112,7 +114,6 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
         _swapchain = VkSwapchainKHR.Null;
         _textures = [];
         _rendered = [];
-        _images = [];
     }
 
     private void Recreate()
@@ -161,7 +162,7 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
             imageSharingMode = VkSharingMode.Exclusive,
             preTransform = capabilities.currentTransform,
             compositeAlpha = VkCompositeAlphaFlagsKHR.Opaque,
-            presentMode = VkPresentModeKHR.Fifo,
+            presentMode = PickPresentMode(surface),
             clipped = true,
         };
         VkResult result = device.Api.vkCreateSwapchainKHR(&createInfo, out VkSwapchainKHR swapchain);
@@ -173,23 +174,23 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
         }
 
         _swapchain = swapchain;
-        Format = format.format.ToGpu();
         device.Api.vkGetSwapchainImagesKHR(_swapchain, out uint imageCount);
-        _images = new VkImage[imageCount];
-        device.Api.vkGetSwapchainImagesKHR(_swapchain, _images);
+        VkImage[] images = new VkImage[imageCount];
+        device.Api.vkGetSwapchainImagesKHR(_swapchain, images);
         _textures = new GpuTexture[imageCount];
         _rendered = new VkSemaphore[imageCount];
         TextureDescription description = new()
         {
             Width = (int)width,
             Height = (int)height,
-            Format = Format,
+            Format = format.format.ToGpu(),
             Usage = TextureUsages.ColorTarget | TextureUsages.CopyDestination | TextureUsages.CopySource,
             Name = "Window",
         };
         for (int i = 0; i < imageCount; i++)
         {
-            Result<GpuTexture> texture = resources.AddWindowTexture(_images[i], description);
+            Result<GpuTexture> texture = resources.AddWindowTexture(images[i], description);
+
             if (!texture.Ok)
             {
                 Log.Error($"The window's image {i} has no place in the heap: {texture.Error}");
@@ -227,5 +228,22 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
         return formats.Length > 0
             ? formats[0]
             : new VkSurfaceFormatKHR(VkFormat.B8G8R8A8Unorm, VkColorSpaceKHR.SrgbNonLinear);
+    }
+
+    /// <summary>
+    /// The first of <see cref="_presentModes"/> the surface has, else FIFO, which every surface has.
+    /// </summary>
+    private VkPresentModeKHR PickPresentMode(VkSurfaceKHR surface)
+    {
+        device.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(device.PhysicalDevice, surface, out uint count);
+        Span<VkPresentModeKHR> modes = new VkPresentModeKHR[count];
+        device.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(device.PhysicalDevice, surface, modes);
+        foreach (VkPresentModeKHR mode in _presentModes)
+        {
+            if (modes.Contains(mode))
+                return mode;
+        }
+
+        return VkPresentModeKHR.Fifo;
     }
 }

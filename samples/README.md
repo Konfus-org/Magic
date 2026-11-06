@@ -1,7 +1,8 @@
 # Samples
 
 Projects that show what Magic does and that `tools/Scripts/Validate.ps1` runs. Each folder is one project: its
-`.magic` file and the csproj that holds its own code.
+`.magic` file and the csproj that holds its own code. [`Shared/`](Shared/README.md) is the gem every sample lists for
+what they share, such as the player each domain puts at its spawn.
 
 Run one from its csproj, which builds Magic and opens the project headless:
 

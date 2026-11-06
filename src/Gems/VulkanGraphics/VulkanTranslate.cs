@@ -6,8 +6,8 @@ using Vortice.Vulkan;
 namespace Magic.VulkanGraphics;
 
 /// <summary>
-/// Core's GPU words as Vulkan's: formats, usages, accesses with the stage, access and layout each implies. Pure
-/// functions, one per word.
+/// Core's GPU words as Vulkan's: formats, usages, accesses with the stage, access and layout each implies, and the
+/// throw for a Vulkan call that must succeed. Pure functions, one per word.
 /// </summary>
 internal static class VulkanTranslate
 {
@@ -108,6 +108,21 @@ internal static class VulkanTranslate
 
     public static VkImageType ToImageType(this TextureKind kind) =>
         kind == TextureKind.Texture3D ? VkImageType.Image3D : VkImageType.Image2D;
+
+    /// <summary>
+    /// The array layers an image of the description has: a cube's six faces, an array's layers, else one.
+    /// </summary>
+    public static uint GetLayerCount(this in TextureDescription description) =>
+        description.Kind switch
+        {
+            TextureKind.Cube => 6,
+            TextureKind.Texture2DArray => (uint)description.Layers,
+            TextureKind.Texture2D or TextureKind.Texture3D => 1,
+            _ => throw new ArgumentOutOfRangeException(nameof(description), description.Kind, "There is no such kind."),
+        };
+
+    public static VkImageAspectFlags ToAspect(this GpuFormat format) =>
+        format.IsDepth ? VkImageAspectFlags.Depth : VkImageAspectFlags.Color;
 
     public static VkImageViewType ToViewType(this TextureKind kind) =>
         kind switch
@@ -266,4 +281,14 @@ internal static class VulkanTranslate
             GpuAccess.HostRead => VkImageLayout.Undefined,
             _ => throw new ArgumentOutOfRangeException(nameof(access), access, "There is no such access."),
         };
+
+    /// <summary>
+    /// Throws when a call the GPU cannot be used without did not succeed, naming <paramref name="what"/> it was to
+    /// make.
+    /// </summary>
+    public static void ThrowIfFailed(this VkResult result, string what)
+    {
+        if (result != VkResult.Success)
+            throw new InvalidOperationException($"Vulkan could not make {what}: {result}.");
+    }
 }

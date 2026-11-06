@@ -1,7 +1,7 @@
 namespace Magic.Files.Types;
 
 /// <summary>
-/// How a <see cref="MaterialVisuals"/> is blended, which picks the pipeline it is drawn with.
+/// How a <see cref="Shading"/> is blended, which picks the pipeline it is drawn with.
 /// </summary>
 public enum MaterialType : byte
 {
@@ -25,7 +25,7 @@ public enum MaterialType : byte
 /// its sides may be set while it is drawn, on the main thread, and are drawn so from the next frame; what is set holds
 /// until the material is made again, as its file changes, and is not saved with the world.
 /// </summary>
-public sealed class MaterialVisuals
+public sealed class Shading
 {
     public required Handle<Shader> Shader { get; init; }
 

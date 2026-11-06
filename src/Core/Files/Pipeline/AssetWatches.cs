@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using System.Threading.Channels;
 using Magic.Debugging;
 using Magic.Threading;
@@ -46,9 +45,9 @@ internal sealed class AssetWatches(IFileSystem files) : IDisposable
     private long _touchedTimestamp;
 
     /// <summary>
-    /// Whether a worker is reading the asset directories again, so another read waits for it. Main thread.
+    /// The worker reading the asset directories again, as another read waits for it to finish. Main thread.
     /// </summary>
-    private bool _isReading;
+    private Task _reading = Task.CompletedTask;
 
     /// <summary>
     /// Whether anything was seen or read that has not been taken in.
@@ -90,18 +89,9 @@ internal sealed class AssetWatches(IFileSystem files) : IDisposable
     }
 
     /// <summary>
-    /// Takes the directories as a worker read them again, none when that failed, with the paths that led to it. Main
-    /// thread.
+    /// Takes the directories as a worker read them again, with the paths that led to it. Main thread.
     /// </summary>
-    public bool TryTakeRead(out AssetDirectoriesReindexed read)
-    {
-        if (!_read.Reader.TryRead(out read))
-            return false;
-
-        _isReading = false;
-
-        return true;
-    }
+    public bool TryTakeRead(out AssetDirectoriesReindexed read) => _read.Reader.TryRead(out read);
 
     /// <summary>
     /// Takes in what the watches saw, and has a worker read <paramref name="directories"/> again once they have seen
@@ -115,37 +105,20 @@ internal sealed class AssetWatches(IFileSystem files) : IDisposable
             _touchedTimestamp = Stopwatch.GetTimestamp();
         }
 
-        if (_touched.IsEmpty || _isReading || Stopwatch.GetElapsedTime(_touchedTimestamp) < _settleTime)
+        if (_touched.IsEmpty || !_reading.IsCompleted || Stopwatch.GetElapsedTime(_touchedTimestamp) < _settleTime)
             return;
 
+        // A read that fails is logged as a fault, and its paths are dropped: the next change is still taken in.
         ImmutableHashSet<string> touched = _touched;
         _touched = touched.Clear();
-        _isReading = true;
-        Task.Run(() => ReadDirectories(directories, builtIn, touched), stopped).FireAndForget();
-    }
-
-    /// <summary>
-    /// Reads the asset directories again, on a worker, and hands over what it found. Whatever goes wrong is logged, and
-    /// the next change is still taken in.
-    /// </summary>
-    [SuppressMessage(
-        "Design",
-        "CA1031:Do not catch general exception types",
-        Justification = "Whatever goes wrong taking in one batch is logged, and the next is still taken in."
-    )]
-    private void ReadDirectories(ImmutableArray<string> directories, string builtIn, ImmutableHashSet<string> touched)
-    {
-        try
-        {
-            _read.Writer.TryWrite(
-                new AssetDirectoriesReindexed(AssetIndex.Create(files, directories, builtIn), touched)
-            );
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"The asset files' changes could not be taken in: {ex}");
-            _read.Writer.TryWrite(new AssetDirectoriesReindexed(null, touched));
-        }
+        _reading = Task.Run(
+            () =>
+                _read.Writer.TryWrite(
+                    new AssetDirectoriesReindexed(AssetIndex.Create(files, directories, builtIn), touched)
+                ),
+            stopped
+        );
+        _reading.FireAndForget();
     }
 
     /// <summary>
@@ -166,6 +139,6 @@ internal sealed class AssetWatches(IFileSystem files) : IDisposable
 }
 
 /// <summary>
-/// The asset directories as they were read again, none when that failed, and the paths the watches saw that led to it.
+/// The asset directories as they were read again, and the paths the watches saw that led to it.
 /// </summary>
-internal readonly record struct AssetDirectoriesReindexed(AssetIndex? Index, ImmutableHashSet<string> Touched);
+internal readonly record struct AssetDirectoriesReindexed(AssetIndex Index, ImmutableHashSet<string> Touched);

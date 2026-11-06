@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Reflection;
 
 namespace Magic.Utils;
@@ -22,6 +23,21 @@ public static class AssemblyExtensions
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// Every type the assembly holds; those that load, when some don't.
+        /// </summary>
+        internal Type[] GetLoadableTypes()
+        {
+            try
+            {
+                return assembly.GetTypes();
+            }
+            catch (ReflectionTypeLoadException ex)
+            {
+                return [.. ex.Types.OfType<Type>()];
+            }
         }
     }
 }

@@ -87,5 +87,11 @@
       Private="false"
       SkipGetTargetFrameworkProperties="true"
     />
+    <ProjectReference
+      Include="$(MagicRoot)samples/Shared/SamplesShared.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      SkipGetTargetFrameworkProperties="true"
+    />
   </ItemGroup>
 </Project>

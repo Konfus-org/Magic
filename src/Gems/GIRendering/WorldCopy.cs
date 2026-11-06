@@ -1,14 +1,11 @@
 using System.Numerics;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Ecs.Components.Effects;
-using Magic.Files;
-using Magic.Files.Types;
 
 namespace Magic.GIRendering;
 
 /// <summary>
-/// Reads what a frame draws out of the entities into a <see cref="RenderWorld"/>.
+/// Reads what a frame draws beside the renderers out of the entities into a <see cref="RenderWorld"/>.
 /// </summary>
 internal static class WorldCopy
 {
@@ -20,36 +17,12 @@ internal static class WorldCopy
     public static void Read(IEcs ecs, RenderWorld world)
     {
         world.Clear();
-        ReadRenderers(ecs, world);
         ReadCamera(ecs, world);
         ReadSun(ecs, world);
         ReadLights(ecs, world);
-        foreach (EcsChunk<Weather> chunk in ecs.Query<Weather>())
-        {
-            if (chunk.Entities.Length > 0 && world.Fog is null && chunk.First[0].Effects.TryGet(out Fog fog))
-                world.Fog = fog;
-        }
-
         foreach (EcsChunk<Sky> chunk in ecs.Query<Sky>())
         {
             world.HasSky |= chunk.Entities.Length > 0;
-        }
-    }
-
-    private static void ReadRenderers(IEcs ecs, RenderWorld world)
-    {
-        foreach (EcsChunk<Transform, Renderer> chunk in ecs.Query<Transform, Renderer>())
-        {
-            for (int i = 0; i < chunk.Entities.Length; i++)
-            {
-                Renderer renderer = chunk.Second[i];
-                if (renderer.Model != Handle<Model>.None)
-                {
-                    world.Instances.Add(
-                        new RenderInstance(chunk.Entities[i], renderer.Model, renderer.Materials, chunk.First[i])
-                    );
-                }
-            }
         }
     }
 
@@ -62,15 +35,6 @@ internal static class WorldCopy
                 Camera camera = chunk.Second[i];
                 if (camera.Target.IsWindow)
                     world.Camera = new RenderCamera(chunk.First[i], camera.FieldOfView, camera.Near);
-            }
-        }
-
-        foreach (EcsChunk<Camera, PostProcessing> chunk in ecs.Query<Camera, PostProcessing>())
-        {
-            for (int i = 0; i < chunk.Entities.Length; i++)
-            {
-                if (chunk.First[i].Target.IsWindow)
-                    world.Post = chunk.Second[i];
             }
         }
     }

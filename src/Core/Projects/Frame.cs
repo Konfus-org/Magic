@@ -36,9 +36,4 @@ public readonly record struct Frame
     /// <see cref="IGem.Update"/> read.
     /// </summary>
     public FrameEvents Events { get; init; }
-
-    /// <summary>
-    /// How long the main thread worked on the last frame; all zero in the first.
-    /// </summary>
-    public CpuTimings Cpu { get; init; }
 }

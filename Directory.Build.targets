@@ -834,14 +834,16 @@ Success = !Log.HasLoggedErrors;
       Condition="!Exists('$(MagicClangSharpGenerator)')"
       Text="The bindings generator is not at $(MagicClangSharpGenerator), where the restore downloads it."
     />
-    <!-- Its exit code counts its warnings and errors. A warning is printed and passes: a macro it cannot express, which
-         it leaves out, an attribute it does not keep, a type it reads as what it stands for. An error fails the build.
+    <!-- Its exit code counts its warnings and errors. A warning passes and is logged at low importance, read with
+         -v:d: a macro it cannot express, which it leaves out, an attribute it does not keep, a type it reads as what
+         it stands for, none of which C# could hold. An error fails the build, logged as one whatever the verbosity.
          Yielding: the node builds other projects while it runs, as a project waiting on a reference resumes only on
          the node it started on. -->
     <Exec
       Command="&quot;$(MagicClangSharpGenerator)&quot; @&quot;%(_NativeGenerated.Response)&quot;"
       IgnoreExitCode="true"
       CustomErrorRegularExpression="^\s*Error \("
+      StandardOutputImportance="low"
       YieldDuringToolExecution="true"
     />
     <Touch Files="@(_NativeGenerated->'%(Stamp)')" AlwaysCreate="true" />

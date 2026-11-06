@@ -44,82 +44,63 @@ internal sealed class FrameTargets(IGraphicsApi gpu, RenderGraph graph) : IDispo
 
     public GpuBuffer Readback { get; private set; }
 
-    public void Dispose() => Destroy(null);
+    public void Dispose() => Destroy();
 
     /// <summary>
     /// Makes the targets at a size, the old ones destroyed and forgotten by the graph.
     /// </summary>
     public Result Resize(int width, int height)
     {
-        Destroy(graph);
+        Destroy();
         Width = width;
         Height = height;
         HzbLevels = TextureDescription.GetFullLevels(width, height);
-        Result<GpuTexture> visibility = Make(
+        Result<GpuTexture> visibility = gpu.CreateTexture(
             "Visibility",
+            width,
+            height,
             GpuFormat.R32Uint,
             TextureUsages.ColorTarget | TextureUsages.Sampled
         );
-        Result<GpuTexture> depth = Make(
+        Result<GpuTexture> depth = gpu.CreateTexture(
             "Depth",
+            width,
+            height,
             GpuFormat.D32Sfloat,
             TextureUsages.DepthTarget | TextureUsages.Sampled
         );
-        Result<GpuTexture> hzb = Make(
+        Result<GpuTexture> hzb = gpu.CreateTexture(
             "Depth pyramid",
+            width,
+            height,
             GpuFormat.R32Sfloat,
-            TextureUsages.Storage | TextureUsages.Sampled,
-            HzbLevels
+            levels: HzbLevels
         );
-        Result<GpuTexture> normal = Make(
-            "GBuffer normal",
-            GpuFormat.R16G16Unorm,
-            TextureUsages.Storage | TextureUsages.Sampled
-        );
-        Result<GpuTexture> baseColor = Make(
-            "GBuffer base",
-            GpuFormat.R8G8B8A8Unorm,
-            TextureUsages.Storage | TextureUsages.Sampled
-        );
-        Result<GpuTexture> surface = Make(
-            "GBuffer surface",
-            GpuFormat.R8G8B8A8Unorm,
-            TextureUsages.Storage | TextureUsages.Sampled
-        );
-        Result<GpuTexture> velocity = Make(
-            "Velocity",
-            GpuFormat.R16G16B16A16Sfloat,
-            TextureUsages.Storage | TextureUsages.Sampled
-        );
-        Result<GpuTexture> hdr = Make(
-            "HDR",
-            GpuFormat.R16G16B16A16Sfloat,
-            TextureUsages.Storage | TextureUsages.Sampled
-        );
-        Result<GpuTexture> output = Make(
+        Result<GpuTexture> normal = gpu.CreateTexture("GBuffer normal", width, height, GpuFormat.R16G16Unorm);
+        Result<GpuTexture> baseColor = gpu.CreateTexture("GBuffer base", width, height, GpuFormat.R8G8B8A8Unorm);
+        Result<GpuTexture> surface = gpu.CreateTexture("GBuffer surface", width, height, GpuFormat.R8G8B8A8Unorm);
+        Result<GpuTexture> velocity = gpu.CreateTexture("Velocity", width, height, GpuFormat.R16G16B16A16Sfloat);
+        Result<GpuTexture> hdr = gpu.CreateTexture("HDR", width, height, GpuFormat.R16G16B16A16Sfloat);
+        Result<GpuTexture> output = gpu.CreateTexture(
             "Output",
+            width,
+            height,
             GpuFormat.R8G8B8A8Unorm,
             TextureUsages.Storage | TextureUsages.ColorTarget | TextureUsages.CopySource
         );
         Result<GpuBuffer> readback = gpu.CreateBuffer(
-            new BufferDescription
-            {
-                Bytes = (long)width * height * 4,
-                Usage = BufferUsages.Readback,
-                Name = "Output readback",
-            }
+            "Output readback",
+            (long)width * height * 4,
+            BufferUsages.Readback
         );
         foreach (
-            Result<GpuTexture> made in (ReadOnlySpan<Result<GpuTexture>>)
-                [visibility, depth, hzb, normal, baseColor, surface, velocity, hdr, output]
+            Result made in (ReadOnlySpan<Result>)
+                [visibility, depth, hzb, normal, baseColor, surface, velocity, hdr, output, readback]
         )
         {
             if (!made.Ok)
-                return Result.Failure($"a frame target was not made: {made.Error}");
+                return made;
         }
-
-        if (!readback.Ok)
-            return Result.Failure($"the output's readback buffer was not made: {readback.Error}");
 
         Visibility = visibility.Value;
         Depth = depth.Value;
@@ -135,38 +116,19 @@ internal sealed class FrameTargets(IGraphicsApi gpu, RenderGraph graph) : IDispo
         return Result.Success();
     }
 
-    private Result<GpuTexture> Make(string name, GpuFormat format, TextureUsages usage, int levels = 1) =>
-        gpu.CreateTexture(
-            new TextureDescription
-            {
-                Width = Width,
-                Height = Height,
-                Format = format,
-                Usage = usage,
-                Levels = levels,
-                Name = name,
-            }
-        );
-
-    private void Destroy(RenderGraph? forgetIn)
+    private void Destroy()
     {
         foreach (
             GpuTexture texture in (ReadOnlySpan<GpuTexture>)
                 [Visibility, Depth, Hzb, GBufferNormal, GBufferBase, GBufferSurface, Velocity, Hdr, Output]
         )
         {
-            if (texture.IsNone)
-                continue;
-
-            forgetIn?.Forget(texture);
+            graph.Forget(texture);
             gpu.Destroy(texture);
         }
 
-        if (!Readback.IsNone)
-        {
-            forgetIn?.Forget(Readback);
-            gpu.Destroy(Readback);
-        }
+        graph.Forget(Readback);
+        gpu.Destroy(Readback);
 
         Visibility = GpuTexture.None;
         Depth = GpuTexture.None;

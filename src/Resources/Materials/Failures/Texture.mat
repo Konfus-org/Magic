@@ -1,5 +1,5 @@
 {
-    "visuals": {
+    "shading": {
         "shader": { "id": 10003 },
         "params": {
             "kind": { "x": 2 }

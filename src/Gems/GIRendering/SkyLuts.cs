@@ -1,5 +1,4 @@
 using Magic.Gpu;
-using Magic.Rendering;
 using Magic.Utils;
 
 namespace Magic.GIRendering;
@@ -8,7 +7,7 @@ namespace Magic.GIRendering;
 /// The sky's three tables, made each frame while there is a sky: how much of the sun gets through the air, what the air
 /// scatters back into itself, and the sky as the camera sees it.
 /// </summary>
-internal sealed class SkyLuts(IGraphicsApi gpu, RenderGraph graph, GpuPipelines pipelines) : IDisposable
+internal sealed class SkyLuts(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposable
 {
     private readonly GpuPass _transmittancePass = pipelines.Compute(
         "Sky: transmittance",
@@ -32,20 +31,29 @@ internal sealed class SkyLuts(IGraphicsApi gpu, RenderGraph graph, GpuPipelines 
     {
         foreach (GpuTexture texture in (ReadOnlySpan<GpuTexture>)[Transmittance, MultiScattering, View])
         {
-            if (!texture.IsNone)
-                gpu.Destroy(texture);
+            gpu.Destroy(texture);
         }
     }
 
     public Result Create()
     {
-        Result<GpuTexture> transmittance = CreateTable("Sky transmittance", 256, 64);
-        Result<GpuTexture> multiScattering = CreateTable("Sky multi-scattering", 32, 32);
-        Result<GpuTexture> view = CreateTable("Sky view", 192, 108);
+        Result<GpuTexture> transmittance = gpu.CreateTexture(
+            "Sky transmittance",
+            256,
+            64,
+            GpuFormat.R16G16B16A16Sfloat
+        );
+        Result<GpuTexture> multiScattering = gpu.CreateTexture(
+            "Sky multi-scattering",
+            32,
+            32,
+            GpuFormat.R16G16B16A16Sfloat
+        );
+        Result<GpuTexture> view = gpu.CreateTexture("Sky view", 192, 108, GpuFormat.R16G16B16A16Sfloat);
         foreach (Result<GpuTexture> texture in (ReadOnlySpan<Result<GpuTexture>>)[transmittance, multiScattering, view])
         {
             if (!texture.Ok)
-                return Result.Failure($"a sky table was not made: {texture.Error}");
+                return Result.Failure(texture.Error);
         }
 
         Transmittance = transmittance.Value;
@@ -55,40 +63,18 @@ internal sealed class SkyLuts(IGraphicsApi gpu, RenderGraph graph, GpuPipelines 
         return Result.Success();
     }
 
-    /// <summary>
-    /// Says a pass reads the tables.
-    /// </summary>
-    public void UseForReading()
-    {
-        graph.Use(Transmittance, GpuAccess.ShaderRead);
-        graph.Use(MultiScattering, GpuAccess.ShaderRead);
-        graph.Use(View, GpuAccess.ShaderRead);
-    }
-
     public void Record(in GpuConstants header, GpuBuffer frameConstants, GpuBuffer lightingConstants)
     {
-        _transmittancePass.Run(header).Reads(lightingConstants).Writes(Transmittance).Dispatch(256 / 8, 64 / 8);
+        _transmittancePass.Run(header).Reads(lightingConstants).Writes(Transmittance).DispatchOver(256, 64);
         _multiScatteringPass
             .Run(header)
             .Reads(lightingConstants, Transmittance)
             .Writes(MultiScattering)
-            .Dispatch(32 / 8, 32 / 8);
+            .DispatchOver(32, 32);
         _viewPass
             .Run(header)
             .Reads(frameConstants, lightingConstants, Transmittance, MultiScattering)
             .Writes(View)
-            .Dispatch(192 / 8, (108 + 7) / 8);
+            .DispatchOver(192, 108);
     }
-
-    private Result<GpuTexture> CreateTable(string name, int width, int height) =>
-        gpu.CreateTexture(
-            new TextureDescription
-            {
-                Width = width,
-                Height = height,
-                Format = GpuFormat.R16G16B16A16Sfloat,
-                Usage = TextureUsages.Storage | TextureUsages.Sampled,
-                Name = name,
-            }
-        );
 }

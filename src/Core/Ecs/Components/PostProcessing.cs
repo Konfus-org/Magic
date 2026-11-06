@@ -4,9 +4,9 @@ using Magic.Files.Types;
 namespace Magic.Ecs.Components;
 
 /// <summary>
-/// What a <see cref="Camera"/> does to its picture after the lighting: up to four post effects, each a shader that
-/// implements the pixel effect contract, run in order, and how the exposure meter and the bloom are set. A camera
-/// without one draws with the defaults.
+/// What is done to the picture after the lighting: up to four post effects, each a shader that implements the pixel
+/// effect contract, run in order, and how the exposure meter and the bloom are set. It goes on any entity, and the
+/// renderer takes the first it finds; with none, the picture gets the defaults.
 /// </summary>
 public record struct PostProcessing : IComponent
 {

@@ -152,9 +152,10 @@ public interface IDebugUI
     /// <summary>
     /// A header that folds away what is drawn under it, open until clicked; <paramref name="folds"/> folds it this frame
     /// as a click would, for whoever draws it to fold it once and leave it to clicks after. True while open: draw what is
-    /// under it only then.
+    /// under it only then. <paramref name="depth"/> nests it under the headers before it: it and what follows it are
+    /// indented a step for each, until the next header in the window or view.
     /// </summary>
-    bool Header(string label, bool folds = false);
+    bool Header(string label, bool folds = false, int depth = 0);
 
     /// <summary>
     /// Opens a table headed by <paramref name="columns"/>, whose rows are drawn with <see cref="Row"/> until

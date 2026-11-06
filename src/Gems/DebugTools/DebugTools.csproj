@@ -2,7 +2,7 @@
   <!-- A gem: Magic loads it from Gems/DebugTools/DebugTools.dll when a project lists DebugTools. -->
   <PropertyGroup>
     <!-- Shown beside the gem as Magic starts it. -->
-    <Description>Debug windows drawn with the debug UI: the frame rate, CPU and GPU timings and memory use.</Description>
+    <Description>Debug lines and windows drawn with the debug UI: the frame rate, CPU and GPU timings and memory use.</Description>
     <Version>1.0.0</Version>
     <Authors>Konfus</Authors>
     <!-- Copies the gem's own NuGet dependencies next to it, where its load context finds them. -->
@@ -10,6 +10,9 @@
   </PropertyGroup>
   <ItemGroup>
     <AssemblyMetadata Include="Magic.Author" Value="$(Authors)" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="OpenTelemetry" />
   </ItemGroup>
   <ItemGroup>
     <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its interfaces. -->

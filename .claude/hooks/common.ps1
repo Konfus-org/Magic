@@ -28,32 +28,26 @@ function ConvertTo-Key([string] $path) { return $path.Replace('\', '/').TrimEnd(
 function Write-HookJson($value) { [Console]::Out.Write(($value | ConvertTo-Json -Compress -Depth 6)) }
 
 # The checkout a path is in: its top folder, whether it is a linked worktree, the repository's shared git folder,
-# and the merge target, which is the branch checked out in the main checkout.
+# and the merge target, which is the branch checked out in the main checkout. One git call.
 function Get-Checkout([string] $path) {
     if (-not $path) { return $null }
     $folder = $path
     while ($folder -and -not (Test-Path -LiteralPath $folder -PathType Container)) { $folder = Split-Path -Parent $folder }
     if (-not $folder) { return $null }
-    $top = Invoke-Git $folder @('rev-parse', '--show-toplevel')
-    if (-not $top) { return $null }
-    $gitDir = Invoke-Git $folder @('rev-parse', '--path-format=absolute', '--git-dir')
-    $common = Invoke-Git $folder @('rev-parse', '--path-format=absolute', '--git-common-dir')
-    $main = $null
+    $lines = @(Invoke-Git $folder @('rev-parse', '--path-format=absolute', '--show-toplevel', '--git-dir', '--git-common-dir'))
+    if ($lines.Count -lt 3) { return $null }
+    $common = [string]$lines[2]
     $target = $null
-    foreach ($line in @(Invoke-Git $folder @('worktree', 'list', '--porcelain'))) {
-        if (-not $main) {
-            if ($line -like 'worktree *') { $main = $line.Substring(9) }
-            continue
-        }
-        if ($line -like 'branch refs/heads/*') { $target = $line.Substring(18); break }
-        if ($line -eq '') { break }
+    $head = Join-Path $common 'HEAD'
+    if (Test-Path -LiteralPath $head) {
+        $ref = [string](Get-Content -LiteralPath $head -TotalCount 1)
+        if ($ref -match '^ref: refs/heads/(.+)$') { $target = $Matches[1].Trim() }
     }
     return [pscustomobject]@{
-        Top        = [string]$top
-        Common     = [string]$common
-        Main       = [string]$main
+        Top        = [string]$lines[0]
+        Common     = $common
         Target     = $target
-        IsWorktree = (ConvertTo-Key ([string]$gitDir)) -ne (ConvertTo-Key ([string]$common))
+        IsWorktree = (ConvertTo-Key ([string]$lines[1])) -ne (ConvertTo-Key $common)
     }
 }
 
@@ -62,27 +56,6 @@ function Test-ThisRepository($checkout) {
     if (-not $checkout -or -not $env:CLAUDE_PROJECT_DIR) { return $false }
     $project = Invoke-Git $env:CLAUDE_PROJECT_DIR @('rev-parse', '--path-format=absolute', '--git-common-dir')
     return [bool]$project -and (ConvertTo-Key ([string]$project)) -eq (ConvertTo-Key $checkout.Common)
-}
-
-# The worktree this session last edited, which the PostToolUse hook records, for hooks whose cwd is elsewhere.
-function Get-SessionRecord($checkoutCommon, [string] $sessionId) {
-    if (-not $sessionId) { return $null }
-    return Join-Path (Join-Path $checkoutCommon 'agent-sessions') $sessionId
-}
-
-# The checkout a hook should judge: its cwd when that is a linked worktree, else the worktree the session edited last.
-function Resolve-SliceCheckout($hook) {
-    $cwd = [string](Get-Field $hook 'cwd')
-    if (-not $cwd) { $cwd = $env:CLAUDE_PROJECT_DIR }
-    $checkout = Get-Checkout $cwd
-    if ($checkout -and $checkout.IsWorktree) { return $checkout }
-    $project = Get-Checkout $env:CLAUDE_PROJECT_DIR
-    if (-not $project) { return $null }
-    $record = Get-SessionRecord $project.Common ([string](Get-Field $hook 'session_id'))
-    if (-not $record -or -not (Test-Path -LiteralPath $record)) { return $null }
-    $recorded = Get-Checkout ([string](Get-Content -LiteralPath $record -TotalCount 1))
-    if ($recorded -and $recorded.IsWorktree) { return $recorded }
-    return $null
 }
 
 # The checkout's state as tools/Scripts/AgentTaskComplete.ps1 stamps it: the git tree of every file, tracked or new,
@@ -120,6 +93,7 @@ function Get-ValidationStamp($checkout, [string] $tree) {
     return Join-Path (Join-Path $checkout.Common 'agent-task-complete') $tree
 }
 
-function Get-ReviewStamp($checkout, [string] $tree) {
-    return Join-Path (Join-Path $checkout.Common 'agent-review') $tree
+# A slice is reviewed once per branch. The stamp's first line is the slice's changed lines when it was reviewed.
+function Get-ReviewStamp($checkout, [string] $branch) {
+    return Join-Path (Join-Path $checkout.Common 'agent-review') ($branch -replace '[\\/:]', '__')
 }

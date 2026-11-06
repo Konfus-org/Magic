@@ -17,7 +17,7 @@ namespace Magic.Ecs;
 /// <para>
 /// Changing which components an entity has (<see cref="Create()"/>, <see cref="Destroy"/>, <see cref="Remove{T}"/>, or
 /// <see cref="Set{T}"/> of one it lacks) moves it between columns, so it throws during a query's loop or a run: record
-/// it in an <see cref="EntitiesChangeList"/>, and apply that after. Every call but <see cref="IsAlive"/> and
+/// it in an <see cref="EntityCommands"/>, and apply that after. Every call but <see cref="IsAlive"/> and
 /// <see cref="Has{T}"/> throws for an entity that is not alive.
 /// </para>
 /// </summary>

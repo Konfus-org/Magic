@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Metrics;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Events;
@@ -12,10 +13,9 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Magic.Projects;
 
 /// <summary>
-/// The run's gems: makes the ones the registry found as it is made, each after the gems it needs, drives them through the
-/// frame, restarts the run once a build of one has settled, and ends them as it is disposed. A gem that can't be made is
-/// logged, and the others go on without it; one that throws in a hook is logged and leaves every hook, and the frame goes
-/// on.
+/// The run's gems: makes the ones registered, in their order, as it is made, drives them through the frame, restarts
+/// the run once a build of one has settled, and ends them as it is disposed. A gem that can't be made is logged, and the
+/// others go on without it; one that throws in a hook is logged and leaves every hook, and the frame goes on.
 /// </summary>
 internal sealed class Gems : IDisposable
 {
@@ -24,16 +24,45 @@ internal sealed class Gems : IDisposable
     /// </summary>
     private static readonly TimeSpan _settleTime = TimeSpan.FromSeconds(1);
 
-    private readonly GemRegistry _registry;
+    /// <summary>
+    /// Each <see cref="Hook"/>'s name, made once, as its metric's tag.
+    /// </summary>
+    private static readonly string[] _hookNames = Enum.GetNames<Hook>();
+
+    private static readonly Histogram<double> _frameDuration = Metrics.Meter.CreateHistogram<double>(
+        "magic.core.frame.duration",
+        "s",
+        "From one frame to the next."
+    );
+
+    private static readonly Histogram<double> _frameWorkDuration = Metrics.Meter.CreateHistogram<double>(
+        "magic.core.frame.work.duration",
+        "s",
+        "The main thread's work on a frame, the waits for the GPU and the display among it."
+    );
+
+    private static readonly Histogram<double> _hookDuration = Metrics.Meter.CreateHistogram<double>(
+        "magic.core.gem.hook.duration",
+        "s",
+        "One gem's hook."
+    );
+
     private readonly IServiceProvider _provider;
+
     private readonly App _app;
+
     private readonly IFileSystem _files;
+
     private readonly Assets _assets;
-    private readonly Assemblies _assemblies;
+
     private readonly World _world;
+
     private readonly EventCoordinator _events;
+
     private readonly FrameClock _clock = new();
+
     private readonly List<LoadedGem> _loaded = [];
+
     private readonly Subscriptions _watches = [];
 
     /// <summary>
@@ -42,38 +71,31 @@ internal sealed class Gems : IDisposable
     private long _buildTimestamp;
 
     /// <summary>
-    /// How long the main thread worked on the last frame, which the next frame carries.
-    /// </summary>
-    private CpuTimings _lastCpu;
-
-    /// <summary>
     /// When the last sleep ended, 0 before the first frame's: where a frame's work starts.
     /// </summary>
     private long _frameStart;
 
     /// <summary>
-    /// Makes the gems through <paramref name="provider"/>, which was built from the services they were registered with.
+    /// Makes the gems <paramref name="registered"/> through <paramref name="provider"/>, which was built from the services
+    /// they were registered with.
     /// </summary>
     public Gems(
-        GemRegistry registry,
+        List<GemInfo> registered,
         IServiceProvider provider,
         App app,
         IFileSystem files,
         Assets assets,
-        Assemblies assemblies,
         World world,
         EventCoordinator events
     )
     {
-        _registry = registry;
         _provider = provider;
         _app = app;
         _files = files;
         _assets = assets;
-        _assemblies = assemblies;
         _world = world;
         _events = events;
-        Load();
+        Load(registered);
     }
 
     /// <summary>
@@ -85,75 +107,102 @@ internal sealed class Gems : IDisposable
         for (int i = _loaded.Count - 1; i >= 0; i--)
         {
             Log.Info($"Unloading {_loaded[i].Name}.");
-            _loaded[i].Dispose();
+            _loaded[i].Ends.Dispose();
         }
 
         _loaded.Clear();
     }
 
     /// <summary>
-    /// One frame: restarts the run if a gem was built, works out the clocks, runs every gem's hooks in order with the fixed
-    /// steps the clock owes, and sleeps until the next frame is due. Time begins with the first frame, not with what was
-    /// loaded before it.
+    /// One frame: restarts the run if a gem was built, works out the clocks, turns what spins, runs every gem's hooks in
+    /// order with the fixed steps the clock owes. Presenting to the window sets the pace; with no window, frames run as
+    /// fast as they go. Time begins with the first frame, not with what was loaded before it.
     /// </summary>
     public void Pump()
     {
         RestartIfBuilt();
 
-        // While the world loads, its time runs as it is, as the gems may need steps to get ready.
-        bool isPaused = _app.IsPaused || (_world.IsPaused && !_world.IsLoading);
-        float timeScale = _world.IsLoading ? 1 : _world.TimeScale;
-        Frame frame = _clock.Advance(isPaused, timeScale, out int fixedSteps) with
-        {
-            Events = _events.Take(),
-            Cpu = _lastCpu,
-        };
+        // While the loading screen shows, time runs as it is, so it moves however the world it replaces was paused.
+        bool isPaused = _app.IsPaused || (_world.IsPaused && !_world.IsShowingLoadingScreen);
+        float timeScale = _world.IsShowingLoadingScreen ? 1 : _world.TimeScale;
+        Frame frame = _clock.Advance(isPaused, timeScale, out int fixedSteps) with { Events = _events.Take() };
 
-        long updateStart = Stopwatch.GetTimestamp();
+        // The first frame's time is the load's before it, not a frame's.
+        if (_frameStart != 0)
+            _frameDuration.Record(frame.AppDeltaSec);
+
+        _world.TurnSpins((float)frame.SimDeltaSec);
+        long hooksStart = Stopwatch.GetTimestamp();
         RunHook(Hook.Update, frame);
-        long fixedStart = Stopwatch.GetTimestamp();
         for (int step = 1; step <= fixedSteps; step++)
         {
             RunHook(Hook.FixedUpdate, _clock.GetFixedStep(frame, step));
         }
 
         _clock.EndFixedSteps(fixedSteps);
-        long lateStart = Stopwatch.GetTimestamp();
         RunHook(Hook.LateUpdate, frame);
-        long renderStart = Stopwatch.GetTimestamp();
         RunHook(Hook.Render, frame);
-        long renderEnd = Stopwatch.GetTimestamp();
-        _lastCpu = new CpuTimings(
-            Stopwatch.GetElapsedTime(updateStart, fixedStart).TotalMilliseconds,
-            Stopwatch.GetElapsedTime(fixedStart, lateStart).TotalMilliseconds,
-            Stopwatch.GetElapsedTime(lateStart, renderStart).TotalMilliseconds,
-            Stopwatch.GetElapsedTime(renderStart, renderEnd).TotalMilliseconds,
-            Stopwatch.GetElapsedTime(_frameStart == 0 ? updateStart : _frameStart, renderEnd).TotalMilliseconds
-        );
-        _clock.SleepUntilDue();
+        _frameWorkDuration.RecordSince(_frameStart == 0 ? hooksStart : _frameStart);
         _frameStart = Stopwatch.GetTimestamp();
+    }
+
+    /// <summary>
+    /// Calls <paramref name="hook"/> on <paramref name="gem"/>, which leaves the frame if it throws.
+    /// </summary>
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Whatever a gem throws, it is logged and the gem leaves the frame; the others go on."
+    )]
+    private static void RunHook(Hook hook, in Frame frame, LoadedGem gem)
+    {
+        try
+        {
+            switch (hook)
+            {
+                case Hook.Update:
+                    gem.Instance.Update(in frame);
+                    break;
+                case Hook.FixedUpdate:
+                    gem.Instance.FixedUpdate(in frame);
+                    break;
+                case Hook.LateUpdate:
+                    gem.Instance.LateUpdate(in frame);
+                    break;
+                case Hook.Render:
+                    gem.Instance.Render(in frame);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(hook), hook, "There is no such hook.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Gem {gem.Name} failed in {hook} and stops running: {ex}");
+            gem.HasFailed = true;
+        }
     }
 
     /// <summary>
     /// Makes each gem, after registering what it brings so its constructor can find it: its folder of assets, its asset
     /// types and its code, which goes when it does. Then it sets the gem up: the app's window for as long as it lasts when it provides one, the world's ECS, its
-    /// place on the log when it is a sink, and the asset types it reads and writes.
+    /// place on the log when it is a sink, its hooks into domain loading, and the asset types it reads and writes.
     /// </summary>
     [SuppressMessage(
         "Design",
         "CA1031:Do not catch general exception types",
         Justification = "Whatever a gem's constructor throws, it is logged and the gem is not made; the others go on."
     )]
-    private void Load()
+    private void Load(List<GemInfo> registered)
     {
-        foreach (GemInfo gem in GetSorted())
+        foreach (GemInfo gem in registered)
         {
             Watch(gem);
             if (gem.Resources is not null)
                 _assets.Register(gem.Resources);
 
             _assets.Register(gem.Type.Assembly);
-            Subscription code = _assemblies.Register(gem.Type.Assembly);
+            Subscription code = Assemblies.Register(gem.Type.Assembly);
             IGem made;
             try
             {
@@ -169,13 +218,17 @@ internal sealed class Gems : IDisposable
                 continue;
             }
 
-            if (made is IEcs ecs)
-                _world.Ecs = ecs;
-
-            LoadedGem loaded = new(made, gem);
+            LoadedGem loaded = new(
+                made,
+                gem.Name,
+                [
+                    new Subscription(gem.Context.Unload),
+                    new Subscription(() => (made as IDisposable)?.Dispose()),
+                    code,
+                    _assets.Register(made),
+                ]
+            );
             _loaded.Add(loaded);
-            loaded.Subscriptions.Add(code);
-            loaded.Subscriptions.Add(_assets.Register(made));
 
             // The gem is an IWindow in any mode, but a headless run has no window.
             if (made is IWindow window && !_app.IsHeadless)
@@ -183,11 +236,17 @@ internal sealed class Gems : IDisposable
                 _app.Window = window;
 
                 // The window is the gem, which can't unload while the app holds it.
-                loaded.Subscriptions.Add(new Subscription(() => _app.Window = null));
+                loaded.Ends.Add(new Subscription(() => _app.Window = null));
             }
 
             if (made is ILogSink sink)
-                loaded.Subscriptions.Add(Log.Register(sink));
+                loaded.Ends.Add(Log.Register(sink));
+
+            if (made is IEcs ecs)
+                loaded.Ends.Add(_world.Register(ecs));
+
+            if (made is IHookIntoDomainLoading hooks)
+                loaded.Ends.Add(_world.Register(hooks));
 
             string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
             Log.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");
@@ -211,43 +270,20 @@ internal sealed class Gems : IDisposable
     /// <summary>
     /// Calls <paramref name="hook"/> on every gem still in the frame, in the order they were made.
     /// </summary>
-    [SuppressMessage(
-        "Design",
-        "CA1031:Do not catch general exception types",
-        Justification = "Whatever a gem throws, it is logged and the gem leaves the frame; the others go on."
-    )]
     private void RunHook(Hook hook, in Frame frame)
     {
         foreach (LoadedGem gem in _loaded)
         {
-            if (gem.HasLeft)
+            if (gem.HasFailed)
                 continue;
 
-            try
-            {
-                switch (hook)
-                {
-                    case Hook.Update:
-                        gem.Gem.Update(in frame);
-                        break;
-                    case Hook.FixedUpdate:
-                        gem.Gem.FixedUpdate(in frame);
-                        break;
-                    case Hook.LateUpdate:
-                        gem.Gem.LateUpdate(in frame);
-                        break;
-                    case Hook.Render:
-                        gem.Gem.Render(in frame);
-                        break;
-                    default:
-                        throw new ArgumentOutOfRangeException(nameof(hook), hook, "There is no such hook.");
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"Gem {gem.Name} failed in {hook} and stops running: {ex}");
-                gem.HasLeft = true;
-            }
+            long start = _hookDuration.Start();
+            RunHook(hook, frame, gem);
+            _hookDuration.RecordSince(
+                start,
+                new KeyValuePair<string, object?>(Metrics.GemNameTag, gem.Name),
+                new KeyValuePair<string, object?>(Metrics.HookTag, _hookNames[(int)hook])
+            );
         }
     }
 
@@ -275,60 +311,6 @@ internal sealed class Gems : IDisposable
     private void Touch() => Volatile.Write(ref _buildTimestamp, Stopwatch.GetTimestamp());
 
     /// <summary>
-    /// The gems the registry found, each after the gems it needs. A gem in a cycle, or one that needs it, is logged and
-    /// left out, since the provider hangs making a cycle.
-    /// </summary>
-    private List<GemInfo> GetSorted()
-    {
-        List<GemInfo> sorted = [];
-        HashSet<string> placed = new(StringComparer.OrdinalIgnoreCase);
-        HashSet<string> refused = new(StringComparer.OrdinalIgnoreCase);
-        HashSet<string> visiting = new(StringComparer.OrdinalIgnoreCase);
-        foreach (GemInfo gem in _registry.Gems)
-        {
-            Place(gem, sorted, placed, refused, visiting);
-        }
-
-        return sorted;
-    }
-
-    /// <summary>
-    /// Places <paramref name="gem"/> in <paramref name="sorted"/> after the gems it needs: whether it was.
-    /// </summary>
-    private bool Place(
-        GemInfo gem,
-        List<GemInfo> sorted,
-        HashSet<string> placed,
-        HashSet<string> refused,
-        HashSet<string> visiting
-    )
-    {
-        if (placed.Contains(gem.Name))
-            return true;
-
-        // A gem visited again before it is placed is in a cycle; the gem that needs it says so.
-        if (refused.Contains(gem.Name) || !visiting.Add(gem.Name))
-            return false;
-
-        foreach (string name in gem.Needs)
-        {
-            if (_registry.Find(name) is not { } need || Place(need, sorted, placed, refused, visiting))
-                continue;
-
-            string why = visiting.Contains(name) ? "which needs it: a cycle" : "which was not made";
-            Log.Error($"Gem {gem.Name} was not made: it needs {name}, {why}.");
-            visiting.Remove(gem.Name);
-            refused.Add(gem.Name);
-            return false;
-        }
-
-        visiting.Remove(gem.Name);
-        placed.Add(gem.Name);
-        sorted.Add(gem);
-        return true;
-    }
-
-    /// <summary>
     /// A hook of <see cref="IGem"/>'s.
     /// </summary>
     private enum Hook : byte
@@ -337,5 +319,18 @@ internal sealed class Gems : IDisposable
         FixedUpdate,
         LateUpdate,
         Render,
+    }
+
+    /// <summary>
+    /// A gem as made, and what ends with it, last added first: its subscriptions (its place on the log when it is a
+    /// sink, the asset types it reads, the hooks it joined), then the gem itself, then its load context, which frees its
+    /// assemblies once nothing refers to the gem.
+    /// </summary>
+    private sealed record LoadedGem(IGem Instance, string Name, Subscriptions Ends)
+    {
+        /// <summary>
+        /// Whether the gem threw in a hook, so it no longer runs: it is still ended with the others.
+        /// </summary>
+        public bool HasFailed { get; set; }
     }
 }

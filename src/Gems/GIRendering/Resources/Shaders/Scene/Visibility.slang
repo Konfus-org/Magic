@@ -1,8 +1,15 @@
 // What the cluster cull leaves for the draw and the resolve: the visible-cluster list, the draw arguments, the counts
 // buffer's words and the ids the visibility buffer holds (Burns and Hunt, "The Visibility Buffer", 2013), and the
 // barycentrics of a pixel in its triangle with their screen derivatives (Schied and Dachsbacher, "Deferred Attribute
-// Interpolation for Memory-Efficient Deferred Shading", 2015).
+// Interpolation for Memory-Efficient Deferred Shading", 2015), and the triangle a pixel shows, which the passes after
+// the draw read their surface from.
 module "Scene/Visibility";
+
+import Core.Heap;
+import Core.Frame;
+import Scene.Instances;
+import Scene.Clusters;
+import Scene.Vertices;
 
 // One cluster drawn this frame: its row of the visible list is what the visibility buffer's ids name.
 public struct VisibleCluster
@@ -92,3 +99,45 @@ public Barycentrics ComputeBarycentrics(float4 clip0, float4 clip1, float4 clip2
 public float3 Interpolate(float3 a, float3 b, float3 c, float3 lambda) { return a * lambda.x + b * lambda.y + c * lambda.z; }
 
 public float2 Interpolate(float2 a, float2 b, float2 c, float3 lambda) { return a * lambda.x + b * lambda.y + c * lambda.z; }
+
+// The triangle a pixel shows: the instance and cluster it is from, its vertices in the model's frame, where they are
+// relative to the camera, and the pixel's barycentrics in it.
+public struct PixelTriangle
+{
+    public GpuInstance instance;
+    public GpuCluster cluster;
+    public Vertex v0;
+    public Vertex v1;
+    public Vertex v2;
+    public float3 p0;
+    public float3 p1;
+    public float3 p2;
+    public Barycentrics bary;
+}
+
+// The triangle a decoded visibility id names, with the barycentrics of the pixel at pixelNdc, clip-space xy in
+// [-1, 1] with y up.
+public PixelTriangle LoadPixelTriangle(FrameConstants frame, uint visibleIndex, uint triangle, float2 pixelNdc)
+{
+    ArrayRef<VisibleCluster> visible = { frame.visibleClusters };
+    VisibleCluster entry = visible[visibleIndex];
+    PixelTriangle result;
+    result.instance = LoadInstance(frame.instances, entry.instance);
+    result.cluster = LoadCluster(frame.clusters, entry.cluster);
+
+    uint first = result.cluster.indexOffset + triangle * 3u;
+    result.v0 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first));
+    result.v1 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first + 1u));
+    result.v2 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first + 2u));
+    result.p0 = Relative(frame, ToWorld(result.instance.world, result.v0.position));
+    result.p1 = Relative(frame, ToWorld(result.instance.world, result.v1.position));
+    result.p2 = Relative(frame, ToWorld(result.instance.world, result.v2.position));
+    result.bary = ComputeBarycentrics(
+        mul(float4(result.p0, 1.0), frame.viewProjection),
+        mul(float4(result.p1, 1.0), frame.viewProjection),
+        mul(float4(result.p2, 1.0), frame.viewProjection),
+        pixelNdc,
+        float2(frame.width, frame.height)
+    );
+    return result;
+}

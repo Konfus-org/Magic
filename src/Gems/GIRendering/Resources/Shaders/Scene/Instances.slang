@@ -9,7 +9,7 @@ public static const uint MaterialSlots = 8u;
 public struct GpuInstance
 {
     // The model's frame to the world, row-major, for row vectors, the world to the model's frame, and the model's
-    // frame to the world last frame.
+    // frame to the world before it last changed, in the frame movedFrame.
     public float4x4 world;
     public float4x4 inverseWorld;
     public float4x4 previousWorld;
@@ -19,7 +19,7 @@ public struct GpuInstance
     // The instance's clusters in the cluster pool.
     public uint clusterOffset;
     public uint clusterCount;
-    public uint padding0;
+    public uint movedFrame;
     public uint padding1;
     // The material table's row for each slot.
     public uint materials[MaterialSlots];
@@ -32,6 +32,12 @@ public GpuInstance LoadInstance(uint table, uint index)
 }
 
 public uint GetMaterial(GpuInstance instance, uint slot) { return instance.materials[min(slot, MaterialSlots - 1u)]; }
+
+// The model's frame to the world last frame: where it was before it moved, when it moved this frame, else where it is.
+public float4x4 GetPreviousWorld(GpuInstance instance, uint frameIndex)
+{
+    return instance.movedFrame == frameIndex ? instance.previousWorld : instance.world;
+}
 
 // The most a world matrix scales a length by: the longest of its axes.
 public float GetMaxScale(float4x4 world)
