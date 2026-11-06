@@ -160,11 +160,6 @@ internal sealed record BuiltInAssetMissing(string Key, string Message) : AssetCh
 internal sealed record AssetFolderListed(ulong Id, string Folder) : AssetChange;
 
 /// <summary>
-/// What asset <paramref name="Id"/> depends on was found without loading it.
-/// </summary>
-internal sealed record AssetDependenciesFound(ulong Id, ImmutableArray<ulong> Dependencies) : AssetChange;
-
-/// <summary>
 /// A worker finished reading asset <paramref name="Id"/>'s file, which made <paramref name="Made"/>.
 /// </summary>
 internal readonly record struct AssetFileRead(ulong Id, Made Made);

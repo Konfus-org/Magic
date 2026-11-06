@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Text.Json;
 using Magic.Utils;
 
 namespace Magic.Files.Pipeline;
@@ -43,20 +42,10 @@ internal delegate Task<Made> AssetImportRun(
 );
 
 /// <summary>
-/// Reads an asset's file as its type, by Core itself, loading nothing: for finding what it holds.
+/// What a load of an asset gave: the asset, of its type, or why there is none; and its version, a hash of its file and
+/// <c>.meta</c>.
 /// </summary>
-internal delegate Result<object> AssetBuiltInReader(ReadOnlyMemory<byte> bytes, JsonElement settings);
-
-/// <summary>
-/// An asset type, as a <c>.meta</c>'s <c>"type"</c> names it: the type, and how its files are read.
-/// </summary>
-internal sealed record AssetType(Type Type, AssetImportRun Import, AssetBuiltInReader ReadBuiltIn);
-
-/// <summary>
-/// What a load of an asset gave: the asset, of its type, or why there is none; its version, a hash of its file and
-/// <c>.meta</c>; and the ids of the handles it holds, when they were looked for.
-/// </summary>
-internal readonly record struct Made(Result<object> Value, ulong Version, ImmutableArray<ulong> Handles = default);
+internal readonly record struct Made(Result<object> Value, ulong Version);
 
 /// <summary>
 /// One asset asked for or added, and where it is in being loaded.
@@ -143,7 +132,7 @@ internal sealed record LoadedAssets
     /// <summary>
     /// Every asset type Magic and the gems hold, by the name a <c>.meta</c> gives it.
     /// </summary>
-    public ImmutableDictionary<string, AssetType> Types { get; init; } = [];
+    public ImmutableDictionary<string, Type> Types { get; init; } = [];
 
     /// <summary>
     /// The gem that reads each asset type.
@@ -165,9 +154,7 @@ internal sealed record LoadedAssets
     /// Whether asset <paramref name="id"/> was made from <paramref name="other"/>, however far down.
     /// </summary>
     public bool IsMadeFrom(ulong id, ulong other) =>
-        AssetDatabase
-            .Walk([id], Assets.AllLevels, one => Entries.TryGetValue(one, out AssetEntry? entry) ? entry.MadeFrom : [])
-            .Contains(other);
+        Walk([id], one => Entries.TryGetValue(one, out AssetEntry? entry) ? entry.MadeFrom : []).Contains(other);
 
     /// <summary>
     /// What was made from any of <paramref name="changed"/>, however far up.
@@ -189,11 +176,7 @@ internal sealed record LoadedAssets
             }
         }
 
-        return AssetDatabase.Walk(
-            changed,
-            Assets.AllLevels,
-            id => madeInto.TryGetValue(id, out List<ulong>? of) ? of : []
-        );
+        return Walk(changed, id => madeInto.TryGetValue(id, out List<ulong>? of) ? of : []);
     }
 
     /// <summary>
@@ -240,4 +223,29 @@ internal sealed record LoadedAssets
             Entries = Entries.SetItem(id, entry with { Stage = AssetStage.Landed, Landing = made }),
             Landed = Landed.Contains(id) ? Landed : Landed.Add(id),
         };
+
+    /// <summary>
+    /// What is reached from <paramref name="start"/>, however far down <paramref name="neighbours"/>, each once.
+    /// </summary>
+    private static HashSet<ulong> Walk(IEnumerable<ulong> start, Func<ulong, IEnumerable<ulong>> neighbours)
+    {
+        HashSet<ulong> found = [];
+        List<ulong> level = [.. start];
+        while (level.Count > 0)
+        {
+            List<ulong> next = [];
+            foreach (ulong id in level)
+            {
+                foreach (ulong neighbour in neighbours(id))
+                {
+                    if (found.Add(neighbour))
+                        next.Add(neighbour);
+                }
+            }
+
+            level = next;
+        }
+
+        return found;
+    }
 }

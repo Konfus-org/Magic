@@ -43,11 +43,6 @@ internal static class AssetReindex
         changed.UnionWith(loaded.GetListersOf(touched));
         HashSet<ulong> reload = [.. changed, .. loaded.GetMadeFromThese(changed)];
         database = database with { Index = now };
-        foreach (ulong id in changed)
-        {
-            database = database.RemoveDependencies(id);
-        }
-
         int reloading = 0;
         foreach (ulong id in reload)
         {
