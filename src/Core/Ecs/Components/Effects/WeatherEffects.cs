@@ -1,29 +1,28 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 
 namespace Magic.Ecs.Components.Effects;
 
 /// <summary>
-/// Up to <see cref="Capacity"/> effects in order, one of each type: what a component holds its effects in, as
-/// <see cref="Weather"/> does. Each is a struct of plain data of at most <see cref="MaxBytes"/> bytes, kept inline, so the
-/// component stays plain unmanaged data. A <c>foreach</c> visits them in order:
-/// <c>foreach (IWeatherEffect effect in weather.Effects)</c>. As JSON, an array of effects, each naming its type:
-/// <c>[ { "type": "Fog", "density": 0.02 } ]</c>.
+/// Up to <see cref="Capacity"/> weather effects in order, one of each type: what <see cref="Weather"/> holds its effects
+/// in. Each is a struct of plain data of at most <see cref="MaxBytes"/> bytes, kept inline, so the component stays plain
+/// unmanaged data. A <c>foreach</c> visits them in order: <c>foreach (IWeatherEffect effect in weather.Effects)</c>. As
+/// JSON, an array of effects, each naming its type: <c>[ { "type": "Fog", "density": 0.02 } ]</c>.
 /// </summary>
-[JsonConverter(typeof(RenderEffectsJsonConverter))]
-public struct RenderEffects<T> : IEquatable<RenderEffects<T>>
-    where T : IRenderEffect
+[JsonConverter(typeof(WeatherEffectsJsonConverter))]
+public struct WeatherEffects : IEquatable<WeatherEffects>
 {
-    public const int Capacity = RenderEffectSlots.Count;
+    public const int Capacity = 8;
 
-    public const int MaxBytes = RenderEffectSlots.Bytes;
+    public const int MaxBytes = 64;
 
     /// <summary>
-    /// Each effect's kind (<see cref="RenderEffectKinds"/>) in order, none past the last, and its bytes.
+    /// Each effect's kind (<see cref="WeatherEffectKinds"/>) in order, none past the last, and its bytes.
     /// </summary>
-    private RenderEffectNumbers _kinds;
-    private RenderEffectBytes _bytes;
+    private KindNumbers _kinds;
+    private EffectBytes _bytes;
 
     public readonly int Count
     {
@@ -39,15 +38,15 @@ public struct RenderEffects<T> : IEquatable<RenderEffects<T>>
         }
     }
 
-    public static bool operator ==(RenderEffects<T> left, RenderEffects<T> right) => left.Equals(right);
+    public static bool operator ==(WeatherEffects left, WeatherEffects right) => left.Equals(right);
 
-    public static bool operator !=(RenderEffects<T> left, RenderEffects<T> right) => !left.Equals(right);
+    public static bool operator !=(WeatherEffects left, WeatherEffects right) => !left.Equals(right);
 
-    public readonly bool Equals(RenderEffects<T> other) =>
+    public readonly bool Equals(WeatherEffects other) =>
         MemoryMarshal.AsBytes<ushort>(_kinds).SequenceEqual(MemoryMarshal.AsBytes<ushort>(other._kinds))
         && ((ReadOnlySpan<byte>)_bytes).SequenceEqual(other._bytes);
 
-    public override readonly bool Equals(object? obj) => obj is RenderEffects<T> other && Equals(other);
+    public override readonly bool Equals(object? obj) => obj is WeatherEffects other && Equals(other);
 
     public override readonly int GetHashCode()
     {
@@ -62,9 +61,9 @@ public struct RenderEffects<T> : IEquatable<RenderEffects<T>>
     /// The <typeparamref name="TEffect"/> it holds; false when it holds none.
     /// </summary>
     public readonly bool TryGet<TEffect>(out TEffect effect)
-        where TEffect : struct, T
+        where TEffect : struct, IWeatherEffect
     {
-        int slot = Find(RenderEffectKinds.GetNumber<TEffect>());
+        int slot = Find(WeatherEffectKinds.GetNumber<TEffect>());
         if (slot < 0)
         {
             effect = default;
@@ -82,31 +81,8 @@ public struct RenderEffects<T> : IEquatable<RenderEffects<T>>
     /// when it is larger than <see cref="MaxBytes"/>, holds a reference, or there is no room for it.
     /// </summary>
     public void Set<TEffect>(in TEffect effect)
-        where TEffect : struct, T => MemoryMarshal.Write(Take(RenderEffectKinds.GetNumber<TEffect>()), in effect);
-
-    /// <summary>
-    /// Takes the <typeparamref name="TEffect"/> it holds out, those after it moving up; false when it held none.
-    /// </summary>
-    public bool Remove<TEffect>()
-        where TEffect : struct, T
-    {
-        int slot = Find(RenderEffectKinds.GetNumber<TEffect>());
-
-        if (slot < 0)
-            return false;
-
-        int last = Count - 1;
-        for (int i = slot; i < last; i++)
-        {
-            _kinds[i] = _kinds[i + 1];
-            GetBytes(i + 1).CopyTo(GetBytes(i));
-        }
-
-        _kinds[last] = 0;
-        GetBytes(last).Clear();
-
-        return true;
-    }
+        where TEffect : struct, IWeatherEffect =>
+        MemoryMarshal.Write(Take(WeatherEffectKinds.GetNumber<TEffect>()), in effect);
 
     /// <summary>
     /// What a <c>foreach</c> visits the effects with, in order, each boxed as it is read.
@@ -118,8 +94,8 @@ public struct RenderEffects<T> : IEquatable<RenderEffects<T>>
     /// </summary>
     internal void Set(object effect)
     {
-        ushort number = RenderEffectKinds.GetNumber(effect.GetType());
-        RenderEffectKinds.Get(number).Write(effect, Take(number));
+        ushort number = WeatherEffectKinds.GetNumber(effect.GetType());
+        WeatherEffectKinds.Get(number).Write(effect, Take(number));
     }
 
     /// <summary>
@@ -129,7 +105,7 @@ public struct RenderEffects<T> : IEquatable<RenderEffects<T>>
     [UnscopedRef]
     private Span<byte> Take(ushort number)
     {
-        RenderEffectKind kind = RenderEffectKinds.Get(number);
+        WeatherEffectKind kind = WeatherEffectKinds.Get(number);
 
         if (kind.Size > MaxBytes)
         {
@@ -180,13 +156,32 @@ public struct RenderEffects<T> : IEquatable<RenderEffects<T>>
     /// <summary>
     /// Visits the effects in order, each boxed as it is read.
     /// </summary>
-    public ref struct Enumerator(RenderEffects<T> effects)
+    public ref struct Enumerator(WeatherEffects effects)
     {
-        private readonly RenderEffects<T> _effects = effects;
+        private readonly WeatherEffects _effects = effects;
         private int _slot = -1;
 
-        public readonly T Current => (T)RenderEffectKinds.Get(_effects._kinds[_slot]).Box(_effects.ReadBytes(_slot));
+        public readonly IWeatherEffect Current =>
+            (IWeatherEffect)WeatherEffectKinds.Get(_effects._kinds[_slot]).Box(_effects.ReadBytes(_slot));
 
         public bool MoveNext() => ++_slot < Capacity && _effects._kinds[_slot] != 0;
+    }
+
+    /// <summary>
+    /// Each slot's effect kind, inline.
+    /// </summary>
+    [InlineArray(Capacity)]
+    private struct KindNumbers
+    {
+        private ushort _first;
+    }
+
+    /// <summary>
+    /// Each slot's effect's bytes, inline.
+    /// </summary>
+    [InlineArray(Capacity * MaxBytes)]
+    private struct EffectBytes
+    {
+        private byte _first;
     }
 }

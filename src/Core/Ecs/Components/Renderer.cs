@@ -61,19 +61,4 @@ public struct MaterialSlots : IEquatable<MaterialSlots>
 
         return hash.ToHashCode();
     }
-
-    /// <summary>
-    /// Puts <paramref name="material"/> in the first empty slot; false when it is none or every slot is taken.
-    /// </summary>
-    public bool Add(Handle<Material> material)
-    {
-        Span<Handle<Material>> held = this;
-        int free = held.IndexOf(Handle<Material>.None);
-        if (material == Handle<Material>.None || free < 0)
-            return false;
-
-        held[free] = material;
-
-        return true;
-    }
 }

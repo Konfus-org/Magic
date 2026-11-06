@@ -5,10 +5,10 @@ using System.Runtime.InteropServices;
 namespace Magic.Ecs.Components.Effects;
 
 /// <summary>
-/// One kind of render effect: its type, its size in bytes, whether it is plain data that bytes can hold, and how its
-/// bytes, as <see cref="RenderEffects{T}"/> keeps them, are boxed and written.
+/// One kind of weather effect: its type, its size in bytes, whether it is plain data that bytes can hold, and how its
+/// bytes, as <see cref="WeatherEffects"/> keeps them, are boxed and written.
 /// </summary>
-internal sealed record RenderEffectKind(
+internal sealed record WeatherEffectKind(
     Type Type,
     int Size,
     bool IsPlainData,
@@ -17,25 +17,25 @@ internal sealed record RenderEffectKind(
 );
 
 /// <summary>
-/// The kinds of render effect held so far, each a number <see cref="RenderEffects{T}"/> keeps in place of the type, as
+/// The kinds of weather effect held so far, each a number <see cref="WeatherEffects"/> keeps in place of the type, as
 /// a component holds no reference: numbered from 1 as each is first held, for the run. Safe from any thread.
 /// </summary>
-internal static class RenderEffectKinds
+internal static class WeatherEffectKinds
 {
     private static readonly Lock _adding = new();
 
     private static readonly MethodInfo _getNumber =
-        typeof(RenderEffectKinds).GetMethod(
+        typeof(WeatherEffectKinds).GetMethod(
             nameof(GetNumber),
             BindingFlags.NonPublic | BindingFlags.Static,
             Type.EmptyTypes
-        ) ?? throw new MissingMethodException(nameof(RenderEffectKinds), nameof(GetNumber));
+        ) ?? throw new MissingMethodException(nameof(WeatherEffectKinds), nameof(GetNumber));
 
     /// <summary>
     /// Every kind by its number, the first none: replaced whole as one is added, so a reader on another thread sees one
     /// list.
     /// </summary>
-    private static volatile RenderEffectKind?[] _kinds = [null];
+    private static volatile WeatherEffectKind?[] _kinds = [null];
 
     internal static ushort GetNumber<TEffect>()
         where TEffect : struct => Numbered<TEffect>.Number;
@@ -45,14 +45,14 @@ internal static class RenderEffectKinds
     /// </summary>
     internal static ushort GetNumber(Type type) => (ushort)(_getNumber.MakeGenericMethod(type).Invoke(null, null) ?? 0);
 
-    internal static RenderEffectKind Get(ushort number) =>
+    internal static WeatherEffectKind Get(ushort number) =>
         _kinds[number] ?? throw new ArgumentOutOfRangeException(nameof(number), number, "No effect is numbered so.");
 
-    private static ushort Add(RenderEffectKind kind)
+    private static ushort Add(WeatherEffectKind kind)
     {
         lock (_adding)
         {
-            RenderEffectKind?[] kinds = [.. _kinds, kind];
+            WeatherEffectKind?[] kinds = [.. _kinds, kind];
 
             if (kinds.Length > ushort.MaxValue)
                 throw new InvalidOperationException("There are more kinds of effect than can be numbered.");
@@ -70,7 +70,7 @@ internal static class RenderEffectKinds
         where TEffect : struct
     {
         internal static readonly ushort Number = Add(
-            new RenderEffectKind(
+            new WeatherEffectKind(
                 typeof(TEffect),
                 Unsafe.SizeOf<TEffect>(),
                 !RuntimeHelpers.IsReferenceOrContainsReferences<TEffect>(),

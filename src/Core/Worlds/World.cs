@@ -162,46 +162,26 @@ public sealed class World : IEcs, IDisposable
     public void Dispose() => _turn.Dispose();
 
     /// <summary>
-    /// Opens <paramref name="domain"/>, read first on workers, so one that doesn't load leaves the world as it was. One
-    /// already open beside the others stays as it is. Why not, when it doesn't load or no gem provides the ECS.
+    /// Opens <paramref name="domain"/> in place of what is in the world, all but its globals, with the loading screen shown
+    /// until it is there and the project's player at its spawn. It is read first on workers, so one that doesn't load leaves
+    /// the world as it was. Why not, when it doesn't load or no gem provides the ECS.
     /// </summary>
     public async Task<Result> OpenAsync(
         Handle<Domain> domain,
-        DomainOpenMode mode,
         IProgress<LoadProgress>? progress,
         CancellationToken cancel
     )
     {
-        Result opened = await RunLoadingAsync(() => OpenDomainAsync(domain, mode, progress, cancel), cancel)
+        Result opened = await RunLoadingAsync(() => OpenDomainAsync(domain, progress, cancel), cancel)
             .ConfigureAwait(false);
 
         return opened.Ok ? opened : Result.Failure($"The domain does not open: {opened.Error}");
     }
 
     /// <summary>
-    /// Takes <paramref name="domain"/> out of the world; nothing happens when it is not open.
-    /// </summary>
-    public Task CloseAsync(Handle<Domain> domain, CancellationToken cancel) =>
-        RunInTurnAsync(
-            () =>
-            {
-                if (Domains.Contains(domain))
-                {
-                    Unplace(domain);
-                    _read.Remove(domain);
-                    Domains = Domains.Remove(domain);
-                }
-
-                return Task.CompletedTask;
-            },
-            cancel
-        );
-
-    /// <summary>
     /// Puts <paramref name="prefab"/>, loaded first, in the world at <paramref name="at"/>: the entities it made, which are
     /// the caller's to destroy, and go when a domain replaces the world if they are still there. Why not, when it doesn't load
-    /// or no gem provides the ECS. Single entities need none of this: make them with
-    /// <see cref="Create(ReadOnlySpan{IComponent}, bool)"/>.
+    /// or no gem provides the ECS. Single entities need none of this: make them with <see cref="Create"/>.
     /// </summary>
     public async Task<Result<ImmutableArray<Entity>>> SpawnAsync(
         Handle<Prefab> prefab,
@@ -225,13 +205,12 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// A new entity with <paramref name="components"/>, made now. One <paramref name="makeGlobal"/> is tagged
-    /// <see cref="Tag.Global"/> beside the tags they give it, and outlives every domain that replaces the world; throws when
-    /// its tags have no room for that.
+    /// A new entity with <paramref name="components"/>, made now. One whose <see cref="Tags"/> hold <see cref="Tag.Global"/>
+    /// outlives every domain that replaces the world.
     /// </summary>
-    public Entity Create(ReadOnlySpan<IComponent> components, bool makeGlobal = false)
+    public Entity Create(ReadOnlySpan<IComponent> components)
     {
-        Entity made = makeGlobal ? Ecs.Create(WithGlobalTag(components).AsSpan()) : Ecs.Create(components);
+        Entity made = Ecs.Create(components);
         CreateShading(made);
 
         return made;
@@ -405,7 +384,7 @@ public sealed class World : IEcs, IDisposable
         Handle<Domain> fallback = _assets.GetDefault<Domain>();
         Handle<Domain> entry = _app.Project?.EntryPoint ?? Handle<Domain>.None;
         Handle<Domain> first = entry == Handle<Domain>.None ? fallback : entry;
-        Result opened = await OpenAsync(first, DomainOpenMode.Replace, null, cancel).ConfigureAwait(false);
+        Result opened = await OpenAsync(first, null, cancel).ConfigureAwait(false);
         if (opened.Ok)
             return;
 
@@ -413,7 +392,7 @@ public sealed class World : IEcs, IDisposable
         if (first == fallback)
             return;
 
-        Result second = await OpenAsync(fallback, DomainOpenMode.Replace, null, cancel).ConfigureAwait(false);
+        Result second = await OpenAsync(fallback, null, cancel).ConfigureAwait(false);
         if (!second.Ok)
             Log.Error($"The default domain does not open either: {second.Error}");
     }
@@ -440,36 +419,6 @@ public sealed class World : IEcs, IDisposable
         Log.Info($"Kept the world: {saved.Changes.Entities.Length} changes in {saved.Domains.Length} domains.");
 
         return bytes.Value;
-    }
-
-    /// <summary>
-    /// <paramref name="components"/>, tagged global; throws when their tags have no room for that.
-    /// </summary>
-    private static ImmutableArray<IComponent> WithGlobalTag(ReadOnlySpan<IComponent> components)
-    {
-        ImmutableArray<IComponent>.Builder tagged = ImmutableArray.CreateBuilder<IComponent>(components.Length + 1);
-        bool hasTags = false;
-        foreach (IComponent component in components)
-        {
-            hasTags |= component is Tags;
-            tagged.Add(component is Tags tags ? AddGlobalTag(tags) : component);
-        }
-
-        if (!hasTags)
-            tagged.Add(AddGlobalTag(default));
-
-        return tagged.ToImmutable();
-    }
-
-    private static Tags AddGlobalTag(Tags tags)
-    {
-        if (tags.Has(Tag.Global) || tags.Add(Tag.Global))
-            return tags;
-
-        throw new ArgumentException(
-            $"The entity's tags have no room to tag it global: an entity has at most {Tags.Capacity}.",
-            nameof(tags)
-        );
     }
 
     /// <summary>
@@ -729,12 +678,11 @@ public sealed class World : IEcs, IDisposable
     private string GetName(Handle<Domain> domain) => _assets.GetPath(domain) ?? "a domain";
 
     /// <summary>
-    /// Reads the domain on workers, so one that doesn't load leaves the world as it was. One already open beside the others
-    /// is just found. A replace comes with the project's player, through the loading screen (<see cref="ReplaceAsync"/>).
+    /// Reads the domain on workers, so one that doesn't load leaves the world as it was, then puts it in place of the world
+    /// with the project's player, through the loading screen (<see cref="ReplaceAsync"/>).
     /// </summary>
     private async Task<Result> OpenDomainAsync(
         Handle<Domain> domain,
-        DomainOpenMode mode,
         IProgress<LoadProgress>? progress,
         CancellationToken cancel
     )
@@ -742,22 +690,10 @@ public sealed class World : IEcs, IDisposable
         if (!HasEcs)
             return Result.Failure("no gem the project lists provides the ECS.");
 
-        bool isReplace = mode == DomainOpenMode.Replace;
-        if (!isReplace && Domains.Contains(domain))
-            return Result.Success();
-
         Result<ImmutableArray<PlacedPrefab>> read = await ReadDomainAsync(domain, progress, cancel)
             .ConfigureAwait(false);
         if (!read.Ok)
             return Result.Failure(read.Error);
-
-        if (!isReplace)
-        {
-            await _threads.Enter(EngineThread.Main);
-            Add(domain, read.Value);
-
-            return Result.Success();
-        }
 
         ImmutableArray<ImmutableArray<IComponent>> placed = GetComponents(GetPlacements(domain, read.Value));
         ImmutableArray<ImmutableArray<IComponent>> player = await ReadPlayerAsync(domain, placed, progress, cancel)
@@ -1114,7 +1050,4 @@ public sealed class World : IEcs, IDisposable
 
         return GetEntities(loaded.Value, spawn ?? new Transform());
     }
-
-    /// <inheritdoc/>
-    Entity IEcs.Create(ReadOnlySpan<IComponent> components) => Create(components);
 }

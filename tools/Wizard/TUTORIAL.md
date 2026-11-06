@@ -248,11 +248,8 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
                      [Description("Most lines to return.")] int max = 200) => FormatLog(after, max)),
                 CreateTool("command_run", "Runs a console command as if typed at the terminal; 'help' lists them. What it says goes to the log: read it with log_read.",
                     ([Description("The command and its words, such as: help")] string line) => OnMainThreadAsync(() => RunCommand(line))),
-                CreateTool("domain_open", "Starts opening a domain by its asset path; engine_info says once the world has loaded.",
-                    ([Description("Path under the project's Assets folder or a Resources folder, with forward slashes, such as Domains/Valley/Valley.domain.")] string path,
-                     [Description("True to open it beside the open domains; false to replace them.")] bool additive = false) => OpenDomain(path, additive)),
-                CreateTool("domain_close", "Closes an open domain by its asset path, destroying what it spawned.",
-                    ([Description("Path under the project's Assets folder or a Resources folder, with forward slashes.")] string path) => OnMainThreadAsync(() => CloseDomain(path))),
+                CreateTool("domain_open", "Starts opening a domain by its asset path in place of the world; engine_info says once the world has loaded.",
+                    ([Description("Path under the project's Assets folder or a Resources folder, with forward slashes, such as Domains/Valley/Valley.domain.")] string path) => OpenDomain(path)),
                 CreateTool("entity_list", "Entities by id with the names of their components' types, those with a component of a type when one is given, a page at a time.",
                     ([Description("A component type's name, from component_types; empty for every entity.")] string component = "",
                      [Description("How many matching entities to skip.")] int skip = 0,
@@ -533,23 +530,17 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
         return "ran: what it said is in the log";
     }
 
-    private string OpenDomain(string path, bool additive)
+    private string OpenDomain(string path)
     {
         Handle<Domain> domain = FindDomain(path);
-        OpenDomainAsync(domain, additive ? DomainOpenMode.Additive : DomainOpenMode.Replace, path).FireAndForget();
+        OpenDomainAsync(domain, path).FireAndForget();
         return "opening";
     }
 
-    private async Task OpenDomainAsync(Handle<Domain> domain, DomainOpenMode mode, string path)
+    private async Task OpenDomainAsync(Handle<Domain> domain, string path)
     {
-        Result<Domain> opened = await _world.OpenAsync(domain, mode, cancel: _app.Lifetime).ConfigureAwait(false);
+        Result opened = await _world.OpenAsync(domain, null, _app.Lifetime).ConfigureAwait(false);
         if (!opened.Ok) Debugging.Error($"An MCP client's domain {path} did not open: {opened.Error}");
-    }
-
-    private string CloseDomain(string path)
-    {
-        _world.Close(FindDomain(path));
-        return "closed";
     }
 
     private Handle<Domain> FindDomain(string path)
