@@ -8,6 +8,13 @@ namespace Magic.Ecs;
 /// its own hook through <see cref="Query()"/>.
 /// </para>
 /// <para>
+/// A call says whether it reads or writes. <see cref="Query{T1}()"/> and <see cref="Get{T}"/> read, through read-only
+/// spans and references. <see cref="Mutate{T1}()"/>, <see cref="Mutate{T}(Entity)"/>, <see cref="Set{T}"/> and the
+/// calls that change which components an entity has write, and mark each chunk they hand out or change as written,
+/// whether or not anything is. A reader that keeps its query's <see cref="EcsQuery{T1}.Version"/> knows a chunk whose
+/// <see cref="EcsChunk{T1}.Written"/> is no higher hasn't changed since.
+/// </para>
+/// <para>
 /// The world is the thread's that made the gem providing it: every call is made there, or throws. Work on another
 /// thread hands what it built to that thread as data.
 /// </para>
@@ -52,10 +59,16 @@ public interface IEcs
     void Set(Entity entity, ReadOnlySpan<IComponent> components);
 
     /// <summary>
-    /// The entity's component by reference, so a write goes straight into storage. Good until the entity's components
-    /// next change; throws when it has none.
+    /// The entity's component by reference, to read. Good until the entity's components next change; throws when it
+    /// has none.
     /// </summary>
-    ref T Get<T>(Entity entity)
+    ref readonly T Get<T>(Entity entity)
+        where T : unmanaged, IComponent;
+
+    /// <summary>
+    /// <see cref="Get{T}"/> to write: a write goes straight into storage, and the entity's chunk is marked written.
+    /// </summary>
+    ref T Mutate<T>(Entity entity)
         where T : unmanaged, IComponent;
 
     bool Has<T>(Entity entity)
@@ -73,8 +86,8 @@ public interface IEcs
     EcsQuery Query();
 
     /// <summary>
-    /// The entities that have a <typeparamref name="T1"/>, chunk by chunk, on this thread, with spans straight over
-    /// storage: writing through them changes the components.
+    /// The entities that have a <typeparamref name="T1"/>, chunk by chunk, on this thread, with read-only spans straight
+    /// over storage.
     /// </summary>
     EcsQuery<T1> Query<T1>()
         where T1 : unmanaged, IComponent;
@@ -83,6 +96,20 @@ public interface IEcs
     /// <see cref="Query{T1}"/> over the entities that have both components.
     /// </summary>
     EcsQuery<T1, T2> Query<T1, T2>()
+        where T1 : unmanaged, IComponent
+        where T2 : unmanaged, IComponent;
+
+    /// <summary>
+    /// <see cref="Query{T1}()"/> to write: writing through the spans changes the components, and every chunk the loop
+    /// walks is marked written.
+    /// </summary>
+    EcsMutation<T1> Mutate<T1>()
+        where T1 : unmanaged, IComponent;
+
+    /// <summary>
+    /// <see cref="Mutate{T1}()"/> over the entities that have both components.
+    /// </summary>
+    EcsMutation<T1, T2> Mutate<T1, T2>()
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent;
 }
