@@ -49,18 +49,12 @@ internal sealed class Visibility(
                 Depth = DepthMode.TestAndWrite,
             }
     );
-    private readonly GpuPass _buildHzbPass = pipelines.Compute(
-        "Build depth pyramid",
-        "BuildHzb",
-        "BuildHzb",
-        isTiled: true
-    );
+    private readonly GpuPass _buildHzbPass = pipelines.Compute("Build depth pyramid", "BuildHzb", "BuildHzb");
     private readonly GpuPass _resolvePass = pipelines.Compute(
         "Resolve standard material",
         "ResolveMaterial",
         "ResolveMaterial",
-        PassShaders.Standard,
-        isTiled: true
+        PassShaders.Standard
     );
 
     public GpuBuffer Counts { get; private set; }
@@ -80,30 +74,29 @@ internal sealed class Visibility(
                 [Counts, RetestArguments, VisibleClusters, DrawArguments, RetestList]
         )
         {
-            if (!buffer.IsNone)
-                gpu.Destroy(buffer);
+            gpu.Destroy(buffer);
         }
     }
 
     public Result Create()
     {
-        Result<GpuBuffer> counts = CreateBuffer("Counts", CountsBytes, BufferUsages.Storage | BufferUsages.Indirect);
-        Result<GpuBuffer> retestArguments = CreateBuffer(
+        Result<GpuBuffer> counts = gpu.CreateBuffer(
+            "Counts",
+            CountsBytes,
+            BufferUsages.Storage | BufferUsages.Indirect
+        );
+        Result<GpuBuffer> retestArguments = gpu.CreateBuffer(
             "Retest arguments",
             RetestArgumentsBytes,
             BufferUsages.Storage | BufferUsages.Indirect
         );
-        Result<GpuBuffer> visibleClusters = CreateBuffer(
-            "Visible clusters",
-            (long)MaxVisibleClusters * 8,
-            BufferUsages.Storage
-        );
-        Result<GpuBuffer> drawArguments = CreateBuffer(
+        Result<GpuBuffer> visibleClusters = gpu.CreateBuffer("Visible clusters", (long)MaxVisibleClusters * 8);
+        Result<GpuBuffer> drawArguments = gpu.CreateBuffer(
             "Draw arguments",
             (long)MaxVisibleClusters * 2 * DrawArgumentsBytes,
             BufferUsages.Storage | BufferUsages.Indirect
         );
-        Result<GpuBuffer> retestList = CreateBuffer("Retest list", (long)MaxVisibleClusters * 8, BufferUsages.Storage);
+        Result<GpuBuffer> retestList = gpu.CreateBuffer("Retest list", (long)MaxVisibleClusters * 8);
         foreach (
             Result<GpuBuffer> made in (ReadOnlySpan<Result<GpuBuffer>>)
                 [counts, retestArguments, visibleClusters, drawArguments, retestList]
@@ -176,21 +169,7 @@ internal sealed class Visibility(
                 view.Targets.GBufferSurface,
                 view.Targets.Velocity
             )
-            .Dispatch(pipelines.GetTiles(view.Targets.Width), pipelines.GetTiles(view.Targets.Height));
-
-    private Result<GpuBuffer> CreateBuffer(string name, long bytes, BufferUsages usage)
-    {
-        Result<GpuBuffer> buffer = gpu.CreateBuffer(
-            new BufferDescription
-            {
-                Bytes = bytes,
-                Usage = usage,
-                Name = name,
-            }
-        );
-
-        return buffer.Ok ? buffer : Result.Failure($"the {name} buffer was not made: {buffer.Error}");
-    }
+            .DispatchOver(view.Targets.Width, view.Targets.Height);
 
     /// <summary>
     /// The cluster cull: mode 0 one group an instance over its clusters, mode 1 the retest list, as many groups as
@@ -251,9 +230,7 @@ internal sealed class Visibility(
                 buildHzbRun.Reads(targets.Hzb, level - 1);
 
             buildHzbRun.Writes(targets.Hzb, level);
-            int width = Math.Max(targets.Width >> level, 1);
-            int height = Math.Max(targets.Height >> level, 1);
-            buildHzbRun.Dispatch(pipelines.GetTiles(width), pipelines.GetTiles(height));
+            buildHzbRun.DispatchOver(Math.Max(targets.Width >> level, 1), Math.Max(targets.Height >> level, 1));
         }
     }
 }
