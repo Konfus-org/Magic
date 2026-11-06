@@ -45,12 +45,12 @@ namespace Magic.ImGuiDebugUI;
 /// <para>
 /// ImGui's frame is the main thread's. <see cref="Update"/> hands ImGui the frame's input and starts its frame, so the
 /// widgets gems made after this one call in their Update go into it; <see cref="LateUpdate"/> draws what is reported, ends
-/// the frame and publishes a copy of it, whether anything draws it or not; and whatever draws the world records the newest
-/// copy over the finished picture (<see cref="Record"/>). Reports come from any thread (<see cref="Reports"/>). It is public because
+/// the frame and publishes a copy of it, whether anything draws it or not; and <see cref="Render"/> records the newest
+/// copy over the window's image, in the overlay layer, so it shows over whatever drew the world. Reports come from any thread (<see cref="Reports"/>). It is public because
 /// nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </para>
 /// </summary>
-public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
+public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
 {
     private const int InputBytes = 256;
 
@@ -284,9 +284,9 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     }
 
     /// <summary>
-    /// The newest frame ImGui ended over <paramref name="target"/>.
+    /// The newest frame ImGui ended, over the window's image.
     /// </summary>
-    public void Record(RenderGraph graph, GpuTexture target) => _overlay.Record(graph, target);
+    public void Render(in Frame frame, RenderGraph graph) => _overlay.Record(graph);
 
     public void Text(Vector3 position, string text, Color? color = null, string? tooltip = null) =>
         _reports.Add(new Report(text, ReportKind.Plain, color ?? _white, position, tooltip, 0));

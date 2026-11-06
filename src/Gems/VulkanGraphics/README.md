@@ -1,7 +1,8 @@
 # VulkanGraphics
 
 The GPU through Vulkan 1.3: provides `IGraphicsApi`. Resources go into one bindless heap, which every shader reads by
-the id in a handle; a frame is one `GpuCommands` value, recorded by whatever draws and submitted here.
+the id in a handle. A frame is one `GpuCommands` value, which the gems record into Core's graph and Core presents here;
+it puts in the barriers each pass's uses need, from what each resource was last used as.
 
 To use it, list `VulkanGraphics` in a project's `.magic` file after the gem that provides the window.
 

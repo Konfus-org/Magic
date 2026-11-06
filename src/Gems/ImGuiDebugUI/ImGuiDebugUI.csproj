@@ -2,7 +2,7 @@
   <!-- A gem: Magic loads it from Gems/ImGuiDebugUI/ImGuiDebugUI.dll when a project lists ImGuiDebugUI. -->
   <PropertyGroup>
     <!-- Shown beside the gem as Magic starts it. -->
-    <Description>The debug UI, drawn with Dear ImGui: provides IDebugUI and IOverlay.</Description>
+    <Description>The debug UI, drawn with Dear ImGui: provides IDebugUI.</Description>
     <Version>1.0.0</Version>
     <Authors>Konfus</Authors>
     <!-- Copies the gem's own NuGet dependencies next to it, where its load context finds them. -->

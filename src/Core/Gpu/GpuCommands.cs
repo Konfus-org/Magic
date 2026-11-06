@@ -4,9 +4,9 @@ using System.Runtime.InteropServices;
 namespace Magic.Gpu;
 
 /// <summary>
-/// A frame's commands as a value: passes in order, each with the transitions it needs first. A gem records one with
-/// <see cref="GpuCommandRecorder"/> and hands it to <see cref="IGraphicsApi.Submit"/>; the GPU provider turns it into
-/// its API's calls and nothing else decides what the GPU does.
+/// A frame's commands as a value: passes in the order they run, each with what it uses. The gems record it into
+/// Core's <see cref="Rendering.RenderGraph"/> and Core hands it to <see cref="IGraphicsApi.Present"/>; the GPU provider
+/// turns it into its API's calls and nothing else decides what the GPU does.
 /// </summary>
 public readonly record struct GpuCommands(ImmutableArray<GpuPass> Passes)
 {
@@ -35,7 +35,8 @@ public enum GpuPassKind : byte
 }
 
 /// <summary>
-/// One pass: a debug group the GPU provider times, its transitions put before anything in it runs, and its commands.
+/// One pass: a debug group the GPU provider times, what it uses, which the provider puts the barriers in for before
+/// anything in it runs, and its commands.
 /// </summary>
 public readonly record struct GpuPass
 {
@@ -45,7 +46,9 @@ public readonly record struct GpuPass
 
     public required GpuPassKind Kind { get; init; }
 
-    public ImmutableArray<GpuTransition> Transitions { get; init; } = [];
+    public RenderLayer Layer { get; init; }
+
+    public ImmutableArray<GpuUse> Uses { get; init; } = [];
 
     public ImmutableArray<GpuCommand> Commands { get; init; } = [];
 
@@ -56,12 +59,30 @@ public readonly record struct GpuPass
 }
 
 /// <summary>
-/// A resource's access changing between two passes, which the GPU provider makes a barrier of. A texture's covers one
-/// level, or every level when <see cref="Level"/> is -1.
+/// Where a pass falls in the frame: every pass of a layer runs after every pass of the layer before, whichever gem
+/// recorded it first.
 /// </summary>
-public readonly record struct GpuTransition
+public enum RenderLayer : byte
 {
-    public GpuTransition() { }
+    /// <summary>
+    /// The picture the world is drawn into.
+    /// </summary>
+    Picture,
+
+    /// <summary>
+    /// What draws over the finished picture, as a debug UI does.
+    /// </summary>
+    Overlay,
+}
+
+/// <summary>
+/// A resource a pass touches and how. The GPU provider knows the access it was left in, by the pass before or the
+/// frame before, and puts in the barrier between the two; a read after the same read needs none. A texture's covers
+/// one level, or every level when <see cref="Level"/> is -1.
+/// </summary>
+public readonly record struct GpuUse
+{
+    public GpuUse() { }
 
     /// <summary>
     /// The buffer's or texture's id, as <see cref="IsTexture"/> says.
@@ -70,9 +91,7 @@ public readonly record struct GpuTransition
 
     public required bool IsTexture { get; init; }
 
-    public required GpuAccess Before { get; init; }
-
-    public required GpuAccess After { get; init; }
+    public required GpuAccess Access { get; init; }
 
     public int Level { get; init; } = -1;
 }
@@ -165,7 +184,7 @@ public readonly record struct GpuConstants(uint X, uint Y = 0, uint Z = 0, uint 
 }
 
 /// <summary>
-/// Which command a <see cref="GpuCommand"/> is; the fields each reads are on <see cref="GpuCommandRecorder"/>'s
+/// Which command a <see cref="GpuCommand"/> is; the fields each reads are on <see cref="Rendering.RenderGraph"/>'s
 /// method of the same name.
 /// </summary>
 public enum GpuCommandKind : byte
@@ -194,7 +213,7 @@ public enum GpuCommandKind : byte
 
 /// <summary>
 /// One command, as plain fields a kind reads its own way: a resource's id and a second's, two byte offsets, a size,
-/// four numbers and a block of constants. <see cref="GpuCommandRecorder"/> fills them; the GPU provider reads them.
+/// four numbers and a block of constants. <see cref="Rendering.RenderGraph"/> fills them; the GPU provider reads them.
 /// </summary>
 public readonly record struct GpuCommand
 {

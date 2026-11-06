@@ -1,5 +1,4 @@
 using Magic.Gpu;
-using Magic.Rendering;
 using Magic.Utils;
 
 namespace Magic.GIRendering;
@@ -9,7 +8,7 @@ namespace Magic.GIRendering;
 /// and its depth, the depth pyramid the next frame culls against, the GBuffer, and the output with the buffer its
 /// pixels are read back through for a screenshot.
 /// </summary>
-internal sealed class FrameTargets(IGraphicsApi gpu, RenderGraph graph) : IDisposable
+internal sealed class FrameTargets(IGraphicsApi gpu) : IDisposable
 {
     public int Width { get; private set; }
 
@@ -47,7 +46,7 @@ internal sealed class FrameTargets(IGraphicsApi gpu, RenderGraph graph) : IDispo
     public void Dispose() => Destroy();
 
     /// <summary>
-    /// Makes the targets at a size, the old ones destroyed and forgotten by the graph.
+    /// Makes the targets at a size, the old ones destroyed.
     /// </summary>
     public Result Resize(int width, int height)
     {
@@ -123,11 +122,9 @@ internal sealed class FrameTargets(IGraphicsApi gpu, RenderGraph graph) : IDispo
                 [Visibility, Depth, Hzb, GBufferNormal, GBufferBase, GBufferSurface, Velocity, Hdr, Output]
         )
         {
-            graph.Forget(texture);
             gpu.Destroy(texture);
         }
 
-        graph.Forget(Readback);
         gpu.Destroy(Readback);
 
         Visibility = GpuTexture.None;

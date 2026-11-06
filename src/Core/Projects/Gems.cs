@@ -5,7 +5,9 @@ using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Events;
 using Magic.Files;
+using Magic.Gpu;
 using Magic.Platform;
+using Magic.Rendering;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
@@ -73,6 +75,11 @@ internal sealed class Gems : IDisposable
     private readonly List<LoadedGem> _loaded = [];
 
     private readonly Subscriptions _watches = [];
+
+    /// <summary>
+    /// The frame every gem's Render records into, which the GPU provider presents. Render thread.
+    /// </summary>
+    private readonly RenderGraph _graph = new();
 
     /// <summary>
     /// The render thread's own clocks, for the frames it draws.
@@ -181,14 +188,15 @@ internal sealed class Gems : IDisposable
     }
 
     /// <summary>
-    /// Calls <paramref name="hook"/> on <paramref name="gem"/>, which leaves the frame if it throws.
+    /// Calls <paramref name="hook"/> on <paramref name="gem"/>, which leaves the frame if it throws. Present is the GPU
+    /// provider's alone.
     /// </summary>
     [SuppressMessage(
         "Design",
         "CA1031:Do not catch general exception types",
         Justification = "Whatever a gem throws, it is logged and the gem leaves the frame; the others go on."
     )]
-    private static void RunHook(Hook hook, in Frame frame, LoadedGem gem)
+    private void RunHook(Hook hook, in Frame frame, LoadedGem gem)
     {
         try
         {
@@ -204,7 +212,12 @@ internal sealed class Gems : IDisposable
                     gem.Instance.LateUpdate(in frame);
                     break;
                 case Hook.Render:
-                    gem.Instance.Render(in frame);
+                    gem.Instance.Render(in frame, _graph);
+                    break;
+                case Hook.Present:
+                    if (gem.Instance is IGraphicsApi gpu)
+                        gpu.Present(_graph.Finish());
+
                     break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(hook), hook, "There is no such hook.");
@@ -219,7 +232,7 @@ internal sealed class Gems : IDisposable
 
     /// <summary>
     /// One frame of the render thread, which runs them as fast as the GPU and the display let it, never waiting for the
-    /// main thread: every gem's Render. It tells the world which published frame it drew at least, the gems taking what
+    /// main thread: every gem's Render into the frame's graph, then the GPU provider's Present of it. It tells the world which published frame it drew at least, the gems taking what
     /// was published when it began or newer, and wakes the main thread if it waits for that. A render frame has no
     /// messages.
     /// </summary>
@@ -231,6 +244,10 @@ internal sealed class Gems : IDisposable
             _renderFrameDuration.Record(frame.AppDeltaSec);
 
         RunHook(Hook.Render, frame);
+        RunHook(Hook.Present, frame);
+
+        // Without a GPU provider, nothing presents what the gems recorded, so it goes.
+        _graph.Finish();
         _world.DrawnFrame = published;
         _drawn.Set();
     }
@@ -363,7 +380,7 @@ internal sealed class Gems : IDisposable
     private void Touch() => Volatile.Write(ref _buildTimestamp, Stopwatch.GetTimestamp());
 
     /// <summary>
-    /// A hook of <see cref="IGem"/>'s.
+    /// A hook of the frame's: <see cref="IGem"/>'s, and Present, which is the GPU provider's alone.
     /// </summary>
     private enum Hook : byte
     {
@@ -371,6 +388,7 @@ internal sealed class Gems : IDisposable
         FixedUpdate,
         LateUpdate,
         Render,
+        Present,
     }
 
     /// <summary>

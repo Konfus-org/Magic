@@ -16,13 +16,8 @@ namespace Magic.GIRendering;
 /// then it is not drawn, and one that could not be made is drawn as the failure model. Pools are filled from the
 /// start and never compacted: a model stays resident for the run.
 /// </summary>
-internal sealed class GeometryPools(
-    IGraphicsApi gpu,
-    RenderGraph graph,
-    IMeshPreprocessor meshes,
-    Assets assets,
-    Threads threads
-) : IDisposable
+internal sealed class GeometryPools(IGraphicsApi gpu, IMeshPreprocessor meshes, Assets assets, Threads threads)
+    : IDisposable
 {
     public const int VertexCapacity = 1 << 20;
     public const int IndexCapacity = 1 << 22;
@@ -150,7 +145,7 @@ internal sealed class GeometryPools(
     /// <summary>
     /// Copies what arrived since the last frame into the pools, in the frame's upload pass.
     /// </summary>
-    public void Upload()
+    public void Upload(RenderGraph graph)
     {
         if (_arrived.Count == 0)
             return;
@@ -170,7 +165,7 @@ internal sealed class GeometryPools(
                 rebased[i] = derived.Indices[i] + where.VertexOffset;
             }
 
-            graph.Recorder.CopyBuffer(
+            graph.CopyBuffer(
                 indices.Buffer,
                 indices.Offset,
                 Indices,
@@ -188,14 +183,14 @@ internal sealed class GeometryPools(
                 rows[i] = cluster;
             }
 
-            graph.Recorder.CopyBuffer(
+            graph.CopyBuffer(
                 clusters.Buffer,
                 clusters.Offset,
                 Clusters,
                 (ulong)where.ClusterOffset * GpuCluster.Bytes,
                 (ulong)clusterBytes
             );
-            UploadLeaves(derived, where);
+            UploadLeaves(graph, derived, where);
         }
 
         _arrived.Clear();
@@ -247,7 +242,7 @@ internal sealed class GeometryPools(
     /// <summary>
     /// The model's leaf clusters into the leaf table and its acceleration structure built, after its pools landed.
     /// </summary>
-    private void UploadLeaves(MeshDerived derived, ResidentModel where)
+    private void UploadLeaves(RenderGraph graph, MeshDerived derived, ResidentModel where)
     {
         if (where.Acceleration.IsNone)
             return;
@@ -261,7 +256,7 @@ internal sealed class GeometryPools(
         }
 
         graph.Upload(gpu, LeafClusters, CollectionsMarshal.AsSpan(leaves), (ulong)where.LeafOffset * sizeof(uint));
-        graph.Recorder.BuildAcceleration(where.Acceleration);
+        graph.BuildAcceleration(where.Acceleration);
     }
 
     private async Task LoadAsync(Handle<Model> model)

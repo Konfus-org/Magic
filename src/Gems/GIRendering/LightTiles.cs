@@ -12,7 +12,7 @@ namespace Magic.GIRendering;
 /// The light table and the tiles of the screen each light reaches: the world's local lights uploaded each frame, and a
 /// pass that sets each tile's bit for every light that touches what the tile shows.
 /// </summary>
-internal sealed class LightTiles(IGraphicsApi gpu, RenderGraph graph, GpuPipelines pipelines) : IDisposable
+internal sealed class LightTiles(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposable
 {
     /// <summary>
     /// The twin of <c>Scene/Lights.slang</c>'s.
@@ -65,11 +65,10 @@ internal sealed class LightTiles(IGraphicsApi gpu, RenderGraph graph, GpuPipelin
     }
 
     /// <summary>
-    /// The tiles made again for a picture of a size; the old ones destroyed and forgotten by the graph.
+    /// The tiles made again for a picture of a size; the old ones destroyed.
     /// </summary>
     public Result Resize(int width, int height)
     {
-        graph.Forget(Tiles);
         gpu.Destroy(Tiles);
         Result<GpuBuffer> tiles = gpu.CreateBuffer(
             "Light tiles",
@@ -86,6 +85,7 @@ internal sealed class LightTiles(IGraphicsApi gpu, RenderGraph graph, GpuPipelin
     /// The world's lights into the table, point lights first, in a transfer pass the caller opened.
     /// </summary>
     public void Prepare(
+        RenderGraph graph,
         EcsSnapshot<Transform, PointLight> points,
         EcsSnapshot<Transform, SpotLight> spots,
         EcsSnapshot<Transform, RectLight> rects
@@ -128,7 +128,7 @@ internal sealed class LightTiles(IGraphicsApi gpu, RenderGraph graph, GpuPipelin
     {
         FrameTargets targets = view.Targets;
         _cullPass
-            .Run(header)
+            .Run(view.Graph, header)
             .Reads(view.Constants, lightingConstants, Table, targets.Depth)
             .Writes(Tiles)
             .Dispatch((uint)GetTiles(targets.Width), (uint)GetTiles(targets.Height));

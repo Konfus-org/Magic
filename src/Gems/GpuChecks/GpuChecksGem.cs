@@ -3,6 +3,7 @@ using Magic.Files;
 using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Projects;
+using Magic.Rendering;
 using Magic.Shaders;
 using Magic.Threading;
 using Magic.Utils;
@@ -13,7 +14,7 @@ namespace Magic.GpuChecks;
 /// Proves the GPU provider and the shader compiler work together, before any renderer draws: as the run starts, a
 /// compute entry is compiled, fills a texture with a gradient through the heap, the texture is read back and its
 /// corners checked, and each is an error under --fail-on-error when wrong. The compile and the readback wait on
-/// workers; every GPU call is made on the render thread. It is public because nothing in its assembly makes it: Magic
+/// workers; every GPU call is made on the render thread, and the dispatch is recorded in <see cref="Render"/>. It is public because nothing in its assembly makes it: Magic
 /// does, by reflection, when a project lists the gem.
 /// </summary>
 public sealed class GpuChecksGem : IGem, IDisposable
@@ -24,9 +25,20 @@ public sealed class GpuChecksGem : IGem, IDisposable
 
     private readonly IGraphicsApi _gpu;
     private readonly Task _check;
+
+    /// <summary>
+    /// Set once <see cref="Render"/> has recorded the dispatch, which the check then reads back.
+    /// </summary>
+    private readonly TaskCompletionSource _recorded = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private GpuPipeline _pipeline;
     private GpuTexture _gradient;
     private GpuBuffer _readback;
+
+    /// <summary>
+    /// The dispatch's group counts, from the check once what it draws with is made until <see cref="Render"/> records
+    /// it. Render thread.
+    /// </summary>
+    private (uint X, uint Y)? _groups;
 
     public GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, Assets assets, Threads threads)
     {
@@ -47,6 +59,32 @@ public sealed class GpuChecksGem : IGem, IDisposable
         _gpu.Destroy(_pipeline);
         _gpu.Destroy(_gradient);
         _gpu.Destroy(_readback);
+    }
+
+    /// <summary>
+    /// The gradient's dispatch and its copy into the readback buffer, once the check has made what they use.
+    /// </summary>
+    public void Render(in Frame frame, RenderGraph graph)
+    {
+        if (_groups is not { } groups)
+            return;
+
+        _groups = null;
+        graph.BeginComputePass("Fill gradient");
+        graph.Use(_gradient, GpuAccess.ShaderWrite);
+        graph.BindPipeline(_pipeline);
+        graph.PushConstants(new GpuConstants(_gradient.Id, Size, Size));
+        graph.Dispatch(groups.X, groups.Y);
+        graph.EndPass();
+        graph.BeginTransferPass("Read gradient back");
+        graph.Use(_gradient, GpuAccess.CopySource);
+        graph.Use(_readback, GpuAccess.CopyDestination);
+        graph.CopyTextureToBuffer(_gradient, 0, 0, _readback, 0);
+        graph.EndPass();
+        graph.BeginTransferPass("Gradient to the host");
+        graph.Use(_readback, GpuAccess.HostRead);
+        graph.EndPass();
+        _recorded.SetResult();
     }
 
     private async Task CheckAsync(IShaderCompiler shaders, Assets assets, Threads threads)
@@ -133,24 +171,9 @@ public sealed class GpuChecksGem : IGem, IDisposable
 
         _readback = readback.Value;
 
-        // Record the gradient's dispatch and its copy into the buffer, and submit them.
-        GpuCommandRecorder recorder = new();
-        recorder.BeginComputePass("Fill gradient");
-        recorder.Transition(_gradient, GpuAccess.None, GpuAccess.ShaderWrite);
-        recorder.BindPipeline(_pipeline);
-        recorder.PushConstants(new GpuConstants(_gradient.Id, Size, Size));
-        recorder.Dispatch(
-            (Size + entry.GroupSizeX - 1) / entry.GroupSizeX,
-            (Size + entry.GroupSizeY - 1) / entry.GroupSizeY
-        );
-        recorder.EndPass();
-        recorder.BeginTransferPass("Read gradient back");
-        recorder.Transition(_gradient, GpuAccess.ShaderWrite, GpuAccess.CopySource);
-        recorder.Transition(_readback, GpuAccess.None, GpuAccess.CopyDestination);
-        recorder.CopyTextureToBuffer(_gradient, 0, 0, _readback, 0);
-        recorder.Transition(_readback, GpuAccess.CopyDestination, GpuAccess.HostRead);
-        recorder.EndPass();
-        _gpu.Submit(recorder.Finish());
+        // Have Render record the dispatch and its copy into the buffer.
+        _groups = ((Size + entry.GroupSizeX - 1) / entry.GroupSizeX, (Size + entry.GroupSizeY - 1) / entry.GroupSizeY);
+        await _recorded.Task.ConfigureAwait(false);
 
         // Read the gradient back once the GPU has computed it. It is red along x, green along y, a quarter blue and
         // opaque; each corner and the centre must read so.

@@ -20,7 +20,9 @@ internal static class Screenshot
         graph.BeginTransferPass("Read the output back");
         graph.Use(targets.Output, GpuAccess.CopySource);
         graph.Use(targets.Readback, GpuAccess.CopyDestination);
-        graph.Recorder.CopyTextureToBuffer(targets.Output, 0, 0, targets.Readback, 0);
+        graph.CopyTextureToBuffer(targets.Output, 0, 0, targets.Readback, 0);
+        graph.EndPass();
+        graph.BeginTransferPass("Output to the host");
         graph.Use(targets.Readback, GpuAccess.HostRead);
         graph.EndPass();
     }

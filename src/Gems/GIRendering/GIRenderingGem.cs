@@ -45,7 +45,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly Channel<ScreenshotRequested> _screenshots = Channel.CreateUnbounded<ScreenshotRequested>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
     );
-    private readonly RenderGraph _graph;
     private readonly GpuPipelines _pipelines;
     private readonly GeometryPools _pools;
     private readonly TextureTable _textures;
@@ -65,7 +64,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly ShadowMask? _shadows;
     private readonly Lighting _lighting;
     private readonly SurfaceView _surfaceView;
-    private readonly IOverlay? _overlay;
     private readonly RendererDebugWindow? _debugWindow;
 
     /// <summary>
@@ -103,11 +101,9 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         App app,
         EventCoordinator events,
         IDebugUI? debugUI = null,
-        IOverlay? overlay = null,
         IInput? input = null
     )
     {
-        _overlay = overlay;
         _debugWindow = debugUI is null ? null : new RendererDebugWindow(debugUI, input);
         _gpu = gpu;
         _assets = assets;
@@ -115,23 +111,20 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _app = app;
         _events = events;
         _threads = threads;
-        _graph = new RenderGraph(gpu);
-        _pipelines = new GpuPipelines(gpu, _graph, shaders, assets);
-        _pools = new GeometryPools(gpu, _graph, meshes, assets, threads);
-        _textures = new TextureTable(gpu, _graph, assets, threads);
-        _materials = new MaterialTable(gpu, _graph, assets, _textures, threads);
-        _targets = new FrameTargets(gpu, _graph);
-        _instances = new InstanceTable(gpu, _graph);
+        _pipelines = new GpuPipelines(gpu, shaders, assets);
+        _pools = new GeometryPools(gpu, meshes, assets, threads);
+        _textures = new TextureTable(gpu, assets, threads);
+        _materials = new MaterialTable(gpu, assets, _textures, threads);
+        _targets = new FrameTargets(gpu);
+        _instances = new InstanceTable(gpu);
         _failure = new MaterialInstance { Handle = assets.GetFailure<Material, Model>() };
-        _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu, _graph) : null;
-        _visibility = new Visibility(gpu, _graph, _pipelines, _pools, _materials);
-        _frameView = new FrameView(gpu, _graph, _pools, _materials, _visibility, _rayTracing);
+        _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu) : null;
+        _visibility = new Visibility(gpu, _pipelines, _pools, _materials);
+        _frameView = new FrameView(gpu, _pools, _materials, _visibility, _rayTracing);
         _sky = new SkyLuts(gpu, _pipelines);
-        _lightTiles = new LightTiles(gpu, _graph, _pipelines);
-        _shadows = _rayTracing is null
-            ? null
-            : new ShadowMask(gpu, _graph, _pipelines, _pools, _visibility, _lightTiles);
-        _lighting = new Lighting(gpu, _graph, _pipelines, _sky, _lightTiles, _shadows);
+        _lightTiles = new LightTiles(gpu, _pipelines);
+        _shadows = _rayTracing is null ? null : new ShadowMask(gpu, _pipelines, _pools, _visibility, _lightTiles);
+        _lighting = new Lighting(gpu, _pipelines, _sky, _lightTiles, _shadows);
         _surfaceView = new SurfaceView(_pipelines);
         StartAsync().FireAndForget();
     }
@@ -141,7 +134,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _stopping.Cancel();
         _stopping.Dispose();
         EndPreparing();
-        _graph.Clear();
         _pipelines.Dispose();
         _targets.Dispose();
         _materials.Dispose();
@@ -198,9 +190,9 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     }
 
     /// <summary>
-    /// Draws the newest inputs published, or the last again when none are newer, and submits the frame.
+    /// Records the newest inputs published, or the last again when none are newer, into the frame's graph.
     /// </summary>
-    public void Render(in Frame frame)
+    public void Render(in Frame frame, RenderGraph graph)
     {
         if (_started is not { Ok: true })
             return;
@@ -230,41 +222,39 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             EndPreparing();
         }
 
-        _graph.BeginTransferPass("Upload arrivals");
-        _pools.Upload();
-        _textures.Upload();
-        _materials.Upload();
-        _graph.EndPass();
+        graph.BeginTransferPass("Upload arrivals");
+        _pools.Upload(graph);
+        _textures.Upload(graph);
+        _materials.Upload(graph);
+        graph.EndPass();
 
         // The frame's tables.
         RenderCamera camera = GetCamera(inputs.Cameras);
         RenderSun sun = GetSun(inputs.DirectionalLights);
-        _graph.BeginTransferPass("Upload frame");
+        graph.BeginTransferPass("Upload frame");
         bool hasChanges = _pools.HasArrivals || _instances.HasChanges;
-        _instances.Upload();
-        _rayTracing?.Prepare(_instances.Rows, _instances.Extras, hasChanges);
-        _frameView.Upload(camera, sun, frame.Index, _targets, _instances.Buffer, instanceCount);
-        _visibility.ResetCounts();
-        _lightTiles.Prepare(inputs.PointLights, inputs.SpotLights, inputs.RectLights);
-        _lighting.Prepare(inputs.Skies, camera, sun, _targets);
-        _graph.EndPass();
+        _instances.Upload(graph);
+        _rayTracing?.Prepare(graph, _instances.Rows, _instances.Extras, hasChanges);
+        _frameView.Upload(graph, camera, sun, frame.Index, _targets, _instances.Buffer, instanceCount);
+        _visibility.ResetCounts(graph);
+        _lightTiles.Prepare(graph, inputs.PointLights, inputs.SpotLights, inputs.RectLights);
+        _lighting.Prepare(graph, inputs.Skies, camera, sun, _targets);
+        graph.EndPass();
 
         // The passes, in the order they run.
-        RenderView view = new(_frameView.Constants, _instances.Buffer, instanceCount, _targets);
+        RenderView view = new(_frameView.Constants, _instances.Buffer, instanceCount, _targets, graph);
         _visibility.Record(view);
         _lighting.Record(view);
         _surfaceView.Record(view, inputs.DebugView, sun.Exposure);
-        _overlay?.Record(_graph, _targets.Output);
 
         GpuTexture target = _gpu.WindowTarget;
         if (!target.IsNone)
         {
-            _graph.Import(target, GpuAccess.None);
-            _graph.BeginTransferPass("Show");
-            _graph.Use(_targets.Output, GpuAccess.CopySource);
-            _graph.Use(target, GpuAccess.CopyDestination);
-            _graph.Recorder.BlitTexture(_targets.Output, target);
-            _graph.EndPass();
+            graph.BeginTransferPass("Show");
+            graph.Use(_targets.Output, GpuAccess.CopySource);
+            graph.Use(target, GpuAccess.CopyDestination);
+            graph.BlitTexture(_targets.Output, target);
+            graph.EndPass();
         }
 
         // One readback buffer, so one screenshot a frame: the last asked for.
@@ -275,9 +265,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         }
 
         if (shot is not null)
-            Screenshot.RecordReadback(_graph, _targets);
+            Screenshot.RecordReadback(graph, _targets);
 
-        _gpu.Submit(_graph.Finish());
         if (!_hasDrawn)
         {
             _hasDrawn = true;

@@ -17,7 +17,7 @@ namespace Magic.GIRendering;
 /// as renderers were made or destroyed before it, moves its rows, and any other is built again. Every row is built again
 /// once a model is made or fails. Blocks that changed are uploaded in runs; a still scene uploads nothing.
 /// </summary>
-internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisposable
+internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
 {
     public const int Capacity = 1 << 18;
 
@@ -136,7 +136,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisp
     /// <summary>
     /// Copies the blocks of rows that changed into the table, each run of them in one copy, in the frame's upload pass.
     /// </summary>
-    public void Upload()
+    public void Upload(RenderGraph graph)
     {
         if (!HasChanges)
             return;
@@ -174,7 +174,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisp
             }
 
             _rows.AsSpan(runStart, runRows).CopyTo(staged[stagedRows..]);
-            graph.Recorder.CopyBuffer(
+            graph.CopyBuffer(
                 upload.Buffer,
                 upload.Offset + ((ulong)stagedRows * GpuInstance.Bytes),
                 Buffer,

@@ -18,13 +18,8 @@ namespace Magic.GIRendering;
 /// names the failure shader or a texture that does not load is drawn as the failure kind. The whole table is uploaded
 /// again in the frame after a row changes.
 /// </summary>
-internal sealed class MaterialTable(
-    IGraphicsApi gpu,
-    RenderGraph graph,
-    Assets assets,
-    TextureTable textures,
-    Threads threads
-) : IDisposable
+internal sealed class MaterialTable(IGraphicsApi gpu, Assets assets, TextureTable textures, Threads threads)
+    : IDisposable
 {
     /// <summary>
     /// As many rows as the instance table has, which holds every drawn slot of a scene whose renderers fill one each.
@@ -132,7 +127,7 @@ internal sealed class MaterialTable(
     /// <summary>
     /// Copies the rows into the table, in the frame's upload pass, when any changed.
     /// </summary>
-    public void Upload()
+    public void Upload(RenderGraph graph)
     {
         if (!_isDirty)
             return;
