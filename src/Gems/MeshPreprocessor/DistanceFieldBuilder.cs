@@ -16,20 +16,14 @@ namespace Magic.MeshPreprocessor;
 internal static class DistanceFieldBuilder
 {
     /// <summary>
-    /// Voxels across the field on each axis.
-    /// </summary>
-    public const int Size = MeshDerived.FieldSize;
-
-    /// <summary>
     /// How many voxels of distance the field keeps either side of a surface; beyond, it is as far.
     /// </summary>
     public const int Band = 4;
 
     /// <summary>
-    /// Voxels the field reaches beyond the mesh's bounds on each side: the band, so a ray reads a true distance all
-    /// the way in.
+    /// The pseudo-normals a triangle has, one per <see cref="Feature"/>.
     /// </summary>
-    private const int Padding = Band;
+    private const int FeatureCount = 7;
 
     public static DistanceField Build(Model model)
     {
@@ -59,7 +53,12 @@ internal static class DistanceFieldBuilder
     public static DistanceField Build(Vector3[] positions, (int A, int B, int C)[] triangles)
     {
         if (positions.Length == 0 || triangles.Length == 0)
-            return new DistanceField([.. new byte[Size * Size * Size]], Vector3.Zero, 1, Band);
+            return new DistanceField(
+                [.. new byte[MeshDerived.FieldSize * MeshDerived.FieldSize * MeshDerived.FieldSize]],
+                Vector3.Zero,
+                1,
+                Band
+            );
 
         Vector3 min = new(float.MaxValue);
         Vector3 max = new(float.MinValue);
@@ -69,29 +68,32 @@ internal static class DistanceFieldBuilder
             max = Vector3.Max(max, position);
         }
 
+        // The field reaches a band beyond the bounds on each side, so a ray reads a true distance all the way in.
         Vector3 extent = max - min;
         float longest = Math.Max(Math.Max(extent.X, extent.Y), Math.Max(extent.Z, 1e-3f));
-        float voxel = longest / (Size - 1 - (2 * Padding));
+        float voxel = longest / (MeshDerived.FieldSize - 1 - (2 * Band));
         Vector3 center = (min + max) * 0.5f;
-        Vector3 origin = center - new Vector3(voxel * (Size - 1) * 0.5f);
+        Vector3 origin = center - new Vector3(voxel * (MeshDerived.FieldSize - 1) * 0.5f);
         float band = Band * voxel;
 
-        Normals normals = Normals.Make(positions, triangles);
-        TriangleGrid grid = TriangleGrid.Make(positions, triangles, origin, voxel);
-        byte[] field = new byte[Size * Size * Size];
+        Vector3[] pseudoNormals = GetPseudoNormals(positions, triangles);
+        TriangleGrid grid = TriangleGrid.Create(positions, triangles, origin, voxel);
+        byte[] field = new byte[MeshDerived.FieldSize * MeshDerived.FieldSize * MeshDerived.FieldSize];
         Parallel.For(
             0,
-            Size,
+            MeshDerived.FieldSize,
             z =>
             {
-                for (int y = 0; y < Size; y++)
+                for (int y = 0; y < MeshDerived.FieldSize; y++)
                 {
-                    for (int x = 0; x < Size; x++)
+                    for (int x = 0; x < MeshDerived.FieldSize; x++)
                     {
                         Vector3 point = origin + (new Vector3(x, y, z) * voxel);
-                        float distance = Measure(point, positions, triangles, normals, grid, voxel, band);
+                        float distance = Measure(point, positions, triangles, pseudoNormals, grid, voxel, band);
                         float scaled = Math.Clamp(distance / band, -1, 1);
-                        field[(((z * Size) + y) * Size) + x] = unchecked((byte)(sbyte)Math.Round(scaled * 127));
+                        field[(((z * MeshDerived.FieldSize) + y) * MeshDerived.FieldSize) + x] = unchecked(
+                            (byte)(sbyte)Math.Round(scaled * 127)
+                        );
                     }
                 }
             }
@@ -108,15 +110,13 @@ internal static class DistanceFieldBuilder
         Vector3 point,
         Vector3[] positions,
         (int A, int B, int C)[] triangles,
-        Normals normals,
+        Vector3[] pseudoNormals,
         TriangleGrid grid,
         float voxel,
         float band
     )
     {
-        int cellX = (int)Math.Floor((point.X - grid.Origin.X) / voxel);
-        int cellY = (int)Math.Floor((point.Y - grid.Origin.Y) / voxel);
-        int cellZ = (int)Math.Floor((point.Z - grid.Origin.Z) / voxel);
+        (int cellX, int cellY, int cellZ) = grid.GetCell(point);
         float best = float.MaxValue;
         Vector3 bestNormal = Vector3.UnitY;
         Vector3 bestPoint = point;
@@ -153,7 +153,7 @@ internal static class DistanceFieldBuilder
 
                             best = distance;
                             bestPoint = closest;
-                            bestNormal = normals.Get(triangle, feature);
+                            bestNormal = pseudoNormals[(triangle * FeatureCount) + (int)feature];
                         }
                     }
                 }
@@ -181,12 +181,10 @@ internal static class DistanceFieldBuilder
     )
     {
         Vector3 origin = point + new Vector3(0, 0.137f, 0.291f) * voxel;
-        int cellX = (int)Math.Floor((origin.X - grid.Origin.X) / voxel);
-        int cellY = (int)Math.Floor((origin.Y - grid.Origin.Y) / voxel);
-        int cellZ = (int)Math.Floor((origin.Z - grid.Origin.Z) / voxel);
+        (int cellX, int cellY, int cellZ) = grid.GetCell(origin);
         HashSet<int> tested = [];
         int crossings = 0;
-        for (int x = Math.Max(cellX, 0); x < Size; x++)
+        for (int x = Math.Max(cellX, 0); x < MeshDerived.FieldSize; x++)
         {
             if (!grid.TryGetCell(x, cellY, cellZ, out ReadOnlySpan<int> cell))
                 break;
@@ -295,6 +293,72 @@ internal static class DistanceFieldBuilder
         return a + (ab * (vb * denominator)) + (ac * (vc * denominator));
     }
 
+    /// <summary>
+    /// By triangle, a pseudo-normal per <see cref="Feature"/> in the enum's order: the face's own, a vertex's faces'
+    /// weighted by their angles there, an edge's two faces' sum; the face's own where a sum is zero.
+    /// </summary>
+    private static Vector3[] GetPseudoNormals(Vector3[] positions, (int A, int B, int C)[] triangles)
+    {
+        Vector3[] faces = new Vector3[triangles.Length];
+        Vector3[] vertices = new Vector3[positions.Length];
+        Dictionary<(int, int), Vector3> edges = [];
+        for (int t = 0; t < triangles.Length; t++)
+        {
+            (int a, int b, int c) = triangles[t];
+            Vector3 normal = Vector3.Cross(positions[b] - positions[a], positions[c] - positions[a]);
+            float length = normal.Length();
+            if (length < 1e-12f)
+                continue;
+
+            normal /= length;
+            faces[t] = normal;
+            vertices[a] += normal * Angle(positions[a], positions[b], positions[c]);
+            vertices[b] += normal * Angle(positions[b], positions[c], positions[a]);
+            vertices[c] += normal * Angle(positions[c], positions[a], positions[b]);
+            AddEdge(a, b, normal);
+            AddEdge(b, c, normal);
+            AddEdge(c, a, normal);
+        }
+
+        Vector3[] pseudoNormals = new Vector3[triangles.Length * FeatureCount];
+        for (int t = 0; t < triangles.Length; t++)
+        {
+            (int a, int b, int c) = triangles[t];
+            Span<Vector3> own = pseudoNormals.AsSpan(t * FeatureCount, FeatureCount);
+            own[(int)Feature.Face] = faces[t];
+            own[(int)Feature.VertexA] = vertices[a];
+            own[(int)Feature.VertexB] = vertices[b];
+            own[(int)Feature.VertexC] = vertices[c];
+            own[(int)Feature.EdgeAb] = edges.GetValueOrDefault(Key(a, b));
+            own[(int)Feature.EdgeBc] = edges.GetValueOrDefault(Key(b, c));
+            own[(int)Feature.EdgeCa] = edges.GetValueOrDefault(Key(c, a));
+            for (int i = 0; i < own.Length; i++)
+            {
+                if (own[i].LengthSquared() == 0)
+                    own[i] = faces[t];
+            }
+        }
+
+        return pseudoNormals;
+
+        static float Angle(Vector3 at, Vector3 next, Vector3 previous)
+        {
+            Vector3 u = next - at;
+            Vector3 v = previous - at;
+            float lengths = u.Length() * v.Length();
+
+            return lengths > 0 ? MathF.Acos(Math.Clamp(Vector3.Dot(u, v) / lengths, -1, 1)) : 0;
+        }
+
+        static (int, int) Key(int a, int b) => a < b ? (a, b) : (b, a);
+
+        void AddEdge(int a, int b, Vector3 normal)
+        {
+            (int, int) key = Key(a, b);
+            edges[key] = edges.TryGetValue(key, out Vector3 sum) ? sum + normal : normal;
+        }
+    }
+
     private enum Feature : byte
     {
         Face,
@@ -307,115 +371,18 @@ internal static class DistanceFieldBuilder
     }
 
     /// <summary>
-    /// The pseudo-normals: a face's own, a vertex's faces' weighted by their angles there, an edge's two faces' sum.
-    /// </summary>
-    private sealed class Normals
-    {
-        private readonly Vector3[] _faces;
-        private readonly Vector3[] _vertices;
-        private readonly Dictionary<(int, int), Vector3> _edges;
-        private readonly (int A, int B, int C)[] _triangles;
-
-        private Normals(
-            Vector3[] faces,
-            Vector3[] vertices,
-            Dictionary<(int, int), Vector3> edges,
-            (int A, int B, int C)[] triangles
-        )
-        {
-            _faces = faces;
-            _vertices = vertices;
-            _edges = edges;
-            _triangles = triangles;
-        }
-
-        public static Normals Make(Vector3[] positions, (int A, int B, int C)[] triangles)
-        {
-            Vector3[] faces = new Vector3[triangles.Length];
-            Vector3[] vertices = new Vector3[positions.Length];
-            Dictionary<(int, int), Vector3> edges = [];
-            for (int t = 0; t < triangles.Length; t++)
-            {
-                (int a, int b, int c) = triangles[t];
-                Vector3 normal = Vector3.Cross(positions[b] - positions[a], positions[c] - positions[a]);
-                float length = normal.Length();
-                if (length < 1e-12f)
-                    continue;
-
-                normal /= length;
-                faces[t] = normal;
-                vertices[a] += normal * Angle(positions[a], positions[b], positions[c]);
-                vertices[b] += normal * Angle(positions[b], positions[c], positions[a]);
-                vertices[c] += normal * Angle(positions[c], positions[a], positions[b]);
-                AddEdge(edges, a, b, normal);
-                AddEdge(edges, b, c, normal);
-                AddEdge(edges, c, a, normal);
-            }
-
-            return new Normals(faces, vertices, edges, triangles);
-        }
-
-        public Vector3 Get(int triangle, Feature feature)
-        {
-            (int a, int b, int c) = _triangles[triangle];
-            Vector3 normal = feature switch
-            {
-                Feature.Face => _faces[triangle],
-                Feature.VertexA => _vertices[a],
-                Feature.VertexB => _vertices[b],
-                Feature.VertexC => _vertices[c],
-                Feature.EdgeAb => _edges[Key(a, b)],
-                Feature.EdgeBc => _edges[Key(b, c)],
-                Feature.EdgeCa => _edges[Key(c, a)],
-                _ => throw new ArgumentOutOfRangeException(nameof(feature), feature, "not a feature"),
-            };
-
-            return normal.LengthSquared() > 0 ? normal : _faces[triangle];
-        }
-
-        private static float Angle(Vector3 at, Vector3 next, Vector3 previous)
-        {
-            Vector3 u = next - at;
-            Vector3 v = previous - at;
-            float lengths = u.Length() * v.Length();
-
-            return lengths > 0 ? MathF.Acos(Math.Clamp(Vector3.Dot(u, v) / lengths, -1, 1)) : 0;
-        }
-
-        private static (int, int) Key(int a, int b) => a < b ? (a, b) : (b, a);
-
-        private static void AddEdge(Dictionary<(int, int), Vector3> edges, int a, int b, Vector3 normal)
-        {
-            (int, int) key = Key(a, b);
-            edges[key] = edges.TryGetValue(key, out Vector3 sum) ? sum + normal : normal;
-        }
-    }
-
-    /// <summary>
     /// The triangles binned into the field's cells by their bounds, so a voxel looks at the few near it.
     /// </summary>
-    private sealed class TriangleGrid
+    private sealed class TriangleGrid(Vector3 origin, float voxel, int[] starts, int[] items)
     {
-        private readonly int[] _starts;
-        private readonly int[] _items;
-
-        private TriangleGrid(Vector3 origin, int[] starts, int[] items)
-        {
-            Origin = origin;
-            _starts = starts;
-            _items = items;
-        }
-
-        public Vector3 Origin { get; }
-
-        public static TriangleGrid Make(
+        public static TriangleGrid Create(
             Vector3[] positions,
             (int A, int B, int C)[] triangles,
             Vector3 origin,
             float voxel
         )
         {
-            int[] counts = new int[(Size * Size * Size) + 1];
+            int[] counts = new int[(MeshDerived.FieldSize * MeshDerived.FieldSize * MeshDerived.FieldSize) + 1];
             (int Min, int Max)[] rangesX = new (int, int)[triangles.Length];
             (int Min, int Max)[] rangesY = new (int, int)[triangles.Length];
             (int Min, int Max)[] rangesZ = new (int, int)[triangles.Length];
@@ -461,33 +428,51 @@ internal static class DistanceFieldBuilder
                 }
             }
 
-            return new TriangleGrid(origin, starts, items);
+            return new TriangleGrid(origin, voxel, starts, items);
+        }
+
+        /// <summary>
+        /// The cell a point falls in, which may lie outside the grid.
+        /// </summary>
+        public (int X, int Y, int Z) GetCell(Vector3 point)
+        {
+            Vector3 cell = (point - origin) / voxel;
+
+            return ((int)Math.Floor(cell.X), (int)Math.Floor(cell.Y), (int)Math.Floor(cell.Z));
         }
 
         public bool TryGetCell(int x, int y, int z, out ReadOnlySpan<int> cell)
         {
             cell = default;
-            if (x < 0 || y < 0 || z < 0 || x >= Size || y >= Size || z >= Size)
+            if (
+                x < 0
+                || y < 0
+                || z < 0
+                || x >= MeshDerived.FieldSize
+                || y >= MeshDerived.FieldSize
+                || z >= MeshDerived.FieldSize
+            )
                 return false;
 
             int index = Index(x, y, z);
-            cell = _items.AsSpan(_starts[index], _starts[index + 1] - _starts[index]);
+            cell = items.AsSpan(starts[index], starts[index + 1] - starts[index]);
 
             return true;
         }
 
-        private static int Index(int x, int y, int z) => (((z * Size) + y) * Size) + x;
+        private static int Index(int x, int y, int z) =>
+            (((z * MeshDerived.FieldSize) + y) * MeshDerived.FieldSize) + x;
 
         private static (int Min, int Max) Range(float min, float max, float origin, float voxel) =>
             (
-                Math.Clamp((int)Math.Floor((min - origin) / voxel), 0, Size - 1),
-                Math.Clamp((int)Math.Floor((max - origin) / voxel), 0, Size - 1)
+                Math.Clamp((int)Math.Floor((min - origin) / voxel), 0, MeshDerived.FieldSize - 1),
+                Math.Clamp((int)Math.Floor((max - origin) / voxel), 0, MeshDerived.FieldSize - 1)
             );
     }
 }
 
 /// <summary>
-/// A model's distance field: <see cref="DistanceFieldBuilder.Size"/> voxels a side from <paramref name="Origin"/>,
+/// A model's distance field: <see cref="MeshDerived.FieldSize"/> voxels a side from <paramref name="Origin"/>,
 /// <paramref name="Voxel"/> metres apart, each the distance scaled by <paramref name="Band"/> as a signed byte.
 /// </summary>
 internal readonly record struct DistanceField(ImmutableArray<byte> Voxels, Vector3 Origin, float Voxel, float Band);
