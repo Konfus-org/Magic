@@ -5,16 +5,11 @@ using Magic.Utils;
 namespace Magic.Files.Pipeline;
 
 /// <summary>
-/// Takes what was pushed, and what workers finished, into the database and the loaded assets: the rules of what each
-/// change does.
+/// Takes what was pushed, and what workers finished, into the loaded assets: the rules of what each change does.
 /// </summary>
 internal static class AssetChanges
 {
-    public static (AssetDatabase, LoadedAssets) Take(
-        AssetDatabase database,
-        LoadedAssets loaded,
-        AssetsChangeList changes
-    )
+    public static LoadedAssets Take(AssetDatabase database, LoadedAssets loaded, AssetsChangeList changes)
     {
         while (changes.TryTakeAsked(out AssetChange? change))
         {
@@ -44,9 +39,6 @@ internal static class AssetChanges
                 case AssetFolderListed listed:
                     loaded = RecordFolder(loaded, listed);
                     break;
-                case AssetDependenciesFound found:
-                    database = database.SetDependencies(found.Id, found.Dependencies);
-                    break;
                 default:
                     throw new ArgumentException(
                         $"{change.GetType().Name} is no change the assets take.",
@@ -62,7 +54,7 @@ internal static class AssetChanges
                 loaded = loaded.Land(read.Id, entry, read.Made);
         }
 
-        return (database, loaded);
+        return loaded;
     }
 
     /// <summary>
