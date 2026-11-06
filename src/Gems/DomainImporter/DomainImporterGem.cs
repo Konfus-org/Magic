@@ -20,11 +20,9 @@ public sealed class DomainImporterGem(Assets assets) : IGem, IAssetImporter<Doma
 
     public Task<Result<Domain>> ImportAsync(AssetFile file, IProgress<LoadProgress>? progress, CancellationToken cancel)
     {
-        int slash = file.Path.LastIndexOf('/');
-        string folder = slash < 0 ? string.Empty : file.Path[..slash];
         ImmutableArray<Chunk>.Builder chunks = ImmutableArray.CreateBuilder<Chunk>();
         ImmutableArray<Handle<Prefab>>.Builder globals = ImmutableArray.CreateBuilder<Handle<Prefab>>();
-        foreach (string path in assets.GetPaths(folder, file.Id))
+        foreach (string path in assets.GetPathsBeside(file))
         {
             Handle<Prefab> prefab = assets.Find<Prefab>(path);
             if (prefab == Handle<Prefab>.None)

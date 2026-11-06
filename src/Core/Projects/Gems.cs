@@ -344,7 +344,11 @@ internal sealed class Gems : IDisposable
     /// </summary>
     private void Watch(GemInfo gem)
     {
-        Result<IFileWatcher> watched = _files.Watch(gem.Folder, "*.dll");
+        Result<IDisposable> watched = _files.Watch(
+            gem.Folder,
+            "*.dll",
+            _ => Volatile.Write(ref _buildTimestamp, Stopwatch.GetTimestamp())
+        );
         if (!watched.Ok)
         {
             Log.Warn($"Gem {gem.Name} is not watched, so a build of it won't restart the run: {watched.Error}");
@@ -352,15 +356,8 @@ internal sealed class Gems : IDisposable
             return;
         }
 
-        IFileWatcher watcher = watched.Value;
-        watcher.Created += (_, _) => Touch();
-        watcher.Changed += (_, _) => Touch();
-        watcher.Deleted += (_, _) => Touch();
-        watcher.Renamed += (_, _) => Touch();
-        _watches.Add(new Subscription(watcher.Dispose));
+        _watches.Add(new Subscription(watched.Value.Dispose));
     }
-
-    private void Touch() => Volatile.Write(ref _buildTimestamp, Stopwatch.GetTimestamp());
 
     /// <summary>
     /// A hook of <see cref="IGem"/>'s.

@@ -51,13 +51,9 @@ internal static class AssetReindex
 
             if (!now.ById.ContainsKey(id))
             {
-                // One a gem added has no file, and stays.
-                if (!before.ById.TryGetValue(id, out IndexedFile? gone))
-                    continue;
-
                 foreach (TaskCompletionSource<Made> waiter in entry.Waiting)
                 {
-                    changes.Answer(waiter, new Made(Result.Failure($"{gone.Path} is gone."), 0));
+                    changes.Answer(waiter, new Made(Result.Failure($"{before.ById[id].Path} is gone."), 0));
                 }
 
                 loaded = loaded with { Entries = loaded.Entries.Remove(id) };

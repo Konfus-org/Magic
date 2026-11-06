@@ -30,9 +30,6 @@ internal static class AssetChanges
                 case AssetExporterRemoved removed:
                     loaded = loaded with { Exporters = Release(loaded.Exporters, removed.Type, removed.Exporter) };
                     break;
-                case AssetAdded added:
-                    loaded = Add(database, loaded, added);
-                    break;
                 case BuiltInAssetMissing missing:
                     loaded = ReportMissing(loaded, missing);
                     break;
@@ -158,34 +155,6 @@ internal static class AssetChanges
         Type type,
         object gem
     ) => gems.TryGetValue(type, out object? other) && ReferenceEquals(other, gem) ? gems.Remove(type) : gems;
-
-    /// <summary>
-    /// Hands out an asset a gem made, replacing any it added under the id before, a version later; refused when a file
-    /// has the id.
-    /// </summary>
-    private static LoadedAssets Add(AssetDatabase database, LoadedAssets loaded, AssetAdded added)
-    {
-        if (database.Index.ById.TryGetValue(added.Id, out IndexedFile? file))
-        {
-            Log.Error(
-                $"A {added.Type.Name} a gem made has the id {added.Id}, which {file.Path} has, so it is not added."
-            );
-
-            return loaded;
-        }
-
-        loaded.Entries.TryGetValue(added.Id, out AssetEntry? before);
-        ulong version = (before?.Current?.Version ?? 0) + 1;
-        AssetEntry entry = new()
-        {
-            Type = added.Type,
-            Import = added.Import,
-            Stage = AssetStage.Landed,
-            Waiting = before?.Waiting ?? [],
-        };
-
-        return loaded.Land(added.Id, entry, new Made(Result.Success(added.Asset), version));
-    }
 
     /// <summary>
     /// Says a missing default or failure is missing, the first time it is asked for.

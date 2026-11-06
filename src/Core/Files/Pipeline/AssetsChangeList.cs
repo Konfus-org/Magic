@@ -16,16 +16,13 @@ internal readonly record struct AssetLoaded(ulong Id, object Asset);
 /// </summary>
 internal sealed class AssetsChangeList
 {
-    private readonly Channel<AssetChange> _asked = Channel.CreateUnbounded<AssetChange>(
-        new UnboundedChannelOptions { SingleReader = true }
-    );
+    // Not single-reader: HasChanges peeks from any thread while the main thread takes.
+    private readonly Channel<AssetChange> _asked = Channel.CreateUnbounded<AssetChange>();
 
     /// <summary>
     /// What workers finished reading.
     /// </summary>
-    private readonly Channel<AssetFileRead> _read = Channel.CreateUnbounded<AssetFileRead>(
-        new UnboundedChannelOptions { SingleReader = true }
-    );
+    private readonly Channel<AssetFileRead> _read = Channel.CreateUnbounded<AssetFileRead>();
 
     private readonly List<AssetLoaded> _reloaded = [];
 
@@ -141,11 +138,6 @@ internal sealed record AssetImporterRemoved(Type Type, object Importer) : AssetC
 internal sealed record AssetExporterAdded(Type Type, object Exporter) : AssetChange;
 
 internal sealed record AssetExporterRemoved(Type Type, object Exporter) : AssetChange;
-
-/// <summary>
-/// A gem made <paramref name="Asset"/> and hands it out as asset <paramref name="Id"/>.
-/// </summary>
-internal sealed record AssetAdded(ulong Id, Type Type, AssetImportRun Import, object Asset) : AssetChange;
 
 /// <summary>
 /// A built-in default or failure, <paramref name="Key"/>, was asked for and is missing, as <paramref name="Message"/>

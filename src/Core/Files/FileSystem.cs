@@ -22,12 +22,6 @@ internal sealed class FileSystem : IFileSystem
 
     public bool DirectoryExists(string path) => Directory.Exists(path);
 
-    public Result CreateDirectory(string path) =>
-        Run(() =>
-        {
-            _ = Directory.CreateDirectory(path);
-        });
-
     public Result<string[]> EnumerateFiles(string path, string searchPattern, bool recursive) =>
         Run(() =>
             Directory.GetFiles(
@@ -37,24 +31,10 @@ internal sealed class FileSystem : IFileSystem
             )
         );
 
-    public Result<string[]> EnumerateDirectories(string path) => Run(() => Directory.GetDirectories(path));
-
-    public Result<string[]> ReadLines(string path) => Run(() => File.ReadAllLines(path));
-
-    public Task<Result<string[]>> ReadLinesAsync(string path, CancellationToken cancel) =>
-        RunAsync(() => File.ReadAllLinesAsync(path, cancel));
-
-    public Result<string> ReadText(string path) => Run(() => File.ReadAllText(path));
-
-    public Task<Result<string>> ReadTextAsync(string path, CancellationToken cancel) =>
-        RunAsync(() => File.ReadAllTextAsync(path, cancel));
-
     public Result<byte[]> ReadBytes(string path) => Run(() => File.ReadAllBytes(path));
 
     public Task<Result<byte[]>> ReadBytesAsync(string path, CancellationToken cancel) =>
         RunAsync(() => File.ReadAllBytesAsync(path, cancel));
-
-    public Result Write(string path, string contents) => Run(() => File.WriteAllText(path, contents));
 
     public async Task<Result> WriteAsync(string path, ReadOnlyMemory<byte> bytes, CancellationToken cancel)
     {
@@ -81,22 +61,26 @@ internal sealed class FileSystem : IFileSystem
         }
     }
 
-    public Result Delete(string path) => Delete(path, recursive: false);
-
-    public Result Delete(string path, bool recursive) =>
-        Run(() =>
+    public Result<IDisposable> Watch(string path, string filter, Action<string> touched) =>
+        Run<IDisposable>(() =>
         {
-            if (Directory.Exists(path))
-                Directory.Delete(path, recursive);
-            else
-                File.Delete(path);
+            FileSystemWatcher watcher = new(path, filter)
+            {
+                IncludeSubdirectories = true,
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite,
+            };
+            watcher.Created += (_, e) => touched(e.FullPath);
+            watcher.Changed += (_, e) => touched(e.FullPath);
+            watcher.Deleted += (_, e) => touched(e.FullPath);
+            watcher.Renamed += (_, e) =>
+            {
+                touched(e.OldFullPath);
+                touched(e.FullPath);
+            };
+            watcher.EnableRaisingEvents = true;
+
+            return watcher;
         });
-
-    public Result Copy(string sourceFile, string destinationFile) =>
-        Run(() => File.Copy(sourceFile, destinationFile, overwrite: true));
-
-    public Result<IFileWatcher> Watch(string path, string filter) =>
-        Run<IFileWatcher>(() => new FileWatcher(path, filter));
 
     /// <summary>
     /// <paramref name="work"/>'s value, or the reason the disk refused it. Anything else thrown is a bug and goes on.
@@ -106,20 +90,6 @@ internal sealed class FileSystem : IFileSystem
         try
         {
             return Result.Success(work());
-        }
-        catch (Exception ex) when (IsRefusal(ex))
-        {
-            return Result.Failure(ex.Message);
-        }
-    }
-
-    /// <inheritdoc cref="Run{T}(Func{T})"/>
-    private static Result Run(Action work)
-    {
-        try
-        {
-            work();
-            return Result.Success();
         }
         catch (Exception ex) when (IsRefusal(ex))
         {
@@ -145,30 +115,4 @@ internal sealed class FileSystem : IFileSystem
     /// </summary>
     private static bool IsRefusal(Exception ex) =>
         ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException;
-
-    private sealed class FileWatcher : IFileWatcher
-    {
-        private readonly FileSystemWatcher _watcher;
-
-        internal FileWatcher(string path, string filter)
-        {
-            _watcher = new FileSystemWatcher(path, filter)
-            {
-                IncludeSubdirectories = true,
-                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite,
-            };
-            _watcher.Created += (_, e) => Created?.Invoke(this, e);
-            _watcher.Changed += (_, e) => Changed?.Invoke(this, e);
-            _watcher.Deleted += (_, e) => Deleted?.Invoke(this, e);
-            _watcher.Renamed += (_, e) => Renamed?.Invoke(this, e);
-            _watcher.EnableRaisingEvents = true;
-        }
-
-        public event EventHandler<FileSystemEventArgs>? Created;
-        public event EventHandler<FileSystemEventArgs>? Changed;
-        public event EventHandler<FileSystemEventArgs>? Deleted;
-        public event EventHandler<RenamedEventArgs>? Renamed;
-
-        public void Dispose() => _watcher.Dispose();
-    }
 }
