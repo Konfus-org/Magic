@@ -194,21 +194,11 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisp
         in RowInputs inputs
     )
     {
-        Span<uint> materialRows = stackalloc uint[MaterialSlots.Capacity];
-        ReadOnlySpan<Handle<Material>> slotHandles = renderer.Materials;
-        for (int slot = 0; slot < MaterialSlots.Capacity; slot++)
-        {
-            materialRows[slot] = inputs.Materials.GetRow(
-                resident.IsFailure ? inputs.FailureMaterial : slotHandles[slot]
-            );
-        }
-
         Matrix4x4 worldMatrix = transform.Matrix;
         Matrix4x4.Invert(worldMatrix, out Matrix4x4 inverseWorld);
         Vector3 scale = transform.Scale;
         float maxScale = Math.Max(Math.Abs(scale.X), Math.Max(Math.Abs(scale.Y), Math.Abs(scale.Z)));
-
-        return new GpuInstance
+        GpuInstance row = new()
         {
             World = worldMatrix,
             InverseWorld = inverseWorld,
@@ -217,15 +207,15 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisp
             BoundsRadius = resident.BoundsRadius * maxScale,
             ClusterOffset = resident.ClusterOffset,
             ClusterCount = resident.ClusterCount,
-            Material0 = materialRows[0],
-            Material1 = materialRows[1],
-            Material2 = materialRows[2],
-            Material3 = materialRows[3],
-            Material4 = materialRows[4],
-            Material5 = materialRows[5],
-            Material6 = materialRows[6],
-            Material7 = materialRows[7],
         };
+        for (int slot = 0; slot < MaterialSlots.Capacity; slot++)
+        {
+            row.Materials[slot] = inputs.Materials.GetRow(
+                resident.IsFailure ? inputs.FailureMaterial : renderer.Materials[slot]
+            );
+        }
+
+        return row;
     }
 
     /// <summary>

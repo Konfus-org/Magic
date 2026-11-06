@@ -24,8 +24,6 @@ internal sealed class LightTiles(IGraphicsApi gpu, RenderGraph graph, GpuPipelin
 
     private const int Buckets = MaxLights / 32;
 
-    private readonly GpuLight[] _lights = new GpuLight[MaxLights];
-
     private readonly GpuPass _cullPass = pipelines.Compute("Cull lights", "CullLights", "CullLights");
 
     private bool _isFullLogged;
@@ -92,12 +90,7 @@ internal sealed class LightTiles(IGraphicsApi gpu, RenderGraph graph, GpuPipelin
         if (Count == 0)
             return;
 
-        CollectionsMarshal.AsSpan(world.Lights)[..Count].CopyTo(_lights);
-        int bytes = Count * GpuLight.Bytes;
-        GpuUpload upload = gpu.BeginUpload(bytes);
-        MemoryMarshal.AsBytes(_lights.AsSpan(0, Count)).CopyTo(upload.Bytes);
-        graph.Use(Table, GpuAccess.CopyDestination);
-        graph.Recorder.CopyBuffer(upload.Buffer, upload.Offset, Table, 0, (ulong)bytes);
+        graph.Upload(gpu, Table, CollectionsMarshal.AsSpan(world.Lights)[..Count]);
     }
 
     /// <summary>
@@ -111,15 +104,6 @@ internal sealed class LightTiles(IGraphicsApi gpu, RenderGraph graph, GpuPipelin
             .Reads(view.Constants, lightingConstants, Table, targets.Depth)
             .Writes(Tiles)
             .Dispatch((uint)GetTiles(targets.Width), (uint)GetTiles(targets.Height));
-    }
-
-    /// <summary>
-    /// Says a pass reads the table and the tiles.
-    /// </summary>
-    public void UseForReading()
-    {
-        graph.Use(Table, GpuAccess.ShaderRead);
-        graph.Use(Tiles, GpuAccess.ShaderRead);
     }
 
     private static int GetTiles(int pixels) => (pixels + TileSize - 1) / TileSize;

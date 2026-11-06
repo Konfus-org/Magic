@@ -155,21 +155,11 @@ internal sealed class GeometryPools(
         if (_arrived.Count == 0)
             return;
 
-        graph.Use(Vertices, GpuAccess.CopyDestination);
         graph.Use(Indices, GpuAccess.CopyDestination);
         graph.Use(Clusters, GpuAccess.CopyDestination);
         foreach ((MeshDerived derived, ResidentModel where) in _arrived)
         {
-            int vertexBytes = derived.Vertices.Length * GpuVertex.Bytes;
-            GpuUpload vertices = gpu.BeginUpload(vertexBytes);
-            MemoryMarshal.AsBytes(derived.Vertices.AsSpan()).CopyTo(vertices.Bytes);
-            graph.Recorder.CopyBuffer(
-                vertices.Buffer,
-                vertices.Offset,
-                Vertices,
-                (ulong)where.VertexOffset * GpuVertex.Bytes,
-                (ulong)vertexBytes
-            );
+            graph.Upload(gpu, Vertices, derived.Vertices.AsSpan(), (ulong)where.VertexOffset * GpuVertex.Bytes);
 
             // Indices point into the whole pool, and clusters into the whole index pool.
             int indexBytes = derived.Indices.Length * sizeof(uint);
@@ -270,17 +260,7 @@ internal sealed class GeometryPools(
                 leaves.Add(where.ClusterOffset + (uint)i);
         }
 
-        int bytes = leaves.Count * sizeof(uint);
-        GpuUpload upload = gpu.BeginUpload(bytes);
-        MemoryMarshal.AsBytes(CollectionsMarshal.AsSpan(leaves)).CopyTo(upload.Bytes);
-        graph.Use(LeafClusters, GpuAccess.CopyDestination);
-        graph.Recorder.CopyBuffer(
-            upload.Buffer,
-            upload.Offset,
-            LeafClusters,
-            (ulong)where.LeafOffset * sizeof(uint),
-            (ulong)bytes
-        );
+        graph.Upload(gpu, LeafClusters, CollectionsMarshal.AsSpan(leaves), (ulong)where.LeafOffset * sizeof(uint));
         graph.Recorder.BuildAcceleration(where.Acceleration);
     }
 
@@ -310,23 +290,13 @@ internal sealed class GeometryPools(
             return;
         }
 
-        Vector3 min = new(float.MaxValue);
-        Vector3 max = new(float.MinValue);
-        foreach (GpuVertex vertex in made.Vertices)
-        {
-            min = Vector3.Min(min, vertex.Position);
-            max = Vector3.Max(max, vertex.Position);
-        }
-
         ResidentModel where = new(
             (uint)_vertexCount,
             (uint)_indexCount,
             (uint)_clusterCount,
             (uint)made.Clusters.Length,
             made.BoundsCenter,
-            made.BoundsRadius,
-            made.Vertices.IsEmpty ? Vector3.Zero : min,
-            made.Vertices.IsEmpty ? Vector3.Zero : max
+            made.BoundsRadius
         );
         if (gpu.Features.HasRayQuery)
             where = where with { LeafOffset = (uint)_leafCount, Acceleration = CreateAcceleration(name, made, where) };
@@ -350,8 +320,8 @@ internal sealed class GeometryPools(
 }
 
 /// <summary>
-/// Where a model is in the pools, and the sphere and the box around it in its own frame; <paramref name="IsFailure"/>
-/// when it stands in for a model that could not be made, to be drawn as a failure.
+/// Where a model is in the pools, and the sphere around it in its own frame; <paramref name="IsFailure"/> when it
+/// stands in for a model that could not be made, to be drawn as a failure.
 /// </summary>
 internal readonly record struct ResidentModel(
     uint VertexOffset,
@@ -360,8 +330,6 @@ internal readonly record struct ResidentModel(
     uint ClusterCount,
     Vector3 BoundsCenter,
     float BoundsRadius,
-    Vector3 BoundsMin,
-    Vector3 BoundsMax,
     bool IsFailure = false,
     uint LeafOffset = 0,
     GpuAcceleration Acceleration = default

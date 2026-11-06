@@ -1,6 +1,5 @@
 using System.Numerics;
 using Magic.Ecs.Components;
-using Magic.Ecs.Components.Effects;
 
 namespace Magic.GIRendering;
 
@@ -16,24 +15,14 @@ internal sealed class RenderWorld
 
     public RenderSun? Sun { get; set; }
 
-    public Fog? Fog { get; set; }
-
     public bool HasSky { get; set; }
-
-    /// <summary>
-    /// What is done to the picture after the lighting: the first entity's that has a <see cref="PostProcessing"/>, else
-    /// the defaults.
-    /// </summary>
-    public PostProcessing Post { get; set; }
 
     public void Clear()
     {
         Lights.Clear();
         Camera = null;
         Sun = null;
-        Fog = null;
         HasSky = false;
-        Post = new PostProcessing();
     }
 }
 

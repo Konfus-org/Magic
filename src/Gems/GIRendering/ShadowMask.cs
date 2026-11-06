@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
@@ -153,10 +152,7 @@ internal sealed class ShadowMask(
             HasHistory = _hasHistory ? 1u : 0u,
         };
         _hasHistory = true;
-        GpuUpload upload = gpu.BeginUpload(ShadowDenoiseConstants.Bytes);
-        MemoryMarshal.Write(upload.Bytes, in constants);
-        graph.Use(_constants, GpuAccess.CopyDestination);
-        graph.Recorder.CopyBuffer(upload.Buffer, upload.Offset, _constants, 0, ShadowDenoiseConstants.Bytes);
+        graph.Upload(gpu, _constants, in constants);
     }
 
     /// <summary>

@@ -1,5 +1,4 @@
 using System.Numerics;
-using System.Runtime.InteropServices;
 using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
@@ -23,9 +22,12 @@ internal sealed class FrameView(
     private const float SkyBrightness = 0.3f;
 
     private GpuSampler _sampler;
-    private Matrix4x4 _previousViewProjection;
-    private Vector4 _previousCameraPosition;
-    private bool _hasPreviousFrame;
+
+    /// <summary>
+    /// Last frame's view, while a frame was drawn since the view was last forgotten: what a thing that moved carries
+    /// where it was from, and whether last frame's depth pyramid is there to cull against.
+    /// </summary>
+    private (Matrix4x4 ViewProjection, Vector4 CameraPosition)? _previous;
 
     /// <summary>
     /// The main view's constants.
@@ -55,21 +57,22 @@ internal sealed class FrameView(
     }
 
     /// <summary>
-    /// Forgets the last frame's camera, so the next frame moves nothing on from where a view that is gone looked.
+    /// Forgets the last frame's camera and depth pyramid, so the next frame moves nothing on from where a view that is
+    /// gone looked, and culls against no pyramid of it.
     /// </summary>
-    public void ClearHistory() => _hasPreviousFrame = false;
+    public void ClearHistory() => _previous = null;
 
     /// <summary>
-    /// The main view's constants: the camera, the sun and the frame's resources.
+    /// The main view's constants, the camera, the sun and the frame's resources, copied into <see cref="Constants"/>
+    /// in a transfer pass the caller opened.
     /// </summary>
-    public FrameConstants GetMain(
+    public void Upload(
         RenderCamera camera,
         RenderSun sun,
         uint frameIndex,
         FrameTargets targets,
         GpuBuffer instances,
-        int instanceCount,
-        bool hasHzb
+        int instanceCount
     )
     {
         float aspect = (float)targets.Width / targets.Height;
@@ -112,47 +115,17 @@ internal sealed class FrameView(
             SunDirection = new Vector4(sun.Direction, 0),
             SunRadiance = new Vector4(sun.Radiance, 0),
             SkyRadiance = new Vector4(SkyBrightness * 0.8f, SkyBrightness * 0.9f, SkyBrightness, 0),
-            HasHzb = hasHzb ? 1u : 0u,
+            HasHzb = _previous is null ? 0u : 1u,
             PixelsPerRadian = targets.Height / (2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360)),
             ErrorThreshold = ErrorThresholdPixels,
             FrameIndex = frameIndex,
             Acceleration = rayTracing?.Acceleration.Id ?? 0,
             LeafClusters = pools.LeafClusters.Id,
         };
-        FillFrustum(viewProjection, ref frame);
-        if (!_hasPreviousFrame)
-        {
-            _hasPreviousFrame = true;
-            _previousViewProjection = viewProjection;
-            _previousCameraPosition = frame.CameraPosition;
-        }
 
-        frame.PreviousViewProjection = _previousViewProjection;
-        frame.PreviousCameraPosition = _previousCameraPosition;
-        _previousViewProjection = viewProjection;
-        _previousCameraPosition = frame.CameraPosition;
-
-        return frame;
-    }
-
-    /// <summary>
-    /// <paramref name="frame"/> copied into <paramref name="buffer"/>, in a transfer pass.
-    /// </summary>
-    public void Upload(GpuBuffer buffer, in FrameConstants frame)
-    {
-        GpuUpload upload = gpu.BeginUpload(FrameConstants.Bytes);
-        MemoryMarshal.Write(upload.Bytes, in frame);
-        graph.Use(buffer, GpuAccess.CopyDestination);
-        graph.Recorder.CopyBuffer(upload.Buffer, upload.Offset, buffer, 0, FrameConstants.Bytes);
-    }
-
-    /// <summary>
-    /// The frustum's planes from the view-projection, for row vectors: each a column added to or taken from the last,
-    /// scaled so its normal is a unit; the far plane is the third column alone, which a perspective with no far plane
-    /// never rejects by.
-    /// </summary>
-    private static void FillFrustum(in Matrix4x4 viewProjection, ref FrameConstants frame)
-    {
+        // The frustum's planes from the view-projection, for row vectors: each a column added to or taken from the
+        // last, scaled so its normal is a unit; the far plane is the third column alone, which a perspective with no
+        // far plane never rejects by.
         Vector4 c0 = new(viewProjection.M11, viewProjection.M21, viewProjection.M31, viewProjection.M41);
         Vector4 c1 = new(viewProjection.M12, viewProjection.M22, viewProjection.M32, viewProjection.M42);
         Vector4 c2 = new(viewProjection.M13, viewProjection.M23, viewProjection.M33, viewProjection.M43);
@@ -163,8 +136,19 @@ internal sealed class FrameView(
         frame.FrustumPlane3 = Normalize(c3 - c1);
         frame.FrustumPlane4 = Normalize(c3 - c2);
         frame.FrustumPlane5 = Normalize(c2);
+
+        // Where the view was last frame, or where it is now when no frame was drawn since it was forgotten.
+        (Matrix4x4 ViewProjection, Vector4 CameraPosition) previous =
+            _previous ?? (viewProjection, frame.CameraPosition);
+        frame.PreviousViewProjection = previous.ViewProjection;
+        frame.PreviousCameraPosition = previous.CameraPosition;
+        _previous = (viewProjection, frame.CameraPosition);
+        graph.Upload(gpu, Constants, in frame);
     }
 
+    /// <summary>
+    /// The plane scaled so its normal is a unit; the far plane's is zero, and stays so.
+    /// </summary>
     private static Vector4 Normalize(Vector4 plane)
     {
         float length = MathF.Sqrt((plane.X * plane.X) + (plane.Y * plane.Y) + (plane.Z * plane.Z));
