@@ -37,38 +37,5 @@ public static class EcsExtensions
                 snapshot.Add(chunk);
             }
         }
-
-        /// <summary>
-        /// <see cref="Snapshot{T1}"/> of the entities that have all three components.
-        /// </summary>
-        public void Snapshot<T1, T2, T3>(EcsSnapshot<T1, T2, T3> snapshot)
-            where T1 : unmanaged, IComponent
-            where T2 : unmanaged, IComponent
-            where T3 : unmanaged, IComponent
-        {
-            ArgumentNullException.ThrowIfNull(snapshot);
-            snapshot.Clear();
-            foreach (EcsChunk<T1, T2, T3> chunk in ecs.Query<T1, T2, T3>())
-            {
-                snapshot.Add(chunk);
-            }
-        }
-
-        /// <summary>
-        /// <see cref="Snapshot{T1}"/> of the entities that have all four components.
-        /// </summary>
-        public void Snapshot<T1, T2, T3, T4>(EcsSnapshot<T1, T2, T3, T4> snapshot)
-            where T1 : unmanaged, IComponent
-            where T2 : unmanaged, IComponent
-            where T3 : unmanaged, IComponent
-            where T4 : unmanaged, IComponent
-        {
-            ArgumentNullException.ThrowIfNull(snapshot);
-            snapshot.Clear();
-            foreach (EcsChunk<T1, T2, T3, T4> chunk in ecs.Query<T1, T2, T3, T4>())
-            {
-                snapshot.Add(chunk);
-            }
-        }
     }
 }

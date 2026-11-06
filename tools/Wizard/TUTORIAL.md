@@ -260,7 +260,7 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
                 CreateTool("entity_get", "One entity's components, each by its type's name, as JSON in the engine's file format.",
                     ([Description("The entity's id, from entity_list.")] string id) => OnMainThreadAsync(() => FormatEntity(id))),
                 CreateTool("entity_create", "Creates an entity with no components and answers its id.",
-                    () => OnMainThreadAsync(() => FormatId(_world.Create()))),
+                    () => OnMainThreadAsync(() => FormatId(_world.Create([])))),
                 CreateTool("entity_destroy", "Destroys an entity and its components.",
                     ([Description("The entity's id.")] string id) => OnMainThreadAsync(() => DestroyEntity(id))),
                 CreateTool("component_types", "The names of every component type an entity can have, in order.",

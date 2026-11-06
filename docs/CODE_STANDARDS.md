@@ -71,7 +71,7 @@ Write the engine as data flowing through functions, not objects calling each oth
 - A component is an unmanaged struct with public fields that implements `IComponent`, and members for what follows from
   those fields.
 - Work over many entities is a system: a function over chunks a gem calls from a hook, through `IEcs.Query` on its own
-  thread or `IEcs.Run` on the ECS's workers.
+  thread.
 - A game is its assets and scripts, never a gem.
 
 ## Async
