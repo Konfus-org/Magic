@@ -780,8 +780,6 @@ public sealed class World : IEcs, IDisposable
                     continue;
 
                 _shading[(entity, slot)] = new ShadingInstance(materials[slot]);
-                // PROTO: shows each instance until the renderer draws them.
-                Log.Info($"Entity {entity.Id} slot {slot}: a shading instance of {_assets.GetPath(materials[slot])}.");
             }
         }
     }

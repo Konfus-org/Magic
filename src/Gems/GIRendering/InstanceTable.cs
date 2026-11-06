@@ -8,6 +8,7 @@ using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
+using Magic.Worlds;
 
 namespace Magic.GIRendering;
 
@@ -17,7 +18,7 @@ namespace Magic.GIRendering;
 /// as renderers were made or destroyed before it, moves its rows, and any other is built again. Every row is built again
 /// once a model is made or fails. Blocks that changed are uploaded in runs; a still scene uploads nothing.
 /// </summary>
-internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisposable
+internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph, World world) : IDisposable
 {
     public const int Capacity = 1 << 18;
 
@@ -99,9 +100,10 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisp
 
     /// <summary>
     /// The rows of <see cref="Renderers"/>, from what changed since the last fill: each its model's place in the pools
-    /// and its material rows, or an empty row while its model is being made. How many rows the cull walks.
+    /// and the material rows of its entity's shading, or an empty row while its model is being made. How many rows the
+    /// cull walks.
     /// </summary>
-    public int Fill(uint frameIndex, GeometryPools pools, MaterialTable materials, Handle<Material> failureMaterial)
+    public int Fill(uint frameIndex, GeometryPools pools, MaterialTable materials, ShadingInstance? failure)
     {
         if (Renderers.Count > Capacity && !_isFullLogged)
         {
@@ -114,7 +116,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisp
         HasChanges |= Count != _lastCount;
         bool isRebuild = pools.SettledCount != _settledModels;
         _settledModels = pools.SettledCount;
-        RowInputs inputs = new(frameIndex, pools, materials, failureMaterial);
+        RowInputs inputs = new(frameIndex, pools, materials, failure);
         int shift = Count - _lastCount;
         int blocks = (Count + BlockSize - 1) / BlockSize;
 
@@ -196,21 +198,16 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisp
         where T : unmanaged => MemoryMarshal.AsBytes(now).SequenceEqual(MemoryMarshal.AsBytes(last));
 
     /// <summary>
-    /// A renderer's row, with its model resident: where it is, its bounds in the world and its material rows.
+    /// A renderer's row, with its model resident: where it is, its bounds in the world and the material rows of its
+    /// entity's shading, every slot the failure's when the model failed.
     /// </summary>
-    private static GpuInstance CreateRow(
-        Transform transform,
-        Renderer renderer,
-        ResidentModel resident,
-        in RowInputs inputs
-    )
+    private GpuInstance CreateRow(Entity entity, Transform transform, ResidentModel resident, in RowInputs inputs)
     {
         Span<uint> materialRows = stackalloc uint[MaterialSlots.Capacity];
-        ReadOnlySpan<Handle<Material>> slotHandles = renderer.Materials;
         for (int slot = 0; slot < MaterialSlots.Capacity; slot++)
         {
             materialRows[slot] = inputs.Materials.GetRow(
-                resident.IsFailure ? inputs.FailureMaterial : slotHandles[slot]
+                resident.IsFailure ? inputs.Failure : world.GetShading(entity, slot)
             );
         }
 
@@ -271,7 +268,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisp
             Renderer renderer = Renderers.Second[index];
             ResidentModel? resident = renderer.Model == Handle<Model>.None ? null : inputs.Pools.Get(renderer.Model);
             GpuInstance row = resident is { } model
-                ? CreateRow(Renderers.First[index], renderer, model, inputs)
+                ? CreateRow(Renderers.Entities[index], Renderers.First[index], model, inputs)
                 : default;
             bool wasDrawnHere =
                 index < _lastCount
@@ -301,12 +298,13 @@ internal sealed class InstanceTable(IGraphicsApi gpu, RenderGraph graph) : IDisp
     private int GetBlockLength(int block) => Math.Min(BlockSize, Count - (block * BlockSize));
 
     /// <summary>
-    /// What a row is built from beside its renderer.
+    /// What a row is built from beside its renderer: <paramref name="Failure"/> the shading a failed model is drawn
+    /// with, null when there is none.
     /// </summary>
     private readonly record struct RowInputs(
         uint FrameIndex,
         GeometryPools Pools,
         MaterialTable Materials,
-        Handle<Material> FailureMaterial
+        ShadingInstance? Failure
     );
 }

@@ -43,6 +43,11 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly FrameTargets _targets;
     private readonly RayTracing? _rayTracing;
     private readonly InstanceTable _instances;
+
+    /// <summary>
+    /// The shading a model that failed is drawn with, every slot; null when there is no failure material.
+    /// </summary>
+    private readonly ShadingInstance? _failure;
     private readonly Visibility _visibility;
     private readonly FrameView _frameView;
     private readonly SkyLuts _sky;
@@ -76,6 +81,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         Assets assets,
         IMeshPreprocessor meshes,
         IEcs ecs,
+        World world,
         Threads threads,
         App app,
         EventCoordinator events,
@@ -97,7 +103,9 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _textures = new TextureTable(gpu, _graph, assets, threads);
         _materials = new MaterialTable(gpu, _graph, assets, _textures, threads);
         _targets = new FrameTargets(gpu, _graph);
-        _instances = new InstanceTable(gpu, _graph);
+        _instances = new InstanceTable(gpu, _graph, world);
+        Handle<Material> failure = assets.GetFailure<Material, Model>();
+        _failure = failure == Handle<Material>.None ? null : new ShadingInstance(failure);
         _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu, _graph) : null;
         _visibility = new Visibility(gpu, _graph, _pipelines, _pools, _materials);
         _frameView = new FrameView(gpu, _graph, _pools, _materials, _visibility, _rayTracing);
@@ -185,7 +193,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         RenderCamera camera = _world.Camera ?? new RenderCamera(new Transform(), 60, 0.05f);
         RenderSun sun = _world.Sun ?? new RenderSun(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One, 1);
         GpuBuffer constants = _frameView.Constants;
-        int instanceCount = _instances.Fill(frame.Index, _pools, _materials, _assets.GetFailure<Material, Model>());
+        int instanceCount = _instances.Fill(frame.Index, _pools, _materials, _failure);
         _graph.BeginTransferPass("Upload frame");
         bool hasChanges = _pools.HasArrivals || _instances.HasChanges;
         _instances.Upload();
@@ -269,7 +277,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         StartCompiling();
         foreach (Handle<Material> material in materials)
         {
-            _materials.GetRow(material);
+            _materials.Load(material);
         }
 
         EndPreparing();
@@ -327,9 +335,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             hasFailure |= _pools.HasFailed(model);
         }
 
-        Handle<Material> failure = _assets.GetFailure<Material, Model>();
-        if (hasFailure && failure != Handle<Material>.None)
-            _materials.GetRow(failure);
+        if (hasFailure && _failure is { } failure)
+            _materials.Load(failure.Material);
     }
 
     /// <summary>
@@ -353,9 +360,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
                 return false;
         }
 
-        Handle<Material> failure = _assets.GetFailure<Material, Model>();
-
-        return !hasFailure || failure == Handle<Material>.None || _materials.HasArrived(failure);
+        return !hasFailure || _failure is not { } failure || _materials.HasArrived(failure.Material);
     }
 
     /// <summary>
