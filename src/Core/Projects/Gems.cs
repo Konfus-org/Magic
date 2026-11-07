@@ -23,6 +23,16 @@ namespace Magic.Projects;
 internal sealed class Gems : IDisposable
 {
     /// <summary>
+    /// How long a fixed step is.
+    /// </summary>
+    private const double FixedStepSec = 1.0 / 60;
+
+    /// <summary>
+    /// The most fixed steps a frame runs; what the simulation owes past them is dropped.
+    /// </summary>
+    private const int MaxFixedSteps = 4;
+
+    /// <summary>
     /// How long a gem's files must have been left alone after a build wrote them.
     /// </summary>
     private static readonly TimeSpan _settleTime = TimeSpan.FromSeconds(1);
@@ -70,7 +80,10 @@ internal sealed class Gems : IDisposable
 
     private readonly Threads _threads;
 
-    private readonly FrameClock _clock = new();
+    /// <summary>
+    /// The main thread's real time, from its first frame.
+    /// </summary>
+    private readonly Stopwatch _clock = new();
 
     private readonly List<LoadedGem> _loaded = [];
 
@@ -82,9 +95,9 @@ internal sealed class Gems : IDisposable
     private readonly RenderGraph _graph = new();
 
     /// <summary>
-    /// The render thread's own clocks, for the frames it draws.
+    /// The render thread's own real time, from the first frame it draws.
     /// </summary>
-    private readonly FrameClock _renderClock = new();
+    private readonly Stopwatch _renderClock = new();
 
     /// <summary>
     /// Set by the render thread each time it has drawn a frame, for the main thread waiting to stay one frame ahead.
@@ -100,6 +113,26 @@ internal sealed class Gems : IDisposable
     /// When the last wait for the render thread ended, 0 before the first frame's: where a frame's work starts.
     /// </summary>
     private long _frameStart;
+
+    /// <summary>
+    /// The main thread's last frame, whose clocks the next one goes on from.
+    /// </summary>
+    private Frame _frame;
+
+    /// <summary>
+    /// The simulation time the fixed steps have reached.
+    /// </summary>
+    private double _fixedSec;
+
+    /// <summary>
+    /// The simulation time the fixed steps still owe; dropped when it is more than <see cref="MaxFixedSteps"/> can run.
+    /// </summary>
+    private double _owedSec;
+
+    /// <summary>
+    /// The last frame the render thread drew, whose clocks the next one goes on from.
+    /// </summary>
+    private Frame _renderFrame;
 
     /// <summary>
     /// Makes the gems <paramref name="registered"/> through <paramref name="provider"/>, which was built from the services
@@ -147,9 +180,9 @@ internal sealed class Gems : IDisposable
 
     /// <summary>
     /// One frame: restarts the run if a gem was built, works out the clocks, turns what spins, runs every gem's hooks but
-    /// Render in order with the fixed steps the clock owes, and tells the world the frame is published. Then it waits until
-    /// the render thread has drawn the frame before, so the next frame is worked out while this one draws, and the frames
-    /// run at the render thread's pace. Time begins with the first frame, not with what was loaded before it.
+    /// Render in order with the fixed steps the simulation owes, and tells the world the frame is published. Then it waits
+    /// until the render thread has drawn the frame before, so the next frame is worked out while this one draws, and the
+    /// frames run at the render thread's pace. Time begins with the first frame, not with what was loaded before it.
     /// </summary>
     public void Pump()
     {
@@ -158,7 +191,12 @@ internal sealed class Gems : IDisposable
         // While the loading screen shows, time runs as it is, so it moves however the world it replaces was paused.
         bool isPaused = _world.IsPaused && !_world.IsShowingLoadingScreen;
         float timeScale = _world.IsShowingLoadingScreen ? 1 : _world.TimeScale;
-        Frame frame = _clock.Advance(isPaused, timeScale, out int fixedSteps) with { Events = _events.Take() };
+        Frame frame = CreateFrame(_clock, _frame, isPaused ? 0 : timeScale) with
+        {
+            IsPaused = isPaused,
+            Events = _events.Take(),
+        };
+        _frame = frame;
 
         // The first frame's time is the load's before it, not a frame's.
         if (_frameStart != 0)
@@ -167,12 +205,28 @@ internal sealed class Gems : IDisposable
         _world.TurnSpins((float)frame.SimDeltaSec);
         long hooksStart = Stopwatch.GetTimestamp();
         RunHook(Hook.Update, frame);
-        for (int step = 1; step <= fixedSteps; step++)
+
+        // The fixed steps catch the simulation up with the frame, at most MaxFixedSteps of them, and what is owed past
+        // those is dropped. A fixed step sees its own time and no messages.
+        _owedSec += frame.SimDeltaSec;
+        for (int step = 0; step < MaxFixedSteps && _owedSec >= FixedStepSec; step++)
         {
-            RunHook(Hook.FixedUpdate, _clock.GetFixedStep(frame, step));
+            _owedSec -= FixedStepSec;
+            _fixedSec += FixedStepSec;
+            RunHook(
+                Hook.FixedUpdate,
+                frame with
+                {
+                    SimSec = _fixedSec,
+                    SimDeltaSec = FixedStepSec,
+                    Events = FrameEvents.None,
+                }
+            );
         }
 
-        _clock.EndFixedSteps(fixedSteps);
+        if (_owedSec >= FixedStepSec)
+            _owedSec = 0;
+
         RunHook(Hook.LateUpdate, frame);
         _world.PublishedFrame = frame.Index;
         _frameWorkDuration.RecordSince(_frameStart == 0 ? hooksStart : _frameStart);
@@ -185,6 +239,27 @@ internal sealed class Gems : IDisposable
         }
 
         _frameStart = Stopwatch.GetTimestamp();
+    }
+
+    /// <summary>
+    /// The frame after <paramref name="last"/> on <paramref name="clock"/>, which starts with the first one. The simulation
+    /// moves by the real time since <paramref name="last"/>, times <paramref name="timeScale"/>.
+    /// </summary>
+    private static Frame CreateFrame(Stopwatch clock, in Frame last, float timeScale)
+    {
+        bool isFirst = !clock.IsRunning;
+        clock.Start();
+        double nowSec = clock.Elapsed.TotalSeconds;
+        double simDeltaSec = (nowSec - last.AppSec) * timeScale;
+
+        return new()
+        {
+            Index = isFirst ? 0 : last.Index + 1,
+            AppSec = nowSec,
+            AppDeltaSec = nowSec - last.AppSec,
+            SimSec = last.SimSec + simDeltaSec,
+            SimDeltaSec = simDeltaSec,
+        };
     }
 
     /// <summary>
@@ -239,7 +314,8 @@ internal sealed class Gems : IDisposable
     private void Render()
     {
         uint published = _world.PublishedFrame;
-        Frame frame = _renderClock.Advance(isPaused: false, timeScale: 1, out _);
+        Frame frame = CreateFrame(_renderClock, _renderFrame, timeScale: 1);
+        _renderFrame = frame;
         if (frame.Index > 0)
             _renderFrameDuration.Record(frame.AppDeltaSec);
 
