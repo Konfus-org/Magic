@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- The tests of the preprocessor's pure parts: the cluster hierarchy and the distance field on known meshes. They
+  <!-- The tests of the GI renderer's model preprocessing: the cluster hierarchy and the distance field on known meshes. They
        run on the testing platform xunit v3 carries, which dotnet test drives. -->
   <PropertyGroup>
     <IsPackable>false</IsPackable>
@@ -12,6 +12,6 @@
     <PackageReference Include="xunit.v3" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="$(MagicRoot)src/Gems/MeshPreprocessor/MeshPreprocessor.csproj" />
+    <ProjectReference Include="$(MagicRoot)src/Gems/GIRendering/GIRendering.csproj" />
   </ItemGroup>
 </Project>

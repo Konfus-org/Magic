@@ -4,12 +4,17 @@ Draws the world into the window: every renderer's model, GPU-driven, lit by the 
 asks for a screenshot, it hands the frame as a texture to the gem that writes textures.
 
 To use it, list `GIRendering` in a project's `.magic` file after the GPU provider, the shader compiler, the ECS, the
-model reader, the mesh preprocessor and the texture reader.
+model reader and the texture reader.
 
 ## What it draws
 
-- A model shows once the preprocessor has made its clusters. One that doesn't load is drawn as the failure model, and
-  a material or texture that doesn't load as the magenta failure material.
+- As a model loads, the gem makes what it draws it as, once per change to its file, and keeps it in the cache: its
+  vertices as the GPU reads them, a hierarchy of clusters of up to 128 triangles, and a signed distance field around
+  it. Each level of the hierarchy groups neighbouring clusters of the one below and simplifies them, so the GPU picks
+  per cluster how much detail to draw. meshoptimizer, which the kit builds from source, does the clustering and the
+  simplifying.
+- A model shows once it is on the GPU. One that doesn't load is drawn as the failure model, and a material or texture
+  that doesn't load as the magenta failure material.
 - A model nothing has drawn or waited for in a minute leaves the GPU, and loads again when it is next drawn.
 - As a domain replaces the world, the loading screen stays until the models, materials and textures of what comes are
   on the GPU, or failed, and nothing drawn before carries into the frames after.
@@ -35,7 +40,8 @@ With a gem that provides the debug UI, F2 opens the Rendering window, which choo
 views, and a line on screen names any view but the finished frame. A screenshot is of the renderer's picture alone,
 without what other gems draw over it.
 
-`bake` in the console opens every domain under `Domains/` in turn and exits, so a release ships with the caches full.
+`bake` in the console loads every asset, which makes every model's clusters, then opens every domain under `Domains/`
+in turn and exits, so a release ships with the caches full.
 
 ## Changing it
 

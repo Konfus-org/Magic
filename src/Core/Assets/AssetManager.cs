@@ -354,6 +354,70 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
+    /// Has <paramref name="preprocessor"/> run on each asset of its type that loads from now on, and on each made again,
+    /// until the subscription is disposed. Any thread.
+    /// </summary>
+    public Subscription Register<T, TMade>(IAssetPreprocessor<T, TMade> preprocessor)
+        where T : IAsset<T>
+    {
+        AssetPreprocessRun run = RunAsync;
+        lock (_gate)
+        {
+            Loaded = Loaded with
+            {
+                Preprocessors = Loaded.Preprocessors.SetItem(
+                    typeof(T),
+                    Loaded.Preprocessors.GetValueOrDefault(typeof(T), []).Add(run)
+                ),
+            };
+        }
+
+        return new Subscription(() =>
+        {
+            lock (_gate)
+            {
+                Loaded = Loaded with
+                {
+                    Preprocessors = Loaded.Preprocessors.SetItem(
+                        typeof(T),
+                        Loaded.Preprocessors[typeof(T)].Remove(run)
+                    ),
+                };
+            }
+        });
+
+        // What it made of the asset before, by its id and version, else what it makes of it now.
+        async Task RunAsync(ulong id, ulong version, object asset, CancellationToken cancel)
+        {
+            Result<TMade> cached = await Caches.ReadAsync(id, version, preprocessor, cancel).ConfigureAwait(false);
+            if (!cached.Ok)
+                await Caches
+                    .WriteAsync(id, version, preprocessor.Preprocess((T)asset), preprocessor, cancel)
+                    .ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Loads every asset of a type Magic or a gem reads, each as the type its <c>.meta</c> names, so what each importer
+    /// that is a cache and each <see cref="IAssetPreprocessor{T, TMade}"/> makes of it is in the cache: their ids, or
+    /// why one could not be loaded.
+    /// </summary>
+    public Task<Result<ImmutableArray<ulong>>> BakeAsync(IProgress<LoadProgress>? progress, CancellationToken cancel)
+    {
+        LoadedAssets loaded = Loaded;
+        ImmutableArray<ulong> readable =
+        [
+            .. Database
+                .Index.ById.Values.Where(file =>
+                    loaded.Types.TryGetValue(file.Type, out AssetType? type) && CanImport(type.Type, loaded)
+                )
+                .Select(file => file.Id),
+        ];
+
+        return AssetCrawl.LoadAllAsync(this, readable, progress, cancel);
+    }
+
+    /// <summary>
     /// Loads what depends on <paramref name="asset"/>, up to <paramref name="levels"/> levels, as
     /// <see cref="FindDependentsAsync{TAsset}"/> finds it, each as the type its <c>.meta</c> names: their ids, or why
     /// one could not be loaded.
@@ -726,7 +790,7 @@ public sealed class AssetManager : IDisposable
         {
             Result<T> cached = await Caches.ReadAsync(id, version, cache, cancel).ConfigureAwait(false);
             if (cached.Ok)
-                return new Made(Result.Success<object>(cached.Value), version, AssetScan.FindHandles(cached.Value));
+                return await PreprocessAsync(id, version, cached.Value, cancel).ConfigureAwait(false);
         }
 
         Result<T> read = reader is not null
@@ -740,7 +804,7 @@ public sealed class AssetManager : IDisposable
         if (cache is not null)
             await Caches.WriteAsync(id, version, read.Value, cache, cancel).ConfigureAwait(false);
 
-        return new Made(Result.Success<object>(read.Value), version, AssetScan.FindHandles(read.Value));
+        return await PreprocessAsync(id, version, read.Value, cancel).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -971,6 +1035,21 @@ public sealed class AssetManager : IDisposable
                 );
             }
         }
+    }
+
+    /// <summary>
+    /// What a load of <paramref name="asset"/> gives, once each <see cref="IAssetPreprocessor{T, TMade}"/> its type has
+    /// keeps what it makes of it in the cache.
+    /// </summary>
+    private async Task<Made> PreprocessAsync<T>(ulong id, ulong version, T asset, CancellationToken cancel)
+        where T : IAsset<T>
+    {
+        foreach (AssetPreprocessRun run in Loaded.Preprocessors.GetValueOrDefault(typeof(T), []))
+        {
+            await run(id, version, asset, cancel).ConfigureAwait(false);
+        }
+
+        return new Made(Result.Success<object>(asset), version, AssetScan.FindHandles(asset));
     }
 
     /// <summary>

@@ -1,8 +1,7 @@
 using System.Numerics;
-using Magic.Rendering;
 using Xunit;
 
-namespace Magic.MeshPreprocessor.Tests;
+namespace Magic.GIRendering.Tests;
 
 /// <summary>
 /// The distance field of a unit cube: exact at the voxels nearest its centre and faces, negative inside, positive

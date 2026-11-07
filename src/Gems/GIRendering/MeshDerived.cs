@@ -1,9 +1,8 @@
 using System.Collections.Immutable;
 using System.Numerics;
 using Magic.Assets;
-using Magic.Utils;
 
-namespace Magic.Rendering;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// What the renderer draws a <see cref="Model"/> as, made from it once and cached under its version: the vertices as
@@ -55,17 +54,4 @@ public sealed class MeshDerived
     /// Metres a field value of 1 means: the farthest the field tells from a surface.
     /// </summary>
     public required float FieldBand { get; init; }
-}
-
-/// <summary>
-/// Makes <see cref="MeshDerived"/> from a model, as a gem provides it: reads the model, makes what the cache lacks
-/// and keeps it there. Any thread; the work runs on a worker.
-/// </summary>
-public interface IMeshPreprocessor
-{
-    Task<Result<MeshDerived>> GetAsync(
-        Handle<Model> model,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    );
 }

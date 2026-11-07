@@ -7,7 +7,23 @@
     <Authors>Konfus</Authors>
     <!-- Copies the gem's own NuGet dependencies next to it, where its load context finds them. -->
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <!-- meshoptimizer is a C API over arrays. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- The tests drive the cluster and distance field builders directly. -->
+    <InternalsVisibleTo Include="GIRendering.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <NativeLibrary
+      Include="meshoptimizer"
+      Repository="https://github.com/zeux/meshoptimizer"
+      Tag="v1.3"
+      CMakeOptions="-DMESHOPT_BUILD_SHARED_LIBS=ON;-DMESHOPT_INSTALL=ON"
+      Headers="src/meshoptimizer.h"
+      IncludePath="src"
+    />
+  </ItemGroup>
   <ItemGroup>
     <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its interfaces. -->
     <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" Private="false" />

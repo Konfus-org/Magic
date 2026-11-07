@@ -1,9 +1,8 @@
 using System.Collections.Immutable;
 using System.Numerics;
 using Magic.Assets;
-using Magic.Rendering;
 
-namespace Magic.MeshPreprocessor;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// Builds a model's signed distance field: a cube of voxels around its bounds, each the distance to the nearest
@@ -44,7 +43,7 @@ internal static class DistanceFieldBuilder
             }
         }
 
-        return Build(positions.ToArray(), triangles.ToArray());
+        return Build([.. positions], [.. triangles]);
     }
 
     /// <summary>
@@ -180,7 +179,7 @@ internal static class DistanceFieldBuilder
         float voxel
     )
     {
-        Vector3 origin = point + new Vector3(0, 0.137f, 0.291f) * voxel;
+        Vector3 origin = point + (new Vector3(0, 0.137f, 0.291f) * voxel);
         (int cellX, int cellY, int cellZ) = grid.GetCell(origin);
         HashSet<int> tested = [];
         int crossings = 0;
@@ -220,7 +219,7 @@ internal static class DistanceFieldBuilder
         float inverse = 1 / determinant;
         Vector3 t = origin - a;
         float u = Vector3.Dot(t, p) * inverse;
-        if (u < 0 || u > 1)
+        if (u is < 0 or > 1)
             return false;
 
         Vector3 q = Vector3.Cross(t, ab);
@@ -284,7 +283,7 @@ internal static class DistanceFieldBuilder
         if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0)
         {
             feature = Feature.EdgeBc;
-            return b + ((c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6))));
+            return b + ((c - b) * ((d4 - d3) / (d4 - d3 + (d5 - d6))));
         }
 
         float denominator = 1 / (va + vb + vc);

@@ -6,7 +6,6 @@
   <Folder Name="/Gems/">
     <Project Path="Gems/ArchEcs/ArchEcs.csproj" />
     <Project Path="Gems/AssimpModelImporter/AssimpModelImporter.csproj" />
-    <Project Path="Gems/MeshPreprocessor/MeshPreprocessor.csproj" />
     <Project Path="Gems/DomainImporter/DomainImporter.csproj" />
     <Project Path="Gems/GpuChecks/GpuChecks.csproj" />
     <Project Path="Gems/PrefabImporter/PrefabImporter.csproj" />
@@ -26,7 +25,7 @@
     <File Path="../docs/CONTRIBUTING.md" />
   </Folder>
   <Folder Name="/Tests/">
-    <Project Path="../tests/MeshPreprocessor.Tests/MeshPreprocessor.Tests.csproj" />
+    <Project Path="../tests/GIRendering.Tests/GIRendering.Tests.csproj" />
   </Folder>
   <Folder Name="/Samples/">
     <File Path="../samples/README.md" />

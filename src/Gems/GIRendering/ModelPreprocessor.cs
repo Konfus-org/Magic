@@ -1,64 +1,27 @@
 using System.Buffers;
 using System.Collections.Immutable;
-using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Assets;
-using Magic.Debugging;
-using Magic.Files;
-using Magic.Projects;
-using Magic.Rendering;
+using Magic.Assets.Pipeline;
 using Magic.Utils;
 
-namespace Magic.MeshPreprocessor;
+namespace Magic.GIRendering;
 
 /// <summary>
-/// Makes what the renderer draws a model as, the cluster hierarchy, and keeps it in the cache under the model's
-/// version, so a model is clustered once per change to its file. It is public because nothing in its assembly makes
-/// it: Magic does, by reflection, when a project lists the gem.
+/// Makes what the renderer draws a model as, its cluster hierarchy and distance field, as the model loads, and says how
+/// the cache keeps it: <see cref="AssetManager"/> keeps it under the model's version, so a model is clustered once per
+/// change to its file.
 /// </summary>
-public sealed class MeshPreprocessorGem(AssetManager assets, Caches caches)
-    : IGem,
-        IMeshPreprocessor,
-        ICache<MeshDerived>
+internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
 {
     /// <summary>
     /// Raised when the bytes written change shape, or the hierarchy is built otherwise.
     /// </summary>
     public int Version => 10;
 
-    public async Task<Result<MeshDerived>> GetAsync(
-        Handle<Model> model,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    )
-    {
-        string name = assets.GetPath(model) ?? $"model {model.Id}";
-        string work = $"Clustering {name}";
-        progress?.Report(new LoadProgress(work, 0, 2));
-        Result<Model> loaded = await assets.LoadAsync(model, progress, cancel).ConfigureAwait(false);
-        if (!loaded.Ok)
-            return Result.Failure($"{name} could not be read: {loaded.Error}");
-
-        ulong version = assets.GetVersion(model);
-        Result<MeshDerived> cached = await caches.ReadAsync(model.Id, version, this, cancel).ConfigureAwait(false);
-        if (cached.Ok)
-        {
-            progress?.Report(new LoadProgress(work, 2, 2));
-
-            return cached;
-        }
-
-        progress?.Report(new LoadProgress(work, 1, 2));
-        MeshDerived derived = await Task.Run(() => ClusterBuilder.Build(loaded.Value), cancel).ConfigureAwait(false);
-        int triangles = loaded.Value.Meshes.Sum(mesh => mesh.Indices.Length / 3);
-        Log.Info($"{name}: {triangles} triangles clustered into {derived.Clusters.Length} clusters.");
-        await caches.WriteAsync(model.Id, version, derived, this, cancel).ConfigureAwait(false);
-        progress?.Report(new LoadProgress(work, 2, 2));
-
-        return Result.Success(derived);
-    }
+    public MeshDerived Preprocess(Model asset) => ClusterBuilder.Build(asset);
 
     public void Write(MeshDerived value, IBufferWriter<byte> bytes)
     {

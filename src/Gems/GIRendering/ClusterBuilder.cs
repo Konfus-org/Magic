@@ -4,10 +4,9 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.Debugging;
-using Magic.Rendering;
-using static Magic.MeshPreprocessor.meshoptimizer;
+using static Magic.GIRendering.meshoptimizer;
 
-namespace Magic.MeshPreprocessor;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// Builds a model's cluster hierarchy, the DAG of Karis, "Nanite: A Deep Dive", 2021: the leaves are clusters of
@@ -21,7 +20,13 @@ namespace Magic.MeshPreprocessor;
 /// </summary>
 internal static unsafe class ClusterBuilder
 {
+    /// <summary>
+    /// The most triangles a mesh's root holds: what a model draws as when it is a few pixels across.
+    /// </summary>
+    internal const int RootTriangles = 12;
+
     private const int GroupSize = 8;
+
     private const int MaxLevels = 24;
 
     /// <summary>
@@ -39,11 +44,6 @@ internal static unsafe class ClusterBuilder
     /// Faces meeting at a vertex at more than this angle, in radians, keep their own normals in a simplified level.
     /// </summary>
     private const float CreaseAngle = MathF.PI / 4;
-
-    /// <summary>
-    /// The most triangles a mesh's root holds: what a model draws as when it is a few pixels across.
-    /// </summary>
-    internal const int RootTriangles = 12;
 
     public static MeshDerived Build(Model model)
     {

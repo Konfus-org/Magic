@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs.Components;
+using Magic.Files;
 using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Threading;
@@ -34,8 +35,13 @@ internal enum ResourceState : byte
 /// to frame, and another one under the name, as at a new window size, destroys it and makes it again. The rest is freed
 /// with the gem.
 /// </summary>
-internal sealed class GpuResources(IGraphicsApi gpu, IMeshPreprocessor meshes, AssetManager assets, Threads threads)
-    : IDisposable
+internal sealed class GpuResources(
+    IGraphicsApi gpu,
+    ModelPreprocessor models,
+    Caches caches,
+    AssetManager assets,
+    Threads threads
+) : IDisposable
 {
     private const int VertexCapacity = 1 << 20;
     private const int IndexCapacity = 1 << 22;
@@ -625,7 +631,23 @@ internal sealed class GpuResources(IGraphicsApi gpu, IMeshPreprocessor meshes, A
 
     private async Task LoadAsync(Handle<Model> model)
     {
-        Result<MeshDerived> derived = await meshes.GetAsync(model, null, CancellationToken.None).ConfigureAwait(false);
+        // The load preprocesses the model into the cache under its version. One loaded before the gem registered its
+        // preprocessor, or one the cache could not keep, is made here, on a worker, and cached.
+        Result<Model> loaded = await assets.LoadAsync(model, null, CancellationToken.None).ConfigureAwait(false);
+        Result<MeshDerived> derived = loaded.Ok
+            ? await caches
+                .ReadAsync(model.Id, assets.GetVersion(model), models, CancellationToken.None)
+                .ConfigureAwait(false)
+            : Result.Failure(loaded.Error);
+        if (loaded.Ok && !derived.Ok)
+        {
+            MeshDerived built = await Task.Run(() => models.Preprocess(loaded.Value)).ConfigureAwait(false);
+            await caches
+                .WriteAsync(model.Id, assets.GetVersion(model), built, models, CancellationToken.None)
+                .ConfigureAwait(false);
+            derived = Result.Success(built);
+        }
+
         await threads.Enter(EngineThread.Render);
         string name = assets.GetPath(model) ?? $"model {model.Id}";
         if (!derived.Ok)

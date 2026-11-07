@@ -1,6 +1,6 @@
 using System.Numerics;
 
-namespace Magic.MeshPreprocessor;
+namespace Magic.GIRendering;
 
 /// <summary>
 /// Values packed as <c>Core/Pack.slang</c> unpacks them: the CPU side of the same bits.

@@ -7,6 +7,7 @@ using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Events;
+using Magic.Files;
 using Magic.Gpu;
 using Magic.Input;
 using Magic.Projects;
@@ -66,6 +67,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     /// Ends the start when the gem is disposed before it is done, so nothing is made for a gem that is gone.
     /// </summary>
     private readonly CancellationTokenSource _stopping = new();
+    private readonly Subscription _preprocessing;
 
     private DebugView _debugView;
 
@@ -91,7 +93,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         IGraphicsApi gpu,
         IShaderCompiler shaders,
         AssetManager assets,
-        IMeshPreprocessor meshes,
+        Caches caches,
         IEcs ecs,
         Threads threads,
         App app,
@@ -108,7 +110,9 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _events = events;
         _threads = threads;
         _pipelines = new GpuPipelines(gpu, shaders, assets);
-        _resources = new GpuResources(gpu, meshes, assets, threads);
+        ModelPreprocessor models = new();
+        _preprocessing = assets.Register(models);
+        _resources = new GpuResources(gpu, models, caches, assets, threads);
         _failure = new MaterialInstance { Handle = assets.GetFailure<Material, Model>() };
         _instances = new InstanceTable(gpu, assets, _resources, _failure);
         _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu, _resources) : null;
@@ -124,6 +128,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
     public void Dispose()
     {
+        _preprocessing.Dispose();
         _stopping.Cancel();
         _stopping.Dispose();
         EndPreparing();

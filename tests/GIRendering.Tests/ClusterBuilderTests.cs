@@ -1,9 +1,8 @@
 using System.Numerics;
 using Magic.Assets;
-using Magic.Rendering;
 using Xunit;
 
-namespace Magic.MeshPreprocessor.Tests;
+namespace Magic.GIRendering.Tests;
 
 /// <summary>
 /// The hierarchy of a sphere of a few thousand triangles: leaves of its own triangles, errors that never fall going

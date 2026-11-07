@@ -158,6 +158,9 @@ Write the engine as data flowing through functions, not objects calling each oth
 - An asset type gems share is Core's. One only a gem reads is that gem's.
 - Reading a file format is its importer's one job, and writing one its exporter's; anything else known about an asset,
   its sidecar included, is Core's.
+- What a gem makes from an asset, such as a renderer's clusters of a model, is an `IAssetPreprocessor<T, TMade>` the gem
+  registers with `AssetManager`: it runs as the asset loads, and what it made is in `Caches` under the asset's id and
+  version for the gem to read. `bake` runs every one on every asset.
 - An import setting is a property of the asset type, declared as one, never a settings type beside it.
 - A key the file must have is `required { get; init; }`. One with a default is `{ get; set; }`, the default as its
   initializer and nowhere else. What code sets, not the file, has no public setter.

@@ -38,6 +38,12 @@ internal delegate Task<Made> AssetImportRun(
 );
 
 /// <summary>
+/// Keeps what one preprocessor makes of asset <paramref name="id"/>, made from <paramref name="version"/> of its file, in
+/// the cache, unless it is there already. On a worker.
+/// </summary>
+internal delegate Task AssetPreprocessRun(ulong id, ulong version, object asset, CancellationToken cancel);
+
+/// <summary>
 /// Reads an asset's file as its type, by Core itself, loading nothing: for finding what it holds.
 /// </summary>
 internal delegate Result<object> AssetBuiltInReader(ReadOnlyMemory<byte> bytes, JsonElement settings);
@@ -134,6 +140,11 @@ internal sealed record LoadedAssets
     /// The gem that writes each asset type.
     /// </summary>
     public ImmutableDictionary<Type, object> Exporters { get; init; } = [];
+
+    /// <summary>
+    /// What each asset type's load runs after the import, a run for each preprocessor registered for it.
+    /// </summary>
+    public ImmutableDictionary<Type, ImmutableArray<AssetPreprocessRun>> Preprocessors { get; init; } = [];
 
     /// <summary>
     /// The asset types each gem not made yet will read, by the gem's type: a load of one waits for it.
