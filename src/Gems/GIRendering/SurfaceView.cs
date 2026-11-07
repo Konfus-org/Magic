@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using Magic.Assets;
-using Magic.Gpu;
-using Magic.Shaders;
+using Magic.Rendering;
 
 namespace Magic.GIRendering;
 

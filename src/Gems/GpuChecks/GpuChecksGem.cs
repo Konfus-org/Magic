@@ -1,9 +1,7 @@
 using Magic.Assets;
 using Magic.Debugging;
-using Magic.Gpu;
 using Magic.Projects;
 using Magic.Rendering;
-using Magic.Shaders;
 using Magic.Threading;
 using Magic.Utils;
 

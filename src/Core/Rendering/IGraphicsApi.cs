@@ -1,7 +1,6 @@
-using Magic.Shaders;
 using Magic.Utils;
 
-namespace Magic.Gpu;
+namespace Magic.Rendering;
 
 /// <summary>
 /// The GPU, as a gem that provides it: resources made from descriptions into one bindless heap, pipelines built from
@@ -31,26 +30,26 @@ public interface IGraphicsApi
     /// <summary>
     /// The texture under the description's name: made on the first ask, the same one while the name is asked for with
     /// the same description, so what it holds carries from frame to frame, and made again, the old one destroyed, when
-    /// the description changes. <see cref="Rendering.RenderGraph.Texture"/> asks for it.
+    /// the description changes. <see cref="RenderGraph.Texture"/> asks for it.
     /// </summary>
     Result<GpuTexture> GetTexture(in TextureDescription description);
 
     /// <summary>
     /// The buffer under the description's name, kept as <see cref="GetTexture"/> keeps a texture.
-    /// <see cref="Rendering.RenderGraph.Buffer"/> asks for it.
+    /// <see cref="RenderGraph.Buffer"/> asks for it.
     /// </summary>
     Result<GpuBuffer> GetBuffer(in BufferDescription description);
 
     /// <summary>
     /// The top-level acceleration structure under the description's name, kept as <see cref="GetTexture"/> keeps a
-    /// texture; only when <see cref="GpuFeatures.HasRayQuery"/>. <see cref="Rendering.RenderGraph.Acceleration"/> asks
+    /// texture; only when <see cref="GpuFeatures.HasRayQuery"/>. <see cref="RenderGraph.Acceleration"/> asks
     /// for it.
     /// </summary>
     Result<GpuAcceleration> GetAcceleration(in TopLevelDescription description);
 
     /// <summary>
     /// Whether <paramref name="shader"/> is built for this GPU: a compute entry into its pipeline, a vertex or pixel
-    /// entry compiled. The first ask starts compiling it. <see cref="Rendering.RenderGraph.GetState"/> asks for it.
+    /// entry compiled. The first ask starts compiling it. <see cref="RenderGraph.GetState"/> asks for it.
     /// </summary>
     GpuState GetState(in ShaderEntry shader);
 
@@ -69,13 +68,13 @@ public interface IGraphicsApi
 
     /// <summary>
     /// A bottom-level acceleration structure over triangles of the heap's buffers, built by
-    /// <see cref="Rendering.RenderGraph.BuildAcceleration"/>; only when <see cref="GpuFeatures.HasRayQuery"/>.
+    /// <see cref="RenderGraph.BuildAcceleration"/>; only when <see cref="GpuFeatures.HasRayQuery"/>.
     /// </summary>
     Result<GpuAcceleration> CreateAcceleration(in BottomLevelDescription description);
 
     /// <summary>
     /// A top-level acceleration structure over instances of bottom-level ones, built from its instance buffer by
-    /// <see cref="Rendering.RenderGraph.BuildAcceleration"/>; only when <see cref="GpuFeatures.HasRayQuery"/>.
+    /// <see cref="RenderGraph.BuildAcceleration"/>; only when <see cref="GpuFeatures.HasRayQuery"/>.
     /// </summary>
     Result<GpuAcceleration> CreateAcceleration(in TopLevelDescription description);
 

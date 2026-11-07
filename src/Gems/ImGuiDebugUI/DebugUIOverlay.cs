@@ -5,9 +5,7 @@ using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Magic.Assets;
 using Magic.Debugging;
-using Magic.Gpu;
 using Magic.Rendering;
-using Magic.Shaders;
 using Magic.Threading;
 using Magic.Utils;
 

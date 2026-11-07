@@ -6,7 +6,6 @@ using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Events;
 using Magic.Files;
-using Magic.Gpu;
 using Magic.Platform;
 using Magic.Rendering;
 using Magic.Threading;

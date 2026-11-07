@@ -4,8 +4,7 @@ using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Gpu;
-using Magic.Shaders;
+using Magic.Rendering;
 using Magic.Utils;
 
 namespace Magic.GIRendering;

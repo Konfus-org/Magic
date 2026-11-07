@@ -5,7 +5,6 @@ using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs.Components;
 using Magic.Files;
-using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Threading;
 using Magic.Utils;

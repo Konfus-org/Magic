@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using Magic.Debugging;
-using Magic.Gpu;
-using Magic.Shaders;
+using Magic.Rendering;
 using Magic.Threading;
 using Magic.Utils;
 

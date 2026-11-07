@@ -8,7 +8,6 @@ using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Gpu;
 using Magic.Input;
 using Magic.Platform;
 using Magic.Projects;

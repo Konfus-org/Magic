@@ -3,8 +3,6 @@ using System.Drawing;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Debugging;
-using Magic.Gpu;
-using Magic.Shaders;
 using Magic.Utils;
 
 namespace Magic.Rendering;

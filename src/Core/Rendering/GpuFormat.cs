@@ -1,4 +1,4 @@
-namespace Magic.Gpu;
+namespace Magic.Rendering;
 
 /// <summary>
 /// How a texture's texels are laid out, named as Vulkan names them, channel by channel with the bits of each. Only the

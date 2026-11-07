@@ -1,5 +1,4 @@
 using System.Numerics;
-using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
 

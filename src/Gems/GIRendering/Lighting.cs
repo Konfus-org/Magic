@@ -3,9 +3,7 @@ using System.Numerics;
 using Magic.Assets;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Gpu;
 using Magic.Rendering;
-using Magic.Shaders;
 using Magic.Utils;
 
 namespace Magic.GIRendering;

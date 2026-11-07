@@ -1,6 +1,6 @@
 using Magic.Utils;
 
-namespace Magic.Shaders;
+namespace Magic.Rendering;
 
 /// <summary>
 /// Compiles Slang entries to SPIR-V, as a gem provides it: the entry's module and the modules it imports come from the

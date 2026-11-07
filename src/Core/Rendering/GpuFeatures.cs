@@ -1,4 +1,4 @@
-namespace Magic.Gpu;
+namespace Magic.Rendering;
 
 /// <summary>
 /// What the GPU has beyond the baseline every GPU Magic runs on. A renderer takes a path that needs one only when it

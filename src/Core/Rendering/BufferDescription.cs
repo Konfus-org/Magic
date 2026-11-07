@@ -1,4 +1,4 @@
-namespace Magic.Gpu;
+namespace Magic.Rendering;
 
 /// <summary>
 /// What a buffer is for, which picks the memory it lives in and what commands may touch it.

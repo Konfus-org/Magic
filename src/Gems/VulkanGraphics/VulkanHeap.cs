@@ -1,4 +1,4 @@
-using Magic.Gpu;
+using Magic.Rendering;
 using Vortice.Vulkan;
 
 namespace Magic.VulkanGraphics;

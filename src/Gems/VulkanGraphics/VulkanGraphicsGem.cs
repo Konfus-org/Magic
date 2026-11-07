@@ -1,9 +1,8 @@
 using System.Diagnostics.Metrics;
 using Magic.Debugging;
-using Magic.Gpu;
 using Magic.Platform;
 using Magic.Projects;
-using Magic.Shaders;
+using Magic.Rendering;
 using Magic.Threading;
 using Magic.Utils;
 using Vortice.Vulkan;

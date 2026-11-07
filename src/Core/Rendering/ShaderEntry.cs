@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using Magic.Assets;
 
-namespace Magic.Shaders;
+namespace Magic.Rendering;
 
 /// <summary>
 /// The stage an entry point runs in.

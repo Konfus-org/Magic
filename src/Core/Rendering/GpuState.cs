@@ -1,4 +1,4 @@
-namespace Magic.Gpu;
+namespace Magic.Rendering;
 
 /// <summary>
 /// Where something the GPU provider makes in the background is: not yet, ready to use, or never.

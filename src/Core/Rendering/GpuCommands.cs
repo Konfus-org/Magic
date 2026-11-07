@@ -1,12 +1,11 @@
 using System.Collections.Immutable;
 using System.Runtime.InteropServices;
-using Magic.Shaders;
 
-namespace Magic.Gpu;
+namespace Magic.Rendering;
 
 /// <summary>
 /// A frame's commands as a value: passes in the order they run, each with what it uses. The gems record it into
-/// Core's <see cref="Rendering.RenderGraph"/> and Core hands it to <see cref="IGraphicsApi.Present"/>; the GPU provider
+/// Core's <see cref="RenderGraph"/> and Core hands it to <see cref="IGraphicsApi.Present"/>; the GPU provider
 /// turns it into its API's calls and nothing else decides what the GPU does.
 /// </summary>
 public readonly record struct GpuCommands(ImmutableArray<GpuPass> Passes)
@@ -174,7 +173,7 @@ public readonly record struct GpuConstants(uint X, uint Y = 0, uint Z = 0, uint 
 }
 
 /// <summary>
-/// Which command a <see cref="GpuCommand"/> is; the fields each reads are on <see cref="Rendering.RenderGraph"/>'s
+/// Which command a <see cref="GpuCommand"/> is; the fields each reads are on <see cref="RenderGraph"/>'s
 /// method of the same name.
 /// </summary>
 public enum GpuCommandKind : byte
@@ -197,7 +196,7 @@ public enum GpuCommandKind : byte
 
 /// <summary>
 /// One command, as plain fields a kind reads its own way: a resource's id and a second's, two byte offsets, a size,
-/// four numbers and a block of constants. <see cref="Rendering.RenderGraph"/> fills them; the GPU provider reads them.
+/// four numbers and a block of constants. <see cref="RenderGraph"/> fills them; the GPU provider reads them.
 /// </summary>
 public readonly record struct GpuCommand
 {

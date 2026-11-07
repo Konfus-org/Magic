@@ -1,4 +1,4 @@
-namespace Magic.Gpu;
+namespace Magic.Rendering;
 
 /// <summary>
 /// A buffer the GPU provider made, by its place in the bindless heap: the same number a shader reads it through, so a

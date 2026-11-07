@@ -1,5 +1,5 @@
 using Magic.Assets;
-using Magic.Shaders;
+using Magic.Rendering;
 
 namespace Magic.GIRendering;
 
