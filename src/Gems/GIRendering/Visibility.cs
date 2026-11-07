@@ -62,12 +62,6 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
     private const int CullGroupsPerRow = 65535;
     private const BufferUsages IndirectUsage = BufferUsages.Storage | BufferUsages.Indirect;
 
-    // PROTO: the pixel radius on screen under which an instance hands off to its impostor, from
-    // MAGIC_PROTO_IMPOSTOR_PIXELS, else 32: half an atlas view, so an impostor is never magnified; 0 draws none.
-    private static readonly uint _impostorStart = BitConverter.SingleToUInt32Bits(
-        float.TryParse(Environment.GetEnvironmentVariable("MAGIC_PROTO_IMPOSTOR_PIXELS"), out float start) ? start : 32f
-    );
-
     private readonly ShaderEntry _cullShader = PassShaders.GetEntry(assets, "CullClusters", "CullClusters");
     private readonly DrawShaders _drawShaders = new(
         PassShaders.GetEntry(assets, "DrawVisibility", "DrawVisibilityVertex", ShaderStage.Vertex),
@@ -77,7 +71,7 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
         Depth = DepthMode.TestAndWrite,
     };
 
-    // PROTO: a cluster of an instance in the impostor handoff, kept by the dither.
+    // A cluster of an instance in the impostor handoff, kept by the dither.
     private readonly DrawShaders _fadingShaders = new(
         PassShaders.GetEntry(assets, "DrawVisibility", "DrawVisibilityVertex", ShaderStage.Vertex),
         PassShaders.GetEntry(assets, "DrawVisibility", "DrawVisibilityFadingPixel", ShaderStage.Pixel)
@@ -86,7 +80,7 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
         Depth = DepthMode.TestAndWrite,
     };
 
-    // PROTO: an impostor's quad, both faces, its pixels writing their own depth no nearer than the quad's.
+    // An impostor's quad, both faces, its pixels writing their own depth no nearer than the quad's.
     private readonly DrawShaders _impostorShaders = new(
         PassShaders.GetEntry(assets, "DrawImpostors", "DrawImpostorsVertex", ShaderStage.Vertex),
         PassShaders.GetEntry(assets, "DrawImpostors", "DrawImpostorsPixel", ShaderStage.Pixel)
@@ -181,11 +175,7 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
 
         // Cull: one group an instance over its clusters, what last frame's pyramid hid onto the retest list.
         int rows = (view.InstanceCount + CullGroupsPerRow - 1) / CullGroupsPerRow;
-        view.Graph.Compute(
-                "Cull clusters",
-                _cullShader,
-                new GpuConstants(view.Constants.Id, 0, cull.ImpostorDraws.Id, _impostorStart)
-            )
+        view.Graph.Compute("Cull clusters", _cullShader, new GpuConstants(view.Constants.Id, 0, cull.ImpostorDraws.Id))
             .Reads(view.Constants, view.Instances, resources.ClusterPool, view.Hzb)
             .Writes(
                 cull.Counts,
@@ -205,7 +195,7 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
             drawsOffset: (ulong)MaxVisibleClusters * 2 * DrawArgumentsBytes,
             countOffset: 24
         );
-        ImmutableArray<GpuResource> heapTextures = resources.GetHeapTextures();
+        ImmutableArray<GpuResource> heapTextures = resources.GetHeapTextures(view.Graph);
         RecordImpostors(view, heapTextures, "Draw impostors", drawsOffset: 0, countOffset: 16);
         RecordHzb(view);
 
@@ -213,7 +203,7 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
         view.Graph.Compute(
                 "Retest clusters",
                 _cullShader,
-                new GpuConstants(view.Constants.Id, 1, cull.ImpostorDraws.Id, _impostorStart)
+                new GpuConstants(view.Constants.Id, 1, cull.ImpostorDraws.Id)
             )
             .Reads(view.Constants, view.Instances, resources.ClusterPool, view.Hzb, cull.RetestList)
             .Writes(cull.Counts, cull.VisibleClusters, cull.DrawArguments, cull.ImpostorDraws)
@@ -287,7 +277,7 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
                     Colors = [new GpuTarget { Texture = view.Visibility, Load = load }],
                     Depth = new GpuTarget { Texture = view.Depth, Load = load },
                 },
-                new GpuConstants(view.Constants.Id, 0, 0, _impostorStart)
+                new GpuConstants(view.Constants.Id)
             )
             .Reads(
                 view.Constants,
@@ -308,7 +298,7 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
             );
 
     /// <summary>
-    /// PROTO: the impostors the cull left at <paramref name="drawsOffset"/>, into the view's visibility buffer and depth,
+    /// The impostors the cull left at <paramref name="drawsOffset"/>, into the view's visibility buffer and depth,
     /// one indirect draw each, reading their atlases among <paramref name="heapTextures"/>.
     /// </summary>
     private void RecordImpostors(
@@ -327,7 +317,7 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
                     Colors = [new GpuTarget { Texture = view.Visibility, Load = TargetLoad.Keep }],
                     Depth = new GpuTarget { Texture = view.Depth, Load = TargetLoad.Keep },
                 },
-                new GpuConstants(view.Constants.Id, 0, resources.ImpostorTable.Id, _impostorStart)
+                new GpuConstants(view.Constants.Id, 0, resources.ImpostorTable.Id)
             )
             .Reads(view.Constants, view.Instances, resources.ImpostorTable)
             .Reads(heapTextures.AsSpan())

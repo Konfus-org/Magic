@@ -40,7 +40,6 @@ internal sealed class GpuResources(
     Threads threads
 ) : IDisposable
 {
-    // PROTO: raised for the terrain sample's 2M-triangle terrain.
     private const int VertexCapacity = 1 << 22;
     private const int IndexCapacity = 1 << 24;
     private const int ClusterCapacity = 1 << 17;
@@ -60,7 +59,7 @@ internal sealed class GpuResources(
     private readonly Dictionary<ulong, Material?> _materials = [];
     private readonly List<(Texture Asset, TextureEntry Entry)> _arrivedTextures = [];
 
-    // PROTO: the impostor table's rows; row 0 is no impostor, so it is taken from the start.
+    // The impostor table's rows; row 0 is no impostor, so it is taken from the start.
     private readonly FreeList _impostorRows = CreateImpostorRows();
 
     /// <summary>
@@ -100,7 +99,7 @@ internal sealed class GpuResources(
     public GpuBuffer LeafClusters { get; private set; }
 
     /// <summary>
-    /// PROTO: every resident model's impostor, a <see cref="GpuImpostor"/> a row, by the row its instances name.
+    /// Every resident model's impostor, a <see cref="GpuImpostor"/> a row, by the row its instances name.
     /// </summary>
     public GpuBuffer ImpostorTable { get; private set; }
 
@@ -114,10 +113,11 @@ internal sealed class GpuResources(
 
     /// <summary>
     /// The textures shaders read through the heap, by the id in a row rather than by a pass's name: every material's
-    /// texture on the GPU and every resident model's impostor atlas. A pass that samples them names them in its reads,
-    /// so each is readable, its copy done, before the pass runs.
+    /// texture on the GPU and every resident model's impostor atlases, which are asked of the graph here, every frame that
+    /// reads them. A pass that samples them names them in its reads, so each is readable, its copy done, before the pass
+    /// runs.
     /// </summary>
-    public ImmutableArray<GpuResource> GetHeapTextures()
+    public ImmutableArray<GpuResource> GetHeapTextures(RenderGraph graph)
     {
         ImmutableArray<GpuResource>.Builder textures = ImmutableArray.CreateBuilder<GpuResource>();
         foreach (TextureEntry entry in _textures.Values)
@@ -128,11 +128,14 @@ internal sealed class GpuResources(
 
         foreach (ResidentModel resident in _residentModels.Values)
         {
-            if (resident.Impostor.IsNone)
+            if (resident.Impostor is not { } atlas || resident.ImpostorUv is not { } uvAtlas)
                 continue;
 
-            textures.Add(resident.Impostor);
-            textures.Add(resident.ImpostorUv);
+            if (graph.Texture(atlas) is { Ok: true } surface)
+                textures.Add(surface.Value);
+
+            if (graph.Texture(uvAtlas) is { Ok: true } uvs)
+                textures.Add(uvs.Value);
         }
 
         return textures.ToImmutable();
@@ -143,8 +146,6 @@ internal sealed class GpuResources(
         foreach (ResidentModel resident in _residentModels.Values)
         {
             gpu.Destroy(resident.Acceleration);
-            gpu.Destroy(resident.Impostor);
-            gpu.Destroy(resident.ImpostorUv);
         }
     }
 
@@ -225,12 +226,10 @@ internal sealed class GpuResources(
                 _leafRanges.Free((int)where.LeafOffset, (int)where.LeafCount);
 
             gpu.Destroy(where.Acceleration);
-            if (!where.Impostor.IsNone)
-            {
-                gpu.Destroy(where.Impostor);
-                gpu.Destroy(where.ImpostorUv);
+
+            // Its atlases go once no frame asks for them.
+            if (where.ImpostorRow != 0)
                 _impostorRows.Free((int)where.ImpostorRow, 1);
-            }
 
             _residentModels.Remove(id);
             _askedModels.Remove(id);
@@ -401,7 +400,7 @@ internal sealed class GpuResources(
             }
 
             UploadLeaves(graph, derived, where);
-            if (!where.Impostor.IsNone)
+            if (where.ImpostorRow != 0)
                 UploadImpostor(graph, derived, where);
         }
 
@@ -608,26 +607,16 @@ internal sealed class GpuResources(
         if (!LeafClusters.IsNone)
             where = CreateAcceleration(name, made, where);
 
-        // PROTO: a model that baked an impostor gets its atlases and a row of the impostor table.
+        // A model that baked an impostor gets a row of the impostor table, and its atlases' descriptions, which the graph
+        // makes on the first ask and keeps while frames read them.
         if (!made.Impostor.IsEmpty && _impostorRows.CanAllocate(1))
         {
-            Result<GpuTexture> atlas = CreateAtlas($"{name} impostor", GpuFormat.R16G16B16A16Sfloat);
-            Result<GpuTexture> uvAtlas = CreateAtlas($"{name} impostor uv", GpuFormat.R16G16Sfloat);
-            if (atlas.Ok && uvAtlas.Ok)
+            where = where with
             {
-                where = where with
-                {
-                    Impostor = atlas.Value,
-                    ImpostorUv = uvAtlas.Value,
-                    ImpostorRow = (uint)_impostorRows.Allocate(1),
-                };
-            }
-            else
-            {
-                gpu.Destroy(atlas.Value);
-                gpu.Destroy(uvAtlas.Value);
-                Log.Warn($"{name} draws no impostor: {(atlas.Ok ? uvAtlas.Error : atlas.Error)}");
-            }
+                Impostor = GetAtlasDescription($"{name} impostor", GpuFormat.R16G16B16A16Sfloat),
+                ImpostorUv = GetAtlasDescription($"{name} impostor uv", GpuFormat.R16G16Sfloat),
+                ImpostorRow = (uint)_impostorRows.Allocate(1),
+            };
         }
 
         // An arrival is a use, so a model that took longer to make than it may go unused is copied up before it can be
@@ -715,34 +704,45 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// PROTO: an impostor atlas of <see cref="MeshDerived.ImpostorSize"/> texels a side, in <paramref name="format"/>.
+    /// An impostor atlas of <see cref="MeshDerived.ImpostorSize"/> texels a side, in <paramref name="format"/>.
     /// </summary>
-    private Result<GpuTexture> CreateAtlas(string name, GpuFormat format) =>
-        gpu.CreateTexture(
-            new TextureDescription
-            {
-                Width = MeshDerived.ImpostorSize,
-                Height = MeshDerived.ImpostorSize,
-                Format = format,
-                Usage = TextureUsages.Sampled | TextureUsages.CopyDestination,
-                Levels = 1,
-                Name = name,
-            }
-        );
+    private static TextureDescription GetAtlasDescription(string name, GpuFormat format) =>
+        new()
+        {
+            Width = MeshDerived.ImpostorSize,
+            Height = MeshDerived.ImpostorSize,
+            Format = format,
+            Usage = TextureUsages.Sampled | TextureUsages.CopyDestination,
+            Levels = 1,
+            Name = name,
+        };
 
     /// <summary>
-    /// PROTO: the model's impostor atlases copied up, and its row of the impostor table written.
+    /// The model's impostor atlases asked of the graph and copied up, and its row of the impostor table written; the row
+    /// stays empty when an atlas was not made, and the model draws no impostor.
     /// </summary>
     private void UploadImpostor(RenderGraph graph, MeshDerived derived, ResidentModel where)
     {
-        graph.Upload(where.Impostor, MemoryMarshal.AsBytes(derived.Impostor.AsSpan()));
-        graph.Upload(where.ImpostorUv, MemoryMarshal.AsBytes(derived.ImpostorUv.AsSpan()));
+        if (where.Impostor is not { } atlasDescription || where.ImpostorUv is not { } uvDescription)
+            return;
+
+        Result<GpuTexture> atlas = graph.Texture(atlasDescription);
+        Result<GpuTexture> uvAtlas = graph.Texture(uvDescription);
+        if (!atlas.Ok || !uvAtlas.Ok)
+        {
+            Log.Warn($"{atlasDescription.Name} is not drawn: {(atlas.Ok ? uvAtlas.Error : atlas.Error)}");
+
+            return;
+        }
+
+        graph.Upload(atlas.Value, MemoryMarshal.AsBytes(derived.Impostor.AsSpan()));
+        graph.Upload(uvAtlas.Value, MemoryMarshal.AsBytes(derived.ImpostorUv.AsSpan()));
         GpuImpostor row = new()
         {
             BoundsMin = derived.BoundsMin,
-            Atlas = where.Impostor.Id,
+            Atlas = atlas.Value.Id,
             BoundsMax = derived.BoundsMax,
-            UvAtlas = where.ImpostorUv.Id,
+            UvAtlas = uvAtlas.Value.Id,
         };
         graph.Upload(ImpostorTable, [row], (ulong)where.ImpostorRow * GpuImpostor.Bytes);
     }
@@ -782,7 +782,7 @@ internal readonly record struct ResidentModel(
     uint LeafOffset = 0,
     uint LeafCount = 0,
     GpuAcceleration Acceleration = default,
-    GpuTexture Impostor = default,
-    GpuTexture ImpostorUv = default,
+    TextureDescription? Impostor = null,
+    TextureDescription? ImpostorUv = null,
     uint ImpostorRow = 0
 );

@@ -25,6 +25,11 @@ internal sealed class RenderInputs
 
     public DebugView DebugView { get; set; }
 
+    /// <summary>
+    /// The pixel radius on screen under which an instance hands off to its impostor; 0 draws no impostors.
+    /// </summary>
+    public float ImpostorPixels { get; set; }
+
     public int Width { get; set; }
 
     public int Height { get; set; }

@@ -41,7 +41,8 @@ internal sealed class FrameView(GpuResources resources)
         GpuBuffer instances,
         GpuBuffer materials,
         in CullBuffers cull,
-        GpuAcceleration acceleration
+        GpuAcceleration acceleration,
+        float impostorPixels
     )
     {
         Result<GpuSampler> sampler = graph.Sampler(new SamplerDescription { Anisotropy = 8 });
@@ -96,6 +97,7 @@ internal sealed class FrameView(GpuResources resources)
             HasHzb = targets.HasHistory ? 1u : 0u,
             PixelsPerRadian = height / (2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360)),
             ErrorThreshold = ErrorThresholdPixels,
+            ImpostorPixels = impostorPixels,
             FrameIndex = frameIndex,
             Acceleration = acceleration.Id,
             LeafClusters = resources.LeafClusters.Id,

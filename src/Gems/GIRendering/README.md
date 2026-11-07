@@ -20,7 +20,7 @@ texture reader.
   baked on the CPU from the clusters the hierarchy draws at an atlas texel's error.
 - An instance whose model has an impostor atlas draws as it once it is under 32 pixels in radius on screen, half a
   view of the atlas, so the atlas is never magnified. Over a quarter of that the clusters and the impostor share the
-  pixels by a dither, so nothing pops. `MAGIC_PROTO_IMPOSTOR_PIXELS` sets the radius, and 0 draws no impostors.
+  pixels by a dither, so nothing pops.
 - A model nothing has drawn or waited for in a minute leaves the GPU, and loads again when it is next drawn.
 - As a domain replaces the world, the loading screen stays until the models, materials and textures of what comes are
   on the GPU, or failed, and nothing drawn before carries into the frames after.
@@ -41,6 +41,7 @@ Set these in the console with `set GIRendering.<name>=<value>`. A wrong value lo
 
 - `debug` shows one part of the GBuffer alone. `final` shows the finished frame again. The names are in `DebugView`.
 - `window` is `true` or `false`, and opens the Rendering window.
+- `impostorPixels` is the radius on screen, in pixels, under which a model draws as its impostor. 0 draws none.
 
 With a gem that provides the debug UI, F2 opens the Rendering window, which chooses the view. F5 and F6 step through the
 views, and a line on screen names any view but the finished frame. A screenshot is of the renderer's picture alone,

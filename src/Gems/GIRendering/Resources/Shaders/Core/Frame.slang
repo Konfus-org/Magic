@@ -44,7 +44,8 @@ public struct FrameConstants
     public float pixelsPerRadian;
     // Pixels of projected error a drawn cluster may have.
     public float errorThreshold;
-    public float padding0;
+    // The pixel radius on screen under which an instance hands off to its impostor; 0 draws no impostors.
+    public float impostorPixels;
 
     public uint instanceCount;
     public uint maxVisibleClusters;

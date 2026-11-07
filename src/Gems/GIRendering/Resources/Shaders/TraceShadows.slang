@@ -77,7 +77,7 @@ uint4 Trace(FrameConstants frame, LightingConstants lighting, uint2 pixel)
     TextureRef normalTexture = { frame.gbufferNormal };
     float3 relative = ReconstructRelative(frame, uv, depthTexture.Load(pixel, 0u).x);
     float3 normal = DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0);
-    // PROTO: an impostor's pixel has no triangle to lift off.
+    // An impostor's pixel has no triangle to lift off.
     float3 lifted = (id & ImpostorFlag) != 0u ? relative : LiftOffTriangle(frame, id, uv, relative);
     float3 world = lifted + frame.cameraPosition.xyz;
     float offset = 0.01 + OffsetPixels * length(relative) / frame.pixelsPerRadian;

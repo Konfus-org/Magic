@@ -1,4 +1,4 @@
-// PROTO: octahedral impostors. An instance whose model baked an atlas (the mesh preprocessor's ImpostorBuilder) draws
+// Octahedral impostors. An instance whose model baked an atlas (the mesh preprocessor's ImpostorBuilder) draws
 // as a quad fitted to its box once it is under a handoff's pixel radius on screen, the three views nearest the
 // camera's direction blended; in the handoff its clusters draw too, each pixel shown by one of the two by a dither on
 // the fade, so nothing pops (Brucks, "Octahedral Impostors", 2018).
@@ -12,8 +12,8 @@ import Scene.Instances;
 public static const uint ImpostorViews = 12u;
 public static const uint ImpostorTile = 64u;
 
-// The handoff runs from its start, a pixel radius on screen that a pass header's w holds as float bits, down to
-// three quarters of it; a start of 0 draws no impostors.
+// The handoff runs from the frame's impostorPixels, a pixel radius on screen, down to three quarters of it; a radius of
+// 0 draws no impostors.
 public static const float ImpostorBand = 0.25;
 
 // The visibility id's top bit marks an impostor's pixel, the next three the material slot the draw saw, the rest its
@@ -54,9 +54,9 @@ public GpuImpostor LoadImpostor(uint table, uint row)
 }
 
 // How far into the handoff an instance is, 0 for clusters alone, 1 for the impostor alone.
-public float GetImpostorFade(FrameConstants frame, GpuInstance instance, uint startBits)
+public float GetImpostorFade(FrameConstants frame, GpuInstance instance)
 {
-    float start = asfloat(startBits);
+    float start = frame.impostorPixels;
     if (instance.impostor == 0u || start <= 0.0)
         return 0.0;
 

@@ -60,7 +60,10 @@ internal record struct FrameConstants
 
     public float ErrorThreshold;
 
-    public float Padding0;
+    /// <summary>
+    /// The pixel radius on screen under which an instance hands off to its impostor; 0 draws no impostors.
+    /// </summary>
+    public float ImpostorPixels;
 
     public uint InstanceCount;
 
@@ -161,7 +164,7 @@ internal record struct GpuInstance
     public uint MovedFrame;
 
     /// <summary>
-    /// PROTO: the model's row of the impostor table, 0 for none.
+    /// The model's row of the impostor table, 0 for none.
     /// </summary>
     public uint Impostor;
 
@@ -391,7 +394,7 @@ public record struct GpuCluster
 }
 
 /// <summary>
-/// PROTO: one model's impostor, 32 bytes: the twin of <c>Scene/Impostors.slang</c>'s: the box around the model in its
+/// One model's impostor, 32 bytes: the twin of <c>Scene/Impostors.slang</c>'s: the box around the model in its
 /// frame, and the heap id of its atlas.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]

@@ -18,12 +18,12 @@ public sealed class MeshDerived
     public const int FieldSize = 64;
 
     /// <summary>
-    /// PROTO: views across and down an impostor atlas, on an octahedral grid over the whole sphere.
+    /// Views across and down an impostor atlas, on an octahedral grid over the whole sphere.
     /// </summary>
     public const int ImpostorViews = 12;
 
     /// <summary>
-    /// PROTO: texels a side of one view of an impostor atlas.
+    /// Texels a side of one view of an impostor atlas.
     /// </summary>
     public const int ImpostorTile = 64;
 
@@ -68,7 +68,7 @@ public sealed class MeshDerived
     public required float FieldBand { get; init; }
 
     /// <summary>
-    /// PROTO: the model's octahedral impostor atlas, <see cref="ImpostorViews"/> by <see cref="ImpostorViews"/> views of
+    /// The model's octahedral impostor atlas, <see cref="ImpostorViews"/> by <see cref="ImpostorViews"/> views of
     /// <see cref="ImpostorTile"/> texels a side, row by row as RGBA16F: each texel the octahedral normal, the depth from
     /// the view's front plane over the sphere's diameter, and the material slot plus one, 0 where the view sees nothing.
     /// Empty for a model too big to stand far away as one.
@@ -76,13 +76,13 @@ public sealed class MeshDerived
     public required ImmutableArray<Half> Impostor { get; init; }
 
     /// <summary>
-    /// PROTO: the texture coordinates of the surface each texel of <see cref="Impostor"/> shows, at the same texels, as
+    /// The texture coordinates of the surface each texel of <see cref="Impostor"/> shows, at the same texels, as
     /// RG16F; empty with it.
     /// </summary>
     public required ImmutableArray<Half> ImpostorUv { get; init; }
 
     /// <summary>
-    /// PROTO: the box around the whole model, in its frame: what an impostor's quad is fitted to.
+    /// The box around the whole model, in its frame: what an impostor's quad is fitted to.
     /// </summary>
     public required Vector3 BoundsMin { get; init; }
 

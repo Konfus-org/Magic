@@ -34,8 +34,8 @@ void CullClusters(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
         if (!isInView)
             return;
 
-        // PROTO: under the handoff's start on screen the instance draws as an impostor too, past its end as that alone.
-        float fade = GetImpostorFade(frame, instance, header.w);
+        // Under the handoff's start on screen the instance draws as an impostor too, past its end as that alone.
+        float fade = GetImpostorFade(frame, instance);
         if (fade > 0.0 && local.x == 0u)
             TestImpostor(frame, header.z, instanceIndex, instance, false);
 
@@ -119,10 +119,10 @@ void Test(FrameConstants frame, uint instanceIndex, GpuInstance instance, uint c
     VisibleCluster entry = { instanceIndex, clusterIndex };
     visible[listIndex] = entry;
 
-    // PROTO: the cluster's region of the draws, by pass and by whether its instance is in the impostor handoff, which
+    // The cluster's region of the draws, by pass and by whether its instance is in the impostor handoff, which
     // draws with the dither.
     static const uint countOffsets[4] = { CountVisibleDraws, CountRetestDraws, CountFadingDraws, CountRetestFadingDraws };
-    bool isFading = GetImpostorFade(frame, instance, GetPassHeader().w) > 0.0;
+    bool isFading = GetImpostorFade(frame, instance) > 0.0;
     uint region = (isRetest ? 1u : 0u) + (isFading ? 2u : 0u);
     uint countOffset = countOffsets[region];
     uint drawOffset = region * frame.maxVisibleClusters;
@@ -132,7 +132,7 @@ void Test(FrameConstants frame, uint instanceIndex, GpuInstance instance, uint c
     draws[drawOffset + drawIndex] = arguments;
 }
 
-// PROTO: appends the instance's impostor to the draws, the retested ones after the first's, or, when the old depth
+// Appends the instance's impostor to the draws, the retested ones after the first's, or, when the old depth
 // pyramid hides it, to the retest list, as a cluster's test does.
 void TestImpostor(FrameConstants frame, uint draws, uint instanceIndex, GpuInstance instance, bool isRetest)
 {

@@ -17,7 +17,7 @@ struct Varyings
     float4 position : SV_Position;
     // The visibility id, the same from each of a triangle's three vertices.
     nointerpolation uint id : VISIBILITY_ID;
-    // PROTO: how far into the impostor handoff the instance is.
+    // How far into the impostor handoff the instance is.
     nointerpolation float fade : FADE;
 };
 
@@ -37,14 +37,14 @@ Varyings DrawVisibilityVertex(uint vertexIndex : SV_VertexID, uint instanceIndex
     Vertex vertex = LoadVertex(frame.vertices, LoadIndex(frame.indices, cluster.indexOffset + vertexIndex));
     float3 relative = Relative(frame, ToWorld(instance.world, vertex.position));
     output.position = mul(float4(relative, 1.0), frame.viewProjection);
-    output.fade = GetImpostorFade(frame, instance, GetPassHeader().w);
+    output.fade = GetImpostorFade(frame, instance);
     return output;
 }
 
 [shader("pixel")]
 uint DrawVisibilityPixel(Varyings input) : SV_Target0 { return input.id; }
 
-// PROTO: a cluster of an instance in the impostor handoff, its own pipeline so the plain draw above keeps its early
+// A cluster of an instance in the impostor handoff, its own pipeline so the plain draw above keeps its early
 // depth test: the dither keeps the clusters' share of the pixels, and the impostor draws the rest.
 [shader("pixel")]
 uint DrawVisibilityFadingPixel(Varyings input) : SV_Target0

@@ -3,7 +3,7 @@ using System.Numerics;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// PROTO: a model's octahedral impostor atlas, as <see cref="MeshDerived.Impostor"/> says, baked on the CPU from the
+/// A model's octahedral impostor atlas, as <see cref="MeshDerived.Impostor"/> says, baked on the CPU from the
 /// clusters the hierarchy draws at an atlas texel's error, so a model of any size bakes from about as many triangles as
 /// its atlas can show: each view rasterises them orthographically into its tile, the nearest kept. The renderer's
 /// Scene/Impostors.slang reads it with the same grid and view frames.

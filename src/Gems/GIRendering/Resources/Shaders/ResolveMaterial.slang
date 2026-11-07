@@ -44,7 +44,7 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
     }
 
     // The surface's inputs, the point in its model's frame, its instance and its material slot: from the triangle the
-    // id names, or, PROTO, for an impostor's pixel, from its atlas traced again along the pixel's ray, with the slot the
+    // id names, or, for an impostor's pixel, from its atlas traced again along the pixel's ray, with the slot the
     // draw saw.
     SurfaceInputs inputs;
     float3 model;

@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using System.Linq;
 using System.Numerics;
 using System.Threading.Channels;
@@ -67,6 +68,12 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly Subscription _preprocessing;
 
     private DebugView _debugView;
+
+    /// <summary>
+    /// The pixel radius on screen under which an instance hands off to its impostor: half an atlas view, so an impostor
+    /// is never magnified. Set with GIRendering.impostorPixels; 0 draws no impostors.
+    /// </summary>
+    private float _impostorPixels = MeshDerived.ImpostorTile / 2;
 
     /// <summary>
     /// The inputs <see cref="Render"/> draws, taken from <see cref="_inputs"/>, until newer are. Render thread.
@@ -164,6 +171,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _ecs.Snapshot(back.RectLights);
         _ecs.Snapshot(back.Skies);
         back.DebugView = _debugView;
+        back.ImpostorPixels = _impostorPixels;
         (back.Width, back.Height) = _app.Window is { Width: > 0, Height: > 0 } window
             ? (window.Width, window.Height)
             : (DefaultWidth, DefaultHeight);
@@ -487,7 +495,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             tables.Value.Rows,
             tables.Value.Materials,
             cull.Value,
-            _rayTracing?.Acceleration ?? GpuAcceleration.None
+            _rayTracing?.Acceleration ?? GpuAcceleration.None,
+            inputs.ImpostorPixels
         );
         if (!view.Ok)
             return Result.Failure(view.Error);
@@ -552,6 +561,16 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
                 _debugWindow.IsOpen = isOpen;
             else
                 Log.Error($"{setting.Key} takes true or false, with a debug UI to draw it, not '{setting.Value}'.");
+
+            return;
+        }
+
+        if (setting.Key == "GIRendering.impostorPixels")
+        {
+            if (float.TryParse(setting.Value, CultureInfo.InvariantCulture, out float pixels) && pixels >= 0)
+                _impostorPixels = pixels;
+            else
+                Log.Error($"{setting.Key} takes a pixel radius of 0 or more, not '{setting.Value}'.");
 
             return;
         }
