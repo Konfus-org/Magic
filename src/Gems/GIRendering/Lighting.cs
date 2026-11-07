@@ -16,6 +16,7 @@ namespace Magic.GIRendering;
 /// </summary>
 internal sealed class Lighting(
     IGraphicsApi gpu,
+    GpuResources resources,
     GpuPipelines pipelines,
     SkyLuts sky,
     LightTiles lights,
@@ -33,11 +34,7 @@ internal sealed class Lighting(
     private GpuSampler _sampler;
     private bool _hasSky;
 
-    public void Dispose()
-    {
-        gpu.Destroy(_constants);
-        gpu.Destroy(_sampler);
-    }
+    public void Dispose() => gpu.Destroy(_constants);
 
     public Result Create()
     {
@@ -46,7 +43,7 @@ internal sealed class Lighting(
             return Result.Failure(constants.Error);
 
         _constants = constants.Value;
-        Result<GpuSampler> sampler = gpu.CreateSampler(
+        Result<GpuSampler> sampler = resources.TryGetSampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
         if (!sampler.Ok)

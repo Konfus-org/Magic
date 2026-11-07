@@ -11,6 +11,7 @@ namespace Magic.GIRendering;
 /// </summary>
 internal sealed class FrameView(
     IGraphicsApi gpu,
+    GpuResources resources,
     GeometryPools pools,
     MaterialTable materials,
     Visibility visibility,
@@ -33,15 +34,11 @@ internal sealed class FrameView(
     /// </summary>
     public GpuBuffer Constants { get; private set; }
 
-    public void Dispose()
-    {
-        gpu.Destroy(Constants);
-        gpu.Destroy(_sampler);
-    }
+    public void Dispose() => gpu.Destroy(Constants);
 
     public Result Create()
     {
-        Result<GpuSampler> sampler = gpu.CreateSampler(new SamplerDescription { Anisotropy = 8 });
+        Result<GpuSampler> sampler = resources.TryGetSampler(new SamplerDescription { Anisotropy = 8 });
         if (!sampler.Ok)
             return Result.Failure($"the default sampler was not made: {sampler.Error}");
 

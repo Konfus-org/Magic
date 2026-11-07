@@ -47,7 +47,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     );
     private readonly GpuPipelines _pipelines;
     private readonly GeometryPools _pools;
-    private readonly TextureTable _textures;
+    private readonly GpuResources _resources;
     private readonly MaterialTable _materials;
     private readonly FrameTargets _targets;
     private readonly RayTracing? _rayTracing;
@@ -113,18 +113,18 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _threads = threads;
         _pipelines = new GpuPipelines(gpu, shaders, assets);
         _pools = new GeometryPools(gpu, meshes, assets, threads);
-        _textures = new TextureTable(gpu, assets, threads);
-        _materials = new MaterialTable(gpu, assets, _textures, threads);
+        _resources = new GpuResources(gpu, assets, threads);
+        _materials = new MaterialTable(gpu, assets, _resources, threads);
         _targets = new FrameTargets(gpu);
         _instances = new InstanceTable(gpu);
         _failure = new MaterialInstance { Handle = assets.GetFailure<Material, Model>() };
         _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu) : null;
         _visibility = new Visibility(gpu, _pipelines, _pools, _materials);
-        _frameView = new FrameView(gpu, _pools, _materials, _visibility, _rayTracing);
+        _frameView = new FrameView(gpu, _resources, _pools, _materials, _visibility, _rayTracing);
         _sky = new SkyLuts(gpu, _pipelines);
         _lightTiles = new LightTiles(gpu, _pipelines);
         _shadows = _rayTracing is null ? null : new ShadowMask(gpu, _pipelines, _pools, _visibility, _lightTiles);
-        _lighting = new Lighting(gpu, _pipelines, _sky, _lightTiles, _shadows);
+        _lighting = new Lighting(gpu, _resources, _pipelines, _sky, _lightTiles, _shadows);
         _surfaceView = new SurfaceView(_pipelines);
         StartAsync().FireAndForget();
     }
@@ -137,7 +137,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _pipelines.Dispose();
         _targets.Dispose();
         _materials.Dispose();
-        _textures.Dispose();
+        _resources.Dispose();
         _pools.Dispose();
         _instances.Dispose();
         _rayTracing?.Dispose();
@@ -224,7 +224,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
         graph.BeginTransferPass("Upload arrivals");
         _pools.Upload(graph);
-        _textures.Upload(graph);
+        _resources.Upload(graph);
         _materials.Upload(graph);
         graph.EndPass();
 

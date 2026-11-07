@@ -18,7 +18,7 @@ namespace Magic.GIRendering;
 /// names the failure shader or a texture that does not load is drawn as the failure kind. The whole table is uploaded
 /// again in the frame after a row changes.
 /// </summary>
-internal sealed class MaterialTable(IGraphicsApi gpu, Assets assets, TextureTable textures, Threads threads)
+internal sealed class MaterialTable(IGraphicsApi gpu, Assets assets, GpuResources resources, Threads threads)
     : IDisposable
 {
     /// <summary>
@@ -147,13 +147,13 @@ internal sealed class MaterialTable(IGraphicsApi gpu, Assets assets, TextureTabl
         };
 
     /// <summary>
-    /// The state of the "colorMap" texture <paramref name="parameters"/> name, asking the texture table for it, with its
+    /// The state of the "colorMap" texture <paramref name="parameters"/> name, asking the GPU resources for it, with its
     /// places there once it is ready; ready, as nothing, when they name none.
     /// </summary>
     private TextureState GetColorMap(MaterialParamDictionary parameters, out uint texture, out uint sampler)
     {
         if (parameters.TryGetValue("colorMap", out MaterialParam? colorMap) && colorMap.Texture != Handle<Texture>.None)
-            return textures.Get(colorMap.Texture, out texture, out sampler);
+            return resources.Get(colorMap.Texture, out texture, out sampler);
 
         texture = 0;
         sampler = 0;
@@ -243,7 +243,7 @@ internal sealed class MaterialTable(IGraphicsApi gpu, Assets assets, TextureTabl
         }
 
         _materials[material.Id] = loaded.Value;
-        // Asks the texture table for its texture now, so the loading gate waits for it before any row needs it.
+        // Asks the GPU resources for its texture now, so the loading gate waits for it before any row needs it.
         GetColorMap(loaded.Value.Params, out _, out _);
         RebuildRowsOf(material);
     }

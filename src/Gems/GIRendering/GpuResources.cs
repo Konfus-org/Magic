@@ -19,18 +19,19 @@ internal enum TextureState : byte
 }
 
 /// <summary>
-/// The textures the materials name, each read once, made on the GPU with every level and the sampler its asset asks
-/// for, and copied up in the frame after it arrives. A texture stays resident for the run.
+/// The GPU resources the gem draws with, each made once on its first ask and freed with the gem: a texture asset by its
+/// handle, read and made with every level and the sampler its asset asks for, then copied up in the frame after it
+/// arrives; a sampler by its description, shared by every ask for the same one.
 /// </summary>
-internal sealed class TextureTable(IGraphicsApi gpu, Assets assets, Threads threads) : IDisposable
+internal sealed class GpuResources(IGraphicsApi gpu, Assets assets, Threads threads) : IDisposable
 {
-    private readonly Dictionary<ulong, Entry> _entries = [];
-    private readonly Dictionary<(TextureFilter, TextureWrap), GpuSampler> _samplers = [];
+    private readonly Dictionary<ulong, TextureEntry> _textures = [];
+    private readonly Dictionary<SamplerDescription, GpuSampler> _samplers = [];
     private readonly List<(Texture Asset, GpuTexture Texture)> _arrived = [];
 
     public void Dispose()
     {
-        foreach (Entry entry in _entries.Values)
+        foreach (TextureEntry entry in _textures.Values)
         {
             gpu.Destroy(entry.Texture);
         }
@@ -46,10 +47,10 @@ internal sealed class TextureTable(IGraphicsApi gpu, Assets assets, Threads thre
     /// </summary>
     public TextureState Get(Handle<Texture> handle, out uint texture, out uint sampler)
     {
-        if (!_entries.TryGetValue(handle.Id, out Entry? entry))
+        if (!_textures.TryGetValue(handle.Id, out TextureEntry? entry))
         {
-            entry = new Entry();
-            _entries[handle.Id] = entry;
+            entry = new TextureEntry();
+            _textures[handle.Id] = entry;
             LoadAsync(handle, entry).FireAndForget();
         }
 
@@ -60,7 +61,22 @@ internal sealed class TextureTable(IGraphicsApi gpu, Assets assets, Threads thre
     }
 
     /// <summary>
-    /// Copies the levels of what arrived since the last frame, in the frame's upload pass.
+    /// The sampler <paramref name="description"/> makes, made on the first ask for it.
+    /// </summary>
+    public Result<GpuSampler> TryGetSampler(in SamplerDescription description)
+    {
+        if (_samplers.TryGetValue(description, out GpuSampler sampler))
+            return Result.Success(sampler);
+
+        Result<GpuSampler> made = gpu.CreateSampler(description);
+        if (made.Ok)
+            _samplers[description] = made.Value;
+
+        return made;
+    }
+
+    /// <summary>
+    /// Copies the levels of the textures that arrived since the last frame, in the frame's upload pass.
     /// </summary>
     public void Upload(RenderGraph graph)
     {
@@ -89,7 +105,7 @@ internal sealed class TextureTable(IGraphicsApi gpu, Assets assets, Threads thre
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "not a texture format"),
         };
 
-    private async Task LoadAsync(Handle<Texture> handle, Entry entry)
+    private async Task LoadAsync(Handle<Texture> handle, TextureEntry entry)
     {
         Result<Texture> loaded = await assets.LoadAsync(handle, null, CancellationToken.None).ConfigureAwait(false);
         await threads.Enter(EngineThread.Render);
@@ -122,7 +138,14 @@ internal sealed class TextureTable(IGraphicsApi gpu, Assets assets, Threads thre
             return;
         }
 
-        Result<GpuSampler> sampler = GetSampler(asset.Filter, asset.Wrap);
+        Result<GpuSampler> sampler = TryGetSampler(
+            new SamplerDescription
+            {
+                Filter = asset.Filter,
+                Wrap = asset.Wrap,
+                Anisotropy = asset.Filter == TextureFilter.Linear ? 8 : 1,
+            }
+        );
         if (!sampler.Ok)
         {
             Log.Error($"{name} is drawn as a failure: {sampler.Error}");
@@ -138,26 +161,7 @@ internal sealed class TextureTable(IGraphicsApi gpu, Assets assets, Threads thre
         _arrived.Add((asset, texture.Value));
     }
 
-    private Result<GpuSampler> GetSampler(TextureFilter filter, TextureWrap wrap)
-    {
-        if (_samplers.TryGetValue((filter, wrap), out GpuSampler sampler))
-            return Result.Success(sampler);
-
-        Result<GpuSampler> made = gpu.CreateSampler(
-            new SamplerDescription
-            {
-                Filter = filter,
-                Wrap = wrap,
-                Anisotropy = filter == TextureFilter.Linear ? 8 : 1,
-            }
-        );
-        if (made.Ok)
-            _samplers[(filter, wrap)] = made.Value;
-
-        return made;
-    }
-
-    private sealed class Entry
+    private sealed class TextureEntry
     {
         public TextureState State { get; set; }
 
