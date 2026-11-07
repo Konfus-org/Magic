@@ -19,7 +19,7 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
     /// <summary>
     /// Raised when the bytes written change shape, or the hierarchy is built otherwise.
     /// </summary>
-    public int Version => 13;
+    public int Version => 15;
 
     public MeshDerived Preprocess(Model asset) => ClusterBuilder.Build(asset);
 

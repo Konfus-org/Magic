@@ -45,11 +45,6 @@ internal static unsafe class ClusterBuilder
     /// </summary>
     private const float CreaseAngle = MathF.PI / 4;
 
-    /// <summary>
-    /// PROTO: metres; a model whose sphere is this big or bigger, such as a terrain, bakes no impostor.
-    /// </summary>
-    private const float ImpostorMaxRadius = 50;
-
     public static MeshDerived Build(Model model)
     {
         ImmutableArray<GpuVertex>.Builder vertices = ImmutableArray.CreateBuilder<GpuVertex>();
@@ -70,7 +65,7 @@ internal static unsafe class ClusterBuilder
         SetRootParents(clusters, center, radius);
         DistanceField field = DistanceFieldBuilder.Build(model);
 
-        // PROTO: a model under ImpostorMaxRadius stands far away as an impostor.
+        // The box around the model, which its impostor's quad is fitted to.
         Vector3 boundsMin = new(float.MaxValue);
         Vector3 boundsMax = new(float.MinValue);
         foreach (GpuVertex vertex in vertices)
@@ -79,8 +74,8 @@ internal static unsafe class ClusterBuilder
             boundsMax = Vector3.Max(boundsMax, vertex.Position);
         }
 
-        (Half[] Surface, Half[] Uv) impostor =
-            radius < ImpostorMaxRadius ? ImpostorBuilder.Bake(vertices, indices, clusters, center, radius) : ([], []);
+        // Every model stands far away as an impostor once it is a few pixels across.
+        (Half[] Surface, Half[] Uv) impostor = ImpostorBuilder.Bake(vertices, indices, clusters, center, radius);
 
         return new MeshDerived
         {

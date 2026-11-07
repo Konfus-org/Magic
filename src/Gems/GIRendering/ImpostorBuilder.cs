@@ -3,8 +3,9 @@ using System.Numerics;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// PROTO: a model's octahedral impostor atlas, as <see cref="MeshDerived.Impostor"/> says, baked on the CPU from its leaf
-/// clusters: each view rasterises every leaf triangle orthographically into its tile, the nearest kept. The renderer's
+/// PROTO: a model's octahedral impostor atlas, as <see cref="MeshDerived.Impostor"/> says, baked on the CPU from the
+/// clusters the hierarchy draws at an atlas texel's error, so a model of any size bakes from about as many triangles as
+/// its atlas can show: each view rasterises them orthographically into its tile, the nearest kept. The renderer's
 /// Scene/Impostors.slang reads it with the same grid and view frames.
 /// </summary>
 internal static class ImpostorBuilder
@@ -27,6 +28,10 @@ internal static class ImpostorBuilder
     {
         Half[] texels = new Half[Size * Size * 4];
         Half[] uvs = new Half[Size * Size * 2];
+
+        // The cut the GPU's cull makes when the error it may show is a texel of a view: a cluster whose own error is
+        // under it and whose parent group's is over it.
+        float texelError = 2 * radius / Tile;
         Parallel.For(0, Views * Views, view => BakeView(view % Views, view / Views));
 
         return (texels, uvs);
@@ -38,7 +43,7 @@ internal static class ImpostorBuilder
             Array.Fill(depth, float.MaxValue);
             foreach (GpuCluster cluster in clusters)
             {
-                if (cluster.Error != 0)
+                if (cluster.Error > texelError || cluster.ParentError <= texelError)
                     continue;
 
                 for (int t = 0; t < cluster.TriangleCount; t++)

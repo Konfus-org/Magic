@@ -15,9 +15,9 @@ texture reader.
   simplifying.
 - A model shows once it is on the GPU. One that doesn't load is drawn as the failure model, and a material or texture
   that doesn't load as the magenta failure material.
-- A model under 100 m across also gets an octahedral impostor atlas: 12 by 12 views over the whole sphere, 64 texels
-  a side each, every texel the surface's normal, its depth and its material slot as the view sees it, baked from the
-  leaf clusters on the CPU.
+- Every model also gets an octahedral impostor atlas: 12 by 12 views over the whole sphere, 64 texels a side each,
+  every texel the surface's normal, its depth, its material slot and its texture coordinates as the view sees it,
+  baked on the CPU from the clusters the hierarchy draws at an atlas texel's error.
 - An instance whose model has an impostor atlas draws as it once it is under 32 pixels in radius on screen, half a
   view of the atlas, so the atlas is never magnified. Over a quarter of that the clusters and the impostor share the
   pixels by a dither, so nothing pops. `MAGIC_PROTO_IMPOSTOR_PIXELS` sets the radius, and 0 draws no impostors.
