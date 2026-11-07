@@ -199,6 +199,29 @@ built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
   and every loop have braces; each branch decides for itself. A blank line goes before `return`, `continue`, `break`
   or `throw` unless it opens its block.
 
+### API shape
+
+Write plain statements first. Use one of these shapes where it makes the call site shorter and plainer, picked by
+what the caller does:
+
+| The caller                                                                  | Shape       | How                                                                                                                                                              |
+| --------------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Describes what should exist: settings, a description, an asset             | Declarative | Plain data set in an object initializer, `required { get; init; }` for what must be given and `with` for a changed copy. The default.                           |
+| Changes a value in a known order                                            | Steps       | Named methods that take a value and return one, called in order and assigned.                                                                                    |
+| Says what it wants in one sentence, such as a query or a chain of setup     | Fluent      | Each method returns its receiver, or a struct's new value, so the chain reads as `subject.Verb(x).Verb(y)`.                                                      |
+| Builds what is valid only once complete, over many calls or across members  | Builder     | Calls collect into the builder, and `Build()` checks them and returns the finished, immutable value. Only where an initializer with `required` can't express it. |
+
+- No `Pipe`, `Cascade`, `Then` or other method that only calls the function it is given. Assign each step, and set
+  members in an initializer or as statements:
+
+  ```csharp
+  state = Integrate(state, stepSec);
+  state = ResolveContacts(state);
+  ```
+
+- In the frame loop, work over many values is a system that changes chunks in place through spans, never a chain
+  that returns new copies ([Performance](#performance)).
+
 ### Naming
 
 - A name reads well as `Class.Member(arguments)`: `AssetManager.Find<Texture>(path)`, `App.Exit()`. Action first,
@@ -218,7 +241,7 @@ built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
 - No single-letter names except loop counters, `x`/`y`/`z` and formula coefficients. `ctx`, `sb`, `dt` and `ex` are
   fine. A local keeps one meaning and never shadows a type.
 - A reusable buffer has one purpose and is named for it.
-- Keep .NET's idioms: static factories (`Result.Success`), fluent builders.
+- Keep .NET's idioms: static factories (`Result.Success`) and the shapes in [API shape](#api-shape).
 - Test methods read as the sentence they check.
 
 ### Comments
