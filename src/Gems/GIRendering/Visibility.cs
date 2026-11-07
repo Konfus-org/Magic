@@ -113,8 +113,7 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
                 return Result.Failure(made.Error);
         }
 
-        graph.Use(counts.Value, GpuAccess.CopyDestination);
-        graph.FillBuffer(counts.Value, 0);
+        graph.Clear(counts.Value);
         graph.Upload(retestArguments.Value, [0u, 1u, 1u]);
 
         return Result.Success(

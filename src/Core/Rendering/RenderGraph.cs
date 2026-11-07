@@ -8,11 +8,11 @@ using Magic.Utils;
 namespace Magic.Rendering;
 
 /// <summary>
-/// A frame's passes as data: a compute or draw pass named by its shaders, told what it uses and ended by what it
-/// dispatches or draws, or a transfer pass begun in a layer, told what it uses, given its copies and ended; take the
-/// frame with <see cref="Finish"/>. Core holds one, every gem's Render records into it, and Core hands what it finishes to
-/// <see cref="IGraphicsApi.Present"/>, which puts in the barriers the uses need. Each method's parameters say which of
-/// a <see cref="GpuCommand"/>'s fields its kind reads. Render thread.
+/// A frame's passes as data: a compute or draw pass named by its shaders, told what it reads and ended by what it
+/// dispatches or draws, and transfers (uploads, clears, blits, readbacks and builds), which the graph gathers into
+/// passes of their own; take the frame with <see cref="Finish"/>. Core holds one, every gem's Render records into it,
+/// and Core hands what it finishes to <see cref="IGraphicsApi.Present"/>, which puts in the barriers the uses need.
+/// Each method's parameters say which of a <see cref="GpuCommand"/>'s fields its kind reads. Render thread.
 /// </summary>
 public sealed class RenderGraph
 {
@@ -107,30 +107,13 @@ public sealed class RenderGraph
         return new DrawPass(this);
     }
 
-    public void BeginTransferPass(string name, RenderLayer layer = RenderLayer.Picture) =>
-        Begin(
-            new()
-            {
-                Name = name,
-                Kind = GpuPassKind.Transfer,
-                Layer = layer,
-            }
-        );
-
-    public void EndPass()
-    {
-        GpuPass pass = _pass ?? throw new InvalidOperationException("No pass has begun.");
-        _passes.Add(pass with { Uses = _uses.DrainToImmutable(), Commands = _commands.DrainToImmutable() });
-        _pass = null;
-    }
-
     /// <summary>
     /// The frame's passes, layer by layer and in the order they were recorded within one, and the graph empty for the
-    /// next frame. A pass still open is left out.
+    /// next frame. The transfers still open end their pass; a compute or draw pass never ended is left out.
     /// </summary>
     public GpuCommands Finish()
     {
-        DropOpenPass();
+        EndOpenPass();
         ImmutableArray<GpuPass>.Builder ordered = ImmutableArray.CreateBuilder<GpuPass>(_passes.Count);
         foreach (RenderLayer layer in _layers)
         {
@@ -147,34 +130,6 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// Says the pass touches <paramref name="buffer"/> as <paramref name="access"/>.
-    /// </summary>
-    public void Use(GpuBuffer buffer, GpuAccess access) =>
-        AddUse(
-            new()
-            {
-                Id = buffer.Id,
-                IsTexture = false,
-                Access = access,
-            }
-        );
-
-    /// <summary>
-    /// Says the pass touches <paramref name="texture"/> as <paramref name="access"/>, every level or
-    /// <paramref name="level"/> alone.
-    /// </summary>
-    public void Use(GpuTexture texture, GpuAccess access, int level = -1) =>
-        AddUse(
-            new()
-            {
-                Id = texture.Id,
-                IsTexture = true,
-                Access = access,
-                Level = level,
-            }
-        );
-
-    /// <summary>
     /// Copies <paramref name="rows"/> into <paramref name="to"/> from <paramref name="offset"/> bytes on, staged through
     /// the frame's upload ring, in a transfer pass.
     /// </summary>
@@ -188,7 +143,7 @@ public sealed class RenderGraph
     public Span<T> Upload<T>(GpuBuffer to, int rows, ulong offset = 0)
         where T : unmanaged
     {
-        Use(to, GpuAccess.CopyDestination);
+        UseInTransfer(GetUse(to, GpuAccess.CopyDestination));
         int bytes = rows * Unsafe.SizeOf<T>();
         GpuUpload upload = BeginUpload(bytes);
         CopyBuffer(upload.Buffer, upload.Offset, to, offset, (ulong)bytes);
@@ -199,14 +154,64 @@ public sealed class RenderGraph
     /// <summary>
     /// Copies <paramref name="pixels"/>, a whole level of the first layer tightly packed, into <paramref name="to"/>'s
     /// <paramref name="level"/>, staged as <see cref="Upload{T}(GpuBuffer, ReadOnlySpan{T}, ulong)"/> stages, in a
-    /// transfer pass. One texture's levels may share a pass; the same level filled twice needs a pass each.
+    /// transfer pass. The same level filled twice in a frame gets a pass each.
     /// </summary>
     public void Upload(GpuTexture to, ReadOnlySpan<byte> pixels, int level = 0)
     {
-        Use(to, GpuAccess.CopyDestination, level);
+        UseInTransfer(GetUse(to, GpuAccess.CopyDestination, level));
         GpuUpload upload = BeginUpload(pixels.Length);
         pixels.CopyTo(upload.Bytes);
         CopyBufferToTexture(upload.Buffer, upload.Offset, to, level);
+    }
+
+    /// <summary>
+    /// Every byte of <paramref name="buffer"/> set to 0.
+    /// </summary>
+    public void Clear(GpuBuffer buffer)
+    {
+        // A clear writes the whole buffer, so it follows any other use of it in a pass of its own.
+        if (_pass is { Kind: GpuPassKind.Transfer } && IsHeld(buffer))
+            EndPass();
+
+        UseInTransfer(GetUse(buffer, GpuAccess.CopyDestination));
+        Add(new() { Kind = GpuCommandKind.FillBuffer, Id = buffer.Id });
+    }
+
+    /// <summary>
+    /// Level 0 of <paramref name="from"/> stretched over level 0 of <paramref name="to"/>, filtered linearly; the formats
+    /// may differ.
+    /// </summary>
+    public void Blit(GpuTexture from, GpuTexture to)
+    {
+        UseInTransfer(GetUse(from, GpuAccess.CopySource));
+        UseInTransfer(GetUse(to, GpuAccess.CopyDestination));
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.BlitTexture,
+                Id = from.Id,
+                Id2 = to.Id,
+            }
+        );
+    }
+
+    /// <summary>
+    /// Level 0 of the first layer of <paramref name="from"/> copied, tightly packed, into <paramref name="into"/>, a
+    /// <see cref="BufferUsages.Readback"/> buffer the host may read once the frame has finished on the GPU.
+    /// </summary>
+    public void ReadBack(GpuTexture from, GpuBuffer into)
+    {
+        UseInTransfer(GetUse(from, GpuAccess.CopySource));
+        UseInTransfer(GetUse(into, GpuAccess.CopyDestination));
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.CopyTextureToBuffer,
+                Id = from.Id,
+                Id2 = into.Id,
+            }
+        );
+        UseInTransfer(GetUse(into, GpuAccess.HostRead));
     }
 
     /// <summary>
@@ -214,7 +219,9 @@ public sealed class RenderGraph
     /// <paramref name="instanceCount"/> instances of its instance buffer. The build waits for every command before
     /// it and every command after waits for the build.
     /// </summary>
-    public void BuildAcceleration(GpuAcceleration acceleration, uint instanceCount = 0) =>
+    public void BuildAcceleration(GpuAcceleration acceleration, uint instanceCount = 0)
+    {
+        BeginTransfer();
         Add(
             new()
             {
@@ -223,57 +230,14 @@ public sealed class RenderGraph
                 X = instanceCount,
             }
         );
+    }
 
-    /// <summary>
-    /// A whole level of a layer, tightly packed from <paramref name="destinationOffset"/> on.
-    /// </summary>
-    public void CopyTextureToBuffer(
-        GpuTexture source,
-        int level,
-        int layer,
-        GpuBuffer destination,
-        ulong destinationOffset
-    ) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.CopyTextureToBuffer,
-                Id = source.Id,
-                X = (uint)level,
-                Y = (uint)layer,
-                Id2 = destination.Id,
-                Offset2 = destinationOffset,
-            }
-        );
-
-    /// <summary>
-    /// Level 0 of one texture stretched over level 0 of another, filtered linearly; the formats may differ.
-    /// </summary>
-    public void BlitTexture(GpuTexture source, GpuTexture destination) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.BlitTexture,
-                Id = source.Id,
-                Id2 = destination.Id,
-            }
-        );
-
-    /// <summary>
-    /// Every 4 bytes from <paramref name="offset"/> for <paramref name="bytes"/>, or to the end when 0, set to
-    /// <paramref name="value"/>.
-    /// </summary>
-    public void FillBuffer(GpuBuffer buffer, uint value, ulong offset = 0, ulong bytes = 0) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.FillBuffer,
-                Id = buffer.Id,
-                Offset = offset,
-                Size = bytes,
-                X = value,
-            }
-        );
+    internal void EndPass()
+    {
+        GpuPass pass = _pass ?? throw new InvalidOperationException("No pass has begun.");
+        _passes.Add(pass with { Uses = _uses.DrainToImmutable(), Commands = _commands.DrainToImmutable() });
+        _pass = null;
+    }
 
     internal void PushConstants(in GpuConstants constants) =>
         Add(new() { Kind = GpuCommandKind.PushConstants, Constants = constants });
@@ -366,6 +330,17 @@ public sealed class RenderGraph
         );
 
     /// <summary>
+    /// Says the open pass touches <paramref name="buffer"/> as <paramref name="access"/>.
+    /// </summary>
+    internal void Use(GpuBuffer buffer, GpuAccess access) => AddUse(GetUse(buffer, access));
+
+    /// <summary>
+    /// Says the open pass touches <paramref name="texture"/> as <paramref name="access"/>, every level or
+    /// <paramref name="level"/> alone.
+    /// </summary>
+    internal void Use(GpuTexture texture, GpuAccess access, int level = -1) => AddUse(GetUse(texture, access, level));
+
+    /// <summary>
     /// Says the pass touches each of <paramref name="resources"/> as <paramref name="access"/>, every level of a texture.
     /// </summary>
     internal void Use(scoped ReadOnlySpan<GpuResource> resources, GpuAccess access)
@@ -378,6 +353,23 @@ public sealed class RenderGraph
                 Use(resource.Buffer, access);
         }
     }
+
+    private static GpuUse GetUse(GpuBuffer buffer, GpuAccess access) =>
+        new()
+        {
+            Id = buffer.Id,
+            IsTexture = false,
+            Access = access,
+        };
+
+    private static GpuUse GetUse(GpuTexture texture, GpuAccess access, int level = -1) =>
+        new()
+        {
+            Id = texture.Id,
+            IsTexture = true,
+            Access = access,
+            Level = level,
+        };
 
     private void SetScissor(uint x, uint y, uint width, uint height) =>
         Add(
@@ -450,13 +442,85 @@ public sealed class RenderGraph
 
     private void Begin(in GpuPass pass)
     {
-        DropOpenPass();
+        EndOpenPass();
         _pass = pass;
+    }
+
+    /// <summary>
+    /// The open transfer pass ended, or a compute or draw pass a gem began and never ended left out.
+    /// </summary>
+    private void EndOpenPass()
+    {
+        if (_pass is { Kind: GpuPassKind.Transfer })
+            EndPass();
+        else
+            DropOpenPass();
+    }
+
+    /// <summary>
+    /// A transfer pass open for the next transfer: the one open, or a new one.
+    /// </summary>
+    private void BeginTransfer()
+    {
+        if (_pass is not { Kind: GpuPassKind.Transfer })
+            Begin(new() { Name = "Transfers", Kind = GpuPassKind.Transfer });
+    }
+
+    /// <summary>
+    /// Adds <paramref name="use"/> to a transfer pass: the open one, or a new one when the open one uses the same
+    /// resource another way, has written the same texture level or has cleared the buffer, as a pass's barriers all
+    /// come before its commands. Uploads into one buffer share a pass, as each writes its own range.
+    /// </summary>
+    private void UseInTransfer(in GpuUse use)
+    {
+        if (_pass is { Kind: GpuPassKind.Transfer } && IsUsedOtherwise(use))
+            EndPass();
+
+        BeginTransfer();
+        AddUse(use);
+    }
+
+    private bool IsUsedOtherwise(in GpuUse use)
+    {
+        foreach (GpuUse held in _uses)
+        {
+            bool isSame =
+                held.Id == use.Id
+                && held.IsTexture == use.IsTexture
+                && (held.Level == use.Level || held.Level < 0 || use.Level < 0);
+            bool isWrittenAgain = use.Access == GpuAccess.CopyDestination && (use.IsTexture || IsCleared(use.Id));
+            if (isSame && (held.Access != use.Access || isWrittenAgain))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
     /// Begins a draw pass, each of its targets used as a colour or depth target.
     /// </summary>
+    private bool IsHeld(GpuBuffer buffer)
+    {
+        foreach (GpuUse held in _uses)
+        {
+            if (!held.IsTexture && held.Id == buffer.Id)
+                return true;
+        }
+
+        return false;
+    }
+
+    private bool IsCleared(uint buffer)
+    {
+        foreach (GpuCommand command in _commands)
+        {
+            if (command.Kind == GpuCommandKind.FillBuffer && command.Id == buffer)
+                return true;
+        }
+
+        return false;
+    }
+
     private void BeginDraw(in GpuPass pass)
     {
         Begin(pass);

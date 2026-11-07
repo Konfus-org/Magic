@@ -132,7 +132,6 @@ internal sealed class DebugUIOverlay : IDisposable
         }
 
         TextureDescription description = _gpu.GetDescription(target);
-        graph.BeginTransferPass("Debug UI: upload", RenderLayer.Overlay);
         graph.Upload(vertices.Value, vertexRows);
         graph.Upload(indices.Value, indexRows);
         graph.Upload(
@@ -146,7 +145,6 @@ internal sealed class DebugUIOverlay : IDisposable
                 },
             ]
         );
-        graph.EndPass();
         RecordDraws(frame, graph, target, description, vertices.Value, indices.Value, constants.Value);
     }
 
@@ -222,10 +220,7 @@ internal sealed class DebugUIOverlay : IDisposable
             _textures.Add(change.Texture, texture);
         }
 
-        // A pass each, as a pass's barriers come before all of it and a texture filled twice in a frame needs one between.
-        graph.BeginTransferPass("Debug UI: texture", RenderLayer.Overlay);
         graph.Upload(texture, pixels);
-        graph.EndPass();
     }
 
     private void DestroyTexture(ulong id)

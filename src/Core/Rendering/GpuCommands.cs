@@ -173,8 +173,8 @@ public readonly record struct GpuConstants(uint X, uint Y = 0, uint Z = 0, uint 
 }
 
 /// <summary>
-/// Which command a <see cref="GpuCommand"/> is; the fields each reads are on <see cref="RenderGraph"/>'s
-/// method of the same name.
+/// Which command a <see cref="GpuCommand"/> is; the fields each reads are on the <see cref="RenderGraph"/> method that
+/// records it.
 /// </summary>
 public enum GpuCommandKind : byte
 {

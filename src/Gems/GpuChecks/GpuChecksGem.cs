@@ -82,14 +82,7 @@ public sealed class GpuChecksGem : IGem, IDisposable
             .Compute("Fill gradient", fill, new GpuConstants(_gradient.Id, Size, Size))
             .Writes(_gradient)
             .DispatchOver(Size, Size);
-        graph.BeginTransferPass("Read gradient back");
-        graph.Use(_gradient, GpuAccess.CopySource);
-        graph.Use(_readback, GpuAccess.CopyDestination);
-        graph.CopyTextureToBuffer(_gradient, 0, 0, _readback, 0);
-        graph.EndPass();
-        graph.BeginTransferPass("Gradient to the host");
-        graph.Use(_readback, GpuAccess.HostRead);
-        graph.EndPass();
+        graph.ReadBack(_gradient, _readback);
         _recorded.SetResult(true);
     }
 

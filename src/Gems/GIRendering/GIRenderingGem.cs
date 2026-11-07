@@ -226,16 +226,12 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             EndPreparing();
         }
 
-        graph.BeginTransferPass("Upload arrivals");
         _resources.Upload(graph);
-        graph.EndPass();
 
         // The frame's tables, and the view's targets at the window's size.
         RenderCamera camera = GetCamera(inputs.Cameras);
         RenderSun sun = GetSun(inputs.DirectionalLights);
-        graph.BeginTransferPass("Upload frame");
         Result<UploadedFrame> uploaded = UploadFrame(graph, inputs, camera, sun, frame.Index, instanceCount);
-        graph.EndPass();
         if (!uploaded.Ok)
         {
             Log.Error($"The frame is not drawn: {uploaded.Error}");
@@ -262,13 +258,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
         GpuTexture target = _gpu.WindowTarget;
         if (!target.IsNone)
-        {
-            graph.BeginTransferPass("Show");
-            graph.Use(view.Output, GpuAccess.CopySource);
-            graph.Use(target, GpuAccess.CopyDestination);
-            graph.BlitTexture(view.Output, target);
-            graph.EndPass();
-        }
+            graph.Blit(view.Output, target);
 
         // One readback buffer, so one screenshot a frame: the last asked for.
         ScreenshotRequested? shot = null;
@@ -565,7 +555,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             return;
         }
 
-        Screenshot.RecordReadback(graph, view.Output, readback.Value);
+        graph.ReadBack(view.Output, readback.Value);
         Screenshot.SaveAsync(_gpu, _assets, readback.Value, path, view.Width, view.Height).FireAndForget();
     }
 
