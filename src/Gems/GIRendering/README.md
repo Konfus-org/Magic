@@ -60,8 +60,8 @@ in turn and exits, so a release ships with the caches full.
 - A pass is one `RenderGraph.Compute` or `RenderGraph.Draw` call saying what it reads and writes, which puts its
   barriers in. The frame is not drawn until every area's shaders are built.
 - A texture, material or model asset comes from `GpuResources`, which reads it on the first ask. It asks the graph
-  for the model pools, each texture and its sampler every frame, and evicts a model once nothing has asked for it in a
-  while and no renderer drawn holds it. A
+  for the model pools, each texture and its sampler, and each resident model's acceleration structure and impostor
+  atlases every frame, and evicts a model once nothing has asked for it in a while and no renderer drawn holds it. A
   renderer's instance row is built again, asking for its model, when the renderer is written and when a model
   arrives; the material rows its slots are drawn with are made again each frame.
 - Each frame, an area's `Prepare` asks the graph for its own textures and buffers by description, uploads what

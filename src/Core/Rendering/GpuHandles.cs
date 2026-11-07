@@ -24,10 +24,10 @@ public readonly record struct GpuTexture(uint Id)
 
 /// <summary>
 /// An acceleration structure of the heap, for the GPUs that trace rays: a model's triangles, or the instances of
-/// such, as <see cref="IGraphicsApi.CreateAcceleration(in BottomLevelDescription)"/> and its top-level twin make
-/// them. Shaders reach it by the id.
+/// such, as <see cref="RenderGraph.Acceleration(in BottomLevelDescription)"/> and its top-level twin ask for them.
+/// Shaders reach it by the id; an instance of a bottom-level one refers to it by its device <paramref name="Address"/>.
 /// </summary>
-public readonly record struct GpuAcceleration(uint Id)
+public readonly record struct GpuAcceleration(uint Id, ulong Address)
 {
     public static GpuAcceleration None => default;
 

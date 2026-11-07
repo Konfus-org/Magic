@@ -66,6 +66,15 @@ public sealed class RenderGraph
         Gpu?.GetBuffer(description) ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
 
     /// <summary>
+    /// The bottom-level acceleration structure under the description's name, its device address on the handle for the
+    /// instances that refer to it, kept and freed as <see cref="Texture"/> keeps and frees a texture; only on a GPU that
+    /// traces rays. Build it with <see cref="BuildAcceleration"/> once its triangles are uploaded.
+    /// </summary>
+    public Result<GpuAcceleration> Acceleration(in BottomLevelDescription description) =>
+        Gpu?.GetAcceleration(description)
+        ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
+
+    /// <summary>
     /// The top-level acceleration structure under the description's name, kept and freed as <see cref="Texture"/>
     /// keeps and frees a texture; only on a GPU that traces rays.
     /// </summary>

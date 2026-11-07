@@ -38,22 +38,13 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     private readonly Gauge<long> _memoryLimit;
 
     /// <summary>
-    /// The transient textures not lent, by their description: a pool, so a frame makes none it made before.
-    /// </summary>
-    private readonly Dictionary<TextureDescription, Stack<GpuTexture>> _spareTransients = [];
-
-    /// <summary>
-    /// The transient textures lent this frame, which go back to the pool as it ends.
-    /// </summary>
-    private readonly List<(TextureDescription Description, GpuTexture Texture)> _lentTransients = [];
-
-    /// <summary>
-    /// The textures, buffers and top-level acceleration structures the graph names, by their name, and the samplers it
+    /// The textures, buffers and acceleration structures the graph names, by their name, and the samplers it
     /// asks for, by their description, each with the description it was made to and the frame that last asked for it.
     /// </summary>
     private readonly Dictionary<string, Named<TextureDescription, GpuTexture>> _namedTextures = [];
     private readonly Dictionary<string, Named<BufferDescription, GpuBuffer>> _namedBuffers = [];
-    private readonly Dictionary<string, Named<TopLevelDescription, GpuAcceleration>> _namedAccelerations = [];
+    private readonly Dictionary<string, Named<BottomLevelDescription, GpuAcceleration>> _namedBottomLevels = [];
+    private readonly Dictionary<string, Named<TopLevelDescription, GpuAcceleration>> _namedTopLevels = [];
     private readonly Dictionary<SamplerDescription, Named<SamplerDescription, GpuSampler>> _samplers = [];
 
     public VulkanGraphicsGem(App app, Threads threads, IShaderCompiler compiler, IWindow? window = null)
@@ -87,8 +78,6 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
 
     public GpuFeatures Features => _device.Features;
 
-    public GpuLimits Limits => _device.Limits;
-
     public GpuTexture WindowTarget { get; private set; }
 
     /// <summary>
@@ -116,24 +105,6 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
         _resources.Textures[texture.Id]?.Description
         ?? throw new ArgumentException($"Texture {texture.Id} is gone.", nameof(texture));
 
-    public BufferDescription GetDescription(GpuBuffer buffer) =>
-        _resources.Buffers[buffer.Id]?.Description
-        ?? throw new ArgumentException($"Buffer {buffer.Id} is gone.", nameof(buffer));
-
-    public Result<GpuBuffer> CreateBuffer(in BufferDescription description)
-    {
-        ThrowIfNotOnRender();
-
-        return _resources.CreateBuffer(description);
-    }
-
-    public Result<GpuTexture> CreateTexture(in TextureDescription description)
-    {
-        ThrowIfNotOnRender();
-
-        return _resources.CreateTexture(description);
-    }
-
     public Result<GpuTexture> GetTexture(in TextureDescription description) =>
         GetNamed(
             _namedTextures,
@@ -154,9 +125,19 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
             static (gem, buffer) => gem.Destroy(buffer)
         );
 
+    public Result<GpuAcceleration> GetAcceleration(in BottomLevelDescription description) =>
+        GetNamed(
+            _namedBottomLevels,
+            description.Name,
+            description,
+            description.Name,
+            static (gem, made) => gem._resources.CreateAcceleration(made),
+            static (gem, acceleration) => gem.Destroy(acceleration)
+        );
+
     public Result<GpuAcceleration> GetAcceleration(in TopLevelDescription description) =>
         GetNamed(
-            _namedAccelerations,
+            _namedTopLevels,
             description.Name,
             description,
             description.Name,
@@ -179,98 +160,6 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
         ThrowIfNotOnRender();
 
         return _shaders.GetState(shader);
-    }
-
-    public Result<GpuTexture> CreateTransient(in TextureDescription description)
-    {
-        ThrowIfNotOnRender();
-        if (
-            _spareTransients.TryGetValue(description, out Stack<GpuTexture>? spare)
-            && spare.TryPop(out GpuTexture pooled)
-        )
-        {
-            _lentTransients.Add((description, pooled));
-
-            return Result.Success(pooled);
-        }
-
-        Result<GpuTexture> made = _resources.CreateTexture(description);
-        if (made.Ok)
-            _lentTransients.Add((description, made.Value));
-
-        return made;
-    }
-
-    public Result<GpuSampler> CreateSampler(in SamplerDescription description)
-    {
-        ThrowIfNotOnRender();
-
-        return _resources.CreateSampler(description);
-    }
-
-    public Result<GpuPipeline> CreatePipeline(in ComputePipelineDescription description)
-    {
-        ThrowIfNotOnRender();
-
-        return _resources.CreatePipeline(description);
-    }
-
-    public Result<GpuPipeline> CreatePipeline(in GraphicsPipelineDescription description)
-    {
-        ThrowIfNotOnRender();
-
-        return _resources.CreatePipeline(description);
-    }
-
-    public void Destroy(GpuBuffer buffer)
-    {
-        ThrowIfNotOnRender();
-        if (_resources.Buffers.Remove(buffer.Id) is { } removed)
-            _frames.Current.Trash.Add(new(buffer.Id, removed));
-    }
-
-    public void Destroy(GpuTexture texture)
-    {
-        ThrowIfNotOnRender();
-        if (_resources.Textures.Remove(texture.Id) is { } removed)
-            _frames.Current.Trash.Add(new(texture.Id, removed));
-    }
-
-    public void Destroy(GpuSampler sampler)
-    {
-        ThrowIfNotOnRender();
-        if (_resources.Samplers.Remove(sampler.Id) is { } removed)
-            _frames.Current.Trash.Add(new(sampler.Id, removed));
-    }
-
-    public void Destroy(GpuPipeline pipeline)
-    {
-        ThrowIfNotOnRender();
-        if (_resources.Pipelines.Remove(pipeline.Id) is { } removed)
-            _frames.Current.Trash.Add(new(pipeline.Id, removed));
-    }
-
-    public Result<GpuAcceleration> CreateAcceleration(in BottomLevelDescription description)
-    {
-        ThrowIfNotOnRender();
-
-        return _resources.CreateAcceleration(description);
-    }
-
-    public Result<GpuAcceleration> CreateAcceleration(in TopLevelDescription description)
-    {
-        ThrowIfNotOnRender();
-
-        return _resources.CreateAcceleration(description);
-    }
-
-    public ulong GetAddress(GpuAcceleration acceleration) => _resources.Accelerations[acceleration.Id]?.Address ?? 0;
-
-    public void Destroy(GpuAcceleration acceleration)
-    {
-        ThrowIfNotOnRender();
-        if (_resources.Accelerations.Remove(acceleration.Id) is { } removed)
-            _frames.Current.Trash.Add(new(acceleration.Id, removed));
     }
 
     public GpuUpload BeginUpload(int bytes)
@@ -336,7 +225,6 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
         if (!WindowTarget.IsNone)
             _swapchain?.Present();
 
-        ReturnTransients();
         DestroyUnasked();
 
         // The next frame: what the GPU is done with finished, so a readback awaited completes whether or not anything
@@ -345,6 +233,30 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
         _memoryUsage.Record(_resources.MemoryBytes);
         _memoryLimit.Record(_device.Limits.DeviceMemoryBytes);
         BeginFrame();
+    }
+
+    private void Destroy(GpuBuffer buffer)
+    {
+        if (_resources.Buffers.Remove(buffer.Id) is { } removed)
+            _frames.Current.Trash.Add(new(buffer.Id, removed));
+    }
+
+    private void Destroy(GpuTexture texture)
+    {
+        if (_resources.Textures.Remove(texture.Id) is { } removed)
+            _frames.Current.Trash.Add(new(texture.Id, removed));
+    }
+
+    private void Destroy(GpuSampler sampler)
+    {
+        if (_resources.Samplers.Remove(sampler.Id) is { } removed)
+            _frames.Current.Trash.Add(new(sampler.Id, removed));
+    }
+
+    private void Destroy(GpuAcceleration acceleration)
+    {
+        if (_resources.Accelerations.Remove(acceleration.Id) is { } removed)
+            _frames.Current.Trash.Add(new(acceleration.Id, removed));
     }
 
     private void BeginFrame()
@@ -401,7 +313,8 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     {
         DestroyUnasked(_namedTextures, static (gem, texture) => gem.Destroy(texture));
         DestroyUnasked(_namedBuffers, static (gem, buffer) => gem.Destroy(buffer));
-        DestroyUnasked(_namedAccelerations, static (gem, acceleration) => gem.Destroy(acceleration));
+        DestroyUnasked(_namedBottomLevels, static (gem, acceleration) => gem.Destroy(acceleration));
+        DestroyUnasked(_namedTopLevels, static (gem, acceleration) => gem.Destroy(acceleration));
         DestroyUnasked(_samplers, static (gem, sampler) => gem.Destroy(sampler));
     }
 
@@ -420,22 +333,6 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
             destroy(this, entry.Made);
             named.Remove(key);
         }
-    }
-
-    private void ReturnTransients()
-    {
-        foreach ((TextureDescription description, GpuTexture texture) in _lentTransients)
-        {
-            if (!_spareTransients.TryGetValue(description, out Stack<GpuTexture>? spare))
-            {
-                spare = new Stack<GpuTexture>();
-                _spareTransients[description] = spare;
-            }
-
-            spare.Push(texture);
-        }
-
-        _lentTransients.Clear();
     }
 
     private void ThrowIfNotOnRender()

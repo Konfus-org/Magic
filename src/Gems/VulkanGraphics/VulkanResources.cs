@@ -784,7 +784,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
 
         Name(VkObjectType.AccelerationStructureKHR, handle.Handle, name);
 
-        return Result.Success(new GpuAcceleration(id));
+        return Result.Success(new GpuAcceleration(id, acceleration.Address));
     }
 
     private void Free(VulkanAcceleration acceleration)

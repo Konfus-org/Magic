@@ -26,19 +26,15 @@ internal enum ResourceState : byte
 /// The GPU resources the gem draws with, each read once on its first ask: a texture asset by its handle, read and asked
 /// of the graph with every level and the sampler its asset asks for, then copied up in the frame after it arrives; a
 /// material asset by its handle, read once, with the texture it names asked for, and handed out as the material row a
-/// slot's params make over its own; a model asset by its handle, made by the preprocessor on a worker and copied into
-/// the pools of vertices, indices, clusters and leaf clusters in the frame after it arrives. The pools and the textures
-/// are asked of the graph every frame, so the GPU provider keeps what they hold. Each pool hands out ranges first fit
-/// from a free list. A model not asked for in <see cref="UnusedSec"/>, and held by no renderer drawn, is evicted: its
-/// ranges go back to the free lists and its acceleration structure is destroyed, and the next ask makes it again.
+/// slot's params make over its own; a model asset by its handle, made by the preprocessor on a worker, settled into the
+/// pools of vertices, indices, clusters and leaf clusters with its acceleration structure at the start of the next
+/// frame, and copied up in it. The pools, the textures and each resident model's acceleration structure and atlases are
+/// asked of the graph every frame, so the GPU provider keeps what they hold. Each pool hands out ranges first fit from a
+/// free list. A model not asked for in <see cref="UnusedSec"/>, and held by no renderer drawn, is evicted: its ranges go
+/// back to the free lists and its structure and atlases are no longer asked for, so the GPU provider frees them, and the
+/// next ask makes it again.
 /// </summary>
-internal sealed class GpuResources(
-    IGraphicsApi gpu,
-    ModelPreprocessor models,
-    Caches caches,
-    AssetManager assets,
-    Threads threads
-) : IDisposable
+internal sealed class GpuResources(ModelPreprocessor models, Caches caches, AssetManager assets, Threads threads)
 {
     private const int VertexCapacity = 1 << 22;
     private const int IndexCapacity = 1 << 24;
@@ -70,6 +66,12 @@ internal sealed class GpuResources(
     private readonly Dictionary<ulong, ResidentModel> _residentModels = [];
     private readonly HashSet<ulong> _failedModels = [];
     private readonly List<(MeshDerived Derived, ResidentModel Where)> _arrivedModels = [];
+
+    /// <summary>
+    /// The models made since the last frame, by their id with their name, which the next <see cref="SettleModels"/>
+    /// settles.
+    /// </summary>
+    private readonly List<(ulong Model, string Name, MeshDerived Made)> _madeModels = [];
     private readonly FreeList _vertexRanges = new(VertexCapacity);
     private readonly FreeList _indexRanges = new(IndexCapacity);
     private readonly FreeList _clusterRanges = new(ClusterCapacity);
@@ -141,14 +143,6 @@ internal sealed class GpuResources(
         return textures.ToImmutable();
     }
 
-    public void Dispose()
-    {
-        foreach (ResidentModel resident in _residentModels.Values)
-        {
-            gpu.Destroy(resident.Acceleration);
-        }
-    }
-
     /// <summary>
     /// The pools models are copied into, asked for every frame before any model is, so what they hold stays.
     /// </summary>
@@ -197,10 +191,30 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
+    /// Every resident model's acceleration structure asked for, so the GPU provider keeps it, and the models made since
+    /// the last frame settled into the pools, after the pools were asked for and before any renderer's row is built.
+    /// </summary>
+    public void SettleModels(RenderGraph graph)
+    {
+        foreach (ResidentModel resident in _residentModels.Values)
+        {
+            if (resident.AccelerationDescription is { } acceleration)
+                _ = graph.Acceleration(acceleration);
+        }
+
+        foreach ((ulong model, string name, MeshDerived made) in _madeModels)
+        {
+            Settle(graph, model, name, made);
+        }
+
+        _madeModels.Clear();
+    }
+
+    /// <summary>
     /// Evicts every model not asked for in <see cref="UnusedSec"/> that none of <paramref name="drawn"/> holds: its
-    /// ranges go back to the pools' free lists and its acceleration structure is destroyed. Renderers not written since
-    /// their rows were built ask for nothing, so once a model looks unused each model <paramref name="drawn"/> holds is
-    /// asked for first.
+    /// ranges go back to the pools' free lists and its acceleration structure and atlases are no longer asked for.
+    /// Renderers not written since their rows were built ask for nothing, so once a model looks unused each model
+    /// <paramref name="drawn"/> holds is asked for first.
     /// </summary>
     public void EvictUnusedModels(ReadOnlySpan<Renderer> drawn)
     {
@@ -225,9 +239,7 @@ internal sealed class GpuResources(
             if (!where.Acceleration.IsNone)
                 _leafRanges.Free((int)where.LeafOffset, (int)where.LeafCount);
 
-            gpu.Destroy(where.Acceleration);
-
-            // Its atlases go once no frame asks for them.
+            // Its acceleration structure and atlases go once no frame asks for them.
             if (where.ImpostorRow != 0)
                 _impostorRows.Free((int)where.ImpostorRow, 1);
 
@@ -579,7 +591,17 @@ internal sealed class GpuResources(
             return;
         }
 
-        MeshDerived made = derived.Value;
+        _madeModels.Add((model.Id, name, derived.Value));
+    }
+
+    /// <summary>
+    /// The model made into the pools' ranges, with its acceleration structure over its leaf clusters on a GPU that
+    /// traces rays and its impostor's table row and atlases when it baked one, all copied up by the next upload; the
+    /// failure model when the pools are full.
+    /// </summary>
+    private void Settle(RenderGraph graph, ulong model, string name, MeshDerived made)
+    {
+        SettledModels++;
         bool fits =
             _vertexRanges.CanAllocate(made.Vertices.Length)
             && _indexRanges.CanAllocate(made.Indices.Length)
@@ -587,8 +609,7 @@ internal sealed class GpuResources(
         if (!fits)
         {
             Log.Error($"{name} is drawn as the failure model: the geometry pools are full.");
-            _failedModels.Add(model.Id);
-            SettledModels++;
+            _failedModels.Add(model);
 
             return;
         }
@@ -605,7 +626,7 @@ internal sealed class GpuResources(
         );
         // A leaf table is there only on a GPU that traces rays.
         if (!LeafClusters.IsNone)
-            where = CreateAcceleration(name, made, where);
+            where = AskAcceleration(graph, name, made, where);
 
         // A model that baked an impostor gets a row of the impostor table, and its atlases' descriptions, which the graph
         // makes on the first ask and keeps while frames read them.
@@ -621,10 +642,9 @@ internal sealed class GpuResources(
 
         // An arrival is a use, so a model that took longer to make than it may go unused is copied up before it can be
         // evicted.
-        _askedModels[model.Id] = Environment.TickCount64;
-        _residentModels[model.Id] = where;
+        _askedModels[model] = Environment.TickCount64;
+        _residentModels[model] = where;
         _arrivedModels.Add((made, where));
-        SettledModels++;
         int leafTriangles = 0;
         foreach (GpuCluster cluster in made.Clusters)
         {
@@ -638,10 +658,10 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// The model's place with its acceleration structure over its leaf clusters, a geometry each, and their range in the
-    /// leaf table; as it was, with none, when the structure could not be made.
+    /// The model's place with its acceleration structure over its leaf clusters, a geometry each, asked for, what it is
+    /// made to, and their range in the leaf table; as it was, with none, when the structure could not be made.
     /// </summary>
-    private ResidentModel CreateAcceleration(string name, MeshDerived made, ResidentModel where)
+    private ResidentModel AskAcceleration(RenderGraph graph, string name, MeshDerived made, ResidentModel where)
     {
         List<TriangleGeometry> geometries = [];
         foreach (GpuCluster cluster in made.Clusters)
@@ -665,9 +685,8 @@ internal sealed class GpuResources(
         if (geometries.Count == 0 || !_leafRanges.CanAllocate(geometries.Count))
             return where;
 
-        Result<GpuAcceleration> acceleration = gpu.CreateAcceleration(
-            new BottomLevelDescription { Geometries = [.. geometries], Name = $"{name} acceleration" }
-        );
+        BottomLevelDescription description = new() { Geometries = [.. geometries], Name = $"{name} acceleration" };
+        Result<GpuAcceleration> acceleration = graph.Acceleration(description);
         if (!acceleration.Ok)
         {
             Log.Warn($"{name} has no acceleration structure, so rays pass through it: {acceleration.Error}");
@@ -680,6 +699,7 @@ internal sealed class GpuResources(
             LeafOffset = (uint)_leafRanges.Allocate(geometries.Count),
             LeafCount = (uint)geometries.Count,
             Acceleration = acceleration.Value,
+            AccelerationDescription = description,
         };
     }
 
@@ -782,6 +802,7 @@ internal readonly record struct ResidentModel(
     uint LeafOffset = 0,
     uint LeafCount = 0,
     GpuAcceleration Acceleration = default,
+    BottomLevelDescription? AccelerationDescription = null,
     TextureDescription? Impostor = null,
     TextureDescription? ImpostorUv = null,
     uint ImpostorRow = 0

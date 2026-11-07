@@ -34,8 +34,7 @@ public enum BufferUsages : byte
     Readback = 1 << 4,
 
     /// <summary>
-    /// Holds an acceleration structure: what <see cref="IGraphicsApi.CreateAcceleration(in BottomLevelDescription)"/>
-    /// makes for itself.
+    /// Holds an acceleration structure: what the GPU provider makes for each one the graph names.
     /// </summary>
     Acceleration = 1 << 5,
 }

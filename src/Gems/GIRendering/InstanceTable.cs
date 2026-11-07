@@ -17,12 +17,7 @@ namespace Magic.GIRendering;
 /// <paramref name="resources"/> has then, and uploaded whole. <paramref name="failure"/> is the material a model that
 /// failed is drawn with, every slot; an empty slot when there is none.
 /// </summary>
-internal sealed class InstanceTable(
-    IGraphicsApi gpu,
-    AssetManager assets,
-    GpuResources resources,
-    MaterialInstance failure
-)
+internal sealed class InstanceTable(AssetManager assets, GpuResources resources, MaterialInstance failure)
 {
     public const int Capacity = 1 << 18;
 
@@ -232,7 +227,7 @@ internal sealed class InstanceTable(
             _rows[index] = row;
             _entities[index] = entity;
             _extras[index] = resident is { Acceleration.IsNone: false } traced
-                ? new InstanceExtra(gpu.GetAddress(traced.Acceleration), traced.LeafOffset)
+                ? new InstanceExtra(traced.Acceleration.Address, traced.LeafOffset)
                 : default;
         }
 

@@ -113,9 +113,9 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _threads = threads;
         ModelPreprocessor models = new();
         _preprocessing = assets.Register(models);
-        _resources = new GpuResources(gpu, models, caches, assets, threads);
+        _resources = new GpuResources(models, caches, assets, threads);
         _failure = new MaterialInstance { Handle = assets.GetFailure<Material, Model>() };
-        _instances = new InstanceTable(gpu, assets, _resources, _failure);
+        _instances = new InstanceTable(assets, _resources, _failure);
         _rayTracing = gpu.Features.HasRayQuery ? new RayTracing() : null;
         _visibility = new Visibility(assets, _resources);
         _frameView = new FrameView(_resources);
@@ -139,7 +139,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     {
         _preprocessing.Dispose();
         EndPreparing();
-        _resources.Dispose();
     }
 
     /// <summary>
@@ -208,6 +207,9 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
             return;
         }
+
+        // The models made since the last frame settle into the pools before any renderer's row is built.
+        _resources.SettleModels(graph);
 
         if (_inputs.TryTake(out RenderInputs? newest))
         {
