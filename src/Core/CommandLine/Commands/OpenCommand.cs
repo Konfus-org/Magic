@@ -3,7 +3,6 @@ using Magic.Debugging;
 using Magic.Files;
 using Magic.Files.Types;
 using Magic.Projects;
-using Magic.Serialization;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;

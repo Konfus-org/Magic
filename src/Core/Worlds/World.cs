@@ -9,7 +9,6 @@ using Magic.Ecs.Components;
 using Magic.Events;
 using Magic.Files;
 using Magic.Files.Types;
-using Magic.Serialization;
 using Magic.Threading;
 using Magic.Utils;
 

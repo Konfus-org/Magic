@@ -5,7 +5,6 @@ using System.IO.Hashing;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using Magic.Caching;
 using Magic.Files;
 using Magic.Files.Types;
 using Magic.Projects;

@@ -1,7 +1,7 @@
 using System.Buffers;
 using Magic.Utils;
 
-namespace Magic.Caching;
+namespace Magic.Files;
 
 /// <summary>
 /// How one type of cached thing is written and read back: the gem that makes it passes its own to

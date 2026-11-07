@@ -3,11 +3,10 @@ using System.Buffers.Binary;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using Magic.Debugging;
-using Magic.Files;
 using Magic.Projects;
 using Magic.Utils;
 
-namespace Magic.Caching;
+namespace Magic.Files;
 
 /// <summary>
 /// What is slow to make, kept so that a later run reads it rather than making it again: an asset's import, a compiled

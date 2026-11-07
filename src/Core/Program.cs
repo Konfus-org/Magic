@@ -1,6 +1,5 @@
 using System.Diagnostics.Metrics;
 using System.Runtime;
-using Magic.Caching;
 using Magic.CommandLine;
 using Magic.Debugging;
 using Magic.Events;

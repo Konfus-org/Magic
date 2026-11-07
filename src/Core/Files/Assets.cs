@@ -5,11 +5,10 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Magic.Caching;
 using Magic.Debugging;
 using Magic.Events;
 using Magic.Files.Pipeline;
-using Magic.Serialization;
+using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
 

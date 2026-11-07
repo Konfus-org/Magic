@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Collections.Immutable;
 using System.Runtime.InteropServices;
-using Magic.Caching;
 using Magic.Utils;
 
 namespace Magic.Files.Pipeline;

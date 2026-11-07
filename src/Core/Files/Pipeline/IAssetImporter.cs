@@ -7,7 +7,7 @@ namespace Magic.Files.Pipeline;
 /// Reads the files of one asset type, turning a file format on disk into what the engine works with. A gem provides one
 /// for its format by implementing it; the host hands it to <see cref="Assets"/> as the gem is made, and takes it back as
 /// the gem ends. One importer reads a type. A type marked <see cref="AssetFormatAttribute"/> is read by Core itself. An
-/// importer that is also an <see cref="Caching.ICache{T}"/> has what it imports cached by the asset's id and version, and
+/// importer that is also an <see cref="ICache{T}"/> has what it imports cached by the asset's id and version, and
 /// isn't asked again until the file or its <c>.meta</c> changes.
 /// </summary>
 public interface IAssetImporter<T>

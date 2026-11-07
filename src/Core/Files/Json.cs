@@ -3,7 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Magic.Utils;
 
-namespace Magic.Serialization;
+namespace Magic.Files;
 
 /// <summary>
 /// The one JSON dialect, for whatever reads a file: camelCase keys matched exactly, enums by their names in snake_case

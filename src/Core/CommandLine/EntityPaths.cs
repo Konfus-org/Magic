@@ -6,7 +6,7 @@ using System.Text;
 using System.Text.Json;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Serialization;
+using Magic.Files;
 using Magic.Utils;
 
 namespace Magic.CommandLine;

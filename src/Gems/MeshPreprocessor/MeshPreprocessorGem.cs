@@ -4,7 +4,6 @@ using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Magic.Caching;
 using Magic.Debugging;
 using Magic.Files;
 using Magic.Files.Types;

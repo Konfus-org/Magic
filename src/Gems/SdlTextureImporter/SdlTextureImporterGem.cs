@@ -4,7 +4,7 @@ using System.Collections.Immutable;
 using System.IO;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Magic.Caching;
+using Magic.Files;
 using Magic.Files.Pipeline;
 using Magic.Files.Types;
 using Magic.Projects;
