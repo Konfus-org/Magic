@@ -1,4 +1,5 @@
-// Which clusters draw this frame, decided per cluster with no walk of the hierarchy: in the frustum, facing the
+// Which clusters draw this frame, decided per cluster with no walk of the hierarchy: of an instance in the frustum
+// and at least five pixels across, those in the frustum, facing the
 // camera, at the level whose error is under a pixel, and not behind what the depth pyramid holds. The pass header's
 // y picks the mode: 0 runs one group per instance over its clusters, against last frame's pyramid, keeping what only
 // the pyramid hid for a retest; 1 runs the retest list against this frame's pyramid.
@@ -27,10 +28,13 @@ void CullClusters(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
         if (instanceIndex >= frame.instanceCount)
             return;
 
+        // An instance less than five pixels across on screen draws nothing: neither clusters nor impostor.
         GpuInstance instance = LoadInstance(frame.instances, instanceIndex);
+        float3 center = Relative(frame, instance.boundsCenter);
         bool isInView =
             instance.clusterCount != 0u
-            && IsSphereInFrustum(frame, Relative(frame, instance.boundsCenter), instance.boundsRadius);
+            && IsSphereInFrustum(frame, center, instance.boundsRadius)
+            && GetPixelRadius(frame, center, instance.boundsRadius) >= MinPixelRadius;
         if (!isInView)
             return;
 

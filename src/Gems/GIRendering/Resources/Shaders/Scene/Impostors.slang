@@ -8,6 +8,7 @@ import Core.Heap;
 import Core.Pack;
 import Core.Frame;
 import Scene.Instances;
+import Scene.Culling;
 
 public static const uint ImpostorViews = 12u;
 public static const uint ImpostorTile = 64u;
@@ -60,7 +61,7 @@ public float GetImpostorFade(FrameConstants frame, GpuInstance instance)
     if (instance.impostor == 0u || start <= 0.0)
         return 0.0;
 
-    float pixels = instance.boundsRadius / max(length(Relative(frame, instance.boundsCenter)), 1e-3) * frame.pixelsPerRadian;
+    float pixels = GetPixelRadius(frame, Relative(frame, instance.boundsCenter), instance.boundsRadius);
     return saturate((start - pixels) / (start * ImpostorBand));
 }
 

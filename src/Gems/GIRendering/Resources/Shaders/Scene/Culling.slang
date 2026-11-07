@@ -21,6 +21,16 @@ public bool IsSphereInFrustum(FrameConstants frame, float3 center, float radius)
     return true;
 }
 
+// The pixel radius under which an instance's sphere is less than five pixels across on screen, too small to notice,
+// and draws nothing.
+public static const float MinPixelRadius = 2.5;
+
+// The sphere's radius in pixels on screen.
+public float GetPixelRadius(FrameConstants frame, float3 center, float radius)
+{
+    return radius / max(length(center), 1e-3) * frame.pixelsPerRadian;
+}
+
 // Pixels an error of error metres covers at the sphere's nearest point: how wrong the cluster looks on screen.
 public float ProjectError(FrameConstants frame, float3 center, float radius, float error)
 {

@@ -4,7 +4,7 @@
             "name": "Spawn",
             "tags": [ "spawn" ],
             "components": {
-                "Transform": { "position": { "x": 0, "y": 7, "z": -990 }, "rotation": { "x": 0.0523, "y": 0, "z": 0, "w": 0.9986 } }
+                "Transform": { "position": { "x": 0, "y": 30, "z": -900 }, "rotation": { "x": 0.0872, "y": 0, "z": 0, "w": 0.9962 } }
             }
         },
         {
