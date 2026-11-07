@@ -19,9 +19,11 @@
             "name": "PostProcessing",
             "components": {
                 "PostProcessing": {
-                    "effect0": {
-                        "id": 1700000000000283
-                    },
+                    "effects": [
+                        {
+                            "id": 16110046817102106845
+                        }
+                    ],
                     "bloomStrength": 0.04
                 }
             }
@@ -64,10 +66,17 @@
                 "Weather": {
                     "effects": [
                         {
-                            "type": "Fog",
-                            "density": 0.02,
-                            "halfHeight": 40,
-                            "anisotropy": 0.6
+                            "handle": {
+                                "id": 8828027672504642575
+                            },
+                            "overrides": {
+                                "halfHeight": {
+                                    "x": 40
+                                },
+                                "anisotropy": {
+                                    "x": 0.6
+                                }
+                            }
                         }
                     ]
                 }

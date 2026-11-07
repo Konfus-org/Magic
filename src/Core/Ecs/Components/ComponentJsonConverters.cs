@@ -45,8 +45,8 @@ internal sealed class TagsJsonConverter : JsonConverter<Tags>
 }
 
 /// <summary>
-/// A renderer's material slots as JSON: an array of handles by slot, so a prefab lists a model's materials in the order
-/// its meshes name them. Empty slots after the last filled one are left out.
+/// Material slots as JSON: an array of instances by slot, in the order the component lists them, so a prefab lists a
+/// model's materials in the order its meshes name them. Empty slots after the last filled one are left out.
 /// </summary>
 [SuppressMessage(
     "Performance",

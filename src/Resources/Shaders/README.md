@@ -13,6 +13,7 @@ compiler loads a module and its imports from the assets, so a game's `Shaders/` 
 - `Sky/` is the sky contract, `ISky`, and the Earth's atmosphere, which gives the sky, the sun's colour through the
   air and the sky's light on the ground from three tables made each frame.
 - `Post/` is the post effect contract, `IPixelEffect`, the effect that does nothing and a vignette.
+- `Weather/` is what the weather's effects are drawn with: the fog, whose fields are a fog material's params.
 - A contract between shaders is an interface, `I` plus a noun, and a pass that works with any implementation is
   generic over it. A game adds a material, a sky or a post effect by implementing the contract in a module of its own
   and naming it in the asset that uses it.
