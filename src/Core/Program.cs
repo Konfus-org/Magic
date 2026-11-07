@@ -42,9 +42,9 @@ internal static class Program
     {
         Log.Verbose($"Command line args: {string.Join(", ", commandLine)}");
 
-        // What outlasts a run: the app, which the commands set, and the world the last run kept.
+        // What outlasts a run: the app, which the commands set, and the world as the last run saved it.
         using App app = new();
-        byte[]? kept = null;
+        Task<Result<byte[]>>? worldRestorePoint = null;
         bool isLaunching = true;
 
         // One pass per run, all new for it: a typed command that asks for another project or mode, or a change to a gem's
@@ -100,7 +100,7 @@ internal static class Program
 
             app.StartRun();
             using Gems gems = new(registered, provider, app, files, assets, world, events, threads);
-            world.StartAsync(kept, app.Lifetime).FireAndForget();
+            world.StartAsync(worldRestorePoint?.WaitAsync(app.Lifetime), app.Lifetime).FireAndForget();
 
             // If we don't have a window and aren't headless something is wrong, early out.
             if (!app.IsHeadless && app.Window is null)
@@ -136,9 +136,9 @@ internal static class Program
             if (app.HasFailed)
                 return ExitFailed();
 
-            // The world is kept while the gems are still whole, for a restart of this same project; they end as this pass
+            // The world is saved while the gems are still whole, for a restart of this same project; they end as this pass
             // does, last made first.
-            kept = app.IsExiting || app.Project != project ? null : world.Keep();
+            worldRestorePoint = app.IsExiting || app.Project != project ? null : world.SaveAsync();
 
             Log.Info($"Closing {project.Name} and {(app.IsExiting ? "exiting" : "restarting")}.");
             if (app.IsExiting)
