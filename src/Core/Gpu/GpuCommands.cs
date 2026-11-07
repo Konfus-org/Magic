@@ -63,6 +63,11 @@ public readonly record struct GpuPass
     /// frame while the shader is not built. None for a pass that binds its own pipeline.
     /// </summary>
     public ShaderEntry? Shader { get; init; }
+
+    /// <summary>
+    /// What a draw pass draws with, which the GPU provider binds before the commands as <see cref="Shader"/> is bound.
+    /// </summary>
+    public DrawShaders? DrawShaders { get; init; }
 }
 
 /// <summary>

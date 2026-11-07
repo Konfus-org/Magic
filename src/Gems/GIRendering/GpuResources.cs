@@ -30,10 +30,7 @@ internal enum ResourceState : byte
 /// made by the preprocessor on a worker and copied into the pools of vertices, indices, clusters and leaf clusters in
 /// the frame after it arrives. Each pool hands out ranges first fit from a free list. A model not asked for in
 /// <see cref="UnusedSec"/>, and held by no renderer drawn, is evicted: its ranges go back to the free lists and its
-/// acceleration structure is destroyed, and the next ask makes it again. The gem's own textures, buffers and acceleration structure are asked for
-/// by description, each by its name: the same description again is the same one, so what it holds carries from frame
-/// to frame, and another one under the name, as at a new window size, destroys it and makes it again. The rest is freed
-/// with the gem.
+/// acceleration structure is destroyed, and the next ask makes it again. The rest is freed with the gem.
 /// </summary>
 internal sealed class GpuResources(
     IGraphicsApi gpu,
@@ -60,9 +57,6 @@ internal sealed class GpuResources(
     /// </summary>
     private readonly Dictionary<ulong, Material?> _materials = [];
     private readonly Dictionary<SamplerDescription, GpuSampler> _samplers = [];
-    private readonly Dictionary<string, (TextureDescription Description, GpuTexture Made)> _targets = [];
-    private readonly Dictionary<string, (BufferDescription Description, GpuBuffer Made)> _buffers = [];
-    private readonly Dictionary<string, (TopLevelDescription Description, GpuAcceleration Made)> _topLevels = [];
     private readonly List<(Texture Asset, GpuTexture Texture)> _arrivedTextures = [];
 
     /// <summary>
@@ -126,21 +120,6 @@ internal sealed class GpuResources(
             gpu.Destroy(resident.Acceleration);
         }
 
-        foreach ((_, GpuTexture texture) in _targets.Values)
-        {
-            gpu.Destroy(texture);
-        }
-
-        foreach ((_, GpuAcceleration topLevel) in _topLevels.Values)
-        {
-            gpu.Destroy(topLevel);
-        }
-
-        foreach ((_, GpuBuffer buffer) in _buffers.Values)
-        {
-            gpu.Destroy(buffer);
-        }
-
         gpu.Destroy(LeafClusters);
         gpu.Destroy(VertexPool);
         gpu.Destroy(IndexPool);
@@ -152,24 +131,24 @@ internal sealed class GpuResources(
     /// </summary>
     public Result Create()
     {
-        Result<GpuBuffer> vertices = gpu.CreateBuffer("Vertex pool", (long)VertexCapacity * GpuVertex.Bytes);
+        Result<GpuBuffer> vertices = CreatePool("Vertex pool", (long)VertexCapacity * GpuVertex.Bytes);
         if (!vertices.Ok)
             return Result.Failure(vertices.Error);
 
         VertexPool = vertices.Value;
-        Result<GpuBuffer> indices = gpu.CreateBuffer("Index pool", (long)IndexCapacity * sizeof(uint));
+        Result<GpuBuffer> indices = CreatePool("Index pool", (long)IndexCapacity * sizeof(uint));
         if (!indices.Ok)
             return Result.Failure(indices.Error);
 
         IndexPool = indices.Value;
-        Result<GpuBuffer> clusters = gpu.CreateBuffer("Cluster pool", (long)ClusterCapacity * GpuCluster.Bytes);
+        Result<GpuBuffer> clusters = CreatePool("Cluster pool", (long)ClusterCapacity * GpuCluster.Bytes);
         if (!clusters.Ok)
             return Result.Failure(clusters.Error);
 
         ClusterPool = clusters.Value;
         if (gpu.Features.HasRayQuery)
         {
-            Result<GpuBuffer> leaves = gpu.CreateBuffer("Leaf clusters", (long)ClusterCapacity * sizeof(uint));
+            Result<GpuBuffer> leaves = CreatePool("Leaf clusters", (long)ClusterCapacity * sizeof(uint));
             if (!leaves.Ok)
                 return Result.Failure(leaves.Error);
 
@@ -360,62 +339,6 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// The texture under <paramref name="name"/>, as <see cref="TryGet"/> makes it.
-    /// </summary>
-    public Result<GpuTexture> TryGetTexture(
-        string name,
-        int width,
-        int height,
-        GpuFormat format,
-        TextureUsages usage = TextureUsages.Storage | TextureUsages.Sampled,
-        int levels = 1
-    ) =>
-        TryGet(
-            _targets,
-            new TextureDescription
-            {
-                Width = width,
-                Height = height,
-                Format = format,
-                Usage = usage,
-                Levels = levels,
-                Name = name,
-            },
-            name,
-            static (gpu, description) => gpu.CreateTexture(description),
-            static (gpu, texture) => gpu.Destroy(texture)
-        );
-
-    /// <summary>
-    /// The buffer under <paramref name="name"/>, as <see cref="TryGet"/> makes it.
-    /// </summary>
-    public Result<GpuBuffer> TryGetBuffer(string name, long bytes, BufferUsages usage = BufferUsages.Storage) =>
-        TryGet(
-            _buffers,
-            new BufferDescription
-            {
-                Bytes = bytes,
-                Usage = usage,
-                Name = name,
-            },
-            name,
-            static (gpu, description) => gpu.CreateBuffer(description),
-            static (gpu, buffer) => gpu.Destroy(buffer)
-        );
-
-    /// <summary>
-    /// The top-level acceleration structure under its description's name, as <see cref="TryGet"/> makes it.
-    /// </summary>
-    public Result<GpuAcceleration> TryGetAcceleration(in TopLevelDescription description) =>
-        TryGet(
-            _topLevels,
-            description,
-            description.Name,
-            static (gpu, made) => gpu.CreateAcceleration(made),
-            static (gpu, acceleration) => gpu.Destroy(acceleration)
-        );
-
-    /// <summary>
     /// Copies the models and the levels of the textures that arrived since the last frame, in the frame's upload pass.
     /// </summary>
     public void Upload(RenderGraph graph)
@@ -428,7 +351,7 @@ internal sealed class GpuResources(
 
         foreach ((MeshDerived derived, ResidentModel where) in _arrivedModels)
         {
-            graph.Upload(gpu, VertexPool, derived.Vertices.AsSpan(), (ulong)where.VertexOffset * GpuVertex.Bytes);
+            graph.Upload(VertexPool, derived.Vertices.AsSpan(), (ulong)where.VertexOffset * GpuVertex.Bytes);
 
             // Indices point into the whole pool, and clusters into the whole index pool.
             int indexBytes = derived.Indices.Length * sizeof(uint);
@@ -524,36 +447,11 @@ internal sealed class GpuResources(
 
     private bool IsUnused(ulong model, long now) => now - _askedModels[model] >= UnusedSec * 1000L;
 
-    /// <summary>
-    /// What <paramref name="description"/> makes, under <paramref name="name"/> in <paramref name="made"/>: made on the
-    /// first ask, the same one while the name is asked for with the same description, so what it holds carries from frame
-    /// to frame, and made again, the old one destroyed, when the description changes.
-    /// </summary>
-    private Result<T> TryGet<TDescription, T>(
-        Dictionary<string, (TDescription Description, T Made)> made,
-        TDescription description,
-        string name,
-        Func<IGraphicsApi, TDescription, Result<T>> create,
-        Action<IGraphicsApi, T> destroy
-    )
-        where TDescription : struct, IEquatable<TDescription>
+    private Result<GpuBuffer> CreatePool(string name, long bytes)
     {
-        if (made.TryGetValue(name, out (TDescription Description, T Made) old))
-        {
-            if (old.Description.Equals(description))
-                return Result.Success(old.Made);
+        Result<GpuBuffer> pool = gpu.CreateBuffer(GpuDescriptions.GetBuffer(name, bytes));
 
-            destroy(gpu, old.Made);
-            made.Remove(name);
-        }
-
-        Result<T> created = create(gpu, description);
-        if (!created.Ok)
-            return Result.Failure($"the {name} was not made: {created.Error}");
-
-        made[name] = (description, created.Value);
-
-        return created;
+        return pool.Ok ? pool : Result.Failure($"the {name} was not made: {pool.Error}");
     }
 
     private async Task LoadAsync(Handle<Material> handle)
@@ -766,7 +664,7 @@ internal sealed class GpuResources(
                 leaves.Add(where.ClusterOffset + (uint)i);
         }
 
-        graph.Upload(gpu, LeafClusters, CollectionsMarshal.AsSpan(leaves), (ulong)where.LeafOffset * sizeof(uint));
+        graph.Upload(LeafClusters, CollectionsMarshal.AsSpan(leaves), (ulong)where.LeafOffset * sizeof(uint));
         graph.BuildAcceleration(where.Acceleration);
     }
 

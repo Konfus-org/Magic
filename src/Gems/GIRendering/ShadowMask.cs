@@ -1,4 +1,8 @@
+using System.Collections.Immutable;
+using Magic.Assets;
 using Magic.Gpu;
+using Magic.Rendering;
+using Magic.Shaders;
 using Magic.Utils;
 
 namespace Magic.GIRendering;
@@ -30,19 +34,24 @@ internal readonly record struct ShadowBuffers(
 /// light in the next tile or frame. It blends with last frame's mask and moments, so it keeps two of each and swaps
 /// them every frame, and with none while the view has no history.
 /// </summary>
-internal sealed class ShadowMask(IGraphicsApi gpu, GpuPipelines pipelines, GpuResources resources)
+internal sealed class ShadowMask(AssetManager assets, GpuResources resources)
 {
     private const int BytesPerPixel = 16;
     private const int SunTileWidth = 8;
     private const int SunTileHeight = 4;
     private const int FilterPasses = 3;
 
+    /// <summary>
+    /// The twin of <c>DenoiseShadows.slang</c>'s group size, a tile state each group.
+    /// </summary>
+    private const int DenoiseGroupSize = 8;
+
     private static readonly string[] _filterPassNames = ["Filter shadows 1", "Filter shadows 2", "Filter shadows 3"];
 
-    private readonly GpuPass _tracePass = pipelines.Compute("Trace shadows", "TraceShadows", "TraceShadows");
-    private readonly GpuPass _classifyPass = pipelines.Compute("Classify shadows", "DenoiseShadows", "ClassifyShadows");
-    private readonly GpuPass _filterPass = pipelines.Compute("Filter shadows", "DenoiseShadows", "FilterShadows");
-    private readonly GpuPass _blendPass = pipelines.Compute("Blend shadows", "DenoiseShadows", "BlendShadows");
+    private readonly ShaderEntry _traceShader = PassShaders.GetEntry(assets, "TraceShadows", "TraceShadows");
+    private readonly ShaderEntry _classifyShader = PassShaders.GetEntry(assets, "DenoiseShadows", "ClassifyShadows");
+    private readonly ShaderEntry _filterShader = PassShaders.GetEntry(assets, "DenoiseShadows", "FilterShadows");
+    private readonly ShaderEntry _blendShader = PassShaders.GetEntry(assets, "DenoiseShadows", "BlendShadows");
 
     /// <summary>
     /// The mask the frame drawn last wrote, which the next blends with.
@@ -54,6 +63,8 @@ internal sealed class ShadowMask(IGraphicsApi gpu, GpuPipelines pipelines, GpuRe
     /// </summary>
     private GpuTexture _moments;
 
+    public ImmutableArray<ShaderEntry> Shaders => [_traceShader, _classifyShader, _filterShader, _blendShader];
+
     /// <summary>
     /// The masks and the denoiser's targets asked for at the view's size, last frame's mask and moments kept to blend
     /// with, and the denoiser's constants uploaded, in a transfer pass the caller opened.
@@ -64,40 +75,34 @@ internal sealed class ShadowMask(IGraphicsApi gpu, GpuPipelines pipelines, GpuRe
         int height = view.Height;
         long tiles = (long)((width + SunTileWidth - 1) / SunTileWidth) * ((height + SunTileHeight - 1) / SunTileHeight);
         long maskBytes = (long)width * height * BytesPerPixel;
-        (uint groupsX, uint groupsY) = _classifyPass.GetGroups(width, height);
-        Result<GpuBuffer> traced = resources.TryGetBuffer("Traced shadows", maskBytes);
-        Result<GpuBuffer> sunTiles = resources.TryGetBuffer("Sun shadow tiles", tiles * sizeof(uint));
-        Result<GpuBuffer> constants = resources.TryGetBuffer("Shadow denoiser constants", ShadowDenoiseConstants.Bytes);
-        Result<GpuBuffer> tileStates = resources.TryGetBuffer(
-            "Shadow tile states",
-            (long)groupsX * groupsY * sizeof(uint)
+        long groups =
+            (long)((width + DenoiseGroupSize - 1) / DenoiseGroupSize)
+            * ((height + DenoiseGroupSize - 1) / DenoiseGroupSize);
+        RenderGraph graph = view.Graph;
+        Result<GpuBuffer> traced = graph.Buffer(GpuDescriptions.GetBuffer("Traced shadows", maskBytes));
+        Result<GpuBuffer> sunTiles = graph.Buffer(GpuDescriptions.GetBuffer("Sun shadow tiles", tiles * sizeof(uint)));
+        Result<GpuBuffer> constants = graph.Buffer(
+            GpuDescriptions.GetBuffer("Shadow denoiser constants", ShadowDenoiseConstants.Bytes)
         );
-        Result<GpuBuffer> mask = resources.TryGetBuffer("Shadow mask", maskBytes);
-        Result<GpuBuffer> maskHistory = resources.TryGetBuffer("Shadow mask history", maskBytes);
-        Result<GpuTexture> sunBlend = resources.TryGetTexture(
-            "Sun shadow blend",
-            width,
-            height,
-            GpuFormat.R16G16Sfloat
+        Result<GpuBuffer> tileStates = graph.Buffer(
+            GpuDescriptions.GetBuffer("Shadow tile states", groups * sizeof(uint))
         );
-        Result<GpuTexture> sunHistory = resources.TryGetTexture(
-            "Sun shadow history",
-            width,
-            height,
-            GpuFormat.R16G16Sfloat
+        Result<GpuBuffer> mask = graph.Buffer(GpuDescriptions.GetBuffer("Shadow mask", maskBytes));
+        Result<GpuBuffer> maskHistory = graph.Buffer(GpuDescriptions.GetBuffer("Shadow mask history", maskBytes));
+        Result<GpuTexture> sunBlend = graph.Texture(
+            GpuDescriptions.GetTexture("Sun shadow blend", width, height, GpuFormat.R16G16Sfloat)
         );
-        Result<GpuTexture> sunDenoised = resources.TryGetTexture("Sun shadow", width, height, GpuFormat.R8Unorm);
-        Result<GpuTexture> moments = resources.TryGetTexture(
-            "Sun shadow moments",
-            width,
-            height,
-            GpuFormat.R16G16B16A16Sfloat
+        Result<GpuTexture> sunHistory = graph.Texture(
+            GpuDescriptions.GetTexture("Sun shadow history", width, height, GpuFormat.R16G16Sfloat)
         );
-        Result<GpuTexture> momentsHistory = resources.TryGetTexture(
-            "Sun shadow moments history",
-            width,
-            height,
-            GpuFormat.R16G16B16A16Sfloat
+        Result<GpuTexture> sunDenoised = graph.Texture(
+            GpuDescriptions.GetTexture("Sun shadow", width, height, GpuFormat.R8Unorm)
+        );
+        Result<GpuTexture> moments = graph.Texture(
+            GpuDescriptions.GetTexture("Sun shadow moments", width, height, GpuFormat.R16G16B16A16Sfloat)
+        );
+        Result<GpuTexture> momentsHistory = graph.Texture(
+            GpuDescriptions.GetTexture("Sun shadow moments history", width, height, GpuFormat.R16G16B16A16Sfloat)
         );
         foreach (
             Result made in (ReadOnlySpan<Result>)
@@ -149,7 +154,7 @@ internal sealed class ShadowMask(IGraphicsApi gpu, GpuPipelines pipelines, GpuRe
             PreviousMask = shadows.PreviousMask.Id,
             HasHistory = view.HasHistory ? 1u : 0u,
         };
-        view.Graph.Upload(gpu, shadows.Constants, in denoise);
+        graph.Upload(shadows.Constants, [denoise]);
 
         return Result.Success(shadows);
     }
@@ -165,8 +170,7 @@ internal sealed class ShadowMask(IGraphicsApi gpu, GpuPipelines pipelines, GpuRe
         in ShadowBuffers shadows
     )
     {
-        _tracePass
-            .Run(view.Graph, header)
+        view.Graph.Compute("Trace shadows", _traceShader, header)
             .Reads(
                 view.Constants,
                 lightingConstants,
@@ -189,8 +193,7 @@ internal sealed class ShadowMask(IGraphicsApi gpu, GpuPipelines pipelines, GpuRe
         {
             Y = shadows.Constants.Id,
         };
-        _classifyPass
-            .Run(view.Graph, denoise)
+        view.Graph.Compute("Classify shadows", _classifyShader, denoise)
             .Reads(
                 view.Constants,
                 lightingConstants,
@@ -214,15 +217,13 @@ internal sealed class ShadowMask(IGraphicsApi gpu, GpuPipelines pipelines, GpuRe
                 1 => (shadows.SunHistory, shadows.SunBlend),
                 _ => (shadows.SunBlend, shadows.SunDenoised),
             };
-            _filterPass
-                .Run(view.Graph, denoise with { W = (uint)pass }, _filterPassNames[pass])
+            view.Graph.Compute(_filterPassNames[pass], _filterShader, denoise with { W = (uint)pass })
                 .Reads(view.Constants, shadows.Constants, shadows.TileStates, view.Depth, view.GBufferNormal, input)
                 .Writes(output)
                 .DispatchOver(view.Width, view.Height);
         }
 
-        _blendPass
-            .Run(view.Graph, denoise)
+        view.Graph.Compute("Blend shadows", _blendShader, denoise)
             .Reads(
                 view.Constants,
                 lightingConstants,

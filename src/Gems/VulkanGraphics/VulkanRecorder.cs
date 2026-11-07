@@ -31,9 +31,12 @@ internal sealed unsafe class VulkanRecorder(
         {
             GpuPass pass = commands.Passes[passIndex];
 
-            // A pass whose shader is not built yet is left out, and what it writes keeps what it held.
+            // A pass whose shaders are not built yet is left out, and what it writes keeps what it held.
             VulkanShader? shader = pass.Shader is { } entry ? shaders.Get(entry) : null;
-            if (pass.Shader is not null && shader is null)
+            GpuPipeline pipeline = pass.DrawShaders is { } drawn
+                ? shaders.Get(drawn, pass.Targets)
+                : shader?.Pipeline ?? GpuPipeline.None;
+            if ((pass.Shader is not null || pass.DrawShaders is not null) && pipeline.IsNone)
                 continue;
 
             BeginGroup(cmd, pass.Name);
@@ -41,8 +44,8 @@ internal sealed unsafe class VulkanRecorder(
             frame.WriteTimestamp(pass.Name, passIndex);
             bool isDrawing = pass.Kind == GpuPassKind.Draw && BeginRendering(cmd, pass);
             (uint X, uint Y, uint Z) groupSize = shader?.GroupSize ?? (1, 1, 1);
-            if (shader is not null)
-                Run(frame, new GpuCommand { Kind = GpuCommandKind.BindPipeline, Id = shader.Pipeline.Id }, groupSize);
+            if (!pipeline.IsNone)
+                Run(frame, new GpuCommand { Kind = GpuCommandKind.BindPipeline, Id = pipeline.Id }, groupSize);
 
             foreach (GpuCommand command in pass.Commands)
             {

@@ -10,7 +10,7 @@ namespace Magic.GIRendering;
 /// instance whose model has its triangles' structure, built again when the instances change, what a ray query traces
 /// through.
 /// </summary>
-internal sealed class RayTracing(IGraphicsApi gpu, GpuResources resources)
+internal sealed class RayTracing
 {
     private readonly GpuAccelerationInstance[] _rows = new GpuAccelerationInstance[InstanceTable.Capacity];
 
@@ -25,14 +25,16 @@ internal sealed class RayTracing(IGraphicsApi gpu, GpuResources resources)
     /// </summary>
     public Result Build(RenderGraph graph, ReadOnlySpan<GpuInstance> rows, ReadOnlySpan<InstanceExtra> extras)
     {
-        Result<GpuBuffer> instances = resources.TryGetBuffer(
-            "Acceleration instances",
-            (long)InstanceTable.Capacity * GpuAccelerationInstance.Bytes
+        Result<GpuBuffer> instances = graph.Buffer(
+            GpuDescriptions.GetBuffer(
+                "Acceleration instances",
+                (long)InstanceTable.Capacity * GpuAccelerationInstance.Bytes
+            )
         );
         if (!instances.Ok)
             return Result.Failure(instances.Error);
 
-        Result<GpuAcceleration> acceleration = resources.TryGetAcceleration(
+        Result<GpuAcceleration> acceleration = graph.Acceleration(
             new TopLevelDescription
             {
                 MaxInstances = InstanceTable.Capacity,
@@ -67,7 +69,7 @@ internal sealed class RayTracing(IGraphicsApi gpu, GpuResources resources)
         if (count == 0)
             return Result.Success();
 
-        graph.Upload(gpu, instances.Value, _rows.AsSpan(0, count));
+        graph.Upload(instances.Value, _rows.AsSpan(0, count));
         graph.BuildAcceleration(acceleration.Value, (uint)count);
 
         return Result.Success();

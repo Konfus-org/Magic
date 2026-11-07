@@ -65,13 +65,45 @@ public readonly ref struct ComputePass
 
     private ComputePass Use(scoped ReadOnlySpan<GpuResource> resources, GpuAccess access)
     {
-        foreach (GpuResource resource in resources)
-        {
-            if (resource.IsTexture)
-                _graph.Use(resource.Texture, access);
-            else
-                _graph.Use(resource.Buffer, access);
-        }
+        _graph.Use(resources, access);
+
+        return this;
+    }
+}
+
+/// <summary>
+/// A draw pass being recorded, begun by <see cref="RenderGraph.Draw"/>: say what it reads, which the GPU provider puts
+/// the barriers in for, then end it with what it draws.
+/// </summary>
+public readonly ref struct DrawPass
+{
+    private readonly RenderGraph _graph;
+
+    internal DrawPass(RenderGraph graph) => _graph = graph;
+
+    public DrawPass Reads(params ReadOnlySpan<GpuResource> resources) => Use(resources, GpuAccess.ShaderRead);
+
+    public DrawPass Indirect(params ReadOnlySpan<GpuResource> resources) => Use(resources, GpuAccess.Indirect);
+
+    /// <summary>
+    /// As <see cref="RenderGraph.DrawIndirectCount"/> draws.
+    /// </summary>
+    public void DrawIndirectCount(
+        GpuBuffer arguments,
+        ulong argumentsOffset,
+        GpuBuffer count,
+        ulong countOffset,
+        uint maxDraws,
+        uint stride = 16
+    )
+    {
+        _graph.DrawIndirectCount(arguments, argumentsOffset, count, countOffset, maxDraws, stride);
+        _graph.EndPass();
+    }
+
+    private DrawPass Use(scoped ReadOnlySpan<GpuResource> resources, GpuAccess access)
+    {
+        _graph.Use(resources, access);
 
         return this;
     }

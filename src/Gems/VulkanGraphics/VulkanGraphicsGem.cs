@@ -42,9 +42,13 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     private readonly List<(TextureDescription Description, GpuTexture Texture)> _lentTransients = [];
 
     /// <summary>
-    /// The textures the graph names, by their name, with the description each was made to.
+    /// The textures, buffers and top-level acceleration structures the graph names, by their name, with the
+    /// description each was made to.
     /// </summary>
-    private readonly Dictionary<string, (TextureDescription Description, GpuTexture Texture)> _named = [];
+    private readonly Dictionary<string, (TextureDescription Description, GpuTexture Made)> _namedTextures = [];
+    private readonly Dictionary<string, (BufferDescription Description, GpuBuffer Made)> _namedBuffers = [];
+    private readonly Dictionary<string, (TopLevelDescription Description, GpuAcceleration Made)> _namedAccelerations =
+    [];
 
     public VulkanGraphicsGem(App app, Threads threads, IShaderCompiler compiler, IWindow? window = null)
     {
@@ -124,26 +128,32 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
         return _resources.CreateTexture(description);
     }
 
-    public Result<GpuTexture> GetTexture(in TextureDescription description)
-    {
-        ThrowIfNotOnRender();
-        if (_named.TryGetValue(description.Name, out (TextureDescription Description, GpuTexture Texture) made))
-        {
-            if (made.Description == description)
-                return Result.Success(made.Texture);
+    public Result<GpuTexture> GetTexture(in TextureDescription description) =>
+        GetNamed(
+            _namedTextures,
+            description,
+            description.Name,
+            static (gem, made) => gem._resources.CreateTexture(made),
+            static (gem, texture) => gem.Destroy(texture)
+        );
 
-            Destroy(made.Texture);
-            _named.Remove(description.Name);
-        }
+    public Result<GpuBuffer> GetBuffer(in BufferDescription description) =>
+        GetNamed(
+            _namedBuffers,
+            description,
+            description.Name,
+            static (gem, made) => gem._resources.CreateBuffer(made),
+            static (gem, buffer) => gem.Destroy(buffer)
+        );
 
-        Result<GpuTexture> texture = _resources.CreateTexture(description);
-        if (!texture.Ok)
-            return Result.Failure($"the {description.Name} was not made: {texture.Error}");
-
-        _named[description.Name] = (description, texture.Value);
-
-        return texture;
-    }
+    public Result<GpuAcceleration> GetAcceleration(in TopLevelDescription description) =>
+        GetNamed(
+            _namedAccelerations,
+            description,
+            description.Name,
+            static (gem, made) => gem._resources.CreateAcceleration(made),
+            static (gem, acceleration) => gem.Destroy(acceleration)
+        );
 
     public GpuState GetState(in ShaderEntry shader)
     {
@@ -321,6 +331,39 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     {
         _frames.Begin();
         WindowTarget = _swapchain?.Acquire(_frames.Current.Acquired) ?? GpuTexture.None;
+    }
+
+    /// <summary>
+    /// What <paramref name="description"/> makes, under <paramref name="name"/> in <paramref name="named"/>: made on the
+    /// first ask, the same one while the name is asked for with the same description, and made again, the old one
+    /// destroyed, when the description changes.
+    /// </summary>
+    private Result<T> GetNamed<TDescription, T>(
+        Dictionary<string, (TDescription Description, T Made)> named,
+        TDescription description,
+        string name,
+        Func<VulkanGraphicsGem, TDescription, Result<T>> create,
+        Action<VulkanGraphicsGem, T> destroy
+    )
+        where TDescription : struct, IEquatable<TDescription>
+    {
+        ThrowIfNotOnRender();
+        if (named.TryGetValue(name, out (TDescription Description, T Made) old))
+        {
+            if (old.Description.Equals(description))
+                return Result.Success(old.Made);
+
+            destroy(this, old.Made);
+            named.Remove(name);
+        }
+
+        Result<T> created = create(this, description);
+        if (!created.Ok)
+            return Result.Failure($"the {name} was not made: {created.Error}");
+
+        named[name] = (description, created.Value);
+
+        return created;
     }
 
     private void ReturnTransients()

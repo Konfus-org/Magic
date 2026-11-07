@@ -36,8 +36,21 @@ public interface IGraphicsApi
     Result<GpuTexture> GetTexture(in TextureDescription description);
 
     /// <summary>
-    /// Whether the compute shader <paramref name="shader"/> is built for this GPU; the first ask starts compiling it.
-    /// <see cref="Rendering.RenderGraph.GetState"/> asks for it.
+    /// The buffer under the description's name, kept as <see cref="GetTexture"/> keeps a texture.
+    /// <see cref="Rendering.RenderGraph.Buffer"/> asks for it.
+    /// </summary>
+    Result<GpuBuffer> GetBuffer(in BufferDescription description);
+
+    /// <summary>
+    /// The top-level acceleration structure under the description's name, kept as <see cref="GetTexture"/> keeps a
+    /// texture; only when <see cref="GpuFeatures.HasRayQuery"/>. <see cref="Rendering.RenderGraph.Acceleration"/> asks
+    /// for it.
+    /// </summary>
+    Result<GpuAcceleration> GetAcceleration(in TopLevelDescription description);
+
+    /// <summary>
+    /// Whether <paramref name="shader"/> is built for this GPU: a compute entry into its pipeline, a vertex or pixel
+    /// entry compiled. The first ask starts compiling it. <see cref="Rendering.RenderGraph.GetState"/> asks for it.
     /// </summary>
     GpuState GetState(in ShaderEntry shader);
 

@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.InteropServices;
 using Magic.Debugging;
 using Magic.Gpu;
 using Magic.Shaders;
@@ -38,6 +39,20 @@ public sealed class RenderGraph
         Gpu?.GetTexture(description) ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
 
     /// <summary>
+    /// The buffer under the description's name, kept as <see cref="Texture"/> keeps a texture.
+    /// </summary>
+    public Result<GpuBuffer> Buffer(in BufferDescription description) =>
+        Gpu?.GetBuffer(description) ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
+
+    /// <summary>
+    /// The top-level acceleration structure under the description's name, kept as <see cref="Texture"/> keeps a
+    /// texture; only on a GPU that traces rays.
+    /// </summary>
+    public Result<GpuAcceleration> Acceleration(in TopLevelDescription description) =>
+        Gpu?.GetAcceleration(description)
+        ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
+
+    /// <summary>
     /// Whether the GPU provider has built <paramref name="shader"/>, the first ask starting it; failed while there is no
     /// provider.
     /// </summary>
@@ -74,11 +89,31 @@ public sealed class RenderGraph
         );
 
     /// <summary>
+    /// Begins a draw pass with <paramref name="shaders"/> into <paramref name="targets"/>, with
+    /// <paramref name="constants"/> pushed to it: say what it reads on what this returns, then draw, which ends it. The
+    /// GPU provider leaves the pass out of a frame while the shaders are not built.
+    /// </summary>
+    public DrawPass Draw(string name, in DrawShaders shaders, in GpuRenderTargets targets, in GpuConstants constants)
+    {
+        BeginDraw(
+            new()
+            {
+                Name = name,
+                Kind = GpuPassKind.Draw,
+                Targets = targets,
+                DrawShaders = shaders,
+            }
+        );
+        PushConstants(constants);
+
+        return new DrawPass(this);
+    }
+
+    /// <summary>
     /// Begins a draw pass into <paramref name="targets"/>, each target used as a colour or depth target.
     /// </summary>
-    public void BeginDrawPass(string name, in GpuRenderTargets targets, RenderLayer layer = RenderLayer.Picture)
-    {
-        Begin(
+    public void BeginDrawPass(string name, in GpuRenderTargets targets, RenderLayer layer = RenderLayer.Picture) =>
+        BeginDraw(
             new()
             {
                 Name = name,
@@ -87,14 +122,6 @@ public sealed class RenderGraph
                 Layer = layer,
             }
         );
-        foreach (GpuTarget color in targets.Colors)
-        {
-            Use(color.Texture, GpuAccess.ColorTarget, color.Level);
-        }
-
-        if (targets.Depth is { } depth)
-            Use(depth.Texture, GpuAccess.DepthTarget, depth.Level);
-    }
 
     public void BeginTransferPass(string name, RenderLayer layer = RenderLayer.Picture) =>
         Begin(
@@ -167,6 +194,21 @@ public sealed class RenderGraph
                 Level = level,
             }
         );
+    }
+
+    /// <summary>
+    /// Copies <paramref name="rows"/> into <paramref name="to"/> from <paramref name="offset"/> bytes on, staged through
+    /// the frame's upload ring, in a transfer pass.
+    /// </summary>
+    public void Upload<T>(GpuBuffer to, ReadOnlySpan<T> rows, ulong offset = 0)
+        where T : unmanaged
+    {
+        Use(to, GpuAccess.CopyDestination);
+        IGraphicsApi gpu = Gpu ?? throw new InvalidOperationException("There is no GPU provider to upload through.");
+        ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(rows);
+        GpuUpload upload = gpu.BeginUpload(bytes.Length);
+        bytes.CopyTo(upload.Bytes);
+        CopyBuffer(upload.Buffer, upload.Offset, to, offset, (ulong)bytes.Length);
     }
 
     public void BindPipeline(GpuPipeline pipeline) =>
@@ -388,10 +430,39 @@ public sealed class RenderGraph
             }
         );
 
+    /// <summary>
+    /// Says the pass touches each of <paramref name="resources"/> as <paramref name="access"/>, every level of a texture.
+    /// </summary>
+    internal void Use(scoped ReadOnlySpan<GpuResource> resources, GpuAccess access)
+    {
+        foreach (GpuResource resource in resources)
+        {
+            if (resource.IsTexture)
+                Use(resource.Texture, access);
+            else
+                Use(resource.Buffer, access);
+        }
+    }
+
     private void Begin(in GpuPass pass)
     {
         DropOpenPass();
         _pass = pass;
+    }
+
+    /// <summary>
+    /// Begins a draw pass, each of its targets used as a colour or depth target.
+    /// </summary>
+    private void BeginDraw(in GpuPass pass)
+    {
+        Begin(pass);
+        foreach (GpuTarget color in pass.Targets.Colors)
+        {
+            Use(color.Texture, GpuAccess.ColorTarget, color.Level);
+        }
+
+        if (pass.Targets.Depth is { } depth)
+            Use(depth.Texture, GpuAccess.DepthTarget, depth.Level);
     }
 
     /// <summary>

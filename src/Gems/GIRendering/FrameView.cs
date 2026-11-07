@@ -9,7 +9,7 @@ namespace Magic.GIRendering;
 /// A view: its targets, all the window's size, and its constants, its matrices, its targets and the frame's tables,
 /// remembering last frame's so a thing that moved carries where it was.
 /// </summary>
-internal sealed class FrameView(IGraphicsApi gpu, GpuResources resources)
+internal sealed class FrameView(GpuResources resources)
 {
     private const float ErrorThresholdPixels = 1;
     private const float SkyBrightness = 0.3f;
@@ -123,7 +123,7 @@ internal sealed class FrameView(IGraphicsApi gpu, GpuResources resources)
                 ? (last.ViewProjection, last.CameraPosition)
                 : (viewProjection, frame.CameraPosition);
         _previous = (viewProjection, frame.CameraPosition, width, height);
-        graph.Upload(gpu, targets.Constants, in frame);
+        graph.Upload(targets.Constants, [frame]);
 
         return made;
     }
@@ -168,39 +168,47 @@ internal sealed class FrameView(IGraphicsApi gpu, GpuResources resources)
         in CullBuffers cull
     )
     {
-        Result<GpuBuffer> constants = resources.TryGetBuffer("Frame constants", FrameConstants.Bytes);
-        Result<GpuTexture> visibilityBuffer = resources.TryGetTexture(
-            "Visibility",
-            width,
-            height,
-            GpuFormat.R32Uint,
-            TextureUsages.ColorTarget | TextureUsages.Sampled
+        Result<GpuBuffer> constants = graph.Buffer(GpuDescriptions.GetBuffer("Frame constants", FrameConstants.Bytes));
+        Result<GpuTexture> visibilityBuffer = graph.Texture(
+            GpuDescriptions.GetTexture(
+                "Visibility",
+                width,
+                height,
+                GpuFormat.R32Uint,
+                TextureUsages.ColorTarget | TextureUsages.Sampled
+            )
         );
-        Result<GpuTexture> depth = resources.TryGetTexture(
-            "Depth",
-            width,
-            height,
-            GpuFormat.D32Sfloat,
-            TextureUsages.DepthTarget | TextureUsages.Sampled
+        Result<GpuTexture> depth = graph.Texture(
+            GpuDescriptions.GetTexture(
+                "Depth",
+                width,
+                height,
+                GpuFormat.D32Sfloat,
+                TextureUsages.DepthTarget | TextureUsages.Sampled
+            )
         );
-        Result<GpuTexture> hzb = resources.TryGetTexture(
-            "Depth pyramid",
-            width,
-            height,
-            GpuFormat.R32Sfloat,
-            levels: TextureDescription.GetFullLevels(width, height)
+        Result<GpuTexture> hzb = graph.Texture(
+            GpuDescriptions.GetTexture(
+                "Depth pyramid",
+                width,
+                height,
+                GpuFormat.R32Sfloat,
+                levels: TextureDescription.GetFullLevels(width, height)
+            )
         );
-        Result<GpuTexture> normal = resources.TryGetTexture("GBuffer normal", width, height, GpuFormat.R16G16Unorm);
-        Result<GpuTexture> baseColor = resources.TryGetTexture("GBuffer base", width, height, GpuFormat.R8G8B8A8Unorm);
-        Result<GpuTexture> surface = resources.TryGetTexture("GBuffer surface", width, height, GpuFormat.R8G8B8A8Unorm);
-        Result<GpuTexture> velocity = resources.TryGetTexture("Velocity", width, height, GpuFormat.R16G16B16A16Sfloat);
-        Result<GpuTexture> hdr = resources.TryGetTexture("HDR", width, height, GpuFormat.R16G16B16A16Sfloat);
-        Result<GpuTexture> output = resources.TryGetTexture(
-            "Output",
-            width,
-            height,
-            GpuFormat.R8G8B8A8Unorm,
-            TextureUsages.Storage | TextureUsages.ColorTarget | TextureUsages.CopySource
+        Result<GpuTexture> normal = graph.Texture(GetTarget("GBuffer normal", GpuFormat.R16G16Unorm));
+        Result<GpuTexture> baseColor = graph.Texture(GetTarget("GBuffer base", GpuFormat.R8G8B8A8Unorm));
+        Result<GpuTexture> surface = graph.Texture(GetTarget("GBuffer surface", GpuFormat.R8G8B8A8Unorm));
+        Result<GpuTexture> velocity = graph.Texture(GetTarget("Velocity", GpuFormat.R16G16B16A16Sfloat));
+        Result<GpuTexture> hdr = graph.Texture(GetTarget("HDR", GpuFormat.R16G16B16A16Sfloat));
+        Result<GpuTexture> output = graph.Texture(
+            GpuDescriptions.GetTexture(
+                "Output",
+                width,
+                height,
+                GpuFormat.R8G8B8A8Unorm,
+                TextureUsages.Storage | TextureUsages.ColorTarget | TextureUsages.CopySource
+            )
         );
         foreach (
             Result asked in (ReadOnlySpan<Result>)
@@ -233,5 +241,8 @@ internal sealed class FrameView(IGraphicsApi gpu, GpuResources resources)
                 graph
             )
         );
+
+        TextureDescription GetTarget(string name, GpuFormat format) =>
+            GpuDescriptions.GetTexture(name, width, height, format);
     }
 }

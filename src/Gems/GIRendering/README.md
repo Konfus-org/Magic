@@ -3,8 +3,8 @@
 Draws the world into the window: every renderer's model, GPU-driven, lit by the sun and the sky. When the console
 asks for a screenshot, it hands the frame as a texture to the gem that writes textures.
 
-To use it, list `GIRendering` in a project's `.magic` file after the GPU provider, the shader compiler, the ECS, the
-model reader and the texture reader.
+To use it, list `GIRendering` in a project's `.magic` file after the GPU provider, the ECS, the model reader and the
+texture reader.
 
 ## What it draws
 
@@ -47,16 +47,16 @@ in turn and exits, so a release ships with the caches full.
 
 `GIRenderingGem.Render` is the frame in order, top to bottom: start there.
 
-- An area is the passes of one part of the frame, which it declares with `GpuPipelines`, or records with the graph's
-  `Compute` by naming a shader entry the GPU provider builds. It keeps only those passes and what it carries from one
-  frame to the next, such as last frame's view.
-- A pass is one `GpuPass.Run` or `RenderGraph.Compute` call saying what it reads and writes, which puts its barriers
-  in. The frame is not drawn until the graph's shaders are built.
+- An area is the passes of one part of the frame, each naming the shader entries the GPU provider builds, which it
+  lists in its `Shaders`. It keeps only those entries and what it carries from one frame to the next, such as last
+  frame's view.
+- A pass is one `RenderGraph.Compute` or `RenderGraph.Draw` call saying what it reads and writes, which puts its
+  barriers in. The frame is not drawn until every area's shaders are built.
 - A texture, material or model asset, or a sampler, comes from `GpuResources`, which makes it on the first ask and
   frees it with the gem, or a model once nothing has asked for it in a while and no renderer drawn holds it. A
   renderer's instance row is built again, asking for its model, when the renderer is written and when a model
   arrives; the material rows its slots are drawn with are made again each frame.
-- Each frame, an area's `Prepare` asks `GpuResources` for its own textures and buffers by description, uploads what
+- Each frame, an area's `Prepare` asks the graph for its own textures and buffers by description, uploads what
   goes in them in the frame's upload pass, and returns their handles. Its `Record` takes what its passes read and
   write as arguments, and `Render` hands the handles on from one area to the next. The same description under a name
   is the same resource, holding what the last frame left in it; another one, as at a new window size, makes it again,

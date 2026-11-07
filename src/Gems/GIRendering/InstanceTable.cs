@@ -139,11 +139,15 @@ internal sealed class InstanceTable(
     /// </summary>
     public Result<(GpuBuffer Rows, GpuBuffer Materials)> Upload(RenderGraph graph)
     {
-        Result<GpuBuffer> rows = resources.TryGetBuffer("Instance table", (long)Capacity * GpuInstance.Bytes);
+        Result<GpuBuffer> rows = graph.Buffer(
+            GpuDescriptions.GetBuffer("Instance table", (long)Capacity * GpuInstance.Bytes)
+        );
         if (!rows.Ok)
             return Result.Failure(rows.Error);
 
-        Result<GpuBuffer> materials = resources.TryGetBuffer("Material table", (long)Capacity * GpuMaterial.Bytes);
+        Result<GpuBuffer> materials = graph.Buffer(
+            GpuDescriptions.GetBuffer("Material table", (long)Capacity * GpuMaterial.Bytes)
+        );
         if (!materials.Ok)
             return Result.Failure(materials.Error);
 
@@ -153,7 +157,7 @@ internal sealed class InstanceTable(
             resources.Get(_materialSlots[row], out _materialRows[row]);
         }
 
-        graph.Upload(gpu, materials.Value, _materialRows.AsSpan(0, _materialSlots.Count));
+        graph.Upload(materials.Value, _materialRows.AsSpan(0, _materialSlots.Count));
         UploadChangedRows(graph, rows.Value);
 
         return Result.Success((rows.Value, materials.Value));

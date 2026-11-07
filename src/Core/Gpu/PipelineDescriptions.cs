@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Magic.Shaders;
 
 namespace Magic.Gpu;
 
@@ -108,4 +109,17 @@ public readonly record struct GraphicsPipelineDescription
     public CullMode Cull { get; init; } = CullMode.Back;
 
     public string Name { get; init; } = string.Empty;
+}
+
+/// <summary>
+/// A draw pass's shaders and fixed state, which the GPU provider builds into a pipeline for the formats of the targets
+/// the pass draws into.
+/// </summary>
+public readonly record struct DrawShaders(ShaderEntry Vertex, ShaderEntry Pixel)
+{
+    public DepthMode Depth { get; init; }
+
+    public BlendMode Blend { get; init; }
+
+    public CullMode Cull { get; init; } = CullMode.Back;
 }
