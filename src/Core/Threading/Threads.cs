@@ -7,7 +7,7 @@ namespace Magic.Threading;
 /// <summary>
 /// The engine's threads, as somewhere work can be posted (<see cref="Post"/>) or an awaited flow can step onto:
 /// <c>await threads.Enter(EngineThread.Game)</c> goes on there, as that thread next pumps. For a flow whose steps must be
-/// there, such as an awaited pipeline. It makes and ends the engine's threads but the game thread
+/// there, such as an awaited pipeline. It makes and ends the engine's threads but the platform thread
 /// (<see cref="Start"/>). Any thread, but where a member says otherwise.
 /// </summary>
 public sealed class Threads
@@ -25,12 +25,12 @@ public sealed class Threads
     private readonly Thread?[] _running;
 
     /// <summary>
-    /// Made on the process's first thread, which it names and takes as the game thread, and as every engine thread
+    /// Made on the process's first thread, which it names and takes as the platform thread, and as every engine thread
     /// until one is started.
     /// </summary>
     internal Threads()
     {
-        Thread.CurrentThread.Name ??= nameof(EngineThread.Game);
+        Thread.CurrentThread.Name ??= nameof(EngineThread.Platform);
         int count = Enum.GetValues<EngineThread>().Length;
         _threadIds = new int[count];
         Array.Fill(_threadIds, Environment.CurrentManagedThreadId);

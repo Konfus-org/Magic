@@ -4,7 +4,7 @@ namespace Magic.Platform;
 
 /// <summary>
 /// The window the game draws into, which a platform gem opens. Its title and icon are the game thread's, and a new title
-/// or icon reaches the OS once the gem gets to it. Its size is written whole on the game thread and read from any.
+/// or icon reaches the OS once the gem gets to it. Its size is written whole on the platform thread and read from any.
 /// </summary>
 public interface IWindow
 {

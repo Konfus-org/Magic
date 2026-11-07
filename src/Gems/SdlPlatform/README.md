@@ -1,7 +1,7 @@
 # SdlPlatform
 
 The window, clipboard and input, through [SDL3](https://github.com/libsdl-org/SDL). Provides `IWindow`, `IClipboard`
-and `IInput`.
+and `IInput`, and pumps the OS's events on the platform thread (`IPlatform`).
 
 To use it, list `SdlPlatform` in a project's `.magic` file.
 
@@ -10,5 +10,6 @@ To use it, list `SdlPlatform` in a project's `.magic` file.
 - Mouse position and motion are in window pixels. The wheel is in notches.
 - Gamepads use SDL's standard layout. Sticks go from -1 to 1 with up positive. Triggers go from 0 to 1.
 - The window's title is the project's name, and its icon the default one until `Icon` is set. Closing the window ends the run.
-- The window and clipboard's members are the game thread's, and throw on any other. The window's size is read from any.
+- The window and clipboard's members are the game thread's, and throw on any other; what is set reaches the OS on the
+  platform thread's next pump. The window's size is read from any.
 - Headless, it opens no window and needs no display. Only gamepads give input, and the clipboard's text stays in the gem.

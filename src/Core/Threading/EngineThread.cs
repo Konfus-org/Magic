@@ -7,6 +7,12 @@ namespace Magic.Threading;
 public enum EngineThread : byte
 {
     /// <summary>
+    /// The process's first thread, which the OS gives its window and events to: it pumps them, and hands the game
+    /// thread the input they make.
+    /// </summary>
+    Platform,
+
+    /// <summary>
     /// What the frames run on, and where the ECS and the gems' hooks but Render are.
     /// </summary>
     Game,

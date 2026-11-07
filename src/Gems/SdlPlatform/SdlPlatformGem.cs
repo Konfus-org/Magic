@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
+using System.Threading.Channels;
 using Magic.Assets;
 using Magic.Debugging;
 using Magic.Input;
@@ -21,17 +22,24 @@ namespace Magic.SdlPlatform;
 /// gamepads into <see cref="IInput"/>'s controls and typed text. Headless, it opens no window, keeps the clipboard's text
 /// to itself and reads gamepads only: keyboards and mice need a window to type and point into.
 /// <para>
-/// SDL's windows and events belong to the process's first thread, the game thread, which everything here runs on:
-/// <see cref="Update"/> applies SDL's events to the controls, before any gem that takes the input runs, as they are
-/// made after this one, so input stays fixed for the rest of a frame. It is public because nothing in its assembly
-/// makes it: Magic does, by reflection, when a project lists the gem.
+/// SDL's windows and events belong to the process's first thread, the platform thread, which makes the gem and pumps
+/// SDL's events (<see cref="Pump"/>), handing them to the game thread as they came. <see cref="Update"/> applies them to
+/// the controls there, before any gem that takes the input runs, as they are made after this one, so input stays fixed
+/// for the rest of a frame. What the game thread sets on the window and clipboard is handed to the platform thread
+/// the same way. It is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists
+/// the gem.
 /// </para>
 /// </summary>
-public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposable
+public sealed class SdlPlatformGem : IGem, IPlatform, IWindow, IClipboard, IInput, IDisposable
 {
     private const int InitialWidth = 1280;
 
     private const int InitialHeight = 720;
+
+    /// <summary>
+    /// The longest a pump waits for the OS's next event, so what was handed to the platform thread is never kept longer.
+    /// </summary>
+    private const int PumpWaitMs = 10;
 
     /// <summary>
     /// How far a stick moves from its centre before it counts, as a part of its full deflection.
@@ -77,6 +85,35 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
     /// </summary>
     private readonly unsafe void* _metalView;
 
+    /// <summary>
+    /// SDL's events, pumped on the platform thread and applied on the game thread, each with the text SDL holds only until
+    /// the platform thread's next pump: the name of the keyboard or mouse it adds, or what was typed.
+    /// </summary>
+    private readonly Channel<(SDL_Event Event, string Text)> _events = Channel.CreateUnbounded<(SDL_Event, string)>(
+        new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
+    );
+
+    /// <summary>
+    /// What the game thread set on the window and clipboard, each written whole and taken by the platform thread's next
+    /// pump; null once taken.
+    /// </summary>
+    private string? _titleToShow;
+
+    private string? _clipboardToSet;
+
+    /// <summary>
+    /// Window pixels to SDL's points, written whole by each pump for the game thread's mouse motion.
+    /// </summary>
+    private float _pixelDensity = 1;
+
+    /// <summary>
+    /// The window's size in pixels, read by the platform thread as the window opens and on each pump, and written whole
+    /// for any thread; 0 when headless.
+    /// </summary>
+    private int _width;
+
+    private int _height;
+
     private string _title;
 
     private string _clipboard = string.Empty;
@@ -117,6 +154,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
             _metalView = SDL_Metal_CreateView(_window);
 
         Handle = ReadHandle();
+        ReadSize();
 
         // Typed characters come as text events only while text input is on: always, as a desktop has no on-screen
         // keyboard for it to bring up.
@@ -130,7 +168,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
         uint* keyboards = SDL_GetKeyboards(&keyboardsCount);
         for (int i = 0; i < keyboardsCount; i++)
         {
-            GetOrAddDevice(DeviceKind.Keyboard, keyboards[i]);
+            GetOrAddDevice(DeviceKind.Keyboard, keyboards[i], CString.Read(SDL_GetKeyboardNameForID(keyboards[i])));
         }
 
         SDL_free(keyboards);
@@ -139,27 +177,21 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
         uint* mice = SDL_GetMice(&miceCount);
         for (int i = 0; i < miceCount; i++)
         {
-            GetOrAddDevice(DeviceKind.Mouse, mice[i]);
+            GetOrAddDevice(DeviceKind.Mouse, mice[i], CString.Read(SDL_GetMouseNameForID(mice[i])));
         }
 
         SDL_free(mice);
         Icon = assets.GetDefault<Icon>();
     }
 
-    public unsafe string Title
+    public string Title
     {
         get => _title;
         set
         {
             ThrowIfNotOnGame();
             _title = value;
-            if (_window == null)
-                return;
-
-            fixed (byte* text = CString.ToBytes(value))
-            {
-                SDL_SetWindowTitle(_window, text);
-            }
+            Volatile.Write(ref _titleToShow, value);
         }
     }
 
@@ -181,30 +213,12 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
     /// <summary>
     /// 0 when headless.
     /// </summary>
-    public unsafe int Width
-    {
-        get
-        {
-            int width = 0;
-            SDL_GetWindowSizeInPixels(_window, &width, null);
-
-            return width;
-        }
-    }
+    public int Width => Volatile.Read(ref _width);
 
     /// <summary>
     /// 0 when headless.
     /// </summary>
-    public unsafe int Height
-    {
-        get
-        {
-            int height = 0;
-            SDL_GetWindowSizeInPixels(_window, null, &height);
-
-            return height;
-        }
-    }
+    public int Height => Volatile.Read(ref _height);
 
     public WindowHandle Handle { get; }
 
@@ -215,18 +229,13 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
     /// </summary>
     unsafe string IClipboard.Text
     {
-        get => _clipboard;
+        get => Volatile.Read(ref _clipboard);
         set
         {
             ThrowIfNotOnGame();
-            _clipboard = value;
-            if (_window == null)
-                return;
-
-            fixed (byte* text = CString.ToBytes(value))
-            {
-                SDL_SetClipboardText(text);
-            }
+            Volatile.Write(ref _clipboard, value);
+            if (_window != null)
+                Volatile.Write(ref _clipboardToSet, value);
         }
     }
 
@@ -310,7 +319,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
         }
 
         _text = string.Empty;
-        PollEvents();
+        ApplyEvents();
 
         // Sticks and triggers as they stand now, rather than added up from events.
         foreach ((uint id, nint gamepad) in _gamepads)
@@ -321,6 +330,55 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
                 SetState(states, control, sign * ToStick(SDL_GetGamepadAxis((SDL_Gamepad*)gamepad, axis)));
             }
         }
+    }
+
+    /// <summary>
+    /// Gives the window and clipboard what the game thread set, then hands the game thread SDL's events since the last
+    /// pump, waiting up to <see cref="PumpWaitMs"/> for one when there are none. Platform thread.
+    /// </summary>
+    public unsafe void Pump()
+    {
+        if (_window != null)
+        {
+            if (Interlocked.Exchange(ref _titleToShow, null) is { } title)
+            {
+                fixed (byte* text = CString.ToBytes(title))
+                {
+                    SDL_SetWindowTitle(_window, text);
+                }
+            }
+
+            if (Interlocked.Exchange(ref _clipboardToSet, null) is { } clipboard)
+            {
+                fixed (byte* text = CString.ToBytes(clipboard))
+                {
+                    SDL_SetClipboardText(text);
+                }
+            }
+
+            Volatile.Write(ref _pixelDensity, SDL_GetWindowPixelDensity(_window));
+            ReadSize();
+        }
+
+        SDL_Event sdlEvent;
+        if (!SDL_WaitEventTimeout(&sdlEvent, PumpWaitMs))
+            return;
+
+        do
+        {
+            SDL_EventType type = (SDL_EventType)sdlEvent.type;
+            string text = string.Empty;
+            if (type == SDL_EVENT_KEYBOARD_ADDED)
+                text = CString.Read(SDL_GetKeyboardNameForID(sdlEvent.kdevice.which));
+            else if (type == SDL_EVENT_MOUSE_ADDED)
+                text = CString.Read(SDL_GetMouseNameForID(sdlEvent.mdevice.which));
+            else if (type == SDL_EVENT_TEXT_INPUT)
+                text = CString.Read(sdlEvent.text.text);
+            else if (type == SDL_EVENT_CLIPBOARD_UPDATE)
+                Volatile.Write(ref _clipboard, ReadClipboard());
+
+            _events.Writer.TryWrite((sdlEvent, text));
+        } while (SDL_PollEvent(&sdlEvent));
     }
 
     /// <summary>
@@ -375,18 +433,19 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
     }
 
     /// <summary>
-    /// Applies SDL's events since the last frame to the devices and their controls, in the order they happened.
+    /// Applies SDL's events the platform thread handed over since the last frame to the devices and their controls, in
+    /// the order they happened.
     /// </summary>
     [SuppressMessage(
         "Style",
         "IDE0010:Add missing cases",
         Justification = "SDL has far more events than the gem reads; the rest are ignored on purpose."
     )]
-    private unsafe void PollEvents()
+    private unsafe void ApplyEvents()
     {
-        SDL_Event sdlEvent;
-        while (SDL_PollEvent(&sdlEvent))
+        while (_events.Reader.TryRead(out (SDL_Event Event, string Text) pumped))
         {
+            SDL_Event sdlEvent = pumped.Event;
             switch ((SDL_EventType)sdlEvent.type)
             {
                 case SDL_EVENT_QUIT:
@@ -394,13 +453,13 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
                     _app.Exit();
                     break;
                 case SDL_EVENT_KEYBOARD_ADDED:
-                    GetOrAddDevice(DeviceKind.Keyboard, sdlEvent.kdevice.which);
+                    GetOrAddDevice(DeviceKind.Keyboard, sdlEvent.kdevice.which, pumped.Text);
                     break;
                 case SDL_EVENT_KEYBOARD_REMOVED:
                     RemoveDevice(DeviceKind.Keyboard, sdlEvent.kdevice.which);
                     break;
                 case SDL_EVENT_MOUSE_ADDED:
-                    GetOrAddDevice(DeviceKind.Mouse, sdlEvent.mdevice.which);
+                    GetOrAddDevice(DeviceKind.Mouse, sdlEvent.mdevice.which, pumped.Text);
                     break;
                 case SDL_EVENT_MOUSE_REMOVED:
                     RemoveDevice(DeviceKind.Mouse, sdlEvent.mdevice.which);
@@ -415,7 +474,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
                 case SDL_EVENT_KEY_UP:
                     if (!sdlEvent.key.repeat && sdlEvent.key.scancode.Control is { } key)
                         SetState(
-                            GetOrAddDevice(DeviceKind.Keyboard, sdlEvent.key.which),
+                            GetOrAddDevice(DeviceKind.Keyboard, sdlEvent.key.which, string.Empty),
                             key,
                             sdlEvent.key.down ? 1 : 0
                         );
@@ -426,7 +485,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
                     if (SdlControlExtensions.ToMouseControl(sdlEvent.button.button) is { } button)
                     {
                         SetState(
-                            GetOrAddDevice(DeviceKind.Mouse, sdlEvent.button.which),
+                            GetOrAddDevice(DeviceKind.Mouse, sdlEvent.button.which, string.Empty),
                             button,
                             sdlEvent.button.down ? 1 : 0
                         );
@@ -436,8 +495,8 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
                 case SDL_EVENT_MOUSE_MOTION:
                 {
                     // SDL's points as window pixels; motion and wheel count up over the frame.
-                    float density = SDL_GetWindowPixelDensity(_window);
-                    ControlState[] mouse = GetOrAddDevice(DeviceKind.Mouse, sdlEvent.motion.which);
+                    float density = Volatile.Read(ref _pixelDensity);
+                    ControlState[] mouse = GetOrAddDevice(DeviceKind.Mouse, sdlEvent.motion.which, string.Empty);
                     SetState(mouse, Control.MouseX, sdlEvent.motion.x * density);
                     SetState(mouse, Control.MouseY, sdlEvent.motion.y * density);
                     SetState(
@@ -458,7 +517,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
                 {
                     // A wheel the OS flips (natural scrolling) is flipped back, so away from the player is positive on
                     // every system.
-                    ControlState[] mouse = GetOrAddDevice(DeviceKind.Mouse, sdlEvent.wheel.which);
+                    ControlState[] mouse = GetOrAddDevice(DeviceKind.Mouse, sdlEvent.wheel.which, string.Empty);
                     float direction = sdlEvent.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1 : 1;
                     SetState(
                         mouse,
@@ -475,10 +534,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
                 }
 
                 case SDL_EVENT_TEXT_INPUT:
-                    _text += CString.Read(sdlEvent.text.text);
-                    break;
-                case SDL_EVENT_CLIPBOARD_UPDATE:
-                    _clipboard = ReadClipboard();
+                    _text += pumped.Text;
                     break;
                 case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
                 case SDL_EVENT_GAMEPAD_BUTTON_UP:
@@ -516,18 +572,14 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
     }
 
     /// <summary>
-    /// A keyboard's or mouse's controls, adding it, named as SDL names it, the first time it is heard of: input can
-    /// arrive before its device does, and some from no device at all (id 0).
+    /// A keyboard's or mouse's controls, adding it as <paramref name="name"/> the first time it is heard of: input can
+    /// arrive before its device does, unnamed, and some from no device at all (id 0).
     /// </summary>
-    private unsafe ControlState[] GetOrAddDevice(DeviceKind kind, uint id)
+    private ControlState[] GetOrAddDevice(DeviceKind kind, uint id, string name)
     {
         int index = FindIndex(kind, id);
-        if (index >= 0)
-            return _controls[index];
 
-        byte* name = kind == DeviceKind.Keyboard ? SDL_GetKeyboardNameForID(id) : SDL_GetMouseNameForID(id);
-
-        return AddDevice(kind, id, CString.Read(name));
+        return index >= 0 ? _controls[index] : AddDevice(kind, id, name);
     }
 
     /// <summary>
@@ -580,7 +632,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
     }
 
     /// <summary>
-    /// Loads <paramref name="icon"/> and its image on workers, then gives the image to the window on the game thread,
+    /// Loads <paramref name="icon"/> and its image on workers, then gives the image to the window on the platform thread,
     /// unless the run ended or another icon was set meanwhile. One that does not load is a warning, and the window keeps
     /// what it shows.
     /// </summary>
@@ -601,7 +653,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
             return;
         }
 
-        await _threads.Enter(EngineThread.Game);
+        await _threads.Enter(EngineThread.Platform);
         if (!lifetime.IsCancellationRequested && Icon == icon)
             SetIcon(image.Value);
     }
@@ -633,6 +685,18 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
 
             SDL_DestroySurface(surface);
         }
+    }
+
+    /// <summary>
+    /// The window's size in pixels, written whole for any thread to read. Platform thread.
+    /// </summary>
+    private unsafe void ReadSize()
+    {
+        int width = 0;
+        int height = 0;
+        SDL_GetWindowSizeInPixels(_window, &width, &height);
+        Volatile.Write(ref _width, width);
+        Volatile.Write(ref _height, height);
     }
 
     /// <summary>

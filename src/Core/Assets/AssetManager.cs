@@ -478,7 +478,7 @@ public sealed class AssetManager : IDisposable
     /// <summary>
     /// Adds <paramref name="directory"/> to the asset directories, after those added before it, which win a path it shares
     /// with them, and before Magic's built-in one, which all of them win over; and indexes them, so what it holds is found
-    /// from now on, and watches it. One that does not exist, or is added already, is left out. Main thread.
+    /// from now on, and watches it. One that does not exist, or is added already, is left out. Game thread.
     /// </summary>
     internal void Register(string directory)
     {
@@ -563,7 +563,7 @@ public sealed class AssetManager : IDisposable
     /// <summary>
     /// Has a load of an asset type one of <paramref name="gems"/> reads, as its <see cref="IAssetImporter{T}"/>s say,
     /// wait for that gem until it registers (<see cref="Register(object)"/>) or is not made (<see cref="Drop"/>), as a
-    /// gem made before it may load one. Main thread.
+    /// gem made before it may load one. Game thread.
     /// </summary>
     internal void Expect(IEnumerable<Type> gems)
     {
@@ -579,7 +579,7 @@ public sealed class AssetManager : IDisposable
 
     /// <summary>
     /// Stops waiting for <paramref name="gem"/>, which was not made: what was asked for as a type only it would read is
-    /// read now, and fails as a type no gem reads. Main thread.
+    /// read now, and fails as a type no gem reads. Game thread.
     /// </summary>
     internal void Drop(Type gem)
     {

@@ -389,6 +389,12 @@ internal sealed class Gems : IDisposable
                 loaded.Ends.Add(new Subscription(() => _app.Window = null));
             }
 
+            if (made is IPlatform platform)
+            {
+                _app.Platform = platform;
+                loaded.Ends.Add(new Subscription(() => _app.Platform = null));
+            }
+
             if (made is ILogSink sink)
                 loaded.Ends.Add(Log.Register(sink));
 

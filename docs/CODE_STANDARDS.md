@@ -47,6 +47,8 @@ Write the engine as data flowing through functions, not objects calling each oth
   project lists them, and disposed in reverse.
 - A hook is what the engine calls on a gem each frame: `IGem`'s `Update`, `FixedUpdate`, `LateUpdate` and `Render`, in
   that order over the gems. `Render` runs on the render thread, which owns the GPU, and the others on the game thread.
+  The platform thread, the process's first, pumps the OS's window and events through the gem that implements
+  `IPlatform`, which hands the game thread the input they make as data.
   `Render` records into the frame's `RenderGraph`, each pass in its `RenderLayer`, and Core hands it to the GPU provider
   once every gem has.
   `LateUpdate` hands `Render` what it draws as data, the newest through a `Mailbox<T>` and what must not be lost
@@ -96,7 +98,8 @@ Write the engine as data flowing through functions, not objects calling each oth
 - Nothing blocks the game or render thread: no `.Result`, `.Wait()` or `.GetAwaiter().GetResult()`, and no waiting on
   the other engine thread. Two waits are allowed, each with a comment saying so: at a boundary where every thread it
   could hold up has ended, and Core's game thread waiting at the end of a frame until the render thread has drawn the
-  frame before. The render thread never waits for the game thread.
+  frame before. The render thread never waits for the game thread. The platform thread waits on the OS for its next
+  event.
 - A worker hands an engine thread data (a message, a `Channel<T>`, a value written whole) or work
   (`Threads.Post`). No locks on collections two threads share.
 - Background work is a task. `Threads` is for the engine's own threads.

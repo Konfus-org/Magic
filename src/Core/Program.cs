@@ -15,6 +15,11 @@ namespace Magic;
 
 internal static class Program
 {
+    /// <summary>
+    /// How long the platform thread waits between looks at what was posted to it, with no platform gem to wait on the OS.
+    /// </summary>
+    private static readonly TimeSpan _platformWait = TimeSpan.FromMilliseconds(10);
+
     private static readonly Histogram<double> _stepDuration = Metrics.Meter.CreateHistogram<double>(
         Metrics.StepDuration,
         "s",
@@ -112,28 +117,19 @@ internal static class Program
                 app.Exit();
             }
 
+            // The frames run on the game thread, while this one, the platform thread, pumps the OS's events until the
+            // run ends; then the game thread's last frame finishes, and this thread is the game thread for what ends.
+            threads.Start(EngineThread.Game, () => RunFrame(app, world, gems, cli));
             while (!app.Lifetime.IsCancellationRequested)
             {
-                // Under --fail-on-error, the first error logged ends the run; the exit code says so below.
-                if (app.HasFailed)
-                {
-                    app.Exit();
-                    continue;
-                }
-
-                // Core's own steps are timed for whatever listens; the gems' pump times its hooks itself.
-                long start = _stepDuration.Start();
-                threads.Pump(EngineThread.Game);
-                _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "Threads"));
-                start = _stepDuration.Start();
-                world.Pump();
-                _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "World"));
-                gems.Pump();
-                start = _stepDuration.Start();
-                cli.Pump();
-                _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "Commands"));
+                threads.Pump(EngineThread.Platform);
+                if (app.Platform is { } platform)
+                    platform.Pump();
+                else
+                    app.Lifetime.WaitHandle.WaitOne(_platformWait);
             }
 
+            threads.Stop(EngineThread.Game);
             if (app.HasFailed)
                 return ExitFailed();
 
@@ -144,6 +140,27 @@ internal static class Program
             Log.Info($"Closing {project.Name} and {(app.IsExiting ? "exiting" : "restarting")}.");
             if (app.IsExiting)
                 return 0;
+        }
+
+        // One frame on the game thread, after what was posted to it: Core's own steps are timed for whatever listens, and
+        // the gems' pump times its hooks itself. Under --fail-on-error, the first error logged ends the run; the exit
+        // code says so.
+        static void RunFrame(App app, World world, Gems gems, Cli cli)
+        {
+            if (app.HasFailed)
+                app.Exit();
+
+            // The platform thread ends the game thread once it next wakes; until then no frame runs for an ended run.
+            if (app.Lifetime.IsCancellationRequested)
+                return;
+
+            long start = _stepDuration.Start();
+            world.Pump();
+            _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "World"));
+            gems.Pump();
+            start = _stepDuration.Start();
+            cli.Pump();
+            _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "Commands"));
         }
 
         static int ExitFailed()

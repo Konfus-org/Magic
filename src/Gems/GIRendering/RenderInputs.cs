@@ -4,8 +4,8 @@ using Magic.Ecs.Components;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// Everything a frame draws, copied on the main thread as its frame ends and published for the render thread, which
-/// reads nothing else of the main thread's. Filled whole each time, into the same lists.
+/// Everything a frame draws, copied on the game thread as its frame ends and published for the render thread, which
+/// reads nothing else of the game thread's. Filled whole each time, into the same lists.
 /// </summary>
 internal sealed class RenderInputs
 {
