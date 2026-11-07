@@ -16,5 +16,6 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" PrivateAssets="all" />
     <PackageReference Include="System.CommandLine" PrivateAssets="all" />
     <PackageReference Include="System.IO.Hashing" PrivateAssets="all" />
+    <PackageReference Include="SystemTextJson.JsonDiffPatch" PrivateAssets="all" />
   </ItemGroup>
 </Project>

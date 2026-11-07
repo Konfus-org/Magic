@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using Arch.Core;
 using Magic.Ecs;
 using Magic.Projects;
+using Magic.Threading;
 using ArchEntity = Arch.Core.Entity;
 using ArchWorld = Arch.Core.World;
 using Entity = Magic.Ecs.Entity;
@@ -12,7 +13,7 @@ using Entity = Magic.Ecs.Entity;
 namespace Magic.ArchEcs;
 
 /// <summary>
-/// The entity world, in one Arch world, on the thread that made the gem. Entities are Arch's, bit for bit, and
+/// The entity world, in one Arch world, on the game thread. Entities are Arch's, bit for bit, and
 /// components live in Arch's chunks, so a query hands out spans straight over them and allocates nothing. Arch trusts
 /// its caller, so this gem checks what Arch would let go wrong silently (a dead entity, a structural change during a
 /// loop, a call from another thread) and throws instead. It is public because nothing in its assembly makes it: Magic
@@ -23,9 +24,9 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     private readonly ArchWorld _world;
 
     /// <summary>
-    /// The thread that made the gem, the only one that may change the world.
+    /// Which thread is the game thread, the only one that may change the world.
     /// </summary>
-    private readonly int _worldThreadId;
+    private readonly Threads _threads;
 
     /// <summary>
     /// One walk per query, by the type of chunk it hands out, made the first time the query is asked for and reused.
@@ -49,7 +50,7 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     /// </summary>
     private long _version = 1;
 
-    public ArchEcsGem()
+    public ArchEcsGem(Threads threads)
     {
         // An entity becomes Arch's and back by reinterpreting its bits, so an Arch that laid its own out differently
         // would scramble every handle.
@@ -61,7 +62,7 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
             );
         }
 
-        _worldThreadId = Environment.CurrentManagedThreadId;
+        _threads = threads;
         _world = ArchWorld.Create();
     }
 
@@ -305,11 +306,11 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
 
     private void ThrowIfNotWorldThread()
     {
-        if (Environment.CurrentManagedThreadId == _worldThreadId)
+        if (_threads.IsCurrent(EngineThread.Game))
             return;
 
         throw new InvalidOperationException(
-            "The entity world is used from the thread that made it: hand it what another thread built as data."
+            "The entity world is the game thread's: hand it what another thread built as data."
         );
     }
 

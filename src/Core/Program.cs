@@ -1,6 +1,6 @@
 using System.Diagnostics.Metrics;
 using System.Runtime;
-using Magic.Caching;
+using Magic.Assets;
 using Magic.CommandLine;
 using Magic.Debugging;
 using Magic.Events;
@@ -15,6 +15,11 @@ namespace Magic;
 
 internal static class Program
 {
+    /// <summary>
+    /// How long the platform thread waits between looks at what was posted to it, with no platform gem to wait on the OS.
+    /// </summary>
+    private static readonly TimeSpan _platformWait = TimeSpan.FromMilliseconds(10);
+
     private static readonly Histogram<double> _stepDuration = Metrics.Meter.CreateHistogram<double>(
         Metrics.StepDuration,
         "s",
@@ -43,9 +48,9 @@ internal static class Program
     {
         Log.Verbose($"Command line args: {string.Join(", ", commandLine)}");
 
-        // What outlasts a run: the app, which the commands set, and the world the last run kept.
+        // What outlasts a run: the app, which the commands set, and the world as the last run saved it.
         using App app = new();
-        byte[]? kept = null;
+        Task<Result<byte[]>>? worldRestorePoint = null;
         bool isLaunching = true;
 
         // One pass per run, all new for it: a typed command that asks for another project or mode, or a change to a gem's
@@ -56,7 +61,7 @@ internal static class Program
             EventCoordinator events = new();
             Threads threads = new();
             Caches caches = new(files, app);
-            using Assets assets = new(files, caches, events, app);
+            using AssetManager assets = new(files, caches, events, app);
             using World world = new(assets, files, events, threads, app);
             Cli cli = new(app, files, events, assets, world);
 
@@ -101,7 +106,7 @@ internal static class Program
 
             app.StartRun();
             using Gems gems = new(registered, provider, app, files, assets, world, events, threads);
-            world.StartAsync(kept, app.Lifetime).FireAndForget();
+            world.StartAsync(worldRestorePoint?.WaitAsync(app.Lifetime), app.Lifetime).FireAndForget();
 
             // If we don't have a window and aren't headless something is wrong, early out.
             if (!app.IsHeadless && app.Window is null)
@@ -112,38 +117,50 @@ internal static class Program
                 app.Exit();
             }
 
+            // The frames run on the game thread, while this one, the platform thread, pumps the OS's events until the
+            // run ends; then the game thread's last frame finishes, and this thread is the game thread for what ends.
+            threads.Start(EngineThread.Game, () => RunFrame(app, world, gems, cli));
             while (!app.Lifetime.IsCancellationRequested)
             {
-                // Under --fail-on-error, the first error logged ends the run; the exit code says so below.
-                if (app.HasFailed)
-                {
-                    app.Exit();
-                    continue;
-                }
-
-                // Core's own steps are timed for whatever listens; the gems' pump times its hooks itself.
-                long start = _stepDuration.Start();
-                threads.Pump(EngineThread.Main);
-                _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "Threads"));
-                start = _stepDuration.Start();
-                world.Pump();
-                _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "World"));
-                gems.Pump();
-                start = _stepDuration.Start();
-                cli.Pump();
-                _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "Commands"));
+                threads.Pump(EngineThread.Platform);
+                if (app.Platform is { } platform)
+                    platform.Pump();
+                else
+                    app.Lifetime.WaitHandle.WaitOne(_platformWait);
             }
 
+            threads.Stop(EngineThread.Game);
             if (app.HasFailed)
                 return ExitFailed();
 
-            // The world is kept while the gems are still whole, for a restart of this same project; they end as this pass
+            // The world is saved while the gems are still whole, for a restart of this same project; they end as this pass
             // does, last made first.
-            kept = app.IsExiting || app.Project != project ? null : world.Keep();
+            worldRestorePoint = app.IsExiting || app.Project != project ? null : world.SaveAsync();
 
             Log.Info($"Closing {project.Name} and {(app.IsExiting ? "exiting" : "restarting")}.");
             if (app.IsExiting)
                 return 0;
+        }
+
+        // One frame on the game thread, after what was posted to it: Core's own steps are timed for whatever listens, and
+        // the gems' pump times its hooks itself. Under --fail-on-error, the first error logged ends the run; the exit
+        // code says so.
+        static void RunFrame(App app, World world, Gems gems, Cli cli)
+        {
+            if (app.HasFailed)
+                app.Exit();
+
+            // The platform thread ends the game thread once it next wakes; until then no frame runs for an ended run.
+            if (app.Lifetime.IsCancellationRequested)
+                return;
+
+            long start = _stepDuration.Start();
+            world.Pump();
+            _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "World"));
+            gems.Pump();
+            start = _stepDuration.Start();
+            cli.Pump();
+            _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "Commands"));
         }
 
         static int ExitFailed()

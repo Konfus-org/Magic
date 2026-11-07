@@ -74,6 +74,11 @@ public sealed class App : IDisposable
     public CancellationToken Lifetime => _lifetime.Token;
 
     /// <summary>
+    /// What pumps the OS's events on the platform thread: the gem's that provides it, for as long as the run lasts.
+    /// </summary>
+    internal IPlatform? Platform { get; set; }
+
+    /// <summary>
     /// Whether --fail-on-error has seen its error.
     /// </summary>
     internal bool HasFailed => ShouldExitOnError && Log.ErrorCount > 0;

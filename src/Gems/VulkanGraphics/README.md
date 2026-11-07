@@ -4,7 +4,13 @@ The GPU through Vulkan 1.3: provides `IGraphicsApi`. Resources go into one bindl
 the id in a handle. A frame is one `GpuCommands` value, which the gems record into Core's graph and Core presents here;
 it puts in the barriers each pass's uses need, from what each resource was last used as.
 
-To use it, list `VulkanGraphics` in a project's `.magic` file after the gem that provides the window.
+To use it, list `VulkanGraphics` in a project's `.magic` file after the gems that provide the window and the shader
+compiler.
+
+- A texture the graph names is made on the first ask and kept while its name is asked for with the same description;
+  another description makes it again.
+- A compute pass the graph records with a shader entry runs that entry, compiled through the shader compiler and built
+  on the first ask. The pass is left out of frames until then; a shader that fails is logged, and its passes stay out.
 
 - The GPU is the fastest one with Vulkan 1.3, bindless descriptors and dynamic rendering that can show the window;
   the log names it as the run starts. Mesh shaders, ray queries and 64-bit atomics are noted in `GpuFeatures` when

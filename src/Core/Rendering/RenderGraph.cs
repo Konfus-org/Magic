@@ -1,6 +1,8 @@
 using System.Collections.Immutable;
 using Magic.Debugging;
 using Magic.Gpu;
+using Magic.Shaders;
+using Magic.Utils;
 
 namespace Magic.Rendering;
 
@@ -15,10 +17,51 @@ public sealed class RenderGraph
     private static readonly RenderLayer[] _layers = Enum.GetValues<RenderLayer>();
 
     private readonly List<GpuPass> _passes = [];
+
     private readonly ImmutableArray<GpuUse>.Builder _uses = ImmutableArray.CreateBuilder<GpuUse>();
+
     private readonly ImmutableArray<GpuCommand>.Builder _commands = ImmutableArray.CreateBuilder<GpuCommand>();
 
     private GpuPass? _pass;
+
+    /// <summary>
+    /// The GPU provider the graph's names resolve through, set by Core once the gems are loaded; none while
+    /// no gem provides the GPU.
+    /// </summary>
+    internal IGraphicsApi? Gpu { get; set; }
+
+    /// <summary>
+    /// The texture under the description's name, made by the GPU provider on the first ask and kept while the same
+    /// description is asked for, its heap id known at once to write into constants.
+    /// </summary>
+    public Result<GpuTexture> Texture(in TextureDescription description) =>
+        Gpu?.GetTexture(description) ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
+
+    /// <summary>
+    /// Whether the GPU provider has built <paramref name="shader"/>, the first ask starting it; failed while there is no
+    /// provider.
+    /// </summary>
+    public GpuState GetState(in ShaderEntry shader) => Gpu?.GetState(shader) ?? GpuState.Failed;
+
+    /// <summary>
+    /// Begins a compute pass running <paramref name="shader"/> with <paramref name="constants"/> pushed to it: say what
+    /// it reads and writes on what this returns, then dispatch, which ends it. The GPU provider leaves the pass out of a
+    /// frame while the shader is not built.
+    /// </summary>
+    public ComputePass Compute(string name, in ShaderEntry shader, in GpuConstants constants)
+    {
+        Begin(
+            new()
+            {
+                Name = name,
+                Kind = GpuPassKind.Compute,
+                Shader = shader,
+            }
+        );
+        PushConstants(constants);
+
+        return new ComputePass(this);
+    }
 
     public void BeginComputePass(string name, RenderLayer layer = RenderLayer.Picture) =>
         Begin(
@@ -327,6 +370,21 @@ public sealed class RenderGraph
                 Offset = offset,
                 Size = bytes,
                 X = value,
+            }
+        );
+
+    /// <summary>
+    /// A thread for each of <paramref name="x"/> by <paramref name="y"/> by <paramref name="z"/>, in as many groups of
+    /// the pass's shader as cover them: in a pass <see cref="Compute"/> began.
+    /// </summary>
+    internal void DispatchThreads(uint x, uint y, uint z) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.DispatchThreads,
+                X = x,
+                Y = y,
+                Z = z,
             }
         );
 

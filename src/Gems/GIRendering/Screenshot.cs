@@ -1,6 +1,5 @@
+using Magic.Assets;
 using Magic.Debugging;
-using Magic.Files;
-using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
@@ -33,7 +32,7 @@ internal static class Screenshot
     /// </summary>
     public static async Task SaveAsync(
         IGraphicsApi gpu,
-        Assets assets,
+        AssetManager assets,
         GpuBuffer readback,
         string path,
         int width,

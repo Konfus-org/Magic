@@ -6,7 +6,7 @@ namespace Magic.Worlds;
 /// <summary>
 /// A gem that takes part as a domain, or a saved world, replaces what is in the world: it cleans up after what leaves, and
 /// prepares what comes, while the loading screen shows. The world awaits every gem's hook before it goes on, so nothing
-/// left over bleeds in and nothing half ready shows. Each hook starts on the main thread; implement the ones the gem needs.
+/// left over bleeds in and nothing half ready shows. Each hook starts on the game thread; implement the ones the gem needs.
 /// </summary>
 public interface IHookIntoDomainLoading
 {

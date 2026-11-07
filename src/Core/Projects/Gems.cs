@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
+using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Events;
@@ -51,7 +52,7 @@ internal sealed class Gems : IDisposable
     private static readonly Histogram<double> _frameWorkDuration = Metrics.Meter.CreateHistogram<double>(
         Metrics.FrameWorkDuration,
         "s",
-        "The main thread's work on a frame."
+        "The game thread's work on a frame."
     );
 
     private static readonly Histogram<double> _renderFrameDuration = Metrics.Meter.CreateHistogram<double>(
@@ -72,7 +73,7 @@ internal sealed class Gems : IDisposable
 
     private readonly IFileSystem _files;
 
-    private readonly Assets _assets;
+    private readonly AssetManager _assets;
 
     private readonly World _world;
 
@@ -81,7 +82,7 @@ internal sealed class Gems : IDisposable
     private readonly Threads _threads;
 
     /// <summary>
-    /// The main thread's real time, from its first frame.
+    /// The game thread's real time, from its first frame.
     /// </summary>
     private readonly Stopwatch _clock = new();
 
@@ -100,7 +101,7 @@ internal sealed class Gems : IDisposable
     private readonly Stopwatch _renderClock = new();
 
     /// <summary>
-    /// Set by the render thread each time it has drawn a frame, for the main thread waiting to stay one frame ahead.
+    /// Set by the render thread each time it has drawn a frame, for the game thread waiting to stay one frame ahead.
     /// </summary>
     private readonly AutoResetEvent _drawn = new(initialState: false);
 
@@ -115,7 +116,7 @@ internal sealed class Gems : IDisposable
     private long _frameStart;
 
     /// <summary>
-    /// The main thread's last frame, whose clocks the next one goes on from.
+    /// The game thread's last frame, whose clocks the next one goes on from.
     /// </summary>
     private Frame _frame;
 
@@ -143,7 +144,7 @@ internal sealed class Gems : IDisposable
         IServiceProvider provider,
         App app,
         IFileSystem files,
-        Assets assets,
+        AssetManager assets,
         World world,
         EventCoordinator events,
         Threads threads
@@ -157,6 +158,7 @@ internal sealed class Gems : IDisposable
         _events = events;
         _threads = threads;
         Load(registered);
+        _graph.Gpu = _loaded.Find(static gem => gem.Instance is IGraphicsApi)?.Instance as IGraphicsApi;
         _threads.Start(EngineThread.Render, Render);
     }
 
@@ -231,7 +233,7 @@ internal sealed class Gems : IDisposable
         _world.PublishedFrame = frame.Index;
         _frameWorkDuration.RecordSince(_frameStart == 0 ? hooksStart : _frameStart);
 
-        // The one wait on the render thread in a frame, so the main thread never runs more than a frame ahead of it; the
+        // The one wait on the render thread in a frame, so the game thread never runs more than a frame ahead of it; the
         // render thread never waits for this one.
         while (_world.DrawnFrame + 1 < frame.Index)
         {
@@ -307,8 +309,8 @@ internal sealed class Gems : IDisposable
 
     /// <summary>
     /// One frame of the render thread, which runs them as fast as the GPU and the display let it, never waiting for the
-    /// main thread: every gem's Render into the frame's graph, then the GPU provider's Present of it. It tells the world which published frame it drew at least, the gems taking what
-    /// was published when it began or newer, and wakes the main thread if it waits for that. A render frame has no
+    /// game thread: every gem's Render into the frame's graph, then the GPU provider's Present of it. It tells the world which published frame it drew at least, the gems taking what
+    /// was published when it began or newer, and wakes the game thread if it waits for that. A render frame has no
     /// messages.
     /// </summary>
     private void Render()
@@ -385,6 +387,12 @@ internal sealed class Gems : IDisposable
 
                 // The window is the gem, which can't unload while the app holds it.
                 loaded.Ends.Add(new Subscription(() => _app.Window = null));
+            }
+
+            if (made is IPlatform platform)
+            {
+                _app.Platform = platform;
+                loaded.Ends.Add(new Subscription(() => _app.Platform = null));
             }
 
             if (made is ILogSink sink)

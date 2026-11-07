@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Runtime.InteropServices;
+using Magic.Shaders;
 
 namespace Magic.Gpu;
 
@@ -56,6 +57,12 @@ public readonly record struct GpuPass
     /// What a <see cref="GpuPassKind.Draw"/> pass draws into.
     /// </summary>
     public GpuRenderTargets Targets { get; init; }
+
+    /// <summary>
+    /// The compute shader the GPU provider binds before the commands, built from the entry; the pass is left out of a
+    /// frame while the shader is not built. None for a pass that binds its own pipeline.
+    /// </summary>
+    public ShaderEntry? Shader { get; init; }
 }
 
 /// <summary>
@@ -180,6 +187,7 @@ public enum GpuCommandKind : byte
     BlitTexture,
     FillBuffer,
     BuildAcceleration,
+    DispatchThreads,
 }
 
 /// <summary>

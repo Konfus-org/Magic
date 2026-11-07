@@ -9,7 +9,12 @@ namespace Magic.VulkanGraphics;
 /// the barriers its uses need as one, its draws inside dynamic rendering, and each command as the call it names. Keeps
 /// what each buffer and texture level was last used as, so a barrier knows what it moves from.
 /// </summary>
-internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources resources, VulkanHeap heap)
+internal sealed unsafe class VulkanRecorder(
+    VulkanDevice device,
+    VulkanResources resources,
+    VulkanHeap heap,
+    VulkanShaders shaders
+)
 {
     private const int MaxTargets = 8;
 
@@ -25,13 +30,23 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
         for (int passIndex = 0; passIndex < commands.Passes.Length; passIndex++)
         {
             GpuPass pass = commands.Passes[passIndex];
+
+            // A pass whose shader is not built yet is left out, and what it writes keeps what it held.
+            VulkanShader? shader = pass.Shader is { } entry ? shaders.Get(entry) : null;
+            if (pass.Shader is not null && shader is null)
+                continue;
+
             BeginGroup(cmd, pass.Name);
             Barrier(cmd, pass.Uses.AsSpan());
             frame.WriteTimestamp(pass.Name, passIndex);
             bool isDrawing = pass.Kind == GpuPassKind.Draw && BeginRendering(cmd, pass);
+            (uint X, uint Y, uint Z) groupSize = shader?.GroupSize ?? (1, 1, 1);
+            if (shader is not null)
+                Run(frame, new GpuCommand { Kind = GpuCommandKind.BindPipeline, Id = shader.Pipeline.Id }, groupSize);
+
             foreach (GpuCommand command in pass.Commands)
             {
-                Run(frame, command);
+                Run(frame, command, groupSize);
             }
 
             if (isDrawing)
@@ -311,7 +326,11 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
     private void SetViewport(VkCommandBuffer cmd, uint x, uint y, uint width, uint height) =>
         device.Api.vkCmdSetViewport(cmd, x, y + height, width, -(float)height, 0, 1);
 
-    private void Run(VulkanFrames.Frame frame, in GpuCommand command)
+    /// <summary>
+    /// Records <paramref name="command"/>, a dispatch of threads in groups of <paramref name="groupSize"/>: the pass's
+    /// shader's, one for a pass without one.
+    /// </summary>
+    private void Run(VulkanFrames.Frame frame, in GpuCommand command, (uint X, uint Y, uint Z) groupSize)
     {
         VkCommandBuffer cmd = frame.CommandBuffer;
         VkDeviceApi api = device.Api;
@@ -341,6 +360,14 @@ internal sealed unsafe class VulkanRecorder(VulkanDevice device, VulkanResources
 
             case GpuCommandKind.Dispatch:
                 api.vkCmdDispatch(cmd, command.X, command.Y, command.Z);
+                break;
+            case GpuCommandKind.DispatchThreads:
+                api.vkCmdDispatch(
+                    cmd,
+                    (command.X + groupSize.X - 1) / groupSize.X,
+                    (command.Y + groupSize.Y - 1) / groupSize.Y,
+                    (command.Z + groupSize.Z - 1) / groupSize.Z
+                );
                 break;
             case GpuCommandKind.DispatchIndirect:
                 if (resources.Buffers[command.Id] is { } arguments)

@@ -1,9 +1,8 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
+using Magic.Assets;
 using Magic.Debugging;
-using Magic.Files;
-using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Shaders;
@@ -56,7 +55,7 @@ internal sealed class DebugUIOverlay : IDisposable
     public DebugUIOverlay(
         IGraphicsApi gpu,
         IShaderCompiler shaders,
-        Assets assets,
+        AssetManager assets,
         Mailbox<DebugUIFrame> frames,
         ChannelReader<DebugUITextureChange> textureChanges,
         CancellationToken lifetime

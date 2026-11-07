@@ -4,11 +4,10 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Unicode;
 using System.Threading.Channels;
+using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Files;
-using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Input;
 using Magic.Platform;
@@ -44,7 +43,7 @@ namespace Magic.ImGuiDebugUI;
 /// The debug UI, drawn with Dear ImGui: what gems and scripts report, and the lines they log to show on screen, as lines
 /// down the left of the picture and text in the world, and the windows gems draw with its widgets (<see cref="IDebugUI"/>).
 /// <para>
-/// ImGui's frame is the main thread's. <see cref="Update"/> hands ImGui the frame's input and starts its frame, so the
+/// ImGui's frame is the game thread's. <see cref="Update"/> hands ImGui the frame's input and starts its frame, so the
 /// widgets gems made after this one call in their Update go into it; <see cref="LateUpdate"/> draws what is reported, ends
 /// the frame and publishes a copy of it, whether anything draws it or not; and <see cref="Render"/> records the newest
 /// copy over the window's image, in the overlay layer, so it shows over whatever drew the world. Reports come from any thread (<see cref="Reports"/>). It is public because
@@ -194,7 +193,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, ILogSink, IDisposable
         App app,
         IGraphicsApi gpu,
         IShaderCompiler shaders,
-        Assets assets,
+        AssetManager assets,
         IEcs ecs,
         IInput? input = null,
         IClipboard? clipboard = null

@@ -1,5 +1,5 @@
 using System.Numerics;
-using Magic.Files.Types;
+using Magic.Assets;
 
 namespace Magic.Debugging;
 
@@ -15,7 +15,7 @@ namespace Magic.Debugging;
 /// <para>
 /// Windows are drawn with the widgets, <see cref="Begin(string, bool)"/> to <see cref="MenuItem"/>, in immediate mode:
 /// what is called in a frame's Update is that frame's windows, so a window is drawn every frame it is open. They are the
-/// main thread's, called in Update by a gem made after the provider, as one that takes this is. A widget's label is drawn
+/// game thread's, called in Update by a gem made after the provider, as one that takes this is. A widget's label is drawn
 /// on its left, and the widget stretches to the width of what it is in; the part of a label from <c>##</c> on is not
 /// shown, and tells apart widgets that show the same label. A widget answers from the input of the frame it is called in.
 /// </para>

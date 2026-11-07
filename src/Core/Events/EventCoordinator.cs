@@ -6,8 +6,8 @@ namespace Magic.Events;
 
 /// <summary>
 /// Messages between gems, by type. Anything publishes one, from any thread, and every gem hears it the next frame,
-/// read from that frame's <see cref="Frame.Events"/> in a hook. A message is a struct, and publishing and reading
-/// allocate nothing once its type's buffers have grown.
+/// read from that frame's <see cref="Frame.Events"/> in a hook, in load order, until one handles it. A message is a
+/// struct, and publishing and reading allocate nothing once its type's buffers have grown.
 /// </summary>
 public sealed class EventCoordinator
 {
@@ -23,7 +23,7 @@ public sealed class EventCoordinator
     /// Hands <paramref name="message"/> to every gem in the next frame. Any thread.
     /// </summary>
     public void Publish<T>(in T message)
-        where T : struct => GetQueue<T>().Published.Enqueue(message);
+        where T : struct, IEvent => GetQueue<T>().Published.Enqueue(message);
 
     /// <summary>
     /// What was published since the last take, as the frame about to start reads it. The frame loop's, once a frame.
@@ -39,13 +39,15 @@ public sealed class EventCoordinator
     }
 
     /// <summary>
-    /// What the last take took of <typeparamref name="T"/>; empty when none was ever published.
+    /// What the last take took of <typeparamref name="T"/> that nothing has handled; empty when none was ever
+    /// published. Game thread.
     /// </summary>
-    internal ReadOnlySpan<T> GetTaken<T>()
-        where T : struct => _queues.TryGetValue(typeof(T), out IEventQueue? queue) ? ((EventQueue<T>)queue).Taken : [];
+    internal Span<T> GetTaken<T>()
+        where T : struct, IEvent =>
+        _queues.TryGetValue(typeof(T), out IEventQueue? queue) ? ((EventQueue<T>)queue).GetUnhandled() : [];
 
     private EventQueue<T> GetQueue<T>()
-        where T : struct
+        where T : struct, IEvent
     {
         if (_queues.TryGetValue(typeof(T), out IEventQueue? found))
             return (EventQueue<T>)found;
@@ -75,7 +77,7 @@ public sealed class EventCoordinator
     /// The messages of one type.
     /// </summary>
     private sealed class EventQueue<T> : IEventQueue
-        where T : struct
+        where T : struct, IEvent
     {
         /// <summary>
         /// What the last take took, at its start, reused take after take and grown as needed.
@@ -85,7 +87,23 @@ public sealed class EventCoordinator
 
         public ConcurrentQueue<T> Published { get; } = new();
 
-        public ReadOnlySpan<T> Taken => _taken.AsSpan(0, _takenCount);
+        /// <summary>
+        /// What the last take took, less what was handled since it was last read, so whoever reads it next doesn't get
+        /// what a reader before handled.
+        /// </summary>
+        public Span<T> GetUnhandled()
+        {
+            int kept = 0;
+            for (int i = 0; i < _takenCount; i++)
+            {
+                if (!_taken[i].IsHandled)
+                    _taken[kept++] = _taken[i];
+            }
+
+            _takenCount = kept;
+
+            return _taken.AsSpan(0, _takenCount);
+        }
 
         public void Take()
         {

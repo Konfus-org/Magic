@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
-using Magic.Files;
-using Magic.Files.Types;
+using Magic.Assets;
 
 namespace Magic.Shaders;
 
@@ -36,6 +35,17 @@ public readonly record struct ShaderEntry
     public required ShaderStage Stage { get; init; }
 
     public ImmutableArray<ShaderTypeArgument> TypeArguments { get; init; } = [];
+
+    /// <summary>
+    /// The same entry of the same module in the same stage, with the same type arguments in the same order.
+    /// </summary>
+    public bool Equals(ShaderEntry other) =>
+        Module == other.Module
+        && Name == other.Name
+        && Stage == other.Stage
+        && TypeArguments.AsSpan().SequenceEqual(other.TypeArguments.AsSpan());
+
+    public override int GetHashCode() => HashCode.Combine(Module, Name, Stage);
 }
 
 /// <summary>

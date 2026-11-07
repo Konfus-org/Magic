@@ -1,14 +1,13 @@
 using System.Collections.Immutable;
 using System.Linq;
 using System.Text.Json;
+using Magic.Assets;
+using Magic.Assets.Pipeline;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Files;
-using Magic.Files.Pipeline;
-using Magic.Files.Types;
 using Magic.Projects;
-using Magic.Serialization;
 using Magic.Utils;
 
 namespace Magic.PrefabImporter;
@@ -19,7 +18,7 @@ namespace Magic.PrefabImporter;
 /// reads one is what that one is made from, so it is read again when one of them changes. It is public because nothing in
 /// its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class PrefabImporterGem(Assets assets) : IGem, IAssetImporter<Prefab>
+public sealed class PrefabImporterGem(AssetManager assets) : IGem, IAssetImporter<Prefab>
 {
     public ImmutableArray<string> Extensions => [".prefab"];
 

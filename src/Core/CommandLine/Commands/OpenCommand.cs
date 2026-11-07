@@ -1,9 +1,8 @@
 using System.CommandLine;
+using Magic.Assets;
 using Magic.Debugging;
 using Magic.Files;
-using Magic.Files.Types;
 using Magic.Projects;
-using Magic.Serialization;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
@@ -16,7 +15,7 @@ namespace Magic.CommandLine.Commands;
 /// </summary>
 internal static class OpenCommand
 {
-    public static Command Create(App app, IFileSystem files, Assets assets, World world, CommandQueue queue)
+    public static Command Create(App app, IFileSystem files, AssetManager assets, World world, CommandQueue queue)
     {
         Argument<string> project = new("project") { Description = "The .magic file to run" };
         Command open = new(

@@ -1,5 +1,5 @@
 using System.Collections.Frozen;
-using Magic.Files.Types;
+using Magic.Assets;
 using Magic.Gpu;
 using Vortice.Vulkan;
 

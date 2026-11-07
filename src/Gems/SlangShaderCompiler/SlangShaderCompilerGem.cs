@@ -5,9 +5,8 @@ using System.IO.Hashing;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using Magic.Caching;
+using Magic.Assets;
 using Magic.Files;
-using Magic.Files.Types;
 using Magic.Projects;
 using Magic.Shaders;
 using Magic.Utils;
@@ -30,7 +29,7 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
     private const string ShadersFolder = "Shaders";
     private const string Extension = ".slang";
 
-    private readonly Assets _assets;
+    private readonly AssetManager _assets;
     private readonly Caches _caches;
 
     /// <summary>
@@ -46,7 +45,7 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
 
     private readonly unsafe void* _globalSession;
 
-    public unsafe SlangShaderCompilerGem(App app, Assets assets, Caches caches)
+    public unsafe SlangShaderCompilerGem(App app, AssetManager assets, Caches caches)
     {
         _assets = assets;
         _caches = caches;

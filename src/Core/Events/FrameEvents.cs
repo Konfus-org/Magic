@@ -16,9 +16,10 @@ public readonly record struct FrameEvents
     public static FrameEvents None => default;
 
     /// <summary>
-    /// Every <typeparamref name="T"/> published during the last frame, in the order they were; empty when there were
-    /// none.
+    /// Every <typeparamref name="T"/> published during the last frame that no gem before this one has handled, in the
+    /// order they were published; empty when there are none. Set <see cref="IEvent.IsHandled"/> through a
+    /// <c>ref</c> to take one from the gems after this one.
     /// </summary>
-    public ReadOnlySpan<T> Get<T>()
-        where T : struct => _events is null ? [] : _events.GetTaken<T>();
+    public Span<T> Get<T>()
+        where T : struct, IEvent => _events is null ? [] : _events.GetTaken<T>();
 }

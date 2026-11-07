@@ -4,16 +4,6 @@ using Magic.Rendering;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// A buffer or a texture, as a pass names what it reads or writes.
-/// </summary>
-internal readonly record struct GpuResource(GpuBuffer Buffer, GpuTexture Texture, bool IsTexture)
-{
-    public static implicit operator GpuResource(GpuBuffer buffer) => new(buffer, default, false);
-
-    public static implicit operator GpuResource(GpuTexture texture) => new(default, texture, true);
-}
-
-/// <summary>
 /// One pass of the frame: its name and its pipeline, declared by the area that runs it and built by
 /// <see cref="GpuPipelines"/>. <c>Run</c> starts it, once a
 /// frame or more.

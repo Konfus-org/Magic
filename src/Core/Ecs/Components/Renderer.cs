@@ -1,8 +1,7 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
-using Magic.Files;
-using Magic.Files.Types;
+using Magic.Assets;
 
 namespace Magic.Ecs.Components;
 
@@ -24,9 +23,10 @@ public record struct Renderer : IComponent
 }
 
 /// <summary>
-/// A <see cref="Renderer"/>'s materials by slot, the one a model's mesh names (<see cref="Mesh.MaterialSlot"/>):
+/// Materials by slot, as a component lists what it draws with: a <see cref="Renderer"/>'s by the slot a model's mesh
+/// names (<see cref="Mesh.MaterialSlot"/>), and the post and weather effects in the order they run.
 /// <see cref="Capacity"/> of them, each a <see cref="MaterialInstance"/>, inline so the component stays plain unmanaged
-/// data, indexed, an empty slot's handle none.
+/// data, indexed, an empty slot's handle none. In a file, an array of them, the empty slots after the last left out.
 /// </summary>
 [InlineArray(Capacity)]
 [JsonConverter(typeof(MaterialSlotsJsonConverter))]

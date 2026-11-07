@@ -7,7 +7,7 @@ namespace Magic.CommandLine;
 
 /// <summary>
 /// The lines the console runs next, and what holds them back. Lines a command queues run before the terminal's, in
-/// the order queued. A hold keeps every line after the one that set it back until its condition says no. Main thread.
+/// the order queued. A hold keeps every line after the one that set it back until its condition says no. Game thread.
 /// </summary>
 internal sealed class CommandQueue(EventCoordinator events)
 {

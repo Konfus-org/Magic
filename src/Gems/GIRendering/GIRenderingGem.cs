@@ -2,12 +2,12 @@ using System.Collections.Immutable;
 using System.Linq;
 using System.Numerics;
 using System.Threading.Channels;
+using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Events;
 using Magic.Files;
-using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Input;
 using Magic.Projects;
@@ -36,7 +36,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private const float ExposureAtSun = 4;
 
     private readonly IGraphicsApi _gpu;
-    private readonly Assets _assets;
+    private readonly AssetManager _assets;
     private readonly IEcs _ecs;
     private readonly App _app;
     private readonly EventCoordinator _events;
@@ -67,6 +67,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     /// Ends the start when the gem is disposed before it is done, so nothing is made for a gem that is gone.
     /// </summary>
     private readonly CancellationTokenSource _stopping = new();
+    private readonly Subscription _preprocessing;
 
     private DebugView _debugView;
 
@@ -91,8 +92,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     public GIRenderingGem(
         IGraphicsApi gpu,
         IShaderCompiler shaders,
-        Assets assets,
-        IMeshPreprocessor meshes,
+        AssetManager assets,
+        Caches caches,
         IEcs ecs,
         Threads threads,
         App app,
@@ -109,13 +110,15 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _events = events;
         _threads = threads;
         _pipelines = new GpuPipelines(gpu, shaders, assets);
-        _resources = new GpuResources(gpu, meshes, assets, threads);
+        ModelPreprocessor models = new();
+        _preprocessing = assets.Register(models);
+        _resources = new GpuResources(gpu, models, caches, assets, threads);
         _failure = new MaterialInstance { Handle = assets.GetFailure<Material, Model>() };
         _instances = new InstanceTable(gpu, assets, _resources, _failure);
         _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu, _resources) : null;
         _visibility = new Visibility(gpu, _pipelines, _resources);
         _frameView = new FrameView(gpu, _resources);
-        _sky = new SkyLuts(_resources, _pipelines);
+        _sky = new SkyLuts(assets);
         _lightTiles = new LightTiles(gpu, _resources, _pipelines);
         _shadowMask = _rayTracing is null ? null : new ShadowMask(gpu, _pipelines, _resources);
         _lighting = new Lighting(gpu, _resources, _pipelines);
@@ -125,6 +128,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
     public void Dispose()
     {
+        _preprocessing.Dispose();
         _stopping.Cancel();
         _stopping.Dispose();
         EndPreparing();
@@ -178,6 +182,14 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     public void Render(in Frame frame, RenderGraph graph)
     {
         if (_started is not { Ok: true })
+            return;
+
+        // The sky's shaders are the GPU provider's to build; one that fails ends the start as a pipeline would.
+        GpuState skyShaders = _sky.GetState(graph);
+        if (skyShaders == GpuState.Failed)
+            FailStart("a sky shader was not built.");
+
+        if (skyShaders != GpuState.Ready)
             return;
 
         if (_inputs.TryTake(out RenderInputs? newest))
@@ -417,14 +429,24 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         if (made.Ok)
             made = _resources.Create();
 
-        // A renderer that draws nothing holds no domain back.
         if (!made.Ok)
         {
-            Log.Error($"The renderer draws nothing: {made.Error}");
-            EndPreparing();
+            FailStart(made.Error);
+
+            return;
         }
 
         _started = made;
+    }
+
+    /// <summary>
+    /// Ends the start as failed: the renderer draws nothing, and holds no domain back.
+    /// </summary>
+    private void FailStart(string error)
+    {
+        Log.Error($"The renderer draws nothing: {error}");
+        EndPreparing();
+        _started = Result.Failure(error);
     }
 
     /// <summary>
@@ -484,7 +506,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             return Result.Failure(lights.Error);
 
         // The sky's tables and the shadow mask before the lighting constants, which name them.
-        Result<SkyTables> sky = _sky.Prepare();
+        Result<SkyTables> sky = SkyLuts.Prepare(graph);
         if (!sky.Ok)
             return Result.Failure(sky.Error);
 
