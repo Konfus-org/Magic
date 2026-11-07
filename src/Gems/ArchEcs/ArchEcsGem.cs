@@ -33,10 +33,21 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     private readonly Dictionary<Type, object> _queryWalks = [];
 
     /// <summary>
+    /// When each chunk was last written, by archetype then by the chunk's index in it: the version written then, none
+    /// for a chunk never written.
+    /// </summary>
+    private readonly Dictionary<Archetype, List<long>> _written = [];
+
+    /// <summary>
     /// How many query loops are open: while any is, an entity's components can't change, as that would move it out
     /// from under their spans.
     /// </summary>
     private int _openLoops;
+
+    /// <summary>
+    /// The version a write stamps its chunk with, moved on by each read query so what is written after one is newer.
+    /// </summary>
+    private long _version = 1;
 
     public ArchEcsGem()
     {
@@ -69,6 +80,7 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
 
         ArchEntity created = _world.Create(types);
         _world.SetRange(created, values);
+        Stamp(created);
 
         return Unsafe.BitCast<ArchEntity, Entity>(created);
     }
@@ -79,7 +91,11 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     public void Destroy(Entity entity)
     {
         ThrowIfCannotChange();
-        _world.Destroy(GetAlive(entity));
+        ArchEntity alive = GetAlive(entity);
+
+        // The archetype's last entity moves into its place.
+        Stamp(alive);
+        _world.Destroy(alive);
     }
 
     public bool IsAlive(Entity entity)
@@ -99,18 +115,22 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
         {
             // Not structural, so it is fine inside a loop.
             existing = component;
+            Stamp(alive);
 
             return;
         }
 
         ThrowIfCannotChange();
+        Stamp(alive);
         _world.Add(alive, component);
+        Stamp(alive);
     }
 
     public void Set(Entity entity, ReadOnlySpan<IComponent> components)
     {
         ThrowIfNotWorldThread();
         ArchEntity alive = GetAlive(entity);
+        Stamp(alive);
         foreach (IComponent component in components)
         {
             object[] value = [component];
@@ -124,15 +144,31 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
             ThrowIfCannotChange();
             _world.AddRange(alive, value);
         }
+
+        Stamp(alive);
     }
 
-    public ref T Get<T>(Entity entity)
+    public ref readonly T Get<T>(Entity entity)
         where T : unmanaged, IComponent
     {
         ThrowIfNotWorldThread();
         ref T component = ref _world.TryGetRef<T>(GetAlive(entity), out bool has);
         if (!has)
             throw new InvalidOperationException($"{entity} has no {typeof(T).Name}.");
+
+        return ref component;
+    }
+
+    public ref T Mutate<T>(Entity entity)
+        where T : unmanaged, IComponent
+    {
+        ThrowIfNotWorldThread();
+        ArchEntity alive = GetAlive(entity);
+        ref T component = ref _world.TryGetRef<T>(alive, out bool has);
+        if (!has)
+            throw new InvalidOperationException($"{entity} has no {typeof(T).Name}.");
+
+        Stamp(alive);
 
         return ref component;
     }
@@ -149,17 +185,44 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
             return;
 
         ThrowIfCannotChange();
+        Stamp(alive);
         _world.Remove<T>(alive);
+        Stamp(alive);
     }
 
-    public EcsQuery Query() => new(GetWalk(All.Description, All.Cut));
+    public EcsQuery Query() => new(GetWalk(All.Description, static (chunk, _) => All.Cut(chunk)));
 
     public EcsQuery<T1> Query<T1>()
-        where T1 : unmanaged, IComponent => new(GetWalk(All<T1>.Description, All<T1>.Cut));
+        where T1 : unmanaged, IComponent => new(GetWalk(All<T1>.Description, All<T1>.Cut), _version++);
 
     public EcsQuery<T1, T2> Query<T1, T2>()
         where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent => new(GetWalk(All<T1, T2>.Description, All<T1, T2>.Cut));
+        where T2 : unmanaged, IComponent => new(GetWalk(All<T1, T2>.Description, All<T1, T2>.Cut), _version++);
+
+    public EcsMutation<T1> Mutate<T1>()
+        where T1 : unmanaged, IComponent
+    {
+        IEnumerable<EcsMutableChunk<T1>> walk = GetWalk(
+            All<T1>.Description,
+            static (chunk, _) => All<T1>.CutMutable(chunk)
+        );
+        Stamp(All<T1>.Description);
+
+        return new(walk);
+    }
+
+    public EcsMutation<T1, T2> Mutate<T1, T2>()
+        where T1 : unmanaged, IComponent
+        where T2 : unmanaged, IComponent
+    {
+        IEnumerable<EcsMutableChunk<T1, T2>> walk = GetWalk(
+            All<T1, T2>.Description,
+            static (chunk, _) => All<T1, T2>.CutMutable(chunk)
+        );
+        Stamp(All<T1, T2>.Description);
+
+        return new(walk);
+    }
 
     /// <summary>
     /// A chunk's live entities as Magic's: Arch's arrays run to the chunk's capacity, past its last entity.
@@ -185,7 +248,7 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
             : throw new InvalidOperationException($"The ECS has no type for {type.Name}.");
     }
 
-    private IEnumerable<TChunk> GetWalk<TChunk>(in QueryDescription description, Func<Chunk, TChunk> cut)
+    private IEnumerable<TChunk> GetWalk<TChunk>(in QueryDescription description, Func<Chunk, long, TChunk> cut)
         where TChunk : allows ref struct
     {
         ThrowIfNotWorldThread();
@@ -193,6 +256,42 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
         walk ??= new Walk<TChunk>(this, description, cut);
 
         return (Walk<TChunk>)walk;
+    }
+
+    private long GetWritten(Archetype archetype, int chunk) =>
+        _written.TryGetValue(archetype, out List<long>? stamps) && chunk < stamps.Count ? stamps[chunk] : 0;
+
+    /// <summary>
+    /// Marks the chunk <paramref name="entity"/> is in as written now.
+    /// </summary>
+    private void Stamp(ArchEntity entity)
+    {
+        EntityData data = _world.GetEntityData(entity);
+        Stamp(data.Archetype, data.Slot.ChunkIndex);
+    }
+
+    /// <summary>
+    /// Marks every chunk <paramref name="description"/> matches as written now.
+    /// </summary>
+    private void Stamp(in QueryDescription description)
+    {
+        foreach (Archetype archetype in _world.Query(in description).GetArchetypeIterator())
+        {
+            for (int index = 0; index < archetype.ChunkCount; index++)
+            {
+                Stamp(archetype, index);
+            }
+        }
+    }
+
+    private void Stamp(Archetype archetype, int chunk)
+    {
+        ref List<long>? stamps = ref CollectionsMarshal.GetValueRefOrAddDefault(_written, archetype, out _);
+        stamps ??= [];
+        if (stamps.Count <= chunk)
+            CollectionsMarshal.SetCount(stamps, chunk + 1);
+
+        stamps[chunk] = _version;
     }
 
     private ArchEntity GetAlive(Entity entity)
@@ -247,7 +346,10 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     {
         internal static readonly QueryDescription Description = new QueryDescription().WithAll<T1>();
 
-        internal static EcsChunk<T1> Cut(Chunk chunk) => new(GetEntities(chunk), GetColumn<T1>(chunk));
+        internal static EcsChunk<T1> Cut(Chunk chunk, long written) =>
+            new(GetEntities(chunk), GetColumn<T1>(chunk), written);
+
+        internal static EcsMutableChunk<T1> CutMutable(Chunk chunk) => new(GetEntities(chunk), GetColumn<T1>(chunk));
     }
 
     /// <summary>
@@ -259,7 +361,10 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     {
         internal static readonly QueryDescription Description = new QueryDescription().WithAll<T1, T2>();
 
-        internal static EcsChunk<T1, T2> Cut(Chunk chunk) =>
+        internal static EcsChunk<T1, T2> Cut(Chunk chunk, long written) =>
+            new(GetEntities(chunk), GetColumn<T1>(chunk), GetColumn<T2>(chunk), written);
+
+        internal static EcsMutableChunk<T1, T2> CutMutable(Chunk chunk) =>
             new(GetEntities(chunk), GetColumn<T1>(chunk), GetColumn<T2>(chunk));
     }
 
@@ -268,16 +373,17 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     /// until the loop ends. One per query and reused, so a loop allocates nothing; a loop over the same query started
     /// inside one gets a walk of its own.
     /// </summary>
-    private sealed class Walk<TChunk>(ArchEcsGem ecs, QueryDescription description, Func<Chunk, TChunk> cut)
+    private sealed class Walk<TChunk>(ArchEcsGem ecs, QueryDescription description, Func<Chunk, long, TChunk> cut)
         : IEnumerable<TChunk>,
             IEnumerator<TChunk>
         where TChunk : allows ref struct
     {
         private readonly List<Chunk> _chunks = [];
+        private readonly List<long> _written = [];
         private int _index;
         private bool _isWalking;
 
-        public TChunk Current => cut(_chunks[_index]);
+        public TChunk Current => cut(_chunks[_index], _written[_index]);
 
         object IEnumerator.Current =>
             throw new NotSupportedException("A chunk is spans over storage, which cannot be boxed.");
@@ -306,9 +412,14 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
         private void Start()
         {
             _chunks.Clear();
-            foreach (ref Chunk chunk in ecs._world.Query(in description))
+            _written.Clear();
+            foreach (Archetype archetype in ecs._world.Query(in description).GetArchetypeIterator())
             {
-                _chunks.Add(chunk);
+                for (int index = 0; index < archetype.ChunkCount; index++)
+                {
+                    _chunks.Add(archetype.GetChunk(index));
+                    _written.Add(ecs.GetWritten(archetype, index));
+                }
             }
 
             _index = -1;

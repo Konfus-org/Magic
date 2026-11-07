@@ -12,19 +12,19 @@ using Magic.Utils;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// The instance table: a row per renderer, at its index in a snapshot of the renderers. A frame's work is what changed
-/// since the last snapshot, a block of rows at a time: a block the same byte for byte stays as it is, one that only moved,
-/// as renderers were made or destroyed before it, moves its rows, and any other is built again. Every row is built again
-/// once a model is made or fails. Blocks that changed are uploaded in runs; a still scene uploads nothing. Beside it, the
-/// material table: a row per distinct <see cref="MaterialInstance"/> drawn, which every slot holding it shares, made
-/// again each fill while its material or texture loads, and uploaded whole in the frame a row changes.
+/// The instance table: a row per renderer, at its index in a snapshot of the renderers. A frame's work is the chunks of
+/// renderers written since the snapshot the last fill read, or that moved: their rows are built again, and the rest
+/// stay as they are. Every row is built again once a model is made or fails. Blocks of rows that changed are uploaded
+/// in runs; a still scene uploads nothing. Beside it, the material table: a row per distinct
+/// <see cref="MaterialInstance"/> drawn, which every slot holding it shares, made again each fill while its material or
+/// texture loads, and uploaded whole in the frame a row changes.
 /// </summary>
 internal sealed class InstanceTable(IGraphicsApi gpu, Assets assets) : IDisposable
 {
     public const int Capacity = 1 << 18;
 
     /// <summary>
-    /// How many rows are compared, moved and uploaded together: a still block is a few vector compares.
+    /// How many rows are marked changed and uploaded together.
     /// </summary>
     private const int BlockSize = 64;
 
@@ -56,9 +56,16 @@ internal sealed class InstanceTable(IGraphicsApi gpu, Assets assets) : IDisposab
     private readonly List<uint> _loadingMaterialRows = [];
 
     /// <summary>
-    /// The snapshot the last fill read.
+    /// The renderer each row was last built for.
     /// </summary>
-    private EcsSnapshot<Transform, Renderer> _last = new();
+    private readonly Entity[] _drawn = new Entity[Capacity];
+
+    /// <summary>
+    /// The chunks of the snapshot the last fill read, and the version it was filled at.
+    /// </summary>
+    private readonly List<EcsSnapshotChunk> _filled = [];
+
+    private long _filledAt;
 
     private int _lastCount;
 
@@ -123,8 +130,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu, Assets assets) : IDisposab
     /// <summary>
     /// The rows of <paramref name="renderers"/>, from what changed since the last fill: each its model's place in the
     /// pools and the material rows of its slots, or an empty row while its model is being made; and the material rows
-    /// whose material or texture was loading, made again. How many rows the cull walks. The last fill's snapshot must be
-    /// left as it was until this one.
+    /// whose material or texture was loading, made again. How many rows the cull walks.
     /// </summary>
     public int Fill(
         EcsSnapshot<Transform, Renderer> renderers,
@@ -142,7 +148,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu, Assets assets) : IDisposab
 
         // The same snapshot again, with the same models, makes the same rows.
         bool isRebuild = pools.SettledCount != _settledModels;
-        if (renderers == _last && !isRebuild)
+        if (renderers.Version == _filledAt && !isRebuild)
             return Count;
 
         if (renderers.Count > Capacity && !_isFullLogged)
@@ -156,25 +162,21 @@ internal sealed class InstanceTable(IGraphicsApi gpu, Assets assets) : IDisposab
         HasChanges |= Count != _lastCount;
         _settledModels = pools.SettledCount;
         RowInputs inputs = new(renderers, frameIndex, pools, resources, failure);
-        int shift = Count - _lastCount;
-        int blocks = (Count + BlockSize - 1) / BlockSize;
 
-        // Rows move towards the end when renderers were made, so the blocks go from the end then, and from the start
-        // otherwise: a block moves before the block it moves onto is written.
-        for (int i = 0; i < blocks; i++)
+        // A chunk the last fill read in the same place, and not written since, has its rows already.
+        ReadOnlySpan<EcsSnapshotChunk> chunks = renderers.Chunks;
+        for (int i = 0; i < chunks.Length && chunks[i].Offset < Count; i++)
         {
-            int start = (shift > 0 ? blocks - 1 - i : i) * BlockSize;
-            int length = Math.Min(BlockSize, Count - start);
-            if (!isRebuild && IsSameAs(renderers, start, start, length))
-                continue;
-
-            if (!isRebuild && shift != 0 && IsSameAs(renderers, start, start - shift, length))
-                MoveRows(start - shift, start, length);
-            else
-                SetRows(start, length, inputs);
+            EcsSnapshotChunk chunk = chunks[i];
+            bool isBuilt =
+                !isRebuild && i < _filled.Count && _filled[i].IsSameChunk(chunk) && chunk.Written <= _filledAt;
+            if (!isBuilt)
+                SetRows(chunk.Offset, Math.Min(chunk.Count, Count - chunk.Offset), inputs);
         }
 
-        _last = renderers;
+        _filled.Clear();
+        _filled.AddRange(chunks);
+        _filledAt = renderers.Version;
 
         return Count;
     }
@@ -240,9 +242,6 @@ internal sealed class InstanceTable(IGraphicsApi gpu, Assets assets) : IDisposab
         Array.Clear(_isDirty);
     }
 
-    private static bool IsSame<T>(ReadOnlySpan<T> now, ReadOnlySpan<T> last)
-        where T : unmanaged => MemoryMarshal.AsBytes(now).SequenceEqual(MemoryMarshal.AsBytes(last));
-
     /// <summary>
     /// A renderer's row, with its model resident: where it is, its bounds in the world and the material rows of its
     /// slots, every slot the failure's when the model failed.
@@ -280,43 +279,20 @@ internal sealed class InstanceTable(IGraphicsApi gpu, Assets assets) : IDisposab
     }
 
     /// <summary>
-    /// Whether the block of <paramref name="renderers"/> at <paramref name="start"/> is byte for byte what the last
-    /// snapshot had from <paramref name="lastStart"/>.
-    /// </summary>
-    private bool IsSameAs(EcsSnapshot<Transform, Renderer> renderers, int start, int lastStart, int length) =>
-        lastStart >= 0
-        && lastStart + length <= _lastCount
-        && IsSame(renderers.Entities.Slice(start, length), _last.Entities.Slice(lastStart, length))
-        && IsSame(renderers.First.Slice(start, length), _last.First.Slice(lastStart, length))
-        && IsSame(renderers.Second.Slice(start, length), _last.Second.Slice(lastStart, length));
-
-    /// <summary>
-    /// The rows of a block that only moved, from <paramref name="from"/> to <paramref name="to"/>.
-    /// </summary>
-    private void MoveRows(int from, int to, int length)
-    {
-        Array.Copy(_rows, from, _rows, to, length);
-        Array.Copy(_extras, from, _extras, to, length);
-        MarkDirty(to);
-    }
-
-    /// <summary>
-    /// The rows of a block built again from its renderers. A renderer that was drawn at the same index and moved in the
-    /// world keeps where it was, for this frame's motion.
+    /// The rows from <paramref name="start"/> built again from their renderers. A renderer that was drawn at the same
+    /// index and moved in the world keeps where it was, for this frame's motion.
     /// </summary>
     private void SetRows(int start, int length, in RowInputs inputs)
     {
         for (int index = start; index < start + length; index++)
         {
+            Entity entity = inputs.Renderers.Entities[index];
             Renderer renderer = inputs.Renderers.Second[index];
             ResidentModel? resident = renderer.Model == Handle<Model>.None ? null : inputs.Pools.Get(renderer.Model);
             GpuInstance row = resident is { } model
                 ? CreateRow(inputs.Renderers.First[index], renderer, model, inputs)
                 : default;
-            bool wasDrawnHere =
-                index < _lastCount
-                && _last.Entities[index] == inputs.Renderers.Entities[index]
-                && _rows[index].ClusterCount > 0;
+            bool wasDrawnHere = index < _lastCount && _drawn[index] == entity && _rows[index].ClusterCount > 0;
             if (wasDrawnHere && _rows[index].World != row.World)
             {
                 row.PreviousWorld = _rows[index].World;
@@ -324,12 +300,18 @@ internal sealed class InstanceTable(IGraphicsApi gpu, Assets assets) : IDisposab
             }
 
             _rows[index] = row;
+            _drawn[index] = entity;
             _extras[index] = resident is { Acceleration.IsNone: false } traced
                 ? new InstanceExtra(gpu.GetAddress(traced.Acceleration), traced.LeafOffset)
                 : default;
         }
 
-        MarkDirty(start);
+        for (int block = start / BlockSize; block <= (start + length - 1) / BlockSize; block++)
+        {
+            _isDirty[block] = true;
+        }
+
+        HasChanges = true;
     }
 
     /// <summary>
@@ -374,12 +356,6 @@ internal sealed class InstanceTable(IGraphicsApi gpu, Assets assets) : IDisposab
         _hasMaterialChanges = true;
 
         return state;
-    }
-
-    private void MarkDirty(int start)
-    {
-        _isDirty[start / BlockSize] = true;
-        HasChanges = true;
     }
 
     private int GetBlockLength(int block) => Math.Min(BlockSize, Count - (block * BlockSize));

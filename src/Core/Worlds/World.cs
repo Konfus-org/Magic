@@ -248,8 +248,12 @@ public sealed class World : IEcs, IDisposable
     public void Set(Entity entity, ReadOnlySpan<IComponent> components) => Ecs.Set(entity, components);
 
     /// <inheritdoc/>
-    public ref T Get<T>(Entity entity)
+    public ref readonly T Get<T>(Entity entity)
         where T : unmanaged, IComponent => ref Ecs.Get<T>(entity);
+
+    /// <inheritdoc/>
+    public ref T Mutate<T>(Entity entity)
+        where T : unmanaged, IComponent => ref Ecs.Mutate<T>(entity);
 
     /// <inheritdoc/>
     public bool Has<T>(Entity entity)
@@ -273,6 +277,15 @@ public sealed class World : IEcs, IDisposable
     public EcsQuery<T1, T2> Query<T1, T2>()
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent => Ecs.Query<T1, T2>();
+
+    /// <inheritdoc/>
+    public EcsMutation<T1> Mutate<T1>()
+        where T1 : unmanaged, IComponent => Ecs.Mutate<T1>();
+
+    /// <inheritdoc/>
+    public EcsMutation<T1, T2> Mutate<T1, T2>()
+        where T1 : unmanaged, IComponent
+        where T2 : unmanaged, IComponent => Ecs.Mutate<T1, T2>();
 
     /// <summary>
     /// Changes the world for the prefabs and domains the assets read again, as the last frame's take heard it, and lets
@@ -329,7 +342,7 @@ public sealed class World : IEcs, IDisposable
         if (deltaSec <= 0)
             return;
 
-        foreach (EcsChunk<Transform, Spin> chunk in Query<Transform, Spin>())
+        foreach (EcsMutableChunk<Transform, Spin> chunk in Mutate<Transform, Spin>())
         {
             for (int i = 0; i < chunk.Entities.Length; i++)
             {

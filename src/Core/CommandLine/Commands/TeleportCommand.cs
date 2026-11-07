@@ -102,7 +102,7 @@ internal static class TeleportCommand
             }
 
             Vector3 by = position.Value - player.Position;
-            foreach (EcsChunk<Tags, Transform> chunk in world.Query<Tags, Transform>())
+            foreach (EcsMutableChunk<Tags, Transform> chunk in world.Mutate<Tags, Transform>())
             {
                 for (int i = 0; i < chunk.Entities.Length; i++)
                 {

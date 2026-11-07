@@ -72,7 +72,7 @@ Write the engine as data flowing through functions, not objects calling each oth
 - Gems depend on Core's interfaces, never on each other.
 - A component is an unmanaged struct with public fields that implements `IComponent`, and members for what follows from
   those fields.
-- Work over many entities is a system: a function over chunks a gem calls from a hook, through `IEcs.Query` on its own
+- Work over many entities is a system: a function over chunks a gem calls from a hook, through `IEcs.Query` to read or `IEcs.Mutate` to write, on its own
   thread.
 - A game is its assets and scripts, never a gem.
 
