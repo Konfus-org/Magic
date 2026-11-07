@@ -11,6 +11,7 @@ import Scene.Instances;
 import Scene.Clusters;
 import Scene.Culling;
 import Scene.Visibility;
+import Scene.Impostors;
 
 static const uint ModeInstances = 0u;
 
@@ -33,6 +34,14 @@ void CullClusters(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
         if (!isInView)
             return;
 
+        // PROTO: under the handoff's start on screen the instance draws as an impostor too, past its end as that alone.
+        float fade = GetImpostorFade(frame, instance, header.w);
+        if (fade > 0.0 && local.x == 0u)
+            TestImpostor(frame, header.z, instanceIndex, instance, false);
+
+        if (fade >= 1.0)
+            return;
+
         for (uint i = local.x; i < instance.clusterCount; i += 64u)
         {
             Test(frame, instanceIndex, instance, instance.clusterOffset + i, false);
@@ -48,7 +57,10 @@ void CullClusters(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
         ArrayRef<VisibleCluster> retest = { frame.retestList };
         VisibleCluster entry = retest[index];
         GpuInstance instance = LoadInstance(frame.instances, entry.instance);
-        Test(frame, entry.instance, instance, entry.cluster, true);
+        if (entry.cluster == RetestImpostor)
+            TestImpostor(frame, header.z, entry.instance, instance, true);
+        else
+            Test(frame, entry.instance, instance, entry.cluster, true);
     }
 }
 
@@ -113,4 +125,35 @@ void Test(FrameConstants frame, uint instanceIndex, GpuInstance instance, uint c
     ArrayRef<DrawArguments> draws = { frame.drawArguments };
     DrawArguments arguments = { cluster.triangleCount * 3u, 1u, 0u, listIndex };
     draws[drawOffset + drawIndex] = arguments;
+}
+
+// PROTO: appends the instance's impostor to the draws, the retested ones after the first's, or, when the old depth
+// pyramid hides it, to the retest list, as a cluster's test does.
+void TestImpostor(FrameConstants frame, uint draws, uint instanceIndex, GpuInstance instance, bool isRetest)
+{
+    BufferRef counts = { frame.counts };
+    if ((frame.hasHzb != 0u || isRetest) && IsOccluded(frame, Relative(frame, instance.boundsCenter), instance.boundsRadius))
+    {
+        if (isRetest)
+            return;
+
+        uint retestIndex = counts.InterlockedAdd(CountRetest, 1u);
+        if (retestIndex >= frame.maxVisibleClusters)
+            return;
+
+        ArrayRef<VisibleCluster> retest = { frame.retestList };
+        VisibleCluster entry = { instanceIndex, RetestImpostor };
+        retest[retestIndex] = entry;
+        BufferRef retestArguments = { frame.retestArguments };
+        retestArguments.InterlockedMax(RetestGroups, (retestIndex / RetestThreads) + 1u);
+        return;
+    }
+
+    uint drawIndex = counts.InterlockedAdd(isRetest ? CountRetestImpostorDraws : CountImpostorDraws, 1u);
+    if (drawIndex >= frame.maxVisibleClusters)
+        return;
+
+    ArrayRef<DrawArguments> impostorDraws = { draws };
+    DrawArguments arguments = { 6u, 1u, 0u, instanceIndex };
+    impostorDraws[(isRetest ? frame.maxVisibleClusters : 0u) + drawIndex] = arguments;
 }

@@ -263,6 +263,7 @@ internal sealed class InstanceTable(
             BoundsRadius = resident.BoundsRadius * maxScale,
             ClusterOffset = resident.ClusterOffset,
             ClusterCount = resident.ClusterCount,
+            Impostor = resident.ImpostorRow,
         };
         for (int slot = 0; slot < MaterialSlots.Capacity; slot++)
         {

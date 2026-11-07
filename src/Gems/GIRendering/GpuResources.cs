@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -39,9 +40,11 @@ internal sealed class GpuResources(
     Threads threads
 ) : IDisposable
 {
-    private const int VertexCapacity = 1 << 20;
-    private const int IndexCapacity = 1 << 22;
-    private const int ClusterCapacity = 1 << 16;
+    // PROTO: raised for the terrain sample's 2M-triangle terrain.
+    private const int VertexCapacity = 1 << 22;
+    private const int IndexCapacity = 1 << 24;
+    private const int ClusterCapacity = 1 << 17;
+    private const int ImpostorCapacity = 1024;
     private const string FailureShader = "Shaders/Material/Failure.slang";
 
     /// <summary>
@@ -57,6 +60,9 @@ internal sealed class GpuResources(
     private readonly Dictionary<ulong, Material?> _materials = [];
     private readonly Dictionary<SamplerDescription, GpuSampler> _samplers = [];
     private readonly List<(Texture Asset, GpuTexture Texture)> _arrivedTextures = [];
+
+    // PROTO: the impostor table's rows; row 0 is no impostor.
+    private readonly FreeList _impostorRows = new(ImpostorCapacity);
 
     /// <summary>
     /// Each model asked for and not evicted, by its id, made or not, with when it was last asked, in
@@ -94,6 +100,11 @@ internal sealed class GpuResources(
     /// </summary>
     public GpuBuffer LeafClusters { get; private set; }
 
+    /// <summary>
+    /// PROTO: every resident model's impostor, a <see cref="GpuImpostor"/> a row, by the row its instances name.
+    /// </summary>
+    public GpuBuffer ImpostorTable { get; private set; }
+
     private static GpuMaterial FailureMaterial =>
         new()
         {
@@ -101,6 +112,29 @@ internal sealed class GpuResources(
             Roughness = 1,
             Kind = (uint)MaterialKind.Failure,
         };
+
+    /// <summary>
+    /// The textures shaders read through the heap, by the id in a row rather than by a pass's name: every material's
+    /// texture on the GPU and every resident model's impostor atlas. A pass that samples them names them in its reads,
+    /// so each is readable, its copy done, before the pass runs.
+    /// </summary>
+    public ImmutableArray<GpuResource> GetHeapTextures()
+    {
+        ImmutableArray<GpuResource>.Builder textures = ImmutableArray.CreateBuilder<GpuResource>();
+        foreach (TextureEntry entry in _textures.Values)
+        {
+            if (entry.State == ResourceState.Ready)
+                textures.Add(entry.Texture);
+        }
+
+        foreach (ResidentModel resident in _residentModels.Values)
+        {
+            if (!resident.Impostor.IsNone)
+                textures.Add(resident.Impostor);
+        }
+
+        return textures.ToImmutable();
+    }
 
     public void Dispose()
     {
@@ -117,12 +151,14 @@ internal sealed class GpuResources(
         foreach (ResidentModel resident in _residentModels.Values)
         {
             gpu.Destroy(resident.Acceleration);
+            gpu.Destroy(resident.Impostor);
         }
 
         gpu.Destroy(LeafClusters);
         gpu.Destroy(VertexPool);
         gpu.Destroy(IndexPool);
         gpu.Destroy(ClusterPool);
+        gpu.Destroy(ImpostorTable);
     }
 
     /// <summary>
@@ -145,6 +181,12 @@ internal sealed class GpuResources(
             return Result.Failure(clusters.Error);
 
         ClusterPool = clusters.Value;
+        Result<GpuBuffer> impostors = CreatePool("Impostor table", (long)ImpostorCapacity * GpuImpostor.Bytes);
+        if (!impostors.Ok)
+            return Result.Failure(impostors.Error);
+
+        ImpostorTable = impostors.Value;
+        _impostorRows.Allocate(1);
         if (gpu.Features.HasRayQuery)
         {
             Result<GpuBuffer> leaves = CreatePool("Leaf clusters", (long)ClusterCapacity * sizeof(uint));
@@ -187,6 +229,12 @@ internal sealed class GpuResources(
                 _leafRanges.Free((int)where.LeafOffset, (int)where.LeafCount);
 
             gpu.Destroy(where.Acceleration);
+            if (!where.Impostor.IsNone)
+            {
+                gpu.Destroy(where.Impostor);
+                _impostorRows.Free((int)where.ImpostorRow, 1);
+            }
+
             _residentModels.Remove(id);
             _askedModels.Remove(id);
             Log.Info(
@@ -370,6 +418,8 @@ internal sealed class GpuResources(
             }
 
             UploadLeaves(graph, derived, where);
+            if (!where.Impostor.IsNone)
+                UploadImpostor(graph, derived, where);
         }
 
         _arrivedModels.Clear();
@@ -563,6 +613,26 @@ internal sealed class GpuResources(
         if (gpu.Features.HasRayQuery)
             where = CreateAcceleration(name, made, where);
 
+        // PROTO: a model that baked an impostor gets its atlas and a row of the impostor table.
+        if (!made.Impostor.IsEmpty && _impostorRows.CanAllocate(1))
+        {
+            Result<GpuTexture> atlas = gpu.CreateTexture(
+                new TextureDescription
+                {
+                    Width = MeshDerived.ImpostorSize,
+                    Height = MeshDerived.ImpostorSize,
+                    Format = GpuFormat.R16G16B16A16Sfloat,
+                    Usage = TextureUsages.Sampled | TextureUsages.CopyDestination,
+                    Levels = 1,
+                    Name = $"{name} impostor",
+                }
+            );
+            if (atlas.Ok)
+                where = where with { Impostor = atlas.Value, ImpostorRow = (uint)_impostorRows.Allocate(1) };
+            else
+                Log.Warn($"{name} draws no impostor: {atlas.Error}");
+        }
+
         // An arrival is a use, so a model that took longer to make than it may go unused is copied up before it can be
         // evicted.
         _askedModels[model.Id] = Environment.TickCount64;
@@ -647,6 +717,21 @@ internal sealed class GpuResources(
         graph.BuildAcceleration(where.Acceleration);
     }
 
+    /// <summary>
+    /// PROTO: the model's impostor atlas copied up, and its row of the impostor table written.
+    /// </summary>
+    private void UploadImpostor(RenderGraph graph, MeshDerived derived, ResidentModel where)
+    {
+        graph.Upload(where.Impostor, MemoryMarshal.AsBytes(derived.Impostor.AsSpan()));
+        GpuImpostor row = new()
+        {
+            BoundsMin = derived.BoundsMin,
+            Atlas = where.Impostor.Id,
+            BoundsMax = derived.BoundsMax,
+        };
+        graph.Upload(ImpostorTable, [row], (ulong)where.ImpostorRow * GpuImpostor.Bytes);
+    }
+
     private sealed class TextureEntry
     {
         public ResourceState State { get; set; }
@@ -673,5 +758,7 @@ internal readonly record struct ResidentModel(
     bool IsFailure = false,
     uint LeafOffset = 0,
     uint LeafCount = 0,
-    GpuAcceleration Acceleration = default
+    GpuAcceleration Acceleration = default,
+    GpuTexture Impostor = default,
+    uint ImpostorRow = 0
 );

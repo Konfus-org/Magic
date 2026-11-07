@@ -1,0 +1,131 @@
+using System.Numerics;
+
+namespace Magic.GIRendering;
+
+/// <summary>
+/// PROTO: a model's octahedral impostor atlas, as <see cref="MeshDerived.Impostor"/> says, baked on the CPU from its leaf
+/// clusters: each view rasterises every leaf triangle orthographically into its tile, the nearest kept. The renderer's
+/// Scene/Impostors.slang reads it with the same grid and view frames.
+/// </summary>
+internal static class ImpostorBuilder
+{
+    private const int Views = MeshDerived.ImpostorViews;
+    private const int Tile = MeshDerived.ImpostorTile;
+    private const int Size = MeshDerived.ImpostorSize;
+
+    /// <summary>
+    /// The atlas as RGBA16F halves, row by row, the views baked in parallel.
+    /// </summary>
+    public static Half[] Bake(
+        IReadOnlyList<GpuVertex> vertices,
+        IReadOnlyList<uint> indices,
+        IReadOnlyList<GpuCluster> clusters,
+        Vector3 center,
+        float radius
+    )
+    {
+        Half[] texels = new Half[Size * Size * 4];
+        Parallel.For(0, Views * Views, view => BakeView(view % Views, view / Views));
+
+        return texels;
+
+        void BakeView(int viewX, int viewY)
+        {
+            (Vector3 forward, Vector3 right, Vector3 up) = GetViewFrame(viewX, viewY);
+            float[] depth = new float[Tile * Tile];
+            Array.Fill(depth, float.MaxValue);
+            foreach (GpuCluster cluster in clusters)
+            {
+                if (cluster.Error != 0)
+                    continue;
+
+                for (int t = 0; t < cluster.TriangleCount; t++)
+                {
+                    int first = (int)cluster.IndexOffset + (t * 3);
+                    DrawTriangle(
+                        vertices[(int)indices[first]],
+                        vertices[(int)indices[first + 1]],
+                        vertices[(int)indices[first + 2]],
+                        cluster.MaterialSlot
+                    );
+                }
+            }
+
+            void DrawTriangle(GpuVertex a, GpuVertex b, GpuVertex c, uint slot)
+            {
+                Vector3 pa = Project(a.Position);
+                Vector3 pb = Project(b.Position);
+                Vector3 pc = Project(c.Position);
+                float area = Edge(pa, pb, pc);
+                if (MathF.Abs(area) < 1e-12f)
+                    return;
+
+                int minX = Math.Max((int)MathF.Floor(MathF.Min(pa.X, MathF.Min(pb.X, pc.X))), 0);
+                int maxX = Math.Min((int)MathF.Ceiling(MathF.Max(pa.X, MathF.Max(pb.X, pc.X))), Tile - 1);
+                int minY = Math.Max((int)MathF.Floor(MathF.Min(pa.Y, MathF.Min(pb.Y, pc.Y))), 0);
+                int maxY = Math.Min((int)MathF.Ceiling(MathF.Max(pa.Y, MathF.Max(pb.Y, pc.Y))), Tile - 1);
+                Vector3 na = Packing.DecodeUnitVector(a.Normal);
+                Vector3 nb = Packing.DecodeUnitVector(b.Normal);
+                Vector3 nc = Packing.DecodeUnitVector(c.Normal);
+
+                // A triangle facing away from the view is left out, as the cluster draw culls it, so the impostor
+                // shows what the clusters it hands off from show.
+                if (Vector3.Dot(na + nb + nc, forward) <= 0)
+                    return;
+                for (int y = minY; y <= maxY; y++)
+                {
+                    for (int x = minX; x <= maxX; x++)
+                    {
+                        Vector3 p = new(x + 0.5f, y + 0.5f, 0);
+                        float wa = Edge(pb, pc, p) / area;
+                        float wb = Edge(pc, pa, p) / area;
+                        float wc = Edge(pa, pb, p) / area;
+                        if (wa < 0 || wb < 0 || wc < 0)
+                            continue;
+
+                        float z = (wa * pa.Z) + (wb * pb.Z) + (wc * pc.Z);
+                        if (z >= depth[(y * Tile) + x])
+                            continue;
+
+                        depth[(y * Tile) + x] = z;
+                        Vector3 normal = Vector3.Normalize((wa * na) + (wb * nb) + (wc * nc));
+                        Vector2 flat = Packing.EncodeOctahedral(normal);
+                        int texel = ((((viewY * Tile) + y) * Size) + (viewX * Tile) + x) * 4;
+                        texels[texel] = (Half)flat.X;
+                        texels[texel + 1] = (Half)flat.Y;
+                        texels[texel + 2] = (Half)Math.Clamp(z, 0, 1);
+                        texels[texel + 3] = (Half)(slot + 1);
+                    }
+                }
+            }
+
+            // A model point as the tile's pixel x, y and its depth from the view's front plane over the diameter.
+            Vector3 Project(Vector3 point)
+            {
+                Vector3 offset = point - center;
+                float s = Vector3.Dot(offset, right) / radius;
+                float t = Vector3.Dot(offset, up) / radius;
+                float along = Vector3.Dot(offset, forward);
+
+                return new Vector3((s + 1) * 0.5f * Tile, (1 - t) * 0.5f * Tile, (radius - along) / (2 * radius));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The view at grid point x, y: the direction it looks from, towards the model, and its right and up.
+    /// </summary>
+    private static (Vector3 Forward, Vector3 Right, Vector3 Up) GetViewFrame(int x, int y)
+    {
+        Vector2 flat = (new Vector2(x, y) / (Views - 1) * 2) - Vector2.One;
+        Vector3 forward = Packing.DecodeOctahedral(flat);
+        Vector3 up0 = MathF.Abs(forward.Y) < 0.999f ? Vector3.UnitY : Vector3.UnitZ;
+        Vector3 right = Vector3.Normalize(Vector3.Cross(up0, forward));
+        Vector3 up = Vector3.Cross(forward, right);
+
+        return (forward, right, up);
+    }
+
+    private static float Edge(Vector3 a, Vector3 b, Vector3 p) =>
+        ((b.X - a.X) * (p.Y - a.Y)) - ((b.Y - a.Y) * (p.X - a.X));
+}

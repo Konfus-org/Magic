@@ -10,12 +10,15 @@ import Scene.Instances;
 import Scene.Clusters;
 import Scene.Vertices;
 import Scene.Visibility;
+import Scene.Impostors;
 
 struct Varyings
 {
     float4 position : SV_Position;
     // The visibility id, the same from each of a triangle's three vertices.
     nointerpolation uint id : VISIBILITY_ID;
+    // PROTO: how far into the impostor handoff the instance is.
+    nointerpolation float fade : FADE;
 };
 
 // Each draw is one instance, so its first instance, the visible row, is the instance drawn: SV_InstanceID would be
@@ -34,8 +37,15 @@ Varyings DrawVisibilityVertex(uint vertexIndex : SV_VertexID, uint instanceIndex
     Vertex vertex = LoadVertex(frame.vertices, LoadIndex(frame.indices, cluster.indexOffset + vertexIndex));
     float3 relative = Relative(frame, ToWorld(instance.world, vertex.position));
     output.position = mul(float4(relative, 1.0), frame.viewProjection);
+    output.fade = GetImpostorFade(frame, instance, GetPassHeader().w);
     return output;
 }
 
 [shader("pixel")]
-uint DrawVisibilityPixel(Varyings input) : SV_Target0 { return input.id; }
+uint DrawVisibilityPixel(Varyings input) : SV_Target0
+{
+    if (input.fade > 0.0 && GetDither(input.position.xy) < input.fade)
+        discard;
+
+    return input.id;
+}

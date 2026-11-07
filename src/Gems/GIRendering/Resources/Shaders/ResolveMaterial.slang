@@ -13,6 +13,7 @@ import Core.Pack;
 import Scene.Instances;
 import Scene.Materials;
 import Scene.Visibility;
+import Scene.Impostors;
 import Surface.Surface;
 import Material.IMaterial;
 import Material.Failure;
@@ -27,11 +28,13 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
         return;
 
     UintTextureRef visibility = { frame.visibility };
-    uint visibleIndex;
-    uint triangle;
+    uint visibleIndex = 0u;
+    uint triangle = 0u;
     float2 unjittered = GetTexelCenterUv(thread.xy, size) - frame.jitter.xy / float2(size);
     StorageRef velocityTarget = { frame.velocity, 0u };
-    if (!DecodeVisibilityId(visibility.Load(thread.xy, 0u), visibleIndex, triangle))
+    uint id = visibility.Load(thread.xy, 0u);
+    bool isImpostor = (id & ImpostorFlag) != 0u;
+    if (!isImpostor && !DecodeVisibilityId(id, visibleIndex, triangle))
     {
         float3 far = ReconstructRelative(frame, unjittered, 1e-6);
         float4 previousClip = mul(float4(far, 1.0), frame.previousViewProjection);
@@ -40,26 +43,53 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
         return;
     }
 
-    PixelTriangle shown = LoadPixelTriangle(frame, visibleIndex, triangle, ToClip(GetTexelCenterUv(thread.xy, size)));
-    float3 lambda = shown.bary.lambda;
-
+    // The surface's inputs, the point in its model's frame, its instance and its material slot: from the triangle the
+    // id names, or, PROTO, for an impostor's pixel, from its atlas traced again along the pixel's ray, with the slot the
+    // draw saw and no texture coordinates.
     SurfaceInputs inputs;
-    inputs.position = Interpolate(shown.p0, shown.p1, shown.p2, lambda);
-    float3 normal = Interpolate(shown.v0.normal, shown.v1.normal, shown.v2.normal, lambda);
-    float3 tangent = Interpolate(shown.v0.tangent, shown.v1.tangent, shown.v2.tangent, lambda);
-    inputs.normal = ToWorldNormal(shown.instance.world, normal);
-    inputs.tangent = ToWorldDirection(shown.instance.world, tangent);
-    inputs.tangentSign = shown.v0.tangentSign;
-    inputs.uv = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, lambda);
-    inputs.uvDdx = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, shown.bary.ddx);
-    inputs.uvDdy = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, shown.bary.ddy);
+    float3 model;
+    GpuInstance instance;
+    uint slot;
+    if (isImpostor)
+    {
+        instance = LoadInstance(frame.instances, id & ImpostorInstanceMask);
+        ImpostorRay ray = GetModelRay(frame, instance, ReconstructRelative(frame, unjittered, 0.5));
+        ImpostorHit hit = TraceImpostor(instance, LoadImpostor(GetPassHeader().y, instance.impostor), ray, 0.0);
+        model = hit.position;
+        slot = (id >> ImpostorSlotShift) & 7u;
+        inputs.position = Relative(frame, ToWorld(instance.world, hit.position));
+        inputs.normal = ToWorldNormal(instance.world, hit.normal);
+        float3 side = abs(inputs.normal.y) < 0.999 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0);
+        inputs.tangent = normalize(cross(side, inputs.normal));
+        inputs.tangentSign = 1.0;
+        inputs.uv = float2(0.0, 0.0);
+        inputs.uvDdx = float2(0.0, 0.0);
+        inputs.uvDdy = float2(0.0, 0.0);
+    }
+    else
+    {
+        PixelTriangle shown = LoadPixelTriangle(frame, visibleIndex, triangle, ToClip(GetTexelCenterUv(thread.xy, size)));
+        float3 lambda = shown.bary.lambda;
+        instance = shown.instance;
+        model = Interpolate(shown.v0.position, shown.v1.position, shown.v2.position, lambda);
+        slot = shown.cluster.materialSlot;
+        inputs.position = Interpolate(shown.p0, shown.p1, shown.p2, lambda);
+        float3 normal = Interpolate(shown.v0.normal, shown.v1.normal, shown.v2.normal, lambda);
+        float3 tangent = Interpolate(shown.v0.tangent, shown.v1.tangent, shown.v2.tangent, lambda);
+        inputs.normal = ToWorldNormal(shown.instance.world, normal);
+        inputs.tangent = ToWorldDirection(shown.instance.world, tangent);
+        inputs.tangentSign = shown.v0.tangentSign;
+        inputs.uv = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, lambda);
+        inputs.uvDdx = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, shown.bary.ddx);
+        inputs.uvDdy = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, shown.bary.ddy);
+    }
+
     inputs.viewDirection = NormalizeSafe(-inputs.position, float3(0.0, 0.0, -1.0));
-    inputs.material = LoadMaterial(frame.materials, GetMaterial(shown.instance, shown.cluster.materialSlot));
+    inputs.material = LoadMaterial(frame.materials, GetMaterial(instance, slot));
     inputs.sampler = inputs.material.baseColorSampler != 0u ? inputs.material.baseColorSampler : frame.defaultSampler;
     SurfaceOutputs surface = inputs.material.kind == MaterialKindFailure ? Failure.Evaluate(inputs) : M.Evaluate(inputs);
 
-    float3 model = Interpolate(shown.v0.position, shown.v1.position, shown.v2.position, lambda);
-    float3 previous = ToWorld(GetPreviousWorld(shown.instance, frame.frameIndex), model) - frame.previousCameraPosition.xyz;
+    float3 previous = ToWorld(GetPreviousWorld(instance, frame.frameIndex), model) - frame.previousCameraPosition.xyz;
     float4 previousClip = mul(float4(previous, 1.0), frame.previousViewProjection);
     float2 previousUv = ToUv(previousClip.xy / max(previousClip.w, Epsilon));
     velocityTarget.Store(thread.xy, float4(previousUv - unjittered, previousClip.w, 0.0));

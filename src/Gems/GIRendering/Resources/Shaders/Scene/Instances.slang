@@ -20,7 +20,7 @@ public struct GpuInstance
     public uint clusterOffset;
     public uint clusterCount;
     public uint movedFrame;
-    public uint padding1;
+    public uint impostor;
     // The material table's row for each slot.
     public uint materials[MaterialSlots];
 }

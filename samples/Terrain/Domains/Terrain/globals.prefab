@@ -1,0 +1,57 @@
+{
+    "entities": [
+        {
+            "name": "Spawn",
+            "tags": [
+                "spawn"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -6761.601,
+                        "y": 1410.349,
+                        "z": -2852.093
+                    },
+                    "rotation": {
+                        "x": 0.06225,
+                        "y": 0.60688,
+                        "z": -0.04776,
+                        "w": 0.79091
+                    }
+                }
+            }
+        },
+        {
+            "name": "Sky",
+            "components": {
+                "Sky": {
+                    "material": {
+                        "id": 4569236087865836549
+                    }
+                }
+            }
+        },
+        {
+            "name": "Sun",
+            "components": {
+                "Transform": {
+                    "rotation": {
+                        "x": 0.41554,
+                        "y": 0.2661,
+                        "z": -0.12854,
+                        "w": 0.86023
+                    }
+                },
+                "DirectionalLight": {
+                    "mode": "sun",
+                    "color": {
+                        "r": 1,
+                        "g": 0.96,
+                        "b": 0.9
+                    },
+                    "intensity": 3
+                }
+            }
+        }
+    ]
+}

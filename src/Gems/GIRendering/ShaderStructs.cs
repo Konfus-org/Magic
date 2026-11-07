@@ -160,7 +160,10 @@ internal record struct GpuInstance
     /// </summary>
     public uint MovedFrame;
 
-    public uint Padding1;
+    /// <summary>
+    /// PROTO: the model's row of the impostor table, 0 for none.
+    /// </summary>
+    public uint Impostor;
 
     /// <summary>
     /// The material table's row for each of the instance's slots.
@@ -383,6 +386,24 @@ public record struct GpuCluster
     /// Which of the instance's material slots the cluster is drawn with.
     /// </summary>
     public uint MaterialSlot;
+
+    public uint Padding;
+}
+
+/// <summary>
+/// PROTO: one model's impostor, 32 bytes: the twin of <c>Scene/Impostors.slang</c>'s: the box around the model in its
+/// frame, and the heap id of its atlas.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal record struct GpuImpostor
+{
+    public const int Bytes = 32;
+
+    public Vector3 BoundsMin;
+
+    public uint Atlas;
+
+    public Vector3 BoundsMax;
 
     public uint Padding;
 }
