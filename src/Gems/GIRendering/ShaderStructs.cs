@@ -405,5 +405,8 @@ internal record struct GpuImpostor
 
     public Vector3 BoundsMax;
 
-    public uint Padding;
+    /// <summary>
+    /// The heap id of the atlas of the texture coordinates its surface texels show.
+    /// </summary>
+    public uint UvAtlas;
 }

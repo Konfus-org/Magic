@@ -37,13 +37,14 @@ public static const uint CountRetestFadingDraws = 28u;
 // A retest list entry's cluster for an instance whose impostor the old pyramid hid.
 public static const uint RetestImpostor = 0xFFFFFFFFu;
 
-// One model's impostor, C#'s GpuImpostor: the box around the model in its frame and the heap id of its atlas.
+// One model's impostor, C#'s GpuImpostor: the box around the model in its frame, the heap id of its atlas and of the
+// atlas of the texture coordinates each texel shows.
 public struct GpuImpostor
 {
     public float3 boundsMin;
     public uint atlas;
     public float3 boundsMax;
-    public uint padding;
+    public uint uvAtlas;
 }
 
 public GpuImpostor LoadImpostor(uint table, uint row)
@@ -131,6 +132,8 @@ public struct ImpostorHit
     public float3 position;
     public float3 normal;
     public uint slot;
+    // The atlas texel the strongest view saw the surface at.
+    public uint2 texel;
 }
 
 public ImpostorHit TraceImpostor(GpuInstance instance, GpuImpostor impostor, ImpostorRay ray, float minCoverage)
@@ -174,6 +177,7 @@ public ImpostorHit TraceImpostor(GpuInstance instance, GpuImpostor impostor, Imp
     hit.position = center;
     hit.normal = float3(0.0, 1.0, 0.0);
     hit.slot = 0u;
+    hit.texel = uint2(0u, 0u);
     for (int i = 0; i < 3; i++)
     {
         // The ray where it crosses the plane through the centre facing the view, in the view's tile.
@@ -188,7 +192,8 @@ public ImpostorHit TraceImpostor(GpuInstance instance, GpuImpostor impostor, Imp
             continue;
 
         uint2 inTile = min(uint2(float2(st.x + 1.0, 1.0 - st.y) * 0.5 * float(ImpostorTile)), ImpostorTile - 1u);
-        float4 texel = atlas.Load(uint2(views[i]) * ImpostorTile + inTile, 0u);
+        uint2 atlasTexel = uint2(views[i]) * ImpostorTile + inTile;
+        float4 texel = atlas.Load(atlasTexel, 0u);
         if (texel.w < 0.5)
             continue;
 
@@ -198,6 +203,7 @@ public ImpostorHit TraceImpostor(GpuInstance instance, GpuImpostor impostor, Imp
         {
             best = weights[i];
             hit.slot = uint(texel.w + 0.5) - 1u;
+            hit.texel = atlasTexel;
 
             // Where the pixel's own ray reaches the depth the view saw along its axis, so the point stays on the ray.
             float along = radius - texel.z * 2.0 * radius;
@@ -213,6 +219,43 @@ public ImpostorHit TraceImpostor(GpuInstance instance, GpuImpostor impostor, Imp
     // that shadow rays trace from what the depth says.
     hit.position += hit.normal * (4.0 * radius / float(ImpostorTile));
     return hit;
+}
+
+// The texture coordinates of the surface an impostor's atlas texel shows, and how they change a texel across and a
+// texel down its view.
+public struct ImpostorUv
+{
+    public float2 uv;
+    public float2 perTexelX;
+    public float2 perTexelY;
+}
+
+public ImpostorUv LoadImpostorUv(GpuImpostor impostor, uint2 texel)
+{
+    TextureRef uvs = { impostor.uvAtlas };
+    ImpostorUv result;
+    result.uv = uvs.Load(texel, 0u).xy;
+    result.perTexelX = GetUvStep(impostor, texel, int2(1, 0), result.uv);
+    result.perTexelY = GetUvStep(impostor, texel, int2(0, 1), result.uv);
+    return result;
+}
+
+// How the texture coordinates change a texel along step: towards the neighbour the view also saw a surface at, else
+// from the one opposite; none at a texel alone.
+float2 GetUvStep(GpuImpostor impostor, uint2 texel, int2 step, float2 uv)
+{
+    TextureRef atlas = { impostor.atlas };
+    TextureRef uvs = { impostor.uvAtlas };
+    int2 inTile = int2(texel % ImpostorTile);
+    int2 next = inTile + step;
+    if (all(next >= 0) && all(next < int(ImpostorTile)) && atlas.Load(uint2(int2(texel) + step), 0u).w >= 0.5)
+        return uvs.Load(uint2(int2(texel) + step), 0u).xy - uv;
+
+    int2 back = inTile - step;
+    if (all(back >= 0) && all(back < int(ImpostorTile)) && atlas.Load(uint2(int2(texel) - step), 0u).w >= 0.5)
+        return uv - uvs.Load(uint2(int2(texel) - step), 0u).xy;
+
+    return float2(0.0, 0.0);
 }
 
 // A ray in an instance's model frame: where it starts and its unit direction.

@@ -19,7 +19,7 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
     /// <summary>
     /// Raised when the bytes written change shape, or the hierarchy is built otherwise.
     /// </summary>
-    public int Version => 12;
+    public int Version => 13;
 
     public MeshDerived Preprocess(Model asset) => ClusterBuilder.Build(asset);
 
@@ -38,6 +38,7 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
                 value.FieldBand,
                 value.Field.Length,
                 value.Impostor.Length,
+                value.ImpostorUv.Length,
                 value.BoundsMin,
                 value.BoundsMax
             )
@@ -48,6 +49,7 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
         bytes.Write(MemoryMarshal.AsBytes(value.Clusters.AsSpan()));
         bytes.Write(value.Field.AsSpan());
         bytes.Write(MemoryMarshal.AsBytes(value.Impostor.AsSpan()));
+        bytes.Write(MemoryMarshal.AsBytes(value.ImpostorUv.AsSpan()));
     }
 
     public Result<MeshDerived> Read(ReadOnlySpan<byte> bytes)
@@ -61,13 +63,15 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
             + ((long)header.IndexCount * sizeof(uint))
             + ((long)header.ClusterCount * GpuCluster.Bytes)
             + header.FieldBytes
-            + ((long)header.ImpostorHalves * sizeof(ushort));
+            + ((long)header.ImpostorHalves * sizeof(ushort))
+            + ((long)header.ImpostorUvHalves * sizeof(ushort));
         if (
             header.VertexCount < 0
             || header.IndexCount < 0
             || header.ClusterCount < 0
             || header.FieldBytes < 0
             || header.ImpostorHalves < 0
+            || header.ImpostorUvHalves < 0
             || bytes.Length < needed
         )
             return Result.Failure("the entry is cut short.");
@@ -77,6 +81,7 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
         ImmutableArray<GpuCluster> clusters = Take<GpuCluster>(ref bytes, header.ClusterCount);
         ImmutableArray<byte> field = Take<byte>(ref bytes, header.FieldBytes);
         ImmutableArray<Half> impostor = Take<Half>(ref bytes, header.ImpostorHalves);
+        ImmutableArray<Half> impostorUv = Take<Half>(ref bytes, header.ImpostorUvHalves);
 
         return Result.Success(
             new MeshDerived
@@ -91,6 +96,7 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
                 FieldVoxel = header.FieldVoxel,
                 FieldBand = header.FieldBand,
                 Impostor = impostor,
+                ImpostorUv = impostorUv,
                 BoundsMin = header.BoundsMin,
                 BoundsMax = header.BoundsMax,
             }
@@ -122,6 +128,7 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
         float FieldBand,
         int FieldBytes,
         int ImpostorHalves,
+        int ImpostorUvHalves,
         Vector3 BoundsMin,
         Vector3 BoundsMax
     );

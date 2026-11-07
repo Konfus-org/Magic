@@ -76,6 +76,12 @@ public sealed class MeshDerived
     public required ImmutableArray<Half> Impostor { get; init; }
 
     /// <summary>
+    /// PROTO: the texture coordinates of the surface each texel of <see cref="Impostor"/> shows, at the same texels, as
+    /// RG16F; empty with it.
+    /// </summary>
+    public required ImmutableArray<Half> ImpostorUv { get; init; }
+
+    /// <summary>
     /// PROTO: the box around the whole model, in its frame: what an impostor's quad is fitted to.
     /// </summary>
     public required Vector3 BoundsMin { get; init; }

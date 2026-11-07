@@ -128,8 +128,11 @@ internal sealed class GpuResources(
 
         foreach (ResidentModel resident in _residentModels.Values)
         {
-            if (!resident.Impostor.IsNone)
-                textures.Add(resident.Impostor);
+            if (resident.Impostor.IsNone)
+                continue;
+
+            textures.Add(resident.Impostor);
+            textures.Add(resident.ImpostorUv);
         }
 
         return textures.ToImmutable();
@@ -141,6 +144,7 @@ internal sealed class GpuResources(
         {
             gpu.Destroy(resident.Acceleration);
             gpu.Destroy(resident.Impostor);
+            gpu.Destroy(resident.ImpostorUv);
         }
     }
 
@@ -224,6 +228,7 @@ internal sealed class GpuResources(
             if (!where.Impostor.IsNone)
             {
                 gpu.Destroy(where.Impostor);
+                gpu.Destroy(where.ImpostorUv);
                 _impostorRows.Free((int)where.ImpostorRow, 1);
             }
 
@@ -603,24 +608,26 @@ internal sealed class GpuResources(
         if (!LeafClusters.IsNone)
             where = CreateAcceleration(name, made, where);
 
-        // PROTO: a model that baked an impostor gets its atlas and a row of the impostor table.
+        // PROTO: a model that baked an impostor gets its atlases and a row of the impostor table.
         if (!made.Impostor.IsEmpty && _impostorRows.CanAllocate(1))
         {
-            Result<GpuTexture> atlas = gpu.CreateTexture(
-                new TextureDescription
+            Result<GpuTexture> atlas = CreateAtlas($"{name} impostor", GpuFormat.R16G16B16A16Sfloat);
+            Result<GpuTexture> uvAtlas = CreateAtlas($"{name} impostor uv", GpuFormat.R16G16Sfloat);
+            if (atlas.Ok && uvAtlas.Ok)
+            {
+                where = where with
                 {
-                    Width = MeshDerived.ImpostorSize,
-                    Height = MeshDerived.ImpostorSize,
-                    Format = GpuFormat.R16G16B16A16Sfloat,
-                    Usage = TextureUsages.Sampled | TextureUsages.CopyDestination,
-                    Levels = 1,
-                    Name = $"{name} impostor",
-                }
-            );
-            if (atlas.Ok)
-                where = where with { Impostor = atlas.Value, ImpostorRow = (uint)_impostorRows.Allocate(1) };
+                    Impostor = atlas.Value,
+                    ImpostorUv = uvAtlas.Value,
+                    ImpostorRow = (uint)_impostorRows.Allocate(1),
+                };
+            }
             else
-                Log.Warn($"{name} draws no impostor: {atlas.Error}");
+            {
+                gpu.Destroy(atlas.Value);
+                gpu.Destroy(uvAtlas.Value);
+                Log.Warn($"{name} draws no impostor: {(atlas.Ok ? uvAtlas.Error : atlas.Error)}");
+            }
         }
 
         // An arrival is a use, so a model that took longer to make than it may go unused is copied up before it can be
@@ -708,16 +715,34 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// PROTO: the model's impostor atlas copied up, and its row of the impostor table written.
+    /// PROTO: an impostor atlas of <see cref="MeshDerived.ImpostorSize"/> texels a side, in <paramref name="format"/>.
+    /// </summary>
+    private Result<GpuTexture> CreateAtlas(string name, GpuFormat format) =>
+        gpu.CreateTexture(
+            new TextureDescription
+            {
+                Width = MeshDerived.ImpostorSize,
+                Height = MeshDerived.ImpostorSize,
+                Format = format,
+                Usage = TextureUsages.Sampled | TextureUsages.CopyDestination,
+                Levels = 1,
+                Name = name,
+            }
+        );
+
+    /// <summary>
+    /// PROTO: the model's impostor atlases copied up, and its row of the impostor table written.
     /// </summary>
     private void UploadImpostor(RenderGraph graph, MeshDerived derived, ResidentModel where)
     {
         graph.Upload(where.Impostor, MemoryMarshal.AsBytes(derived.Impostor.AsSpan()));
+        graph.Upload(where.ImpostorUv, MemoryMarshal.AsBytes(derived.ImpostorUv.AsSpan()));
         GpuImpostor row = new()
         {
             BoundsMin = derived.BoundsMin,
             Atlas = where.Impostor.Id,
             BoundsMax = derived.BoundsMax,
+            UvAtlas = where.ImpostorUv.Id,
         };
         graph.Upload(ImpostorTable, [row], (ulong)where.ImpostorRow * GpuImpostor.Bytes);
     }
@@ -758,5 +783,6 @@ internal readonly record struct ResidentModel(
     uint LeafCount = 0,
     GpuAcceleration Acceleration = default,
     GpuTexture Impostor = default,
+    GpuTexture ImpostorUv = default,
     uint ImpostorRow = 0
 );

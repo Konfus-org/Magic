@@ -79,8 +79,8 @@ internal static unsafe class ClusterBuilder
             boundsMax = Vector3.Max(boundsMax, vertex.Position);
         }
 
-        ImmutableArray<Half> impostor =
-            radius < ImpostorMaxRadius ? [.. ImpostorBuilder.Bake(vertices, indices, clusters, center, radius)] : [];
+        (Half[] Surface, Half[] Uv) impostor =
+            radius < ImpostorMaxRadius ? ImpostorBuilder.Bake(vertices, indices, clusters, center, radius) : ([], []);
 
         return new MeshDerived
         {
@@ -93,7 +93,8 @@ internal static unsafe class ClusterBuilder
             FieldOrigin = field.Origin,
             FieldVoxel = field.Voxel,
             FieldBand = field.Band,
-            Impostor = impostor,
+            Impostor = [.. impostor.Surface],
+            ImpostorUv = [.. impostor.Uv],
             BoundsMin = boundsMin,
             BoundsMax = boundsMax,
         };

@@ -45,7 +45,7 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
 
     // The surface's inputs, the point in its model's frame, its instance and its material slot: from the triangle the
     // id names, or, PROTO, for an impostor's pixel, from its atlas traced again along the pixel's ray, with the slot the
-    // draw saw and no texture coordinates.
+    // draw saw.
     SurfaceInputs inputs;
     float3 model;
     GpuInstance instance;
@@ -54,7 +54,8 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
     {
         instance = LoadInstance(frame.instances, id & ImpostorInstanceMask);
         ImpostorRay ray = GetModelRay(frame, instance, ReconstructRelative(frame, unjittered, 0.5));
-        ImpostorHit hit = TraceImpostor(instance, LoadImpostor(GetPassHeader().y, instance.impostor), ray, 0.0);
+        GpuImpostor impostor = LoadImpostor(GetPassHeader().y, instance.impostor);
+        ImpostorHit hit = TraceImpostor(instance, impostor, ray, 0.0);
         model = hit.position;
         slot = (id >> ImpostorSlotShift) & 7u;
         inputs.position = Relative(frame, ToWorld(instance.world, hit.position));
@@ -62,9 +63,15 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
         float3 side = abs(inputs.normal.y) < 0.999 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0);
         inputs.tangent = normalize(cross(side, inputs.normal));
         inputs.tangentSign = 1.0;
-        inputs.uv = float2(0.0, 0.0);
-        inputs.uvDdx = float2(0.0, 0.0);
-        inputs.uvDdy = float2(0.0, 0.0);
+
+        // The texture coordinates the atlas holds at the texel, and their change over a screen pixel: a texel's change
+        // times how many atlas texels the pixel spans, a pixel's size over a texel's at the instance's distance.
+        ImpostorUv uv = LoadImpostorUv(impostor, hit.texel);
+        float pixel = length(inputs.position) / frame.pixelsPerRadian;
+        float atlasTexel = 2.0 * instance.boundsRadius / float(ImpostorTile);
+        inputs.uv = uv.uv;
+        inputs.uvDdx = uv.perTexelX * (pixel / atlasTexel);
+        inputs.uvDdy = uv.perTexelY * (pixel / atlasTexel);
     }
     else
     {

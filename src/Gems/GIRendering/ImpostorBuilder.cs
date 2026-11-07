@@ -14,9 +14,10 @@ internal static class ImpostorBuilder
     private const int Size = MeshDerived.ImpostorSize;
 
     /// <summary>
-    /// The atlas as RGBA16F halves, row by row, the views baked in parallel.
+    /// The atlas as RGBA16F halves, and the texture coordinates of the same texels as RG16F halves, row by row, the views
+    /// baked in parallel.
     /// </summary>
-    public static Half[] Bake(
+    public static (Half[] Surface, Half[] Uv) Bake(
         IReadOnlyList<GpuVertex> vertices,
         IReadOnlyList<uint> indices,
         IReadOnlyList<GpuCluster> clusters,
@@ -25,9 +26,10 @@ internal static class ImpostorBuilder
     )
     {
         Half[] texels = new Half[Size * Size * 4];
+        Half[] uvs = new Half[Size * Size * 2];
         Parallel.For(0, Views * Views, view => BakeView(view % Views, view / Views));
 
-        return texels;
+        return (texels, uvs);
 
         void BakeView(int viewX, int viewY)
         {
@@ -95,6 +97,9 @@ internal static class ImpostorBuilder
                         texels[texel + 1] = (Half)flat.Y;
                         texels[texel + 2] = (Half)Math.Clamp(z, 0, 1);
                         texels[texel + 3] = (Half)(slot + 1);
+                        Vector2 uv = (wa * a.Uv) + (wb * b.Uv) + (wc * c.Uv);
+                        uvs[texel / 2] = (Half)uv.X;
+                        uvs[(texel / 2) + 1] = (Half)uv.Y;
                     }
                 }
             }
