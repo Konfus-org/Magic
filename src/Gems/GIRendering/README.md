@@ -10,6 +10,7 @@ model reader, the mesh preprocessor and the texture reader.
 
 - A model shows once the preprocessor has made its clusters. One that doesn't load is drawn as the failure model, and
   a material or texture that doesn't load as the magenta failure material.
+- A model nothing has drawn or waited for in a minute leaves the GPU, and loads again when it is next drawn.
 - As a domain replaces the world, the loading screen stays until the models, materials and textures of what comes are
   on the GPU, or failed, and nothing drawn before carries into the frames after.
 - The directional light is the sun while it is above the horizon, else the moon while it is, else the first there is.
@@ -40,10 +41,18 @@ without what other gems draw over it.
 
 `GIRenderingGem.Render` is the frame in order, top to bottom: start there.
 
-- Each area declares its own passes with `GpuPipelines` and takes what it depends on through its constructor.
+- An area is the passes of one part of the frame, which it declares with `GpuPipelines`. It keeps only those passes
+  and what it carries from one frame to the next, such as last frame's view.
 - A pass is one `GpuPass.Run` call saying what it reads and writes, which puts its barriers in.
-- A texture or material asset, or a sampler, comes from `GpuResources`, which makes it on the first ask and frees it
-  with the gem. The rows a slot's material is drawn with are filled with the instance rows.
+- A texture, material or model asset, or a sampler, comes from `GpuResources`, which makes it on the first ask and
+  frees it with the gem, or a model once nothing has asked for it in a while and no renderer drawn holds it. A
+  renderer's instance row is built again, asking for its model, when the renderer is written and when a model
+  arrives; the material rows its slots are drawn with are made again each frame.
+- Each frame, an area's `Prepare` asks `GpuResources` for its own textures and buffers by description, uploads what
+  goes in them in the frame's upload pass, and returns their handles. Its `Record` takes what its passes read and
+  write as arguments, and `Render` hands the handles on from one area to the next. The same description under a name
+  is the same resource, holding what the last frame left in it; another one, as at a new window size, makes it again,
+  empty.
 - The shaders are the `Shaders/` modules in this gem's `Resources`, built on the shader library
   ([Shaders](../../Resources/Shaders/README.md)). The passes are at the folder's root, and what they share is under it:
   - `Core/Frame` is what every pass of a frame reads.

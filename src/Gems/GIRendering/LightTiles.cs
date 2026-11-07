@@ -3,16 +3,20 @@ using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Gpu;
-using Magic.Rendering;
 using Magic.Utils;
 
 namespace Magic.GIRendering;
 
 /// <summary>
+/// A frame's light table, holding <paramref name="Count"/> lights, and each tile's words of bits, a bit per light.
+/// </summary>
+internal readonly record struct LightBuffers(GpuBuffer Table, GpuBuffer Tiles, int Count);
+
+/// <summary>
 /// The light table and the tiles of the screen each light reaches: the world's local lights uploaded each frame, and a
 /// pass that sets each tile's bit for every light that touches what the tile shows.
 /// </summary>
-internal sealed class LightTiles(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposable
+internal sealed class LightTiles(IGraphicsApi gpu, GpuResources resources, GpuPipelines pipelines)
 {
     /// <summary>
     /// The twin of <c>Scene/Lights.slang</c>'s.
@@ -35,103 +39,70 @@ internal sealed class LightTiles(IGraphicsApi gpu, GpuPipelines pipelines) : IDi
 
     private bool _isFullLogged;
 
-    public GpuBuffer Table { get; private set; }
-
     /// <summary>
-    /// Each tile's words of bits, a bit per light.
+    /// The table and the view's tiles asked for, and the world's lights into the table, point lights first, in a
+    /// transfer pass the caller opened.
     /// </summary>
-    public GpuBuffer Tiles { get; private set; }
-
-    /// <summary>
-    /// How many lights the table holds this frame.
-    /// </summary>
-    public int Count { get; private set; }
-
-    public void Dispose()
-    {
-        gpu.Destroy(Table);
-        gpu.Destroy(Tiles);
-    }
-
-    public Result Create()
-    {
-        Result<GpuBuffer> table = gpu.CreateBuffer("Light table", (long)MaxLights * GpuLight.Bytes);
-        if (!table.Ok)
-            return Result.Failure(table.Error);
-
-        Table = table.Value;
-
-        return Result.Success();
-    }
-
-    /// <summary>
-    /// The tiles made again for a picture of a size; the old ones destroyed.
-    /// </summary>
-    public Result Resize(int width, int height)
-    {
-        gpu.Destroy(Tiles);
-        Result<GpuBuffer> tiles = gpu.CreateBuffer(
-            "Light tiles",
-            (long)GetTiles(width) * GetTiles(height) * Buckets * sizeof(uint)
-        );
-        Tiles = tiles.Value;
-        if (!tiles.Ok)
-            return Result.Failure(tiles.Error);
-
-        return Result.Success();
-    }
-
-    /// <summary>
-    /// The world's lights into the table, point lights first, in a transfer pass the caller opened.
-    /// </summary>
-    public void Prepare(
-        RenderGraph graph,
+    public Result<LightBuffers> Prepare(
+        in RenderView view,
         EcsSnapshot<Transform, PointLight> points,
         EcsSnapshot<Transform, SpotLight> spots,
         EcsSnapshot<Transform, RectLight> rects
     )
     {
+        Result<GpuBuffer> table = resources.TryGetBuffer("Light table", (long)MaxLights * GpuLight.Bytes);
+        if (!table.Ok)
+            return Result.Failure(table.Error);
+
+        Result<GpuBuffer> tiles = resources.TryGetBuffer(
+            "Light tiles",
+            (long)GetTiles(view.Width) * GetTiles(view.Height) * Buckets * sizeof(uint)
+        );
+        if (!tiles.Ok)
+            return Result.Failure(tiles.Error);
+
         int total = points.Count + spots.Count + rects.Count;
-        Count = Math.Min(total, MaxLights);
+        LightBuffers lights = new(table.Value, tiles.Value, Math.Min(total, MaxLights));
         if (total > MaxLights && !_isFullLogged)
         {
             _isFullLogged = true;
             Log.Error($"Some lights are not drawn: the light table holds {MaxLights}.");
         }
 
-        if (Count == 0)
-            return;
+        if (lights.Count == 0)
+            return Result.Success(lights);
 
         int row = 0;
-        for (int i = 0; i < points.Count && row < Count; i++)
+        for (int i = 0; i < points.Count && row < lights.Count; i++)
         {
             _lights[row++] = ToGpuLight(points.First[i], points.Second[i]);
         }
 
-        for (int i = 0; i < spots.Count && row < Count; i++)
+        for (int i = 0; i < spots.Count && row < lights.Count; i++)
         {
             _lights[row++] = ToGpuLight(spots.First[i], spots.Second[i]);
         }
 
-        for (int i = 0; i < rects.Count && row < Count; i++)
+        for (int i = 0; i < rects.Count && row < lights.Count; i++)
         {
             _lights[row++] = ToGpuLight(rects.First[i], rects.Second[i]);
         }
 
-        graph.Upload(gpu, Table, _lights.AsSpan(0, Count));
+        view.Graph.Upload(gpu, lights.Table, _lights.AsSpan(0, lights.Count));
+
+        return Result.Success(lights);
     }
 
     /// <summary>
     /// Each tile's lights, from the view's depth.
     /// </summary>
-    public void Record(in RenderView view, in GpuConstants header, GpuBuffer lightingConstants)
+    public void Record(in RenderView view, in GpuConstants header, GpuBuffer lightingConstants, in LightBuffers lights)
     {
-        FrameTargets targets = view.Targets;
         _cullPass
             .Run(view.Graph, header)
-            .Reads(view.Constants, lightingConstants, Table, targets.Depth)
-            .Writes(Tiles)
-            .Dispatch((uint)GetTiles(targets.Width), (uint)GetTiles(targets.Height));
+            .Reads(view.Constants, lightingConstants, lights.Table, view.Depth)
+            .Writes(lights.Tiles)
+            .Dispatch((uint)GetTiles(view.Width), (uint)GetTiles(view.Height));
     }
 
     private static int GetTiles(int pixels) => (pixels + TileSize - 1) / TileSize;

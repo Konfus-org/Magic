@@ -5,10 +5,15 @@ using Magic.Utils;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// The sky's three tables, made each frame while there is a sky: how much of the sun gets through the air, what the air
-/// scatters back into itself, and the sky as the camera sees it.
+/// The sky's three tables: how much of the sun gets through the air, what the air scatters back into itself, and the
+/// sky as the camera sees it.
 /// </summary>
-internal sealed class SkyLuts(IGraphicsApi gpu, GpuPipelines pipelines) : IDisposable
+internal readonly record struct SkyTables(GpuTexture Transmittance, GpuTexture MultiScattering, GpuTexture View);
+
+/// <summary>
+/// The passes that make the sky's tables, each frame while there is a sky.
+/// </summary>
+internal sealed class SkyLuts(GpuResources resources, GpuPipelines pipelines)
 {
     private readonly GpuPass _transmittancePass = pipelines.Compute(
         "Sky: transmittance",
@@ -22,60 +27,55 @@ internal sealed class SkyLuts(IGraphicsApi gpu, GpuPipelines pipelines) : IDispo
     );
     private readonly GpuPass _viewPass = pipelines.Compute("Sky: view", "SkyLuts", "SkyView");
 
-    public GpuTexture Transmittance { get; private set; }
-
-    public GpuTexture MultiScattering { get; private set; }
-
-    public GpuTexture View { get; private set; }
-
-    public void Dispose()
+    /// <summary>
+    /// The tables asked for, before the lighting constants name them.
+    /// </summary>
+    public Result<SkyTables> Prepare()
     {
-        foreach (GpuTexture texture in (ReadOnlySpan<GpuTexture>)[Transmittance, MultiScattering, View])
-        {
-            gpu.Destroy(texture);
-        }
-    }
-
-    public Result Create()
-    {
-        Result<GpuTexture> transmittance = gpu.CreateTexture(
+        Result<GpuTexture> transmittance = resources.TryGetTexture(
             "Sky transmittance",
             256,
             64,
             GpuFormat.R16G16B16A16Sfloat
         );
-        Result<GpuTexture> multiScattering = gpu.CreateTexture(
+        Result<GpuTexture> multiScattering = resources.TryGetTexture(
             "Sky multi-scattering",
             32,
             32,
             GpuFormat.R16G16B16A16Sfloat
         );
-        Result<GpuTexture> view = gpu.CreateTexture("Sky view", 192, 108, GpuFormat.R16G16B16A16Sfloat);
+        Result<GpuTexture> view = resources.TryGetTexture("Sky view", 192, 108, GpuFormat.R16G16B16A16Sfloat);
         foreach (Result<GpuTexture> texture in (ReadOnlySpan<Result<GpuTexture>>)[transmittance, multiScattering, view])
         {
             if (!texture.Ok)
                 return Result.Failure(texture.Error);
         }
 
-        Transmittance = transmittance.Value;
-        MultiScattering = multiScattering.Value;
-        View = view.Value;
-
-        return Result.Success();
+        return Result.Success(new SkyTables(transmittance.Value, multiScattering.Value, view.Value));
     }
 
-    public void Record(RenderGraph graph, in GpuConstants header, GpuBuffer frameConstants, GpuBuffer lightingConstants)
+    public void Record(
+        RenderGraph graph,
+        in GpuConstants header,
+        GpuBuffer frameConstants,
+        GpuBuffer lightingConstants,
+        in SkyTables tables
+    )
     {
-        _transmittancePass.Run(graph, header).Reads(lightingConstants).Writes(Transmittance).DispatchOver(256, 64);
+        _transmittancePass
+            .Run(graph, header)
+            .Reads(lightingConstants)
+            .Writes(tables.Transmittance)
+            .DispatchOver(256, 64);
         _multiScatteringPass
             .Run(graph, header)
-            .Reads(lightingConstants, Transmittance)
-            .Writes(MultiScattering)
+            .Reads(lightingConstants, tables.Transmittance)
+            .Writes(tables.MultiScattering)
             .DispatchOver(32, 32);
         _viewPass
             .Run(graph, header)
-            .Reads(frameConstants, lightingConstants, Transmittance, MultiScattering)
-            .Writes(View)
+            .Reads(frameConstants, lightingConstants, tables.Transmittance, tables.MultiScattering)
+            .Writes(tables.View)
             .DispatchOver(192, 108);
     }
 }

@@ -13,17 +13,17 @@ namespace Magic.GIRendering;
 internal static class Screenshot
 {
     /// <summary>
-    /// The frame's output copied where the CPU can read it.
+    /// The frame's output copied into <paramref name="readback"/>, where the CPU can read it.
     /// </summary>
-    public static void RecordReadback(RenderGraph graph, FrameTargets targets)
+    public static void RecordReadback(RenderGraph graph, GpuTexture output, GpuBuffer readback)
     {
         graph.BeginTransferPass("Read the output back");
-        graph.Use(targets.Output, GpuAccess.CopySource);
-        graph.Use(targets.Readback, GpuAccess.CopyDestination);
-        graph.CopyTextureToBuffer(targets.Output, 0, 0, targets.Readback, 0);
+        graph.Use(output, GpuAccess.CopySource);
+        graph.Use(readback, GpuAccess.CopyDestination);
+        graph.CopyTextureToBuffer(output, 0, 0, readback, 0);
         graph.EndPass();
         graph.BeginTransferPass("Output to the host");
-        graph.Use(targets.Readback, GpuAccess.HostRead);
+        graph.Use(readback, GpuAccess.HostRead);
         graph.EndPass();
     }
 

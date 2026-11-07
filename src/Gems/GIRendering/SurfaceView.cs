@@ -51,28 +51,27 @@ internal sealed class SurfaceView(GpuPipelines pipelines)
 
     public void Record(in RenderView view, DebugView debugView, float exposure)
     {
-        FrameTargets targets = view.Targets;
         _showPass
             .Run(
                 view.Graph,
                 new GpuConstants(
                     view.Constants.Id,
                     (uint)debugView,
-                    targets.Hdr.Id,
+                    view.Hdr.Id,
                     BitConverter.SingleToUInt32Bits(exposure)
                 )
             )
             .Reads(
                 view.Constants,
-                targets.Visibility,
-                targets.Depth,
-                targets.GBufferNormal,
-                targets.GBufferBase,
-                targets.GBufferSurface,
-                targets.Velocity,
-                targets.Hdr
+                view.Visibility,
+                view.Depth,
+                view.GBufferNormal,
+                view.GBufferBase,
+                view.GBufferSurface,
+                view.Velocity,
+                view.Hdr
             )
-            .Writes(targets.Output)
-            .DispatchOver(targets.Width, targets.Height);
+            .Writes(view.Output)
+            .DispatchOver(view.Width, view.Height);
     }
 }

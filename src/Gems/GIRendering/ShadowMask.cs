@@ -1,8 +1,26 @@
 using Magic.Gpu;
-using Magic.Rendering;
 using Magic.Utils;
 
 namespace Magic.GIRendering;
+
+/// <summary>
+/// A frame's shadow mask and the denoiser's buffers and targets. <paramref name="Mask"/> is the denoised mask shading
+/// reads, <paramref name="Traced"/> the mask as the rays left it, and <paramref name="SunTiles"/> a bit for each pixel
+/// its sun ray reached the sun from, a word for each 8 by 4 pixels; the previous ones are what the last frame wrote.
+/// </summary>
+internal readonly record struct ShadowBuffers(
+    GpuBuffer Constants,
+    GpuBuffer TileStates,
+    GpuBuffer Traced,
+    GpuBuffer SunTiles,
+    GpuBuffer Mask,
+    GpuBuffer PreviousMask,
+    GpuTexture SunBlend,
+    GpuTexture SunHistory,
+    GpuTexture SunDenoised,
+    GpuTexture Moments,
+    GpuTexture PreviousMoments
+);
 
 /// <summary>
 /// On a GPU that traces rays, how much of each light reaches each pixel: a pass that traces a ray a pixel towards the
@@ -10,15 +28,9 @@ namespace Magic.GIRendering;
 /// <c>Scene/Shadows.slang</c> reads, and the sun's tiles beside it; then the noise taken out, into the mask shading
 /// reads: the sun's slot in time and then in space, the tile lights' slots in time alone, since a slot may hold another
 /// light in the next tile or frame. It blends with last frame's mask and moments, so it keeps two of each and swaps
-/// them every frame.
+/// them every frame, and with none while the view has no history.
 /// </summary>
-internal sealed class ShadowMask(
-    IGraphicsApi gpu,
-    GpuPipelines pipelines,
-    GeometryPools pools,
-    Visibility visibility,
-    LightTiles lights
-) : IDisposable
+internal sealed class ShadowMask(IGraphicsApi gpu, GpuPipelines pipelines, GpuResources resources)
 {
     private const int BytesPerPixel = 16;
     private const int SunTileWidth = 8;
@@ -32,80 +44,61 @@ internal sealed class ShadowMask(
     private readonly GpuPass _filterPass = pipelines.Compute("Filter shadows", "DenoiseShadows", "FilterShadows");
     private readonly GpuPass _blendPass = pipelines.Compute("Blend shadows", "DenoiseShadows", "BlendShadows");
 
-    private GpuBuffer _constants;
-    private GpuBuffer _tileStates;
-    private GpuBuffer _previousMask;
-    private GpuTexture _sunBlend;
-    private GpuTexture _sunHistory;
-    private GpuTexture _sunDenoised;
+    /// <summary>
+    /// The mask the frame drawn last wrote, which the next blends with.
+    /// </summary>
+    private GpuBuffer _mask;
+
+    /// <summary>
+    /// The moments the frame drawn last wrote, which the next blends with.
+    /// </summary>
     private GpuTexture _moments;
-    private GpuTexture _previousMoments;
-    private bool _hasHistory;
 
     /// <summary>
-    /// The denoised mask shading reads this frame.
+    /// The masks and the denoiser's targets asked for at the view's size, last frame's mask and moments kept to blend
+    /// with, and the denoiser's constants uploaded, in a transfer pass the caller opened.
     /// </summary>
-    public GpuBuffer Mask { get; private set; }
-
-    /// <summary>
-    /// The mask as the rays left it.
-    /// </summary>
-    public GpuBuffer Traced { get; private set; }
-
-    /// <summary>
-    /// A bit for each pixel its sun ray reached the sun from, a word for each 8 by 4 pixels.
-    /// </summary>
-    public GpuBuffer SunTiles { get; private set; }
-
-    public void Dispose() => Destroy();
-
-    /// <summary>
-    /// Forgets the shadows of frames gone, so none blend into what is drawn next.
-    /// </summary>
-    public void ClearHistory() => _hasHistory = false;
-
-    /// <summary>
-    /// The masks and the denoiser's targets made again for a picture of a size, with no history; the old ones destroyed.
-    /// </summary>
-    public Result Resize(int width, int height)
+    public Result<ShadowBuffers> Prepare(in RenderView view)
     {
-        Destroy();
-        _hasHistory = false;
+        int width = view.Width;
+        int height = view.Height;
         long tiles = (long)((width + SunTileWidth - 1) / SunTileWidth) * ((height + SunTileHeight - 1) / SunTileHeight);
         long maskBytes = (long)width * height * BytesPerPixel;
         (uint groupsX, uint groupsY) = _classifyPass.GetGroups(width, height);
-        Result<GpuBuffer> traced = gpu.CreateBuffer("Traced shadows", maskBytes);
-        Result<GpuBuffer> sunTiles = gpu.CreateBuffer("Sun shadow tiles", tiles * sizeof(uint));
-        Result<GpuBuffer> constants = gpu.CreateBuffer("Shadow denoiser constants", ShadowDenoiseConstants.Bytes);
-        Result<GpuBuffer> tileStates = gpu.CreateBuffer("Shadow tile states", (long)groupsX * groupsY * sizeof(uint));
-        Result<GpuBuffer> mask = gpu.CreateBuffer("Shadow mask", maskBytes);
-        Result<GpuBuffer> previousMask = gpu.CreateBuffer("Shadow mask history", maskBytes);
-        Result<GpuTexture> sunBlend = gpu.CreateTexture("Sun shadow blend", width, height, GpuFormat.R16G16Sfloat);
-        Result<GpuTexture> sunHistory = gpu.CreateTexture("Sun shadow history", width, height, GpuFormat.R16G16Sfloat);
-        Result<GpuTexture> sunDenoised = gpu.CreateTexture("Sun shadow", width, height, GpuFormat.R8Unorm);
-        Result<GpuTexture> moments = gpu.CreateTexture(
+        Result<GpuBuffer> traced = resources.TryGetBuffer("Traced shadows", maskBytes);
+        Result<GpuBuffer> sunTiles = resources.TryGetBuffer("Sun shadow tiles", tiles * sizeof(uint));
+        Result<GpuBuffer> constants = resources.TryGetBuffer("Shadow denoiser constants", ShadowDenoiseConstants.Bytes);
+        Result<GpuBuffer> tileStates = resources.TryGetBuffer(
+            "Shadow tile states",
+            (long)groupsX * groupsY * sizeof(uint)
+        );
+        Result<GpuBuffer> mask = resources.TryGetBuffer("Shadow mask", maskBytes);
+        Result<GpuBuffer> maskHistory = resources.TryGetBuffer("Shadow mask history", maskBytes);
+        Result<GpuTexture> sunBlend = resources.TryGetTexture(
+            "Sun shadow blend",
+            width,
+            height,
+            GpuFormat.R16G16Sfloat
+        );
+        Result<GpuTexture> sunHistory = resources.TryGetTexture(
+            "Sun shadow history",
+            width,
+            height,
+            GpuFormat.R16G16Sfloat
+        );
+        Result<GpuTexture> sunDenoised = resources.TryGetTexture("Sun shadow", width, height, GpuFormat.R8Unorm);
+        Result<GpuTexture> moments = resources.TryGetTexture(
             "Sun shadow moments",
             width,
             height,
             GpuFormat.R16G16B16A16Sfloat
         );
-        Result<GpuTexture> previousMoments = gpu.CreateTexture(
+        Result<GpuTexture> momentsHistory = resources.TryGetTexture(
             "Sun shadow moments history",
             width,
             height,
             GpuFormat.R16G16B16A16Sfloat
         );
-        Traced = traced.Value;
-        SunTiles = sunTiles.Value;
-        _constants = constants.Value;
-        _tileStates = tileStates.Value;
-        Mask = mask.Value;
-        _previousMask = previousMask.Value;
-        _sunBlend = sunBlend.Value;
-        _sunHistory = sunHistory.Value;
-        _sunDenoised = sunDenoised.Value;
-        _moments = moments.Value;
-        _previousMoments = previousMoments.Value;
         foreach (
             Result made in (ReadOnlySpan<Result>)
                 [
@@ -114,51 +107,64 @@ internal sealed class ShadowMask(
                     constants,
                     tileStates,
                     mask,
-                    previousMask,
+                    maskHistory,
                     sunBlend,
                     sunHistory,
                     sunDenoised,
                     moments,
-                    previousMoments,
+                    momentsHistory,
                 ]
         )
         {
             if (!made.Ok)
-                return made;
+                return Result.Failure(made.Error);
         }
 
-        return Result.Success();
-    }
-
-    /// <summary>
-    /// Last frame's mask and moments kept to blend with, and the denoiser's constants uploaded, in a transfer pass the
-    /// caller opened.
-    /// </summary>
-    public void Prepare(RenderGraph graph)
-    {
-        (Mask, _previousMask) = (_previousMask, Mask);
-        (_moments, _previousMoments) = (_previousMoments, _moments);
-        ShadowDenoiseConstants constants = new()
+        // Last frame's mask and moments are this frame's history.
+        (GpuBuffer previousMask, _mask) =
+            _mask == mask.Value ? (mask.Value, maskHistory.Value) : (maskHistory.Value, mask.Value);
+        (GpuTexture previousMoments, _moments) =
+            _moments == moments.Value ? (moments.Value, momentsHistory.Value) : (momentsHistory.Value, moments.Value);
+        ShadowBuffers shadows = new(
+            constants.Value,
+            tileStates.Value,
+            traced.Value,
+            sunTiles.Value,
+            _mask,
+            previousMask,
+            sunBlend.Value,
+            sunHistory.Value,
+            sunDenoised.Value,
+            _moments,
+            previousMoments
+        );
+        ShadowDenoiseConstants denoise = new()
         {
-            TileStates = _tileStates.Id,
-            SunBlend = _sunBlend.Id,
-            SunHistory = _sunHistory.Id,
-            SunDenoised = _sunDenoised.Id,
-            Moments = _moments.Id,
-            PreviousMoments = _previousMoments.Id,
-            PreviousMask = _previousMask.Id,
-            HasHistory = _hasHistory ? 1u : 0u,
+            TileStates = shadows.TileStates.Id,
+            SunBlend = shadows.SunBlend.Id,
+            SunHistory = shadows.SunHistory.Id,
+            SunDenoised = shadows.SunDenoised.Id,
+            Moments = shadows.Moments.Id,
+            PreviousMoments = shadows.PreviousMoments.Id,
+            PreviousMask = shadows.PreviousMask.Id,
+            HasHistory = view.HasHistory ? 1u : 0u,
         };
-        _hasHistory = true;
-        graph.Upload(gpu, _constants, in constants);
+        view.Graph.Upload(gpu, shadows.Constants, in denoise);
+
+        return Result.Success(shadows);
     }
 
     /// <summary>
     /// Each pixel's shadows, from the view's surfaces, traced and then denoised.
     /// </summary>
-    public void Record(in RenderView view, in GpuConstants header, GpuBuffer lightingConstants)
+    public void Record(
+        in RenderView view,
+        in GpuConstants header,
+        GpuBuffer lightingConstants,
+        in LightBuffers lights,
+        in ShadowBuffers shadows
+    )
     {
-        FrameTargets targets = view.Targets;
         _tracePass
             .Run(view.Graph, header)
             .Reads(
@@ -167,52 +173,52 @@ internal sealed class ShadowMask(
                 lights.Table,
                 lights.Tiles,
                 view.Instances,
-                pools.Clusters,
-                pools.Vertices,
-                pools.Indices,
-                visibility.VisibleClusters,
-                targets.Visibility,
-                targets.Depth,
-                targets.GBufferNormal
+                resources.ClusterPool,
+                resources.VertexPool,
+                resources.IndexPool,
+                view.Cull.VisibleClusters,
+                view.Visibility,
+                view.Depth,
+                view.GBufferNormal
             )
-            .Writes(Traced, SunTiles)
-            .DispatchOver(targets.Width, targets.Height);
+            .Writes(shadows.Traced, shadows.SunTiles)
+            .DispatchOver(view.Width, view.Height);
 
         // Denoise: classify the sun's tiles, filter three times, blend with last frame.
         GpuConstants denoise = header with
         {
-            Y = _constants.Id,
+            Y = shadows.Constants.Id,
         };
         _classifyPass
             .Run(view.Graph, denoise)
             .Reads(
                 view.Constants,
                 lightingConstants,
-                _constants,
-                SunTiles,
-                targets.Depth,
-                targets.GBufferNormal,
-                targets.Velocity,
-                _sunHistory,
-                _previousMoments
+                shadows.Constants,
+                shadows.SunTiles,
+                view.Depth,
+                view.GBufferNormal,
+                view.Velocity,
+                shadows.SunHistory,
+                shadows.PreviousMoments
             )
-            .Writes(_tileStates, _sunBlend, _moments)
-            .DispatchOver(targets.Width, targets.Height);
+            .Writes(shadows.TileStates, shadows.SunBlend, shadows.Moments)
+            .DispatchOver(view.Width, view.Height);
 
         // Each pass reads the last one's output; the first pass's is what the next frame blends with.
         for (int pass = 0; pass < FilterPasses; pass++)
         {
             (GpuTexture input, GpuTexture output) = pass switch
             {
-                0 => (_sunBlend, _sunHistory),
-                1 => (_sunHistory, _sunBlend),
-                _ => (_sunBlend, _sunDenoised),
+                0 => (shadows.SunBlend, shadows.SunHistory),
+                1 => (shadows.SunHistory, shadows.SunBlend),
+                _ => (shadows.SunBlend, shadows.SunDenoised),
             };
             _filterPass
                 .Run(view.Graph, denoise with { W = (uint)pass }, _filterPassNames[pass])
-                .Reads(view.Constants, _constants, _tileStates, targets.Depth, targets.GBufferNormal, input)
+                .Reads(view.Constants, shadows.Constants, shadows.TileStates, view.Depth, view.GBufferNormal, input)
                 .Writes(output)
-                .DispatchOver(targets.Width, targets.Height);
+                .DispatchOver(view.Width, view.Height);
         }
 
         _blendPass
@@ -220,46 +226,15 @@ internal sealed class ShadowMask(
             .Reads(
                 view.Constants,
                 lightingConstants,
-                _constants,
-                Traced,
-                targets.Depth,
-                targets.Velocity,
-                _sunDenoised,
-                _previousMask,
-                _previousMoments
+                shadows.Constants,
+                shadows.Traced,
+                view.Depth,
+                view.Velocity,
+                shadows.SunDenoised,
+                shadows.PreviousMask,
+                shadows.PreviousMoments
             )
-            .Writes(Mask)
-            .DispatchOver(targets.Width, targets.Height);
-    }
-
-    private void Destroy()
-    {
-        foreach (
-            GpuBuffer buffer in (ReadOnlySpan<GpuBuffer>)
-                [Traced, SunTiles, _constants, _tileStates, Mask, _previousMask]
-        )
-        {
-            gpu.Destroy(buffer);
-        }
-
-        foreach (
-            GpuTexture texture in (ReadOnlySpan<GpuTexture>)
-                [_sunBlend, _sunHistory, _sunDenoised, _moments, _previousMoments]
-        )
-        {
-            gpu.Destroy(texture);
-        }
-
-        Traced = GpuBuffer.None;
-        SunTiles = GpuBuffer.None;
-        _constants = GpuBuffer.None;
-        _tileStates = GpuBuffer.None;
-        Mask = GpuBuffer.None;
-        _previousMask = GpuBuffer.None;
-        _sunBlend = GpuTexture.None;
-        _sunHistory = GpuTexture.None;
-        _sunDenoised = GpuTexture.None;
-        _moments = GpuTexture.None;
-        _previousMoments = GpuTexture.None;
+            .Writes(shadows.Mask)
+            .DispatchOver(view.Width, view.Height);
     }
 }
