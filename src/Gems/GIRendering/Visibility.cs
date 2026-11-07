@@ -20,7 +20,7 @@ internal readonly record struct RenderView(
 /// threshold and last frame's depth pyramid; the visible ones drawn into a visibility buffer; what the old pyramid hid
 /// retested against the new one; and every pixel's material resolved into the GBuffer.
 /// </summary>
-internal sealed class Visibility(IGraphicsApi gpu, GpuPipelines pipelines, GeometryPools pools, MaterialTable materials)
+internal sealed class Visibility(IGraphicsApi gpu, GpuPipelines pipelines, GeometryPools pools, InstanceTable instances)
     : IDisposable
 {
     public const int MaxVisibleClusters = 1 << 18;
@@ -161,7 +161,7 @@ internal sealed class Visibility(IGraphicsApi gpu, GpuPipelines pipelines, Geome
                 pools.Clusters,
                 pools.Vertices,
                 pools.Indices,
-                materials.Buffer,
+                instances.MaterialBuffer,
                 VisibleClusters,
                 view.Targets.Visibility
             )

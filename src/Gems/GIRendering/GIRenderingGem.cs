@@ -48,7 +48,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly GpuPipelines _pipelines;
     private readonly GeometryPools _pools;
     private readonly GpuResources _resources;
-    private readonly MaterialTable _materials;
     private readonly FrameTargets _targets;
     private readonly RayTracing? _rayTracing;
     private readonly InstanceTable _instances;
@@ -114,13 +113,12 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _pipelines = new GpuPipelines(gpu, shaders, assets);
         _pools = new GeometryPools(gpu, meshes, assets, threads);
         _resources = new GpuResources(gpu, assets, threads);
-        _materials = new MaterialTable(gpu, assets, _resources, threads);
         _targets = new FrameTargets(gpu);
-        _instances = new InstanceTable(gpu);
+        _instances = new InstanceTable(gpu, assets);
         _failure = new MaterialInstance { Handle = assets.GetFailure<Material, Model>() };
         _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu) : null;
-        _visibility = new Visibility(gpu, _pipelines, _pools, _materials);
-        _frameView = new FrameView(gpu, _resources, _pools, _materials, _visibility, _rayTracing);
+        _visibility = new Visibility(gpu, _pipelines, _pools, _instances);
+        _frameView = new FrameView(gpu, _resources, _pools, _instances, _visibility, _rayTracing);
         _sky = new SkyLuts(gpu, _pipelines);
         _lightTiles = new LightTiles(gpu, _pipelines);
         _shadows = _rayTracing is null ? null : new ShadowMask(gpu, _pipelines, _pools, _visibility, _lightTiles);
@@ -136,7 +134,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         EndPreparing();
         _pipelines.Dispose();
         _targets.Dispose();
-        _materials.Dispose();
         _resources.Dispose();
         _pools.Dispose();
         _instances.Dispose();
@@ -205,15 +202,14 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             return;
 
         // The rows from what changed since the inputs replaced, which go back once compared.
-        int instanceCount = _instances.Fill(inputs.Renderers, frame.Index, _pools, _materials, _failure);
+        int instanceCount = _instances.Fill(inputs.Renderers, frame.Index, _pools, _resources, _failure);
         if (replaced is not null)
             _inputs.Return(replaced);
 
         if (!Resize(inputs.Width, inputs.Height))
             return;
 
-        // What arrived: models into the pools, textures, material rows.
-        _materials.Refresh();
+        // The loading domain shows once what it draws is on the GPU.
         if (_preparing is { } preparing && IsPrepared(preparing))
         {
             Log.Info(
@@ -225,7 +221,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         graph.BeginTransferPass("Upload arrivals");
         _pools.Upload(graph);
         _resources.Upload(graph);
-        _materials.Upload(graph);
         graph.EndPass();
 
         // The frame's tables.
@@ -235,7 +230,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         bool hasChanges = _pools.HasArrivals || _instances.HasChanges;
         _instances.Upload(graph);
         _rayTracing?.Prepare(graph, _instances.Rows, _instances.Extras, hasChanges);
-        _frameView.Upload(graph, camera, sun, frame.Index, _targets, _instances.Buffer, instanceCount);
+        _frameView.Upload(graph, camera, sun, frame.Index, _targets, instanceCount);
         _visibility.ResetCounts(graph);
         _lightTiles.Prepare(graph, inputs.PointLights, inputs.SpotLights, inputs.RectLights);
         _lighting.Prepare(graph, inputs.Skies, camera, sun, _targets);
@@ -321,7 +316,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         ];
         foreach (Handle<Material> material in materials)
         {
-            _materials.Load(material);
+            _resources.Get(material);
         }
 
         EndPreparing();
@@ -399,15 +394,13 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
         foreach (Handle<Material> material in preparing.Materials)
         {
-            isPrepared &= _materials.HasArrived(material);
+            isPrepared &= _resources.Get(material) != ResourceState.Loading;
         }
 
         if (!hasFailure || _failure.Handle == Handle<Material>.None)
             return isPrepared;
 
-        _materials.Load(_failure.Handle);
-
-        return isPrepared && _materials.HasArrived(_failure.Handle);
+        return _resources.Get(_failure.Handle) != ResourceState.Loading && isPrepared;
     }
 
     /// <summary>
@@ -435,7 +428,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             Func<Result> step in (ReadOnlySpan<Func<Result>>)
                 [
                     _pools.Create,
-                    _materials.Create,
                     _instances.Create,
                     () => _rayTracing?.Create() ?? Result.Success(),
                     _visibility.Create,

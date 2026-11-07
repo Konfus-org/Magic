@@ -15,9 +15,11 @@ namespace Magic.GIRendering;
 /// The instance table: a row per renderer, at its index in a snapshot of the renderers. A frame's work is what changed
 /// since the last snapshot, a block of rows at a time: a block the same byte for byte stays as it is, one that only moved,
 /// as renderers were made or destroyed before it, moves its rows, and any other is built again. Every row is built again
-/// once a model is made or fails. Blocks that changed are uploaded in runs; a still scene uploads nothing.
+/// once a model is made or fails. Blocks that changed are uploaded in runs; a still scene uploads nothing. Beside it, the
+/// material table: a row per distinct <see cref="MaterialInstance"/> drawn, which every slot holding it shares, made
+/// again each fill while its material or texture loads, and uploaded whole in the frame a row changes.
 /// </summary>
-internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
+internal sealed class InstanceTable(IGraphicsApi gpu, Assets assets) : IDisposable
 {
     public const int Capacity = 1 << 18;
 
@@ -36,6 +38,24 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
     private readonly bool[] _isDirty = new bool[Capacity / BlockSize];
 
     /// <summary>
+    /// The material rows, as many as there are instance rows, which holds every drawn slot of a world whose renderers
+    /// fill one each; row 0 the default an empty slot is drawn with.
+    /// </summary>
+    private readonly GpuMaterial[] _materialRows = new GpuMaterial[Capacity];
+
+    /// <summary>
+    /// The slot each material row is made from, by row.
+    /// </summary>
+    private readonly MaterialInstance[] _materialSlots = new MaterialInstance[Capacity];
+
+    private readonly Dictionary<MaterialInstance, uint> _materialRowOf = [];
+
+    /// <summary>
+    /// The material rows whose material or texture was loading when they were last made.
+    /// </summary>
+    private readonly List<uint> _loadingMaterialRows = [];
+
+    /// <summary>
     /// The snapshot the last fill read.
     /// </summary>
     private EcsSnapshot<Transform, Renderer> _last = new();
@@ -46,7 +66,16 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
 
     private bool _isFullLogged;
 
+    private int _materialCount = 1;
+
+    /// <summary>
+    /// Whether the material rows differ from what <see cref="Upload"/> last copied.
+    /// </summary>
+    private bool _hasMaterialChanges = true;
+
     public GpuBuffer Buffer { get; private set; }
+
+    public GpuBuffer MaterialBuffer { get; private set; }
 
     /// <summary>
     /// How many rows the cull walks: the renderers of the last fill, up to <see cref="Capacity"/>.
@@ -68,7 +97,11 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
     /// </summary>
     public ReadOnlySpan<InstanceExtra> Extras => _extras.AsSpan(0, Count);
 
-    public void Dispose() => gpu.Destroy(Buffer);
+    public void Dispose()
+    {
+        gpu.Destroy(Buffer);
+        gpu.Destroy(MaterialBuffer);
+    }
 
     public Result Create()
     {
@@ -77,23 +110,36 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
             return Result.Failure(buffer.Error);
 
         Buffer = buffer.Value;
+        _materialRows[0] = GpuResources.DefaultMaterial;
+        Result<GpuBuffer> materials = gpu.CreateBuffer("Material table", (long)Capacity * GpuMaterial.Bytes);
+        if (!materials.Ok)
+            return Result.Failure(materials.Error);
+
+        MaterialBuffer = materials.Value;
 
         return Result.Success();
     }
 
     /// <summary>
     /// The rows of <paramref name="renderers"/>, from what changed since the last fill: each its model's place in the
-    /// pools and the material rows of its slots, or an empty row while its model is being made. How many rows
-    /// the cull walks. The last fill's snapshot must be left as it was until this one.
+    /// pools and the material rows of its slots, or an empty row while its model is being made; and the material rows
+    /// whose material or texture was loading, made again. How many rows the cull walks. The last fill's snapshot must be
+    /// left as it was until this one.
     /// </summary>
     public int Fill(
         EcsSnapshot<Transform, Renderer> renderers,
         uint frameIndex,
         GeometryPools pools,
-        MaterialTable materials,
+        GpuResources resources,
         in MaterialInstance failure
     )
     {
+        for (int i = _loadingMaterialRows.Count - 1; i >= 0; i--)
+        {
+            if (SetMaterialRow(_loadingMaterialRows[i], resources) != ResourceState.Loading)
+                _loadingMaterialRows.RemoveAt(i);
+        }
+
         // The same snapshot again, with the same models, makes the same rows.
         bool isRebuild = pools.SettledCount != _settledModels;
         if (renderers == _last && !isRebuild)
@@ -109,7 +155,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
         Count = Math.Min(renderers.Count, Capacity);
         HasChanges |= Count != _lastCount;
         _settledModels = pools.SettledCount;
-        RowInputs inputs = new(renderers, frameIndex, pools, materials, failure);
+        RowInputs inputs = new(renderers, frameIndex, pools, resources, failure);
         int shift = Count - _lastCount;
         int blocks = (Count + BlockSize - 1) / BlockSize;
 
@@ -134,10 +180,17 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
     }
 
     /// <summary>
-    /// Copies the blocks of rows that changed into the table, each run of them in one copy, in the frame's upload pass.
+    /// Copies the blocks of rows that changed into the table, each run of them in one copy, and the material rows into
+    /// theirs when any changed, in the frame's upload pass.
     /// </summary>
     public void Upload(RenderGraph graph)
     {
+        if (_hasMaterialChanges)
+        {
+            _hasMaterialChanges = false;
+            graph.Upload(gpu, MaterialBuffer, _materialRows.AsSpan(0, _materialCount));
+        }
+
         if (!HasChanges)
             return;
 
@@ -194,7 +247,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
     /// A renderer's row, with its model resident: where it is, its bounds in the world and the material rows of its
     /// slots, every slot the failure's when the model failed.
     /// </summary>
-    private static GpuInstance CreateRow(
+    private GpuInstance CreateRow(
         Transform transform,
         in Renderer renderer,
         ResidentModel resident,
@@ -217,8 +270,9 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
         };
         for (int slot = 0; slot < MaterialSlots.Capacity; slot++)
         {
-            row.Materials[slot] = inputs.Materials.GetRow(
-                resident.IsFailure ? inputs.Failure : renderer.Materials[slot]
+            row.Materials[slot] = GetMaterialRow(
+                resident.IsFailure ? inputs.Failure : renderer.Materials[slot],
+                inputs.Resources
             );
         }
 
@@ -278,6 +332,50 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
         MarkDirty(start);
     }
 
+    /// <summary>
+    /// The slot's material row, 0 for an empty slot; a value first seen takes a row, which every slot holding it shares.
+    /// A slot whose params change takes another row; rows are never given back.
+    /// </summary>
+    private uint GetMaterialRow(in MaterialInstance slot, GpuResources resources)
+    {
+        if (slot.Handle == Handle<Material>.None)
+            return 0;
+
+        if (_materialRowOf.TryGetValue(slot, out uint row))
+            return row;
+
+        if (_materialCount >= Capacity)
+        {
+            Log.Error($"{assets.GetPath(slot.Handle)} is drawn as the default material: the material table is full.");
+            _materialRowOf[slot] = 0;
+
+            return 0;
+        }
+
+        row = (uint)_materialCount++;
+        _materialSlots[row] = slot;
+        _materialRowOf[slot] = row;
+        if (SetMaterialRow(row, resources) == ResourceState.Loading)
+            _loadingMaterialRows.Add(row);
+
+        return row;
+    }
+
+    /// <summary>
+    /// Makes the material row from its slot, as the GPU resources have its material now; whether that still loads.
+    /// </summary>
+    private ResourceState SetMaterialRow(uint row, GpuResources resources)
+    {
+        ResourceState state = resources.Get(_materialSlots[row], out GpuMaterial made);
+        if (_materialRows[row] == made)
+            return state;
+
+        _materialRows[row] = made;
+        _hasMaterialChanges = true;
+
+        return state;
+    }
+
     private void MarkDirty(int start)
     {
         _isDirty[start / BlockSize] = true;
@@ -294,7 +392,7 @@ internal sealed class InstanceTable(IGraphicsApi gpu) : IDisposable
         EcsSnapshot<Transform, Renderer> Renderers,
         uint FrameIndex,
         GeometryPools Pools,
-        MaterialTable Materials,
+        GpuResources Resources,
         MaterialInstance Failure
     );
 }
