@@ -20,12 +20,13 @@ public readonly record struct GpuCommands(ImmutableArray<GpuPass> Passes)
 public enum GpuPassKind : byte
 {
     /// <summary>
-    /// Dispatches, with the pipelines and constants they take.
+    /// Dispatches of <see cref="GpuPass.Shader"/>, with the constants they take.
     /// </summary>
     Compute,
 
     /// <summary>
-    /// Draws into <see cref="GpuPass.Targets"/>, with the pipelines, constants, scissor and index buffer they take.
+    /// Draws with <see cref="GpuPass.DrawShaders"/> into <see cref="GpuPass.Targets"/>, with the constants, scissors and
+    /// index buffer they take.
     /// </summary>
     Draw,
 
@@ -60,7 +61,7 @@ public readonly record struct GpuPass
 
     /// <summary>
     /// The compute shader the GPU provider binds before the commands, built from the entry; the pass is left out of a
-    /// frame while the shader is not built. None for a pass that binds its own pipeline.
+    /// frame while the shader is not built.
     /// </summary>
     public ShaderEntry? Shader { get; init; }
 
@@ -178,7 +179,6 @@ public readonly record struct GpuConstants(uint X, uint Y = 0, uint Z = 0, uint 
 /// </summary>
 public enum GpuCommandKind : byte
 {
-    BindPipeline,
     PushConstants,
     Dispatch,
     DispatchIndirect,

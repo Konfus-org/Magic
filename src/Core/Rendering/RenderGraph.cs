@@ -1,4 +1,6 @@
 using System.Collections.Immutable;
+using System.Drawing;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Debugging;
 using Magic.Gpu;
@@ -8,8 +10,9 @@ using Magic.Utils;
 namespace Magic.Rendering;
 
 /// <summary>
-/// A frame's passes as data: begin a pass in a layer, say what it uses, add its commands, end it, and take the frame
-/// with <see cref="Finish"/>. Core holds one, every gem's Render records into it, and Core hands what it finishes to
+/// A frame's passes as data: a compute or draw pass named by its shaders, told what it uses and ended by what it
+/// dispatches or draws, or a transfer pass begun in a layer, told what it uses, given its copies and ended; take the
+/// frame with <see cref="Finish"/>. Core holds one, every gem's Render records into it, and Core hands what it finishes to
 /// <see cref="IGraphicsApi.Present"/>, which puts in the barriers the uses need. Each method's parameters say which of
 /// a <see cref="GpuCommand"/>'s fields its kind reads. Render thread.
 /// </summary>
@@ -78,28 +81,25 @@ public sealed class RenderGraph
         return new ComputePass(this);
     }
 
-    public void BeginComputePass(string name, RenderLayer layer = RenderLayer.Picture) =>
-        Begin(
-            new()
-            {
-                Name = name,
-                Kind = GpuPassKind.Compute,
-                Layer = layer,
-            }
-        );
-
     /// <summary>
-    /// Begins a draw pass with <paramref name="shaders"/> into <paramref name="targets"/>, with
-    /// <paramref name="constants"/> pushed to it: say what it reads on what this returns, then draw, which ends it. The
-    /// GPU provider leaves the pass out of a frame while the shaders are not built.
+    /// Begins a draw pass in <paramref name="layer"/> with <paramref name="shaders"/> into <paramref name="targets"/>,
+    /// with <paramref name="constants"/> pushed to it: say what it reads on what this returns, then draw, which ends it.
+    /// The GPU provider leaves the pass out of a frame while the shaders are not built.
     /// </summary>
-    public DrawPass Draw(string name, in DrawShaders shaders, in GpuRenderTargets targets, in GpuConstants constants)
+    public DrawPass Draw(
+        string name,
+        in DrawShaders shaders,
+        in GpuRenderTargets targets,
+        in GpuConstants constants,
+        RenderLayer layer = RenderLayer.Picture
+    )
     {
         BeginDraw(
             new()
             {
                 Name = name,
                 Kind = GpuPassKind.Draw,
+                Layer = layer,
                 Targets = targets,
                 DrawShaders = shaders,
             }
@@ -108,20 +108,6 @@ public sealed class RenderGraph
 
         return new DrawPass(this);
     }
-
-    /// <summary>
-    /// Begins a draw pass into <paramref name="targets"/>, each target used as a colour or depth target.
-    /// </summary>
-    public void BeginDrawPass(string name, in GpuRenderTargets targets, RenderLayer layer = RenderLayer.Picture) =>
-        BeginDraw(
-            new()
-            {
-                Name = name,
-                Kind = GpuPassKind.Draw,
-                Targets = targets,
-                Layer = layer,
-            }
-        );
 
     public void BeginTransferPass(string name, RenderLayer layer = RenderLayer.Picture) =>
         Begin(
@@ -165,10 +151,8 @@ public sealed class RenderGraph
     /// <summary>
     /// Says the pass touches <paramref name="buffer"/> as <paramref name="access"/>.
     /// </summary>
-    public void Use(GpuBuffer buffer, GpuAccess access)
-    {
-        ThrowIfNotInPass();
-        _uses.Add(
+    public void Use(GpuBuffer buffer, GpuAccess access) =>
+        AddUse(
             new()
             {
                 Id = buffer.Id,
@@ -176,16 +160,13 @@ public sealed class RenderGraph
                 Access = access,
             }
         );
-    }
 
     /// <summary>
     /// Says the pass touches <paramref name="texture"/> as <paramref name="access"/>, every level or
     /// <paramref name="level"/> alone.
     /// </summary>
-    public void Use(GpuTexture texture, GpuAccess access, int level = -1)
-    {
-        ThrowIfNotInPass();
-        _uses.Add(
+    public void Use(GpuTexture texture, GpuAccess access, int level = -1) =>
+        AddUse(
             new()
             {
                 Id = texture.Id,
@@ -194,28 +175,41 @@ public sealed class RenderGraph
                 Level = level,
             }
         );
-    }
 
     /// <summary>
     /// Copies <paramref name="rows"/> into <paramref name="to"/> from <paramref name="offset"/> bytes on, staged through
     /// the frame's upload ring, in a transfer pass.
     /// </summary>
     public void Upload<T>(GpuBuffer to, ReadOnlySpan<T> rows, ulong offset = 0)
+        where T : unmanaged => rows.CopyTo(Upload<T>(to, rows.Length, offset));
+
+    /// <summary>
+    /// <paramref name="rows"/> rows of the frame's upload ring to write into, copied into <paramref name="to"/> from
+    /// <paramref name="offset"/> bytes on in a transfer pass: write them before the frame is presented.
+    /// </summary>
+    public Span<T> Upload<T>(GpuBuffer to, int rows, ulong offset = 0)
         where T : unmanaged
     {
         Use(to, GpuAccess.CopyDestination);
-        IGraphicsApi gpu = Gpu ?? throw new InvalidOperationException("There is no GPU provider to upload through.");
-        ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(rows);
-        GpuUpload upload = gpu.BeginUpload(bytes.Length);
-        bytes.CopyTo(upload.Bytes);
-        CopyBuffer(upload.Buffer, upload.Offset, to, offset, (ulong)bytes.Length);
+        int bytes = rows * Unsafe.SizeOf<T>();
+        GpuUpload upload = BeginUpload(bytes);
+        CopyBuffer(upload.Buffer, upload.Offset, to, offset, (ulong)bytes);
+
+        return MemoryMarshal.Cast<byte, T>(upload.Bytes[..bytes]);
     }
 
-    public void BindPipeline(GpuPipeline pipeline) =>
-        Add(new() { Kind = GpuCommandKind.BindPipeline, Id = pipeline.Id });
-
-    public void PushConstants(in GpuConstants constants) =>
-        Add(new() { Kind = GpuCommandKind.PushConstants, Constants = constants });
+    /// <summary>
+    /// Copies <paramref name="pixels"/>, a whole level of the first layer tightly packed, into <paramref name="to"/>'s
+    /// <paramref name="level"/>, staged as <see cref="Upload{T}(GpuBuffer, ReadOnlySpan{T}, ulong)"/> stages, in a
+    /// transfer pass. One texture's levels may share a pass; the same level filled twice needs a pass each.
+    /// </summary>
+    public void Upload(GpuTexture to, ReadOnlySpan<byte> pixels, int level = 0)
+    {
+        Use(to, GpuAccess.CopyDestination, level);
+        GpuUpload upload = BeginUpload(pixels.Length);
+        pixels.CopyTo(upload.Bytes);
+        CopyBufferToTexture(upload.Buffer, upload.Offset, to, level);
+    }
 
     /// <summary>
     /// Builds an acceleration structure: a bottom-level one over its triangles, a top-level one over the first
@@ -229,138 +223,6 @@ public sealed class RenderGraph
                 Kind = GpuCommandKind.BuildAcceleration,
                 Id = acceleration.Id,
                 X = instanceCount,
-            }
-        );
-
-    public void Dispatch(uint groupsX, uint groupsY = 1, uint groupsZ = 1) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.Dispatch,
-                X = groupsX,
-                Y = groupsY,
-                Z = groupsZ,
-            }
-        );
-
-    /// <summary>
-    /// Three unsigned group counts read from <paramref name="arguments"/> at <paramref name="offset"/>.
-    /// </summary>
-    public void DispatchIndirect(GpuBuffer arguments, ulong offset) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.DispatchIndirect,
-                Id = arguments.Id,
-                Offset = offset,
-            }
-        );
-
-    /// <summary>
-    /// The whole target when every argument is 0.
-    /// </summary>
-    public void SetScissor(uint x, uint y, uint width, uint height) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.SetScissor,
-                X = x,
-                Y = y,
-                Z = width,
-                W = height,
-            }
-        );
-
-    /// <summary>
-    /// 32-bit indices from <paramref name="offset"/> on.
-    /// </summary>
-    public void BindIndexBuffer(GpuBuffer indices, ulong offset = 0) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.BindIndexBuffer,
-                Id = indices.Id,
-                Offset = offset,
-            }
-        );
-
-    public void DrawIndexed(uint indices, uint instances = 1, uint firstIndex = 0, uint firstInstance = 0) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.DrawIndexed,
-                X = indices,
-                Y = instances,
-                Z = firstIndex,
-                W = firstInstance,
-            }
-        );
-
-    /// <summary>
-    /// As many draws as the unsigned count at <paramref name="countOffset"/> in <paramref name="count"/>, up to
-    /// <paramref name="maxDraws"/>, their arguments <paramref name="stride"/> bytes apart from
-    /// <paramref name="argumentsOffset"/> in <paramref name="arguments"/>, each four unsigned integers: vertices,
-    /// instances, first vertex, first instance.
-    /// </summary>
-    public void DrawIndirectCount(
-        GpuBuffer arguments,
-        ulong argumentsOffset,
-        GpuBuffer count,
-        ulong countOffset,
-        uint maxDraws,
-        uint stride = 16
-    ) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.DrawIndirectCount,
-                Id = arguments.Id,
-                Offset = argumentsOffset,
-                Id2 = count.Id,
-                Offset2 = countOffset,
-                X = maxDraws,
-                Y = stride,
-            }
-        );
-
-    public void CopyBuffer(
-        GpuBuffer source,
-        ulong sourceOffset,
-        GpuBuffer destination,
-        ulong destinationOffset,
-        ulong bytes
-    ) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.CopyBuffer,
-                Id = source.Id,
-                Offset = sourceOffset,
-                Id2 = destination.Id,
-                Offset2 = destinationOffset,
-                Size = bytes,
-            }
-        );
-
-    /// <summary>
-    /// A whole level of a layer, tightly packed from <paramref name="sourceOffset"/> on.
-    /// </summary>
-    public void CopyBufferToTexture(
-        GpuBuffer source,
-        ulong sourceOffset,
-        GpuTexture destination,
-        int level = 0,
-        int layer = 0
-    ) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.CopyBufferToTexture,
-                Id = source.Id,
-                Offset = sourceOffset,
-                Id2 = destination.Id,
-                X = (uint)level,
-                Y = (uint)layer,
             }
         );
 
@@ -415,6 +277,81 @@ public sealed class RenderGraph
             }
         );
 
+    internal void PushConstants(in GpuConstants constants) =>
+        Add(new() { Kind = GpuCommandKind.PushConstants, Constants = constants });
+
+    internal void Dispatch(uint groupsX, uint groupsY = 1, uint groupsZ = 1) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.Dispatch,
+                X = groupsX,
+                Y = groupsY,
+                Z = groupsZ,
+            }
+        );
+
+    /// <summary>
+    /// Three unsigned group counts read from <paramref name="arguments"/> at <paramref name="offset"/>.
+    /// </summary>
+    internal void DispatchIndirect(GpuBuffer arguments, ulong offset) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.DispatchIndirect,
+                Id = arguments.Id,
+                Offset = offset,
+            }
+        );
+
+    /// <summary>
+    /// Each of <paramref name="draws"/> clipped to its scissor with its constants pushed, its 32-bit indices read from
+    /// <paramref name="indices"/>.
+    /// </summary>
+    internal void DrawIndexed(GpuBuffer indices, scoped ReadOnlySpan<IndexedDraw> draws)
+    {
+        Use(indices, GpuAccess.Index);
+        BindIndexBuffer(indices);
+        foreach (IndexedDraw draw in draws)
+        {
+            // A draw with no pixels to draw into is left out, as a negative size would wrap round to a huge one.
+            if (draw.Scissor.Width <= 0 || draw.Scissor.Height <= 0)
+                continue;
+
+            Rectangle scissor = draw.Scissor;
+            SetScissor((uint)scissor.X, (uint)scissor.Y, (uint)scissor.Width, (uint)scissor.Height);
+            PushConstants(draw.Constants);
+            DrawIndexed(draw.IndexCount, draw.FirstIndex);
+        }
+    }
+
+    /// <summary>
+    /// As many draws as the unsigned count at <paramref name="countOffset"/> in <paramref name="count"/>, up to
+    /// <paramref name="maxDraws"/>, their arguments <paramref name="stride"/> bytes apart from
+    /// <paramref name="argumentsOffset"/> in <paramref name="arguments"/>, each four unsigned integers: vertices,
+    /// instances, first vertex, first instance.
+    /// </summary>
+    internal void DrawIndirectCount(
+        GpuBuffer arguments,
+        ulong argumentsOffset,
+        GpuBuffer count,
+        ulong countOffset,
+        uint maxDraws,
+        uint stride = 16
+    ) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.DrawIndirectCount,
+                Id = arguments.Id,
+                Offset = argumentsOffset,
+                Id2 = count.Id,
+                Offset2 = countOffset,
+                X = maxDraws,
+                Y = stride,
+            }
+        );
+
     /// <summary>
     /// A thread for each of <paramref name="x"/> by <paramref name="y"/> by <paramref name="z"/>, in as many groups of
     /// the pass's shader as cover them: in a pass <see cref="Compute"/> began.
@@ -443,6 +380,75 @@ public sealed class RenderGraph
                 Use(resource.Buffer, access);
         }
     }
+
+    private void SetScissor(uint x, uint y, uint width, uint height) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.SetScissor,
+                X = x,
+                Y = y,
+                Z = width,
+                W = height,
+            }
+        );
+
+    /// <summary>
+    /// 32-bit indices.
+    /// </summary>
+    private void BindIndexBuffer(GpuBuffer indices) =>
+        Add(new() { Kind = GpuCommandKind.BindIndexBuffer, Id = indices.Id });
+
+    /// <summary>
+    /// One instance of <paramref name="indices"/> indices from <paramref name="firstIndex"/> on.
+    /// </summary>
+    private void DrawIndexed(uint indices, uint firstIndex) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.DrawIndexed,
+                X = indices,
+                Y = 1,
+                Z = firstIndex,
+            }
+        );
+
+    private void CopyBuffer(
+        GpuBuffer source,
+        ulong sourceOffset,
+        GpuBuffer destination,
+        ulong destinationOffset,
+        ulong bytes
+    ) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.CopyBuffer,
+                Id = source.Id,
+                Offset = sourceOffset,
+                Id2 = destination.Id,
+                Offset2 = destinationOffset,
+                Size = bytes,
+            }
+        );
+
+    /// <summary>
+    /// A whole level of the first layer, tightly packed from <paramref name="sourceOffset"/> on.
+    /// </summary>
+    private void CopyBufferToTexture(GpuBuffer source, ulong sourceOffset, GpuTexture destination, int level) =>
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.CopyBufferToTexture,
+                Id = source.Id,
+                Offset = sourceOffset,
+                Id2 = destination.Id,
+                X = (uint)level,
+            }
+        );
+
+    private GpuUpload BeginUpload(int bytes) =>
+        (Gpu ?? throw new InvalidOperationException("There is no GPU provider to upload through.")).BeginUpload(bytes);
 
     private void Begin(in GpuPass pass)
     {
@@ -478,6 +484,16 @@ public sealed class RenderGraph
         _uses.Clear();
         _commands.Clear();
         _pass = null;
+    }
+
+    /// <summary>
+    /// The use added to the open pass, unless it holds the same one, which would only put in a barrier between the two.
+    /// </summary>
+    private void AddUse(in GpuUse use)
+    {
+        ThrowIfNotInPass();
+        if (!_uses.Contains(use))
+            _uses.Add(use);
     }
 
     private void Add(in GpuCommand command)

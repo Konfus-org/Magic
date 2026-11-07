@@ -1,5 +1,4 @@
 using System.Numerics;
-using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
@@ -182,22 +181,8 @@ internal sealed class InstanceTable(
         if (!HasChanges)
             return;
 
-        int blocks = (Count + BlockSize - 1) / BlockSize;
-        int dirtyRows = 0;
-        for (int counted = 0; counted < blocks; counted++)
-        {
-            if (_isDirty[counted])
-                dirtyRows += GetBlockLength(counted);
-        }
-
         HasChanges = false;
-        if (dirtyRows == 0)
-            return;
-
-        GpuUpload upload = gpu.BeginUpload(dirtyRows * GpuInstance.Bytes);
-        Span<GpuInstance> staged = MemoryMarshal.Cast<byte, GpuInstance>(upload.Bytes);
-        graph.Use(table, GpuAccess.CopyDestination);
-        int stagedRows = 0;
+        int blocks = (Count + BlockSize - 1) / BlockSize;
         int block = 0;
         while (block < blocks)
         {
@@ -214,15 +199,7 @@ internal sealed class InstanceTable(
                 runRows += GetBlockLength(block);
             }
 
-            _rows.AsSpan(runStart, runRows).CopyTo(staged[stagedRows..]);
-            graph.CopyBuffer(
-                upload.Buffer,
-                upload.Offset + ((ulong)stagedRows * GpuInstance.Bytes),
-                table,
-                (ulong)runStart * GpuInstance.Bytes,
-                (ulong)runRows * GpuInstance.Bytes
-            );
-            stagedRows += runRows;
+            graph.Upload(table, _rows.AsSpan(runStart, runRows), (ulong)runStart * GpuInstance.Bytes);
         }
 
         Array.Clear(_isDirty);

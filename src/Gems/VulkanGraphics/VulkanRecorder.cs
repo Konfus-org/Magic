@@ -44,8 +44,8 @@ internal sealed unsafe class VulkanRecorder(
             frame.WriteTimestamp(pass.Name, passIndex);
             bool isDrawing = pass.Kind == GpuPassKind.Draw && BeginRendering(cmd, pass);
             (uint X, uint Y, uint Z) groupSize = shader?.GroupSize ?? (1, 1, 1);
-            if (!pipeline.IsNone)
-                Run(frame, new GpuCommand { Kind = GpuCommandKind.BindPipeline, Id = pipeline.Id }, groupSize);
+            if (resources.Pipelines[pipeline.Id] is { } bound)
+                api.vkCmdBindPipeline(cmd, bound.BindPoint, bound.Pipeline);
 
             foreach (GpuCommand command in pass.Commands)
             {
@@ -339,13 +339,6 @@ internal sealed unsafe class VulkanRecorder(
         VkDeviceApi api = device.Api;
         switch (command.Kind)
         {
-            case GpuCommandKind.BindPipeline:
-                if (resources.Pipelines[command.Id] is { } pipeline)
-                    api.vkCmdBindPipeline(cmd, pipeline.BindPoint, pipeline.Pipeline);
-                else
-                    Log.Warn($"Pipeline {command.Id} is gone and is not bound.");
-
-                break;
             case GpuCommandKind.PushConstants:
             {
                 GpuConstants constants = command.Constants;
@@ -378,9 +371,7 @@ internal sealed unsafe class VulkanRecorder(
 
                 break;
             case GpuCommandKind.SetScissor:
-                if (command.Z > 0 && command.W > 0)
-                    api.vkCmdSetScissor(cmd, (int)command.X, (int)command.Y, command.Z, command.W);
-
+                api.vkCmdSetScissor(cmd, (int)command.X, (int)command.Y, command.Z, command.W);
                 break;
             case GpuCommandKind.BindIndexBuffer:
                 if (resources.Buffers[command.Id] is { } indices)

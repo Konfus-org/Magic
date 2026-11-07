@@ -343,36 +343,26 @@ internal sealed class GpuResources(
     /// </summary>
     public void Upload(RenderGraph graph)
     {
-        if (_arrivedModels.Count > 0)
-        {
-            graph.Use(IndexPool, GpuAccess.CopyDestination);
-            graph.Use(ClusterPool, GpuAccess.CopyDestination);
-        }
-
         foreach ((MeshDerived derived, ResidentModel where) in _arrivedModels)
         {
             graph.Upload(VertexPool, derived.Vertices.AsSpan(), (ulong)where.VertexOffset * GpuVertex.Bytes);
 
             // Indices point into the whole pool, and clusters into the whole index pool.
-            int indexBytes = derived.Indices.Length * sizeof(uint);
-            GpuUpload indices = gpu.BeginUpload(indexBytes);
-            Span<uint> rebased = MemoryMarshal.Cast<byte, uint>(indices.Bytes);
+            Span<uint> rebased = graph.Upload<uint>(
+                IndexPool,
+                derived.Indices.Length,
+                (ulong)where.IndexOffset * sizeof(uint)
+            );
             for (int i = 0; i < derived.Indices.Length; i++)
             {
                 rebased[i] = derived.Indices[i] + where.VertexOffset;
             }
 
-            graph.CopyBuffer(
-                indices.Buffer,
-                indices.Offset,
-                IndexPool,
-                (ulong)where.IndexOffset * sizeof(uint),
-                (ulong)indexBytes
+            Span<GpuCluster> rows = graph.Upload<GpuCluster>(
+                ClusterPool,
+                derived.Clusters.Length,
+                (ulong)where.ClusterOffset * GpuCluster.Bytes
             );
-
-            int clusterBytes = derived.Clusters.Length * GpuCluster.Bytes;
-            GpuUpload clusters = gpu.BeginUpload(clusterBytes);
-            Span<GpuCluster> rows = MemoryMarshal.Cast<byte, GpuCluster>(clusters.Bytes);
             for (int i = 0; i < derived.Clusters.Length; i++)
             {
                 GpuCluster cluster = derived.Clusters[i];
@@ -380,26 +370,16 @@ internal sealed class GpuResources(
                 rows[i] = cluster;
             }
 
-            graph.CopyBuffer(
-                clusters.Buffer,
-                clusters.Offset,
-                ClusterPool,
-                (ulong)where.ClusterOffset * GpuCluster.Bytes,
-                (ulong)clusterBytes
-            );
             UploadLeaves(graph, derived, where);
         }
 
         _arrivedModels.Clear();
         foreach ((Texture asset, GpuTexture texture) in _arrivedTextures)
         {
-            graph.Use(texture, GpuAccess.CopyDestination);
             for (int level = 0; level < asset.Levels.Length; level++)
             {
                 TextureLevel source = asset.Levels[level];
-                GpuUpload upload = gpu.BeginUpload(source.Size);
-                asset.Pixels.Span.Slice(source.Offset, source.Size).CopyTo(upload.Bytes);
-                graph.CopyBufferToTexture(upload.Buffer, upload.Offset, texture, level);
+                graph.Upload(texture, asset.Pixels.Span.Slice(source.Offset, source.Size), level);
             }
         }
 
