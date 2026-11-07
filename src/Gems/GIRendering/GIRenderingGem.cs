@@ -197,17 +197,19 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         if (_started is not { Ok: true })
             return;
 
-        RenderInputs? replaced = null;
         if (_inputs.TryTake(out RenderInputs? newest))
-            (replaced, _current) = (_current, newest);
+        {
+            if (_current is not null)
+                _inputs.Return(_current);
+
+            _current = newest;
+        }
 
         if (_current is not { } inputs)
             return;
 
-        // The rows from what changed since the inputs replaced, which go back once compared.
+        // The rows of the renderers written since the inputs before.
         int instanceCount = _instances.Fill(inputs.Renderers, frame.Index, _pools, _materials, _failure);
-        if (replaced is not null)
-            _inputs.Return(replaced);
 
         if (!Resize(inputs.Width, inputs.Height))
             return;

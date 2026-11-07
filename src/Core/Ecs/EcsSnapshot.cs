@@ -60,6 +60,17 @@ public sealed class EcsSnapshot<T1, T2>
 
     public ReadOnlySpan<T2> Second => CollectionsMarshal.AsSpan(_second);
 
+    /// <summary>
+    /// Where each chunk of entities sits in the lists, in query order, and when it was last written.
+    /// </summary>
+    public ReadOnlySpan<EcsSnapshotChunk> Chunks => _chunks.Held;
+
+    /// <summary>
+    /// The version the last fill read at: a chunk whose <see cref="EcsSnapshotChunk.Written"/> is no higher was not
+    /// written after it.
+    /// </summary>
+    public long Version => _chunks.Version;
+
     internal void Start() => _chunks.Start();
 
     internal void Add(EcsChunk<T1, T2> chunk)
@@ -89,16 +100,18 @@ public sealed class EcsSnapshot<T1, T2>
 /// </summary>
 internal sealed class EcsSnapshotChunks
 {
-    private readonly List<(int Offset, int Count, Entity First)> _held = [];
-
-    /// <summary>
-    /// The version the last fill read at.
-    /// </summary>
-    private long _heldAt;
+    private readonly List<EcsSnapshotChunk> _held = [];
 
     private int _index;
 
     private int _count;
+
+    public ReadOnlySpan<EcsSnapshotChunk> Held => CollectionsMarshal.AsSpan(_held);
+
+    /// <summary>
+    /// The version the last fill read at.
+    /// </summary>
+    public long Version { get; private set; }
 
     public static void Copy<T>(List<T> list, int offset, ReadOnlySpan<T> values)
     {
@@ -120,8 +133,8 @@ internal sealed class EcsSnapshotChunks
         if (entities.IsEmpty)
             return true;
 
-        (int, int, Entity) chunk = (offset, entities.Length, entities[0]);
-        bool isHeld = _index < _held.Count && _held[_index] == chunk && written <= _heldAt;
+        EcsSnapshotChunk chunk = new(offset, entities.Length, entities[0], written);
+        bool isHeld = _index < _held.Count && _held[_index].IsSameChunk(chunk) && written <= Version;
         if (_index < _held.Count)
             _held[_index] = chunk;
         else
@@ -139,8 +152,22 @@ internal sealed class EcsSnapshotChunks
     public int End(long version)
     {
         _held.RemoveRange(_index, _held.Count - _index);
-        _heldAt = version;
+        Version = version;
 
         return _count;
     }
+}
+
+/// <summary>
+/// A chunk of entities as a snapshot holds it: from <paramref name="Offset"/> in its lists, <paramref name="Count"/>
+/// entities from <paramref name="First"/>, last written at <paramref name="Written"/>.
+/// </summary>
+public readonly record struct EcsSnapshotChunk(int Offset, int Count, Entity First, long Written)
+{
+    /// <summary>
+    /// Whether <paramref name="other"/> is this chunk in the same place, whenever either was written: an entity joins,
+    /// leaves or moves within a chunk only by a write, so the same first entity there is the same chunk.
+    /// </summary>
+    public bool IsSameChunk(EcsSnapshotChunk other) =>
+        Offset == other.Offset && Count == other.Count && First == other.First;
 }
