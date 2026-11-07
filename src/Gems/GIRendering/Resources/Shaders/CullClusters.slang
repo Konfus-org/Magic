@@ -119,8 +119,13 @@ void Test(FrameConstants frame, uint instanceIndex, GpuInstance instance, uint c
     VisibleCluster entry = { instanceIndex, clusterIndex };
     visible[listIndex] = entry;
 
-    uint countOffset = isRetest ? CountRetestDraws : CountVisibleDraws;
-    uint drawOffset = isRetest ? frame.maxVisibleClusters : 0u;
+    // PROTO: the cluster's region of the draws, by pass and by whether its instance is in the impostor handoff, which
+    // draws with the dither.
+    static const uint countOffsets[4] = { CountVisibleDraws, CountRetestDraws, CountFadingDraws, CountRetestFadingDraws };
+    bool isFading = GetImpostorFade(frame, instance, GetPassHeader().w) > 0.0;
+    uint region = (isRetest ? 1u : 0u) + (isFading ? 2u : 0u);
+    uint countOffset = countOffsets[region];
+    uint drawOffset = region * frame.maxVisibleClusters;
     uint drawIndex = counts.InterlockedAdd(countOffset, 1u);
     ArrayRef<DrawArguments> draws = { frame.drawArguments };
     DrawArguments arguments = { cluster.triangleCount * 3u, 1u, 0u, listIndex };

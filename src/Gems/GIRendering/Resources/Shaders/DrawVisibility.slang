@@ -42,9 +42,14 @@ Varyings DrawVisibilityVertex(uint vertexIndex : SV_VertexID, uint instanceIndex
 }
 
 [shader("pixel")]
-uint DrawVisibilityPixel(Varyings input) : SV_Target0
+uint DrawVisibilityPixel(Varyings input) : SV_Target0 { return input.id; }
+
+// PROTO: a cluster of an instance in the impostor handoff, its own pipeline so the plain draw above keeps its early
+// depth test: the dither keeps the clusters' share of the pixels, and the impostor draws the rest.
+[shader("pixel")]
+uint DrawVisibilityFadingPixel(Varyings input) : SV_Target0
 {
-    if (input.fade > 0.0 && GetDither(input.position.xy) < input.fade)
+    if (GetDither(input.position.xy) < input.fade)
         discard;
 
     return input.id;

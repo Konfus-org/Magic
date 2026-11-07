@@ -77,6 +77,15 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
         Depth = DepthMode.TestAndWrite,
     };
 
+    // PROTO: a cluster of an instance in the impostor handoff, kept by the dither.
+    private readonly DrawShaders _fadingShaders = new(
+        PassShaders.GetEntry(assets, "DrawVisibility", "DrawVisibilityVertex", ShaderStage.Vertex),
+        PassShaders.GetEntry(assets, "DrawVisibility", "DrawVisibilityFadingPixel", ShaderStage.Pixel)
+    )
+    {
+        Depth = DepthMode.TestAndWrite,
+    };
+
     // PROTO: an impostor's quad, both faces, its pixels writing their own depth no nearer than the quad's.
     private readonly DrawShaders _impostorShaders = new(
         PassShaders.GetEntry(assets, "DrawImpostors", "DrawImpostorsVertex", ShaderStage.Vertex),
@@ -101,6 +110,7 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
             _cullShader,
             _drawShaders.Vertex,
             _drawShaders.Pixel,
+            _fadingShaders.Pixel,
             _impostorShaders.Vertex,
             _impostorShaders.Pixel,
             _buildHzbShader,
@@ -123,7 +133,7 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
         Result<GpuBuffer> drawArguments = graph.Buffer(
             GpuDescriptions.GetBuffer(
                 "Draw arguments",
-                (long)MaxVisibleClusters * 2 * DrawArgumentsBytes,
+                (long)MaxVisibleClusters * 4 * DrawArgumentsBytes,
                 IndirectUsage
             )
         );
@@ -186,7 +196,15 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
                 cull.ImpostorDraws
             )
             .Dispatch((uint)Math.Min(view.InstanceCount, CullGroupsPerRow), (uint)Math.Max(rows, 1));
-        RecordDraw(view, "Draw visibility", TargetLoad.Clear, drawsOffset: 0, countOffset: 0);
+        RecordDraw(view, _drawShaders, "Draw visibility", TargetLoad.Clear, drawsOffset: 0, countOffset: 0);
+        RecordDraw(
+            view,
+            _fadingShaders,
+            "Draw fading",
+            TargetLoad.Keep,
+            drawsOffset: (ulong)MaxVisibleClusters * 2 * DrawArgumentsBytes,
+            countOffset: 24
+        );
         ImmutableArray<GpuResource> heapTextures = resources.GetHeapTextures();
         RecordImpostors(view, heapTextures, "Draw impostors", drawsOffset: 0, countOffset: 16);
         RecordHzb(view);
@@ -203,10 +221,19 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
             .DispatchIndirect(cull.RetestArguments, 0);
         RecordDraw(
             view,
+            _drawShaders,
             "Draw retested",
             TargetLoad.Keep,
             drawsOffset: (ulong)MaxVisibleClusters * DrawArgumentsBytes,
             countOffset: 8
+        );
+        RecordDraw(
+            view,
+            _fadingShaders,
+            "Draw retested fading",
+            TargetLoad.Keep,
+            drawsOffset: (ulong)MaxVisibleClusters * 3 * DrawArgumentsBytes,
+            countOffset: 28
         );
         RecordImpostors(
             view,
@@ -240,13 +267,21 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
     }
 
     /// <summary>
-    /// The visible clusters drawn into the view's visibility buffer and its depth, one indirect draw each.
+    /// The visible clusters of one region of the draws, drawn with <paramref name="shaders"/> into the view's visibility
+    /// buffer and its depth, one indirect draw each.
     /// </summary>
-    private void RecordDraw(in RenderView view, string name, TargetLoad load, ulong drawsOffset, ulong countOffset) =>
+    private void RecordDraw(
+        in RenderView view,
+        in DrawShaders shaders,
+        string name,
+        TargetLoad load,
+        ulong drawsOffset,
+        ulong countOffset
+    ) =>
         view
             .Graph.Draw(
                 name,
-                _drawShaders,
+                shaders,
                 new GpuRenderTargets
                 {
                     Colors = [new GpuTarget { Texture = view.Visibility, Load = load }],

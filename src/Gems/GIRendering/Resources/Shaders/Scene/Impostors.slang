@@ -29,6 +29,11 @@ public uint EncodeImpostorId(uint instance, uint slot) { return ImpostorFlag | (
 public static const uint CountImpostorDraws = 16u;
 public static const uint CountRetestImpostorDraws = 20u;
 
+// The counts buffer's words the cull adds the draws of clusters in the handoff at, which draw with the dither, and the
+// draw arguments' regions they go in, after the first and retested draws of the plain clusters.
+public static const uint CountFadingDraws = 24u;
+public static const uint CountRetestFadingDraws = 28u;
+
 // A retest list entry's cluster for an instance whose impostor the old pyramid hid.
 public static const uint RetestImpostor = 0xFFFFFFFFu;
 
