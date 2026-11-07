@@ -1,5 +1,5 @@
-// The post effect contract: a module implements it in a struct, a PostProcessing names that module, and
-// the post pass specialised to the structs runs each over every pixel of the picture, in linear light, after the
+// The post effect contract: a module implements it in a struct, a PostProcessing lists a material over that module,
+// and the post pass specialised to the structs runs each over every pixel of the picture, in linear light, after the
 // exposure and before the tonemap.
 module "Post/IPixelEffect";
 

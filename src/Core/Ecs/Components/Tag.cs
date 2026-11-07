@@ -24,11 +24,6 @@ public readonly record struct Tag(int Id)
     /// </summary>
     public static Tag Global { get; } = From("global");
 
-    /// <summary>
-    /// Goes on while the world is paused, for a gem that reads it.
-    /// </summary>
-    public static Tag Unpausable { get; } = From("unpausable");
-
     public bool IsValid => Id != 0;
 
     /// <summary>

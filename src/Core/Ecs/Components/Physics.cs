@@ -1,6 +1,4 @@
 using System.Numerics;
-using Magic.Files;
-using Magic.Files.Types;
 
 namespace Magic.Ecs.Components;
 
@@ -43,12 +41,12 @@ public enum Shape : byte
 }
 
 /// <summary>
-/// A solid thing: what moves it, its shape and its mass. How it grips and bounces is its <see cref="Material"/>'s. A
-/// new one, <c>{}</c> in a file, is a body that never moves, shaped like the entity's model, made of its renderer's
-/// materials; <c>{ "motion": "dynamic" }</c> is one that falls. The physics gem makes a body for every entity with a
-/// <see cref="Transform"/> and this, moves the transform as the body moves, and reads the fields back: a change to the
-/// transform of a body moves it there, and a change to <see cref="Velocity"/> launches it. The shape's size is the
-/// model's, times the transform's scale, so a unit cube scaled 2 is a 2 m box with no size written anywhere twice.
+/// A solid thing: what moves it, its shape and its mass. A new one, <c>{}</c> in a file, is a body that never moves,
+/// shaped like the entity's model; <c>{ "motion": "dynamic" }</c> is one that falls. The physics gem makes a body
+/// for every entity with a <see cref="Transform"/> and this, moves the transform as the body moves, and reads the
+/// fields back: a change to the transform of a body moves it there, and a change to <see cref="Velocity"/> launches
+/// it. The shape's size is the model's, times the transform's scale, so a unit cube scaled 2 is a 2 m box with no
+/// size written anywhere twice.
 /// </summary>
 public record struct Physics : IComponent
 {
@@ -61,12 +59,6 @@ public record struct Physics : IComponent
     /// What collides, fitted to the model: a box by default.
     /// </summary>
     public Shape Shape;
-
-    /// <summary>
-    /// What it is made of, for how it grips and bounces: none takes its renderer's materials, each mesh's for a mesh
-    /// shape and the first for any other, and the default material with no renderer either.
-    /// </summary>
-    public Handle<Material> Material;
 
     /// <summary>
     /// Kilograms; 0 is the mass of its volume in water, so a 1 m cube is a tonne and a 10 cm one a kilogram.

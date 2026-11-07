@@ -33,26 +33,11 @@ public readonly record struct GpuFeatures
 }
 
 /// <summary>
-/// The GPU's sizes: what a gem fits its tables and dispatches to.
+/// What the GPU is and holds: its name, the alignment an upload's offset takes and its device memory.
 /// </summary>
 public readonly record struct GpuLimits
 {
     public required string DeviceName { get; init; }
-
-    /// <summary>
-    /// Whether the device is a software one, such as lavapipe on a machine with no GPU.
-    /// </summary>
-    public required bool IsSoftware { get; init; }
-
-    /// <summary>
-    /// Buffers, textures and samplers the heap holds at once, each.
-    /// </summary>
-    public required int HeapCapacity { get; init; }
-
-    /// <summary>
-    /// The most groups a dispatch may have along one axis.
-    /// </summary>
-    public required uint MaxDispatchGroups { get; init; }
 
     /// <summary>
     /// Bytes an upload's offset is a multiple of.

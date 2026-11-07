@@ -1,8 +1,7 @@
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
-using Magic.Files;
-using Magic.Files.Types;
+using Magic.Assets;
 
 namespace Magic.PrefabImporter;
 

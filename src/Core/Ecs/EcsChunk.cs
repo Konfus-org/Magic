@@ -1,8 +1,8 @@
 namespace Magic.Ecs;
 
 /// <summary>
-/// Entities the ECS stores together, as an <see cref="EcsQuery"/> or an <see cref="EcsChunkRun{TState, TChunk}"/> is
-/// handed them, over the ECS's own storage. Good until that loop or call ends.
+/// Entities the ECS stores together, as an <see cref="EcsQuery"/> hands them out, over the ECS's own storage. Good
+/// until that loop ends.
 /// </summary>
 public readonly ref struct EcsChunk(ReadOnlySpan<Entity> entities)
 {
@@ -10,116 +10,63 @@ public readonly ref struct EcsChunk(ReadOnlySpan<Entity> entities)
 }
 
 /// <summary>
-/// <see cref="EcsChunk"/> of entities that have a <typeparamref name="T1"/>, with theirs at the same indexes: writing
-/// through <see cref="First"/> changes the components.
+/// <see cref="EcsChunk"/> of entities that have a <typeparamref name="T1"/>, with theirs at the same indexes, to read.
+/// <see cref="Written"/> is when the chunk was last written: above a query's <see cref="EcsQuery{T1}.Version"/> when
+/// it was written after that query.
 /// </summary>
-public readonly ref struct EcsChunk<T1>(ReadOnlySpan<Entity> entities, Span<T1> first)
+public readonly ref struct EcsChunk<T1>(ReadOnlySpan<Entity> entities, ReadOnlySpan<T1> first, long written)
     where T1 : unmanaged, IComponent
 {
     public ReadOnlySpan<Entity> Entities { get; } = entities;
 
-    public Span<T1> First { get; } = first;
+    public ReadOnlySpan<T1> First { get; } = first;
 
-    public void Deconstruct(out ReadOnlySpan<Entity> entities, out Span<T1> first)
-    {
-        entities = Entities;
-        first = First;
-    }
+    public long Written { get; } = written;
 }
 
 /// <summary>
 /// <see cref="EcsChunk{T1}"/> of entities that have both components.
 /// </summary>
-public readonly ref struct EcsChunk<T1, T2>(ReadOnlySpan<Entity> entities, Span<T1> first, Span<T2> second)
-    where T1 : unmanaged, IComponent
-    where T2 : unmanaged, IComponent
-{
-    public ReadOnlySpan<Entity> Entities { get; } = entities;
-
-    public Span<T1> First { get; } = first;
-
-    public Span<T2> Second { get; } = second;
-
-    public void Deconstruct(out ReadOnlySpan<Entity> entities, out Span<T1> first, out Span<T2> second)
-    {
-        entities = Entities;
-        first = First;
-        second = Second;
-    }
-}
-
-/// <summary>
-/// <see cref="EcsChunk{T1}"/> of entities that have all three components.
-/// </summary>
-public readonly ref struct EcsChunk<T1, T2, T3>(
+public readonly ref struct EcsChunk<T1, T2>(
     ReadOnlySpan<Entity> entities,
-    Span<T1> first,
-    Span<T2> second,
-    Span<T3> third
+    ReadOnlySpan<T1> first,
+    ReadOnlySpan<T2> second,
+    long written
 )
     where T1 : unmanaged, IComponent
     where T2 : unmanaged, IComponent
-    where T3 : unmanaged, IComponent
 {
     public ReadOnlySpan<Entity> Entities { get; } = entities;
 
-    public Span<T1> First { get; } = first;
+    public ReadOnlySpan<T1> First { get; } = first;
 
-    public Span<T2> Second { get; } = second;
+    public ReadOnlySpan<T2> Second { get; } = second;
 
-    public Span<T3> Third { get; } = third;
-
-    public void Deconstruct(
-        out ReadOnlySpan<Entity> entities,
-        out Span<T1> first,
-        out Span<T2> second,
-        out Span<T3> third
-    )
-    {
-        entities = Entities;
-        first = First;
-        second = Second;
-        third = Third;
-    }
+    public long Written { get; } = written;
 }
 
 /// <summary>
-/// <see cref="EcsChunk{T1}"/> of entities that have all four components.
+/// <see cref="EcsChunk{T1}"/> to write, as an <see cref="EcsMutation{T1}"/> hands it out: writing through
+/// <see cref="First"/> changes the components. Handing it out marks the chunk written, whether or not anything is.
 /// </summary>
-public readonly ref struct EcsChunk<T1, T2, T3, T4>(
-    ReadOnlySpan<Entity> entities,
-    Span<T1> first,
-    Span<T2> second,
-    Span<T3> third,
-    Span<T4> fourth
-)
+public readonly ref struct EcsMutableChunk<T1>(ReadOnlySpan<Entity> entities, Span<T1> first)
+    where T1 : unmanaged, IComponent
+{
+    public ReadOnlySpan<Entity> Entities { get; } = entities;
+
+    public Span<T1> First { get; } = first;
+}
+
+/// <summary>
+/// <see cref="EcsMutableChunk{T1}"/> of entities that have both components.
+/// </summary>
+public readonly ref struct EcsMutableChunk<T1, T2>(ReadOnlySpan<Entity> entities, Span<T1> first, Span<T2> second)
     where T1 : unmanaged, IComponent
     where T2 : unmanaged, IComponent
-    where T3 : unmanaged, IComponent
-    where T4 : unmanaged, IComponent
 {
     public ReadOnlySpan<Entity> Entities { get; } = entities;
 
     public Span<T1> First { get; } = first;
 
     public Span<T2> Second { get; } = second;
-
-    public Span<T3> Third { get; } = third;
-
-    public Span<T4> Fourth { get; } = fourth;
-
-    public void Deconstruct(
-        out ReadOnlySpan<Entity> entities,
-        out Span<T1> first,
-        out Span<T2> second,
-        out Span<T3> third,
-        out Span<T4> fourth
-    )
-    {
-        entities = Entities;
-        first = First;
-        second = Second;
-        third = Third;
-        fourth = Fourth;
-    }
 }

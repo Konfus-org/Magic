@@ -1,22 +1,13 @@
-using Magic.Files;
-using Magic.Files.Types;
-
 namespace Magic.Ecs.Components;
 
 /// <summary>
-/// What is done to the picture after the lighting: up to four post effects, each a shader that implements the pixel
-/// effect contract, run in order, and how the exposure meter and the bloom are set. It goes on any entity, and the
-/// renderer takes the first it finds; with none, the picture gets the defaults.
+/// What is done to the picture after the lighting: its post effects, each a material whose shader implements the
+/// pixel effect contract, run in order, and how the exposure meter and the bloom are set. It goes on any entity, and
+/// the renderer takes the first it finds; with none, the picture gets the defaults.
 /// </summary>
 public record struct PostProcessing : IComponent
 {
-    public Handle<Shader> Effect0;
-
-    public Handle<Shader> Effect1;
-
-    public Handle<Shader> Effect2;
-
-    public Handle<Shader> Effect3;
+    public MaterialSlots Effects;
 
     /// <summary>
     /// Stops added to what the meter picks: positive brightens.

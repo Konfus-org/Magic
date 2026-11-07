@@ -56,6 +56,10 @@ public interface IFileSystem
 
     Result Copy(string sourceFile, string destinationFile);
 
-    /// <summary>Watch a directory tree for changes to files matching <paramref name="filter"/>.</summary>
-    Result<IFileWatcher> Watch(string path, string filter = "*.*");
+    /// <summary>
+    /// Watches the directory tree under <paramref name="path"/>, calling <paramref name="touched"/> with the full path
+    /// of each file matching <paramref name="filter"/> that is made, written, deleted or renamed (its old path and its
+    /// new one), on a background thread, until the watch is disposed.
+    /// </summary>
+    Result<IDisposable> Watch(string path, string filter, Action<string> touched);
 }

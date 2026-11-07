@@ -95,8 +95,26 @@ internal sealed class FileSystem : IFileSystem
     public Result Copy(string sourceFile, string destinationFile) =>
         Run(() => File.Copy(sourceFile, destinationFile, overwrite: true));
 
-    public Result<IFileWatcher> Watch(string path, string filter) =>
-        Run<IFileWatcher>(() => new FileWatcher(path, filter));
+    public Result<IDisposable> Watch(string path, string filter, Action<string> touched) =>
+        Run<IDisposable>(() =>
+        {
+            FileSystemWatcher watcher = new(path, filter)
+            {
+                IncludeSubdirectories = true,
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite,
+            };
+            watcher.Created += (_, e) => touched(e.FullPath);
+            watcher.Changed += (_, e) => touched(e.FullPath);
+            watcher.Deleted += (_, e) => touched(e.FullPath);
+            watcher.Renamed += (_, e) =>
+            {
+                touched(e.OldFullPath);
+                touched(e.FullPath);
+            };
+            watcher.EnableRaisingEvents = true;
+
+            return watcher;
+        });
 
     /// <summary>
     /// <paramref name="work"/>'s value, or the reason the disk refused it. Anything else thrown is a bug and goes on.
@@ -145,30 +163,4 @@ internal sealed class FileSystem : IFileSystem
     /// </summary>
     private static bool IsRefusal(Exception ex) =>
         ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException;
-
-    private sealed class FileWatcher : IFileWatcher
-    {
-        private readonly FileSystemWatcher _watcher;
-
-        internal FileWatcher(string path, string filter)
-        {
-            _watcher = new FileSystemWatcher(path, filter)
-            {
-                IncludeSubdirectories = true,
-                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite,
-            };
-            _watcher.Created += (_, e) => Created?.Invoke(this, e);
-            _watcher.Changed += (_, e) => Changed?.Invoke(this, e);
-            _watcher.Deleted += (_, e) => Deleted?.Invoke(this, e);
-            _watcher.Renamed += (_, e) => Renamed?.Invoke(this, e);
-            _watcher.EnableRaisingEvents = true;
-        }
-
-        public event EventHandler<FileSystemEventArgs>? Created;
-        public event EventHandler<FileSystemEventArgs>? Changed;
-        public event EventHandler<FileSystemEventArgs>? Deleted;
-        public event EventHandler<RenamedEventArgs>? Renamed;
-
-        public void Dispose() => _watcher.Dispose();
-    }
 }

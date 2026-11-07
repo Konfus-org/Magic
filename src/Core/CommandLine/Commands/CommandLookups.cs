@@ -1,10 +1,10 @@
 using System.Globalization;
 using System.IO;
 using System.Numerics;
+using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Files;
 using Magic.Utils;
 
 namespace Magic.CommandLine.Commands;
@@ -32,7 +32,7 @@ internal static class CommandLookups
     /// The <typeparamref name="T"/> at <paramref name="pathOrName"/>, or else the first whose file is named it, in any
     /// case and without its extension (<c>Tree</c> for <c>Prefabs/Tree.prefab</c>); none when there is neither.
     /// </summary>
-    public static Handle<T> FindAsset<T>(Assets assets, string pathOrName)
+    public static Handle<T> FindAsset<T>(AssetManager assets, string pathOrName)
         where T : IAsset<T>
     {
         Handle<T> atPath = assets.Find<T>(pathOrName);

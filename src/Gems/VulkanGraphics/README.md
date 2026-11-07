@@ -1,17 +1,25 @@
 # VulkanGraphics
 
 The GPU through Vulkan 1.3: provides `IGraphicsApi`. Resources go into one bindless heap, which every shader reads by
-the id in a handle; a frame is one `GpuCommands` value, recorded by whatever draws and submitted here.
+the id in a handle. A frame is one `GpuCommands` value, which the gems record into Core's graph and Core presents here;
+it puts in the barriers each pass's uses need, from what each resource was last used as.
 
-To use it, list `VulkanGraphics` in a project's `.magic` file after the gem that provides the window.
+To use it, list `VulkanGraphics` in a project's `.magic` file after the gems that provide the window and the shader
+compiler.
+
+- A texture the graph names is made on the first ask and kept while its name is asked for with the same description;
+  another description makes it again.
+- A compute pass the graph records with a shader entry runs that entry, compiled through the shader compiler and built
+  on the first ask. The pass is left out of frames until then; a shader that fails is logged, and its passes stay out.
 
 - The GPU is the fastest one with Vulkan 1.3, bindless descriptors and dynamic rendering that can show the window;
   the log names it as the run starts. Mesh shaders, ray queries and 64-bit atomics are noted in `GpuFeatures` when
   the GPU has them. With ray queries, acceleration structures join the heap: a bottom-level one over triangles of its
   buffers, a top-level one over instances of those, each built by a command of the frame.
 - It draws into the window through a surface it makes from the window's OS handles, on Windows, X11, Wayland and macOS.
-  The window sets the frame rate: a release waits for the display, and a Debug build shows each frame as soon as it
-  is drawn, so its frame rate is what the frame costs.
+  The window sets the render thread's frame rate: a release waits for the display, and a Debug build shows each frame
+  as soon as it is drawn, so its frame rate is what the frame costs.
+- Its resources and frames are the render thread's, and its members throw on any other.
 - It publishes each pass's and each frame's time on the GPU, and the device memory it holds and has, on its
   `Magic.Gems.VulkanGraphics` meter, whose tags name the Vulkan version, the GPU, its kind and its driver.
 - A Debug build turns on the Khronos validation layer when the Vulkan SDK is installed, and logs what it reports.

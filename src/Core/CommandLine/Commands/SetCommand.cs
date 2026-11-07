@@ -7,7 +7,7 @@ using System.Text.Json;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Events;
-using Magic.Serialization;
+using Magic.Files;
 using Magic.Utils;
 using Magic.Worlds;
 

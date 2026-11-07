@@ -9,18 +9,22 @@ public static class EcsExtensions
     {
         /// <summary>
         /// Fills <paramref name="snapshot"/> with a copy of the entities that have a <typeparamref name="T1"/> and their
-        /// components, in query order, replacing what it held: a bulk copy a chunk, on this thread. What reads it then
-        /// needs nothing of the ECS, so it can on another thread.
+        /// components, in query order, replacing what it held: a bulk copy of each chunk written since it was last filled,
+        /// on this thread, so a still world copies nothing. What reads it then needs nothing of the ECS, so it can on
+        /// another thread.
         /// </summary>
         public void Snapshot<T1>(EcsSnapshot<T1> snapshot)
             where T1 : unmanaged, IComponent
         {
             ArgumentNullException.ThrowIfNull(snapshot);
-            snapshot.Clear();
-            foreach (EcsChunk<T1> chunk in ecs.Query<T1>())
+            EcsQuery<T1> query = ecs.Query<T1>();
+            snapshot.Start();
+            foreach (EcsChunk<T1> chunk in query)
             {
                 snapshot.Add(chunk);
             }
+
+            snapshot.End(query.Version);
         }
 
         /// <summary>
@@ -31,44 +35,14 @@ public static class EcsExtensions
             where T2 : unmanaged, IComponent
         {
             ArgumentNullException.ThrowIfNull(snapshot);
-            snapshot.Clear();
-            foreach (EcsChunk<T1, T2> chunk in ecs.Query<T1, T2>())
+            EcsQuery<T1, T2> query = ecs.Query<T1, T2>();
+            snapshot.Start();
+            foreach (EcsChunk<T1, T2> chunk in query)
             {
                 snapshot.Add(chunk);
             }
-        }
 
-        /// <summary>
-        /// <see cref="Snapshot{T1}"/> of the entities that have all three components.
-        /// </summary>
-        public void Snapshot<T1, T2, T3>(EcsSnapshot<T1, T2, T3> snapshot)
-            where T1 : unmanaged, IComponent
-            where T2 : unmanaged, IComponent
-            where T3 : unmanaged, IComponent
-        {
-            ArgumentNullException.ThrowIfNull(snapshot);
-            snapshot.Clear();
-            foreach (EcsChunk<T1, T2, T3> chunk in ecs.Query<T1, T2, T3>())
-            {
-                snapshot.Add(chunk);
-            }
-        }
-
-        /// <summary>
-        /// <see cref="Snapshot{T1}"/> of the entities that have all four components.
-        /// </summary>
-        public void Snapshot<T1, T2, T3, T4>(EcsSnapshot<T1, T2, T3, T4> snapshot)
-            where T1 : unmanaged, IComponent
-            where T2 : unmanaged, IComponent
-            where T3 : unmanaged, IComponent
-            where T4 : unmanaged, IComponent
-        {
-            ArgumentNullException.ThrowIfNull(snapshot);
-            snapshot.Clear();
-            foreach (EcsChunk<T1, T2, T3, T4> chunk in ecs.Query<T1, T2, T3, T4>())
-            {
-                snapshot.Add(chunk);
-            }
+            snapshot.End(query.Version);
         }
     }
 }

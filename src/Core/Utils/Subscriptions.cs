@@ -31,11 +31,6 @@ public sealed class Subscriptions : IDisposable, IEnumerable<Subscription>
 
     public void Add(Subscription subscription) => _all.Add(subscription);
 
-    /// <summary>
-    /// Takes <paramref name="subscription"/> out without ending it; whether it was held.
-    /// </summary>
-    public bool Remove(Subscription subscription) => _all.Remove(subscription);
-
     public IEnumerator<Subscription> GetEnumerator() => _all.GetEnumerator();
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();

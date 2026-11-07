@@ -5,49 +5,33 @@ namespace Magic.Ecs;
 /// that implements <see cref="IComponent"/>, which the ECS stores in columns rather than in managed objects.
 /// <para>
 /// Work over many entities is a system: a function over chunks, the entities stored together, which a gem calls from
-/// its own hook, through <see cref="Query()"/> on its own thread, or through <see cref="Run{TState}"/> on the ECS's
-/// worker threads.
+/// its own hook through <see cref="Query()"/>.
+/// </para>
+/// <para>
+/// A call says whether it reads or writes. <see cref="Query{T1}()"/> and <see cref="Get{T}"/> read, through read-only
+/// spans and references. <see cref="Mutate{T1}()"/>, <see cref="Mutate{T}(Entity)"/>, <see cref="Set{T}"/> and the
+/// calls that change which components an entity has write, and mark each chunk they hand out or change as written,
+/// whether or not anything is. A reader that keeps its query's <see cref="EcsQuery{T1}.Version"/> knows a chunk whose
+/// <see cref="EcsChunk{T1}.Written"/> is no higher hasn't changed since.
 /// </para>
 /// <para>
 /// The world is the thread's that made the gem providing it: every call is made there, or throws. Work on another
-/// thread hands what it built to that thread as data, in a batch where it can (<see cref="Create{T1}"/>). The one
-/// exception is reading: while a <see cref="Run{TState}"/> runs, it may read other entities (<see cref="IsAlive"/>,
-/// <see cref="Has{T}"/>, <see cref="Get{T}"/>) on whichever thread it is on.
+/// thread hands what it built to that thread as data.
 /// </para>
 /// <para>
-/// Changing which components an entity has (<see cref="Create()"/>, <see cref="Destroy"/>, <see cref="Remove{T}"/>, or
-/// <see cref="Set{T}"/> of one it lacks) moves it between columns, so it throws during a query's loop or a run: record
-/// it in an <see cref="EntityCommands"/>, and apply that after. Every call but <see cref="IsAlive"/> and
-/// <see cref="Has{T}"/> throws for an entity that is not alive.
+/// Changing which components an entity has (<see cref="Create(ReadOnlySpan{IComponent})"/>, <see cref="Destroy"/>,
+/// <see cref="Remove{T}"/>, or <see cref="Set{T}"/> of one it lacks) moves it between columns, so it throws during a
+/// query's loop; make it after. Every call but <see cref="IsAlive"/> and <see cref="Has{T}"/> throws for an entity that
+/// is not alive.
 /// </para>
 /// </summary>
 public interface IEcs
 {
     /// <summary>
-    /// A new entity, with no components.
-    /// </summary>
-    Entity Create();
-
-    /// <summary>
     /// A new entity with <paramref name="components"/>, each of its own type: what a file or a save made, known only as
-    /// the program runs. It boxes; a batch <see cref="Create{T1}"/> is for what is built in bulk.
+    /// the program runs. It boxes.
     /// </summary>
     Entity Create(ReadOnlySpan<IComponent> components);
-
-    /// <summary>
-    /// One new entity per element of <paramref name="first"/>, each with the component at its index, written into
-    /// <paramref name="created"/>: a batch made in one go rather than one entity and one component at a time, for what
-    /// was built on another thread. The spans are the same length.
-    /// </summary>
-    void Create<T1>(ReadOnlySpan<T1> first, Span<Entity> created)
-        where T1 : unmanaged, IComponent;
-
-    /// <summary>
-    /// <see cref="Create{T1}"/> with two components each.
-    /// </summary>
-    void Create<T1, T2>(ReadOnlySpan<T1> first, ReadOnlySpan<T2> second, Span<Entity> created)
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent;
 
     /// <summary>
     /// Destroys the entity and its components. Its slot goes to a later entity, with a new
@@ -75,10 +59,16 @@ public interface IEcs
     void Set(Entity entity, ReadOnlySpan<IComponent> components);
 
     /// <summary>
-    /// The entity's component by reference, so a write goes straight into storage. Good until the entity's components
-    /// next change; throws when it has none.
+    /// The entity's component by reference, to read. Good until the entity's components next change; throws when it
+    /// has none.
     /// </summary>
-    ref T Get<T>(Entity entity)
+    ref readonly T Get<T>(Entity entity)
+        where T : unmanaged, IComponent;
+
+    /// <summary>
+    /// <see cref="Get{T}"/> to write: a write goes straight into storage, and the entity's chunk is marked written.
+    /// </summary>
+    ref T Mutate<T>(Entity entity)
         where T : unmanaged, IComponent;
 
     bool Has<T>(Entity entity)
@@ -96,8 +86,8 @@ public interface IEcs
     EcsQuery Query();
 
     /// <summary>
-    /// The entities that have a <typeparamref name="T1"/>, chunk by chunk, on this thread, with spans straight over
-    /// storage: writing through them changes the components.
+    /// The entities that have a <typeparamref name="T1"/>, chunk by chunk, on this thread, with read-only spans straight
+    /// over storage.
     /// </summary>
     EcsQuery<T1> Query<T1>()
         where T1 : unmanaged, IComponent;
@@ -110,58 +100,16 @@ public interface IEcs
         where T2 : unmanaged, IComponent;
 
     /// <summary>
-    /// <see cref="Query{T1}"/> over the entities that have all three components.
+    /// <see cref="Query{T1}()"/> to write: writing through the spans changes the components, and every chunk the loop
+    /// walks is marked written.
     /// </summary>
-    EcsQuery<T1, T2, T3> Query<T1, T2, T3>()
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent;
-
-    /// <summary>
-    /// <see cref="Query{T1}"/> over the entities that have all four components.
-    /// </summary>
-    EcsQuery<T1, T2, T3, T4> Query<T1, T2, T3, T4>()
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent
-        where T4 : unmanaged, IComponent;
-
-    /// <summary>
-    /// Runs <paramref name="run"/> on every chunk of entities, spread over the ECS's worker threads, one chunk each,
-    /// and returns once every chunk is done. <paramref name="state"/> is what each run is handed, such as the frame,
-    /// so <paramref name="run"/> can be a delegate made once rather than a closure. A run writes only through its
-    /// chunk and adds up anything shared with <see cref="Interlocked"/>. What a chunk throws is thrown here, once the
-    /// others are done.
-    /// </summary>
-    void Run<TState>(in TState state, EcsChunkRun<TState, EcsChunk> run);
-
-    /// <summary>
-    /// <see cref="Run{TState}"/> over the entities that have a <typeparamref name="T1"/>.
-    /// </summary>
-    void Run<TState, T1>(in TState state, EcsChunkRun<TState, EcsChunk<T1>> run)
+    EcsMutation<T1> Mutate<T1>()
         where T1 : unmanaged, IComponent;
 
     /// <summary>
-    /// <see cref="Run{TState}"/> over the entities that have both components.
+    /// <see cref="Mutate{T1}()"/> over the entities that have both components.
     /// </summary>
-    void Run<TState, T1, T2>(in TState state, EcsChunkRun<TState, EcsChunk<T1, T2>> run)
+    EcsMutation<T1, T2> Mutate<T1, T2>()
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent;
-
-    /// <summary>
-    /// <see cref="Run{TState}"/> over the entities that have all three components.
-    /// </summary>
-    void Run<TState, T1, T2, T3>(in TState state, EcsChunkRun<TState, EcsChunk<T1, T2, T3>> run)
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent;
-
-    /// <summary>
-    /// <see cref="Run{TState}"/> over the entities that have all four components.
-    /// </summary>
-    void Run<TState, T1, T2, T3, T4>(in TState state, EcsChunkRun<TState, EcsChunk<T1, T2, T3, T4>> run)
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent
-        where T4 : unmanaged, IComponent;
 }

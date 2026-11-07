@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.Linq;
+using Magic.Assets;
 using Magic.CommandLine.Commands;
 using Magic.Debugging;
 using Magic.Events;
@@ -13,19 +14,17 @@ namespace Magic.CommandLine;
 /// Magic's commands, run against the <see cref="App"/>: the command line Magic was launched with is the first of
 /// them, and each line typed into the terminal runs the same commands.
 /// </summary>
-internal sealed class Cli : IDisposable
+internal sealed class Cli
 {
     private readonly CommandQueue _queue;
 
     private readonly RootCommand _cliCommands;
 
-    public Cli(App app, IFileSystem files, EventCoordinator events, Assets assets, World world)
+    public Cli(App app, IFileSystem files, EventCoordinator events, AssetManager assets, World world)
     {
         _queue = new CommandQueue(events);
         _cliCommands = CreateCliCommands(app, files, events, assets, world, _queue);
     }
-
-    public void Dispose() => _queue.Dispose();
 
     /// <summary>
     /// Executes the commands Magic was launched with, or says why they didn't run. Only open runs a project; any other
@@ -91,7 +90,7 @@ internal sealed class Cli : IDisposable
         App app,
         IFileSystem files,
         EventCoordinator events,
-        Assets assets,
+        AssetManager assets,
         World world,
         CommandQueue queue
     )

@@ -5,4 +5,7 @@ namespace Magic.Events;
 /// <paramref name="Path"/>, under <c>Screenshots/</c> beside Magic, and logs <c>Screenshot: &lt;path&gt;</c> once
 /// the file is there.
 /// </summary>
-public readonly record struct ScreenshotRequested(string Path);
+public record struct ScreenshotRequested(string Path) : IEvent
+{
+    public bool IsHandled { get; set; }
+}

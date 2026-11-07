@@ -1,17 +1,13 @@
 using System.Collections.Concurrent;
-using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
-using Magic.Debugging;
 using Magic.Projects;
-using Magic.Utils;
 
 namespace Magic.Events;
 
 /// <summary>
-/// Messages between gems, by type. Anything publishes one, from any thread, and every gem hears it the next frame:
-/// read from that frame's <see cref="Frame.Events"/> in a hook, or handed to a watcher as the frame starts, before any
-/// gem's hook. A message is a struct, and publishing, reading and watching allocate nothing once its
-/// type's buffers have grown.
+/// Messages between gems, by type. Anything publishes one, from any thread, and every gem hears it the next frame,
+/// read from that frame's <see cref="Frame.Events"/> in a hook, in load order, until one handles it. A message is a
+/// struct, and publishing and reading allocate nothing once its type's buffers have grown.
 /// </summary>
 public sealed class EventCoordinator
 {
@@ -27,52 +23,31 @@ public sealed class EventCoordinator
     /// Hands <paramref name="message"/> to every gem in the next frame. Any thread.
     /// </summary>
     public void Publish<T>(in T message)
-        where T : struct => GetQueue<T>().Published.Enqueue(message);
+        where T : struct, IEvent => GetQueue<T>().Published.Enqueue(message);
 
     /// <summary>
-    /// Calls <paramref name="watcher"/> with every <typeparamref name="T"/> published from now on, on the frame loop's
-    /// thread as each frame starts, until the subscription is disposed. A watcher that throws is logged, and the others
-    /// still hear the message. What a watcher publishes is heard the frame after.
-    /// </summary>
-    public Subscription Watch<T>(Action<T> watcher)
-        where T : struct
-    {
-        ArgumentNullException.ThrowIfNull(watcher);
-        EventQueue<T> queue = GetQueue<T>();
-        queue.Add(watcher);
-
-        return new Subscription(() => queue.Remove(watcher));
-    }
-
-    /// <summary>
-    /// What was published since the last take, as the frame about to start reads it, after handing it to the watchers.
-    /// The frame loop's, once a frame.
+    /// What was published since the last take, as the frame about to start reads it. The frame loop's, once a frame.
     /// </summary>
     internal FrameEvents Take()
     {
-        // Every type is taken before any watcher hears one, so what a watcher publishes waits for the next take.
-        IEventQueue[] all = Volatile.Read(ref _all);
-        foreach (IEventQueue queue in all)
+        foreach (IEventQueue queue in Volatile.Read(ref _all))
         {
             queue.Take();
-        }
-
-        foreach (IEventQueue queue in all)
-        {
-            queue.Deliver();
         }
 
         return new FrameEvents(this);
     }
 
     /// <summary>
-    /// What the last take took of <typeparamref name="T"/>; empty when none was ever published.
+    /// What the last take took of <typeparamref name="T"/> that nothing has handled; empty when none was ever
+    /// published. Game thread.
     /// </summary>
-    internal ReadOnlySpan<T> GetTaken<T>()
-        where T : struct => _queues.TryGetValue(typeof(T), out IEventQueue? queue) ? ((EventQueue<T>)queue).Taken : [];
+    internal Span<T> GetTaken<T>()
+        where T : struct, IEvent =>
+        _queues.TryGetValue(typeof(T), out IEventQueue? queue) ? ((EventQueue<T>)queue).GetUnhandled() : [];
 
     private EventQueue<T> GetQueue<T>()
-        where T : struct
+        where T : struct, IEvent
     {
         if (_queues.TryGetValue(typeof(T), out IEventQueue? found))
             return (EventQueue<T>)found;
@@ -91,55 +66,43 @@ public sealed class EventCoordinator
     }
 
     /// <summary>
-    /// The queues of every type published or watched, as one kind for the take: type erasure over
-    /// <see cref="EventQueue{T}"/>.
+    /// The queues of every type published, as one kind for the take: type erasure over <see cref="EventQueue{T}"/>.
     /// </summary>
     private interface IEventQueue
     {
         void Take();
-
-        void Deliver();
     }
 
     /// <summary>
-    /// The messages of one type and its watchers.
+    /// The messages of one type.
     /// </summary>
     private sealed class EventQueue<T> : IEventQueue
-        where T : struct
+        where T : struct, IEvent
     {
-        private readonly Lock _changing = new();
-
         /// <summary>
         /// What the last take took, at its start, reused take after take and grown as needed.
         /// </summary>
         private T[] _taken = [];
         private int _takenCount;
 
-        /// <summary>
-        /// Replaced whole as watchers come and go, so delivery walks a set that does not change under it.
-        /// </summary>
-        private Action<T>[] _watchers = [];
-
         public ConcurrentQueue<T> Published { get; } = new();
 
-        public ReadOnlySpan<T> Taken => _taken.AsSpan(0, _takenCount);
-
-        public void Add(Action<T> watcher)
+        /// <summary>
+        /// What the last take took, less what was handled since it was last read, so whoever reads it next doesn't get
+        /// what a reader before handled.
+        /// </summary>
+        public Span<T> GetUnhandled()
         {
-            lock (_changing)
+            int kept = 0;
+            for (int i = 0; i < _takenCount; i++)
             {
-                Volatile.Write(ref _watchers, [.. _watchers, watcher]);
+                if (!_taken[i].IsHandled)
+                    _taken[kept++] = _taken[i];
             }
-        }
 
-        public void Remove(Action<T> watcher)
-        {
-            lock (_changing)
-            {
-                int index = Array.IndexOf(_watchers, watcher);
-                if (index >= 0)
-                    Volatile.Write(ref _watchers, [.. _watchers.AsSpan(0, index), .. _watchers.AsSpan(index + 1)]);
-            }
+            _takenCount = kept;
+
+            return _taken.AsSpan(0, _takenCount);
         }
 
         public void Take()
@@ -153,33 +116,6 @@ public sealed class EventCoordinator
             while (_takenCount < count && Published.TryDequeue(out T message))
             {
                 _taken[_takenCount++] = message;
-            }
-        }
-
-        [SuppressMessage(
-            "Design",
-            "CA1031:Do not catch general exception types",
-            Justification = "Whatever a watcher throws, it is logged and the others still hear the message."
-        )]
-        public void Deliver()
-        {
-            Action<T>[] watchers = Volatile.Read(ref _watchers);
-            if (watchers.Length == 0)
-                return;
-
-            foreach (T message in Taken)
-            {
-                foreach (Action<T> watcher in watchers)
-                {
-                    try
-                    {
-                        watcher(message);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Error($"A watcher of {typeof(T).Name} threw: {ex}");
-                    }
-                }
             }
         }
     }

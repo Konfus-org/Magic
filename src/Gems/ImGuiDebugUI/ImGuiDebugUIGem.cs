@@ -4,11 +4,10 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Unicode;
 using System.Threading.Channels;
+using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Files;
-using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Input;
 using Magic.Platform;
@@ -16,6 +15,7 @@ using Magic.Projects;
 using Magic.Rendering;
 using Magic.Shaders;
 using Magic.Threading;
+using Magic.Utils;
 using static Magic.ImGuiDebugUI.ImDrawFlags_;
 using static Magic.ImGuiDebugUI.ImGui;
 using static Magic.ImGuiDebugUI.ImGuiBackendFlags_;
@@ -40,17 +40,17 @@ using static Magic.ImGuiDebugUI.ImTextureStatus;
 namespace Magic.ImGuiDebugUI;
 
 /// <summary>
-/// The debug UI, drawn with Dear ImGui: what gems and scripts report, as lines down the left of the picture and text in the
-/// world, and the windows gems draw with its widgets (<see cref="IDebugUI"/>).
+/// The debug UI, drawn with Dear ImGui: what gems and scripts report, and the lines they log to show on screen, as lines
+/// down the left of the picture and text in the world, and the windows gems draw with its widgets (<see cref="IDebugUI"/>).
 /// <para>
-/// ImGui's frame is the main thread's. <see cref="Update"/> hands ImGui the frame's input and starts its frame, so the
+/// ImGui's frame is the game thread's. <see cref="Update"/> hands ImGui the frame's input and starts its frame, so the
 /// widgets gems made after this one call in their Update go into it; <see cref="LateUpdate"/> draws what is reported, ends
-/// the frame and publishes a copy of it, whether anything draws it or not; and whatever draws the world records the newest
-/// copy over the finished picture (<see cref="Record"/>). Reports come from any thread (<see cref="Reports"/>). It is public because
+/// the frame and publishes a copy of it, whether anything draws it or not; and <see cref="Render"/> records the newest
+/// copy over the window's image, in the overlay layer, so it shows over whatever drew the world. Reports come from any thread (<see cref="Reports"/>). It is public because
 /// nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </para>
 /// </summary>
-public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
+public sealed class ImGuiDebugUIGem : IGem, IDebugUI, ILogSink, IDisposable
 {
     private const int InputBytes = 256;
 
@@ -72,7 +72,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     private const float ScrollableWindowHeight = 18;
 
     /// <summary>
-    /// Seconds a line on screen, or a warning or error in the world, stays when its report does not say.
+    /// Seconds a line logged to show on screen stays.
     /// </summary>
     private const float ReportSec = 5;
 
@@ -193,7 +193,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
         App app,
         IGraphicsApi gpu,
         IShaderCompiler shaders,
-        Assets assets,
+        AssetManager assets,
         IEcs ecs,
         IInput? input = null,
         IClipboard? clipboard = null
@@ -260,7 +260,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     public unsafe void LateUpdate(in Frame frame)
     {
         if (_depth > 0)
-            Error("A debug UI window was begun and not ended; it is ended for it.", staySec: 0);
+            Text("A debug UI window was begun and not ended; it is ended for it.", _error);
 
         while (_depth > 0)
         {
@@ -284,9 +284,9 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     }
 
     /// <summary>
-    /// The newest frame ImGui ended over <paramref name="target"/>.
+    /// The newest frame ImGui ended, over the window's image.
     /// </summary>
-    public void Record(RenderGraph graph, GpuTexture target) => _overlay.Record(graph, target);
+    public void Render(in Frame frame, RenderGraph graph) => _overlay.Record(graph);
 
     public void Text(Vector3 position, string text, Color? color = null, string? tooltip = null) =>
         _reports.Add(new Report(text, ReportKind.Plain, color ?? _white, position, tooltip, 0));
@@ -294,43 +294,29 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     public void Text(string text, Color? color = null) =>
         _reports.Add(new Report(text, ReportKind.Plain, color ?? _white, null, null, 0));
 
-    public void Info(
-        string text,
-        float? staySec = null,
-        [CallerMemberName] string member = "",
-        [CallerFilePath] string file = "",
-        [CallerLineNumber] int line = 0
-    )
+    /// <summary>
+    /// Shows a line logged to show on screen for a while: information counted while it shows, and a warning or an error
+    /// between <c>!!!</c>s. Any thread.
+    /// </summary>
+    public void Write(in Log.Line line)
     {
-        _reports.Add(new Report(text, ReportKind.Counted, _white, null, null, staySec ?? ReportSec));
-        Log.Info(text, member, file, line);
+        if (!line.IsOnScreen)
+            return;
+
+        (ReportKind kind, Color color) = line.Level switch
+        {
+            Log.LoggingLevel.Verbose or Log.LoggingLevel.Info => (ReportKind.Counted, _white),
+            Log.LoggingLevel.Warn => (ReportKind.Alarm, _warning),
+            Log.LoggingLevel.Error or Log.LoggingLevel.Critical => (ReportKind.Alarm, _error),
+            _ => (ReportKind.Counted, _white),
+        };
+        _reports.Add(new Report(line.Message, kind, color, null, null, ReportSec));
     }
 
-    public void Warn(
-        string text,
-        Vector3? position = null,
-        float? staySec = null,
-        string? tooltip = null,
-        [CallerMemberName] string member = "",
-        [CallerFilePath] string file = "",
-        [CallerLineNumber] int line = 0
-    ) =>
-        _reports.Add(
-            new Report(text, ReportKind.Warning, _warning, position, tooltip, staySec ?? ReportSec, member, file, line)
-        );
-
-    public void Error(
-        string text,
-        Vector3? position = null,
-        float? staySec = null,
-        string? tooltip = null,
-        [CallerMemberName] string member = "",
-        [CallerFilePath] string file = "",
-        [CallerLineNumber] int line = 0
-    ) =>
-        _reports.Add(
-            new Report(text, ReportKind.Error, _error, position, tooltip, staySec ?? ReportSec, member, file, line)
-        );
+    /// <summary>
+    /// Nothing: a line shows with the next frame drawn.
+    /// </summary>
+    public void Flush() { }
 
     public unsafe void Begin(string title, bool scrollable = false) => Begin(title, null, scrollable);
 
@@ -417,7 +403,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
                     (int)ImGuiInputTextFlags_EnterReturnsTrue
                 );
             if (isEntered || ImGui_IsItemEdited())
-                text = Marshal.PtrToStringUTF8((nint)buffer) ?? string.Empty;
+                text = CString.Read(buffer);
         }
 
         // The field keeps the keyboard, to type the next line.
@@ -458,7 +444,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
                 null
             );
             if (isChanged)
-                text = Marshal.PtrToStringUTF8((nint)buffer) ?? string.Empty;
+                text = CString.Read(buffer);
         }
 
         return isChanged;
@@ -556,7 +542,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
         return true;
     }
 
-    public unsafe bool Header(string label, bool folds = false, int depth = 0)
+    public unsafe bool Header(string label, bool isOpenAtStart = true, int depth = 0)
     {
         ThrowIfOutsideFrame();
 
@@ -572,10 +558,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
             level.Indent = depth;
         }
 
-        if (folds)
-            ImGui_SetNextItemOpen(false, (int)ImGuiCond_Always);
-
-        return ImGui_CollapsingHeader(_text.Add(label), (int)ImGuiTreeNodeFlags_DefaultOpen);
+        return ImGui_CollapsingHeader(_text.Add(label), isOpenAtStart ? (int)ImGuiTreeNodeFlags_DefaultOpen : 0);
     }
 
     public unsafe void Table(string label, ReadOnlySpan<string> columns)
@@ -694,7 +677,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IOverlay, IDisposable
     private static unsafe void SetClipboard(ImGuiContext_t* context, byte* text)
     {
         if (GetSelf()._clipboard is { } clipboard)
-            clipboard.Text = Marshal.PtrToStringUTF8((nint)text) ?? string.Empty;
+            clipboard.Text = CString.Read(text);
     }
 
     /// <summary>

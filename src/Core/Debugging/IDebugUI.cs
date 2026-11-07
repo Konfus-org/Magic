@@ -1,6 +1,5 @@
 using System.Numerics;
-using System.Runtime.CompilerServices;
-using Magic.Files.Types;
+using Magic.Assets;
 
 namespace Magic.Debugging;
 
@@ -8,15 +7,15 @@ namespace Magic.Debugging;
 /// What a gem or script shows the developer while the game runs, provided by a UI gem, which decides how it looks and
 /// when it shows.
 /// <para>
-/// What is reported (<c>Text</c>, <see cref="Info"/>, <see cref="Warn"/>, <see cref="Error"/>) shows for a while, over
-/// the game and outside any window: a few words at a place in the world, or a line on screen. Report it from any thread;
-/// it shows with the next frame drawn. Info, Warn and Error are logged through <see cref="Log"/> too, whether anything
-/// shows or not. Reporting the same text at the same place again while it shows keeps it up rather than adding another.
+/// What is reported with <c>Text</c>, and what <see cref="Log"/> is told to show on screen, shows over the game and
+/// outside any window: a few words at a place in the world, or a line on screen. Report it from any thread; it shows with
+/// the next frame drawn. Reporting the same text at the same place again while it shows keeps it up rather than adding
+/// another.
 /// </para>
 /// <para>
 /// Windows are drawn with the widgets, <see cref="Begin(string, bool)"/> to <see cref="MenuItem"/>, in immediate mode:
 /// what is called in a frame's Update is that frame's windows, so a window is drawn every frame it is open. They are the
-/// main thread's, called in Update by a gem made after the provider, as one that takes this is. A widget's label is drawn
+/// game thread's, called in Update by a gem made after the provider, as one that takes this is. A widget's label is drawn
 /// on its left, and the widget stretches to the width of what it is in; the part of a label from <c>##</c> on is not
 /// shown, and tells apart widgets that show the same label. A widget answers from the input of the frame it is called in.
 /// </para>
@@ -40,47 +39,6 @@ public interface IDebugUI
     /// above the lines shown for a while: call it every frame it should show. Never logged.
     /// </summary>
     void Text(string text, Color? color = null);
-
-    /// <summary>
-    /// A line on screen for <paramref name="staySec"/>, null for the UI's own time, logged as information. The same line
-    /// again while it shows is one line, with how often.
-    /// </summary>
-    void Info(
-        string text,
-        float? staySec = null,
-        [CallerMemberName] string member = "",
-        [CallerFilePath] string file = "",
-        [CallerLineNumber] int line = 0
-    );
-
-    /// <summary>
-    /// A warning: at <paramref name="position"/> in the world, or a line on screen without one. It stays
-    /// <paramref name="staySec"/> after it was last reported (null for the UI's own time, 0 for only while it is reported
-    /// every frame), and is logged as a warning when it appears, not again while it stays. <paramref name="tooltip"/>
-    /// shows while the mouse rests on it.
-    /// </summary>
-    void Warn(
-        string text,
-        Vector3? position = null,
-        float? staySec = null,
-        string? tooltip = null,
-        [CallerMemberName] string member = "",
-        [CallerFilePath] string file = "",
-        [CallerLineNumber] int line = 0
-    );
-
-    /// <summary>
-    /// <see cref="Warn"/> for an error, logged as an error.
-    /// </summary>
-    void Error(
-        string text,
-        Vector3? position = null,
-        float? staySec = null,
-        string? tooltip = null,
-        [CallerMemberName] string member = "",
-        [CallerFilePath] string file = "",
-        [CallerLineNumber] int line = 0
-    );
 
     /// <summary>
     /// Opens a movable window titled <paramref name="title"/>, and what is drawn until <see cref="End"/> goes in it.
@@ -150,12 +108,12 @@ public interface IDebugUI
     bool Tabs(string label, ref int index, ReadOnlySpan<string> options);
 
     /// <summary>
-    /// A header that folds away what is drawn under it, open until clicked; <paramref name="folds"/> folds it this frame
-    /// as a click would, for whoever draws it to fold it once and leave it to clicks after. True while open: draw what is
-    /// under it only then. <paramref name="depth"/> nests it under the headers before it: it and what follows it are
-    /// indented a step for each, until the next header in the window or view.
+    /// A header that folds away what is drawn under it, open at first as <paramref name="isOpenAtStart"/> says and as
+    /// clicked after. True while open: draw what is under it only then. <paramref name="depth"/> nests it under the
+    /// headers before it: it and what follows it are indented a step for each, until the next header in the window or
+    /// view.
     /// </summary>
-    bool Header(string label, bool folds = false, int depth = 0);
+    bool Header(string label, bool isOpenAtStart = true, int depth = 0);
 
     /// <summary>
     /// Opens a table headed by <paramref name="columns"/>, whose rows are drawn with <see cref="Row"/> until

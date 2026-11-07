@@ -2,11 +2,9 @@ using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using System.Numerics;
-using System.Runtime.InteropServices;
-using System.Text;
+using Magic.Assets;
+using Magic.Assets.Pipeline;
 using Magic.Ecs.Components;
-using Magic.Files.Pipeline;
-using Magic.Files.Types;
 using Magic.Projects;
 using Magic.Utils;
 using static Magic.AssimpModelImporter.aiPostProcessSteps;
@@ -58,16 +56,15 @@ public sealed unsafe class AssimpModelImporterGem : IGem, IAssetImporter<Model>
         // Read the scene
         Vector3 origin = file.Metadata.Get<Vector3>(nameof(Model.Origin));
         ReadOnlySpan<byte> bytes = file.Bytes.Span;
-        byte[] hint = Encoding.UTF8.GetBytes(Path.GetExtension(file.Path)[1..] + '\0');
         aiScene* scene;
         fixed (byte* data = bytes)
-        fixed (byte* hintPointer = hint)
+        fixed (byte* hintPointer = CString.ToBytes(Path.GetExtension(file.Path)[1..]))
         {
             scene = aiImportFileFromMemory(data, (uint)bytes.Length, Steps, hintPointer);
         }
 
         if (scene == null)
-            return Result.Failure(Marshal.PtrToStringUTF8((nint)aiGetErrorString()) ?? "assimp gave no reason.");
+            return Result.Failure(CString.Read(aiGetErrorString()));
 
         try
         {

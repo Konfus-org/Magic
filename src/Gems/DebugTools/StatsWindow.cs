@@ -6,8 +6,8 @@ using Magic.Debugging;
 namespace Magic.DebugTools;
 
 /// <summary>
-/// A window of everything the meters measure, in sections that fold: CPU, the main thread's frame with what Core and
-/// each gem spend of it; GPU, what the GPU provider says of the API and the GPU, and its frame and passes; Memory, Core's
+/// A window of everything the meters measure, in sections that fold: CPU, the game thread's frame and the render
+/// thread's, with what Core and each gem spend of them; GPU, what the GPU provider says of the API and the GPU, and its frame and passes; Memory, Core's
 /// and the process's, then each gem's; and Other, the rest by meter. A histogram's row shows its mean, how many a second
 /// and its most; a counter's how much it rose and how much a second; a gauge's its latest value. Seconds show as
 /// milliseconds and bytes as megabytes. It also writes the <see cref="CounterLine"/> from the same rows.
@@ -17,13 +17,6 @@ internal sealed class StatsWindow(IDebugUI ui)
     private const double BytesPerMegabyte = 1024 * 1024;
     private const double BytesPerGigabyte = 1024 * 1024 * 1024;
     private const string GemMeterPrefix = "Magic.Gems.";
-    private const string FrameDuration = "magic.core.frame.duration";
-    private const string FrameWorkDuration = "magic.core.frame.work.duration";
-    private const string HookDuration = "magic.core.gem.hook.duration";
-    private const string StepDuration = "magic.core.step.duration";
-    private const string GemNameTag = "magic.core.gem.name";
-    private const string HookTag = "magic.core.gem.hook";
-    private const string StepTag = "magic.core.step";
     private const string ProcessMemory = "dotnet.process.memory.working_set";
     private const string GpuPrefix = "gpu.";
     private const string GpuFrameDuration = "gpu.frame.duration";
@@ -47,13 +40,8 @@ internal sealed class StatsWindow(IDebugUI ui)
     private readonly List<Section> _sections = [];
 
     /// <summary>
-    /// The sections that start folded and were folded once already, which clicks open and fold from then on.
-    /// </summary>
-    private readonly HashSet<string> _folded = [];
-
-    /// <summary>
     /// The frame rate and the memory in use, as written out at the last refresh:
-    /// <c>FPS: 59 (17.0 ms) | Memory: GPU 0.4 GB, RAM 0.9 GB</c>.
+    /// <c>FPS: 59 (17.0 ms) | Memory: GPU 0.4 GB, RAM 0.9 GB</c>. The frame is the one the render thread draws.
     /// </summary>
     public string CounterLine { get; private set; } = string.Empty;
 
@@ -64,10 +52,10 @@ internal sealed class StatsWindow(IDebugUI ui)
     {
         _lines.Clear();
         _sections.Clear();
-        Section cpu = new("cpu", "CPU", isFoldedAtStart: false);
-        Section gpu = new("gpu", "GPU", isFoldedAtStart: false);
-        Section memory = new("memory", "Memory", isFoldedAtStart: false);
-        Section other = new("other", "Other", isFoldedAtStart: true);
+        Section cpu = new("cpu", "CPU", isOpenAtStart: true);
+        Section gpu = new("gpu", "GPU", isOpenAtStart: true);
+        Section memory = new("memory", "Memory", isOpenAtStart: true);
+        Section other = new("other", "Other", isOpenAtStart: false);
         _sections.AddRange([cpu, gpu, memory, other]);
 
         // Core's memory first, ahead of the gems'.
@@ -83,7 +71,8 @@ internal sealed class StatsWindow(IDebugUI ui)
 
         HashSet<string> described = [];
         double framesPerSecond = 0;
-        double frameSec = 0;
+        double drawnPerSecond = 0;
+        double drawnSec = 0;
         double workSec = 0;
         double gpuSec = 0;
         double processBytes = 0;
@@ -109,21 +98,25 @@ internal sealed class StatsWindow(IDebugUI ui)
                     processBytes = row.Value;
                 }
             }
-            else if (row.Instrument is HookDuration or StepDuration)
+            else if (row.Instrument is Metrics.HookDuration or Metrics.StepDuration)
             {
                 // A gem's hook or a step of Core's, which add up to the time a frame it takes.
-                bool isHook = row.Instrument == HookDuration;
-                Section part = cpu.GetChild(isHook ? row.GetTag(GemNameTag) : Core);
-                part.Rows.Add(ToCells(row.GetTag(isHook ? HookTag : StepTag), row));
+                bool isHook = row.Instrument == Metrics.HookDuration;
+                Section part = cpu.GetChild(isHook ? row.GetTag(Metrics.GemNameTag) : Core);
+                part.Rows.Add(ToCells(row.GetTag(isHook ? Metrics.HookTag : Metrics.StepTag), row));
                 part.Amount += row.Value * row.PerSecond;
             }
-            else if (row.Instrument is FrameDuration or FrameWorkDuration)
+            else if (
+                row.Instrument is Metrics.FrameDuration or Metrics.FrameWorkDuration or Metrics.RenderFrameDuration
+            )
             {
                 cpu.Rows.Add(ToCells(name, row));
-                if (row.Instrument == FrameDuration)
-                    (framesPerSecond, frameSec) = (row.PerSecond, row.Value);
-                else
+                if (row.Instrument == Metrics.FrameDuration)
+                    framesPerSecond = row.PerSecond;
+                else if (row.Instrument == Metrics.FrameWorkDuration)
                     workSec = row.Value;
+                else
+                    (drawnPerSecond, drawnSec) = (row.PerSecond, row.Value);
             }
             else if (name.StartsWith(GpuPrefix, StringComparison.Ordinal))
             {
@@ -164,7 +157,7 @@ internal sealed class StatsWindow(IDebugUI ui)
         string gpuCounter = gpuBytes > 0 ? FormatGigabytes("GPU", gpuBytes) + ", " : string.Empty;
         CounterLine = string.Create(
             CultureInfo.InvariantCulture,
-            $"FPS: {framesPerSecond:0} ({frameSec * 1000:0.0} ms) | Memory: {gpuCounter}{FormatGigabytes("RAM", processBytes)}"
+            $"FPS: {drawnPerSecond:0} ({drawnSec * 1000:0.0} ms) | Memory: {gpuCounter}{FormatGigabytes("RAM", processBytes)}"
         );
     }
 
@@ -261,8 +254,7 @@ internal sealed class StatsWindow(IDebugUI ui)
         if (section.Lines.Count == 0 && section.Rows.Count == 0 && section.Children.Count == 0)
             return;
 
-        bool folds = section.IsFoldedAtStart && _folded.Add(section.Id);
-        if (!ui.Header(section.Header, folds, depth))
+        if (!ui.Header(section.Header, section.IsOpenAtStart, depth))
             return;
 
         foreach (string line in section.Lines)
@@ -291,13 +283,13 @@ internal sealed class StatsWindow(IDebugUI ui)
     /// A part of the window under a header: its lines, its rows, and the sections in it, which start folded. Its
     /// <see cref="Amount"/> sums what its header shows: seconds a second for a part of the CPU's, bytes for memory.
     /// </summary>
-    private sealed class Section(string id, string name, bool isFoldedAtStart)
+    private sealed class Section(string id, string name, bool isOpenAtStart)
     {
         public string Id { get; } = id;
 
         public string Name { get; } = name;
 
-        public bool IsFoldedAtStart => isFoldedAtStart;
+        public bool IsOpenAtStart => isOpenAtStart;
 
         /// <summary>
         /// What its header reads, with <see cref="Id"/> as its ImGui id, so the header keeps whether it is open as its
@@ -326,7 +318,7 @@ internal sealed class StatsWindow(IDebugUI ui)
                     return child;
             }
 
-            Section added = new($"{Id}.{childName}", childName, isFoldedAtStart: true);
+            Section added = new($"{Id}.{childName}", childName, isOpenAtStart: false);
             Children.Add(added);
 
             return added;

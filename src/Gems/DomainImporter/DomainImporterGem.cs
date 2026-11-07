@@ -1,9 +1,8 @@
 using System.Collections.Immutable;
 using System.Globalization;
 using System.IO;
-using Magic.Files;
-using Magic.Files.Pipeline;
-using Magic.Files.Types;
+using Magic.Assets;
+using Magic.Assets.Pipeline;
 using Magic.Projects;
 using Magic.Utils;
 
@@ -14,17 +13,15 @@ namespace Magic.DomainImporter;
 /// folder named <c>x_y_z</c> a chunk, and any other at the domain's origin. The file itself holds nothing, so <c>{}</c>
 /// does. It is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class DomainImporterGem(Assets assets) : IGem, IAssetImporter<Domain>
+public sealed class DomainImporterGem(AssetManager assets) : IGem, IAssetImporter<Domain>
 {
     public ImmutableArray<string> Extensions => [".domain"];
 
     public Task<Result<Domain>> ImportAsync(AssetFile file, IProgress<LoadProgress>? progress, CancellationToken cancel)
     {
-        int slash = file.Path.LastIndexOf('/');
-        string folder = slash < 0 ? string.Empty : file.Path[..slash];
         ImmutableArray<Chunk>.Builder chunks = ImmutableArray.CreateBuilder<Chunk>();
         ImmutableArray<Handle<Prefab>>.Builder globals = ImmutableArray.CreateBuilder<Handle<Prefab>>();
-        foreach (string path in assets.GetPaths(folder, file.Id))
+        foreach (string path in assets.GetNeighbors(file))
         {
             Handle<Prefab> prefab = assets.Find<Prefab>(path);
             if (prefab == Handle<Prefab>.None)

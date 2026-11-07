@@ -3,4 +3,7 @@ namespace Magic.Events;
 /// <summary>
 /// Whatever draws the frame has drawn its first one, its shaders compiled: what the console's <c>wait drawn</c> holds for.
 /// </summary>
-public readonly record struct FirstFrameDrawn;
+public record struct FirstFrameDrawn : IEvent
+{
+    public bool IsHandled { get; set; }
+}

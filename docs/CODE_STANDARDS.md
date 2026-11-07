@@ -8,11 +8,11 @@ and old code catches up when you touch it.
 
 Write the engine as data flowing through functions, not objects calling each other. Everything is one of four things:
 
-- **Data:** plain values, such as `Domain`, `Prefab` and `EntityCommands`.
+- **Data:** plain values, such as `Domain` and `Prefab`.
 - **Databases:** one place that holds state and does little else, such as the assets' database and the ECS's columns.
 - **Services:** what you call, such as `world.Create` and `assets.Find`.
 - **Steps:** work done in an order, as named methods that take values and return values. `Program` and
-  `Assets.RunImportAsync` read this way.
+  `AssetManager.RunImportAsync` read this way.
 
 - **Nothing glued in.** Just about everything is a gem that can be swapped out.
 - **Direct calls, not webs.** Data moves A â†’ B â†’ C, and the whole flow reads top to bottom in one place. Call a thing by
@@ -46,7 +46,13 @@ Write the engine as data flowing through functions, not objects calling each oth
   builds objects from constructors takes `IServiceProvider`. Gems are made in dependency order, then in the order the
   project lists them, and disposed in reverse.
 - A hook is what the engine calls on a gem each frame: `IGem`'s `Update`, `FixedUpdate`, `LateUpdate` and `Render`, in
-  that order over the gems, on the main thread. A gem implements the ones it needs. One that throws in a hook is logged
+  that order over the gems. `Render` runs on the render thread, which owns the GPU, and the others on the game thread.
+  The platform thread, the process's first, pumps the OS's window and events through the gem that implements
+  `IPlatform`, which hands the game thread the input they make as data.
+  `Render` records into the frame's `RenderGraph`, each pass in its `RenderLayer`, and Core hands it to the GPU provider
+  once every gem has.
+  `LateUpdate` hands `Render` what it draws as data, the newest through a `Mailbox<T>` and what must not be lost
+  through a `Channel<T>`. A gem implements the ones it needs. One that throws in a hook is logged
   and leaves every hook.
 - Where Core needs something from a gem, the gem implements an interface and Core calls it, as with `IEcs` and
   `IAssetImporter<T>`. Add one when a gem first needs it.
@@ -56,11 +62,11 @@ Write the engine as data flowing through functions, not objects calling each oth
 - `Program` sets a run up and owns its loop, calling each service's `Pump` in turn. `App` lasts the whole process; what a
   run makes is new for it, and a restart keeps only the world, as JSON. A service starts in its constructor
   and ends in `Dispose`, not with paired start and stop calls. A step is a method. A class of its own is for a substantial piece of work.
-- Push onto an `EntityCommands` for bulk work, and run it with `world.Apply`. A single change is a call on `World`.
-- A method that needs the main thread after an await of its own steps onto it with
-  `await threads.Enter(EngineThread.Main)`; nothing hops threads for it.
-- Gems talk through message structs. Publish one from any thread and every gem reads it the next frame, from
-  `frame.Events` or through `EventCoordinator.Watch`.
+- A change is a call on `World`.
+- A method that needs the game thread after an await of its own steps onto it with
+  `await threads.Enter(EngineThread.Game)`; nothing hops threads for it.
+- Gems talk through message structs, each an `IEvent`. Publish one from any thread and every gem reads it the next
+  frame, from `frame.Events`, in load order. A gem that sets `IsHandled` on one takes it from the gems after it.
 - Async work a hook starts arrives in a later frame: by a message, or by work posted with `Threads.Post`. A gem that
   needs slow setup starts it in its constructor and reads what came of it in a hook.
 - `Dispose` frees what the gem started, once none of its work still runs on a worker.
@@ -68,8 +74,8 @@ Write the engine as data flowing through functions, not objects calling each oth
 - Gems depend on Core's interfaces, never on each other.
 - A component is an unmanaged struct with public fields that implements `IComponent`, and members for what follows from
   those fields.
-- Work over many entities is a system: a function over chunks a gem calls from a hook, through `IEcs.Query` on its own
-  thread or `IEcs.Run` on the ECS's workers.
+- Work over many entities is a system: a function over chunks a gem calls from a hook, through `IEcs.Query` to read or `IEcs.Mutate` to write, on its own
+  thread.
 - A game is its assets and scripts, never a gem.
 
 ## Async
@@ -89,9 +95,11 @@ Write the engine as data flowing through functions, not objects calling each oth
 - Await every task, keep it to check later, or call `.FireAndForget()`. Never drop it or discard it with `_ =`. No
   `async void`.
 - Cancellation ends the task with `OperationCanceledException`, never a failed `Result`.
-- Nothing blocks the main or render thread: no `.Result`, `.Wait()` or `.GetAwaiter().GetResult()`, and no waiting on
-  the other engine thread. The one allowed wait is at a boundary where every thread it could hold up has ended, with a
-  comment saying so.
+- Nothing blocks the game or render thread: no `.Result`, `.Wait()` or `.GetAwaiter().GetResult()`, and no waiting on
+  the other engine thread. Two waits are allowed, each with a comment saying so: at a boundary where every thread it
+  could hold up has ended, and Core's game thread waiting at the end of a frame until the render thread has drawn the
+  frame before. The render thread never waits for the game thread. The platform thread waits on the OS for its next
+  event.
 - A worker hands an engine thread data (a message, a `Channel<T>`, a value written whole) or work
   (`Threads.Post`). No locks on collections two threads share.
 - Background work is a task. `Threads` is for the engine's own threads.
@@ -153,6 +161,9 @@ Write the engine as data flowing through functions, not objects calling each oth
 - An asset type gems share is Core's. One only a gem reads is that gem's.
 - Reading a file format is its importer's one job, and writing one its exporter's; anything else known about an asset,
   its sidecar included, is Core's.
+- What a gem makes from an asset, such as a renderer's clusters of a model, is an `IAssetPreprocessor<T, TMade>` the gem
+  registers with `AssetManager`: it runs as the asset loads, and what it made is in `Caches` under the asset's id and
+  version for the gem to read. `bake` runs every one on every asset.
 - An import setting is a property of the asset type, declared as one, never a settings type beside it.
 - A key the file must have is `required { get; init; }`. One with a default is `{ get; set; }`, the default as its
   initializer and nowhere else. What code sets, not the file, has no public setter.
@@ -193,7 +204,7 @@ built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
 
 ### Naming
 
-- A name reads well as `Class.Member(arguments)`: `Assets.Find<Texture>(path)`, `App.Exit()`. Action first,
+- A name reads well as `Class.Member(arguments)`: `AssetManager.Find<Texture>(path)`, `App.Exit()`. Action first,
   subject second (`ReadDomain`), naming what it acts on even if that's longer. If it doesn't make sense without its
   summary (`Process()`, `_scratch`), rename it.
 - Each verb means one thing:
@@ -261,7 +272,7 @@ All code runs on Windows, Linux and macOS.
 
 - **Paths.** Build them with `IFileSystem.Combine` and split them with `IFileSystem.GetParent`; never touch separators.
   `Path.GetExtension`, `Path.GetFileName*` and `Path.ChangeExtension` are fine. No drive letters, absolute paths or
-  checks for `..`. An asset path is relative to its root and uses `/`; only `Assets` turns it into an OS path.
+  checks for `..`. An asset path is relative to its root and uses `/`; only `AssetManager` turns it into an OS path.
 - **Case.** File names in code, assets, `#include`s, csproj and `.meta` files match the disk exactly. Two files never
   differ only by case.
 - **Disk.** All disk access goes through `IFileSystem`, never `File` or `Directory`; only `Debugging` is exempt. Engine

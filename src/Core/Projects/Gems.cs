@@ -1,11 +1,15 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
+using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Events;
 using Magic.Files;
+using Magic.Gpu;
 using Magic.Platform;
+using Magic.Rendering;
+using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,6 +24,16 @@ namespace Magic.Projects;
 internal sealed class Gems : IDisposable
 {
     /// <summary>
+    /// How long a fixed step is.
+    /// </summary>
+    private const double FixedStepSec = 1.0 / 60;
+
+    /// <summary>
+    /// The most fixed steps a frame runs; what the simulation owes past them is dropped.
+    /// </summary>
+    private const int MaxFixedSteps = 4;
+
+    /// <summary>
     /// How long a gem's files must have been left alone after a build wrote them.
     /// </summary>
     private static readonly TimeSpan _settleTime = TimeSpan.FromSeconds(1);
@@ -30,19 +44,25 @@ internal sealed class Gems : IDisposable
     private static readonly string[] _hookNames = Enum.GetNames<Hook>();
 
     private static readonly Histogram<double> _frameDuration = Metrics.Meter.CreateHistogram<double>(
-        "magic.core.frame.duration",
+        Metrics.FrameDuration,
         "s",
         "From one frame to the next."
     );
 
     private static readonly Histogram<double> _frameWorkDuration = Metrics.Meter.CreateHistogram<double>(
-        "magic.core.frame.work.duration",
+        Metrics.FrameWorkDuration,
         "s",
-        "The main thread's work on a frame, the waits for the GPU and the display among it."
+        "The game thread's work on a frame."
+    );
+
+    private static readonly Histogram<double> _renderFrameDuration = Metrics.Meter.CreateHistogram<double>(
+        Metrics.RenderFrameDuration,
+        "s",
+        "From one frame the render thread draws to the next, the waits for the GPU and the display among it."
     );
 
     private static readonly Histogram<double> _hookDuration = Metrics.Meter.CreateHistogram<double>(
-        "magic.core.gem.hook.duration",
+        Metrics.HookDuration,
         "s",
         "One gem's hook."
     );
@@ -53,17 +73,37 @@ internal sealed class Gems : IDisposable
 
     private readonly IFileSystem _files;
 
-    private readonly Assets _assets;
+    private readonly AssetManager _assets;
 
     private readonly World _world;
 
     private readonly EventCoordinator _events;
 
-    private readonly FrameClock _clock = new();
+    private readonly Threads _threads;
+
+    /// <summary>
+    /// The game thread's real time, from its first frame.
+    /// </summary>
+    private readonly Stopwatch _clock = new();
 
     private readonly List<LoadedGem> _loaded = [];
 
     private readonly Subscriptions _watches = [];
+
+    /// <summary>
+    /// The frame every gem's Render records into, which the GPU provider presents. Render thread.
+    /// </summary>
+    private readonly RenderGraph _graph = new();
+
+    /// <summary>
+    /// The render thread's own real time, from the first frame it draws.
+    /// </summary>
+    private readonly Stopwatch _renderClock = new();
+
+    /// <summary>
+    /// Set by the render thread each time it has drawn a frame, for the game thread waiting to stay one frame ahead.
+    /// </summary>
+    private readonly AutoResetEvent _drawn = new(initialState: false);
 
     /// <summary>
     /// When a watch last saw a build write a gem's files, 0 when none has: written whole from the watches' threads.
@@ -71,9 +111,29 @@ internal sealed class Gems : IDisposable
     private long _buildTimestamp;
 
     /// <summary>
-    /// When the last sleep ended, 0 before the first frame's: where a frame's work starts.
+    /// When the last wait for the render thread ended, 0 before the first frame's: where a frame's work starts.
     /// </summary>
     private long _frameStart;
+
+    /// <summary>
+    /// The game thread's last frame, whose clocks the next one goes on from.
+    /// </summary>
+    private Frame _frame;
+
+    /// <summary>
+    /// The simulation time the fixed steps have reached.
+    /// </summary>
+    private double _fixedSec;
+
+    /// <summary>
+    /// The simulation time the fixed steps still owe; dropped when it is more than <see cref="MaxFixedSteps"/> can run.
+    /// </summary>
+    private double _owedSec;
+
+    /// <summary>
+    /// The last frame the render thread drew, whose clocks the next one goes on from.
+    /// </summary>
+    private Frame _renderFrame;
 
     /// <summary>
     /// Makes the gems <paramref name="registered"/> through <paramref name="provider"/>, which was built from the services
@@ -84,9 +144,10 @@ internal sealed class Gems : IDisposable
         IServiceProvider provider,
         App app,
         IFileSystem files,
-        Assets assets,
+        AssetManager assets,
         World world,
-        EventCoordinator events
+        EventCoordinator events,
+        Threads threads
     )
     {
         _provider = provider;
@@ -95,14 +156,20 @@ internal sealed class Gems : IDisposable
         _assets = assets;
         _world = world;
         _events = events;
+        _threads = threads;
         Load(registered);
+        _graph.Gpu = _loaded.Find(static gem => gem.Instance is IGraphicsApi)?.Instance as IGraphicsApi;
+        _threads.Start(EngineThread.Render, Render);
     }
 
     /// <summary>
-    /// Ends the gems, last made first, so no gem outlives one it was made after.
+    /// Stops the render thread, then ends the gems on this one, which is the render thread from then on, last made first,
+    /// so no gem outlives one it was made after.
     /// </summary>
     public void Dispose()
     {
+        _threads.Stop(EngineThread.Render);
+        _drawn.Dispose();
         _watches.Dispose();
         for (int i = _loaded.Count - 1; i >= 0; i--)
         {
@@ -114,18 +181,24 @@ internal sealed class Gems : IDisposable
     }
 
     /// <summary>
-    /// One frame: restarts the run if a gem was built, works out the clocks, turns what spins, runs every gem's hooks in
-    /// order with the fixed steps the clock owes. Presenting to the window sets the pace; with no window, frames run as
-    /// fast as they go. Time begins with the first frame, not with what was loaded before it.
+    /// One frame: restarts the run if a gem was built, works out the clocks, turns what spins, runs every gem's hooks but
+    /// Render in order with the fixed steps the simulation owes, and tells the world the frame is published. Then it waits
+    /// until the render thread has drawn the frame before, so the next frame is worked out while this one draws, and the
+    /// frames run at the render thread's pace. Time begins with the first frame, not with what was loaded before it.
     /// </summary>
     public void Pump()
     {
         RestartIfBuilt();
 
         // While the loading screen shows, time runs as it is, so it moves however the world it replaces was paused.
-        bool isPaused = _app.IsPaused || (_world.IsPaused && !_world.IsShowingLoadingScreen);
+        bool isPaused = _world.IsPaused && !_world.IsShowingLoadingScreen;
         float timeScale = _world.IsShowingLoadingScreen ? 1 : _world.TimeScale;
-        Frame frame = _clock.Advance(isPaused, timeScale, out int fixedSteps) with { Events = _events.Take() };
+        Frame frame = CreateFrame(_clock, _frame, isPaused ? 0 : timeScale) with
+        {
+            IsPaused = isPaused,
+            Events = _events.Take(),
+        };
+        _frame = frame;
 
         // The first frame's time is the load's before it, not a frame's.
         if (_frameStart != 0)
@@ -134,27 +207,73 @@ internal sealed class Gems : IDisposable
         _world.TurnSpins((float)frame.SimDeltaSec);
         long hooksStart = Stopwatch.GetTimestamp();
         RunHook(Hook.Update, frame);
-        for (int step = 1; step <= fixedSteps; step++)
+
+        // The fixed steps catch the simulation up with the frame, at most MaxFixedSteps of them, and what is owed past
+        // those is dropped. A fixed step sees its own time and no messages.
+        _owedSec += frame.SimDeltaSec;
+        for (int step = 0; step < MaxFixedSteps && _owedSec >= FixedStepSec; step++)
         {
-            RunHook(Hook.FixedUpdate, _clock.GetFixedStep(frame, step));
+            _owedSec -= FixedStepSec;
+            _fixedSec += FixedStepSec;
+            RunHook(
+                Hook.FixedUpdate,
+                frame with
+                {
+                    SimSec = _fixedSec,
+                    SimDeltaSec = FixedStepSec,
+                    Events = FrameEvents.None,
+                }
+            );
         }
 
-        _clock.EndFixedSteps(fixedSteps);
+        if (_owedSec >= FixedStepSec)
+            _owedSec = 0;
+
         RunHook(Hook.LateUpdate, frame);
-        RunHook(Hook.Render, frame);
+        _world.PublishedFrame = frame.Index;
         _frameWorkDuration.RecordSince(_frameStart == 0 ? hooksStart : _frameStart);
+
+        // The one wait on the render thread in a frame, so the game thread never runs more than a frame ahead of it; the
+        // render thread never waits for this one.
+        while (_world.DrawnFrame + 1 < frame.Index)
+        {
+            _drawn.WaitOne();
+        }
+
         _frameStart = Stopwatch.GetTimestamp();
     }
 
     /// <summary>
-    /// Calls <paramref name="hook"/> on <paramref name="gem"/>, which leaves the frame if it throws.
+    /// The frame after <paramref name="last"/> on <paramref name="clock"/>, which starts with the first one. The simulation
+    /// moves by the real time since <paramref name="last"/>, times <paramref name="timeScale"/>.
+    /// </summary>
+    private static Frame CreateFrame(Stopwatch clock, in Frame last, float timeScale)
+    {
+        bool isFirst = !clock.IsRunning;
+        clock.Start();
+        double nowSec = clock.Elapsed.TotalSeconds;
+        double simDeltaSec = (nowSec - last.AppSec) * timeScale;
+
+        return new()
+        {
+            Index = isFirst ? 0 : last.Index + 1,
+            AppSec = nowSec,
+            AppDeltaSec = nowSec - last.AppSec,
+            SimSec = last.SimSec + simDeltaSec,
+            SimDeltaSec = simDeltaSec,
+        };
+    }
+
+    /// <summary>
+    /// Calls <paramref name="hook"/> on <paramref name="gem"/>, which leaves the frame if it throws. Present is the GPU
+    /// provider's alone.
     /// </summary>
     [SuppressMessage(
         "Design",
         "CA1031:Do not catch general exception types",
         Justification = "Whatever a gem throws, it is logged and the gem leaves the frame; the others go on."
     )]
-    private static void RunHook(Hook hook, in Frame frame, LoadedGem gem)
+    private void RunHook(Hook hook, in Frame frame, LoadedGem gem)
     {
         try
         {
@@ -170,7 +289,12 @@ internal sealed class Gems : IDisposable
                     gem.Instance.LateUpdate(in frame);
                     break;
                 case Hook.Render:
-                    gem.Instance.Render(in frame);
+                    gem.Instance.Render(in frame, _graph);
+                    break;
+                case Hook.Present:
+                    if (gem.Instance is IGraphicsApi gpu)
+                        gpu.Present(_graph.Finish());
+
                     break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(hook), hook, "There is no such hook.");
@@ -181,6 +305,29 @@ internal sealed class Gems : IDisposable
             Log.Error($"Gem {gem.Name} failed in {hook} and stops running: {ex}");
             gem.HasFailed = true;
         }
+    }
+
+    /// <summary>
+    /// One frame of the render thread, which runs them as fast as the GPU and the display let it, never waiting for the
+    /// game thread: every gem's Render into the frame's graph, then the GPU provider's Present of it. It tells the world which published frame it drew at least, the gems taking what
+    /// was published when it began or newer, and wakes the game thread if it waits for that. A render frame has no
+    /// messages.
+    /// </summary>
+    private void Render()
+    {
+        uint published = _world.PublishedFrame;
+        Frame frame = CreateFrame(_renderClock, _renderFrame, timeScale: 1);
+        _renderFrame = frame;
+        if (frame.Index > 0)
+            _renderFrameDuration.Record(frame.AppDeltaSec);
+
+        RunHook(Hook.Render, frame);
+        RunHook(Hook.Present, frame);
+
+        // Without a GPU provider, nothing presents what the gems recorded, so it goes.
+        _graph.Finish();
+        _world.DrawnFrame = published;
+        _drawn.Set();
     }
 
     /// <summary>
@@ -195,6 +342,8 @@ internal sealed class Gems : IDisposable
     )]
     private void Load(List<GemInfo> registered)
     {
+        // A constructor may load an asset of a type a gem made after it reads.
+        _assets.Expect(registered.ConvertAll(gem => gem.Type));
         foreach (GemInfo gem in registered)
         {
             Watch(gem);
@@ -214,6 +363,7 @@ internal sealed class Gems : IDisposable
                 // anything else is a bug in the gem, and its stack says where.
                 string why = ex is InvalidOperationException ? ex.Message : ex.ToString();
                 Log.Error($"Gem {gem.Name} was not made: {why}");
+                _assets.Drop(gem.Type);
                 code.Dispose();
                 continue;
             }
@@ -237,6 +387,12 @@ internal sealed class Gems : IDisposable
 
                 // The window is the gem, which can't unload while the app holds it.
                 loaded.Ends.Add(new Subscription(() => _app.Window = null));
+            }
+
+            if (made is IPlatform platform)
+            {
+                _app.Platform = platform;
+                loaded.Ends.Add(new Subscription(() => _app.Platform = null));
             }
 
             if (made is ILogSink sink)
@@ -292,7 +448,11 @@ internal sealed class Gems : IDisposable
     /// </summary>
     private void Watch(GemInfo gem)
     {
-        Result<IFileWatcher> watched = _files.Watch(gem.Folder, "*.dll");
+        Result<IDisposable> watched = _files.Watch(
+            gem.Folder,
+            "*.dll",
+            _ => Volatile.Write(ref _buildTimestamp, Stopwatch.GetTimestamp())
+        );
         if (!watched.Ok)
         {
             Log.Warn($"Gem {gem.Name} is not watched, so a build of it won't restart the run: {watched.Error}");
@@ -300,18 +460,11 @@ internal sealed class Gems : IDisposable
             return;
         }
 
-        IFileWatcher watcher = watched.Value;
-        watcher.Created += (_, _) => Touch();
-        watcher.Changed += (_, _) => Touch();
-        watcher.Deleted += (_, _) => Touch();
-        watcher.Renamed += (_, _) => Touch();
-        _watches.Add(new Subscription(watcher.Dispose));
+        _watches.Add(new Subscription(watched.Value.Dispose));
     }
 
-    private void Touch() => Volatile.Write(ref _buildTimestamp, Stopwatch.GetTimestamp());
-
     /// <summary>
-    /// A hook of <see cref="IGem"/>'s.
+    /// A hook of the frame's: <see cref="IGem"/>'s, and Present, which is the GPU provider's alone.
     /// </summary>
     private enum Hook : byte
     {
@@ -319,6 +472,7 @@ internal sealed class Gems : IDisposable
         FixedUpdate,
         LateUpdate,
         Render,
+        Present,
     }
 
     /// <summary>

@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using System.Text.Json.Serialization;
-using Magic.Files;
-using Magic.Files.Types;
+using Magic.Assets;
 
 namespace Magic.Projects;
 

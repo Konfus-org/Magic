@@ -1,12 +1,13 @@
 using System.Collections.Immutable;
 using System.Linq;
 using System.Numerics;
+using System.Threading.Channels;
+using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Events;
 using Magic.Files;
-using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Input;
 using Magic.Projects;
@@ -19,128 +20,127 @@ using Magic.Worlds;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// Draws the world. <c>Update</c> reads what the frame draws out of the entities; <c>Render</c> records the frame in
-/// order, top to bottom, and shows it. As a domain replaces the world, it forgets what it drew before and holds the
-/// loading screen until what comes is on the GPU. It is public because nothing in its assembly makes it: Magic does, by
-/// reflection, when a project lists the gem.
+/// Draws the world. <c>LateUpdate</c> copies what the frame draws out of the entities and publishes it; <c>Render</c>, on
+/// the render thread, takes the newest published, records the frame in order, top to bottom, and shows it. As a domain
+/// replaces the world, it forgets what it drew before and holds the loading screen until what comes is on the GPU. It is
+/// public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
 public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 {
     private const int DefaultWidth = 1280;
     private const int DefaultHeight = 720;
 
+    /// <summary>
+    /// What a surface facing the sun lands at in the picture before the tonemap, with no meter yet.
+    /// </summary>
+    private const float ExposureAtSun = 4;
+
     private readonly IGraphicsApi _gpu;
-    private readonly Assets _assets;
+    private readonly AssetManager _assets;
     private readonly IEcs _ecs;
     private readonly App _app;
     private readonly EventCoordinator _events;
-    private readonly RenderGraph _graph;
-    private readonly RenderWorld _world = new();
+    private readonly Threads _threads;
+    private readonly Mailbox<RenderInputs> _inputs = new();
+    private readonly Channel<ScreenshotRequested> _screenshots = Channel.CreateUnbounded<ScreenshotRequested>(
+        new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
+    );
     private readonly GpuPipelines _pipelines;
-    private readonly GeometryPools _pools;
-    private readonly TextureTable _textures;
-    private readonly MaterialTable _materials;
-    private readonly FrameTargets _targets;
+    private readonly GpuResources _resources;
     private readonly RayTracing? _rayTracing;
     private readonly InstanceTable _instances;
+
+    /// <summary>
+    /// The material a model that failed is drawn with, every slot; an empty slot when there is no failure material.
+    /// </summary>
+    private readonly MaterialInstance _failure;
     private readonly Visibility _visibility;
     private readonly FrameView _frameView;
     private readonly SkyLuts _sky;
     private readonly LightTiles _lightTiles;
-    private readonly ShadowMask? _shadows;
+    private readonly ShadowMask? _shadowMask;
     private readonly Lighting _lighting;
     private readonly SurfaceView _surfaceView;
-    private readonly IOverlay? _overlay;
     private readonly RendererDebugWindow? _debugWindow;
 
     /// <summary>
     /// Ends the start when the gem is disposed before it is done, so nothing is made for a gem that is gone.
     /// </summary>
     private readonly CancellationTokenSource _stopping = new();
+    private readonly Subscription _preprocessing;
 
     private DebugView _debugView;
+
+    /// <summary>
+    /// The inputs <see cref="Render"/> draws, taken from <see cref="_inputs"/>, until newer are. Render thread.
+    /// </summary>
+    private RenderInputs? _current;
     private bool _hasDrawn;
 
     /// <summary>
-    /// How the start ended: null while the passes compile, then whether the pipelines, the pools and the tables were
-    /// made. Main thread.
+    /// How the start ended: null while the passes compile, then whether the pipelines and the pools were made. Render
+    /// thread.
     /// </summary>
     private Result? _started;
 
     /// <summary>
-    /// What a domain loading needs on the GPU before it shows, until <see cref="Render"/> has uploaded it all. Main thread.
+    /// What a domain loading needs on the GPU before it shows, until <see cref="Render"/> has uploaded it all. Render
+    /// thread.
     /// </summary>
     private Preparing? _preparing;
 
     public GIRenderingGem(
         IGraphicsApi gpu,
         IShaderCompiler shaders,
-        Assets assets,
-        IMeshPreprocessor meshes,
+        AssetManager assets,
+        Caches caches,
         IEcs ecs,
         Threads threads,
         App app,
         EventCoordinator events,
         IDebugUI? debugUI = null,
-        IOverlay? overlay = null,
         IInput? input = null
     )
     {
-        _overlay = overlay;
         _debugWindow = debugUI is null ? null : new RendererDebugWindow(debugUI, input);
         _gpu = gpu;
         _assets = assets;
         _ecs = ecs;
         _app = app;
         _events = events;
-        _graph = new RenderGraph(gpu);
-        _pipelines = new GpuPipelines(gpu, _graph, shaders, assets);
-        _pools = new GeometryPools(gpu, _graph, meshes, assets, threads);
-        _textures = new TextureTable(gpu, _graph, assets, threads);
-        _materials = new MaterialTable(gpu, _graph, assets, _textures, threads);
-        _targets = new FrameTargets(gpu, _graph);
-        _instances = new InstanceTable(gpu, _graph);
-        _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu, _graph) : null;
-        _visibility = new Visibility(gpu, _graph, _pipelines, _pools, _materials);
-        _frameView = new FrameView(gpu, _graph, _pools, _materials, _visibility, _rayTracing);
-        _sky = new SkyLuts(gpu, _pipelines);
-        _lightTiles = new LightTiles(gpu, _graph, _pipelines);
-        _shadows = _rayTracing is null
-            ? null
-            : new ShadowMask(gpu, _graph, _pipelines, _pools, _visibility, _lightTiles);
-        _lighting = new Lighting(gpu, _graph, _pipelines, _sky, _lightTiles, _shadows);
+        _threads = threads;
+        _pipelines = new GpuPipelines(gpu, shaders, assets);
+        ModelPreprocessor models = new();
+        _preprocessing = assets.Register(models);
+        _resources = new GpuResources(gpu, models, caches, assets, threads);
+        _failure = new MaterialInstance { Handle = assets.GetFailure<Material, Model>() };
+        _instances = new InstanceTable(gpu, assets, _resources, _failure);
+        _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu, _resources) : null;
+        _visibility = new Visibility(gpu, _pipelines, _resources);
+        _frameView = new FrameView(gpu, _resources);
+        _sky = new SkyLuts(assets);
+        _lightTiles = new LightTiles(gpu, _resources, _pipelines);
+        _shadowMask = _rayTracing is null ? null : new ShadowMask(gpu, _pipelines, _resources);
+        _lighting = new Lighting(gpu, _resources, _pipelines);
         _surfaceView = new SurfaceView(_pipelines);
-        StartAsync(threads).FireAndForget();
+        StartAsync().FireAndForget();
     }
 
     public void Dispose()
     {
+        _preprocessing.Dispose();
         _stopping.Cancel();
         _stopping.Dispose();
         EndPreparing();
-        _graph.Clear();
         _pipelines.Dispose();
-        _targets.Dispose();
-        _materials.Dispose();
-        _textures.Dispose();
-        _pools.Dispose();
-        _instances.Dispose();
-        _rayTracing?.Dispose();
-        _visibility.Dispose();
-        _frameView.Dispose();
-        _sky.Dispose();
-        _lightTiles.Dispose();
-        _shadows?.Dispose();
-        _lighting.Dispose();
+        _resources.Dispose();
     }
 
     /// <summary>
-    /// Reads what the frame draws out of the entities.
+    /// Applies the settings, and the debug window's.
     /// </summary>
     public void Update(in Frame frame)
     {
-        WorldCopy.Read(_ecs, _world);
-        _ecs.Snapshot(_instances.Renderers);
         foreach (SetCliCommand setting in frame.Events.Get<SetCliCommand>())
         {
             ApplySetting(setting);
@@ -151,20 +151,65 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     }
 
     /// <summary>
-    /// Draws the frame and submits it.
+    /// Copies what the frame draws out of the entities and publishes it for <see cref="Render"/>, with the window's size
+    /// and the debug view, after the screenshots asked for.
     /// </summary>
-    public void Render(in Frame frame)
+    public void LateUpdate(in Frame frame)
+    {
+        RenderInputs back = _inputs.Back;
+        _ecs.Snapshot(back.Renderers);
+        _ecs.Snapshot(back.Cameras);
+        _ecs.Snapshot(back.DirectionalLights);
+        _ecs.Snapshot(back.PointLights);
+        _ecs.Snapshot(back.SpotLights);
+        _ecs.Snapshot(back.RectLights);
+        _ecs.Snapshot(back.Skies);
+        back.DebugView = _debugView;
+        (back.Width, back.Height) = _app.Window is { Width: > 0, Height: > 0 } window
+            ? (window.Width, window.Height)
+            : (DefaultWidth, DefaultHeight);
+        foreach (ScreenshotRequested asked in frame.Events.Get<ScreenshotRequested>())
+        {
+            _screenshots.Writer.TryWrite(asked);
+        }
+
+        _inputs.Publish();
+    }
+
+    /// <summary>
+    /// Records the newest inputs published, or the last again when none are newer, into the frame's graph.
+    /// </summary>
+    public void Render(in Frame frame, RenderGraph graph)
     {
         if (_started is not { Ok: true })
             return;
 
-        int width = _app.Window is { Width: > 0, Height: > 0 } window ? window.Width : DefaultWidth;
-        int height = _app.Window is { Width: > 0, Height: > 0 } sized ? sized.Height : DefaultHeight;
-        if (!Resize(width, height))
+        // The sky's shaders are the GPU provider's to build; one that fails ends the start as a pipeline would.
+        GpuState skyShaders = _sky.GetState(graph);
+        if (skyShaders == GpuState.Failed)
+            FailStart("a sky shader was not built.");
+
+        if (skyShaders != GpuState.Ready)
             return;
 
-        // What arrived: models into the pools, textures, material rows.
-        _materials.Refresh();
+        if (_inputs.TryTake(out RenderInputs? newest))
+        {
+            if (_current is not null)
+                _inputs.Return(_current);
+
+            _current = newest;
+        }
+
+        if (_current is not { } inputs)
+            return;
+
+        // Entities -> resources -> rows: the renderers written since the inputs before ask for their models and have
+        // their rows built again, the materials' rows are made again at upload, and a model no renderer drawn holds
+        // leaves once nothing asked for it in a while.
+        int instanceCount = _instances.Fill(inputs.Renderers, frame.Index);
+        _resources.EvictUnusedModels(inputs.Renderers.Second[..instanceCount]);
+
+        // The loading domain shows once what it draws is on the GPU.
         if (_preparing is { } preparing && IsPrepared(preparing))
         {
             Log.Info(
@@ -173,79 +218,90 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             EndPreparing();
         }
 
-        _graph.BeginTransferPass("Upload arrivals");
-        _pools.Upload();
-        _textures.Upload();
-        _materials.Upload();
-        _graph.EndPass();
+        graph.BeginTransferPass("Upload arrivals");
+        _resources.Upload(graph);
+        graph.EndPass();
 
-        // The frame's tables.
-        RenderCamera camera = _world.Camera ?? new RenderCamera(new Transform(), 60, 0.05f);
-        RenderSun sun = _world.Sun ?? new RenderSun(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One, 1);
-        int instanceCount = _instances.Fill(frame.Index, _pools, _materials, _assets.GetFailure<Material, Model>());
-        _graph.BeginTransferPass("Upload frame");
-        bool hasChanges = _pools.HasArrivals || _instances.HasChanges;
-        _instances.Upload();
-        _rayTracing?.Prepare(_instances.Rows, _instances.Extras, hasChanges);
-        _frameView.Upload(camera, sun, frame.Index, _targets, _instances.Buffer, instanceCount);
-        _visibility.ResetCounts();
-        _lighting.Prepare(_world, camera, sun, _targets);
-        _graph.EndPass();
+        // The frame's tables, and the view's targets at the window's size.
+        RenderCamera camera = GetCamera(inputs.Cameras);
+        RenderSun sun = GetSun(inputs.DirectionalLights);
+        graph.BeginTransferPass("Upload frame");
+        Result<UploadedFrame> uploaded = UploadFrame(graph, inputs, camera, sun, frame.Index, instanceCount);
+        graph.EndPass();
+        if (!uploaded.Ok)
+        {
+            Log.Error($"The frame is not drawn: {uploaded.Error}");
 
-        // The passes, in the order they run.
-        RenderView view = new(_frameView.Constants, _instances.Buffer, instanceCount, _targets);
+            return;
+        }
+
+        // The passes, in the order they run, each reading what the ones before it wrote: what the view sees, the sky's
+        // tables while there is a sky, each tile's lights, each pixel's shadows on a GPU that traces rays, the shading,
+        // and the output.
+        (RenderView view, SkyTables sky, LightBuffers lights, ShadowBuffers? shadows, GpuBuffer lighting) =
+            uploaded.Value;
+        GpuConstants header = new(view.Constants.Id, 0, lighting.Id);
         _visibility.Record(view);
-        _lighting.Record(view);
-        _surfaceView.Record(view, _debugView, sun.Exposure);
-        _overlay?.Record(_graph, _targets.Output);
+        if (inputs.Skies.Count > 0)
+            _sky.Record(graph, header, view.Constants, lighting, sky);
+
+        _lightTiles.Record(view, header, lighting, lights);
+        if (_shadowMask is not null && shadows is { } shadowed)
+            _shadowMask.Record(view, header, lighting, lights, shadowed);
+
+        _lighting.Record(view, header, lighting, sky, lights, shadows);
+        _surfaceView.Record(view, inputs.DebugView, sun.Exposure);
 
         GpuTexture target = _gpu.WindowTarget;
         if (!target.IsNone)
         {
-            _graph.Import(target, GpuAccess.None);
-            _graph.BeginTransferPass("Show");
-            _graph.Use(_targets.Output, GpuAccess.CopySource);
-            _graph.Use(target, GpuAccess.CopyDestination);
-            _graph.Recorder.BlitTexture(_targets.Output, target);
-            _graph.EndPass();
+            graph.BeginTransferPass("Show");
+            graph.Use(view.Output, GpuAccess.CopySource);
+            graph.Use(target, GpuAccess.CopyDestination);
+            graph.BlitTexture(view.Output, target);
+            graph.EndPass();
         }
 
         // One readback buffer, so one screenshot a frame: the last asked for.
-        ReadOnlySpan<ScreenshotRequested> requests = frame.Events.Get<ScreenshotRequested>();
-        if (requests.Length > 0)
-            Screenshot.RecordReadback(_graph, _targets);
+        ScreenshotRequested? shot = null;
+        while (_screenshots.Reader.TryRead(out ScreenshotRequested asked))
+        {
+            shot = asked;
+        }
 
-        _gpu.Submit(_graph.Finish());
+        if (shot is { } saved)
+            SaveScreenshot(graph, view, saved.Path);
+
         if (!_hasDrawn)
         {
             _hasDrawn = true;
             _events.Publish(new FirstFrameDrawn());
         }
-
-        if (requests.Length > 0)
-            Screenshot.SaveAsync(_gpu, _assets, _targets.Readback, requests[^1].Path, width, height).FireAndForget();
     }
 
     /// <summary>
     /// Forgets what was drawn before, last frame's depth, camera and shadows, so nothing of it shows in what comes.
     /// </summary>
-    public Task OnDomainUnloadedAsync(CancellationToken cancel)
+    public async Task OnDomainUnloadedAsync(CancellationToken cancel)
     {
+        await _threads.Enter(EngineThread.Render);
         _frameView.ClearHistory();
-        _shadows?.ClearHistory();
-
-        return Task.CompletedTask;
     }
 
     /// <summary>
     /// Asks for every model and material <paramref name="entities"/> draw, and ends in the frame they are on the GPU, or
     /// failed and drawn as the failure, with the passes made. Materials are asked for at once; models once the pools are
-    /// made, by <see cref="Render"/>. One that comes while another waits ends that one.
+    /// made, by <see cref="Render"/>. One that comes while another waits ends that one. On the render thread, whose
+    /// tables these are.
     /// </summary>
-    public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel)
+    public async Task OnDomainLoadingAsync(
+        ImmutableArray<ImmutableArray<IComponent>> entities,
+        CancellationToken cancel
+    )
     {
+        await _threads.Enter(EngineThread.Render);
         if (_started is { Ok: false })
-            return Task.CompletedTask;
+            return;
 
         Renderer[] renderers =
         [
@@ -256,23 +312,69 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         ImmutableArray<Handle<Material>> materials =
         [
             .. renderers
-                .SelectMany(renderer => renderer.Materials.All)
+                .SelectMany(renderer => renderer.Materials.All.Select(slot => slot.Handle))
                 .Where(material => material != Handle<Material>.None)
                 .Distinct(),
         ];
         foreach (Handle<Material> material in materials)
         {
-            _materials.GetRow(material);
+            _resources.Get(material);
         }
 
         EndPreparing();
-        _preparing = new Preparing(
+        Preparing preparing = new(
             [.. renderers.Select(renderer => renderer.Model).Distinct()],
             materials,
             new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
         );
+        _preparing = preparing;
+        await preparing.Done.Task.WaitAsync(cancel).ConfigureAwait(false);
+    }
 
-        return _preparing.Done.Task.WaitAsync(cancel);
+    /// <summary>
+    /// The first camera that draws into the window, else one at the origin.
+    /// </summary>
+    private static RenderCamera GetCamera(EcsSnapshot<Transform, Camera> cameras)
+    {
+        for (int i = 0; i < cameras.Count; i++)
+        {
+            Camera camera = cameras.Second[i];
+            if (camera.Target.IsWindow)
+                return new RenderCamera(cameras.First[i], camera.FieldOfView, camera.Near);
+        }
+
+        return new RenderCamera(new Transform(), 60, 0.05f);
+    }
+
+    /// <summary>
+    /// The directional light the frame is lit by: the sun while it is up, else the moon while it is up, else the first
+    /// there is, else a white light from above.
+    /// </summary>
+    private static RenderSun GetSun(EcsSnapshot<Transform, DirectionalLight> lights)
+    {
+        RenderSun sun = new(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One, 1);
+        int sunRank = -1;
+        for (int i = 0; i < lights.Count; i++)
+        {
+            DirectionalLight light = lights.Second[i];
+            Vector3 towards = -Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, lights.First[i].Rotation));
+            bool isUp = towards.Y > 0;
+            int rank = 0;
+            if (isUp && light.Mode == DirectionalLightMode.Sun)
+                rank = 2;
+            else if (isUp && light.Mode == DirectionalLightMode.Moon)
+                rank = 1;
+
+            if (rank <= sunRank)
+                continue;
+
+            Vector3 illuminance = new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity;
+            float exposure = light.Intensity > 0 ? ExposureAtSun / light.Intensity : 1;
+            sun = new RenderSun(towards, illuminance, exposure);
+            sunRank = rank;
+        }
+
+        return sun;
     }
 
     /// <summary>
@@ -287,23 +389,20 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         bool hasFailure = false;
         foreach (Handle<Model> model in preparing.Models)
         {
-            _pools.Get(model);
-            isPrepared &= _pools.HasArrived(model);
-            hasFailure |= _pools.HasFailed(model);
+            _resources.Get(model);
+            isPrepared &= _resources.HasArrived(model);
+            hasFailure |= _resources.HasFailed(model);
         }
 
         foreach (Handle<Material> material in preparing.Materials)
         {
-            isPrepared &= _materials.HasArrived(material);
+            isPrepared &= _resources.Get(material) != ResourceState.Loading;
         }
 
-        Handle<Material> failure = _assets.GetFailure<Material, Model>();
-        if (!hasFailure || failure == Handle<Material>.None)
+        if (!hasFailure || _failure.Handle == Handle<Material>.None)
             return isPrepared;
 
-        _materials.GetRow(failure);
-
-        return isPrepared && _materials.HasArrived(failure);
+        return _resources.Get(_failure.Handle) != ResourceState.Loading && isPrepared;
     }
 
     /// <summary>
@@ -316,72 +415,139 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     }
 
     /// <summary>
-    /// Compiles the passes on a worker, then makes the pipelines, the pools and the tables from them on the main thread:
-    /// a run that ends before that draws nothing, and finds a shader that does not compile only if it runs long enough
-    /// to.
+    /// Compiles the passes on a worker, then makes the pipelines from them and the pools on the render
+    /// thread, whose the GPU is: a run that ends before that draws nothing, and finds a shader that does not compile only
+    /// if it runs long enough to.
     /// </summary>
-    private async Task StartAsync(Threads threads)
+    private async Task StartAsync()
     {
         CancellationToken stopping = _stopping.Token;
         Result<ImmutableArray<CompiledShader>> compiled = await _pipelines.CompileAsync(stopping).ConfigureAwait(false);
-        await threads.Enter(EngineThread.Main);
+        await _threads.Enter(EngineThread.Render);
         stopping.ThrowIfCancellationRequested();
         Result made = compiled.Ok ? _pipelines.Create(compiled.Value) : Result.Failure(compiled.Error);
-        foreach (
-            Func<Result> step in (ReadOnlySpan<Func<Result>>)
-                [
-                    _pools.Create,
-                    _materials.Create,
-                    _instances.Create,
-                    () => _rayTracing?.Create() ?? Result.Success(),
-                    _visibility.Create,
-                    _frameView.Create,
-                    _sky.Create,
-                    _lightTiles.Create,
-                    _lighting.Create,
-                ]
-        )
-        {
-            if (made.Ok)
-                made = step();
-        }
+        if (made.Ok)
+            made = _resources.Create();
 
-        // A renderer that draws nothing holds no domain back.
         if (!made.Ok)
         {
-            Log.Error($"The renderer draws nothing: {made.Error}");
-            EndPreparing();
+            FailStart(made.Error);
+
+            return;
         }
 
         _started = made;
     }
 
     /// <summary>
-    /// Whether the targets fit this frame's size, made again when they don't; false when that failed, and the frame is
-    /// not drawn.
+    /// Ends the start as failed: the renderer draws nothing, and holds no domain back.
     /// </summary>
-    private bool Resize(int width, int height)
+    private void FailStart(string error)
     {
-        if (_targets.Width == width && _targets.Height == height)
-            return true;
+        Log.Error($"The renderer draws nothing: {error}");
+        EndPreparing();
+        _started = Result.Failure(error);
+    }
 
-        Result resized = _targets.Resize(width, height);
-        if (resized.Ok)
-            resized = _lightTiles.Resize(width, height);
-
-        if (resized.Ok && _shadows is not null)
-            resized = _shadows.Resize(width, height);
-
-        if (!resized.Ok)
+    /// <summary>
+    /// The frame's tables and the view's constants uploaded, each asking for what it uploads into, in a transfer pass the
+    /// caller opened; what the passes read and write, or what was not made, and the frame is not drawn.
+    /// </summary>
+    private Result<UploadedFrame> UploadFrame(
+        RenderGraph graph,
+        RenderInputs inputs,
+        RenderCamera camera,
+        RenderSun sun,
+        uint frameIndex,
+        int instanceCount
+    )
+    {
+        // The world's structure is built again only when the rows changed, before their upload marks them unchanged; a
+        // model's arrival builds every row again, so it builds the structure too.
+        if (_rayTracing is not null && _instances.HasChanges)
         {
-            Log.Error($"The frame is not drawn: {resized.Error}");
-
-            return false;
+            Result built = _rayTracing.Build(graph, _instances.Rows, _instances.Extras);
+            if (!built.Ok)
+                return Result.Failure(built.Error);
         }
 
-        _frameView.ClearHistory();
+        Result<(GpuBuffer Rows, GpuBuffer Materials)> tables = _instances.Upload(graph);
+        if (!tables.Ok)
+            return Result.Failure(tables.Error);
 
-        return true;
+        // The cull's buffers before the view's constants, which name them.
+        Result<CullBuffers> cull = _visibility.Prepare(graph);
+        if (!cull.Ok)
+            return Result.Failure(cull.Error);
+
+        Result<RenderView> view = _frameView.Upload(
+            graph,
+            camera,
+            sun,
+            frameIndex,
+            inputs.Width,
+            inputs.Height,
+            instanceCount,
+            tables.Value.Rows,
+            tables.Value.Materials,
+            cull.Value,
+            _rayTracing?.Acceleration ?? GpuAcceleration.None
+        );
+        if (!view.Ok)
+            return Result.Failure(view.Error);
+
+        Result<LightBuffers> lights = _lightTiles.Prepare(
+            view.Value,
+            inputs.PointLights,
+            inputs.SpotLights,
+            inputs.RectLights
+        );
+        if (!lights.Ok)
+            return Result.Failure(lights.Error);
+
+        // The sky's tables and the shadow mask before the lighting constants, which name them.
+        Result<SkyTables> sky = SkyLuts.Prepare(graph);
+        if (!sky.Ok)
+            return Result.Failure(sky.Error);
+
+        Result<ShadowBuffers>? shadows = _shadowMask?.Prepare(view.Value);
+        if (shadows is { Ok: false } failed)
+            return Result.Failure(failed.Error);
+
+        Result<GpuBuffer> lighting = _lighting.Prepare(
+            view.Value,
+            inputs.Skies,
+            camera,
+            sun,
+            sky.Value,
+            lights.Value,
+            shadows?.Value
+        );
+        if (!lighting.Ok)
+            return Result.Failure(lighting.Error);
+
+        return Result.Success(new UploadedFrame(view.Value, sky.Value, lights.Value, shadows?.Value, lighting.Value));
+    }
+
+    /// <summary>
+    /// The view's output read back, and written to <paramref name="path"/> once the GPU is done with it.
+    /// </summary>
+    private void SaveScreenshot(RenderGraph graph, in RenderView view, string path)
+    {
+        Result<GpuBuffer> readback = _resources.TryGetBuffer(
+            "Output readback",
+            (long)view.Width * view.Height * 4,
+            BufferUsages.Readback
+        );
+        if (!readback.Ok)
+        {
+            Log.Error($"The screenshot was not taken: {readback.Error}");
+
+            return;
+        }
+
+        Screenshot.RecordReadback(graph, view.Output, readback.Value);
+        Screenshot.SaveAsync(_gpu, _assets, readback.Value, path, view.Width, view.Height).FireAndForget();
     }
 
     private void ApplySetting(in SetCliCommand setting)
@@ -405,6 +571,18 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         else
             Log.Error($"{setting.Key} takes {string.Join(", ", Enum.GetNames<DebugView>())}, not '{setting.Value}'.");
     }
+
+    /// <summary>
+    /// What the frame's upload hands its passes: the view, the sky's tables, the lights, the shadow mask on a GPU that
+    /// traces rays, and the lighting constants that name them.
+    /// </summary>
+    private readonly record struct UploadedFrame(
+        RenderView View,
+        SkyTables Sky,
+        LightBuffers Lights,
+        ShadowBuffers? Shadows,
+        GpuBuffer Lighting
+    );
 
     /// <summary>
     /// The models and materials a domain loading draws, and what ends once they are all on the GPU.

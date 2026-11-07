@@ -2,11 +2,10 @@ using System.Collections.Immutable;
 using System.CommandLine;
 using System.Linq;
 using System.Numerics;
+using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Files;
-using Magic.Files.Types;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
@@ -24,7 +23,7 @@ internal static class SpawnCommand
     /// </summary>
     private const float SpawnAheadMetres = 3;
 
-    public static Command Create(App app, World world, Assets assets, CommandQueue queue)
+    public static Command Create(App app, World world, AssetManager assets, CommandQueue queue)
     {
         Argument<string> prefab = new("prefab") { Description = "The prefab's path or name" };
         Argument<string[]> at = new("at")

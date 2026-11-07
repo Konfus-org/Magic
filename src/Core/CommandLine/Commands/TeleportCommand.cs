@@ -1,10 +1,9 @@
 using System.CommandLine;
 using System.Numerics;
+using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Files;
-using Magic.Files.Types;
 using Magic.Utils;
 using Magic.Worlds;
 
@@ -18,7 +17,7 @@ internal static class TeleportCommand
 {
     private const string Usage = "teleport takes x y z, a domain, or a domain then x y z";
 
-    public static Command Create(App app, World world, Assets assets, CommandQueue queue)
+    public static Command Create(App app, World world, AssetManager assets, CommandQueue queue)
     {
         Argument<string[]> where = new("where")
         {
@@ -102,7 +101,7 @@ internal static class TeleportCommand
             }
 
             Vector3 by = position.Value - player.Position;
-            foreach (EcsChunk<Tags, Transform> chunk in world.Query<Tags, Transform>())
+            foreach (EcsMutableChunk<Tags, Transform> chunk in world.Mutate<Tags, Transform>())
             {
                 for (int i = 0; i < chunk.Entities.Length; i++)
                 {

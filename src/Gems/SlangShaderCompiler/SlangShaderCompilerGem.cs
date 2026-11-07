@@ -5,9 +5,8 @@ using System.IO.Hashing;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using Magic.Caching;
+using Magic.Assets;
 using Magic.Files;
-using Magic.Files.Types;
 using Magic.Projects;
 using Magic.Shaders;
 using Magic.Utils;
@@ -30,7 +29,7 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
     private const string ShadersFolder = "Shaders";
     private const string Extension = ".slang";
 
-    private readonly Assets _assets;
+    private readonly AssetManager _assets;
     private readonly Caches _caches;
 
     /// <summary>
@@ -46,7 +45,7 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
 
     private readonly unsafe void* _globalSession;
 
-    public unsafe SlangShaderCompilerGem(App app, Assets assets, Caches caches)
+    public unsafe SlangShaderCompilerGem(App app, AssetManager assets, Caches caches)
     {
         _assets = assets;
         _caches = caches;
@@ -59,7 +58,7 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
     /// <summary>
     /// Raised when the bytes written change shape, and when the compiler's options or tag change.
     /// </summary>
-    public int Version => 2;
+    public int Version => 3;
 
     public unsafe void Dispose()
     {
@@ -71,11 +70,7 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
         _compiling.Dispose();
     }
 
-    public async Task<Result<CompiledShader>> CompileAsync(
-        ShaderEntry entry,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    )
+    public async Task<Result<CompiledShader>> CompileAsync(ShaderEntry entry, CancellationToken cancel)
     {
         if (_assets.GetPath(entry.Module) is not { } entryPath)
             return Result.Failure($"the shader {entry.Module.Id} is not an asset.");
@@ -89,8 +84,6 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
             typeArguments.Add((path, argument.Type));
         }
 
-        string work = $"Compiling {entryPath}: {entry.Name}";
-        progress?.Report(new LoadProgress(work, 0, 3));
         Result<ImmutableArray<SlangModule>> modules = await LoadModulesAsync(
                 [entryPath, .. typeArguments.Select(argument => argument.Path)],
                 cancel
@@ -99,18 +92,12 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
         if (!modules.Ok)
             return Result.Failure(modules.Error);
 
-        progress?.Report(new LoadProgress(work, 1, 3));
         ulong key = GetKey(entryPath, entry, typeArguments);
         ulong version = GetVersion(modules.Value);
         Result<CompiledShader> cached = await _caches.ReadAsync(key, version, this, cancel).ConfigureAwait(false);
         if (cached.Ok)
-        {
-            progress?.Report(new LoadProgress(work, 3, 3));
-
             return cached;
-        }
 
-        progress?.Report(new LoadProgress(work, 2, 3));
         Result<CompiledShader> compiled = await Task.Run(
                 async () =>
                 {
@@ -140,7 +127,6 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
                 cancel
             )
             .ConfigureAwait(false);
-        progress?.Report(new LoadProgress(work, 3, 3));
         if (!compiled.Ok)
             return Result.Failure($"{entryPath}: {entry.Name} did not compile: {compiled.Error}");
 
@@ -152,13 +138,12 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
     public void Write(CompiledShader value, IBufferWriter<byte> bytes)
     {
         byte[] name = Encoding.UTF8.GetBytes(value.EntryPoint);
-        Span<byte> header = bytes.GetSpan(20);
-        BinaryPrimitives.WriteInt32LittleEndian(header, (int)value.Stage);
-        BinaryPrimitives.WriteUInt32LittleEndian(header[4..], value.GroupSizeX);
-        BinaryPrimitives.WriteUInt32LittleEndian(header[8..], value.GroupSizeY);
-        BinaryPrimitives.WriteUInt32LittleEndian(header[12..], value.GroupSizeZ);
-        BinaryPrimitives.WriteInt32LittleEndian(header[16..], name.Length);
-        bytes.Advance(20);
+        Span<byte> header = bytes.GetSpan(16);
+        BinaryPrimitives.WriteUInt32LittleEndian(header, value.GroupSizeX);
+        BinaryPrimitives.WriteUInt32LittleEndian(header[4..], value.GroupSizeY);
+        BinaryPrimitives.WriteUInt32LittleEndian(header[8..], value.GroupSizeZ);
+        BinaryPrimitives.WriteInt32LittleEndian(header[12..], name.Length);
+        bytes.Advance(16);
         bytes.Write(name);
         bytes.Write(value.Spirv.Span);
     }
@@ -166,17 +151,16 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
     public Result<CompiledShader> Read(ReadOnlySpan<byte> bytes)
     {
         // Bytes cut short throw from a slice, which the caches take as a dirty entry.
-        int nameLength = BinaryPrimitives.ReadInt32LittleEndian(bytes[16..]);
+        int nameLength = BinaryPrimitives.ReadInt32LittleEndian(bytes[12..]);
 
         return Result.Success(
             new CompiledShader
             {
-                Stage = (ShaderStage)BinaryPrimitives.ReadInt32LittleEndian(bytes),
-                GroupSizeX = BinaryPrimitives.ReadUInt32LittleEndian(bytes[4..]),
-                GroupSizeY = BinaryPrimitives.ReadUInt32LittleEndian(bytes[8..]),
-                GroupSizeZ = BinaryPrimitives.ReadUInt32LittleEndian(bytes[12..]),
-                EntryPoint = Encoding.UTF8.GetString(bytes.Slice(20, nameLength)),
-                Spirv = bytes[(20 + nameLength)..].ToArray(),
+                GroupSizeX = BinaryPrimitives.ReadUInt32LittleEndian(bytes),
+                GroupSizeY = BinaryPrimitives.ReadUInt32LittleEndian(bytes[4..]),
+                GroupSizeZ = BinaryPrimitives.ReadUInt32LittleEndian(bytes[8..]),
+                EntryPoint = Encoding.UTF8.GetString(bytes.Slice(16, nameLength)),
+                Spirv = bytes[(16 + nameLength)..].ToArray(),
             }
         );
     }
@@ -333,9 +317,9 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
             {
                 void* loaded;
                 fixed (
-                    byte* name = Encoding.UTF8.GetBytes(source.Name + "\0"),
-                        path = Encoding.UTF8.GetBytes(source.Path + "\0"),
-                        text = Encoding.UTF8.GetBytes(source.Source + "\0")
+                    byte* name = CString.ToBytes(source.Name),
+                        path = CString.ToBytes(source.Path),
+                        text = CString.ToBytes(source.Source)
                 )
                 {
                     loaded = Slang.LoadModuleFromSourceString(session, name, path, text, &diagnostics);
@@ -354,7 +338,7 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
             // The entry point, composed with its module and the type arguments' modules into one program, so a type
             // argument is found in the program's own layout.
             void* entryPoint;
-            fixed (byte* entryName = Encoding.UTF8.GetBytes(entry.Name + "\0"))
+            fixed (byte* entryName = CString.ToBytes(entry.Name))
             {
                 result = Slang.FindEntryPointByName(module, entryName, &entryPoint);
             }
@@ -392,7 +376,7 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
                 for (int i = 0; i < typeArguments.Count; i++)
                 {
                     void* type;
-                    fixed (byte* typeName = Encoding.UTF8.GetBytes(typeArguments[i].Type + "\0"))
+                    fixed (byte* typeName = CString.ToBytes(typeArguments[i].Type))
                     {
                         type = Slang.spReflection_FindTypeByName(layout, typeName);
                     }
@@ -446,7 +430,6 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
                 {
                     Spirv = spirv,
                     EntryPoint = entry.Name,
-                    Stage = entry.Stage,
                     GroupSizeX = (uint)sizes[0],
                     GroupSizeY = (uint)sizes[1],
                     GroupSizeZ = (uint)sizes[2],
