@@ -13,7 +13,7 @@ internal sealed class FrameView(
     IGraphicsApi gpu,
     GpuResources resources,
     GeometryPools pools,
-    MaterialTable materials,
+    InstanceTable instances,
     Visibility visibility,
     RayTracing? rayTracing
 ) : IDisposable
@@ -68,7 +68,6 @@ internal sealed class FrameView(
         RenderSun sun,
         uint frameIndex,
         FrameTargets targets,
-        GpuBuffer instances,
         int instanceCount
     )
     {
@@ -91,11 +90,11 @@ internal sealed class FrameView(
             InstanceCount = (uint)instanceCount,
             MaxVisibleClusters = Visibility.MaxVisibleClusters,
             DefaultSampler = _sampler.Id,
-            Instances = instances.Id,
+            Instances = instances.Buffer.Id,
             Clusters = pools.Clusters.Id,
             Vertices = pools.Vertices.Id,
             Indices = pools.Indices.Id,
-            Materials = materials.Buffer.Id,
+            Materials = instances.MaterialBuffer.Id,
             VisibleClusters = visibility.VisibleClusters.Id,
             DrawArguments = visibility.DrawArguments.Id,
             Counts = visibility.Counts.Id,

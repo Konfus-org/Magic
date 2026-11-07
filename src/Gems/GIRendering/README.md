@@ -42,7 +42,8 @@ without what other gems draw over it.
 
 - Each area declares its own passes with `GpuPipelines` and takes what it depends on through its constructor.
 - A pass is one `GpuPass.Run` call saying what it reads and writes, which puts its barriers in.
-- A texture asset or a sampler comes from `GpuResources`, which makes it on the first ask and frees it with the gem.
+- A texture or material asset, or a sampler, comes from `GpuResources`, which makes it on the first ask and frees it
+  with the gem. The rows a slot's material is drawn with are filled with the instance rows.
 - The shaders are the `Shaders/` modules in this gem's `Resources`, built on the shader library
   ([Shaders](../../Resources/Shaders/README.md)). The passes are at the folder's root, and what they share is under it:
   - `Core/Frame` is what every pass of a frame reads.
