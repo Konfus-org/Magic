@@ -2,8 +2,8 @@
 
 The debug UI, drawn with [Dear ImGui](https://github.com/ocornut/imgui): provides `IDebugUI`.
 
-It shows what gems and scripts report: lines down the left of the picture and short text at places in the world. Info,
-warning and error reports are logged too. Other gems draw their debug windows with its widgets.
+It shows what gems and scripts report: lines down the left of the picture and short text at places in the world. A
+line logged with `onScreen` shows there for a while too. Other gems draw their debug windows with its widgets.
 
 To use it, list `ImGuiDebugUI` in a project's `.magic` file, with the GPU provider, the shader compiler and the ECS. A
 gem that takes `IDebugUI` is made after it.

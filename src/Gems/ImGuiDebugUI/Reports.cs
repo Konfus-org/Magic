@@ -1,13 +1,12 @@
 using System.Globalization;
 using System.Numerics;
 using System.Threading.Channels;
-using Magic.Debugging;
 using Magic.Files.Types;
 
 namespace Magic.ImGuiDebugUI;
 
 /// <summary>
-/// How a report reads on screen, and what is logged of it.
+/// How a report reads on screen.
 /// </summary>
 internal enum ReportKind : byte
 {
@@ -22,18 +21,13 @@ internal enum ReportKind : byte
     Counted,
 
     /// <summary>
-    /// Between <c>!!!</c>s, logged as a warning when it appears.
+    /// Between <c>!!!</c>s.
     /// </summary>
-    Warning,
-
-    /// <summary>
-    /// Between <c>!!!</c>s, logged as an error when it appears.
-    /// </summary>
-    Error,
+    Alarm,
 }
 
 /// <summary>
-/// One report as it was made, with where it was made from for the log.
+/// One report as it was made.
 /// </summary>
 internal readonly record struct Report(
     string Text,
@@ -41,10 +35,7 @@ internal readonly record struct Report(
     Color Color,
     Vector3? Position,
     string? Tooltip,
-    float StaySec,
-    string Member = "",
-    string File = "",
-    int Line = 0
+    float StaySec
 );
 
 /// <summary>
@@ -56,8 +47,7 @@ internal readonly record struct ShownReport(string Label, Color Color, Vector3 P
 /// <summary>
 /// What is reported to show for a while: lines on screen, and text at places in the world, each until its seconds after it
 /// was last reported are up. The same text at the same place again while it shows keeps it up rather than adding another.
-/// Any thread reports into a channel; the main thread drains it as it takes what shows each frame, and logs what a warning
-/// or error newly showing asks for.
+/// Any thread reports into a channel; the main thread drains it as it takes what shows each frame.
 /// </summary>
 internal sealed class Reports
 {
@@ -101,17 +91,9 @@ internal sealed class Reports
                 continue;
             }
 
-            // A warning or error is logged as it appears, unless its text shows somewhere already.
-            bool isAlarm = report.Kind is ReportKind.Warning or ReportKind.Error;
-            bool isNewAlarm = isAlarm && !IsShowing(report.Text);
-            if (isNewAlarm && report.Kind == ReportKind.Error)
-                Log.Error(report.Text, report.Member, report.File, report.Line);
-            else if (isNewAlarm)
-                Log.Warn(report.Text, report.Member, report.File, report.Line);
-
             _showing[(report.Text, report.Position)] = new Showing
             {
-                Label = isAlarm ? $"!!! {report.Text} !!!" : report.Text,
+                Label = report.Kind == ReportKind.Alarm ? $"!!! {report.Text} !!!" : report.Text,
                 Color = report.Color,
                 Tooltip = report.Tooltip,
                 ExpiresSec = nowSec + report.StaySec,
@@ -147,20 +129,6 @@ internal sealed class Reports
 
         world.Sort(static (left, right) => left.Order.CompareTo(right.Order));
         lines.Sort(static (left, right) => left.Order.CompareTo(right.Order));
-    }
-
-    /// <summary>
-    /// Whether <paramref name="text"/> shows anywhere, at a place or as a line.
-    /// </summary>
-    private bool IsShowing(string text)
-    {
-        foreach ((string shown, _) in _showing.Keys)
-        {
-            if (string.Equals(shown, text, StringComparison.Ordinal))
-                return true;
-        }
-
-        return false;
     }
 
     private sealed class Showing
