@@ -3,6 +3,7 @@ using Magic.Debugging;
 using Magic.Gpu;
 using Magic.Platform;
 using Magic.Projects;
+using Magic.Shaders;
 using Magic.Threading;
 using Magic.Utils;
 using Vortice.Vulkan;
@@ -23,6 +24,7 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     private readonly VulkanHeap _heap;
     private readonly VulkanResources _resources;
     private readonly VulkanFrames _frames;
+    private readonly VulkanShaders _shaders;
     private readonly VulkanRecorder _recorder;
     private readonly VulkanSwapchain? _swapchain;
     private readonly Meter _meter;
@@ -39,7 +41,12 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     /// </summary>
     private readonly List<(TextureDescription Description, GpuTexture Texture)> _lentTransients = [];
 
-    public VulkanGraphicsGem(App app, Threads threads, IWindow? window = null)
+    /// <summary>
+    /// The textures the graph names, by their name, with the description each was made to.
+    /// </summary>
+    private readonly Dictionary<string, (TextureDescription Description, GpuTexture Texture)> _named = [];
+
+    public VulkanGraphicsGem(App app, Threads threads, IShaderCompiler compiler, IWindow? window = null)
     {
         _threads = threads;
         IWindow? drawn = app.IsHeadless ? null : window;
@@ -60,7 +67,8 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
         _heap = new VulkanHeap(_device.Api, _device.Features.HasRayQuery);
         _resources = new VulkanResources(_device, _heap);
         _frames = new VulkanFrames(_device, _resources, _meter);
-        _recorder = new VulkanRecorder(_device, _resources, _heap);
+        _shaders = new VulkanShaders(compiler, _resources, threads);
+        _recorder = new VulkanRecorder(_device, _resources, _heap, _shaders);
         if (drawn is not null && _device.Surface.IsNotNull)
             _swapchain = new VulkanSwapchain(_device, _resources, drawn);
 
@@ -85,6 +93,7 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
 
     public void Dispose()
     {
+        _shaders.Dispose();
         _swapchain?.Dispose();
         _frames.Dispose();
         _resources.Dispose();
@@ -113,6 +122,34 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
         ThrowIfNotOnRender();
 
         return _resources.CreateTexture(description);
+    }
+
+    public Result<GpuTexture> GetTexture(in TextureDescription description)
+    {
+        ThrowIfNotOnRender();
+        if (_named.TryGetValue(description.Name, out (TextureDescription Description, GpuTexture Texture) made))
+        {
+            if (made.Description == description)
+                return Result.Success(made.Texture);
+
+            Destroy(made.Texture);
+            _named.Remove(description.Name);
+        }
+
+        Result<GpuTexture> texture = _resources.CreateTexture(description);
+        if (!texture.Ok)
+            return Result.Failure($"the {description.Name} was not made: {texture.Error}");
+
+        _named[description.Name] = (description, texture.Value);
+
+        return texture;
+    }
+
+    public GpuState GetState(in ShaderEntry shader)
+    {
+        ThrowIfNotOnRender();
+
+        return _shaders.GetState(shader);
     }
 
     public Result<GpuTexture> CreateTransient(in TextureDescription description)

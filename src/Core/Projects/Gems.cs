@@ -158,6 +158,7 @@ internal sealed class Gems : IDisposable
         _events = events;
         _threads = threads;
         Load(registered);
+        _graph.Gpu = _loaded.Find(static gem => gem.Instance is IGraphicsApi)?.Instance as IGraphicsApi;
         _threads.Start(EngineThread.Render, Render);
     }
 

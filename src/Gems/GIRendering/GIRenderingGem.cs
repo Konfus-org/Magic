@@ -114,7 +114,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu, _resources) : null;
         _visibility = new Visibility(gpu, _pipelines, _resources);
         _frameView = new FrameView(gpu, _resources);
-        _sky = new SkyLuts(_resources, _pipelines);
+        _sky = new SkyLuts(assets);
         _lightTiles = new LightTiles(gpu, _resources, _pipelines);
         _shadowMask = _rayTracing is null ? null : new ShadowMask(gpu, _pipelines, _resources);
         _lighting = new Lighting(gpu, _resources, _pipelines);
@@ -177,6 +177,14 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     public void Render(in Frame frame, RenderGraph graph)
     {
         if (_started is not { Ok: true })
+            return;
+
+        // The sky's shaders are the GPU provider's to build; one that fails ends the start as a pipeline would.
+        GpuState skyShaders = _sky.GetState(graph);
+        if (skyShaders == GpuState.Failed)
+            FailStart("a sky shader was not built.");
+
+        if (skyShaders != GpuState.Ready)
             return;
 
         if (_inputs.TryTake(out RenderInputs? newest))
@@ -416,14 +424,24 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         if (made.Ok)
             made = _resources.Create();
 
-        // A renderer that draws nothing holds no domain back.
         if (!made.Ok)
         {
-            Log.Error($"The renderer draws nothing: {made.Error}");
-            EndPreparing();
+            FailStart(made.Error);
+
+            return;
         }
 
         _started = made;
+    }
+
+    /// <summary>
+    /// Ends the start as failed: the renderer draws nothing, and holds no domain back.
+    /// </summary>
+    private void FailStart(string error)
+    {
+        Log.Error($"The renderer draws nothing: {error}");
+        EndPreparing();
+        _started = Result.Failure(error);
     }
 
     /// <summary>
@@ -483,7 +501,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             return Result.Failure(lights.Error);
 
         // The sky's tables and the shadow mask before the lighting constants, which name them.
-        Result<SkyTables> sky = _sky.Prepare();
+        Result<SkyTables> sky = SkyLuts.Prepare(graph);
         if (!sky.Ok)
             return Result.Failure(sky.Error);
 

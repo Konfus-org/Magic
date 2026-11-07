@@ -41,9 +41,11 @@ without what other gems draw over it.
 
 `GIRenderingGem.Render` is the frame in order, top to bottom: start there.
 
-- An area is the passes of one part of the frame, which it declares with `GpuPipelines`. It keeps only those passes
-  and what it carries from one frame to the next, such as last frame's view.
-- A pass is one `GpuPass.Run` call saying what it reads and writes, which puts its barriers in.
+- An area is the passes of one part of the frame, which it declares with `GpuPipelines`, or records with the graph's
+  `Compute` by naming a shader entry the GPU provider builds. It keeps only those passes and what it carries from one
+  frame to the next, such as last frame's view.
+- A pass is one `GpuPass.Run` or `RenderGraph.Compute` call saying what it reads and writes, which puts its barriers
+  in. The frame is not drawn until the graph's shaders are built.
 - A texture, material or model asset, or a sampler, comes from `GpuResources`, which makes it on the first ask and
   frees it with the gem, or a model once nothing has asked for it in a while and no renderer drawn holds it. A
   renderer's instance row is built again, asking for its model, when the renderer is written and when a model

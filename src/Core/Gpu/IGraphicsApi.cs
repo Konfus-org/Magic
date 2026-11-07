@@ -1,3 +1,4 @@
+using Magic.Shaders;
 using Magic.Utils;
 
 namespace Magic.Gpu;
@@ -26,6 +27,19 @@ public interface IGraphicsApi
     Result<GpuBuffer> CreateBuffer(in BufferDescription description);
 
     Result<GpuTexture> CreateTexture(in TextureDescription description);
+
+    /// <summary>
+    /// The texture under the description's name: made on the first ask, the same one while the name is asked for with
+    /// the same description, so what it holds carries from frame to frame, and made again, the old one destroyed, when
+    /// the description changes. <see cref="Rendering.RenderGraph.Texture"/> asks for it.
+    /// </summary>
+    Result<GpuTexture> GetTexture(in TextureDescription description);
+
+    /// <summary>
+    /// Whether the compute shader <paramref name="shader"/> is built for this GPU; the first ask starts compiling it.
+    /// <see cref="Rendering.RenderGraph.GetState"/> asks for it.
+    /// </summary>
+    GpuState GetState(in ShaderEntry shader);
 
     /// <summary>
     /// A texture for this frame alone, made to <paramref name="description"/> or taken back from an earlier frame's,
