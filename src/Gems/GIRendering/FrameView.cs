@@ -44,7 +44,7 @@ internal sealed class FrameView(GpuResources resources)
         GpuAcceleration acceleration
     )
     {
-        Result<GpuSampler> sampler = resources.TryGetSampler(new SamplerDescription { Anisotropy = 8 });
+        Result<GpuSampler> sampler = graph.Sampler(new SamplerDescription { Anisotropy = 8 });
         if (!sampler.Ok)
             return Result.Failure($"the default sampler was not made: {sampler.Error}");
 

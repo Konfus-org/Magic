@@ -7,8 +7,9 @@ it puts in the barriers each pass's uses need, from what each resource was last 
 To use it, list `VulkanGraphics` in a project's `.magic` file after the gems that provide the window and the shader
 compiler.
 
-- A texture, buffer or top-level acceleration structure the graph names is made on the first ask and kept while its
-  name is asked for with the same description; another description makes it again.
+- A texture, buffer or top-level acceleration structure the graph names, or a sampler it asks for by description, is
+  made on the first ask and kept while its name is asked for with the same description; another description makes it
+  again. One no frame has asked for in a few frames is destroyed, so a gem asks every frame for what it reads.
 - A compute pass the graph records with a shader entry runs that entry, compiled through the shader compiler and built
   on the first ask. A draw pass's vertex and pixel entries are compiled the same way, and built into a pipeline for the
   formats of the targets it draws into on its first draw. The pass is left out of frames until then; a shader that

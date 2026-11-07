@@ -27,31 +27,58 @@ public sealed class RenderGraph
     private GpuPass? _pass;
 
     /// <summary>
+    /// What the GPU has beyond the baseline; nothing while there is no provider.
+    /// </summary>
+    public GpuFeatures Features => Gpu?.Features ?? default;
+
+    /// <summary>
+    /// The window's image for this frame; <see cref="GpuTexture.None"/> headless, while the window is minimised or
+    /// while there is no provider.
+    /// </summary>
+    public GpuTexture WindowTarget => Gpu?.WindowTarget ?? GpuTexture.None;
+
+    /// <summary>
     /// The GPU provider the graph's names resolve through, set by Core once the gems are loaded; none while
     /// no gem provides the GPU.
     /// </summary>
     internal IGraphicsApi? Gpu { get; set; }
 
     /// <summary>
-    /// The texture under the description's name, made by the GPU provider on the first ask and kept while the same
-    /// description is asked for, its heap id known at once to write into constants.
+    /// What <paramref name="texture"/> was made to, the window's image included.
+    /// </summary>
+    public TextureDescription GetDescription(GpuTexture texture) =>
+        (Gpu ?? throw new InvalidOperationException("There is no GPU provider to describe a texture.")).GetDescription(
+            texture
+        );
+
+    /// <summary>
+    /// The texture under the description's name, its heap id known at once to write into constants: made by the GPU
+    /// provider on the first ask, kept while every frame asks for it with the same description, so what it holds
+    /// carries from frame to frame, and freed once no frame has asked for it in a few. Ask every frame that reads it.
     /// </summary>
     public Result<GpuTexture> Texture(in TextureDescription description) =>
         Gpu?.GetTexture(description) ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
 
     /// <summary>
-    /// The buffer under the description's name, kept as <see cref="Texture"/> keeps a texture.
+    /// The buffer under the description's name, kept and freed as <see cref="Texture"/> keeps and frees a texture.
     /// </summary>
     public Result<GpuBuffer> Buffer(in BufferDescription description) =>
         Gpu?.GetBuffer(description) ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
 
     /// <summary>
-    /// The top-level acceleration structure under the description's name, kept as <see cref="Texture"/> keeps a
-    /// texture; only on a GPU that traces rays.
+    /// The top-level acceleration structure under the description's name, kept and freed as <see cref="Texture"/>
+    /// keeps and frees a texture; only on a GPU that traces rays.
     /// </summary>
     public Result<GpuAcceleration> Acceleration(in TopLevelDescription description) =>
         Gpu?.GetAcceleration(description)
         ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
+
+    /// <summary>
+    /// The sampler <paramref name="description"/> makes, one for every ask with the same description, kept and freed
+    /// as <see cref="Texture"/> keeps and frees a texture.
+    /// </summary>
+    public Result<GpuSampler> Sampler(in SamplerDescription description) =>
+        Gpu?.GetSampler(description) ?? Result.Failure("there is no GPU provider to make a sampler.");
 
     /// <summary>
     /// Whether the GPU provider has built <paramref name="shader"/>, the first ask starting it; failed while there is no

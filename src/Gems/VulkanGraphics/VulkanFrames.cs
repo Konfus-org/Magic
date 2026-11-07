@@ -161,18 +161,13 @@ internal sealed unsafe class VulkanFrames : IDisposable
     }
 
     /// <summary>
-    /// Finishes what the GPU is done with: the frame's trash, the readbacks up to its serial, its timestamps.
+    /// Finishes what the GPU is done with: the readbacks up to its serial, then the frame's trash, so a buffer
+    /// destroyed after its readback was promised is read before it is freed, and its timestamps.
     /// </summary>
     private void Complete(Frame frame)
     {
         _completedSerial = Math.Max(_completedSerial, frame.Serial);
         frame.Serial = 0;
-        foreach (Trash trash in frame.Trash)
-        {
-            _resources.Free(trash);
-        }
-
-        frame.Trash.Clear();
         for (int i = _readbacks.Count - 1; i >= 0; i--)
         {
             Readback readback = _readbacks[i];
@@ -184,6 +179,13 @@ internal sealed unsafe class VulkanFrames : IDisposable
             readback.Promise.TrySetResult(Result.Success<ReadOnlyMemory<byte>>(bytes));
             _readbacks.RemoveAt(i);
         }
+
+        foreach (Trash trash in frame.Trash)
+        {
+            _resources.Free(trash);
+        }
+
+        frame.Trash.Clear();
 
         // Read back only while something listens to the meter.
         if (_passDuration.Enabled)

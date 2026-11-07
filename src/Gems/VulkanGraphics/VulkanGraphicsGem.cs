@@ -1,4 +1,6 @@
 using System.Diagnostics.Metrics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Magic.Debugging;
 using Magic.Platform;
 using Magic.Projects;
@@ -18,6 +20,11 @@ namespace Magic.VulkanGraphics;
 /// </summary>
 public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
 {
+    /// <summary>
+    /// How many frames in a row a named resource may go unasked for before it is destroyed.
+    /// </summary>
+    private const int UnusedFrames = 3;
+
     private readonly Threads _threads;
     private readonly VulkanDevice _device;
     private readonly VulkanHeap _heap;
@@ -41,13 +48,13 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     private readonly List<(TextureDescription Description, GpuTexture Texture)> _lentTransients = [];
 
     /// <summary>
-    /// The textures, buffers and top-level acceleration structures the graph names, by their name, with the
-    /// description each was made to.
+    /// The textures, buffers and top-level acceleration structures the graph names, by their name, and the samplers it
+    /// asks for, by their description, each with the description it was made to and the frame that last asked for it.
     /// </summary>
-    private readonly Dictionary<string, (TextureDescription Description, GpuTexture Made)> _namedTextures = [];
-    private readonly Dictionary<string, (BufferDescription Description, GpuBuffer Made)> _namedBuffers = [];
-    private readonly Dictionary<string, (TopLevelDescription Description, GpuAcceleration Made)> _namedAccelerations =
-    [];
+    private readonly Dictionary<string, Named<TextureDescription, GpuTexture>> _namedTextures = [];
+    private readonly Dictionary<string, Named<BufferDescription, GpuBuffer>> _namedBuffers = [];
+    private readonly Dictionary<string, Named<TopLevelDescription, GpuAcceleration>> _namedAccelerations = [];
+    private readonly Dictionary<SamplerDescription, Named<SamplerDescription, GpuSampler>> _samplers = [];
 
     public VulkanGraphicsGem(App app, Threads threads, IShaderCompiler compiler, IWindow? window = null)
     {
@@ -130,6 +137,7 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     public Result<GpuTexture> GetTexture(in TextureDescription description) =>
         GetNamed(
             _namedTextures,
+            description.Name,
             description,
             description.Name,
             static (gem, made) => gem._resources.CreateTexture(made),
@@ -139,6 +147,7 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     public Result<GpuBuffer> GetBuffer(in BufferDescription description) =>
         GetNamed(
             _namedBuffers,
+            description.Name,
             description,
             description.Name,
             static (gem, made) => gem._resources.CreateBuffer(made),
@@ -148,10 +157,21 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     public Result<GpuAcceleration> GetAcceleration(in TopLevelDescription description) =>
         GetNamed(
             _namedAccelerations,
+            description.Name,
             description,
             description.Name,
             static (gem, made) => gem._resources.CreateAcceleration(made),
             static (gem, acceleration) => gem.Destroy(acceleration)
+        );
+
+    public Result<GpuSampler> GetSampler(in SamplerDescription description) =>
+        GetNamed(
+            _samplers,
+            description,
+            description,
+            "sampler",
+            static (gem, made) => gem._resources.CreateSampler(made),
+            static (gem, sampler) => gem.Destroy(sampler)
         );
 
     public GpuState GetState(in ShaderEntry shader)
@@ -317,6 +337,7 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
             _swapchain?.Present();
 
         ReturnTransients();
+        DestroyUnasked();
 
         // The next frame: what the GPU is done with finished, so a readback awaited completes whether or not anything
         // draws, then its commands begun and the window's next image taken.
@@ -333,36 +354,72 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     }
 
     /// <summary>
-    /// What <paramref name="description"/> makes, under <paramref name="name"/> in <paramref name="named"/>: made on the
-    /// first ask, the same one while the name is asked for with the same description, and made again, the old one
-    /// destroyed, when the description changes.
+    /// What <paramref name="description"/> makes, under <paramref name="key"/> in <paramref name="named"/>: made on the
+    /// first ask, the same one while the key is asked for with the same description, made again, the old one destroyed,
+    /// when the description changes, and marked asked for in this frame.
     /// </summary>
-    private Result<T> GetNamed<TDescription, T>(
-        Dictionary<string, (TDescription Description, T Made)> named,
+    private Result<T> GetNamed<TKey, TDescription, T>(
+        Dictionary<TKey, Named<TDescription, T>> named,
+        TKey key,
         TDescription description,
         string name,
         Func<VulkanGraphicsGem, TDescription, Result<T>> create,
         Action<VulkanGraphicsGem, T> destroy
     )
+        where TKey : notnull
         where TDescription : struct, IEquatable<TDescription>
     {
         ThrowIfNotOnRender();
-        if (named.TryGetValue(name, out (TDescription Description, T Made) old))
+        ulong frame = _frames.Current.Serial;
+        ref Named<TDescription, T> old = ref CollectionsMarshal.GetValueRefOrNullRef(named, key);
+        if (!Unsafe.IsNullRef(ref old))
         {
             if (old.Description.Equals(description))
+            {
+                old.Asked = frame;
+
                 return Result.Success(old.Made);
+            }
 
             destroy(this, old.Made);
-            named.Remove(name);
+            named.Remove(key);
         }
 
         Result<T> created = create(this, description);
         if (!created.Ok)
             return Result.Failure($"the {name} was not made: {created.Error}");
 
-        named[name] = (description, created.Value);
+        named[key] = new Named<TDescription, T>(description, created.Value, frame);
 
         return created;
+    }
+
+    /// <summary>
+    /// Destroys every named resource no frame asked for in the last <see cref="UnusedFrames"/>, as this frame ends.
+    /// </summary>
+    private void DestroyUnasked()
+    {
+        DestroyUnasked(_namedTextures, static (gem, texture) => gem.Destroy(texture));
+        DestroyUnasked(_namedBuffers, static (gem, buffer) => gem.Destroy(buffer));
+        DestroyUnasked(_namedAccelerations, static (gem, acceleration) => gem.Destroy(acceleration));
+        DestroyUnasked(_samplers, static (gem, sampler) => gem.Destroy(sampler));
+    }
+
+    private void DestroyUnasked<TKey, TDescription, T>(
+        Dictionary<TKey, Named<TDescription, T>> named,
+        Action<VulkanGraphicsGem, T> destroy
+    )
+        where TKey : notnull
+    {
+        ulong frame = _frames.Current.Serial;
+        foreach ((TKey key, Named<TDescription, T> entry) in named)
+        {
+            if (frame - entry.Asked < UnusedFrames)
+                continue;
+
+            destroy(this, entry.Made);
+            named.Remove(key);
+        }
     }
 
     private void ReturnTransients()
@@ -386,4 +443,9 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
         if (!_threads.IsCurrent(EngineThread.Render))
             throw new InvalidOperationException("The GPU's resources and frames are the render thread's.");
     }
+
+    /// <summary>
+    /// A named resource, the description it was made to, and the frame that last asked for it.
+    /// </summary>
+    private record struct Named<TDescription, T>(TDescription Description, T Made, ulong Asked);
 }

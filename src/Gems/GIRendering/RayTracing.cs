@@ -19,10 +19,9 @@ internal sealed class RayTracing
     public GpuAcceleration Acceleration { get; private set; }
 
     /// <summary>
-    /// The structure and its instances asked for, and the structure built again over the instances, in a transfer pass
-    /// the caller opened after the models' structures were uploaded.
+    /// The structure and its instances asked for, every frame, so the structure built last stays.
     /// </summary>
-    public Result Build(RenderGraph graph, ReadOnlySpan<GpuInstance> rows, ReadOnlySpan<InstanceExtra> extras)
+    public static Result<TracedWorld> Prepare(RenderGraph graph)
     {
         Result<GpuBuffer> instances = graph.Buffer(
             GpuDescriptions.GetBuffer(
@@ -44,6 +43,20 @@ internal sealed class RayTracing
         if (!acceleration.Ok)
             return Result.Failure(acceleration.Error);
 
+        return Result.Success(new TracedWorld(instances.Value, acceleration.Value));
+    }
+
+    /// <summary>
+    /// The structure built again over the instances, in a transfer pass the caller opened after the models' structures
+    /// were uploaded.
+    /// </summary>
+    public void Build(
+        RenderGraph graph,
+        in TracedWorld traced,
+        ReadOnlySpan<GpuInstance> rows,
+        ReadOnlySpan<InstanceExtra> extras
+    )
+    {
         int count = 0;
         for (int i = 0; i < rows.Length; i++)
         {
@@ -64,16 +77,19 @@ internal sealed class RayTracing
             };
         }
 
-        Acceleration = count == 0 ? GpuAcceleration.None : acceleration.Value;
+        Acceleration = count == 0 ? GpuAcceleration.None : traced.Structure;
         if (count == 0)
-            return Result.Success();
+            return;
 
-        graph.Upload(instances.Value, _rows.AsSpan(0, count));
-        graph.BuildAcceleration(acceleration.Value, (uint)count);
-
-        return Result.Success();
+        graph.Upload(traced.Instances, _rows.AsSpan(0, count));
+        graph.BuildAcceleration(traced.Structure, (uint)count);
     }
 }
+
+/// <summary>
+/// The world's top-level acceleration structure and the buffer its instances are built from.
+/// </summary>
+internal readonly record struct TracedWorld(GpuBuffer Instances, GpuAcceleration Structure);
 
 /// <summary>
 /// What the CPU keeps beside an instance's row: its model's acceleration structure's address, 0 when it has none,

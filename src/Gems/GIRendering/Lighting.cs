@@ -12,7 +12,7 @@ namespace Magic.GIRendering;
 /// The view's surfaces lit into the HDR picture, and the sky drawn where nothing was: the lighting constants, naming
 /// the sky's tables, the lights and the shadow mask, uploaded before the view is drawn, and the shading after them.
 /// </summary>
-internal sealed class Lighting(AssetManager assets, GpuResources resources)
+internal sealed class Lighting(AssetManager assets)
 {
     private readonly ShaderEntry _shadeShader = PassShaders.GetEntry(assets, "ShadeSurfaces", "ShadeSurfaces") with
     {
@@ -41,7 +41,7 @@ internal sealed class Lighting(AssetManager assets, GpuResources resources)
         if (!made.Ok)
             return made;
 
-        Result<GpuSampler> sampler = resources.TryGetSampler(
+        Result<GpuSampler> sampler = view.Graph.Sampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
         if (!sampler.Ok)

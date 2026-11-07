@@ -29,8 +29,9 @@ public interface IGraphicsApi
 
     /// <summary>
     /// The texture under the description's name: made on the first ask, the same one while the name is asked for with
-    /// the same description, so what it holds carries from frame to frame, and made again, the old one destroyed, when
-    /// the description changes. <see cref="RenderGraph.Texture"/> asks for it.
+    /// the same description, so what it holds carries from frame to frame, made again, the old one destroyed, when the
+    /// description changes, and destroyed once no frame has asked for it in a few. <see cref="RenderGraph.Texture"/>
+    /// asks for it.
     /// </summary>
     Result<GpuTexture> GetTexture(in TextureDescription description);
 
@@ -46,6 +47,12 @@ public interface IGraphicsApi
     /// for it.
     /// </summary>
     Result<GpuAcceleration> GetAcceleration(in TopLevelDescription description);
+
+    /// <summary>
+    /// The sampler <paramref name="description"/> makes, one for every ask with the same description, kept as
+    /// <see cref="GetTexture"/> keeps a texture. <see cref="RenderGraph.Sampler"/> asks for it.
+    /// </summary>
+    Result<GpuSampler> GetSampler(in SamplerDescription description);
 
     /// <summary>
     /// Whether <paramref name="shader"/> is built for this GPU: a compute entry into its pipeline, a vertex or pixel

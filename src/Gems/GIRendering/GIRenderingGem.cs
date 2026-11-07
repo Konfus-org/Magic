@@ -64,11 +64,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     /// Every shader the areas' passes run, which the GPU provider builds before the frame is drawn.
     /// </summary>
     private readonly ImmutableArray<ShaderEntry> _shaders;
-
-    /// <summary>
-    /// Ends the start when the gem is disposed before it is done, so nothing is made for a gem that is gone.
-    /// </summary>
-    private readonly CancellationTokenSource _stopping = new();
     private readonly Subscription _preprocessing;
 
     private DebugView _debugView;
@@ -80,10 +75,9 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private bool _hasDrawn;
 
     /// <summary>
-    /// How the start ended: null until the pools are made, then whether they were, and failed once a shader does.
-    /// Render thread.
+    /// Whether the renderer draws: failed once a shader or a pool is not made. Render thread.
     /// </summary>
-    private Result? _started;
+    private Result _started = Result.Success();
 
     /// <summary>
     /// What a domain loading needs on the GPU before it shows, until <see cref="Render"/> has uploaded it all. Render
@@ -121,7 +115,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _sky = new SkyLuts(assets);
         _lightTiles = new LightTiles(assets);
         _shadowMask = _rayTracing is null ? null : new ShadowMask(assets, _resources);
-        _lighting = new Lighting(assets, _resources);
+        _lighting = new Lighting(assets);
         _surfaceView = new SurfaceView(assets);
         _shaders =
         [
@@ -132,14 +126,11 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             .. _lighting.Shaders,
             .. _surfaceView.Shaders,
         ];
-        StartAsync().FireAndForget();
     }
 
     public void Dispose()
     {
         _preprocessing.Dispose();
-        _stopping.Cancel();
-        _stopping.Dispose();
         EndPreparing();
         _resources.Dispose();
     }
@@ -189,7 +180,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph)
     {
-        if (_started is not { Ok: true })
+        if (!_started.Ok)
             return;
 
         // The shaders are the GPU provider's to build, the first ask starting each; one that fails ends the start.
@@ -199,6 +190,16 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
         if (shaders != GpuState.Ready)
             return;
+
+        // The pools before any model is asked for, whose acceleration structure names them, and every frame, so what
+        // they hold stays.
+        Result pools = _resources.Prepare(graph);
+        if (!pools.Ok)
+        {
+            FailStart(pools.Error);
+
+            return;
+        }
 
         if (_inputs.TryTake(out RenderInputs? newest))
         {
@@ -256,7 +257,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _lighting.Record(view, header, lighting, sky, lights, shadows);
         _surfaceView.Record(view, inputs.DebugView, sun.Exposure);
 
-        GpuTexture target = _gpu.WindowTarget;
+        GpuTexture target = graph.WindowTarget;
         if (!target.IsNone)
             graph.Blit(view.Output, target);
 
@@ -298,7 +299,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     )
     {
         await _threads.Enter(EngineThread.Render);
-        if (_started is { Ok: false })
+        if (!_started.Ok)
             return;
 
         Renderer[] renderers =
@@ -432,25 +433,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     }
 
     /// <summary>
-    /// Makes the pools on the render thread, whose the GPU is: a run that ends before that draws nothing.
-    /// </summary>
-    private async Task StartAsync()
-    {
-        CancellationToken stopping = _stopping.Token;
-        await _threads.Enter(EngineThread.Render);
-        stopping.ThrowIfCancellationRequested();
-        Result made = _resources.Create();
-        if (!made.Ok)
-        {
-            FailStart(made.Error);
-
-            return;
-        }
-
-        _started = made;
-    }
-
-    /// <summary>
     /// Ends the start as failed: the renderer draws nothing, and holds no domain back.
     /// </summary>
     private void FailStart(string error)
@@ -473,13 +455,16 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         int instanceCount
     )
     {
-        // The world's structure is built again only when the rows changed, before their upload marks them unchanged; a
-        // model's arrival builds every row again, so it builds the structure too.
-        if (_rayTracing is not null && _instances.HasChanges)
+        // The world's structure is asked for every frame, so it stays, and built again only when the rows changed, before
+        // their upload marks them unchanged; a model's arrival builds every row again, so it builds the structure too.
+        if (_rayTracing is not null)
         {
-            Result built = _rayTracing.Build(graph, _instances.Rows, _instances.Extras);
-            if (!built.Ok)
-                return Result.Failure(built.Error);
+            Result<TracedWorld> world = RayTracing.Prepare(graph);
+            if (!world.Ok)
+                return Result.Failure(world.Error);
+
+            if (_instances.HasChanges)
+                _rayTracing.Build(graph, world.Value, _instances.Rows, _instances.Extras);
         }
 
         Result<(GpuBuffer Rows, GpuBuffer Materials)> tables = _instances.Upload(graph);

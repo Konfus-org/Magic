@@ -11,8 +11,9 @@ namespace Magic.GpuChecks;
 /// Proves the GPU provider and the shader compiler work together, before any renderer draws: as the run starts, a
 /// compute entry the provider builds fills a texture with a gradient through the heap, the texture is read back and its
 /// corners checked, and each is an error under --fail-on-error when wrong. The readback waits on a worker; every GPU
-/// call is made on the render thread, and the dispatch is recorded in <see cref="Render"/> once the entry is built. It is public because nothing in its assembly makes it: Magic
-/// does, by reflection, when a project lists the gem.
+/// call is made on the render thread, where <see cref="Render"/> asks for the texture and the readback buffer every
+/// frame while the check runs and records the dispatch once the entry is built. It is public because nothing in its
+/// assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
 public sealed class GpuChecksGem : IGem, IDisposable
 {
@@ -20,20 +21,35 @@ public sealed class GpuChecksGem : IGem, IDisposable
     private const int Bytes = Size * Size * 4;
     private const string ShaderPath = "Shaders/Gradient.slang";
 
+    private static readonly TextureDescription _gradient = new()
+    {
+        Width = Size,
+        Height = Size,
+        Format = GpuFormat.R8G8B8A8Unorm,
+        Usage = TextureUsages.Storage | TextureUsages.CopySource,
+        Name = "Gradient",
+    };
+
+    private static readonly BufferDescription _readback = new()
+    {
+        Bytes = Bytes,
+        Usage = BufferUsages.Readback,
+        Name = "Gradient readback",
+    };
+
     private readonly IGraphicsApi _gpu;
     private readonly Task _check;
 
     /// <summary>
-    /// Set once <see cref="Render"/> has recorded the dispatch, which the check then reads back, or found the entry
-    /// failed to build, when there is nothing to read.
+    /// Set once <see cref="Render"/> has recorded the dispatch, to the buffer the check then reads back, or found the
+    /// entry failed to build or what it writes not made, when there is nothing to read.
     /// </summary>
-    private readonly TaskCompletionSource<bool> _recorded = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private GpuTexture _gradient;
-    private GpuBuffer _readback;
+    private readonly TaskCompletionSource<Result<GpuBuffer>> _recorded = new(
+        TaskCreationOptions.RunContinuationsAsynchronously
+    );
 
     /// <summary>
-    /// The entry to dispatch, from the check once what it writes is made until <see cref="Render"/> records it. Render
-    /// thread.
+    /// The entry to dispatch, from the check until <see cref="Render"/> records it. Render thread.
     /// </summary>
     private ShaderEntry? _fill;
 
@@ -52,38 +68,45 @@ public sealed class GpuChecksGem : IGem, IDisposable
     {
         if (!_check.IsCompleted)
             Log.Error("GPU check: the run ended before the check finished, so nothing was checked.");
-
-        _gpu.Destroy(_gradient);
-        _gpu.Destroy(_readback);
     }
 
     /// <summary>
-    /// The gradient's dispatch and its copy into the readback buffer, once the check has made what they use and the
-    /// GPU provider has built the entry.
+    /// The gradient and its readback buffer asked for while the check runs, so they last until it has read back, and
+    /// the gradient's dispatch and its copy into the buffer once the check asks and the GPU provider has built the entry.
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph)
     {
+        if (_check.IsCompleted)
+            return;
+
+        Result<GpuTexture> gradient = graph.Texture(_gradient);
+        Result<GpuBuffer> readback = graph.Buffer(_readback);
         if (_fill is not { } fill)
             return;
 
         GpuState state = graph.GetState(fill);
-        if (state == GpuState.Loading)
+        Result made =
+            !gradient.Ok ? gradient
+            : !readback.Ok ? readback
+            : state == GpuState.Failed ? Result.Failure("the gradient shader was not built")
+            : Result.Success();
+        if (made.Ok && state == GpuState.Loading)
             return;
 
         _fill = null;
-        if (state == GpuState.Failed)
+        if (!made.Ok)
         {
-            _recorded.SetResult(false);
+            _recorded.SetResult(Result.Failure(made.Error));
 
             return;
         }
 
         graph
-            .Compute("Fill gradient", fill, new GpuConstants(_gradient.Id, Size, Size))
-            .Writes(_gradient)
+            .Compute("Fill gradient", fill, new GpuConstants(gradient.Value.Id, Size, Size))
+            .Writes(gradient.Value)
             .DispatchOver(Size, Size);
-        graph.ReadBack(_gradient, _readback);
-        _recorded.SetResult(true);
+        graph.ReadBack(gradient.Value, readback.Value);
+        _recorded.SetResult(readback);
     }
 
     private async Task CheckAsync(AssetManager assets, Threads threads)
@@ -96,60 +119,25 @@ public sealed class GpuChecksGem : IGem, IDisposable
             return;
         }
 
-        // Make the texture and the readback buffer on the render thread, whose the GPU is.
+        // Have Render, on the render thread, whose the GPU is, record the dispatch and its copy into the buffer.
         await threads.Enter(EngineThread.Render);
-        Result<GpuTexture> gradient = _gpu.CreateTexture(
-            new TextureDescription
-            {
-                Width = Size,
-                Height = Size,
-                Format = GpuFormat.R8G8B8A8Unorm,
-                Usage = TextureUsages.Storage | TextureUsages.CopySource,
-                Name = "Gradient",
-            }
-        );
-        if (!gradient.Ok)
-        {
-            Log.Error($"GPU check: the gradient texture was not made: {gradient.Error}");
-
-            return;
-        }
-
-        _gradient = gradient.Value;
-        Result<GpuBuffer> readback = _gpu.CreateBuffer(
-            new BufferDescription
-            {
-                Bytes = Bytes,
-                Usage = BufferUsages.Readback,
-                Name = "Gradient readback",
-            }
-        );
-        if (!readback.Ok)
-        {
-            Log.Error($"GPU check: the readback buffer was not made: {readback.Error}");
-
-            return;
-        }
-
-        _readback = readback.Value;
-
-        // Have Render record the dispatch and its copy into the buffer.
         _fill = new ShaderEntry
         {
             Module = shader,
             Name = "FillGradient",
             Stage = ShaderStage.Compute,
         };
-        if (!await _recorded.Task.ConfigureAwait(false))
+        Result<GpuBuffer> readback = await _recorded.Task.ConfigureAwait(false);
+        if (!readback.Ok)
         {
-            Log.Error("GPU check: the gradient shader was not built, so nothing was checked.");
+            Log.Error($"GPU check: {readback.Error}, so nothing was checked.");
 
             return;
         }
 
         // Read the gradient back once the GPU has computed it. It is red along x, green along y, a quarter blue and
         // opaque; each corner and the centre must read so.
-        Result<ReadOnlyMemory<byte>> pixels = await _gpu.ReadBackAsync(_readback, 0, Bytes, CancellationToken.None)
+        Result<ReadOnlyMemory<byte>> pixels = await _gpu.ReadBackAsync(readback.Value, 0, Bytes, CancellationToken.None)
             .ConfigureAwait(false);
         if (!pixels.Ok)
         {

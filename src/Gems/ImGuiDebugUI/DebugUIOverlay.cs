@@ -16,23 +16,22 @@ namespace Magic.ImGuiDebugUI;
 /// overlay layer so it shows over the picture whichever gem drew it: it takes in the texture changes queued up to that
 /// frame, uploads the vertices, indices and constants into buffers named on the graph, and draws each of ImGui's draws
 /// clipped to its rectangle in one draw pass, its shaders reading the vertices, the draw's texture and the constants
-/// through the heap. It owns ImGui's textures and its sampler. Render thread.
+/// through the heap. It asks the graph for ImGui's textures every frame while the UI holds them, and for its sampler.
+/// Render thread.
 /// </summary>
-internal sealed class DebugUIOverlay : IDisposable
+internal sealed class DebugUIOverlay
 {
     private const string ShaderPath = "Shaders/DrawDebugUI.slang";
     private const int MinBufferBytes = 16 * 1024;
 
-    private readonly IGraphicsApi _gpu;
     private readonly Mailbox<DebugUIFrame> _frames;
     private readonly ChannelReader<DebugUITextureChange> _textureChanges;
     private readonly DrawShaders _shaders;
 
     /// <summary>
-    /// By the id the UI gave it, each of ImGui's textures made.
+    /// By the id the UI gave it, each of ImGui's textures the UI holds: what it is made to and the texture made.
     /// </summary>
-    private readonly Dictionary<ulong, GpuTexture> _textures = [];
-    private GpuSampler _sampler;
+    private readonly Dictionary<ulong, (TextureDescription Description, GpuTexture Made)> _textures = [];
 
     /// <summary>
     /// The newest copy taken, this overlay's until a newer is.
@@ -40,13 +39,11 @@ internal sealed class DebugUIOverlay : IDisposable
     private DebugUIFrame? _frame;
 
     public DebugUIOverlay(
-        IGraphicsApi gpu,
         AssetManager assets,
         Mailbox<DebugUIFrame> frames,
         ChannelReader<DebugUITextureChange> textureChanges
     )
     {
-        _gpu = gpu;
         _frames = frames;
         _textureChanges = textureChanges;
         Handle<Shader> shader = assets.Find<Shader>(ShaderPath);
@@ -70,16 +67,6 @@ internal sealed class DebugUIOverlay : IDisposable
         };
     }
 
-    public void Dispose()
-    {
-        foreach (GpuTexture texture in _textures.Values)
-        {
-            _gpu.Destroy(texture);
-        }
-
-        _gpu.Destroy(_sampler);
-    }
-
     /// <summary>
     /// The newest frame the UI published over the window's image, the texture changes up to it taken in first, and
     /// nothing drawn while there is no window or nothing to draw.
@@ -97,9 +84,11 @@ internal sealed class DebugUIOverlay : IDisposable
         if (_frame is not { } frame)
             return;
 
-        // The texture changes are taken whether or not there is a window to draw over, so none wait for good.
+        // The texture changes are taken and the textures asked for whether or not there is a window to draw over, so
+        // none wait for good and none are let go of.
         TakeTextureChanges(frame.Index, graph);
-        GpuTexture target = _gpu.WindowTarget;
+        AskTextures(graph);
+        GpuTexture target = graph.WindowTarget;
         if (target.IsNone || frame.Indices.Count == 0)
             return;
 
@@ -119,11 +108,14 @@ internal sealed class DebugUIOverlay : IDisposable
                 Name = "Debug UI constants",
             }
         );
+        Result<GpuSampler> sampler = graph.Sampler(
+            new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
+        );
         Result made =
             !vertices.Ok ? vertices
             : !indices.Ok ? indices
             : !constants.Ok ? constants
-            : CreateSampler();
+            : sampler;
         if (!made.Ok)
         {
             Log.Error($"The debug UI is not drawn: {made.Error}");
@@ -131,7 +123,7 @@ internal sealed class DebugUIOverlay : IDisposable
             return;
         }
 
-        TextureDescription description = _gpu.GetDescription(target);
+        TextureDescription description = graph.GetDescription(target);
         graph.Upload(vertices.Value, vertexRows);
         graph.Upload(indices.Value, indexRows);
         graph.Upload(
@@ -141,7 +133,7 @@ internal sealed class DebugUIOverlay : IDisposable
                 {
                     InverseSize = new Vector2(1f / description.Width, 1f / description.Height),
                     Vertices = vertices.Value.Id,
-                    Sampler = _sampler.Id,
+                    Sampler = sampler.Value.Id,
                 },
             ]
         );
@@ -160,20 +152,15 @@ internal sealed class DebugUIOverlay : IDisposable
         };
 
     /// <summary>
-    /// The sampler made, unless it is.
+    /// Every texture the UI holds asked for, so the GPU provider keeps it: each was made to its description when it was
+    /// filled and is asked for every frame since, so the ask hands back the same texture.
     /// </summary>
-    private Result CreateSampler()
+    private void AskTextures(RenderGraph graph)
     {
-        if (!_sampler.IsNone)
-            return Result.Success();
-
-        Result<GpuSampler> sampler = _gpu.CreateSampler(
-            new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
-        );
-        if (sampler.Ok)
-            _sampler = sampler.Value;
-
-        return sampler;
+        foreach ((TextureDescription description, GpuTexture _) in _textures.Values)
+        {
+            _ = graph.Texture(description);
+        }
     }
 
     /// <summary>
@@ -188,47 +175,34 @@ internal sealed class DebugUIOverlay : IDisposable
             if (change.Pixels is { } pixels)
                 FillTexture(change, pixels, graph);
             else
-                DestroyTexture(change.Texture);
+                _textures.Remove(change.Texture);
         }
     }
 
     /// <summary>
-    /// The texture made, unless it is, and filled with <paramref name="pixels"/> whole.
+    /// The texture asked for at the change's size, under a name of its own, and filled with <paramref name="pixels"/>
+    /// whole.
     /// </summary>
     private void FillTexture(in DebugUITextureChange change, byte[] pixels, RenderGraph graph)
     {
-        if (!_textures.TryGetValue(change.Texture, out GpuTexture texture))
+        TextureDescription description = new()
         {
-            Result<GpuTexture> made = _gpu.CreateTexture(
-                new TextureDescription
-                {
-                    Width = change.Width,
-                    Height = change.Height,
-                    Format = GpuFormat.R8G8B8A8Unorm,
-                    Usage = TextureUsages.Sampled | TextureUsages.CopyDestination,
-                    Name = "Debug UI texture",
-                }
-            );
-            if (!made.Ok)
-            {
-                Log.Error($"A debug UI texture was not made: {made.Error}");
+            Width = change.Width,
+            Height = change.Height,
+            Format = GpuFormat.R8G8B8A8Unorm,
+            Usage = TextureUsages.Sampled | TextureUsages.CopyDestination,
+            Name = $"Debug UI texture {change.Texture}",
+        };
+        Result<GpuTexture> made = graph.Texture(description);
+        if (!made.Ok)
+        {
+            Log.Error($"A debug UI texture was not made: {made.Error}");
 
-                return;
-            }
-
-            texture = made.Value;
-            _textures.Add(change.Texture, texture);
+            return;
         }
 
-        graph.Upload(texture, pixels);
-    }
-
-    private void DestroyTexture(ulong id)
-    {
-        if (!_textures.Remove(id, out GpuTexture gone))
-            return;
-
-        _gpu.Destroy(gone);
+        _textures[change.Texture] = (description, made.Value);
+        graph.Upload(made.Value, pixels);
     }
 
     /// <summary>
@@ -254,7 +228,7 @@ internal sealed class DebugUIOverlay : IDisposable
                 RenderLayer.Overlay
             )
             .Reads(constants, vertices);
-        foreach (GpuTexture texture in _textures.Values)
+        foreach ((TextureDescription _, GpuTexture texture) in _textures.Values)
         {
             pass.Reads(texture);
         }
@@ -287,13 +261,17 @@ internal sealed class DebugUIOverlay : IDisposable
         int top = Math.Max((int)MathF.Floor(draw.Clip.Y), 0);
         int right = Math.Min((int)MathF.Ceiling(draw.Clip.Z), target.Width);
         int bottom = Math.Min((int)MathF.Ceiling(draw.Clip.W), target.Height);
-        if (right <= left || bottom <= top || !_textures.TryGetValue(draw.Texture, out GpuTexture texture))
+        if (
+            right <= left
+            || bottom <= top
+            || !_textures.TryGetValue(draw.Texture, out (TextureDescription, GpuTexture Made) texture)
+        )
             return false;
 
         indexed = new IndexedDraw
         {
             Scissor = Rectangle.FromLTRB(left, top, right, bottom),
-            Constants = new GpuConstants(constants.Id, draw.FirstVertex, texture.Id),
+            Constants = new GpuConstants(constants.Id, draw.FirstVertex, texture.Made.Id),
             IndexCount = draw.IndexCount,
             FirstIndex = draw.FirstIndex,
         };

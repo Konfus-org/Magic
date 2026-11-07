@@ -189,7 +189,6 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, ILogSink, IDisposable
 
     public unsafe ImGuiDebugUIGem(
         App app,
-        IGraphicsApi gpu,
         AssetManager assets,
         IEcs ecs,
         IInput? input = null,
@@ -200,7 +199,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, ILogSink, IDisposable
         _ecs = ecs;
         _input = input;
         _clipboard = clipboard;
-        _overlay = new DebugUIOverlay(gpu, assets, _frames, _textureChanges.Reader);
+        _overlay = new DebugUIOverlay(assets, _frames, _textureChanges.Reader);
 
         // ImGui writes no ini file, and is told the overlay takes the textures it makes and changes, and draws by vertex
         // offset; it takes the engine's look, at its size.
@@ -228,7 +227,6 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, ILogSink, IDisposable
     public unsafe void Dispose()
     {
         ImGui_DestroyContext(_context);
-        _overlay.Dispose();
         _text.Dispose();
         _self.Dispose();
     }
