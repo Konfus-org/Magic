@@ -15,7 +15,7 @@ public static class Assemblies
     private static ImmutableArray<Assembly> _assemblies = [typeof(Assemblies).Assembly];
 
     /// <summary>
-    /// Replaced whole on the main thread, and read whole on any.
+    /// Replaced whole on the game thread, and read whole on any.
     /// </summary>
     private static FrozenDictionary<string, ImmutableArray<Type>> _byName = Index(_assemblies);
 
@@ -40,7 +40,7 @@ public static class Assemblies
 
     /// <summary>
     /// Adds a gem's <paramref name="assembly"/> until the subscription is disposed, which it must be for the gem's code to
-    /// unload. Main thread.
+    /// unload. Game thread.
     /// </summary>
     internal static Subscription Register(Assembly assembly)
     {

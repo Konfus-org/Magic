@@ -36,7 +36,7 @@ internal readonly record struct DomainRead(Handle<Domain> Domain, ImmutableArray
 /// goes to the ECS a gem provides. What comes and goes
 /// does so one at a time, and each entity a domain placed has its <see cref="Owner"/>, for saves and for when the domain opens again. As the run starts it puts
 /// back the world the last run kept, or opens the entry point, without waiting for it, as frames run while it loads; as the
-/// run ends for a restart it keeps the world for the next; and it changes for what the assets say changed. Entity calls are for the main thread; the others, any.
+/// run ends for a restart it keeps the world for the next; and it changes for what the assets say changed. Entity calls are for the game thread; the others, any.
 /// </summary>
 public sealed class World : IEcs, IDisposable
 {
@@ -57,7 +57,7 @@ public sealed class World : IEcs, IDisposable
 
     /// <summary>
     /// The prefabs each open domain placed, as they were read: what its entities are compared with, by a save and as the
-    /// domain opens again. Main thread.
+    /// domain opens again. Game thread.
     /// </summary>
     private readonly Dictionary<Handle<Domain>, ImmutableArray<PlacedPrefab>> _read = [];
 
@@ -68,12 +68,12 @@ public sealed class World : IEcs, IDisposable
 
     /// <summary>
     /// Completed as the next frame starts, and replaced for the one after, by <see cref="Pump"/>: what a replace waits on
-    /// frame by frame. Main thread.
+    /// frame by frame. Game thread.
     /// </summary>
     private TaskCompletionSource _frameStarting = new();
 
     /// <summary>
-    /// The gems that hook into domain loading, in the order they were made. Main thread.
+    /// The gems that hook into domain loading, in the order they were made. Game thread.
     /// </summary>
     private ImmutableArray<IHookIntoDomainLoading> _hooks = [];
 
@@ -120,7 +120,7 @@ public sealed class World : IEcs, IDisposable
 
     /// <summary>
     /// The last frame whose hooks before Render have run, so what it made of the world is published for the render thread.
-    /// Set on the main thread, read on any.
+    /// Set on the game thread, read on any.
     /// </summary>
     internal uint PublishedFrame
     {
@@ -205,7 +205,7 @@ public sealed class World : IEcs, IDisposable
     /// <summary>
     /// The game as a save holds it, as UTF-8 JSON: the domains open, and how the world, with its pause and time scale,
     /// differs from their files. The world is taken now, and the diff found on a worker. Why not, while the world is
-    /// loading or has no domain open, or when JSON can't hold it. Main thread.
+    /// loading or has no domain open, or when JSON can't hold it. Game thread.
     /// </summary>
     public Task<Result<byte[]>> SaveAsync()
     {
@@ -304,7 +304,7 @@ public sealed class World : IEcs, IDisposable
 
     /// <summary>
     /// Changes the world for the prefabs and domains the assets read again, as the last frame's take heard it, and lets
-    /// a replace waiting for this frame go on. Main thread, as each frame starts, before the gems' hooks.
+    /// a replace waiting for this frame go on. Game thread, as each frame starts, before the gems' hooks.
     /// </summary>
     internal void Pump()
     {
@@ -330,7 +330,7 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Has <paramref name="ecs"/> hold the world's entities, until the subscription is disposed. Main thread.
+    /// Has <paramref name="ecs"/> hold the world's entities, until the subscription is disposed. Game thread.
     /// </summary>
     internal Subscription Register(IEcs ecs)
     {
@@ -340,7 +340,7 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Has <paramref name="hooks"/> take part as domains replace the world, until the subscription is disposed. Main thread.
+    /// Has <paramref name="hooks"/> take part as domains replace the world, until the subscription is disposed. Game thread.
     /// </summary>
     internal Subscription Register(IHookIntoDomainLoading hooks)
     {
@@ -350,7 +350,7 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Every entity with a <see cref="Spin"/> turned on by <paramref name="deltaSec"/> of the world's time. Main thread.
+    /// Every entity with a <see cref="Spin"/> turned on by <paramref name="deltaSec"/> of the world's time. Game thread.
     /// </summary>
     internal void TurnSpins(float deltaSec)
     {
@@ -607,7 +607,7 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Runs <paramref name="work"/> on the main thread once no other work on the world is running, and gives what it
+    /// Runs <paramref name="work"/> on the game thread once no other work on the world is running, and gives what it
     /// returns.
     /// </summary>
     private async Task<T> RunInTurnAsync<T>(Func<Task<T>> work, CancellationToken cancel)
@@ -615,7 +615,7 @@ public sealed class World : IEcs, IDisposable
         await _turn.WaitAsync(cancel).ConfigureAwait(false);
         try
         {
-            await _threads.Enter(EngineThread.Main);
+            await _threads.Enter(EngineThread.Game);
 
             return await work().ConfigureAwait(false);
         }
@@ -641,7 +641,7 @@ public sealed class World : IEcs, IDisposable
             .ConfigureAwait(false);
 
     /// <summary>
-    /// <paramref name="domain"/> comes, and is in the world from then on. Main thread.
+    /// <paramref name="domain"/> comes, and is in the world from then on. Game thread.
     /// </summary>
     private void Add(DomainRead domain)
     {
@@ -652,7 +652,7 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// One entity for each of <paramref name="entities"/>. Main thread.
+    /// One entity for each of <paramref name="entities"/>. Game thread.
     /// </summary>
     private ImmutableArray<Entity> CreateEntities(ImmutableArray<ImmutableArray<IComponent>> entities)
     {
@@ -666,7 +666,7 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// <paramref name="entities"/> go, those not gone already. Main thread.
+    /// <paramref name="entities"/> go, those not gone already. Game thread.
     /// </summary>
     private void DestroyEntities(ImmutableArray<Entity> entities)
     {
@@ -711,7 +711,7 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// The world as it is: every entity's components, copied, and the pause and time scale. Main thread.
+    /// The world as it is: every entity's components, copied, and the pause and time scale. Game thread.
     /// </summary>
     private WorldState GetState()
     {
@@ -735,7 +735,7 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// The domains open, with the prefabs each placed as they were read. Main thread.
+    /// The domains open, with the prefabs each placed as they were read. Game thread.
     /// </summary>
     private ImmutableArray<DomainRead> GetOpenDomains() =>
         [.. Domains.Select(domain => new DomainRead(domain, _read.GetValueOrDefault(domain, [])))];
@@ -813,7 +813,7 @@ public sealed class World : IEcs, IDisposable
 
         // Everything in the world leaves but its globals, those too with isClearingGlobals. A global that stays outlives
         // the domain that owned it, so it is owned by none, as an entity made as the game runs.
-        await _threads.Enter(EngineThread.Main);
+        await _threads.Enter(EngineThread.Game);
         ImmutableArray<Entity>.Builder leaving = ImmutableArray.CreateBuilder<Entity>();
         ImmutableArray<Entity>.Builder staying = ImmutableArray.CreateBuilder<Entity>();
         foreach (EcsChunk chunk in Query())
@@ -838,7 +838,7 @@ public sealed class World : IEcs, IDisposable
         Domains = [];
         await RunHooksAsync(hooks => hooks.OnDomainUnloadedAsync(cancel), "cleaning up").ConfigureAwait(false);
 
-        await _threads.Enter(EngineThread.Main);
+        await _threads.Enter(EngineThread.Game);
         ImmutableArray<Entity> loading = CreateEntities(screen);
         IsShowingLoadingScreen = true;
         await RunHooksAsync(hooks => hooks.OnDomainLoadingAsync(arriving, cancel), "preparing").ConfigureAwait(false);
@@ -849,11 +849,11 @@ public sealed class World : IEcs, IDisposable
             await WaitForFrameAsync(cancel).ConfigureAwait(false);
         }
 
-        await _threads.Enter(EngineThread.Main);
+        await _threads.Enter(EngineThread.Game);
         DestroyEntities(loading);
         await RunHooksAsync(hooks => hooks.OnDomainUnloadedAsync(cancel), "cleaning up").ConfigureAwait(false);
 
-        await _threads.Enter(EngineThread.Main);
+        await _threads.Enter(EngineThread.Game);
         arrive();
         IsShowingLoadingScreen = false;
 
@@ -892,12 +892,12 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Waits for the next frame to start, and goes on there, on the main thread.
+    /// Waits for the next frame to start, and goes on there, on the game thread.
     /// </summary>
     private async Task WaitForFrameAsync(CancellationToken cancel)
     {
         await _frameStarting.Task.WaitAsync(cancel).ConfigureAwait(false);
-        await _threads.Enter(EngineThread.Main);
+        await _threads.Enter(EngineThread.Game);
     }
 
     /// <summary>
@@ -988,7 +988,7 @@ public sealed class World : IEcs, IDisposable
     private async Task ReopenAsync(Handle<Domain> domain, CancellationToken cancel)
     {
         Result<ImmutableArray<PlacedPrefab>> read = await ReadDomainAsync(domain, null, cancel).ConfigureAwait(false);
-        await _threads.Enter(EngineThread.Main);
+        await _threads.Enter(EngineThread.Game);
         if (!read.Ok)
         {
             Log.Error($"{GetName(domain)} is not opened again: {read.Error}");

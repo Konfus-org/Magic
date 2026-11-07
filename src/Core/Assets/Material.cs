@@ -25,7 +25,7 @@ public enum Transparency : byte
 /// What a surface looks like: a material shader, a module implementing the shader library's material contract, values
 /// for the parameters its struct declares, and how much shows through it. A <c>.mat</c> file is this class as JSON:
 /// <c>{ "shader": { "id": 10001 }, "params": { "roughness": { "x": 0.8 } } }</c>. Its params, its transparency and
-/// its sides may be set while it is drawn, on the main thread, and are drawn so from the next frame; what is set holds
+/// its sides may be set while it is drawn, on the game thread, and are drawn so from the next frame; what is set holds
 /// until the material is made again, as its file changes, and is not saved with the world.
 /// </summary>
 [AssetFormat(AssetFileFormat.Json)]

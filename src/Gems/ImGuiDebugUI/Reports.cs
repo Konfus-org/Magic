@@ -47,7 +47,7 @@ internal readonly record struct ShownReport(string Label, Color Color, Vector3 P
 /// <summary>
 /// What is reported to show for a while: lines on screen, and text at places in the world, each until its seconds after it
 /// was last reported are up. The same text at the same place again while it shows keeps it up rather than adding another.
-/// Any thread reports into a channel; the main thread drains it as it takes what shows each frame.
+/// Any thread reports into a channel; the game thread drains it as it takes what shows each frame.
 /// </summary>
 internal sealed class Reports
 {
@@ -66,7 +66,7 @@ internal sealed class Reports
     /// Adds what shows at <paramref name="nowSec"/> to <paramref name="world"/>, what has a position, and to
     /// <paramref name="lines"/>, what has none: first what is reported every frame, in the order it was last reported, then
     /// the rest, in the order it was first reported. What has had its time, and was not reported again since the last take,
-    /// is gone after it. Main thread.
+    /// is gone after it. Game thread.
     /// </summary>
     internal void Take(double nowSec, List<ShownReport> world, List<ShownReport> lines)
     {

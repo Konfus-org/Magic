@@ -52,7 +52,7 @@ internal sealed class Gems : IDisposable
     private static readonly Histogram<double> _frameWorkDuration = Metrics.Meter.CreateHistogram<double>(
         Metrics.FrameWorkDuration,
         "s",
-        "The main thread's work on a frame."
+        "The game thread's work on a frame."
     );
 
     private static readonly Histogram<double> _renderFrameDuration = Metrics.Meter.CreateHistogram<double>(
@@ -82,7 +82,7 @@ internal sealed class Gems : IDisposable
     private readonly Threads _threads;
 
     /// <summary>
-    /// The main thread's real time, from its first frame.
+    /// The game thread's real time, from its first frame.
     /// </summary>
     private readonly Stopwatch _clock = new();
 
@@ -101,7 +101,7 @@ internal sealed class Gems : IDisposable
     private readonly Stopwatch _renderClock = new();
 
     /// <summary>
-    /// Set by the render thread each time it has drawn a frame, for the main thread waiting to stay one frame ahead.
+    /// Set by the render thread each time it has drawn a frame, for the game thread waiting to stay one frame ahead.
     /// </summary>
     private readonly AutoResetEvent _drawn = new(initialState: false);
 
@@ -116,7 +116,7 @@ internal sealed class Gems : IDisposable
     private long _frameStart;
 
     /// <summary>
-    /// The main thread's last frame, whose clocks the next one goes on from.
+    /// The game thread's last frame, whose clocks the next one goes on from.
     /// </summary>
     private Frame _frame;
 
@@ -233,7 +233,7 @@ internal sealed class Gems : IDisposable
         _world.PublishedFrame = frame.Index;
         _frameWorkDuration.RecordSince(_frameStart == 0 ? hooksStart : _frameStart);
 
-        // The one wait on the render thread in a frame, so the main thread never runs more than a frame ahead of it; the
+        // The one wait on the render thread in a frame, so the game thread never runs more than a frame ahead of it; the
         // render thread never waits for this one.
         while (_world.DrawnFrame + 1 < frame.Index)
         {
@@ -309,8 +309,8 @@ internal sealed class Gems : IDisposable
 
     /// <summary>
     /// One frame of the render thread, which runs them as fast as the GPU and the display let it, never waiting for the
-    /// main thread: every gem's Render into the frame's graph, then the GPU provider's Present of it. It tells the world which published frame it drew at least, the gems taking what
-    /// was published when it began or newer, and wakes the main thread if it waits for that. A render frame has no
+    /// game thread: every gem's Render into the frame's graph, then the GPU provider's Present of it. It tells the world which published frame it drew at least, the gems taking what
+    /// was published when it began or newer, and wakes the game thread if it waits for that. A render frame has no
     /// messages.
     /// </summary>
     private void Render()

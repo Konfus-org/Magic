@@ -40,7 +40,7 @@ public sealed class EventCoordinator
 
     /// <summary>
     /// What the last take took of <typeparamref name="T"/> that nothing has handled; empty when none was ever
-    /// published. Main thread.
+    /// published. Game thread.
     /// </summary>
     internal Span<T> GetTaken<T>()
         where T : struct, IEvent =>

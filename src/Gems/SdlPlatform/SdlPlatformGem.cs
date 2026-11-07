@@ -21,10 +21,10 @@ namespace Magic.SdlPlatform;
 /// gamepads into <see cref="IInput"/>'s controls and typed text. Headless, it opens no window, keeps the clipboard's text
 /// to itself and reads gamepads only: keyboards and mice need a window to type and point into.
 /// <para>
-/// SDL's windows and events belong to the process's main thread, which everything here runs on: <see cref="Update"/>
-/// applies SDL's events to the controls, before any gem that takes the input runs, as they are made after this one, so
-/// input stays fixed for the rest of a frame. It is public because nothing in its assembly makes it: Magic does, by
-/// reflection, when a project lists the gem.
+/// SDL's windows and events belong to the process's first thread, the game thread, which everything here runs on:
+/// <see cref="Update"/> applies SDL's events to the controls, before any gem that takes the input runs, as they are
+/// made after this one, so input stays fixed for the rest of a frame. It is public because nothing in its assembly
+/// makes it: Magic does, by reflection, when a project lists the gem.
 /// </para>
 /// </summary>
 public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposable
@@ -151,7 +151,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
         get => _title;
         set
         {
-            ThrowIfNotOnMain();
+            ThrowIfNotOnGame();
             _title = value;
             if (_window == null)
                 return;
@@ -164,14 +164,14 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
     }
 
     /// <summary>
-    /// Set on the main thread, it reaches the window once it and its image have loaded, unless another was set meanwhile.
+    /// Set on the game thread, it reaches the window once it and its image have loaded, unless another was set meanwhile.
     /// </summary>
     public unsafe Handle<Icon> Icon
     {
         get => field;
         set
         {
-            ThrowIfNotOnMain();
+            ThrowIfNotOnGame();
             field = value;
             if (_window != null)
                 ShowAsync(value).FireAndForget();
@@ -218,7 +218,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
         get => _clipboard;
         set
         {
-            ThrowIfNotOnMain();
+            ThrowIfNotOnGame();
             _clipboard = value;
             if (_window == null)
                 return;
@@ -496,12 +496,12 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
 
     /// <summary>
     /// What a worker calling this would get away with on some systems and crash on others; SDL's window and clipboard are the
-    /// main thread's.
+    /// game thread's.
     /// </summary>
-    private void ThrowIfNotOnMain()
+    private void ThrowIfNotOnGame()
     {
-        if (!_threads.IsCurrent(EngineThread.Main))
-            throw new InvalidOperationException("The window and clipboard are the main thread's.");
+        if (!_threads.IsCurrent(EngineThread.Game))
+            throw new InvalidOperationException("The window and clipboard are the game thread's.");
     }
 
     private int FindIndex(DeviceKind kind, uint id)
@@ -580,7 +580,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
     }
 
     /// <summary>
-    /// Loads <paramref name="icon"/> and its image on workers, then gives the image to the window on the main thread,
+    /// Loads <paramref name="icon"/> and its image on workers, then gives the image to the window on the game thread,
     /// unless the run ended or another icon was set meanwhile. One that does not load is a warning, and the window keeps
     /// what it shows.
     /// </summary>
@@ -601,7 +601,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
             return;
         }
 
-        await _threads.Enter(EngineThread.Main);
+        await _threads.Enter(EngineThread.Game);
         if (!lifetime.IsCancellationRequested && Icon == icon)
             SetIcon(image.Value);
     }

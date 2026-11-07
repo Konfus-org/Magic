@@ -46,7 +46,7 @@ Write the engine as data flowing through functions, not objects calling each oth
   builds objects from constructors takes `IServiceProvider`. Gems are made in dependency order, then in the order the
   project lists them, and disposed in reverse.
 - A hook is what the engine calls on a gem each frame: `IGem`'s `Update`, `FixedUpdate`, `LateUpdate` and `Render`, in
-  that order over the gems. `Render` runs on the render thread, which owns the GPU, and the others on the main thread.
+  that order over the gems. `Render` runs on the render thread, which owns the GPU, and the others on the game thread.
   `Render` records into the frame's `RenderGraph`, each pass in its `RenderLayer`, and Core hands it to the GPU provider
   once every gem has.
   `LateUpdate` hands `Render` what it draws as data, the newest through a `Mailbox<T>` and what must not be lost
@@ -61,8 +61,8 @@ Write the engine as data flowing through functions, not objects calling each oth
   run makes is new for it, and a restart keeps only the world, as JSON. A service starts in its constructor
   and ends in `Dispose`, not with paired start and stop calls. A step is a method. A class of its own is for a substantial piece of work.
 - A change is a call on `World`.
-- A method that needs the main thread after an await of its own steps onto it with
-  `await threads.Enter(EngineThread.Main)`; nothing hops threads for it.
+- A method that needs the game thread after an await of its own steps onto it with
+  `await threads.Enter(EngineThread.Game)`; nothing hops threads for it.
 - Gems talk through message structs, each an `IEvent`. Publish one from any thread and every gem reads it the next
   frame, from `frame.Events`, in load order. A gem that sets `IsHandled` on one takes it from the gems after it.
 - Async work a hook starts arrives in a later frame: by a message, or by work posted with `Threads.Post`. A gem that
@@ -93,10 +93,10 @@ Write the engine as data flowing through functions, not objects calling each oth
 - Await every task, keep it to check later, or call `.FireAndForget()`. Never drop it or discard it with `_ =`. No
   `async void`.
 - Cancellation ends the task with `OperationCanceledException`, never a failed `Result`.
-- Nothing blocks the main or render thread: no `.Result`, `.Wait()` or `.GetAwaiter().GetResult()`, and no waiting on
+- Nothing blocks the game or render thread: no `.Result`, `.Wait()` or `.GetAwaiter().GetResult()`, and no waiting on
   the other engine thread. Two waits are allowed, each with a comment saying so: at a boundary where every thread it
-  could hold up has ended, and Core's main thread waiting at the end of a frame until the render thread has drawn the
-  frame before. The render thread never waits for the main thread.
+  could hold up has ended, and Core's game thread waiting at the end of a frame until the render thread has drawn the
+  frame before. The render thread never waits for the game thread.
 - A worker hands an engine thread data (a message, a `Channel<T>`, a value written whole) or work
   (`Threads.Post`). No locks on collections two threads share.
 - Background work is a task. `Threads` is for the engine's own threads.

@@ -83,7 +83,7 @@ public sealed class MaterialParamDictionary
 
     /// <summary>
     /// Takes <paramref name="values"/> in place of the snapshot, then counts the change, unless nothing changed. The
-    /// main thread's alone, so the count needs no more than to be written after the values.
+    /// game thread's alone, so the count needs no more than to be written after the values.
     /// </summary>
     private void Change(ImmutableDictionary<string, MaterialParam> values)
     {

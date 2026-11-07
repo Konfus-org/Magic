@@ -66,7 +66,7 @@ internal readonly record struct MetricRow(
 /// <summary>
 /// What every <c>Magic.*</c> meter and .NET's <c>System.Runtime</c> measure, through OpenTelemetry: it sums
 /// measurements up on the thread that records them, without locks or allocation, and hands them over as rows when
-/// collected, on the main thread. It listens only between <see cref="Listen"/> on and off.
+/// collected, on the game thread. It listens only between <see cref="Listen"/> on and off.
 /// </summary>
 internal sealed class MetricsReader : IDisposable
 {
@@ -117,7 +117,7 @@ internal sealed class MetricsReader : IDisposable
 
     /// <summary>
     /// Sums up what was measured since the last collection into the rows it returns, reading the observable instruments
-    /// now. Main thread.
+    /// now. Game thread.
     /// </summary>
     public IReadOnlyList<MetricRow> Collect()
     {

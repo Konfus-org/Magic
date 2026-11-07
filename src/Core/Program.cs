@@ -123,7 +123,7 @@ internal static class Program
 
                 // Core's own steps are timed for whatever listens; the gems' pump times its hooks itself.
                 long start = _stepDuration.Start();
-                threads.Pump(EngineThread.Main);
+                threads.Pump(EngineThread.Game);
                 _stepDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.StepTag, "Threads"));
                 start = _stepDuration.Start();
                 world.Pump();

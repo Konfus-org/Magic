@@ -43,7 +43,7 @@ namespace Magic.ImGuiDebugUI;
 /// The debug UI, drawn with Dear ImGui: what gems and scripts report, and the lines they log to show on screen, as lines
 /// down the left of the picture and text in the world, and the windows gems draw with its widgets (<see cref="IDebugUI"/>).
 /// <para>
-/// ImGui's frame is the main thread's. <see cref="Update"/> hands ImGui the frame's input and starts its frame, so the
+/// ImGui's frame is the game thread's. <see cref="Update"/> hands ImGui the frame's input and starts its frame, so the
 /// widgets gems made after this one call in their Update go into it; <see cref="LateUpdate"/> draws what is reported, ends
 /// the frame and publishes a copy of it, whether anything draws it or not; and <see cref="Render"/> records the newest
 /// copy over the window's image, in the overlay layer, so it shows over whatever drew the world. Reports come from any thread (<see cref="Reports"/>). It is public because

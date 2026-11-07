@@ -6,7 +6,7 @@ using Magic.Debugging;
 namespace Magic.DebugTools;
 
 /// <summary>
-/// A window of everything the meters measure, in sections that fold: CPU, the main thread's frame and the render
+/// A window of everything the meters measure, in sections that fold: CPU, the game thread's frame and the render
 /// thread's, with what Core and each gem spend of them; GPU, what the GPU provider says of the API and the GPU, and its frame and passes; Memory, Core's
 /// and the process's, then each gem's; and Other, the rest by meter. A histogram's row shows its mean, how many a second
 /// and its most; a counter's how much it rose and how much a second; a gauge's its latest value. Seconds show as
