@@ -1,5 +1,4 @@
-using Magic.Files;
-using Magic.Files.Types;
+using Magic.Assets;
 
 namespace Magic.Platform;
 

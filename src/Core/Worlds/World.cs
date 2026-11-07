@@ -5,12 +5,12 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.JsonDiffPatch;
 using System.Text.Json.Nodes;
+using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Events;
 using Magic.Files;
-using Magic.Files.Types;
 using Magic.Threading;
 using Magic.Utils;
 
@@ -40,7 +40,7 @@ internal readonly record struct DomainRead(Handle<Domain> Domain, ImmutableArray
 /// </summary>
 public sealed class World : IEcs, IDisposable
 {
-    private readonly Assets _assets;
+    private readonly AssetManager _assets;
 
     private readonly IFileSystem _files;
 
@@ -77,7 +77,7 @@ public sealed class World : IEcs, IDisposable
     /// </summary>
     private ImmutableArray<IHookIntoDomainLoading> _hooks = [];
 
-    internal World(Assets assets, IFileSystem files, EventCoordinator events, Threads threads, App app)
+    internal World(AssetManager assets, IFileSystem files, EventCoordinator events, Threads threads, App app)
     {
         _assets = assets;
         _files = files;

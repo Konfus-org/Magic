@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Numerics;
 using System.Threading.Channels;
-using Magic.Files.Types;
+using Magic.Assets;
 
 namespace Magic.ImGuiDebugUI;
 

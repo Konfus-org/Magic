@@ -1,10 +1,9 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
+using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Files;
-using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
@@ -20,7 +19,12 @@ namespace Magic.GIRendering;
 /// <paramref name="resources"/> has then, and uploaded whole. <paramref name="failure"/> is the material a model that
 /// failed is drawn with, every slot; an empty slot when there is none.
 /// </summary>
-internal sealed class InstanceTable(IGraphicsApi gpu, Assets assets, GpuResources resources, MaterialInstance failure)
+internal sealed class InstanceTable(
+    IGraphicsApi gpu,
+    AssetManager assets,
+    GpuResources resources,
+    MaterialInstance failure
+)
 {
     public const int Capacity = 1 << 18;
 

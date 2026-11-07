@@ -1,8 +1,7 @@
 using System.Collections.Immutable;
 using System.Text.Json.Nodes;
+using Magic.Assets;
 using Magic.Ecs;
-using Magic.Files;
-using Magic.Files.Types;
 
 namespace Magic.Worlds;
 

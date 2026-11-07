@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
+using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Events;
@@ -72,7 +73,7 @@ internal sealed class Gems : IDisposable
 
     private readonly IFileSystem _files;
 
-    private readonly Assets _assets;
+    private readonly AssetManager _assets;
 
     private readonly World _world;
 
@@ -143,7 +144,7 @@ internal sealed class Gems : IDisposable
         IServiceProvider provider,
         App app,
         IFileSystem files,
-        Assets assets,
+        AssetManager assets,
         World world,
         EventCoordinator events,
         Threads threads

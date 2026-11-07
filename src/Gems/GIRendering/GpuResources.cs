@@ -1,10 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs.Components;
-using Magic.Files;
-using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Threading;
@@ -35,7 +34,7 @@ internal enum ResourceState : byte
 /// to frame, and another one under the name, as at a new window size, destroys it and makes it again. The rest is freed
 /// with the gem.
 /// </summary>
-internal sealed class GpuResources(IGraphicsApi gpu, IMeshPreprocessor meshes, Assets assets, Threads threads)
+internal sealed class GpuResources(IGraphicsApi gpu, IMeshPreprocessor meshes, AssetManager assets, Threads threads)
     : IDisposable
 {
     private const int VertexCapacity = 1 << 20;

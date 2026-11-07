@@ -4,11 +4,10 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Unicode;
 using System.Threading.Channels;
+using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Files;
-using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Input;
 using Magic.Platform;
@@ -194,7 +193,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, ILogSink, IDisposable
         App app,
         IGraphicsApi gpu,
         IShaderCompiler shaders,
-        Assets assets,
+        AssetManager assets,
         IEcs ecs,
         IInput? input = null,
         IClipboard? clipboard = null

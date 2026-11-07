@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using System.Numerics;
-using Magic.Files;
-using Magic.Files.Types;
+using Magic.Assets;
 using Magic.Utils;
 
 namespace Magic.Rendering;

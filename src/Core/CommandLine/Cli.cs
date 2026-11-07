@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.Linq;
+using Magic.Assets;
 using Magic.CommandLine.Commands;
 using Magic.Debugging;
 using Magic.Events;
@@ -19,7 +20,7 @@ internal sealed class Cli
 
     private readonly RootCommand _cliCommands;
 
-    public Cli(App app, IFileSystem files, EventCoordinator events, Assets assets, World world)
+    public Cli(App app, IFileSystem files, EventCoordinator events, AssetManager assets, World world)
     {
         _queue = new CommandQueue(events);
         _cliCommands = CreateCliCommands(app, files, events, assets, world, _queue);
@@ -89,7 +90,7 @@ internal sealed class Cli
         App app,
         IFileSystem files,
         EventCoordinator events,
-        Assets assets,
+        AssetManager assets,
         World world,
         CommandQueue queue
     )

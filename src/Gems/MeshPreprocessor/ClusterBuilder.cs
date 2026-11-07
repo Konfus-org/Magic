@@ -2,8 +2,8 @@ using System.Collections.Immutable;
 using System.Linq;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using Magic.Assets;
 using Magic.Debugging;
-using Magic.Files.Types;
 using Magic.Rendering;
 using static Magic.MeshPreprocessor.meshoptimizer;
 

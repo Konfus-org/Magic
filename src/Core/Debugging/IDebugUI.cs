@@ -1,5 +1,5 @@
 using System.Numerics;
-using Magic.Files.Types;
+using Magic.Assets;
 
 namespace Magic.Debugging;
 

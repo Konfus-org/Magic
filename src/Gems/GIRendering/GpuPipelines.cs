@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
-using Magic.Files;
-using Magic.Files.Types;
+using Magic.Assets;
 using Magic.Gpu;
 using Magic.Shaders;
 using Magic.Utils;
@@ -22,7 +21,7 @@ internal enum PassShaders : byte
 /// The renderer's pipelines: each area declares its passes here as it is made, and they are all compiled together as the
 /// run starts and built for the GPU.
 /// </summary>
-internal sealed class GpuPipelines(IGraphicsApi gpu, IShaderCompiler shaders, Assets assets) : IDisposable
+internal sealed class GpuPipelines(IGraphicsApi gpu, IShaderCompiler shaders, AssetManager assets) : IDisposable
 {
     private const string Folder = "Shaders/";
 

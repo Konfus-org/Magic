@@ -1,6 +1,6 @@
 using System.Linq;
+using Magic.Assets;
 using Magic.Debugging;
-using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Utils;
 using Vortice.Vulkan;

@@ -2,12 +2,11 @@ using System.Collections.Immutable;
 using System.Linq;
 using System.Numerics;
 using System.Threading.Channels;
+using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Events;
-using Magic.Files;
-using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Input;
 using Magic.Projects;
@@ -36,7 +35,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private const float ExposureAtSun = 4;
 
     private readonly IGraphicsApi _gpu;
-    private readonly Assets _assets;
+    private readonly AssetManager _assets;
     private readonly IEcs _ecs;
     private readonly App _app;
     private readonly EventCoordinator _events;
@@ -91,7 +90,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     public GIRenderingGem(
         IGraphicsApi gpu,
         IShaderCompiler shaders,
-        Assets assets,
+        AssetManager assets,
         IMeshPreprocessor meshes,
         IEcs ecs,
         Threads threads,

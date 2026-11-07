@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 using System.Numerics;
-using Magic.Files.Types;
+using Magic.Assets;
 using Magic.Rendering;
 
 namespace Magic.MeshPreprocessor;

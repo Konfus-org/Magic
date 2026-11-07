@@ -12,7 +12,7 @@ Write the engine as data flowing through functions, not objects calling each oth
 - **Databases:** one place that holds state and does little else, such as the assets' database and the ECS's columns.
 - **Services:** what you call, such as `world.Create` and `assets.Find`.
 - **Steps:** work done in an order, as named methods that take values and return values. `Program` and
-  `Assets.RunImportAsync` read this way.
+  `AssetManager.RunImportAsync` read this way.
 
 - **Nothing glued in.** Just about everything is a gem that can be swapped out.
 - **Direct calls, not webs.** Data moves A â†’ B â†’ C, and the whole flow reads top to bottom in one place. Call a thing by
@@ -198,7 +198,7 @@ built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
 
 ### Naming
 
-- A name reads well as `Class.Member(arguments)`: `Assets.Find<Texture>(path)`, `App.Exit()`. Action first,
+- A name reads well as `Class.Member(arguments)`: `AssetManager.Find<Texture>(path)`, `App.Exit()`. Action first,
   subject second (`ReadDomain`), naming what it acts on even if that's longer. If it doesn't make sense without its
   summary (`Process()`, `_scratch`), rename it.
 - Each verb means one thing:
@@ -266,7 +266,7 @@ All code runs on Windows, Linux and macOS.
 
 - **Paths.** Build them with `IFileSystem.Combine` and split them with `IFileSystem.GetParent`; never touch separators.
   `Path.GetExtension`, `Path.GetFileName*` and `Path.ChangeExtension` are fine. No drive letters, absolute paths or
-  checks for `..`. An asset path is relative to its root and uses `/`; only `Assets` turns it into an OS path.
+  checks for `..`. An asset path is relative to its root and uses `/`; only `AssetManager` turns it into an OS path.
 - **Case.** File names in code, assets, `#include`s, csproj and `.meta` files match the disk exactly. Two files never
   differ only by case.
 - **Disk.** All disk access goes through `IFileSystem`, never `File` or `Directory`; only `Debugging` is exempt. Engine

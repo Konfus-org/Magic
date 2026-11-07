@@ -1,8 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
+using Magic.Assets;
 using Magic.Debugging;
-using Magic.Files;
-using Magic.Files.Types;
 using Magic.Input;
 using Magic.Platform;
 using Magic.Projects;
@@ -57,7 +56,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
 
     private readonly Threads _threads;
 
-    private readonly Assets _assets;
+    private readonly AssetManager _assets;
 
     private readonly unsafe SDL_Window* _window;
 
@@ -84,7 +83,7 @@ public sealed class SdlPlatformGem : IGem, IWindow, IClipboard, IInput, IDisposa
 
     private string _text = string.Empty;
 
-    public unsafe SdlPlatformGem(App app, Threads threads, Assets assets)
+    public unsafe SdlPlatformGem(App app, Threads threads, AssetManager assets)
     {
         _app = app;
         _threads = threads;

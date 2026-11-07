@@ -1,6 +1,6 @@
 using System.CommandLine;
+using Magic.Assets;
 using Magic.Debugging;
-using Magic.Files;
 
 namespace Magic.CommandLine.Commands;
 
@@ -10,7 +10,7 @@ namespace Magic.CommandLine.Commands;
 /// </summary>
 internal static class BakeCommand
 {
-    public static Command Create(App app, Assets assets, CommandQueue queue)
+    public static Command Create(App app, AssetManager assets, CommandQueue queue)
     {
         Command bake = new("bake", "Opens every domain under Domains/ in turn, so their caches are made, then exits");
         bake.SetAction(_ => Bake());

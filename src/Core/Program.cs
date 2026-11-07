@@ -1,5 +1,6 @@
 using System.Diagnostics.Metrics;
 using System.Runtime;
+using Magic.Assets;
 using Magic.CommandLine;
 using Magic.Debugging;
 using Magic.Events;
@@ -55,7 +56,7 @@ internal static class Program
             EventCoordinator events = new();
             Threads threads = new();
             Caches caches = new(files, app);
-            using Assets assets = new(files, caches, events, app);
+            using AssetManager assets = new(files, caches, events, app);
             using World world = new(assets, files, events, threads, app);
             Cli cli = new(app, files, events, assets, world);
 

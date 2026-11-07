@@ -1,6 +1,5 @@
+using Magic.Assets;
 using Magic.Debugging;
-using Magic.Files;
-using Magic.Files.Types;
 using Magic.Gpu;
 using Magic.Projects;
 using Magic.Rendering;
@@ -40,7 +39,7 @@ public sealed class GpuChecksGem : IGem, IDisposable
     /// </summary>
     private (uint X, uint Y)? _groups;
 
-    public GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, Assets assets, Threads threads)
+    public GpuChecksGem(IGraphicsApi gpu, IShaderCompiler shaders, AssetManager assets, Threads threads)
     {
         _gpu = gpu;
         _check = CheckAsync(shaders, assets, threads);
@@ -87,7 +86,7 @@ public sealed class GpuChecksGem : IGem, IDisposable
         _recorded.SetResult();
     }
 
-    private async Task CheckAsync(IShaderCompiler shaders, Assets assets, Threads threads)
+    private async Task CheckAsync(IShaderCompiler shaders, AssetManager assets, Threads threads)
     {
         // Compile the entry on a worker.
         Handle<Shader> shader = assets.Find<Shader>(ShaderPath);
