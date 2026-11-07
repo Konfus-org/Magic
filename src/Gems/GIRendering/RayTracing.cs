@@ -7,69 +7,43 @@ namespace Magic.GIRendering;
 
 /// <summary>
 /// The top-level acceleration structure over the instances, on a GPU that traces rays: an instance row for every
-/// instance whose model has its triangles' structure, built again whenever an instance or a model changed, what
-/// a ray query traces through.
+/// instance whose model has its triangles' structure, built again when the instances change, what a ray query traces
+/// through.
 /// </summary>
-internal sealed class RayTracing(IGraphicsApi gpu) : IDisposable
+internal sealed class RayTracing(IGraphicsApi gpu, GpuResources resources)
 {
     private readonly GpuAccelerationInstance[] _rows = new GpuAccelerationInstance[InstanceTable.Capacity];
-    private GpuBuffer _instances;
-    private GpuAcceleration _acceleration;
-    private int _count;
-    private bool _isBuilt;
 
     /// <summary>
-    /// The structure the frame traces through; none until it holds an instance.
+    /// The structure the last build left, what the frame traces through; none while it holds no instance.
     /// </summary>
-    public GpuAcceleration Acceleration => _isBuilt ? _acceleration : GpuAcceleration.None;
+    public GpuAcceleration Acceleration { get; private set; }
 
-    public void Dispose()
+    /// <summary>
+    /// The structure and its instances asked for, and the structure built again over the instances, in a transfer pass
+    /// the caller opened after the models' structures were uploaded.
+    /// </summary>
+    public Result Build(RenderGraph graph, ReadOnlySpan<GpuInstance> rows, ReadOnlySpan<InstanceExtra> extras)
     {
-        gpu.Destroy(_acceleration);
-        gpu.Destroy(_instances);
-    }
-
-    public Result Create()
-    {
-        Result<GpuBuffer> instances = gpu.CreateBuffer(
+        Result<GpuBuffer> instances = resources.TryGetBuffer(
             "Acceleration instances",
             (long)InstanceTable.Capacity * GpuAccelerationInstance.Bytes
         );
         if (!instances.Ok)
             return Result.Failure(instances.Error);
 
-        _instances = instances.Value;
-        Result<GpuAcceleration> acceleration = gpu.CreateAcceleration(
+        Result<GpuAcceleration> acceleration = resources.TryGetAcceleration(
             new TopLevelDescription
             {
                 MaxInstances = InstanceTable.Capacity,
-                Instances = _instances,
+                Instances = instances.Value,
                 Name = "World acceleration",
             }
         );
         if (!acceleration.Ok)
-            return Result.Failure($"the world's acceleration structure was not made: {acceleration.Error}");
+            return Result.Failure(acceleration.Error);
 
-        _acceleration = acceleration.Value;
-
-        return Result.Success();
-    }
-
-    /// <summary>
-    /// The structure built again over the instances when any changed, in a transfer pass the caller opened after
-    /// the instance table and the models' structures were uploaded.
-    /// </summary>
-    public void Prepare(
-        RenderGraph graph,
-        ReadOnlySpan<GpuInstance> rows,
-        ReadOnlySpan<InstanceExtra> extras,
-        bool hasChanges
-    )
-    {
-        if (!hasChanges && _isBuilt)
-            return;
-
-        _count = 0;
+        int count = 0;
         for (int i = 0; i < rows.Length; i++)
         {
             GpuInstance row = rows[i];
@@ -78,7 +52,7 @@ internal sealed class RayTracing(IGraphicsApi gpu) : IDisposable
                 continue;
 
             Matrix4x4 world = row.World;
-            _rows[_count++] = new GpuAccelerationInstance
+            _rows[count++] = new GpuAccelerationInstance
             {
                 Row0 = new(world.M11, world.M21, world.M31, world.M41),
                 Row1 = new(world.M12, world.M22, world.M32, world.M42),
@@ -89,12 +63,14 @@ internal sealed class RayTracing(IGraphicsApi gpu) : IDisposable
             };
         }
 
-        _isBuilt = _count > 0;
-        if (!_isBuilt)
-            return;
+        Acceleration = count == 0 ? GpuAcceleration.None : acceleration.Value;
+        if (count == 0)
+            return Result.Success();
 
-        graph.Upload(gpu, _instances, _rows.AsSpan(0, _count));
-        graph.BuildAcceleration(_acceleration, (uint)_count);
+        graph.Upload(gpu, instances.Value, _rows.AsSpan(0, count));
+        graph.BuildAcceleration(acceleration.Value, (uint)count);
+
+        return Result.Success();
     }
 }
 

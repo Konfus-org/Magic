@@ -32,7 +32,7 @@ public static class Log
             // Always log the verbosity change, even if it is the same as before, so that the log shows what was requested.
             field =
                 value;
-            Write(LoggingLevel.Info, $"Verbosity set to {value}", nameof(Verbosity), string.Empty, 0);
+            Write(LoggingLevel.Info, $"Verbosity set to {value}", nameof(Verbosity), string.Empty, 0, false);
         }
     } = VerbosityLevel.Normal;
 
@@ -52,40 +52,46 @@ public static class Log
     )
     {
         if (Verbosity >= VerbosityLevel.Detailed)
-            Write(LoggingLevel.Verbose, message, member, file, line);
+            Write(LoggingLevel.Verbose, message, member, file, line, false);
     }
 
+    /// <summary>
+    /// What happened, as it goes. With <paramref name="onScreen"/>, the debug UI shows it on screen for a while too.
+    /// </summary>
     public static void Info(
         string message,
+        bool onScreen = false,
         [CallerMemberName] string member = "",
         [CallerFilePath] string file = "",
         [CallerLineNumber] int line = 0
     )
     {
         if (Verbosity >= VerbosityLevel.Normal)
-            Write(LoggingLevel.Info, message, member, file, line);
+            Write(LoggingLevel.Info, message, member, file, line, onScreen);
     }
 
     /// <summary>
-    /// Something works, only worse.
+    /// Something works, only worse. With <paramref name="onScreen"/>, the debug UI shows it on screen for a while too.
     /// </summary>
     public static void Warn(
         string message,
+        bool onScreen = false,
         [CallerMemberName] string member = "",
         [CallerFilePath] string file = "",
         [CallerLineNumber] int line = 0
     )
     {
         if (Verbosity >= VerbosityLevel.Minimal)
-            Write(LoggingLevel.Warn, message, member, file, line);
+            Write(LoggingLevel.Warn, message, member, file, line, onScreen);
     }
 
     /// <summary>
     /// Something failed: what it was is skipped or stood in for, and the frame goes on. Counted as an error at any
-    /// verbosity.
+    /// verbosity. With <paramref name="onScreen"/>, the debug UI shows it on screen for a while too.
     /// </summary>
     public static void Error(
         string message,
+        bool onScreen = false,
         [CallerMemberName] string member = "",
         [CallerFilePath] string file = "",
         [CallerLineNumber] int line = 0
@@ -93,7 +99,7 @@ public static class Log
     {
         Interlocked.Increment(ref _errorCount);
         if (Verbosity >= VerbosityLevel.Minimal)
-            Write(LoggingLevel.Error, message, member, file, line);
+            Write(LoggingLevel.Error, message, member, file, line, onScreen);
     }
 
     /// <summary>
@@ -108,7 +114,7 @@ public static class Log
     )
     {
         Interlocked.Increment(ref _errorCount);
-        Write(LoggingLevel.Critical, message, member, file, line);
+        Write(LoggingLevel.Critical, message, member, file, line, false);
     }
 
     /// <summary>
@@ -182,9 +188,18 @@ public static class Log
         "RS0030:Do not use banned APIs",
         Justification = "We always write to the console as our default log sink."
     )]
-    private static void Write(LoggingLevel level, string message, string member, string file, int line)
+    private static void Write(LoggingLevel level, string message, string member, string file, int line, bool onScreen)
     {
-        Line logged = new(DateTime.Now, level, message, Environment.CurrentManagedThreadId, file, line, member);
+        Line logged = new(
+            DateTime.Now,
+            level,
+            message,
+            Environment.CurrentManagedThreadId,
+            file,
+            line,
+            member,
+            onScreen
+        );
         lock (_lock)
         {
             if (_history.Count == HistorySize)
@@ -262,7 +277,8 @@ public static class Log
         int ThreadId,
         string CallerFile,
         int CallerFileLineNumber,
-        string CallerMemberName
+        string CallerMemberName,
+        bool IsOnScreen
     )
     {
         public override string ToString() =>

@@ -6,8 +6,7 @@ using Magic.Utils;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// The renderer's buffers and textures made in one line each, the result naming what was not made, and a buffer filled
-/// in one line.
+/// The renderer's buffers made in one line each, the result naming what was not made, and a buffer filled in one line.
 /// </summary>
 internal static class GpuExtensions
 {
@@ -45,30 +44,6 @@ internal static class GpuExtensions
             );
 
             return buffer.Ok ? buffer : Result.Failure($"the {name} was not made: {buffer.Error}");
-        }
-
-        public Result<GpuTexture> CreateTexture(
-            string name,
-            int width,
-            int height,
-            GpuFormat format,
-            TextureUsages usage = TextureUsages.Storage | TextureUsages.Sampled,
-            int levels = 1
-        )
-        {
-            Result<GpuTexture> texture = gpu.CreateTexture(
-                new TextureDescription
-                {
-                    Width = width,
-                    Height = height,
-                    Format = format,
-                    Usage = usage,
-                    Levels = levels,
-                    Name = name,
-                }
-            );
-
-            return texture.Ok ? texture : Result.Failure($"the {name} was not made: {texture.Error}");
         }
     }
 }

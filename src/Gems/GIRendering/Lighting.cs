@@ -3,24 +3,15 @@ using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Files.Types;
 using Magic.Gpu;
-using Magic.Rendering;
 using Magic.Utils;
 
 namespace Magic.GIRendering;
 
 /// <summary>
 /// The view's surfaces lit into the HDR picture, and the sky drawn where nothing was: the lighting constants, naming
-/// the sky's tables, the lights and the shadow mask, which it fills before the view is drawn; then the sky's tables
-/// made again while there is a sky, each tile's lights, each pixel's shadows on a GPU that traces rays, and the
-/// shading.
+/// the sky's tables, the lights and the shadow mask, uploaded before the view is drawn, and the shading after them.
 /// </summary>
-internal sealed class Lighting(
-    IGraphicsApi gpu,
-    GpuPipelines pipelines,
-    SkyLuts sky,
-    LightTiles lights,
-    ShadowMask? shadows
-) : IDisposable
+internal sealed class Lighting(IGraphicsApi gpu, GpuResources resources, GpuPipelines pipelines)
 {
     private readonly GpuPass _shadePass = pipelines.Compute(
         "Shade surfaces",
@@ -29,48 +20,30 @@ internal sealed class Lighting(
         PassShaders.Atmosphere
     );
 
-    private GpuBuffer _constants;
-    private GpuSampler _sampler;
-    private bool _hasSky;
-
-    public void Dispose()
+    /// <summary>
+    /// The lighting constants asked for and uploaded, in a transfer pass the caller opened, after the sky's tables, the
+    /// lights and, on a GPU that traces rays, the shadow mask were asked for; the buffer they are in.
+    /// </summary>
+    public Result<GpuBuffer> Prepare(
+        in RenderView view,
+        EcsSnapshot<Sky> skies,
+        RenderCamera camera,
+        RenderSun sun,
+        in SkyTables sky,
+        in LightBuffers lights,
+        ShadowBuffers? shadows
+    )
     {
-        gpu.Destroy(_constants);
-        gpu.Destroy(_sampler);
-    }
+        Result<GpuBuffer> made = resources.TryGetBuffer("Lighting constants", LightingConstants.Bytes);
+        if (!made.Ok)
+            return made;
 
-    public Result Create()
-    {
-        Result<GpuBuffer> constants = gpu.CreateBuffer("Lighting constants", LightingConstants.Bytes);
-        if (!constants.Ok)
-            return Result.Failure(constants.Error);
-
-        _constants = constants.Value;
-        Result<GpuSampler> sampler = gpu.CreateSampler(
+        Result<GpuSampler> sampler = resources.TryGetSampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
         if (!sampler.Ok)
             return Result.Failure($"the lighting sampler was not made: {sampler.Error}");
 
-        _sampler = sampler.Value;
-
-        return Result.Success();
-    }
-
-    /// <summary>
-    /// The frame's constants and shadow denoiser's constants uploaded, in a transfer pass the caller opened, after the
-    /// lights' table.
-    /// </summary>
-    public void Prepare(
-        RenderGraph graph,
-        EcsSnapshot<Sky> skies,
-        RenderCamera camera,
-        RenderSun sun,
-        FrameTargets targets
-    )
-    {
-        _hasSky = skies.Count > 0;
-        shadows?.Prepare(graph);
         LightingConstants constants = new()
         {
             SunIlluminance = new Vector4(sun.Radiance, 0),
@@ -78,9 +51,9 @@ internal sealed class Lighting(
             TransmittanceLut = sky.Transmittance.Id,
             MultiScatteringLut = sky.MultiScattering.Id,
             SkyViewLut = sky.View.Id,
-            LutSampler = _sampler.Id,
-            HasSky = _hasSky ? 1u : 0u,
-            Hdr = targets.Hdr.Id,
+            LutSampler = sampler.Value.Id,
+            HasSky = skies.Count > 0 ? 1u : 0u,
+            Hdr = view.Hdr.Id,
             Lights = lights.Table.Id,
             LightCount = (uint)lights.Count,
             LightTiles = lights.Tiles.Id,
@@ -88,42 +61,43 @@ internal sealed class Lighting(
             TracedShadows = shadows?.Traced.Id ?? 0,
             SunTiles = shadows?.SunTiles.Id ?? 0,
         };
-        graph.Upload(gpu, _constants, in constants);
+        view.Graph.Upload(gpu, made.Value, in constants);
+
+        return made;
     }
 
     /// <summary>
-    /// The view lit: the sky's tables while there is a sky, each tile's lights from the view's depth, each pixel's
-    /// shadows on a GPU that traces rays, then every pixel's surface shaded, and the sky where there is none.
+    /// Every pixel's surface shaded from the sky's tables, its tile's lights and, on a GPU that traces rays, its
+    /// shadows, and the sky where there is none.
     /// </summary>
-    public void Record(in RenderView view)
+    public void Record(
+        in RenderView view,
+        in GpuConstants header,
+        GpuBuffer constants,
+        in SkyTables sky,
+        in LightBuffers lights,
+        ShadowBuffers? shadows
+    )
     {
-        FrameTargets targets = view.Targets;
-        GpuConstants header = new(view.Constants.Id, 0, _constants.Id);
-        if (_hasSky)
-            sky.Record(view.Graph, header, view.Constants, _constants);
-
-        lights.Record(view, header, _constants);
-        shadows?.Record(view, header, _constants);
-
         GpuPassRun shade = _shadePass
             .Run(view.Graph, header)
             .Reads(
                 view.Constants,
-                _constants,
+                constants,
                 sky.Transmittance,
                 sky.MultiScattering,
                 sky.View,
                 lights.Table,
                 lights.Tiles,
-                targets.Visibility,
-                targets.Depth,
-                targets.GBufferNormal,
-                targets.GBufferBase,
-                targets.GBufferSurface
+                view.Visibility,
+                view.Depth,
+                view.GBufferNormal,
+                view.GBufferBase,
+                view.GBufferSurface
             );
-        if (shadows is not null)
-            shade.Reads(shadows.Mask);
+        if (shadows is { } shadowed)
+            shade.Reads(shadowed.Mask);
 
-        shade.Writes(targets.Hdr).DispatchOver(targets.Width, targets.Height);
+        shade.Writes(view.Hdr).DispatchOver(view.Width, view.Height);
     }
 }

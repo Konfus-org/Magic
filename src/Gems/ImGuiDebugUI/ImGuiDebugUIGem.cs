@@ -41,8 +41,8 @@ using static Magic.ImGuiDebugUI.ImTextureStatus;
 namespace Magic.ImGuiDebugUI;
 
 /// <summary>
-/// The debug UI, drawn with Dear ImGui: what gems and scripts report, as lines down the left of the picture and text in the
-/// world, and the windows gems draw with its widgets (<see cref="IDebugUI"/>).
+/// The debug UI, drawn with Dear ImGui: what gems and scripts report, and the lines they log to show on screen, as lines
+/// down the left of the picture and text in the world, and the windows gems draw with its widgets (<see cref="IDebugUI"/>).
 /// <para>
 /// ImGui's frame is the main thread's. <see cref="Update"/> hands ImGui the frame's input and starts its frame, so the
 /// widgets gems made after this one call in their Update go into it; <see cref="LateUpdate"/> draws what is reported, ends
@@ -51,7 +51,7 @@ namespace Magic.ImGuiDebugUI;
 /// nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </para>
 /// </summary>
-public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
+public sealed class ImGuiDebugUIGem : IGem, IDebugUI, ILogSink, IDisposable
 {
     private const int InputBytes = 256;
 
@@ -73,7 +73,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     private const float ScrollableWindowHeight = 18;
 
     /// <summary>
-    /// Seconds a line on screen, or a warning or error in the world, stays when its report does not say.
+    /// Seconds a line logged to show on screen stays.
     /// </summary>
     private const float ReportSec = 5;
 
@@ -261,7 +261,7 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     public unsafe void LateUpdate(in Frame frame)
     {
         if (_depth > 0)
-            Error("A debug UI window was begun and not ended; it is ended for it.", staySec: 0);
+            Text("A debug UI window was begun and not ended; it is ended for it.", _error);
 
         while (_depth > 0)
         {
@@ -295,43 +295,29 @@ public sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     public void Text(string text, Color? color = null) =>
         _reports.Add(new Report(text, ReportKind.Plain, color ?? _white, null, null, 0));
 
-    public void Info(
-        string text,
-        float? staySec = null,
-        [CallerMemberName] string member = "",
-        [CallerFilePath] string file = "",
-        [CallerLineNumber] int line = 0
-    )
+    /// <summary>
+    /// Shows a line logged to show on screen for a while: information counted while it shows, and a warning or an error
+    /// between <c>!!!</c>s. Any thread.
+    /// </summary>
+    public void Write(in Log.Line line)
     {
-        _reports.Add(new Report(text, ReportKind.Counted, _white, null, null, staySec ?? ReportSec));
-        Log.Info(text, member, file, line);
+        if (!line.IsOnScreen)
+            return;
+
+        (ReportKind kind, Color color) = line.Level switch
+        {
+            Log.LoggingLevel.Verbose or Log.LoggingLevel.Info => (ReportKind.Counted, _white),
+            Log.LoggingLevel.Warn => (ReportKind.Alarm, _warning),
+            Log.LoggingLevel.Error or Log.LoggingLevel.Critical => (ReportKind.Alarm, _error),
+            _ => (ReportKind.Counted, _white),
+        };
+        _reports.Add(new Report(line.Message, kind, color, null, null, ReportSec));
     }
 
-    public void Warn(
-        string text,
-        Vector3? position = null,
-        float? staySec = null,
-        string? tooltip = null,
-        [CallerMemberName] string member = "",
-        [CallerFilePath] string file = "",
-        [CallerLineNumber] int line = 0
-    ) =>
-        _reports.Add(
-            new Report(text, ReportKind.Warning, _warning, position, tooltip, staySec ?? ReportSec, member, file, line)
-        );
-
-    public void Error(
-        string text,
-        Vector3? position = null,
-        float? staySec = null,
-        string? tooltip = null,
-        [CallerMemberName] string member = "",
-        [CallerFilePath] string file = "",
-        [CallerLineNumber] int line = 0
-    ) =>
-        _reports.Add(
-            new Report(text, ReportKind.Error, _error, position, tooltip, staySec ?? ReportSec, member, file, line)
-        );
+    /// <summary>
+    /// Nothing: a line shows with the next frame drawn.
+    /// </summary>
+    public void Flush() { }
 
     public unsafe void Begin(string title, bool scrollable = false) => Begin(title, null, scrollable);
 

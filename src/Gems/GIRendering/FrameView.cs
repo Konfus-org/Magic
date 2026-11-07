@@ -6,76 +6,55 @@ using Magic.Utils;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// A view's constants: its matrices, its targets and the frame's tables, remembering last frame's so a thing that moved
-/// carries where it was.
+/// A view: its targets, all the window's size, and its constants, its matrices, its targets and the frame's tables,
+/// remembering last frame's so a thing that moved carries where it was.
 /// </summary>
-internal sealed class FrameView(
-    IGraphicsApi gpu,
-    GeometryPools pools,
-    MaterialTable materials,
-    Visibility visibility,
-    RayTracing? rayTracing
-) : IDisposable
+internal sealed class FrameView(IGraphicsApi gpu, GpuResources resources)
 {
     private const float ErrorThresholdPixels = 1;
     private const float SkyBrightness = 0.3f;
 
-    private GpuSampler _sampler;
-
     /// <summary>
-    /// Last frame's view, while a frame was drawn since the view was last forgotten: what a thing that moved carries
-    /// where it was from, and whether last frame's depth pyramid is there to cull against.
+    /// Last frame's view and its size, while a frame was drawn since the view was last forgotten: what a thing that
+    /// moved carries where it was from, and whether last frame's depth pyramid is there to cull against.
     /// </summary>
-    private (Matrix4x4 ViewProjection, Vector4 CameraPosition)? _previous;
+    private (Matrix4x4 ViewProjection, Vector4 CameraPosition, int Width, int Height)? _previous;
 
     /// <summary>
-    /// The main view's constants.
-    /// </summary>
-    public GpuBuffer Constants { get; private set; }
-
-    public void Dispose()
-    {
-        gpu.Destroy(Constants);
-        gpu.Destroy(_sampler);
-    }
-
-    public Result Create()
-    {
-        Result<GpuSampler> sampler = gpu.CreateSampler(new SamplerDescription { Anisotropy = 8 });
-        if (!sampler.Ok)
-            return Result.Failure($"the default sampler was not made: {sampler.Error}");
-
-        _sampler = sampler.Value;
-        Result<GpuBuffer> constants = gpu.CreateBuffer("Frame constants", FrameConstants.Bytes);
-        if (!constants.Ok)
-            return Result.Failure(constants.Error);
-
-        Constants = constants.Value;
-
-        return Result.Success();
-    }
-
-    /// <summary>
-    /// Forgets the last frame's camera and depth pyramid, so the next frame moves nothing on from where a view that is
-    /// gone looked, and culls against no pyramid of it.
+    /// Forgets the last frame's camera, depth pyramid and shadows, so the next frame moves nothing on from where a view
+    /// that is gone looked, culls against no pyramid of it and blends no shadows of it.
     /// </summary>
     public void ClearHistory() => _previous = null;
 
     /// <summary>
-    /// The main view's constants, the camera, the sun and the frame's resources, copied into <see cref="Constants"/>
-    /// in a transfer pass the caller opened.
+    /// The main view at a size, its targets asked for, and its constants, the camera, the sun and the frame's
+    /// resources, copied in a transfer pass the caller opened: the instance and material tables, the cull's buffers and
+    /// the world's acceleration structure, which the caller asked for before.
     /// </summary>
-    public void Upload(
+    public Result<RenderView> Upload(
         RenderGraph graph,
         RenderCamera camera,
         RenderSun sun,
         uint frameIndex,
-        FrameTargets targets,
+        int width,
+        int height,
+        int instanceCount,
         GpuBuffer instances,
-        int instanceCount
+        GpuBuffer materials,
+        in CullBuffers cull,
+        GpuAcceleration acceleration
     )
     {
-        float aspect = (float)targets.Width / targets.Height;
+        Result<GpuSampler> sampler = resources.TryGetSampler(new SamplerDescription { Anisotropy = 8 });
+        if (!sampler.Ok)
+            return Result.Failure($"the default sampler was not made: {sampler.Error}");
+
+        Result<RenderView> made = TryGetView(graph, width, height, instanceCount, instances, materials, cull);
+        if (!made.Ok)
+            return made;
+
+        RenderView targets = made.Value;
+        float aspect = (float)width / height;
         Matrix4x4.Invert(Matrix4x4.CreateFromQuaternion(camera.Transform.Rotation), out Matrix4x4 view);
         Matrix4x4 projection = CreatePerspective(camera.FieldOfView, aspect, camera.Near);
         Matrix4x4 viewProjection = view * projection;
@@ -87,23 +66,23 @@ internal sealed class FrameView(
             ViewProjection = viewProjection,
             InverseViewProjection = inverse,
             CameraPosition = new Vector4(camera.Transform.Position, 0),
-            Width = (uint)targets.Width,
-            Height = (uint)targets.Height,
+            Width = (uint)width,
+            Height = (uint)height,
             HzbLevels = (uint)targets.HzbLevels,
             Near = camera.Near,
             InstanceCount = (uint)instanceCount,
             MaxVisibleClusters = Visibility.MaxVisibleClusters,
-            DefaultSampler = _sampler.Id,
+            DefaultSampler = sampler.Value.Id,
             Instances = instances.Id,
-            Clusters = pools.Clusters.Id,
-            Vertices = pools.Vertices.Id,
-            Indices = pools.Indices.Id,
-            Materials = materials.Buffer.Id,
-            VisibleClusters = visibility.VisibleClusters.Id,
-            DrawArguments = visibility.DrawArguments.Id,
-            Counts = visibility.Counts.Id,
-            RetestList = visibility.RetestList.Id,
-            RetestArguments = visibility.RetestArguments.Id,
+            Clusters = resources.ClusterPool.Id,
+            Vertices = resources.VertexPool.Id,
+            Indices = resources.IndexPool.Id,
+            Materials = materials.Id,
+            VisibleClusters = cull.VisibleClusters.Id,
+            DrawArguments = cull.DrawArguments.Id,
+            Counts = cull.Counts.Id,
+            RetestList = cull.RetestList.Id,
+            RetestArguments = cull.RetestArguments.Id,
             Hzb = targets.Hzb.Id,
             Visibility = targets.Visibility.Id,
             Depth = targets.Depth.Id,
@@ -115,12 +94,12 @@ internal sealed class FrameView(
             SunDirection = new Vector4(sun.Direction, 0),
             SunRadiance = new Vector4(sun.Radiance, 0),
             SkyRadiance = new Vector4(SkyBrightness * 0.8f, SkyBrightness * 0.9f, SkyBrightness, 0),
-            HasHzb = _previous is null ? 0u : 1u,
-            PixelsPerRadian = targets.Height / (2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360)),
+            HasHzb = targets.HasHistory ? 1u : 0u,
+            PixelsPerRadian = height / (2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360)),
             ErrorThreshold = ErrorThresholdPixels,
             FrameIndex = frameIndex,
-            Acceleration = rayTracing?.Acceleration.Id ?? 0,
-            LeafClusters = pools.LeafClusters.Id,
+            Acceleration = acceleration.Id,
+            LeafClusters = resources.LeafClusters.Id,
         };
 
         // The frustum's planes from the view-projection, for row vectors: each a column added to or taken from the
@@ -137,13 +116,16 @@ internal sealed class FrameView(
         frame.FrustumPlane4 = Normalize(c3 - c2);
         frame.FrustumPlane5 = Normalize(c2);
 
-        // Where the view was last frame, or where it is now when no frame was drawn since it was forgotten.
-        (Matrix4x4 ViewProjection, Vector4 CameraPosition) previous =
-            _previous ?? (viewProjection, frame.CameraPosition);
-        frame.PreviousViewProjection = previous.ViewProjection;
-        frame.PreviousCameraPosition = previous.CameraPosition;
-        _previous = (viewProjection, frame.CameraPosition);
-        graph.Upload(gpu, Constants, in frame);
+        // Where the view was last frame, or where it is now when no frame was drawn at this size since it was
+        // forgotten.
+        (frame.PreviousViewProjection, frame.PreviousCameraPosition) =
+            _previous is { } last && targets.HasHistory
+                ? (last.ViewProjection, last.CameraPosition)
+                : (viewProjection, frame.CameraPosition);
+        _previous = (viewProjection, frame.CameraPosition, width, height);
+        graph.Upload(gpu, targets.Constants, in frame);
+
+        return made;
     }
 
     /// <summary>
@@ -170,5 +152,86 @@ internal sealed class FrameView(
         projection.M43 = near;
 
         return projection;
+    }
+
+    /// <summary>
+    /// The view's constants and targets at a size, each asked for, beside the frame's tables. It has history while the
+    /// last frame drew it at this size: targets made again at another hold nothing of it.
+    /// </summary>
+    private Result<RenderView> TryGetView(
+        RenderGraph graph,
+        int width,
+        int height,
+        int instanceCount,
+        GpuBuffer instances,
+        GpuBuffer materials,
+        in CullBuffers cull
+    )
+    {
+        Result<GpuBuffer> constants = resources.TryGetBuffer("Frame constants", FrameConstants.Bytes);
+        Result<GpuTexture> visibilityBuffer = resources.TryGetTexture(
+            "Visibility",
+            width,
+            height,
+            GpuFormat.R32Uint,
+            TextureUsages.ColorTarget | TextureUsages.Sampled
+        );
+        Result<GpuTexture> depth = resources.TryGetTexture(
+            "Depth",
+            width,
+            height,
+            GpuFormat.D32Sfloat,
+            TextureUsages.DepthTarget | TextureUsages.Sampled
+        );
+        Result<GpuTexture> hzb = resources.TryGetTexture(
+            "Depth pyramid",
+            width,
+            height,
+            GpuFormat.R32Sfloat,
+            levels: TextureDescription.GetFullLevels(width, height)
+        );
+        Result<GpuTexture> normal = resources.TryGetTexture("GBuffer normal", width, height, GpuFormat.R16G16Unorm);
+        Result<GpuTexture> baseColor = resources.TryGetTexture("GBuffer base", width, height, GpuFormat.R8G8B8A8Unorm);
+        Result<GpuTexture> surface = resources.TryGetTexture("GBuffer surface", width, height, GpuFormat.R8G8B8A8Unorm);
+        Result<GpuTexture> velocity = resources.TryGetTexture("Velocity", width, height, GpuFormat.R16G16B16A16Sfloat);
+        Result<GpuTexture> hdr = resources.TryGetTexture("HDR", width, height, GpuFormat.R16G16B16A16Sfloat);
+        Result<GpuTexture> output = resources.TryGetTexture(
+            "Output",
+            width,
+            height,
+            GpuFormat.R8G8B8A8Unorm,
+            TextureUsages.Storage | TextureUsages.ColorTarget | TextureUsages.CopySource
+        );
+        foreach (
+            Result asked in (ReadOnlySpan<Result>)
+                [constants, visibilityBuffer, depth, hzb, normal, baseColor, surface, velocity, hdr, output]
+        )
+        {
+            if (!asked.Ok)
+                return Result.Failure(asked.Error);
+        }
+
+        return Result.Success(
+            new RenderView(
+                constants.Value,
+                instances,
+                materials,
+                instanceCount,
+                cull,
+                width,
+                height,
+                HasHistory: _previous is { } last && last.Width == width && last.Height == height,
+                visibilityBuffer.Value,
+                depth.Value,
+                hzb.Value,
+                normal.Value,
+                baseColor.Value,
+                surface.Value,
+                velocity.Value,
+                hdr.Value,
+                output.Value,
+                graph
+            )
+        );
     }
 }

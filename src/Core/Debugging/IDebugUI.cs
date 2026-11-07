@@ -1,5 +1,4 @@
 using System.Numerics;
-using System.Runtime.CompilerServices;
 using Magic.Files.Types;
 
 namespace Magic.Debugging;
@@ -8,10 +7,10 @@ namespace Magic.Debugging;
 /// What a gem or script shows the developer while the game runs, provided by a UI gem, which decides how it looks and
 /// when it shows.
 /// <para>
-/// What is reported (<c>Text</c>, <see cref="Info"/>, <see cref="Warn"/>, <see cref="Error"/>) shows for a while, over
-/// the game and outside any window: a few words at a place in the world, or a line on screen. Report it from any thread;
-/// it shows with the next frame drawn. Info, Warn and Error are logged through <see cref="Log"/> too, whether anything
-/// shows or not. Reporting the same text at the same place again while it shows keeps it up rather than adding another.
+/// What is reported with <c>Text</c>, and what <see cref="Log"/> is told to show on screen, shows over the game and
+/// outside any window: a few words at a place in the world, or a line on screen. Report it from any thread; it shows with
+/// the next frame drawn. Reporting the same text at the same place again while it shows keeps it up rather than adding
+/// another.
 /// </para>
 /// <para>
 /// Windows are drawn with the widgets, <see cref="Begin(string, bool)"/> to <see cref="MenuItem"/>, in immediate mode:
@@ -40,47 +39,6 @@ public interface IDebugUI
     /// above the lines shown for a while: call it every frame it should show. Never logged.
     /// </summary>
     void Text(string text, Color? color = null);
-
-    /// <summary>
-    /// A line on screen for <paramref name="staySec"/>, null for the UI's own time, logged as information. The same line
-    /// again while it shows is one line, with how often.
-    /// </summary>
-    void Info(
-        string text,
-        float? staySec = null,
-        [CallerMemberName] string member = "",
-        [CallerFilePath] string file = "",
-        [CallerLineNumber] int line = 0
-    );
-
-    /// <summary>
-    /// A warning: at <paramref name="position"/> in the world, or a line on screen without one. It stays
-    /// <paramref name="staySec"/> after it was last reported (null for the UI's own time, 0 for only while it is reported
-    /// every frame), and is logged as a warning when it appears, not again while it stays. <paramref name="tooltip"/>
-    /// shows while the mouse rests on it.
-    /// </summary>
-    void Warn(
-        string text,
-        Vector3? position = null,
-        float? staySec = null,
-        string? tooltip = null,
-        [CallerMemberName] string member = "",
-        [CallerFilePath] string file = "",
-        [CallerLineNumber] int line = 0
-    );
-
-    /// <summary>
-    /// <see cref="Warn"/> for an error, logged as an error.
-    /// </summary>
-    void Error(
-        string text,
-        Vector3? position = null,
-        float? staySec = null,
-        string? tooltip = null,
-        [CallerMemberName] string member = "",
-        [CallerFilePath] string file = "",
-        [CallerLineNumber] int line = 0
-    );
 
     /// <summary>
     /// Opens a movable window titled <paramref name="title"/>, and what is drawn until <see cref="End"/> goes in it.
