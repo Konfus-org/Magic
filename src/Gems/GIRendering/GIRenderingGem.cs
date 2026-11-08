@@ -308,7 +308,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         if (_shadowMask is not null && shadows is { } shadowed)
             _shadowMask.Record(view, header, lighting, lights, shadowed);
 
-        _lighting.Record(view, header, lighting, sky, lights, shadows);
+        _lighting.Record(view, header, lighting, sky, lights, shadows, probes);
         _temporal.Record(view);
 
         // The air's effects before the picture's, so a post effect works on the fogged picture.

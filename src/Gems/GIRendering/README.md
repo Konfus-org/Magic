@@ -38,8 +38,10 @@ texture reader.
   frame its probes trace rays, more of them where their light still changes and in view, each lit where it lands by
   one light picked at random, the sun among them, by the sky where it hits nothing, and by the probes themselves. Each
   probe blends them into the light it holds from each direction and how far it sees, and moves away from a surface
-  it is too near. Nothing is shaded with it yet; the `probes` debug view draws each probe as a sphere of its light. A
-  ray reads the material it lands on averaged over its whole texture.
+  it is too near. A surface's diffuse light from around it is the probes' near it that see it, in place of the open
+  sky's, so shadowed places get the light that bounces into them and a closed room none of the sky's; its mirror
+  reflection is still the sky's. The `probes` debug view draws each probe as a sphere of its light. A ray reads the
+  material it lands on averaged over its whole texture.
 - The first `Weather`'s effects, such as the fog, and then the first `PostProcessing`'s run over the lit picture in
   order, before the output: each is a material whose shader implements the pixel effect contract, with params of its
   own as a surface material's are. An effect shows once its material and its pass are built, and not while either
