@@ -33,10 +33,11 @@ texture reader.
 - Shadows are traced one ray a pixel and light, then denoised. The sun's are smoothed over frames and across the
   screen. The tile lights' are only smoothed over frames, so their soft edges stay grainy, and one can trail for a moment
   where a tile's lights change.
-- The first `PostProcessing`'s effects run over the lit picture in order, before the output: each is a material whose
-  shader implements the pixel effect contract, with params of its own as a surface material's are. An effect shows
-  once its material and its pass are built, and not while either loads or when one failed.
-- Fog and glass aren't drawn yet: a glass material draws as an opaque one.
+- The first `Weather`'s effects, such as the fog, and then the first `PostProcessing`'s run over the lit picture in
+  order, before the output: each is a material whose shader implements the pixel effect contract, with params of its
+  own as a surface material's are. An effect shows once its material and its pass are built, and not while either
+  loads or when one failed. The fog is lit by the sun and the sky alone, unshadowed.
+- Glass isn't drawn yet: a glass material draws as an opaque one.
 
 ## Settings
 

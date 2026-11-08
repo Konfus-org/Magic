@@ -58,7 +58,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly LightTiles _lightTiles;
     private readonly ShadowMask? _shadowMask;
     private readonly Lighting _lighting;
-    private readonly PostEffects _postEffects;
+    private readonly PixelEffects _pixelEffects;
     private readonly SurfaceView _surfaceView;
     private readonly RendererDebugWindow? _debugWindow;
 
@@ -131,7 +131,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _lightTiles = new LightTiles(assets);
         _shadowMask = _rayTracing is null ? null : new ShadowMask(assets, _resources);
         _lighting = new Lighting(assets);
-        _postEffects = new PostEffects(assets, _resources);
+        _pixelEffects = new PixelEffects(assets, _resources);
         _surfaceView = new SurfaceView(assets);
         _shaders =
         [
@@ -179,6 +179,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _ecs.Snapshot(back.RectLights);
         _ecs.Snapshot(back.Skies);
         _ecs.Snapshot(back.PostProcessing);
+        _ecs.Snapshot(back.Weather);
         back.DebugView = _debugView;
         back.ImpostorPixels = _impostorPixels;
         back.ImpostorDistance = _impostorDistance;
@@ -275,7 +276,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
         // The passes, in the order they run, each reading what the ones before it wrote: what the view sees, the sky's
         // tables while there is a sky, each tile's lights, each pixel's shadows on a GPU that traces rays, the shading,
-        // the first post processing's effects, and the output.
+        // the first weather's effects and the first post processing's, and the output.
         (RenderView view, SkyTables sky, LightBuffers lights, ShadowBuffers? shadows, GpuBuffer lighting) =
             uploaded.Value;
         GpuConstants header = new(view.Constants.Id, 0, lighting.Id);
@@ -288,8 +289,10 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             _shadowMask.Record(view, header, lighting, lights, shadowed);
 
         _lighting.Record(view, header, lighting, sky, lights, shadows);
-        if (inputs.PostProcessing.Count > 0)
-            _postEffects.Record(view, inputs.PostProcessing.First[0].Effects);
+        // The air's effects before the picture's, so a post effect works on the fogged picture.
+        MaterialSlots air = inputs.Weather.Count > 0 ? inputs.Weather.First[0].Effects : default;
+        MaterialSlots picture = inputs.PostProcessing.Count > 0 ? inputs.PostProcessing.First[0].Effects : default;
+        _pixelEffects.Record(view, [air, picture]);
 
         _surfaceView.Record(view, inputs.DebugView, sun.Exposure);
 
