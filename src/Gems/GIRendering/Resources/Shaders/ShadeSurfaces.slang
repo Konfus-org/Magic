@@ -1,8 +1,8 @@
 // Every pixel of the picture lit, into the HDR picture: a surface by the sun through the air, by the local lights its
-// tile lists, each dimmed by the shadow mask, and by the light around it, the probes' where there is a probe grid and
-// else the sky's, its direct and indirect light summed over the shared BRDF; and the sky itself where nothing was drawn.
-// The pass header's x is the frame's constants, y the probe grid's or 0 where there is none, and z the lighting
-// constants.
+// tile lists, each dimmed by the shadow mask, and by the light around it, traced on a GPU that traces rays and else the
+// sky's, its direct and indirect light summed over the shared BRDF; and the sky itself where nothing was drawn. The pass
+// header's x is the frame's constants, z the lighting constants and w the traced diffuse constants, or 0 where there are
+// none.
 module "ShadeSurfaces";
 
 import Core.Heap;
@@ -12,22 +12,29 @@ import Core.Math;
 import Core.Pack;
 import Scene.Lighting;
 import Scene.Lights;
-import Scene.Probes;
 import Scene.Shadows;
+import Scene.TracedDiffuse;
 import Light.Lights;
 import Sky.ISky;
 import Surface.Brdf;
 
-// The light a surface reflects of what reaches it indirectly. The diffuse is what a white diffuse surface reflects, its
-// irradiance over pi: the probes' where there is a grid, which see what shades and bounces the light, else the open
-// sky's over its hemisphere. The specular is the sky along the mirror direction, giving way to the diffuse as it
-// roughens.
+// The light a surface at a pixel reflects of what reaches it indirectly. The diffuse is what a white diffuse surface
+// reflects, its irradiance over pi: the traced light where it was traced, which sees what shades and bounces the light
+// near the surface and the probes' beyond; else the open sky's over its hemisphere. The specular is the sky along the mirror direction, giving way to the diffuse as it roughens.
 float3 GetIndirectLight<S : ISky>(
-    FrameConstants frame, LightingConstants lighting, Brdf brdf, float roughness, float3 world, float3 normal, float3 view)
+    FrameConstants frame,
+    LightingConstants lighting,
+    Brdf brdf,
+    float roughness,
+    uint2 pixel,
+    float3 relative,
+    float3 normal,
+    float3 view
+)
 {
     float3 diffuse;
-    if (GetPassHeader().y != 0u)
-        diffuse = GetProbeIrradiance(GetProbeGrid(), world, normal);
+    if (GetPassHeader().w != 0u)
+        diffuse = SampleTracedDiffuse(frame, GetTracedDiffuse(), pixel, relative, normal);
     else if (lighting.hasSky != 0u)
         diffuse = S.GetAmbient(CreateSkyInputs(frame, lighting, normal, false), normal) * InvPi;
     else
@@ -102,6 +109,6 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
             slot++;
         }
     }
-    color += GetIndirectLight<S>(frame, lighting, brdf, surface.x, world, normal, view) * surface.z;
+    color += GetIndirectLight<S>(frame, lighting, brdf, surface.x, thread.xy, relative, normal, view) * surface.z;
     hdr.Store(thread.xy, float4(color, 1.0));
 }

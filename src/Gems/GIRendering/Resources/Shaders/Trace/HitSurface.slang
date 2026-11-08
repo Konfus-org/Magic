@@ -33,6 +33,16 @@ public struct HitSurface
     public bool isBackface;
 }
 
+// How many pixels' width a ray from a pixel's surface starts off it, beyond a centimetre: the drawn cut of a model's
+// clusters may stand that far from the full detail rays hit.
+static const float RayOffsetPixels = 4.0;
+
+// How far along its normal a ray from a pixel's surface at a camera-relative point starts.
+public float GetRayOffset(FrameConstants frame, float3 relative)
+{
+    return 0.01 + RayOffsetPixels * length(relative) / frame.pixelsPerRadian;
+}
+
 // Whether nothing is in the way along a ray from origin up to a distance.
 public bool CanReach(RaytracingAccelerationStructure world, float3 origin, float3 direction, float distance)
 {
@@ -47,16 +57,42 @@ public bool CanReach(RaytracingAccelerationStructure world, float3 origin, float
     return query.CommittedStatus() == COMMITTED_NOTHING;
 }
 
-// What a query committed to: the instance's row, the leaf as its hit group offset plus its geometry, the triangle in
-// the leaf and the barycentrics of the hit in it, whether it faces the ray, and how far along the ray it is.
+// What a ray landed on first: whether it landed on anything, the instance's row, the leaf as its hit group offset plus
+// its geometry, the triangle in the leaf and the barycentrics of the hit in it, whether it faces the ray, and how far
+// along the ray it is.
 public struct RayHit
 {
+    public bool isHit;
     public uint instance;
     public uint leaf;
     public uint triangle;
     public float2 barycentrics;
     public bool isFrontFace;
     public float distance;
+}
+
+// What a ray from origin along direction lands on first within a distance, with flags such as
+// RAY_FLAG_CULL_BACK_FACING_TRIANGLES added to the query's.
+public RayHit GetClosestHit(
+    RaytracingAccelerationStructure world, float3 origin, float3 direction, float distance, uint flags)
+{
+    RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
+    RayDesc ray;
+    ray.Origin = origin;
+    ray.Direction = direction;
+    ray.TMin = 0.0;
+    ray.TMax = distance;
+    query.TraceRayInline(world, flags, 0xFFu, ray);
+    query.Proceed();
+    RayHit hit;
+    hit.isHit = query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
+    hit.instance = query.CommittedInstanceID();
+    hit.leaf = query.CommittedInstanceContributionToHitGroupIndex() + query.CommittedGeometryIndex();
+    hit.triangle = query.CommittedPrimitiveIndex();
+    hit.barycentrics = query.CommittedTriangleBarycentrics();
+    hit.isFrontFace = query.CommittedTriangleFrontFace();
+    hit.distance = query.CommittedRayT();
+    return hit;
 }
 
 // The surface at a hit of a ray from origin along direction.

@@ -38,10 +38,15 @@ texture reader.
   frame its probes trace rays, more of them where their light still changes and in view, each lit where it lands by
   one light picked at random, the sun among them, by the sky where it hits nothing, and by the probes themselves. Each
   probe blends them into the light it holds from each direction and how far it sees, and moves away from a surface
-  it is too near. A surface's diffuse light from around it is the probes' near it that see it, in place of the open
-  sky's, so shadowed places get the light that bounces into them and a closed room none of the sky's; its mirror
-  reflection is still the sky's. The `probes` debug view draws each probe as a sphere of its light. A ray reads the
+  it is too near. The `probes` debug view draws each probe as a sphere of its light. A ray reads the
   material it lands on averaged over its whole texture.
+- On a GPU that traces rays, a surface's diffuse light from around it is traced, in place of the open sky's: each frame
+  two rays from one pixel of each 2 by 2, reaching 10 m, each lit where it lands by one light picked at random and by
+  the probes, and the probes' light near the pixel that see it where it lands on nothing. It is smoothed over neighbours
+  and over frames, then blurred across the surface where it is still grainy. So shadowed places get the light that
+  bounces into them, a closed room none of the sky's, the base of what stands on the ground darkens and a lit wall
+  tints what is near it; the mirror reflection is still the sky's. The `tracedDiffuse` debug view shows the
+  light it gives a white surface.
 - The first `Weather`'s effects, such as the fog, and then the first `PostProcessing`'s run over the lit picture in
   order, before the exposure is metered and the tonemap: each is a material whose shader implements the pixel effect
   contract, with params of its own as a surface material's are. An effect shows once its material and its pass are
@@ -100,7 +105,9 @@ in turn and exits, so a release ships with the caches full.
   - `Scene/Shadows` is the shadow mask: how much of the sun and of each of its tile's first lights reaches a pixel,
     and the sun's tiles the denoiser reads.
   - `Scene/Probes` is the probe grid: where each probe is, what it holds, and the light a point gets from it.
+  - `Scene/TracedDiffuse` is the traced diffuse light's textures, and how a pixel of the picture reads them.
   - `Light/` is what a local light gives a point: a point, spot or rect light's direction and irradiance there.
-  - `Trace/` is what rays read of the world: whether a ray reaches a point, and the surface one lands on.
+  - `Trace/` is what rays read of the world: whether a ray reaches a point, the surface one lands on, and the light
+    that surface gets from the lights.
 - Parts of the lighting, the temporal anti-aliasing and the exposure meter are adapted from another engine under the
   MIT licence; `THIRD-PARTY-NOTICES.md` holds it.

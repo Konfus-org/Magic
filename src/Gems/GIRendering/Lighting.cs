@@ -11,7 +11,7 @@ namespace Magic.GIRendering;
 /// <summary>
 /// The view's surfaces lit into the HDR picture, and the sky drawn where nothing was: the lighting constants, naming
 /// the sky's tables, the lights and the shadow mask, uploaded before the view is drawn, and the shading after them,
-/// lit indirectly by the probes where there are any.
+/// lit indirectly by the traced diffuse light where there is any.
 /// </summary>
 internal sealed class Lighting(AssetManager assets)
 {
@@ -72,7 +72,7 @@ internal sealed class Lighting(AssetManager assets)
 
     /// <summary>
     /// Every pixel's surface shaded from the sky's tables, its tile's lights and, on a GPU that traces rays, its
-    /// shadows and the probes around it, and the sky where there is none.
+    /// shadows and its traced diffuse light, and the sky where there is none.
     /// </summary>
     public void Record(
         in RenderView view,
@@ -81,11 +81,11 @@ internal sealed class Lighting(AssetManager assets)
         in SkyTables sky,
         in LightBuffers lights,
         ShadowBuffers? shadows,
-        ProbeBuffers? probes
+        TracedDiffuseBuffers? diffuse
     )
     {
         ComputePass shade = view
-            .Graph.Compute("Shade surfaces", _shadeShader, header with { Y = probes?.Constants.Id ?? 0 })
+            .Graph.Compute("Shade surfaces", _shadeShader, header with { W = diffuse?.Constants.Id ?? 0 })
             .Reads(
                 view.Constants,
                 constants,
@@ -103,8 +103,8 @@ internal sealed class Lighting(AssetManager assets)
         if (shadows is { } shadowed)
             shade.Reads(shadowed.Mask);
 
-        if (probes is { } probed)
-            shade.Reads(probed.Constants, probed.Probes, probed.Depth);
+        if (diffuse is { } traced)
+            shade.Reads(traced.Constants, traced.Light);
 
         shade.Writes(view.Hdr).DispatchOver(view.Width, view.Height);
     }

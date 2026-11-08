@@ -20,10 +20,6 @@ import Scene.Shadows;
 import Light.Lights;
 import Trace.HitSurface;
 
-// How many pixels' width a ray starts off its surface, beyond a centimetre: the drawn cut of a model's clusters may
-// stand that far from the full detail rays hit.
-static const float OffsetPixels = 4.0;
-
 // The sun's bits of the group's two tiles, the upper and the lower 8 by 4 pixels.
 groupshared uint groupSunTiles[2];
 
@@ -64,8 +60,7 @@ uint4 Trace(FrameConstants frame, LightingConstants lighting, uint2 pixel)
     // An impostor's pixel has no triangle to lift off.
     float3 lifted = (id & ImpostorFlag) != 0u ? relative : LiftOffTriangle(frame, id, uv, relative);
     float3 world = lifted + frame.cameraPosition.xyz;
-    float offset = 0.01 + OffsetPixels * length(relative) / frame.pixelsPerRadian;
-    float3 origin = world + normal * offset;
+    float3 origin = world + normal * GetRayOffset(frame, relative);
     AccelerationRef acceleration = { frame.acceleration };
     RaytracingAccelerationStructure scene = acceleration.Get();
 

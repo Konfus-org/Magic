@@ -48,6 +48,12 @@ internal enum DebugView : uint
     /// it holds from each direction.
     /// </summary>
     Probes,
+
+    /// <summary>
+    /// On a GPU that traces rays, the traced diffuse light as shading reads it: what a white diffuse surface would
+    /// reflect of the light that reaches it indirectly.
+    /// </summary>
+    TracedDiffuse,
 }
 
 /// <summary>
@@ -60,9 +66,14 @@ internal sealed class SurfaceView(AssetManager assets)
 
     public ImmutableArray<ShaderEntry> Shaders => [_showShader];
 
-    public void Record(in RenderView view, DebugView debugView) =>
-        view
-            .Graph.Compute("Show surface", _showShader, new GpuConstants(view.Constants.Id, (uint)debugView))
+    public void Record(in RenderView view, DebugView debugView, TracedDiffuseBuffers? diffuse)
+    {
+        ComputePass show = view
+            .Graph.Compute(
+                "Show surface",
+                _showShader,
+                new GpuConstants(view.Constants.Id, (uint)debugView, W: diffuse?.Constants.Id ?? 0)
+            )
             .Reads(
                 view.Constants,
                 view.ExposureMeter,
@@ -73,7 +84,10 @@ internal sealed class SurfaceView(AssetManager assets)
                 view.GBufferSurface,
                 view.Velocity,
                 view.Hdr
-            )
-            .Writes(view.Output)
-            .DispatchOver(view.Width, view.Height);
+            );
+        if (diffuse is { } traced)
+            show.Reads(traced.Constants, traced.Light);
+
+        show.Writes(view.Output).DispatchOver(view.Width, view.Height);
+    }
 }

@@ -14,11 +14,10 @@ import Core.Random;
 import Core.Sampling;
 import Scene.Culling;
 import Scene.Lighting;
-import Scene.Lights;
 import Scene.Probes;
-import Light.Lights;
 import Sky.ISky;
 import Trace.HitSurface;
+import Trace.HitLight;
 
 // The rays the trace runs a group of.
 static const uint TraceGroupSize = 64u;
@@ -225,49 +224,6 @@ float3 GetSkyRadiance<S : ISky>(FrameConstants frame, LightingConstants lighting
     return S.Evaluate(CreateSkyInputs(frame, lighting, direction, false));
 }
 
-// The light that reaches a surface from one light picked at random, the sun among them, over pi and times how many
-// there are to pick from, with a ray to say nothing is in the way: what a white diffuse surface reflects of them all,
-// on average.
-float3 GetDirectLight<S : ISky>(
-    FrameConstants frame,
-    LightingConstants lighting,
-    RaytracingAccelerationStructure world,
-    HitSurface surface,
-    uint sample
-)
-{
-    uint lightCount = min(lighting.lightCount, MaxLights);
-    float3 xi = GetRandom(uint2(sample, 0u), frame.frameIndex, 1u);
-    uint picked = min(uint(xi.x * float(lightCount + 1u)), lightCount);
-    float3 origin = surface.position + surface.normal * 0.01;
-    float3 direction;
-    float3 irradiance;
-    float distance;
-    if (picked == lightCount)
-    {
-        float3 toSun = frame.sunDirection.xyz;
-        direction = normalize(ToWorld(CreateBasis(toSun), float3(SampleConcentricDisk(xi.yz) * SunAngularRadius, 1.0)));
-        irradiance = lighting.hasSky != 0u
-            ? S.GetSunIlluminance(CreateSkyInputs(frame, lighting, toSun, false))
-            : lighting.sunIlluminance.rgb;
-        distance = 1e6;
-    }
-    else
-    {
-        GpuLight light = LoadLight(lighting.lights, picked);
-        float3 toTarget = SampleLightPoint(light, surface.position, xi.yz) - origin;
-        distance = length(toTarget) * 0.999;
-        direction = toTarget / max(length(toTarget), Epsilon);
-        irradiance = SampleLight(light, surface.position, surface.normal).irradiance;
-    }
-
-    float cosine = dot(surface.normal, direction);
-    if (cosine <= 0.0 || !CanReach(world, origin, direction, distance))
-        return float3(0.0);
-
-    return float(lightCount + 1u) * irradiance * cosine * InvPi;
-}
-
 // A thread a ray of the list: traced from its probe, it brings back the sky where it hits nothing, and where it hits,
 // what the surface there reflects of the lights and of the probes' light, and gives off.
 [shader("compute")]
@@ -291,36 +247,22 @@ void TraceProbes<S : ISky>(uint3 thread : SV_DispatchThreadID)
 
     AccelerationRef acceleration = { frame.acceleration };
     RaytracingAccelerationStructure world = acceleration.Get();
-    RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
-    RayDesc desc;
-    desc.Origin = origin;
-    desc.Direction = direction;
-    desc.TMin = 0.0;
-    desc.TMax = 1e30;
-    query.TraceRayInline(world, RAY_FLAG_NONE, 0xFFu, desc);
-    query.Proceed();
-
+    RayHit hit = GetClosestHit(world, origin, direction, 1e30, RAY_FLAG_NONE);
     ProbeRay ray;
     ray.direction = direction;
-    if (query.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
+    if (!hit.isHit)
     {
         ray.depth = -1.0;
         ray.radiance = GetSkyRadiance<S>(frame, lighting, direction);
     }
     else
     {
-        RayHit hit;
-        hit.instance = query.CommittedInstanceID();
-        hit.leaf = query.CommittedInstanceContributionToHitGroupIndex() + query.CommittedGeometryIndex();
-        hit.triangle = query.CommittedPrimitiveIndex();
-        hit.barycentrics = query.CommittedTriangleBarycentrics();
-        hit.isFrontFace = query.CommittedTriangleFrontFace();
-        hit.distance = query.CommittedRayT();
         HitSurface surface = LoadHitSurface(frame, hit, origin, direction);
 
         // A ray that reached a back is cut short, so a probe sees the inside closer than it is and doesn't leak it.
         ray.depth = surface.isBackface ? hit.distance * 0.9 : hit.distance;
-        float3 light = GetDirectLight<S>(frame, lighting, world, surface, thread.x);
+        float3 xi = GetRandom(uint2(thread.x, 0u), frame.frameIndex, 1u);
+        float3 light = GetDirectLight<S>(frame, lighting, world, surface, xi);
         if (grid.hasHistory != 0u)
             light += 0.95 * GetProbeIrradiance(grid, surface.position, surface.normal);
 

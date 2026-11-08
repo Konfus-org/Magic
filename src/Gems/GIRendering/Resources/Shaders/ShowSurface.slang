@@ -1,7 +1,8 @@
 // What the output shows: the lit picture at the metered exposure through the tonemap, also under the probes in their
 // view, or each pixel's GBuffer as the view the pass header's y names asks, encoded for the screen, so a roughness of a
-// half reads as a half and an albedo as the colour it is. A GBuffer view is black where nothing was drawn, but for the
-// velocity, which the sky has too.
+// half reads as a half and an albedo as the colour it is, or the traced diffuse light as shading reads it, which a white
+// diffuse surface would reflect, through the tonemap. A GBuffer view is black where nothing was drawn, but for the
+// velocity, which the sky has too. The header's w is the traced diffuse constants, or 0 where there are none.
 module "ShowSurface";
 
 import Core.Heap;
@@ -11,6 +12,7 @@ import Core.Math;
 import Core.Color;
 import Core.Pack;
 import Post.Agx;
+import Scene.TracedDiffuse;
 
 // C#'s DebugView.
 enum SurfaceView : uint
@@ -24,6 +26,7 @@ enum SurfaceView : uint
     Occlusion,
     Velocity,
     Probes,
+    TracedDiffuse,
 }
 
 // How far a depth view reaches, in metres: what is this far away or farther is black.
@@ -59,6 +62,15 @@ float3 GetSurfaceView(FrameConstants frame, SurfaceView view, uint2 pixel)
         return float3(baseTexture.Load(pixel, 0u).a);
     case SurfaceView.Occlusion:
         return float3(surfaceTexture.Load(pixel, 0u).z);
+    case SurfaceView.TracedDiffuse:
+        if (GetPassHeader().w == 0u)
+            return float3(0.0);
+
+        float2 uv = GetTexelCenterUv(pixel, uint2(frame.width, frame.height));
+        float3 relative = ReconstructRelative(frame, uv, depthTexture.Load(pixel, 0u).x);
+        float3 normal = DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0);
+        float3 light = SampleTracedDiffuse(frame, GetTracedDiffuse(), pixel, relative, normal);
+        return ToSrgb(ToAgx(light, GetExposure(frame)));
     default:
         return ToSrgb(baseTexture.Load(pixel, 0u).rgb);
     }

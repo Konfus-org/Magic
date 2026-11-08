@@ -376,6 +376,34 @@ internal record struct ProbeGridConstants
 }
 
 /// <summary>
+/// The heap ids of the traced diffuse light's textures and sampler, the twin of <c>Scene/TracedDiffuse.slang</c>'s.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal record struct TracedDiffuseConstants
+{
+    public const int Bytes = 32;
+
+    public uint Traced;
+
+    public uint Filtered;
+
+    public uint Light;
+
+    public uint Depth;
+
+    public uint LightHistory;
+
+    public uint DepthHistory;
+
+    public uint Sampler;
+
+    /// <summary>
+    /// 0 while the history holds nothing of the view: this frame starts it afresh.
+    /// </summary>
+    public uint HasHistory;
+}
+
+/// <summary>
 /// A vertex as the GPU reads it from the vertex pool, 32 bytes: the twin of <c>Scene/Vertices.slang</c>'s. Normals and
 /// tangents are octahedral, packed as <c>Core/Pack.slang</c> packs them.
 /// </summary>
