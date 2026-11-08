@@ -56,37 +56,62 @@ internal enum DebugView : uint
     TracedDiffuse,
 
     /// <summary>
-    /// What smooth surfaces reflect, as traced and blended over frames at half the size, through the tonemap; black
-    /// where nothing is traced.
+    /// What smooth surfaces reflect, as traced and blended over frames at half the size, finished by the post
+    /// effects; black where nothing is traced.
     /// </summary>
     Reflections,
 }
 
 /// <summary>
-/// The output drawn from the lit picture, at the metered exposure through the tonemap, or from one of the GBuffer's
-/// properties or the traced reflections when a debug view asks.
+/// The output drawn from the picture as its effects finished it, or from one of the GBuffer's properties when a debug
+/// view asks; a view of the traced light alone is first written into the picture, so the effects finish it as they would
+/// the picture.
 /// </summary>
 internal sealed class SurfaceView(AssetManager assets)
 {
+    private readonly ShaderEntry _lightShader = PassShaders.GetEntry(assets, "ShowSurface", "ShowLight");
     private readonly ShaderEntry _showShader = PassShaders.GetEntry(assets, "ShowSurface", "ShowSurface");
 
-    public ImmutableArray<ShaderEntry> Shaders => [_showShader];
+    public ImmutableArray<ShaderEntry> Shaders => [_lightShader, _showShader];
 
     /// <summary>
-    /// The output drawn as the debug view asks, from the traced diffuse light and the traced reflections' light where
-    /// there are any.
+    /// The traced diffuse light or the traced reflections' light written into the picture in place of the lit one, when
+    /// the debug view shows one, black where none was traced.
     /// </summary>
-    public void Record(in RenderView view, DebugView debugView, TracedDiffuseBuffers? diffuse, GpuTexture reflections)
+    public void RecordLight(
+        in RenderView view,
+        DebugView debugView,
+        TracedDiffuseBuffers? diffuse,
+        GpuTexture reflections
+    )
     {
+        if (debugView is not (DebugView.TracedDiffuse or DebugView.Reflections))
+            return;
+
         ComputePass show = view
             .Graph.Compute(
-                "Show surface",
-                _showShader,
+                "Show light",
+                _lightShader,
                 new GpuConstants(view.Constants.Id, (uint)debugView, reflections.Id, diffuse?.Constants.Id ?? 0)
             )
+            .Reads(view.Constants, view.Visibility, view.Depth, view.GBufferNormal);
+        if (diffuse is { } traced)
+            show.Reads(traced.Constants, traced.Light);
+
+        if (!reflections.IsNone)
+            show.Reads(reflections);
+
+        show.Writes(view.Hdr).DispatchOver(view.Width, view.Height);
+    }
+
+    /// <summary>
+    /// The output drawn as the debug view asks.
+    /// </summary>
+    public void Record(in RenderView view, DebugView debugView) =>
+        view
+            .Graph.Compute("Show surface", _showShader, new GpuConstants(view.Constants.Id, (uint)debugView))
             .Reads(
                 view.Constants,
-                view.ExposureMeter,
                 view.Visibility,
                 view.Depth,
                 view.GBufferNormal,
@@ -94,13 +119,7 @@ internal sealed class SurfaceView(AssetManager assets)
                 view.GBufferSurface,
                 view.Velocity,
                 view.Hdr
-            );
-        if (diffuse is { } traced)
-            show.Reads(traced.Constants, traced.Light);
-
-        if (!reflections.IsNone)
-            show.Reads(reflections);
-
-        show.Writes(view.Output).DispatchOver(view.Width, view.Height);
-    }
+            )
+            .Writes(view.Output)
+            .DispatchOver(view.Width, view.Height);
 }

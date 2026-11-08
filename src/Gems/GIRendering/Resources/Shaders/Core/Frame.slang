@@ -85,25 +85,16 @@ public struct FrameConstants
     // The distance in metres to an instance's sphere past which it hands off to its impostor; 0 hands off by size
     // alone.
     public float impostorDistance;
-    // The heap id of the lit picture, in linear light before the exposure.
+    // The heap id of the picture: the lit picture in linear light, until the post effects finish it for the screen.
     public uint hdr;
-    // The heap id of the exposure meter, which MeterExposure writes and GetExposure reads, and the seconds the run has
-    // taken.
-    public uint exposureMeter;
+    // The seconds the run has taken, and since the frame before.
     public float timeSec;
+    public float deltaSec;
     // On a GPU that traces rays: each material row as a ray hit reads it, Trace/HitSurface's GpuHitMaterial.
     public uint hitMaterials;
-    public uint padding3;
 }
 
 public FrameConstants GetFrame() { return LoadConstants<FrameConstants>(); }
-
-// What the picture is multiplied by to land near a middle grey: the meter's first float, as it last metered.
-public float GetExposure(FrameConstants frame)
-{
-    BufferRef meter = { frame.exposureMeter };
-    return meter.Load<float>(0u);
-}
 
 // A world position relative to the camera.
 public float3 Relative(FrameConstants frame, float3 worldPosition) { return worldPosition - frame.cameraPosition.xyz; }

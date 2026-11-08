@@ -121,13 +121,11 @@ internal record struct FrameConstants
 
     public uint Hdr;
 
-    public uint ExposureMeter;
-
     public float TimeSec;
 
-    public uint HitMaterials;
+    public float DeltaSec;
 
-    public uint Padding3;
+    public uint HitMaterials;
 }
 
 /// <summary>

@@ -1,6 +1,9 @@
-// The AgX tonemap (Sobotka, AgX, 2022): linear light scaled by the exposure, through AgX's base curve, which keeps the
-// hue of what is bright as it rolls it off, and back to linear light for the display's encoding.
+// The AgX tonemap (Sobotka, AgX, 2022): the exposed picture through AgX's base curve, which keeps the hue of what is
+// bright as it rolls it off, and back to linear light for the display's encoding. ToAgx is the curve alone, for an
+// effect that wraps it.
 module "Post/Agx";
+
+import Post.IPixelEffect;
 
 // The matrices are written as columns, as the reference lists them, so a row vector goes through them on the left.
 static const float3x3 ToAgxSpace = float3x3(
@@ -18,9 +21,14 @@ static const float3x3 FromAgxSpace = float3x3(
 static const float LeastEv = -12.47393;
 static const float MostEv = 4.026069;
 
-public float3 ToAgx(float3 color, float exposure)
+public struct Agx : IPixelEffect
 {
-    float3 value = mul(max(color * exposure, 1e-10), ToAgxSpace);
+    public float3 Apply(float3 color, PixelEffectInputs inputs) { return ToAgx(color); }
+}
+
+public float3 ToAgx(float3 color)
+{
+    float3 value = mul(max(color, 1e-10), ToAgxSpace);
     value = (clamp(log2(value), LeastEv, MostEv) - LeastEv) / (MostEv - LeastEv);
 
     // The base curve, a polynomial fit of the reference's sigmoid.

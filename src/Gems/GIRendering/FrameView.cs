@@ -1,4 +1,5 @@
 using System.Numerics;
+using Magic.Projects;
 using Magic.Rendering;
 using Magic.Utils;
 
@@ -48,9 +49,8 @@ internal sealed class FrameView(GpuResources resources)
         RenderGraph graph,
         RenderCamera camera,
         RenderSun sun,
-        uint frameIndex,
+        in Frame frame,
         Vector2 jitter,
-        float timeSec,
         int width,
         int height,
         int instanceCount,
@@ -76,7 +76,7 @@ internal sealed class FrameView(GpuResources resources)
         projection.M32 = -jitter.Y * 2 / height;
         Matrix4x4 viewProjection = view * projection;
         Matrix4x4.Invert(viewProjection, out Matrix4x4 inverse);
-        FrameConstants frame = new()
+        FrameConstants constants = new()
         {
             View = view,
             Projection = projection,
@@ -108,9 +108,9 @@ internal sealed class FrameView(GpuResources resources)
             Velocity = targets.Velocity.Id,
             Output = targets.Output.Id,
             Hdr = targets.Hdr.Id,
-            ExposureMeter = targets.ExposureMeter.Id,
             HitMaterials = hitMaterials.Id,
-            TimeSec = timeSec,
+            TimeSec = (float)frame.AppSec,
+            DeltaSec = (float)frame.AppDeltaSec,
             SunDirection = new Vector4(sun.Direction, 0),
             SunRadiance = new Vector4(sun.Radiance, 0),
             SkyRadiance = new Vector4(SkyBrightness * 0.8f, SkyBrightness * 0.9f, SkyBrightness, 0),
@@ -119,7 +119,7 @@ internal sealed class FrameView(GpuResources resources)
             ErrorThreshold = ErrorThresholdPixels,
             ImpostorPixels = impostorPixels,
             ImpostorDistance = impostorDistance,
-            FrameIndex = frameIndex,
+            FrameIndex = frame.Index,
             Jitter = jitter,
             Acceleration = acceleration.Id,
             LeafClusters = resources.LeafClusters.Id,
@@ -132,25 +132,21 @@ internal sealed class FrameView(GpuResources resources)
         Vector4 c1 = new(viewProjection.M12, viewProjection.M22, viewProjection.M32, viewProjection.M42);
         Vector4 c2 = new(viewProjection.M13, viewProjection.M23, viewProjection.M33, viewProjection.M43);
         Vector4 c3 = new(viewProjection.M14, viewProjection.M24, viewProjection.M34, viewProjection.M44);
-        frame.FrustumPlane0 = Normalize(c3 + c0);
-        frame.FrustumPlane1 = Normalize(c3 - c0);
-        frame.FrustumPlane2 = Normalize(c3 + c1);
-        frame.FrustumPlane3 = Normalize(c3 - c1);
-        frame.FrustumPlane4 = Normalize(c3 - c2);
-        frame.FrustumPlane5 = Normalize(c2);
+        constants.FrustumPlane0 = Normalize(c3 + c0);
+        constants.FrustumPlane1 = Normalize(c3 - c0);
+        constants.FrustumPlane2 = Normalize(c3 + c1);
+        constants.FrustumPlane3 = Normalize(c3 - c1);
+        constants.FrustumPlane4 = Normalize(c3 - c2);
+        constants.FrustumPlane5 = Normalize(c2);
 
         // Where the view was last frame, or where it is now when no frame was drawn at this size since it was
         // forgotten, with no jitter, so a velocity is the surface's move alone.
-        (frame.PreviousViewProjection, frame.PreviousCameraPosition) =
+        (constants.PreviousViewProjection, constants.PreviousCameraPosition) =
             _previous is { } last && targets.HasHistory
                 ? (last.ViewProjection, last.CameraPosition)
-                : (unjittered, frame.CameraPosition);
-        _previous = (unjittered, frame.CameraPosition, width, height);
-        graph.Upload(targets.Constants, [frame]);
-
-        // A view with no history meters from nothing, so a new place or size takes its first reading at once.
-        if (!targets.HasHistory)
-            ExposureMeter.Restart(graph, targets.ExposureMeter);
+                : (unjittered, constants.CameraPosition);
+        _previous = (unjittered, constants.CameraPosition, width, height);
+        graph.Upload(targets.Constants, [constants]);
 
         return made;
     }
@@ -213,9 +209,6 @@ internal sealed class FrameView(GpuResources resources)
     )
     {
         Result<GpuBuffer> constants = graph.Buffer(GpuDescriptions.GetBuffer("Frame constants", FrameConstants.Bytes));
-        Result<GpuBuffer> exposureMeter = graph.Buffer(
-            GpuDescriptions.GetBuffer("Exposure meter", ExposureMeter.Bytes)
-        );
         Result<GpuTexture> visibilityBuffer = graph.Texture(
             GpuDescriptions.GetTexture(
                 "Visibility",
@@ -253,7 +246,10 @@ internal sealed class FrameView(GpuResources resources)
                 width,
                 height,
                 GpuFormat.R16G16B16A16Sfloat,
-                TextureUsages.Storage | TextureUsages.Sampled | TextureUsages.CopyDestination
+                TextureUsages.Storage
+                    | TextureUsages.ColorTarget
+                    | TextureUsages.Sampled
+                    | TextureUsages.CopyDestination
             )
         );
         Result<GpuTexture> output = graph.Texture(
@@ -267,19 +263,7 @@ internal sealed class FrameView(GpuResources resources)
         );
         foreach (
             Result asked in (ReadOnlySpan<Result>)
-                [
-                    constants,
-                    exposureMeter,
-                    visibilityBuffer,
-                    depth,
-                    hzb,
-                    normal,
-                    baseColor,
-                    surface,
-                    velocity,
-                    hdr,
-                    output,
-                ]
+                [constants, visibilityBuffer, depth, hzb, normal, baseColor, surface, velocity, hdr, output]
         )
         {
             if (!asked.Ok)
@@ -305,7 +289,6 @@ internal sealed class FrameView(GpuResources resources)
                 velocity.Value,
                 hdr.Value,
                 output.Value,
-                exposureMeter.Value,
                 graph
             )
         );

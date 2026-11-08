@@ -137,7 +137,6 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
         ReadOnlySpan<GpuResource> surface =
         [
             view.Constants,
-            view.ExposureMeter,
             table.Value,
             passTable.Value,
             view.Visibility,

@@ -8,6 +8,7 @@ module "Post/TemporalAntiAliasing";
 
 import Core.Heap;
 import Core.Math;
+import Core.Color;
 import Post.IPixelEffect;
 
 // How far in metres the surface the history saw may be from where the pixel's surface was before it is another.
@@ -20,6 +21,9 @@ static const float MovingDistance = 0.01;
 // The most a 16-bit float holds, which the picture is kept under.
 static const float HalfMax = 65504.0;
 
+// What the blend's exposure brings the 3 by 3 neighbours' average to.
+static const float MiddleGrey = 0.18;
+
 public struct TemporalAntiAliasing : IPixelEffect
 {
     public static const uint Levels = 1;
@@ -27,8 +31,9 @@ public struct TemporalAntiAliasing : IPixelEffect
 
     public override float4 Level(PixelEffectInputs inputs)
     {
-        // The range of the 3 by 3 neighbours' colours, and the nearest of them, whose velocity the pixel takes so an
-        // edge moves with what is in front of it.
+        // The range of the 3 by 3 neighbours' colours and their sum, and the nearest of them, whose velocity the pixel
+        // takes so an edge moves with what is in front of it.
+        float3 sum = float3(0.0);
         float3 low = float3(HalfMax);
         float3 high = float3(-HalfMax);
         float nearestDepth = 0.0;
@@ -39,6 +44,7 @@ public struct TemporalAntiAliasing : IPixelEffect
             {
                 uint2 neighbour = uint2(clamp(int2(inputs.pixel) + int2(x, y), int2(0), int2(inputs.size) - 1));
                 float3 color = inputs.picture.Load(neighbour, 0u).rgb;
+                sum += color;
                 low = min(low, color);
                 high = max(high, color);
                 float depth = inputs.depth.Load(neighbour, 0u).x;
@@ -71,21 +77,22 @@ public struct TemporalAntiAliasing : IPixelEffect
         float3 before = clamp(inputs.history.SampleLevel(inputs.sampler, historyUv, 0.0).rgb, low, high);
         float2 moved = abs(velocity) * float2(inputs.size);
         float blend = isOnScreen ? lerp(0.05, 0.8, frac(max(moved.x, moved.y)) * 0.5) : 1.0;
+        float exposure = MiddleGrey / max(GetLuminance(sum / 9.0), Epsilon);
         float3 resolved = FromBlendSpace(
-            lerp(ToBlendSpace(before, inputs.exposure), ToBlendSpace(current, inputs.exposure), blend),
-            inputs.exposure
+            lerp(ToBlendSpace(before, exposure), ToBlendSpace(current, exposure), blend),
+            exposure
         );
         return float4(min(resolved, HalfMax), viewDepth);
     }
 
     public float3 Apply(float3 color, PixelEffectInputs inputs)
     {
-        return inputs.target.Load(inputs.pixel, 0u).rgb * inputs.exposure;
+        return inputs.target.Load(inputs.pixel, 0u).rgb;
     }
 }
 
-// A colour in Reinhard's curve after the exposure, where the blend is done, so a bright pixel doesn't outweigh the
-// neighbours it is averaged with; and back.
+// A colour in Reinhard's curve after an exposure that brings its neighbours to a middle grey, where the blend is done,
+// so a bright pixel doesn't outweigh the neighbours it is averaged with, wherever the effect is in the list; and back.
 float3 ToBlendSpace(float3 color, float exposure)
 {
     float3 exposed = color * exposure;

@@ -53,17 +53,19 @@ texture reader.
   blurred. A rougher surface reflects its traced diffuse light, so a closed room reflects none of the sky. The
   `reflections` debug view shows what is traced.
 - The first `Weather`'s effects, such as the fog, and then the first `PostProcessing`'s run over the lit picture in
-  order, before the exposure is metered and the tonemap: each is a material whose shader implements the pixel effect
-  contract, with params of its own as a surface material's are. Each reads the picture the ones before it left and
-  writes another; one that declares levels first fills each level of a target of its own, which it keeps from frame to
-  frame as its history. While an effect that declares jitter runs, as the temporal anti-aliasing does, the camera draws
-  each frame through a different point in each pixel. With no `PostProcessing`, the picture gets the temporal
-  anti-aliasing. An effect shows once its material and its passes are built, and not while one loads or when one
-  failed. The fog is lit by the sun and the sky alone, unshadowed.
-- The exposure is metered each frame from a histogram of the picture's luminance, as the effects leave it, and adapts to
-  a change over about a second, as an eye does; a new domain or window size takes its first reading at once. The
-  first `PostProcessing`'s `ExposureCompensation` adds stops to it. The picture then goes through the AgX tonemap to the
-  output.
+  order, and finish it for the screen: each is a material whose shader implements the pixel effect contract, with
+  params of its own as a surface material's are. With no `PostProcessing`, the picture gets the engine's
+  `TemporalAntiAliasing`, `Exposure` and `Agx` materials; a `PostProcessing` lists every effect it wants, those
+  included, so another tonemap is another material in the tonemap's place. Each reads the picture the ones before it
+  left and writes another; one that declares levels first fills each level of a target of its own, which it keeps from
+  frame to frame as its history. While an effect that declares jitter runs, as the temporal anti-aliasing does, the
+  camera draws each frame through a different point in each pixel. An effect shows once its material and its passes
+  are built, and not while one loads or when one failed. The fog is lit by the sun and the sky alone, unshadowed.
+- The `Exposure` effect meters the picture each frame from its average log luminance, as the effects before it leave
+  it, and adapts to a change over about a second, as an eye does; a new domain or window size takes its first reading
+  at once. Its `compensation` param adds stops to it. The `Agx` effect is the AgX tonemap.
+- The `tracedDiffuse`, `reflections` and `probes` debug views put their light into the picture before the post
+  effects, so the effects expose and tonemap it.
 - Glass isn't drawn yet: a glass material draws as an opaque one.
 
 ## Settings
@@ -120,5 +122,5 @@ in turn and exits, so a release ships with the caches full.
   - `Light/` is what a local light gives a point: a point, spot or rect light's direction and irradiance there.
   - `Trace/` is what rays read of the world: whether a ray reaches a point, the surface one lands on, and the light
     it brings back from there.
-- Parts of the lighting, the traced reflections and the exposure meter are adapted from another engine under the MIT
-  licence; `THIRD-PARTY-NOTICES.md` holds it.
+- Parts of the lighting and the traced reflections are adapted from another engine under the MIT licence;
+  `THIRD-PARTY-NOTICES.md` holds it.

@@ -49,7 +49,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly MaterialInstance _failure;
 
     /// <summary>
-    /// What is done to the picture when no entity has a <see cref="PostProcessing"/>: the temporal anti-aliasing.
+    /// What is done to the picture when no entity has a <see cref="PostProcessing"/>: the temporal anti-aliasing, the
+    /// exposure and the AgX tonemap.
     /// </summary>
     private readonly PostProcessing _defaultPost = new();
     private readonly Visibility _visibility;
@@ -62,7 +63,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly TracedReflections? _reflections;
     private readonly Lighting _lighting;
     private readonly PixelEffects _pixelEffects;
-    private readonly ExposureMeter _exposureMeter;
     private readonly SurfaceView _surfaceView;
     private readonly RendererDebugWindow? _debugWindow;
 
@@ -131,6 +131,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         {
             Handle = assets.Find<Material>("Materials/TemporalAntiAliasing.mat"),
         };
+        _defaultPost.Effects[1] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Exposure.mat") };
+        _defaultPost.Effects[2] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Agx.mat") };
         _instances = new InstanceTable(assets, _resources, _failure);
         _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(assets, _resources) : null;
         _visibility = new Visibility(assets, _resources);
@@ -143,7 +145,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _reflections = _rayTracing is null ? null : new TracedReflections(assets, _resources);
         _lighting = new Lighting(assets);
         _pixelEffects = new PixelEffects(assets, _resources);
-        _exposureMeter = new ExposureMeter(assets);
         _surfaceView = new SurfaceView(assets);
         _shaders =
         [
@@ -155,7 +156,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             .. _tracedDiffuse?.Shaders ?? [],
             .. _reflections?.Shaders ?? [],
             .. _lighting.Shaders,
-            .. _exposureMeter.Shaders,
             .. _surfaceView.Shaders,
         ];
     }
@@ -281,16 +281,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         // The frame's tables, and the view's targets at the window's size.
         RenderCamera camera = GetCamera(inputs.Cameras);
         RenderSun sun = GetSun(inputs.DirectionalLights);
-        Result<UploadedFrame> uploaded = UploadFrame(
-            graph,
-            inputs,
-            camera,
-            sun,
-            frame.Index,
-            jitter,
-            (float)frame.AppSec,
-            instanceCount
-        );
+        Result<UploadedFrame> uploaded = UploadFrame(graph, inputs, camera, sun, frame, jitter, instanceCount);
         if (!uploaded.Ok)
         {
             Log.Error($"The frame is not drawn: {uploaded.Error}");
@@ -300,9 +291,9 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
         // The passes, in the order they run, each reading what the ones before it wrote: what the view sees, the sky's
         // tables while there is a sky, each tile's lights, on a GPU that traces rays the probes' light, the traced
-        // diffuse light, the traced reflections and each pixel's shadows, the shading, the first weather's effects and
-        // the first post processing's or the default's, the exposure metered from what they leave, and the output
-        // through the tonemap, with the probes over it in their debug view.
+        // diffuse light, the traced reflections and each pixel's shadows, the shading, a debug view's light or probes in
+        // its place or over it, the first weather's effects and the first post processing's or the default's, which
+        // finish the picture, and the output.
         (
             RenderView view,
             SkyTables sky,
@@ -334,12 +325,14 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             _shadowMask.Record(view, header, lighting, lights, shadowed);
 
         _lighting.Record(view, header, lighting, sky, lights, shadows, diffuse, reflections);
-        _pixelEffects.Record(view, frame.Index, effects);
 
-        _exposureMeter.Record(view, (float)frame.AppDeltaSec, post.ExposureCompensation);
-        _surfaceView.Record(view, inputs.DebugView, diffuse, reflections?.Light ?? GpuTexture.None);
+        // A debug view of light draws it into the picture, so the effects finish it as they do the picture.
+        _surfaceView.RecordLight(view, inputs.DebugView, diffuse, reflections?.Light ?? GpuTexture.None);
         if (_probes is not null && inputs.DebugView == DebugView.Probes && probes is { } shown)
             _probes.RecordDraw(view, shown);
+
+        _pixelEffects.Record(view, frame.Index, effects);
+        _surfaceView.Record(view, inputs.DebugView);
 
         GpuTexture target = graph.WindowTarget;
         if (!target.IsNone)
@@ -536,9 +529,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         RenderInputs inputs,
         RenderCamera camera,
         RenderSun sun,
-        uint frameIndex,
+        in Frame frame,
         Vector2 jitter,
-        float timeSec,
         int instanceCount
     )
     {
@@ -569,9 +561,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             graph,
             camera,
             sun,
-            frameIndex,
+            frame,
             jitter,
-            timeSec,
             inputs.Width,
             inputs.Height,
             instanceCount,
@@ -607,7 +598,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
         bool isTraced = _rayTracing is { Acceleration.IsNone: false };
         Result<TracedReflectionBuffers>? reflections = isTraced
-            ? TracedReflections.Prepare(view.Value, frameIndex)
+            ? TracedReflections.Prepare(view.Value, frame.Index)
             : null;
         if (reflections is { Ok: false } unreflected)
             return Result.Failure(unreflected.Error);
@@ -632,7 +623,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
         // The traced diffuse light, whose rays read the probes beyond their range, while there are probes.
         Result<TracedDiffuseBuffers>? diffuse = probes is { Ok: true }
-            ? TracedDiffuse.Prepare(view.Value, frameIndex)
+            ? TracedDiffuse.Prepare(view.Value, frame.Index)
             : null;
         if (diffuse is { Ok: false } untraced)
             return Result.Failure(untraced.Error);

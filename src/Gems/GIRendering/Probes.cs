@@ -262,7 +262,8 @@ internal sealed class Probes(AssetManager assets, GpuResources resources)
     }
 
     /// <summary>
-    /// Each probe drawn over the output as a sphere lit by the light it holds, behind what is nearer.
+    /// Each probe drawn into the picture as a sphere lit by the light it holds, behind what is nearer, before the post
+    /// effects, which expose and tonemap it with the picture.
     /// </summary>
     public void RecordDraw(in RenderView view, in ProbeBuffers probes) =>
         view
@@ -271,12 +272,12 @@ internal sealed class Probes(AssetManager assets, GpuResources resources)
                 _drawShaders,
                 new GpuRenderTargets
                 {
-                    Colors = [new GpuTarget { Texture = view.Output }],
+                    Colors = [new GpuTarget { Texture = view.Hdr }],
                     Depth = new GpuTarget { Texture = view.Depth },
                 },
                 new GpuConstants(view.Constants.Id, probes.Constants.Id)
             )
-            .Reads(view.Constants, view.ExposureMeter, probes.Constants, probes.Probes)
+            .Reads(view.Constants, probes.Constants, probes.Probes)
             .Indirect(probes.DrawArguments)
             .DrawIndirectCount(probes.DrawArguments, 0, probes.DrawArguments, 16, 1);
 }

@@ -30,7 +30,7 @@ public struct Blur : IPixelEffect
         for (int y = -reach; y <= reach; y++)
             sum += inputs.target.Load(GetTexel(inputs, int2(0, y)), 0u).rgb;
 
-        return sum / float(2 * reach + 1) * inputs.exposure;
+        return sum / float(2 * reach + 1);
     }
 }
 

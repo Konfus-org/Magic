@@ -27,8 +27,8 @@ public struct Bloom : IPixelEffect
     {
         if (inputs.level == 0u)
         {
-            float3 color = inputs.picture.Load(inputs.pixel, 0u).rgb * inputs.exposure;
-            return float4(max(min(color, MostBright) - threshold, 0.0) / inputs.exposure, 1.0);
+            float3 color = inputs.picture.Load(inputs.pixel, 0u).rgb;
+            return float4(max(min(color, MostBright) - threshold, 0.0), 1.0);
         }
 
         uint before = inputs.level - 1u;
@@ -49,6 +49,6 @@ public struct Bloom : IPixelEffect
         for (uint level = FinestAdded; level < Levels; level++)
             spread += inputs.target.SampleLevel(inputs.sampler, inputs.uv, float(level)).rgb;
 
-        return color + strength * spread / float(Levels - FinestAdded) * inputs.exposure;
+        return color + strength * spread / float(Levels - FinestAdded);
     }
 }
