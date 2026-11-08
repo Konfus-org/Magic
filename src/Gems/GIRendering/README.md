@@ -56,8 +56,10 @@ texture reader.
   order, before the exposure is metered and the tonemap: each is a material whose shader implements the pixel effect
   contract, with params of its own as a surface material's are. Each reads the picture the ones before it left and
   writes another; one that declares levels first fills each level of a target of its own, which it keeps from frame to
-  frame as its history. An effect shows once its material and its passes are built, and not while one loads or when
-  one failed. The fog is lit by the sun and the sky alone, unshadowed.
+  frame as its history. While an effect that declares jitter runs, as the temporal anti-aliasing does, the camera draws
+  each frame through a different point in each pixel. With no `PostProcessing`, the picture gets the temporal
+  anti-aliasing. An effect shows once its material and its passes are built, and not while one loads or when one
+  failed. The fog is lit by the sun and the sky alone, unshadowed.
 - The exposure is metered each frame from a histogram of the picture's luminance, as the effects leave it, and adapts to
   a change over about a second, as an eye does; a new domain or window size takes its first reading at once. The
   first `PostProcessing`'s `ExposureCompensation` adds stops to it. The picture then goes through the AgX tonemap to the
@@ -118,5 +120,5 @@ in turn and exits, so a release ships with the caches full.
   - `Light/` is what a local light gives a point: a point, spot or rect light's direction and irradiance there.
   - `Trace/` is what rays read of the world: whether a ray reaches a point, the surface one lands on, and the light
     it brings back from there.
-- Parts of the lighting, the traced reflections, the temporal anti-aliasing and the exposure meter are adapted from
-  another engine under the MIT licence; `THIRD-PARTY-NOTICES.md` holds it.
+- Parts of the lighting, the traced reflections and the exposure meter are adapted from another engine under the MIT
+  licence; `THIRD-PARTY-NOTICES.md` holds it.

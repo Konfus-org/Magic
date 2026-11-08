@@ -21,21 +21,35 @@ internal sealed class FrameView(GpuResources resources)
     private (Matrix4x4 ViewProjection, Vector4 CameraPosition, int Width, int Height)? _previous;
 
     /// <summary>
+    /// The jitter of frame <paramref name="frameIndex"/>, in pixels from the pixel's middle: a point in the pixel from
+    /// the Halton sequence in bases 2 and 3 that starts again every 256 frames, so an effect that blends frames sees
+    /// another point of each pixel each frame.
+    /// </summary>
+    public static Vector2 GetJitter(uint frameIndex)
+    {
+        uint term = (frameIndex % JitterFrames) + 1;
+
+        return new Vector2(GetHalton(term, 2) - 0.5f, GetHalton(term, 3) - 0.5f);
+    }
+
+    /// <summary>
     /// Forgets the last frame's camera, depth pyramid and shadows, so the next frame moves nothing on from where a view
     /// that is gone looked, culls against no pyramid of it and blends no shadows of it.
     /// </summary>
     public void ClearHistory() => _previous = null;
 
     /// <summary>
-    /// The main view at a size, its targets asked for, and its constants, the camera, the sun and the frame's
-    /// resources, copied in a transfer pass the caller opened: the instance and material tables, the cull's buffers and
-    /// the world's acceleration structure and hit materials, which the caller asked for before.
+    /// The main view at a size, its targets asked for, and its constants, the camera shifted by
+    /// <paramref name="jitter"/>, the sun and the frame's resources, copied in a transfer pass the caller opened: the
+    /// instance and material tables, the cull's buffers and the world's acceleration structure and hit materials, which
+    /// the caller asked for before.
     /// </summary>
     public Result<RenderView> Upload(
         RenderGraph graph,
         RenderCamera camera,
         RenderSun sun,
         uint frameIndex,
+        Vector2 jitter,
         float timeSec,
         int width,
         int height,
@@ -58,11 +72,6 @@ internal sealed class FrameView(GpuResources resources)
         Matrix4x4.Invert(Matrix4x4.CreateFromQuaternion(camera.Transform.Rotation), out Matrix4x4 view);
         Matrix4x4 projection = CreatePerspective(camera.FieldOfView, aspect, camera.Near);
         Matrix4x4 unjittered = view * projection;
-
-        // The jitter, a point in the pixel from the Halton sequence in bases 2 and 3 that starts again every 256
-        // frames, shifts what each frame draws, so the temporal resolve sees another point of each pixel each frame.
-        uint term = (frameIndex % JitterFrames) + 1;
-        Vector2 jitter = new(GetHalton(term, 2) - 0.5f, GetHalton(term, 3) - 0.5f);
         projection.M31 = jitter.X * 2 / width;
         projection.M32 = -jitter.Y * 2 / height;
         Matrix4x4 viewProjection = view * projection;

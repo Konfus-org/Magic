@@ -8,6 +8,9 @@
 // as `static const uint Levels = 2;` does, each half the size of the one before, the first the picture's. Before
 // Apply, Level runs over every texel of each level in turn, the first first; Apply then reads them. The target lasts
 // from frame to frame, two of them swapping, so last frame's is the effect's history.
+//
+// An effect that blends frames declares `static const uint Jitters = 1;`: while it runs, the camera draws each frame
+// through a different point in each pixel.
 module "Post/IPixelEffect";
 
 import Core.Heap;
@@ -24,9 +27,10 @@ public struct PixelEffectInputs
     public float exposure;
     // Seconds the run has taken, for an effect that moves.
     public float time;
-    // The pixel's surface relative to the camera, in metres, or far along its ray where nothing was drawn, and where the
-    // camera is in the world.
+    // The pixel's surface relative to the camera, in metres, or far along its ray where nothing was drawn, its depth
+    // along the camera's view, 0 where nothing was drawn, and where the camera is in the world.
     public float3 position;
+    public float viewDepth;
     public float3 cameraPosition;
     // Towards the sun, unit, and the sun's and the sky's light, after the exposure as the colour is.
     public float3 sunDirection;
@@ -39,14 +43,17 @@ public struct PixelEffectInputs
     public float roughness;
     public float metalness;
     // The picture as the effects before this one left it, the effect's target as this frame has filled it so far, and
-    // as last frame left it, all before the exposure, and the picture's reversed depth and screen-space velocity, each
-    // read at any texel. The history holds nothing at a new view or size, or on the effect's first frame.
+    // as last frame left it, all before the exposure, and the picture's reversed depth and velocity, each read at any
+    // texel, and a sampler that filters between texels and clamps at the edges. The history holds nothing at a new view
+    // or size, or on the effect's first frame. A velocity's xy is the step in texture coordinates to where the pixel's
+    // surface was last frame, its z the surface's depth along last frame's view.
     public TextureRef picture;
     public TextureRef target;
     public TextureRef history;
     public bool hasHistory;
     public TextureRef depth;
     public TextureRef velocity;
+    public SamplerRef sampler;
 }
 
 public interface IPixelEffect

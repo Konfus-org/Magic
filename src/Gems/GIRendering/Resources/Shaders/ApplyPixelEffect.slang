@@ -8,6 +8,7 @@ module "ApplyPixelEffect";
 import Core.Heap;
 import Core.Pass;
 import Core.Frame;
+import Core.Math;
 import Core.Pack;
 import Scene.Materials;
 import Post.IPixelEffect;
@@ -17,7 +18,8 @@ static const float FarDepth = 1e-6;
 
 // One pass of an effect, C#'s GpuEffectPass: the heap id of the table of the effects' params and the effect's row in
 // it, the level of its target the pass fills, 0 for Apply, and the heap ids of the picture it reads, of what it writes,
-// and of the effect's target and history, with whether the history holds last frame's target.
+// and of the effect's target and history, with whether the history holds last frame's target, and of the sampler that
+// filters between texels.
 struct GpuEffectPass
 {
     uint rows;
@@ -28,6 +30,7 @@ struct GpuEffectPass
     uint target;
     uint history;
     uint hasHistory;
+    uint sampler;
 }
 
 GpuEffectPass LoadPass()
@@ -58,11 +61,14 @@ PixelEffectInputs CreateInputs(FrameConstants frame, GpuEffectPass pass, uint2 p
     inputs.hasHistory = pass.hasHistory != 0u;
     inputs.depth.id = frame.depth;
     inputs.velocity.id = frame.velocity;
+    inputs.sampler.id = pass.sampler;
 
     // The surface under the texel's middle, in the picture's texels.
     uint2 pictureSize = uint2(frame.width, frame.height);
     uint2 texel = min(uint2(inputs.uv * float2(pictureSize)), pictureSize - 1u);
-    inputs.position = ReconstructRelative(frame, inputs.uv, max(inputs.depth.Load(texel, 0u).x, FarDepth));
+    float depth = inputs.depth.Load(texel, 0u).x;
+    inputs.position = ReconstructRelative(frame, inputs.uv, max(depth, FarDepth));
+    inputs.viewDepth = depth > 0.0 ? ToViewDepth(depth, frame.near) : 0.0;
     UintTextureRef visibility = { frame.visibility };
     TextureRef normals = { frame.gbufferNormal };
     TextureRef bases = { frame.gbufferBase };

@@ -71,10 +71,9 @@ internal sealed class GpuResources(
     private readonly List<ShaderTypeArgument> _materialShaders = [];
 
     /// <summary>
-    /// The levels of a target of its own each effect shader's struct declares, by the shader's id, null while it is
-    /// reflected; none when it declares none.
+    /// What each effect shader's struct declares it needs, by the shader's id, null while it is reflected.
     /// </summary>
-    private readonly Dictionary<ulong, int?> _effectLevels = [];
+    private readonly Dictionary<ulong, EffectNeeds?> _effectNeeds = [];
 
     // The impostor table's rows; row 0 is no impostor, so it is taken from the start.
     private readonly FreeList _impostorRows = CreateImpostorRows();
@@ -308,30 +307,30 @@ internal sealed class GpuResources(
     /// <summary>
     /// Whether the effect's material, its shader's struct and the textures it names are on the GPU, its row packed as
     /// <see cref="Get(in MaterialInstance, out GpuMaterial)"/> packs a surface's, and the struct its pass is specialised
-    /// to, with the levels it declares. An effect's shader is not one of the <see cref="MaterialShaders"/>, which only
-    /// surfaces are resolved with.
+    /// to, with what it declares it needs. An effect's shader is not one of the <see cref="MaterialShaders"/>, which
+    /// only surfaces are resolved with.
     /// </summary>
     public ResourceState GetEffect(
         in MaterialInstance slot,
         out GpuMaterial row,
         out ShaderTypeArgument shader,
-        out int levels
+        out EffectNeeds needs
     )
     {
         ResourceState state = Pack(slot, out row, out MaterialLayout layout);
         shader = layout.Shader;
-        levels = 0;
+        needs = default;
         if (state != ResourceState.Ready)
             return state;
 
-        // Its levels are reflected on its first ask, only an effect's, and it waits for them.
-        if (!_effectLevels.TryGetValue(shader.Module.Id, out int? declared))
+        // What it needs is reflected on its first ask, only an effect's, and it waits for that.
+        if (!_effectNeeds.TryGetValue(shader.Module.Id, out EffectNeeds? declared))
         {
-            _effectLevels[shader.Module.Id] = null;
-            ReflectLevelsAsync(shader).FireAndForget();
+            _effectNeeds[shader.Module.Id] = null;
+            ReflectNeedsAsync(shader).FireAndForget();
         }
 
-        levels = declared ?? 0;
+        needs = declared ?? default;
 
         return declared is null ? ResourceState.Loading : state;
     }
@@ -594,15 +593,21 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// Reflects the levels the effect shader's struct declares, once.
+    /// Reflects what the effect shader's struct declares it needs, once: none of what it declares nothing of.
     /// </summary>
-    private async Task ReflectLevelsAsync(ShaderTypeArgument shader)
+    private async Task ReflectNeedsAsync(ShaderTypeArgument shader)
     {
         Result<long> levels = await shaders
             .ReflectConstantAsync(shader, "Levels", CancellationToken.None)
             .ConfigureAwait(false);
+        Result<long> jitters = await shaders
+            .ReflectConstantAsync(shader, "Jitters", CancellationToken.None)
+            .ConfigureAwait(false);
         await threads.Enter(EngineThread.Render);
-        _effectLevels[shader.Module.Id] = levels.Ok ? (int)levels.Value : 0;
+        _effectNeeds[shader.Module.Id] = new EffectNeeds(
+            levels.Ok ? (int)levels.Value : 0,
+            jitters.Ok && jitters.Value != 0
+        );
     }
 
     /// <summary>
@@ -921,6 +926,12 @@ internal sealed class GpuResources(
     /// </summary>
     private readonly record struct MaterialLayout(ImmutableArray<ShaderField> Fields, ShaderTypeArgument Shader);
 }
+
+/// <summary>
+/// What an effect shader's struct declares it needs from the renderer: the levels of a target of its own, and whether
+/// the camera jitters while it runs.
+/// </summary>
+internal readonly record struct EffectNeeds(int Levels, bool HasJitter);
 
 /// <summary>
 /// Where a model is in the pools, each range its offset and count, and the sphere and the box around it in its own frame;

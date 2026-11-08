@@ -14,8 +14,8 @@ namespace Magic.GIRendering;
 /// entries specialised to its shader: one for each level of its own target it declares, then its apply, which reads the
 /// picture the effects before it left and writes the other of two, the last copied back into the HDR picture. An
 /// effect with levels has two targets by its place in the lists, which swap each frame, so the one it filled last frame
-/// is its history. An effect is left out while its material, its textures or its passes load, and when one of them
-/// failed.
+/// is its history, and one that declares jitter has the camera jittered while it runs. An effect is left out while its
+/// material, its textures or its passes load, and when one of them failed.
 /// </summary>
 internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
 {
@@ -68,23 +68,22 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
             MaterialInstance slot = lists[place / MaterialSlots.Capacity][place % MaterialSlots.Capacity];
             bool ranLastFrame = _lastFrame[place] == slot.Handle.Id;
             _lastFrame[place] = 0;
-            if (slot.Handle == Handle<Material>.None)
-                continue;
-
             if (
-                resources.GetEffect(slot, out GpuMaterial row, out ShaderTypeArgument shader, out int declared)
-                != ResourceState.Ready
+                !IsReady(
+                    graph,
+                    slot,
+                    out GpuMaterial row,
+                    out ShaderEntry apply,
+                    out ShaderEntry level,
+                    out EffectNeeds needs
+                )
             )
                 continue;
 
-            ShaderEntry apply = GetSpecialised(_applyShader, shader);
-            ShaderEntry level = GetSpecialised(_levelShader, shader);
             int levels = Math.Min(
-                declared,
+                needs.Levels,
                 Math.Min(MostLevels, TextureDescription.GetFullLevels(view.Width, view.Height))
             );
-            if (graph.GetState(apply) != GpuState.Ready || (levels > 0 && graph.GetState(level) != GpuState.Ready))
-                continue;
 
             Result<(GpuTexture Target, GpuTexture History)> targets = GetTargets(view, place, frameIndex, levels);
             if (!targets.Ok)
@@ -118,7 +117,10 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
                 TextureUsages.Storage | TextureUsages.Sampled | TextureUsages.CopySource
             )
         );
-        foreach (Result made in (ReadOnlySpan<Result>)[table, passTable, otherPicture])
+        Result<GpuSampler> sampler = graph.Sampler(
+            new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
+        );
+        foreach (Result made in (ReadOnlySpan<Result>)[table, passTable, otherPicture, sampler])
         {
             if (!made.Ok)
             {
@@ -158,6 +160,7 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
                 Target = running.Target.Id,
                 History = running.History.Id,
                 HasHistory = running.HasHistory ? 1u : 0u,
+                Sampler = sampler.Value.Id,
             };
             for (int level = 0; level < running.Levels; level++)
             {
@@ -197,6 +200,50 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
 
         if (picture != view.Hdr)
             graph.Blit(picture, view.Hdr);
+    }
+
+    /// <summary>
+    /// Whether an effect of <paramref name="lists"/> that runs this frame asks for the camera's jitter.
+    /// </summary>
+    public bool HasJitter(RenderGraph graph, ReadOnlySpan<MaterialSlots> lists)
+    {
+        foreach (MaterialSlots list in lists)
+        {
+            foreach (MaterialInstance slot in list)
+            {
+                if (IsReady(graph, slot, out _, out _, out _, out EffectNeeds needs) && needs.HasJitter)
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether the effect in <paramref name="slot"/> runs: its material and its textures on the GPU and its passes
+    /// built; its row, its passes and what it needs when it does.
+    /// </summary>
+    private bool IsReady(
+        RenderGraph graph,
+        in MaterialInstance slot,
+        out GpuMaterial row,
+        out ShaderEntry apply,
+        out ShaderEntry level,
+        out EffectNeeds needs
+    )
+    {
+        (row, apply, level, needs) = (default, default, default, default);
+        if (
+            slot.Handle == Handle<Material>.None
+            || resources.GetEffect(slot, out row, out ShaderTypeArgument shader, out needs) != ResourceState.Ready
+        )
+            return false;
+
+        apply = GetSpecialised(_applyShader, shader);
+        level = GetSpecialised(_levelShader, shader);
+
+        return graph.GetState(apply) == GpuState.Ready
+            && (needs.Levels == 0 || graph.GetState(level) == GpuState.Ready);
     }
 
     /// <summary>

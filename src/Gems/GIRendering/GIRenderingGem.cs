@@ -47,6 +47,11 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     /// The material a model that failed is drawn with, every slot; an empty slot when there is no failure material.
     /// </summary>
     private readonly MaterialInstance _failure;
+
+    /// <summary>
+    /// What is done to the picture when no entity has a <see cref="PostProcessing"/>: the temporal anti-aliasing.
+    /// </summary>
+    private readonly PostProcessing _defaultPost = new();
     private readonly Visibility _visibility;
     private readonly FrameView _frameView;
     private readonly SkyLuts _sky;
@@ -56,7 +61,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly TracedDiffuse? _tracedDiffuse;
     private readonly TracedReflections? _reflections;
     private readonly Lighting _lighting;
-    private readonly TemporalAntiAliasing _temporal;
     private readonly PixelEffects _pixelEffects;
     private readonly ExposureMeter _exposureMeter;
     private readonly SurfaceView _surfaceView;
@@ -123,6 +127,10 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _preprocessing = assets.Register(models);
         _resources = new GpuResources(models, caches, assets, shaders, threads);
         _failure = new MaterialInstance { Handle = assets.GetFailure<Material, Model>() };
+        _defaultPost.Effects[0] = new MaterialInstance
+        {
+            Handle = assets.Find<Material>("Materials/TemporalAntiAliasing.mat"),
+        };
         _instances = new InstanceTable(assets, _resources, _failure);
         _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(assets, _resources) : null;
         _visibility = new Visibility(assets, _resources);
@@ -134,7 +142,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _tracedDiffuse = _rayTracing is null ? null : new TracedDiffuse(assets, _resources);
         _reflections = _rayTracing is null ? null : new TracedReflections(assets, _resources);
         _lighting = new Lighting(assets);
-        _temporal = new TemporalAntiAliasing(assets);
         _pixelEffects = new PixelEffects(assets, _resources);
         _exposureMeter = new ExposureMeter(assets);
         _surfaceView = new SurfaceView(assets);
@@ -148,7 +155,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             .. _tracedDiffuse?.Shaders ?? [],
             .. _reflections?.Shaders ?? [],
             .. _lighting.Shaders,
-            .. _temporal.Shaders,
             .. _exposureMeter.Shaders,
             .. _surfaceView.Shaders,
         ];
@@ -265,6 +271,13 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
         _resources.Upload(graph);
 
+        // The air's effects before the picture's, so a post effect works on the fogged picture; the camera jitters while
+        // one of them asks for it.
+        MaterialSlots air = inputs.Weather.Count > 0 ? inputs.Weather.First[0].Effects : default;
+        PostProcessing post = inputs.PostProcessing.Count > 0 ? inputs.PostProcessing.First[0] : _defaultPost;
+        ReadOnlySpan<MaterialSlots> effects = [air, post.Effects];
+        Vector2 jitter = _pixelEffects.HasJitter(graph, effects) ? FrameView.GetJitter(frame.Index) : Vector2.Zero;
+
         // The frame's tables, and the view's targets at the window's size.
         RenderCamera camera = GetCamera(inputs.Cameras);
         RenderSun sun = GetSun(inputs.DirectionalLights);
@@ -274,6 +287,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             camera,
             sun,
             frame.Index,
+            jitter,
             (float)frame.AppSec,
             instanceCount
         );
@@ -286,9 +300,9 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
         // The passes, in the order they run, each reading what the ones before it wrote: what the view sees, the sky's
         // tables while there is a sky, each tile's lights, on a GPU that traces rays the probes' light, the traced
-        // diffuse light, the traced reflections and each pixel's shadows, the shading, the picture resolved over time,
-        // the first weather's effects and the first post processing's, the exposure metered from what they leave, and
-        // the output through the tonemap, with the probes over it in their debug view.
+        // diffuse light, the traced reflections and each pixel's shadows, the shading, the first weather's effects and
+        // the first post processing's or the default's, the exposure metered from what they leave, and the output
+        // through the tonemap, with the probes over it in their debug view.
         (
             RenderView view,
             SkyTables sky,
@@ -320,12 +334,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             _shadowMask.Record(view, header, lighting, lights, shadowed);
 
         _lighting.Record(view, header, lighting, sky, lights, shadows, diffuse, reflections);
-        _temporal.Record(view);
-
-        // The air's effects before the picture's, so a post effect works on the fogged picture.
-        MaterialSlots air = inputs.Weather.Count > 0 ? inputs.Weather.First[0].Effects : default;
-        PostProcessing post = inputs.PostProcessing.Count > 0 ? inputs.PostProcessing.First[0] : new PostProcessing();
-        _pixelEffects.Record(view, frame.Index, [air, post.Effects]);
+        _pixelEffects.Record(view, frame.Index, effects);
 
         _exposureMeter.Record(view, (float)frame.AppDeltaSec, post.ExposureCompensation);
         _surfaceView.Record(view, inputs.DebugView, diffuse, reflections?.Light ?? GpuTexture.None);
@@ -528,6 +537,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         RenderCamera camera,
         RenderSun sun,
         uint frameIndex,
+        Vector2 jitter,
         float timeSec,
         int instanceCount
     )
@@ -560,6 +570,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             camera,
             sun,
             frameIndex,
+            jitter,
             timeSec,
             inputs.Width,
             inputs.Height,

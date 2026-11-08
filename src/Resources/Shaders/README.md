@@ -13,13 +13,15 @@ compiler loads a module and its imports from the assets, so a game's `Shaders/` 
 - `Sky/` is the sky contract, `ISky`, and the Earth's atmosphere, which gives the sky, the sun's colour through the
   air and the sky's light on the ground from three tables made each frame.
 - `Post/` is the pixel effect contract, `IPixelEffect`, which post and weather effects implement, a vignette, a blur,
-  and the AgX tonemap a renderer finishes its picture with. An effect that needs a target of its own, or last
-  frame's, declares levels of it, which the blur shows.
+  the temporal anti-aliasing, and the AgX tonemap a renderer finishes its picture with. An effect that needs a target
+  of its own, or last frame's, declares levels of it, which the blur shows; one that blends frames declares jitter,
+  which the temporal anti-aliasing shows.
 - `Weather/` is the weather's effects: the fog, a pixel effect whose fields are a fog material's params.
 - A contract between shaders is an interface, `I` plus a noun, and a pass that works with any implementation is
   generic over it. A game adds a material, a sky or a post effect by implementing the contract in a module of its own
   and naming it in the asset that uses it.
 - Warnings are errors; matrices are row-major; a technique names its paper.
+- What is adapted from another engine is under its licence, which `THIRD-PARTY-NOTICES.md` holds.
 
 A renderer's own tables and techniques are in its gem's `Resources/Shaders/`.
 
