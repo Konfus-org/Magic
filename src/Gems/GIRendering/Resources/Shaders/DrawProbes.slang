@@ -1,6 +1,6 @@
 // The probe grid's debug view: each probe drawn where it is as a small sphere, each point of it the light the probe
-// holds from that direction, at the output's exposure, over the picture and behind what is nearer. One draw, an
-// instance a probe. The pass header's x is the frame's constants and y the grid's.
+// holds from that direction, shown as the picture is, over the picture and behind what is nearer. One draw, an instance
+// a probe. The pass header's x is the frame's constants and y the grid's.
 module "DrawProbes";
 
 import Core.Heap;
@@ -9,6 +9,7 @@ import Core.Frame;
 import Core.Math;
 import Core.Color;
 import Scene.Probes;
+import Post.Agx;
 
 // The sphere's bands from pole to pole and its slices around: C#'s Probes.SphereVertices is their product times six.
 static const uint SphereStacks = 8u;
@@ -58,5 +59,5 @@ float4 DrawProbesPixel(Varyings input) : SV_Target0
     FrameConstants frame = GetFrame();
     ProbeSh sh = CreateProbeSh(LoadProbe(GetProbeGrid(), input.probe));
     float3 radiance = max(EvaluateSh(sh, normalize(input.direction)), 0.0);
-    return float4(ToSrgb(1.0 - exp(-radiance * frame.exposure)), 1.0);
+    return float4(ToSrgb(ToAgx(radiance, GetExposure(frame))), 1.0);
 }

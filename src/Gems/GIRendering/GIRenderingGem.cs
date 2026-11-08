@@ -29,11 +29,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private const int DefaultWidth = 1280;
     private const int DefaultHeight = 720;
 
-    /// <summary>
-    /// What a surface facing the sun lands at in the picture before the tonemap, with no meter yet.
-    /// </summary>
-    private const float ExposureAtSun = 4;
-
     private readonly IGraphicsApi _gpu;
     private readonly AssetManager _assets;
     private readonly IEcs _ecs;
@@ -61,6 +56,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly Lighting _lighting;
     private readonly TemporalAntiAliasing _temporal;
     private readonly PixelEffects _pixelEffects;
+    private readonly ExposureMeter _exposureMeter;
     private readonly SurfaceView _surfaceView;
     private readonly RendererDebugWindow? _debugWindow;
 
@@ -136,6 +132,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _lighting = new Lighting(assets);
         _temporal = new TemporalAntiAliasing(assets);
         _pixelEffects = new PixelEffects(assets, _resources);
+        _exposureMeter = new ExposureMeter(assets);
         _surfaceView = new SurfaceView(assets);
         _shaders =
         [
@@ -146,6 +143,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             .. _probes?.Shaders ?? [],
             .. _lighting.Shaders,
             .. _temporal.Shaders,
+            .. _exposureMeter.Shaders,
             .. _surfaceView.Shaders,
         ];
     }
@@ -283,7 +281,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         // The passes, in the order they run, each reading what the ones before it wrote: what the view sees, the sky's
         // tables while there is a sky, each tile's lights, on a GPU that traces rays the probes' light and each pixel's
         // shadows, the shading, the picture resolved over time, the first weather's effects and the first post
-        // processing's, and the output, with the probes over it in their debug view.
+        // processing's, the exposure metered from what they leave, and the output through the tonemap, with the probes
+        // over it in their debug view.
         (
             RenderView view,
             SkyTables sky,
@@ -313,10 +312,11 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
         // The air's effects before the picture's, so a post effect works on the fogged picture.
         MaterialSlots air = inputs.Weather.Count > 0 ? inputs.Weather.First[0].Effects : default;
-        MaterialSlots picture = inputs.PostProcessing.Count > 0 ? inputs.PostProcessing.First[0].Effects : default;
-        _pixelEffects.Record(view, [air, picture]);
+        PostProcessing post = inputs.PostProcessing.Count > 0 ? inputs.PostProcessing.First[0] : new PostProcessing();
+        _pixelEffects.Record(view, [air, post.Effects]);
 
-        _surfaceView.Record(view, inputs.DebugView, sun.Exposure);
+        _exposureMeter.Record(view, (float)frame.AppDeltaSec, post.ExposureCompensation);
+        _surfaceView.Record(view, inputs.DebugView);
         if (_probes is not null && inputs.DebugView == DebugView.Probes && probes is { } shown)
             _probes.RecordDraw(view, shown);
 
@@ -435,7 +435,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     /// </summary>
     private static RenderSun GetSun(EcsSnapshot<Transform, DirectionalLight> lights)
     {
-        RenderSun sun = new(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One, 1);
+        RenderSun sun = new(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One);
         int sunRank = -1;
         for (int i = 0; i < lights.Count; i++)
         {
@@ -452,8 +452,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
                 continue;
 
             Vector3 illuminance = new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity;
-            float exposure = light.Intensity > 0 ? ExposureAtSun / light.Intensity : 1;
-            sun = new RenderSun(towards, illuminance, exposure);
+            sun = new RenderSun(towards, illuminance);
             sunRank = rank;
         }
 

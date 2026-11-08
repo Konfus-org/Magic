@@ -1,7 +1,7 @@
-// What the output shows: the lit picture scaled by the exposure, also under the probes in their view, or each pixel's
-// GBuffer as the view the pass header's y names asks, encoded for the screen, so a roughness of a half reads as a half
-// and an albedo as the colour it is. A GBuffer view is black where nothing was drawn, but for the velocity, which the
-// sky has too. The header's z is the HDR picture and w the exposure's bits.
+// What the output shows: the lit picture at the metered exposure through the tonemap, also under the probes in their
+// view, or each pixel's GBuffer as the view the pass header's y names asks, encoded for the screen, so a roughness of a
+// half reads as a half and an albedo as the colour it is. A GBuffer view is black where nothing was drawn, but for the
+// velocity, which the sky has too.
 module "ShowSurface";
 
 import Core.Heap;
@@ -10,6 +10,7 @@ import Core.Frame;
 import Core.Math;
 import Core.Color;
 import Core.Pack;
+import Post.Agx;
 
 // C#'s DebugView.
 enum SurfaceView : uint
@@ -63,11 +64,11 @@ float3 GetSurfaceView(FrameConstants frame, SurfaceView view, uint2 pixel)
     }
 }
 
-// The lit picture for the screen. PROTO: a plain exposure curve until the tonemap is ported.
-float3 GetPicture(uint hdr, float exposure, uint2 pixel)
+// The lit picture for the screen.
+float3 GetPicture(FrameConstants frame, uint2 pixel)
 {
-    TextureRef picture = { hdr };
-    return ToSrgb(1.0 - exp(-picture.Load(pixel, 0u).rgb * exposure));
+    TextureRef picture = { frame.hdr };
+    return ToSrgb(ToAgx(picture.Load(pixel, 0u).rgb, GetExposure(frame)));
 }
 
 [shader("compute")]
@@ -81,7 +82,7 @@ void ShowSurface(uint3 thread : SV_DispatchThreadID)
     PassHeader header = GetPassHeader();
     SurfaceView view = (SurfaceView)header.y;
     bool isPicture = view == SurfaceView.Final || view == SurfaceView.Probes;
-    float3 color = isPicture ? GetPicture(header.z, asfloat(header.w), thread.xy) : GetSurfaceView(frame, view, thread.xy);
+    float3 color = isPicture ? GetPicture(frame, thread.xy) : GetSurfaceView(frame, view, thread.xy);
     StorageRef output = { frame.output, 0u };
     output.Store(thread.xy, float4(color, 1.0));
 }

@@ -1,6 +1,6 @@
 # Third-party notices
 
-Parts of this gem's lighting and its temporal anti-aliasing are adapted from Wicked Engine
+Parts of this gem's lighting, its temporal anti-aliasing and its exposure meter are adapted from Wicked Engine
 (https://github.com/turanszkij/WickedEngine), under this licence:
 
 ```

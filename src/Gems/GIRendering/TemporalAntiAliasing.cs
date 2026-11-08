@@ -55,7 +55,7 @@ internal sealed class TemporalAntiAliasing(AssetManager assets)
                 _resolveShader,
                 new GpuConstants(view.Constants.Id, previous.Id, _resolved.Id, sampler.Value.Id)
             )
-            .Reads(view.Constants, view.Hdr, view.Depth, view.Velocity, previous)
+            .Reads(view.Constants, view.ExposureMeter, view.Hdr, view.Depth, view.Velocity, previous)
             .Writes(_resolved)
             .DispatchOver(view.Width, view.Height);
         graph.Blit(_resolved, view.Hdr);

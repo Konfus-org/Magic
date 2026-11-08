@@ -99,7 +99,7 @@ internal sealed class FrameView(GpuResources resources)
             Velocity = targets.Velocity.Id,
             Output = targets.Output.Id,
             Hdr = targets.Hdr.Id,
-            Exposure = sun.Exposure,
+            ExposureMeter = targets.ExposureMeter.Id,
             HitMaterials = hitMaterials.Id,
             TimeSec = timeSec,
             SunDirection = new Vector4(sun.Direction, 0),
@@ -138,6 +138,10 @@ internal sealed class FrameView(GpuResources resources)
                 : (unjittered, frame.CameraPosition);
         _previous = (unjittered, frame.CameraPosition, width, height);
         graph.Upload(targets.Constants, [frame]);
+
+        // A view with no history meters from nothing, so a new place or size takes its first reading at once.
+        if (!targets.HasHistory)
+            ExposureMeter.Restart(graph, targets.ExposureMeter);
 
         return made;
     }
@@ -200,6 +204,9 @@ internal sealed class FrameView(GpuResources resources)
     )
     {
         Result<GpuBuffer> constants = graph.Buffer(GpuDescriptions.GetBuffer("Frame constants", FrameConstants.Bytes));
+        Result<GpuBuffer> exposureMeter = graph.Buffer(
+            GpuDescriptions.GetBuffer("Exposure meter", ExposureMeter.Bytes)
+        );
         Result<GpuTexture> visibilityBuffer = graph.Texture(
             GpuDescriptions.GetTexture(
                 "Visibility",
@@ -251,7 +258,19 @@ internal sealed class FrameView(GpuResources resources)
         );
         foreach (
             Result asked in (ReadOnlySpan<Result>)
-                [constants, visibilityBuffer, depth, hzb, normal, baseColor, surface, velocity, hdr, output]
+                [
+                    constants,
+                    exposureMeter,
+                    visibilityBuffer,
+                    depth,
+                    hzb,
+                    normal,
+                    baseColor,
+                    surface,
+                    velocity,
+                    hdr,
+                    output,
+                ]
         )
         {
             if (!asked.Ok)
@@ -277,6 +296,7 @@ internal sealed class FrameView(GpuResources resources)
                 velocity.Value,
                 hdr.Value,
                 output.Value,
+                exposureMeter.Value,
                 graph
             )
         );

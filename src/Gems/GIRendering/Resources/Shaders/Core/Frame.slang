@@ -18,7 +18,7 @@ public struct FrameConstants
     // so a point is inside where dot(xyz, p) + w >= 0 for every one; the sixth is the far plane, which never rejects.
     public float4 frustumPlanes[6];
 
-    // Towards the sun, unit, and the sun's and the sky's radiance at the output's exposure.
+    // Towards the sun, unit, and the sun's and the sky's radiance, before the exposure.
     public float4 sunDirection;
     public float4 sunRadiance;
     public float4 skyRadiance;
@@ -87,8 +87,9 @@ public struct FrameConstants
     public float impostorDistance;
     // The heap id of the lit picture, in linear light before the exposure.
     public uint hdr;
-    // What the picture is multiplied by to land near a middle grey, and the seconds the run has taken.
-    public float exposure;
+    // The heap id of the exposure meter, which MeterExposure writes and GetExposure reads, and the seconds the run has
+    // taken.
+    public uint exposureMeter;
     public float timeSec;
     // On a GPU that traces rays: each material row as a ray hit reads it, Trace/HitSurface's GpuHitMaterial.
     public uint hitMaterials;
@@ -96,6 +97,13 @@ public struct FrameConstants
 }
 
 public FrameConstants GetFrame() { return LoadConstants<FrameConstants>(); }
+
+// What the picture is multiplied by to land near a middle grey: the meter's first float, as it last metered.
+public float GetExposure(FrameConstants frame)
+{
+    BufferRef meter = { frame.exposureMeter };
+    return meter.Load<float>(0u);
+}
 
 // A world position relative to the camera.
 public float3 Relative(FrameConstants frame, float3 worldPosition) { return worldPosition - frame.cameraPosition.xyz; }

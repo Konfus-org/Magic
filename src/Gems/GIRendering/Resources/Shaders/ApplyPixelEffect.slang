@@ -28,17 +28,17 @@ void ApplyPixelEffect<E : IPixelEffect>(uint3 thread : SV_DispatchThreadID)
     inputs.size = uint2(frame.width, frame.height);
     inputs.pixel = thread.xy;
     inputs.uv = (float2(thread.xy) + 0.5) / float2(inputs.size);
-    inputs.exposure = frame.exposure;
+    inputs.exposure = GetExposure(frame);
     inputs.time = frame.timeSec;
     inputs.position = ReconstructRelative(frame, inputs.uv, max(depth.Load(thread.xy, 0u).x, FarDepth));
     inputs.cameraPosition = frame.cameraPosition.xyz;
     inputs.sunDirection = frame.sunDirection.xyz;
-    inputs.sunRadiance = frame.sunRadiance.rgb * frame.exposure;
+    inputs.sunRadiance = frame.sunRadiance.rgb * inputs.exposure;
     // PROTO: the sky's light as the shading draws a missing sky, until the sky's tables are handed on.
-    inputs.skyRadiance = frame.skyRadiance.rgb * frame.sunRadiance.r * frame.exposure;
+    inputs.skyRadiance = frame.skyRadiance.rgb * frame.sunRadiance.r * inputs.exposure;
 
     StorageRef picture = { frame.hdr, 0u };
     float4 before = picture.Load(thread.xy);
-    float3 after = effect.Apply(before.rgb * frame.exposure, inputs);
-    picture.Store(thread.xy, float4(after / frame.exposure, before.a));
+    float3 after = effect.Apply(before.rgb * inputs.exposure, inputs);
+    picture.Store(thread.xy, float4(after / inputs.exposure, before.a));
 }

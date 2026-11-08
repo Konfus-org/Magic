@@ -94,9 +94,10 @@ void ResolveTemporal(uint3 thread : SV_DispatchThreadID)
     float3 before = clamp(history.SampleLevel(sampler, historyUv, 0.0).rgb, low, high);
     float2 moved = abs(velocity) * float2(size);
     float blend = isOnScreen ? lerp(0.05, 0.8, frac(max(moved.x, moved.y)) * 0.5) : 1.0;
+    float exposure = GetExposure(frame);
     float3 resolved = FromBlendSpace(
-        lerp(ToBlendSpace(before, frame.exposure), ToBlendSpace(current, frame.exposure), blend),
-        frame.exposure
+        lerp(ToBlendSpace(before, exposure), ToBlendSpace(current, exposure), blend),
+        exposure
     );
     output.Store(thread.xy, float4(min(resolved, HalfMax), viewDepth));
 }

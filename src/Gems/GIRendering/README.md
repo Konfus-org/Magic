@@ -43,9 +43,13 @@ texture reader.
   reflection is still the sky's. The `probes` debug view draws each probe as a sphere of its light. A ray reads the
   material it lands on averaged over its whole texture.
 - The first `Weather`'s effects, such as the fog, and then the first `PostProcessing`'s run over the lit picture in
-  order, before the output: each is a material whose shader implements the pixel effect contract, with params of its
-  own as a surface material's are. An effect shows once its material and its pass are built, and not while either
-  loads or when one failed. The fog is lit by the sun and the sky alone, unshadowed.
+  order, before the exposure is metered and the tonemap: each is a material whose shader implements the pixel effect
+  contract, with params of its own as a surface material's are. An effect shows once its material and its pass are
+  built, and not while either loads or when one failed. The fog is lit by the sun and the sky alone, unshadowed.
+- The exposure is metered each frame from a histogram of the picture's luminance, as the effects leave it, and adapts to
+  a change over about a second, as an eye does; a new domain or window size takes its first reading at once. The
+  first `PostProcessing`'s `ExposureCompensation` adds stops to it. The picture then goes through the AgX tonemap to the
+  output. There is no bloom yet.
 - Glass isn't drawn yet: a glass material draws as an opaque one.
 
 ## Settings
@@ -98,5 +102,5 @@ in turn and exits, so a release ships with the caches full.
   - `Scene/Probes` is the probe grid: where each probe is, what it holds, and the light a point gets from it.
   - `Light/` is what a local light gives a point: a point, spot or rect light's direction and irradiance there.
   - `Trace/` is what rays read of the world: whether a ray reaches a point, and the surface one lands on.
-- Parts of the lighting and the temporal anti-aliasing are adapted from another engine under the MIT licence;
-  `THIRD-PARTY-NOTICES.md` holds it.
+- Parts of the lighting, the temporal anti-aliasing and the exposure meter are adapted from another engine under the
+  MIT licence; `THIRD-PARTY-NOTICES.md` holds it.

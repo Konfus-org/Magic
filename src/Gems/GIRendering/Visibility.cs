@@ -28,6 +28,7 @@ internal readonly record struct RenderView(
     GpuTexture Velocity,
     GpuTexture Hdr,
     GpuTexture Output,
+    GpuBuffer ExposureMeter,
     RenderGraph Graph
 )
 {

@@ -276,7 +276,7 @@ internal sealed class Probes(AssetManager assets, GpuResources resources)
                 },
                 new GpuConstants(view.Constants.Id, probes.Constants.Id)
             )
-            .Reads(view.Constants, probes.Constants, probes.Probes)
+            .Reads(view.Constants, view.ExposureMeter, probes.Constants, probes.Probes)
             .Indirect(probes.DrawArguments)
             .DrawIndirectCount(probes.DrawArguments, 0, probes.DrawArguments, 16, 1);
 }

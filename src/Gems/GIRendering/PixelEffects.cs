@@ -73,7 +73,7 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
                     _running[effect],
                     new GpuConstants(view.Constants.Id, table.Value.Id, (uint)effect)
                 )
-                .Reads(view.Constants, table.Value, view.Depth)
+                .Reads(view.Constants, view.ExposureMeter, table.Value, view.Depth)
                 .Writes(view.Hdr)
                 .DispatchOver(view.Width, view.Height);
         }

@@ -121,7 +121,7 @@ internal record struct FrameConstants
 
     public uint Hdr;
 
-    public float Exposure;
+    public uint ExposureMeter;
 
     public float TimeSec;
 

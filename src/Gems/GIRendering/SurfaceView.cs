@@ -51,7 +51,8 @@ internal enum DebugView : uint
 }
 
 /// <summary>
-/// The output drawn from the lit picture, or from one of the GBuffer's properties when a debug view asks.
+/// The output drawn from the lit picture, at the metered exposure through the tonemap, or from one of the GBuffer's
+/// properties when a debug view asks.
 /// </summary>
 internal sealed class SurfaceView(AssetManager assets)
 {
@@ -59,20 +60,12 @@ internal sealed class SurfaceView(AssetManager assets)
 
     public ImmutableArray<ShaderEntry> Shaders => [_showShader];
 
-    public void Record(in RenderView view, DebugView debugView, float exposure)
-    {
-        view.Graph.Compute(
-                "Show surface",
-                _showShader,
-                new GpuConstants(
-                    view.Constants.Id,
-                    (uint)debugView,
-                    view.Hdr.Id,
-                    BitConverter.SingleToUInt32Bits(exposure)
-                )
-            )
+    public void Record(in RenderView view, DebugView debugView) =>
+        view
+            .Graph.Compute("Show surface", _showShader, new GpuConstants(view.Constants.Id, (uint)debugView))
             .Reads(
                 view.Constants,
+                view.ExposureMeter,
                 view.Visibility,
                 view.Depth,
                 view.GBufferNormal,
@@ -83,5 +76,4 @@ internal sealed class SurfaceView(AssetManager assets)
             )
             .Writes(view.Output)
             .DispatchOver(view.Width, view.Height);
-    }
 }
