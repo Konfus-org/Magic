@@ -27,9 +27,11 @@ internal readonly record struct SlangModule(string Name, string Path, string Sou
 public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICache<CompiledShader>, IDisposable
 {
     private const string ShadersFolder = "Shaders";
+
     private const string Extension = ".slang";
 
     private readonly AssetManager _assets;
+
     private readonly Caches _caches;
 
     /// <summary>
@@ -115,20 +117,15 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
     /// The fields of the struct <paramref name="type"/> names, as a buffer lays them out; or why not. Not cached: a
     /// renderer asks once for each material shader it draws with.
     /// </summary>
-    public async Task<Result<ImmutableArray<ShaderField>>> ReflectAsync(
-        ShaderTypeArgument type,
-        CancellationToken cancel
-    )
-    {
-        if (_assets.GetPath(type.Module) is not { } path)
-            return Result.Failure($"the shader {type.Module.Id} is not an asset.");
+    public Task<Result<ImmutableArray<ShaderField>>> ReflectAsync(ShaderTypeArgument type, CancellationToken cancel) =>
+        ReflectAsync(type, ReadFields, cancel);
 
-        Result<ImmutableArray<SlangModule>> modules = await LoadModulesAsync([path], cancel).ConfigureAwait(false);
-        if (!modules.Ok)
-            return Result.Failure(modules.Error);
-
-        return await RunAsync(() => Reflect(modules.Value, path, type.Type), cancel).ConfigureAwait(false);
-    }
+    /// <summary>
+    /// The integer constant the struct <paramref name="type"/> names declares under <paramref name="name"/>; or why
+    /// not. Not cached, as <see cref="ReflectAsync(ShaderTypeArgument, CancellationToken)"/> isn't.
+    /// </summary>
+    public Task<Result<long>> ReflectConstantAsync(ShaderTypeArgument type, string name, CancellationToken cancel) =>
+        ReflectAsync(type, (layout, found) => ReadConstant(layout, found, name), cancel);
 
     public void Write(CompiledShader value, IBufferWriter<byte> bytes)
     {
@@ -231,6 +228,58 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
         diagnostics = null;
 
         return text.Trim();
+    }
+
+    /// <summary>
+    /// The fields of the struct <paramref name="type"/> in <paramref name="layout"/>, as a buffer lays them out: each
+    /// one's name, offset and size, and a struct field's type's name.
+    /// </summary>
+    private static unsafe Result<ImmutableArray<ShaderField>> ReadFields(nint layout, nint type)
+    {
+        // Slang's SlangTypeKind of a struct, and its SlangParameterCategory of a field's bytes.
+        const int Struct = 1;
+        const int Uniform = 8;
+        void* typeLayout = Slang.spReflection_GetTypeLayout((void*)layout, (void*)type, 0);
+        uint count = Slang.spReflectionTypeLayout_GetFieldCount(typeLayout);
+        ImmutableArray<ShaderField>.Builder fields = ImmutableArray.CreateBuilder<ShaderField>((int)count);
+        for (uint i = 0; i < count; i++)
+        {
+            void* field = Slang.spReflectionTypeLayout_GetFieldByIndex(typeLayout, i);
+            void* fieldLayout = Slang.spReflectionVariableLayout_GetTypeLayout(field);
+            void* fieldType = Slang.spReflectionTypeLayout_GetType(fieldLayout);
+            void* variable = Slang.spReflectionVariableLayout_GetVariable(field);
+            fields.Add(
+                new ShaderField(
+                    CString.Read(Slang.spReflectionVariable_GetName(variable)),
+                    (uint)Slang.spReflectionVariableLayout_GetOffset(field, Uniform),
+                    (uint)Slang.spReflectionTypeLayout_GetSize(fieldLayout, Uniform),
+                    Slang.spReflectionType_GetKind(fieldType) == Struct
+                        ? CString.Read(Slang.spReflectionType_GetName(fieldType))
+                        : string.Empty
+                )
+            );
+        }
+
+        return Result.Success(fields.MoveToImmutable());
+    }
+
+    /// <summary>
+    /// The value of the integer constant <paramref name="name"/> the struct <paramref name="type"/> declares, a
+    /// <c>static const</c> whose initialiser is a literal.
+    /// </summary>
+    private static unsafe Result<long> ReadConstant(nint layout, nint type, string name)
+    {
+        void* variable;
+        fixed (byte* named = CString.ToBytes(name))
+        {
+            variable = Slang.spReflection_FindVarByNameInType((void*)layout, (void*)type, named);
+        }
+
+        long value;
+
+        return variable != null && Slang.spReflectionVariable_GetDefaultValueInt(variable, &value) >= 0
+            ? Result.Success(value)
+            : Result.Failure($"declares no integer constant {name}.");
     }
 
     /// <summary>
@@ -508,18 +557,36 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
     }
 
     /// <summary>
-    /// The fields of <paramref name="typeName"/> in the module at <paramref name="typePath"/> as the session lays them
-    /// out: each one's name, offset and size, and a struct field's type's name.
+    /// What <paramref name="read"/> reads of the struct <paramref name="type"/> names, in a session of its module and
+    /// what it imports; or why not.
     /// </summary>
-    private unsafe Result<ImmutableArray<ShaderField>> Reflect(
-        ImmutableArray<SlangModule> modules,
-        string typePath,
-        string typeName
+    private async Task<Result<T>> ReflectAsync<T>(
+        ShaderTypeArgument type,
+        Func<nint, nint, Result<T>> read,
+        CancellationToken cancel
     )
     {
-        // Slang's SlangTypeKind of a struct, and its SlangParameterCategory of a field's bytes.
-        const int Struct = 1;
-        const int Uniform = 8;
+        if (_assets.GetPath(type.Module) is not { } path)
+            return Result.Failure($"the shader {type.Module.Id} is not an asset.");
+
+        Result<ImmutableArray<SlangModule>> modules = await LoadModulesAsync([path], cancel).ConfigureAwait(false);
+        if (!modules.Ok)
+            return Result.Failure(modules.Error);
+
+        return await RunAsync(() => Reflect(modules.Value, path, type.Type, read), cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// What <paramref name="read"/> reads of <paramref name="typeName"/> in the module at <paramref name="typePath"/>,
+    /// handed the session's layout and the type, both alive until it returns.
+    /// </summary>
+    private unsafe Result<T> Reflect<T>(
+        ImmutableArray<SlangModule> modules,
+        string typePath,
+        string typeName,
+        Func<nint, nint, Result<T>> read
+    )
+    {
         Result<nint> made = CreateSession();
         if (!made.Ok)
             return Result.Failure(made.Error);
@@ -543,28 +610,9 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
             if (type == null)
                 return Result.Failure($"{typePath} declares no type {typeName}.");
 
-            void* typeLayout = Slang.spReflection_GetTypeLayout(layout, type, 0);
-            uint count = Slang.spReflectionTypeLayout_GetFieldCount(typeLayout);
-            ImmutableArray<ShaderField>.Builder fields = ImmutableArray.CreateBuilder<ShaderField>((int)count);
-            for (uint i = 0; i < count; i++)
-            {
-                void* field = Slang.spReflectionTypeLayout_GetFieldByIndex(typeLayout, i);
-                void* fieldLayout = Slang.spReflectionVariableLayout_GetTypeLayout(field);
-                void* fieldType = Slang.spReflectionTypeLayout_GetType(fieldLayout);
-                void* variable = Slang.spReflectionVariableLayout_GetVariable(field);
-                fields.Add(
-                    new ShaderField(
-                        CString.Read(Slang.spReflectionVariable_GetName(variable)),
-                        (uint)Slang.spReflectionVariableLayout_GetOffset(field, Uniform),
-                        (uint)Slang.spReflectionTypeLayout_GetSize(fieldLayout, Uniform),
-                        Slang.spReflectionType_GetKind(fieldType) == Struct
-                            ? CString.Read(Slang.spReflectionType_GetName(fieldType))
-                            : string.Empty
-                    )
-                );
-            }
+            Result<T> value = read((nint)layout, (nint)type);
 
-            return Result.Success(fields.MoveToImmutable());
+            return value.Ok ? value : Result.Failure($"{typePath}'s {typeName} {value.Error}");
         }
         finally
         {

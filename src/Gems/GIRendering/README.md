@@ -49,8 +49,10 @@ texture reader.
   light it gives a white surface.
 - The first `Weather`'s effects, such as the fog, and then the first `PostProcessing`'s run over the lit picture in
   order, before the exposure is metered and the tonemap: each is a material whose shader implements the pixel effect
-  contract, with params of its own as a surface material's are. An effect shows once its material and its pass are
-  built, and not while either loads or when one failed. The fog is lit by the sun and the sky alone, unshadowed.
+  contract, with params of its own as a surface material's are. Each reads the picture the ones before it left and
+  writes another; one that declares levels first fills each level of a target of its own, which it keeps from frame to
+  frame as its history. An effect shows once its material and its passes are built, and not while one loads or when
+  one failed. The fog is lit by the sun and the sky alone, unshadowed.
 - The exposure is metered each frame from a histogram of the picture's luminance, as the effects leave it, and adapts to
   a change over about a second, as an eye does; a new domain or window size takes its first reading at once. The
   first `PostProcessing`'s `ExposureCompensation` adds stops to it. The picture then goes through the AgX tonemap to the

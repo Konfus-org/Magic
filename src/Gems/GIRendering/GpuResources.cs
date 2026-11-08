@@ -70,6 +70,12 @@ internal sealed class GpuResources(
     private readonly Dictionary<ulong, MaterialLayout?> _layouts = [];
     private readonly List<ShaderTypeArgument> _materialShaders = [];
 
+    /// <summary>
+    /// The levels of a target of its own each effect shader's struct declares, by the shader's id, null while it is
+    /// reflected; none when it declares none.
+    /// </summary>
+    private readonly Dictionary<ulong, int?> _effectLevels = [];
+
     // The impostor table's rows; row 0 is no impostor, so it is taken from the start.
     private readonly FreeList _impostorRows = CreateImpostorRows();
 
@@ -302,14 +308,32 @@ internal sealed class GpuResources(
     /// <summary>
     /// Whether the effect's material, its shader's struct and the textures it names are on the GPU, its row packed as
     /// <see cref="Get(in MaterialInstance, out GpuMaterial)"/> packs a surface's, and the struct its pass is specialised
-    /// to. An effect's shader is not one of the <see cref="MaterialShaders"/>, which only surfaces are resolved with.
+    /// to, with the levels it declares. An effect's shader is not one of the <see cref="MaterialShaders"/>, which only
+    /// surfaces are resolved with.
     /// </summary>
-    public ResourceState GetEffect(in MaterialInstance slot, out GpuMaterial row, out ShaderTypeArgument shader)
+    public ResourceState GetEffect(
+        in MaterialInstance slot,
+        out GpuMaterial row,
+        out ShaderTypeArgument shader,
+        out int levels
+    )
     {
         ResourceState state = Pack(slot, out row, out MaterialLayout layout);
         shader = layout.Shader;
+        levels = 0;
+        if (state != ResourceState.Ready)
+            return state;
 
-        return state;
+        // Its levels are reflected on its first ask, only an effect's, and it waits for them.
+        if (!_effectLevels.TryGetValue(shader.Module.Id, out int? declared))
+        {
+            _effectLevels[shader.Module.Id] = null;
+            ReflectLevelsAsync(shader).FireAndForget();
+        }
+
+        levels = declared ?? 0;
+
+        return declared is null ? ResourceState.Loading : state;
     }
 
     /// <summary>
@@ -567,6 +591,18 @@ internal sealed class GpuResources(
         }
 
         _layouts[shader.Id] = new MaterialLayout(fields.Value, type);
+    }
+
+    /// <summary>
+    /// Reflects the levels the effect shader's struct declares, once.
+    /// </summary>
+    private async Task ReflectLevelsAsync(ShaderTypeArgument shader)
+    {
+        Result<long> levels = await shaders
+            .ReflectConstantAsync(shader, "Levels", CancellationToken.None)
+            .ConfigureAwait(false);
+        await threads.Enter(EngineThread.Render);
+        _effectLevels[shader.Module.Id] = levels.Ok ? (int)levels.Value : 0;
     }
 
     /// <summary>

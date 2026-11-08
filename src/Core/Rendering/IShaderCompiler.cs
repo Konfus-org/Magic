@@ -21,4 +21,11 @@ public interface IShaderCompiler
     /// renderer packs a material's params into the struct its shader reads them as. Or why not.
     /// </summary>
     Task<Result<ImmutableArray<ShaderField>>> ReflectAsync(ShaderTypeArgument type, CancellationToken cancel);
+
+    /// <summary>
+    /// The integer constant <paramref name="name"/> that the struct <paramref name="type"/> names declares, as
+    /// <c>static const uint Levels = 2;</c> does: how a shader tells a renderer what it needs beyond its params. Or why
+    /// not, as when the struct declares none.
+    /// </summary>
+    Task<Result<long>> ReflectConstantAsync(ShaderTypeArgument type, string name, CancellationToken cancel);
 }

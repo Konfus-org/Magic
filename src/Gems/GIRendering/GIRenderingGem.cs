@@ -319,7 +319,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         // The air's effects before the picture's, so a post effect works on the fogged picture.
         MaterialSlots air = inputs.Weather.Count > 0 ? inputs.Weather.First[0].Effects : default;
         PostProcessing post = inputs.PostProcessing.Count > 0 ? inputs.PostProcessing.First[0] : new PostProcessing();
-        _pixelEffects.Record(view, [air, post.Effects]);
+        _pixelEffects.Record(view, frame.Index, [air, post.Effects]);
 
         _exposureMeter.Record(view, (float)frame.AppDeltaSec, post.ExposureCompensation);
         _surfaceView.Record(view, inputs.DebugView, diffuse);

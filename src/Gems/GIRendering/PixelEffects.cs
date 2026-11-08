@@ -1,3 +1,5 @@
+using System.Linq;
+using System.Runtime.CompilerServices;
 using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs.Components;
@@ -8,85 +10,249 @@ namespace Magic.GIRendering;
 
 /// <summary>
 /// The effects run over the lit picture before the output, the air's and then the picture's, in order: each a material
-/// whose shader implements the pixel effect contract, its row packed as a surface material's is, and a pass of the entry
-/// specialised to its shader. An effect is left out while its material, its textures or its pass load, and when one of
-/// them failed.
+/// whose shader implements the pixel effect contract, its row packed as a surface material's is, and passes of the
+/// entries specialised to its shader: one for each level of its own target it declares, then its apply, which reads the
+/// picture the effects before it left and writes the other of two, the last copied back into the HDR picture. An
+/// effect with levels has two targets by its place in the lists, which swap each frame, so the one it filled last frame
+/// is its history. An effect is left out while its material, its textures or its passes load, and when one of them
+/// failed.
 /// </summary>
 internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
 {
+    /// <summary>
+    /// The places in the lists a frame runs, the weather's and the post processing's.
+    /// </summary>
+    private const int Places = 2 * MaterialSlots.Capacity;
+
+    /// <summary>
+    /// The most levels an effect's target has: the storage levels the heap keeps of a texture.
+    /// </summary>
+    private const int MostLevels = 16;
+
+    /// <summary>
+    /// The names of the two targets of the effect at each place, by the parity of the frame that fills it.
+    /// </summary>
+    private static readonly string[] _targetNames = [.. Enumerable.Range(0, 2 * Places).Select(i => $"Effect {i}")];
+
     private readonly ShaderEntry _applyShader = PassShaders.GetEntry(assets, "ApplyPixelEffect", "ApplyPixelEffect");
+    private readonly ShaderEntry _levelShader = PassShaders.GetEntry(assets, "ApplyPixelEffect", "FillEffectLevel");
 
     /// <summary>
-    /// The apply entry specialised to each effect shader, kept, so a frame makes none.
+    /// Each entry specialised to each effect shader, kept, so a frame makes none.
     /// </summary>
-    private readonly Dictionary<ShaderTypeArgument, ShaderEntry> _applyShaders = [];
+    private readonly Dictionary<(ShaderEntry Entry, ShaderTypeArgument Shader), ShaderEntry> _specialised = [];
 
     /// <summary>
-    /// The entries of the effects a frame runs, in order: a reusable buffer for <see cref="Record"/>.
+    /// The effects a frame runs, in order: a reusable buffer for <see cref="Record"/>.
     /// </summary>
-    private readonly List<ShaderEntry> _running = [];
+    private readonly List<RunningEffect> _running = [];
 
     /// <summary>
-    /// Runs the effects of each of <paramref name="lists"/>, in order.
+    /// The material the effect at each place was last frame, 0 where none ran: whether its history is its own.
     /// </summary>
-    public void Record(in RenderView view, ReadOnlySpan<MaterialSlots> lists)
+    private readonly ulong[] _lastFrame = new ulong[Places];
+
+    /// <summary>
+    /// Runs the effects of each of <paramref name="lists"/>, in order, on frame <paramref name="frameIndex"/>.
+    /// </summary>
+    public void Record(in RenderView view, uint frameIndex, ReadOnlySpan<MaterialSlots> lists)
     {
-        // The rows and entries of the effects ready to run, in order.
-        Span<GpuMaterial> rows = stackalloc GpuMaterial[lists.Length * MaterialSlots.Capacity];
+        RenderGraph graph = view.Graph;
+
+        // The rows, entries and targets of the effects ready to run, in order.
+        Span<GpuMaterial> rows = stackalloc GpuMaterial[Places];
         _running.Clear();
-        for (int i = 0; i < rows.Length; i++)
+        int passCount = 0;
+        for (int place = 0; place < lists.Length * MaterialSlots.Capacity; place++)
         {
-            MaterialInstance slot = lists[i / MaterialSlots.Capacity][i % MaterialSlots.Capacity];
+            MaterialInstance slot = lists[place / MaterialSlots.Capacity][place % MaterialSlots.Capacity];
+            bool ranLastFrame = _lastFrame[place] == slot.Handle.Id;
+            _lastFrame[place] = 0;
             if (slot.Handle == Handle<Material>.None)
                 continue;
 
-            if (resources.GetEffect(slot, out GpuMaterial row, out ShaderTypeArgument shader) != ResourceState.Ready)
+            if (
+                resources.GetEffect(slot, out GpuMaterial row, out ShaderTypeArgument shader, out int declared)
+                != ResourceState.Ready
+            )
                 continue;
 
-            ShaderEntry entry = GetApplyShader(shader);
-            if (view.Graph.GetState(entry) != GpuState.Ready)
+            ShaderEntry apply = GetSpecialised(_applyShader, shader);
+            ShaderEntry level = GetSpecialised(_levelShader, shader);
+            int levels = Math.Min(
+                declared,
+                Math.Min(MostLevels, TextureDescription.GetFullLevels(view.Width, view.Height))
+            );
+            if (graph.GetState(apply) != GpuState.Ready || (levels > 0 && graph.GetState(level) != GpuState.Ready))
                 continue;
 
+            Result<(GpuTexture Target, GpuTexture History)> targets = GetTargets(view, place, frameIndex, levels);
+            if (!targets.Ok)
+            {
+                Log.Error($"The effect at {place} in the lists is not drawn: {targets.Error}");
+
+                continue;
+            }
+
+            (GpuTexture target, GpuTexture history) = targets.Value;
             rows[_running.Count] = row;
-            _running.Add(entry);
+            _running.Add(new RunningEffect(apply, level, levels, target, history, view.HasHistory && ranLastFrame));
+            _lastFrame[place] = slot.Handle.Id;
+            passCount += levels + 1;
         }
 
         int count = _running.Count;
         if (count == 0)
             return;
 
-        Result<GpuBuffer> table = view.Graph.Buffer(
-            GpuDescriptions.GetBuffer("Effect rows", rows.Length * GpuMaterial.Bytes)
+        Result<GpuBuffer> table = graph.Buffer(GpuDescriptions.GetBuffer("Effect rows", Places * GpuMaterial.Bytes));
+        Result<GpuBuffer> passTable = graph.Buffer(
+            GpuDescriptions.GetBuffer("Effect passes", Places * (MostLevels + 1) * Unsafe.SizeOf<GpuEffectPass>())
         );
-        if (!table.Ok)
+        Result<GpuTexture> otherPicture = graph.Texture(
+            GpuDescriptions.GetTexture(
+                "Effect picture",
+                view.Width,
+                view.Height,
+                GpuFormat.R16G16B16A16Sfloat,
+                TextureUsages.Storage | TextureUsages.Sampled | TextureUsages.CopySource
+            )
+        );
+        foreach (Result made in (ReadOnlySpan<Result>)[table, passTable, otherPicture])
         {
-            Log.Error($"The picture's effects are not drawn: {table.Error}");
+            if (!made.Ok)
+            {
+                Log.Error($"The picture's effects are not drawn: {made.Error}");
 
-            return;
+                return;
+            }
         }
 
-        view.Graph.Upload(table.Value, rows[..count]);
+        graph.Upload(table.Value, rows[..count]);
+        Span<GpuEffectPass> passes = graph.Upload<GpuEffectPass>(passTable.Value, passCount);
+
+        // Each effect's levels into its target, then its apply from one picture into the other, which the next reads.
+        ReadOnlySpan<GpuResource> surface =
+        [
+            view.Constants,
+            view.ExposureMeter,
+            table.Value,
+            passTable.Value,
+            view.Visibility,
+            view.Depth,
+            view.GBufferNormal,
+            view.GBufferBase,
+            view.GBufferSurface,
+            view.Velocity,
+        ];
+        (GpuTexture picture, GpuTexture other) = (view.Hdr, otherPicture.Value);
+        int pass = 0;
         for (int effect = 0; effect < count; effect++)
         {
-            view.Graph.Compute(
+            RunningEffect running = _running[effect];
+            GpuEffectPass shared = new()
+            {
+                Rows = table.Value.Id,
+                Row = (uint)effect,
+                Picture = picture.Id,
+                Target = running.Target.Id,
+                History = running.History.Id,
+                HasHistory = running.HasHistory ? 1u : 0u,
+            };
+            for (int level = 0; level < running.Levels; level++)
+            {
+                passes[pass] = shared with { Level = (uint)level, Output = running.Target.Id };
+                ComputePass fill = graph
+                    .Compute(
+                        "Fill effect level",
+                        running.Level,
+                        new GpuConstants(view.Constants.Id, passTable.Value.Id, (uint)pass)
+                    )
+                    .Reads(surface)
+                    .Reads(picture, running.History);
+                if (level > 0)
+                    fill.Reads(running.Target, level - 1);
+
+                fill.Writes(running.Target, level)
+                    .DispatchOver(Math.Max(view.Width >> level, 1), Math.Max(view.Height >> level, 1));
+                pass++;
+            }
+
+            passes[pass] = shared with { Output = other.Id };
+            ComputePass applied = graph
+                .Compute(
                     "Apply effect",
-                    _running[effect],
-                    new GpuConstants(view.Constants.Id, table.Value.Id, (uint)effect)
+                    running.Apply,
+                    new GpuConstants(view.Constants.Id, passTable.Value.Id, (uint)pass)
                 )
-                .Reads(view.Constants, view.ExposureMeter, table.Value, view.Depth)
-                .Writes(view.Hdr)
-                .DispatchOver(view.Width, view.Height);
+                .Reads(surface)
+                .Reads(picture);
+            if (running.Levels > 0)
+                applied.Reads(running.Target, running.History);
+
+            applied.Writes(other).DispatchOver(view.Width, view.Height);
+            pass++;
+            (picture, other) = (other, picture);
         }
+
+        if (picture != view.Hdr)
+            graph.Blit(picture, view.Hdr);
     }
 
-    private ShaderEntry GetApplyShader(ShaderTypeArgument shader)
+    /// <summary>
+    /// The two targets of the effect at <paramref name="place"/> with <paramref name="levels"/>: the one frame
+    /// <paramref name="frameIndex"/> fills, by its parity, and the one the frame before filled; none without levels.
+    /// </summary>
+    private static Result<(GpuTexture Target, GpuTexture History)> GetTargets(
+        in RenderView view,
+        int place,
+        uint frameIndex,
+        int levels
+    )
     {
-        if (!_applyShaders.TryGetValue(shader, out ShaderEntry entry))
+        if (levels == 0)
+            return Result.Success((GpuTexture.None, GpuTexture.None));
+
+        int filled = (2 * place) + (int)(frameIndex % 2);
+        Result<GpuTexture> target = view.Graph.Texture(GetTarget(_targetNames[filled], view, levels));
+        Result<GpuTexture> history = view.Graph.Texture(GetTarget(_targetNames[filled ^ 1], view, levels));
+        if (!target.Ok || !history.Ok)
+            return Result.Failure(target.Ok ? history.Error : target.Error);
+
+        return Result.Success((target.Value, history.Value));
+    }
+
+    private static TextureDescription GetTarget(string name, in RenderView view, int levels) =>
+        GpuDescriptions.GetTexture(
+            name,
+            view.Width,
+            view.Height,
+            GpuFormat.R16G16B16A16Sfloat,
+            TextureUsages.Storage | TextureUsages.Sampled,
+            levels
+        );
+
+    private ShaderEntry GetSpecialised(ShaderEntry entry, ShaderTypeArgument shader)
+    {
+        if (!_specialised.TryGetValue((entry, shader), out ShaderEntry specialised))
         {
-            entry = _applyShader with { TypeArguments = [shader] };
-            _applyShaders[shader] = entry;
+            specialised = entry with { TypeArguments = [shader] };
+            _specialised[(entry, shader)] = specialised;
         }
 
-        return entry;
+        return specialised;
     }
+
+    /// <summary>
+    /// An effect a frame runs: its entries, the levels of its target, its target and its history, none without levels,
+    /// and whether the history holds what it filled last frame.
+    /// </summary>
+    private readonly record struct RunningEffect(
+        ShaderEntry Apply,
+        ShaderEntry Level,
+        int Levels,
+        GpuTexture Target,
+        GpuTexture History,
+        bool HasHistory
+    );
 }

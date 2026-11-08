@@ -127,6 +127,15 @@ internal static unsafe partial class Slang
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     public static partial void* spReflection_FindTypeByName(void* programLayout, byte* name);
 
+    // A struct's static const, read by name: what a shader declares for a renderer beyond its params.
+    [LibraryImport(Library)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    public static partial void* spReflection_FindVarByNameInType(void* programLayout, void* type, byte* name);
+
+    [LibraryImport(Library)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    public static partial int spReflectionVariable_GetDefaultValueInt(void* variable, long* value);
+
     [LibraryImport(Library)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     public static partial void* spReflection_getEntryPointByIndex(void* programLayout, ulong index);

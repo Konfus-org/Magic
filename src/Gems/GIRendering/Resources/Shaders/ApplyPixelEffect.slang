@@ -1,44 +1,109 @@
-// One pixel effect over every pixel of the lit picture, in place: the effect's struct is loaded from its row of the
-// table whose heap id is the pass header's y, at the row its z names, and handed each pixel after the exposure, with
-// where its surface is and the sun's and the sky's light; what it gives back is written before the exposure again, for
-// the next effect or the output.
+// A pixel effect's passes: each level of its target filled, then the effect applied over every pixel of the picture.
+// A pass reads its GpuEffectPass from the table whose heap id is the pass header's y, at the row its z names, and the
+// effect's struct from its row of the params table that names. The effect is handed each pixel after the exposure,
+// with where its surface is and the sun's and the sky's light; what it gives back is written before the exposure again,
+// into the other picture, for the next effect or the output.
 module "ApplyPixelEffect";
 
 import Core.Heap;
 import Core.Pass;
 import Core.Frame;
+import Core.Pack;
 import Scene.Materials;
 import Post.IPixelEffect;
 
 // The reversed depth a pixel where nothing was drawn is put at: far along its ray, short of infinity.
 static const float FarDepth = 1e-6;
 
-[shader("compute")]
-[numthreads(8, 8, 1)]
-void ApplyPixelEffect<E : IPixelEffect>(uint3 thread : SV_DispatchThreadID)
+// One pass of an effect, C#'s GpuEffectPass: the heap id of the table of the effects' params and the effect's row in
+// it, the level of its target the pass fills, 0 for Apply, and the heap ids of the picture it reads, of what it writes,
+// and of the effect's target and history, with whether the history holds last frame's target.
+struct GpuEffectPass
 {
-    FrameConstants frame = GetFrame();
-    if (any(thread.xy >= uint2(frame.width, frame.height)))
-        return;
+    uint rows;
+    uint row;
+    uint level;
+    uint picture;
+    uint output;
+    uint target;
+    uint history;
+    uint hasHistory;
+}
 
+GpuEffectPass LoadPass()
+{
     PassHeader header = GetPassHeader();
-    E effect = LoadMaterialParams<E>(header.y, header.z);
-    TextureRef depth = { frame.depth };
+    ArrayRef<GpuEffectPass> passes = { header.y };
+    return passes[header.z];
+}
+
+// What an effect is handed for a texel of what the pass writes, which is size texels across.
+PixelEffectInputs CreateInputs(FrameConstants frame, GpuEffectPass pass, uint2 pixel, uint2 size)
+{
     PixelEffectInputs inputs;
-    inputs.size = uint2(frame.width, frame.height);
-    inputs.pixel = thread.xy;
-    inputs.uv = (float2(thread.xy) + 0.5) / float2(inputs.size);
+    inputs.size = size;
+    inputs.pixel = pixel;
+    inputs.uv = (float2(pixel) + 0.5) / float2(size);
+    inputs.level = pass.level;
     inputs.exposure = GetExposure(frame);
     inputs.time = frame.timeSec;
-    inputs.position = ReconstructRelative(frame, inputs.uv, max(depth.Load(thread.xy, 0u).x, FarDepth));
     inputs.cameraPosition = frame.cameraPosition.xyz;
     inputs.sunDirection = frame.sunDirection.xyz;
     inputs.sunRadiance = frame.sunRadiance.rgb * inputs.exposure;
     // PROTO: the sky's light as the shading draws a missing sky, until the sky's tables are handed on.
     inputs.skyRadiance = frame.skyRadiance.rgb * frame.sunRadiance.r * inputs.exposure;
+    inputs.picture.id = pass.picture;
+    inputs.target.id = pass.target;
+    inputs.history.id = pass.history;
+    inputs.hasHistory = pass.hasHistory != 0u;
+    inputs.depth.id = frame.depth;
+    inputs.velocity.id = frame.velocity;
 
-    StorageRef picture = { frame.hdr, 0u };
-    float4 before = picture.Load(thread.xy);
+    // The surface under the texel's middle, in the picture's texels.
+    uint2 pictureSize = uint2(frame.width, frame.height);
+    uint2 texel = min(uint2(inputs.uv * float2(pictureSize)), pictureSize - 1u);
+    inputs.position = ReconstructRelative(frame, inputs.uv, max(inputs.depth.Load(texel, 0u).x, FarDepth));
+    UintTextureRef visibility = { frame.visibility };
+    TextureRef normals = { frame.gbufferNormal };
+    TextureRef bases = { frame.gbufferBase };
+    TextureRef surfaces = { frame.gbufferSurface };
+    bool isDrawn = visibility.Load(texel, 0u) != 0u;
+    float4 base = isDrawn ? bases.Load(texel, 0u) : float4(0.0);
+    inputs.normal = isDrawn ? DecodeOctahedral(normals.Load(texel, 0u).xy * 2.0 - 1.0) : float3(0.0);
+    inputs.baseColor = base.rgb;
+    inputs.metalness = base.a;
+    inputs.roughness = isDrawn ? surfaces.Load(texel, 0u).x : 0.0;
+    return inputs;
+}
+
+[shader("compute")]
+[numthreads(8, 8, 1)]
+void FillEffectLevel<E : IPixelEffect>(uint3 thread : SV_DispatchThreadID)
+{
+    GpuEffectPass pass = LoadPass();
+    StorageRef level = { pass.output, pass.level };
+    uint2 size = level.GetSize();
+    if (any(thread.xy >= size))
+        return;
+
+    E effect = LoadMaterialParams<E>(pass.rows, pass.row);
+    level.Store(thread.xy, effect.Level(CreateInputs(GetFrame(), pass, thread.xy, size)));
+}
+
+[shader("compute")]
+[numthreads(8, 8, 1)]
+void ApplyPixelEffect<E : IPixelEffect>(uint3 thread : SV_DispatchThreadID)
+{
+    FrameConstants frame = GetFrame();
+    uint2 size = uint2(frame.width, frame.height);
+    if (any(thread.xy >= size))
+        return;
+
+    GpuEffectPass pass = LoadPass();
+    E effect = LoadMaterialParams<E>(pass.rows, pass.row);
+    PixelEffectInputs inputs = CreateInputs(frame, pass, thread.xy, size);
+    float4 before = inputs.picture.Load(thread.xy, 0u);
     float3 after = effect.Apply(before.rgb * inputs.exposure, inputs);
-    picture.Store(thread.xy, float4(after / inputs.exposure, before.a));
+    StorageRef output = { pass.output, 0u };
+    output.Store(thread.xy, float4(after / inputs.exposure, before.a));
 }
