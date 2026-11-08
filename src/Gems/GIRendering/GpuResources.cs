@@ -1,5 +1,7 @@
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
+using System.Linq;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Magic.Assets;
@@ -25,16 +27,22 @@ internal enum ResourceState : byte
 /// <summary>
 /// The GPU resources the gem draws with, each read once on its first ask: a texture asset by its handle, read and asked
 /// of the graph with every level and the sampler its asset asks for, then copied up in the frame after it arrives; a
-/// material asset by its handle, read once, with the texture it names asked for, and handed out as the material row a
-/// slot's params make over its own; a model asset by its handle, made by the preprocessor on a worker, settled into the
-/// pools of vertices, indices, clusters and leaf clusters with its acceleration structure at the start of the next
+/// material asset by its handle, read once, with the textures it names asked for and its shader's struct reflected,
+/// and handed out as the row a slot's params make over its own, packed as that struct lays them out; a model asset by
+/// its handle, made by the preprocessor on a worker, settled into the pools of vertices, indices, clusters and leaf clusters with its acceleration structure at the start of the next
 /// frame, and copied up in it. The pools, the textures and each resident model's acceleration structure and atlases are
 /// asked of the graph every frame, so the GPU provider keeps what they hold. Each pool hands out ranges first fit from a
 /// free list. A model not asked for in <see cref="UnusedSec"/>, and held by no renderer drawn, is evicted: its ranges go
 /// back to the free lists and its structure and atlases are no longer asked for, so the GPU provider frees them, and the
 /// next ask makes it again.
 /// </summary>
-internal sealed class GpuResources(ModelPreprocessor models, Caches caches, AssetManager assets, Threads threads)
+internal sealed class GpuResources(
+    ModelPreprocessor models,
+    Caches caches,
+    AssetManager assets,
+    IShaderCompiler shaders,
+    Threads threads
+)
 {
     private const int VertexCapacity = 1 << 22;
     private const int IndexCapacity = 1 << 24;
@@ -54,6 +62,13 @@ internal sealed class GpuResources(ModelPreprocessor models, Caches caches, Asse
     /// </summary>
     private readonly Dictionary<ulong, Material?> _materials = [];
     private readonly List<(Texture Asset, TextureEntry Entry)> _arrivedTextures = [];
+
+    /// <summary>
+    /// Each material shader's struct as reflection lays it out, by the shader's id, null while it is reflected; its
+    /// fields are default when it was not, and its materials are drawn as the failure.
+    /// </summary>
+    private readonly Dictionary<ulong, MaterialLayout?> _layouts = [];
+    private readonly List<ShaderTypeArgument> _materialShaders = [];
 
     // The impostor table's rows; row 0 is no impostor, so it is taken from the start.
     private readonly FreeList _impostorRows = CreateImpostorRows();
@@ -78,12 +93,6 @@ internal sealed class GpuResources(ModelPreprocessor models, Caches caches, Asse
     private readonly FreeList _leafRanges = new(ClusterCapacity);
 
     /// <summary>
-    /// The material row a slot is drawn with until its material is loaded, and an empty slot always.
-    /// </summary>
-    public static GpuMaterial DefaultMaterial =>
-        new() { BaseColor = new Vector4(0.8f, 0.8f, 0.8f, 1), Roughness = 0.6f };
-
-    /// <summary>
     /// How many models were made or failed, ever: when it changes, a renderer waiting for its model may draw now.
     /// </summary>
     public int SettledModels { get; private set; }
@@ -105,13 +114,11 @@ internal sealed class GpuResources(ModelPreprocessor models, Caches caches, Asse
     /// </summary>
     public GpuBuffer ImpostorTable { get; private set; }
 
-    private static GpuMaterial FailureMaterial =>
-        new()
-        {
-            BaseColor = new Vector4(1, 0, 1, 1),
-            Roughness = 1,
-            Kind = (uint)MaterialKind.Failure,
-        };
+    /// <summary>
+    /// The material shaders rows are drawn with, each as a resolve pass specialises to it, in the order a row numbers
+    /// them.
+    /// </summary>
+    public IReadOnlyList<ShaderTypeArgument> MaterialShaders => _materialShaders;
 
     /// <summary>
     /// The textures shaders read through the heap, by the id in a row rather than by a pass's name: every material's
@@ -270,21 +277,21 @@ internal sealed class GpuResources(ModelPreprocessor models, Caches caches, Asse
     }
 
     /// <summary>
-    /// Whether the material and the texture it names are on the GPU, or it is drawn as the failure; the first ask starts
-    /// loading it.
+    /// Whether the material, its shader's struct and the textures it names are on the GPU, or it is drawn as the failure;
+    /// the first ask starts loading it.
     /// </summary>
     public ResourceState Get(Handle<Material> handle) => Get(new MaterialInstance { Handle = handle }, out _);
 
     /// <summary>
-    /// Whether the slot's material and the texture it names are on the GPU, and the row the slot's params over the
-    /// material's make: "color", "roughness", "metalness", "emissive" and the material's "colorMap" texture, each the
-    /// default when left out. The default row while the material loads and without the texture while that loads; of the
-    /// failure kind when the material did not load or names the failure shader, and the bare failure row when its
-    /// texture failed. The first ask starts loading the material.
+    /// Whether the slot's material, its shader's struct and the textures it names are on the GPU, and the row the slot's
+    /// params over the material's make: each field of the struct by its name, a texture's heap id in a <c>TextureRef</c>
+    /// and its sampler's in the <c>SamplerRef</c> named for it with "Sampler" after, and 0 where neither sets one. Failed
+    /// when the material, its shader's struct or a texture did not load, or the material is the failure. The first ask
+    /// starts loading the material.
     /// </summary>
     public ResourceState Get(in MaterialInstance slot, out GpuMaterial row)
     {
-        row = DefaultMaterial;
+        row = default;
         if (!_materials.TryGetValue(slot.Handle.Id, out Material? asked))
         {
             _materials[slot.Handle.Id] = null;
@@ -293,41 +300,43 @@ internal sealed class GpuResources(ModelPreprocessor models, Caches caches, Asse
             return ResourceState.Loading;
         }
 
-        if (asked is not { } material)
+        if (asked is not { } material || _layouts.GetValueOrDefault(material.Shader.Id) is not { } layout)
             return ResourceState.Loading;
 
+        if (layout.Fields.IsDefault)
+            return ResourceState.Failed;
+
         MaterialOverrides overrides = slot.Overrides;
-        bool isFailure = material.Shader == assets.Find<Shader>(FailureShader);
-        row = isFailure ? FailureMaterial : DefaultMaterial;
-        if (TryGetParam("color", out MaterialParam? color))
-            row.BaseColor = new Vector4(color.R, color.G, color.B, color.A);
-
-        if (TryGetParam("roughness", out MaterialParam? roughness))
-            row.Roughness = roughness.X;
-
-        if (TryGetParam("metalness", out MaterialParam? metalness))
-            row.Metalness = metalness.X;
-
-        if (TryGetParam("emissive", out MaterialParam? emissive))
-            row.Emissive = new Vector3(emissive.R, emissive.G, emissive.B);
-
-        ResourceState colorMap = GetColorMap(material.Params, out uint texture, out uint sampler);
-        switch (colorMap)
+        ResourceState state =
+            material.Shader == assets.Find<Shader>(FailureShader) ? ResourceState.Failed : ResourceState.Ready;
+        row.Shader = layout.Shader;
+        Span<uint> words = row.Params;
+        foreach (ShaderField field in layout.Fields)
         {
-            case ResourceState.Ready:
-                row.BaseColorTexture = texture;
-                row.BaseColorSampler = sampler;
+            if (!TryGetParam(field.Name, out MaterialParam? param))
+                continue;
 
-                return isFailure ? ResourceState.Failed : ResourceState.Ready;
-            case ResourceState.Failed:
-                row = FailureMaterial;
+            Span<uint> into = words.Slice((int)field.Offset / 4, (int)field.Size / 4);
+            if (field.Struct == "TextureRef")
+            {
+                ResourceState texture = PackTexture(layout, field.Name, param.Texture, words);
+                state = texture == ResourceState.Ready || state == ResourceState.Failed ? state : texture;
 
-                return ResourceState.Failed;
-            case ResourceState.Loading:
-                return ResourceState.Loading;
-            default:
-                throw new ArgumentOutOfRangeException(nameof(slot), colorMap, "not a resource state");
+                continue;
+            }
+
+            // PROTO: a param that sets a colour fills the field from it, and one that sets none from its vector.
+            bool isColor = param.R != 0 || param.G != 0 || param.B != 0 || param.A != 0;
+            ReadOnlySpan<float> values = isColor
+                ? [param.R, param.G, param.B, param.A]
+                : [param.X, param.Y, param.Z, param.W];
+            for (int i = 0; i < into.Length && i < values.Length; i++)
+            {
+                into[i] = BitConverter.SingleToUInt32Bits(values[i]);
+            }
         }
+
+        return state;
 
         bool TryGetParam(string name, [MaybeNullWhen(false)] out MaterialParam param) =>
             overrides.TryGet(name, out param) || material.Params.TryGetValue(name, out param);
@@ -481,18 +490,56 @@ internal sealed class GpuResources(ModelPreprocessor models, Caches caches, Asse
         };
 
     /// <summary>
-    /// The state of the "colorMap" texture <paramref name="parameters"/> name, asking for it, with its heap ids once it
-    /// is ready; ready, as nothing, when they name none.
+    /// Writes <paramref name="texture"/>'s heap id into the field named <paramref name="name"/> of <paramref name="words"/>,
+    /// and its sampler's into the field named for it with "Sampler" after, asking for it; its state, ready as nothing
+    /// when it is none.
     /// </summary>
-    private ResourceState GetColorMap(MaterialParamDictionary parameters, out uint texture, out uint sampler)
+    private ResourceState PackTexture(MaterialLayout layout, string name, Handle<Texture> texture, Span<uint> words)
     {
-        if (parameters.TryGetValue("colorMap", out MaterialParam? colorMap) && colorMap.Texture != Handle<Texture>.None)
-            return Get(colorMap.Texture, out texture, out sampler);
+        if (texture == Handle<Texture>.None)
+            return ResourceState.Ready;
 
-        texture = 0;
-        sampler = 0;
+        ResourceState state = Get(texture, out uint id, out uint sampler);
+        foreach (ShaderField field in layout.Fields)
+        {
+            if (field.Name == name)
+                words[(int)field.Offset / 4] = id;
+            else if (field.Struct == "SamplerRef" && field.Name == name + "Sampler")
+                words[(int)field.Offset / 4] = sampler;
+        }
 
-        return ResourceState.Ready;
+        return state;
+    }
+
+    /// <summary>
+    /// Reflects the struct of <paramref name="shader"/>, which a material draws with, once: named for its file, as
+    /// Material/Standard.slang declares Standard. It numbers the shader for the rows once it has, or leaves it failed
+    /// when it can't, or the struct is more than a row holds.
+    /// </summary>
+    private async Task ReflectAsync(Handle<Shader> shader)
+    {
+        string path = assets.GetPath(shader) ?? $"shader {shader.Id}";
+        ShaderTypeArgument type = new(shader, Path.GetFileNameWithoutExtension(path));
+        Result<ImmutableArray<ShaderField>> fields = await shaders
+            .ReflectAsync(type, CancellationToken.None)
+            .ConfigureAwait(false);
+        await threads.Enter(EngineThread.Render);
+        int bytes = fields.Ok
+            ? fields.Value.Select(field => (int)(field.Offset + field.Size)).DefaultIfEmpty().Max()
+            : 0;
+        if (!fields.Ok || bytes > GpuMaterial.Bytes - 4)
+        {
+            string why = fields.Ok
+                ? $"its params are {bytes} bytes, over a row's {GpuMaterial.Bytes - 4}"
+                : fields.Error;
+            Log.Error($"Materials drawn with {path} are drawn as the failure: {why}");
+            _layouts[shader.Id] = new MaterialLayout(default, 0);
+
+            return;
+        }
+
+        _layouts[shader.Id] = new MaterialLayout(fields.Value, (uint)_materialShaders.Count);
+        _materialShaders.Add(type);
     }
 
     /// <summary>
@@ -516,16 +563,21 @@ internal sealed class GpuResources(ModelPreprocessor models, Caches caches, Asse
         Result<Material> loaded = await assets.LoadAsync(handle, null, CancellationToken.None).ConfigureAwait(false);
         await threads.Enter(EngineThread.Render);
         if (!loaded.Ok)
-        {
             Log.Error($"{assets.GetPath(handle)} is drawn as a failure: {loaded.Error}");
-            _materials[handle.Id] = new Material { Shader = assets.Find<Shader>(FailureShader) };
 
-            return;
+        Material material = loaded.Ok ? loaded.Value : new Material { Shader = assets.Find<Shader>(FailureShader) };
+        _materials[handle.Id] = material;
+
+        // Its shader's struct and its textures are asked for now, so the loading gate waits for them before any row
+        // needs them.
+        if (_layouts.TryAdd(material.Shader.Id, null))
+            ReflectAsync(material.Shader).FireAndForget();
+
+        foreach (MaterialParam param in material.Params.Values)
+        {
+            if (param.Texture != Handle<Texture>.None)
+                Get(param.Texture, out _, out _);
         }
-
-        _materials[handle.Id] = loaded.Value;
-        // Asks for its texture now, so the loading gate waits for it before any row needs it.
-        GetColorMap(loaded.Value.Params, out _, out _);
     }
 
     private async Task LoadAsync(Handle<Texture> handle, TextureEntry entry)
@@ -783,6 +835,12 @@ internal sealed class GpuResources(ModelPreprocessor models, Caches caches, Asse
 
         public GpuSampler Sampler { get; set; }
     }
+
+    /// <summary>
+    /// A material shader's struct as its rows are packed: its fields as reflection lays them out, default when it could
+    /// not be, and the number its rows name it by.
+    /// </summary>
+    private readonly record struct MaterialLayout(ImmutableArray<ShaderField> Fields, uint Shader);
 }
 
 /// <summary>

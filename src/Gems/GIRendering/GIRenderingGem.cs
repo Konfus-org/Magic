@@ -100,6 +100,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
     public GIRenderingGem(
         IGraphicsApi gpu,
+        IShaderCompiler shaders,
         AssetManager assets,
         Caches caches,
         IEcs ecs,
@@ -119,7 +120,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _threads = threads;
         ModelPreprocessor models = new();
         _preprocessing = assets.Register(models);
-        _resources = new GpuResources(models, caches, assets, threads);
+        _resources = new GpuResources(models, caches, assets, shaders, threads);
         _failure = new MaterialInstance { Handle = assets.GetFailure<Material, Model>() };
         _instances = new InstanceTable(assets, _resources, _failure);
         _rayTracing = gpu.Features.HasRayQuery ? new RayTracing() : null;
@@ -235,8 +236,12 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         int instanceCount = _instances.Fill(inputs.Renderers, frame.Index);
         _resources.EvictUnusedModels(inputs.Renderers.Second[..instanceCount]);
 
-        // The loading domain shows once what it draws is on the GPU.
-        if (_preparing is { } preparing && IsPrepared(preparing))
+        // The loading domain shows once what it draws is on the GPU, and the resolve for each material shader is built.
+        if (
+            _preparing is { } preparing
+            && IsPrepared(preparing)
+            && GetState(graph, _visibility.GetResolveShaders()) != GpuState.Loading
+        )
         {
             Log.Info(
                 $"What the domain draws is on the GPU: {preparing.Models.Length} models, {preparing.Materials.Length} materials."

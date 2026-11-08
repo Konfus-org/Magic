@@ -2,8 +2,6 @@
 // finds the pixel's triangle, and every material, which decides what the surface there is made of.
 module "Surface/Surface";
 
-import Scene.Materials;
-
 public struct SurfaceInputs
 {
     // In the camera-relative world.
@@ -18,9 +16,6 @@ public struct SurfaceInputs
     public float2 uvDdy;
     // Unit, towards the camera.
     public float3 viewDirection;
-    public GpuMaterial material;
-    // The heap id of the sampler a material's textures are read with.
-    public uint sampler;
 }
 
 public struct SurfaceOutputs

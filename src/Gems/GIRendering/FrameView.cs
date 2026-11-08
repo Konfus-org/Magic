@@ -46,10 +46,6 @@ internal sealed class FrameView(GpuResources resources)
         float impostorDistance
     )
     {
-        Result<GpuSampler> sampler = graph.Sampler(new SamplerDescription { Anisotropy = 8 });
-        if (!sampler.Ok)
-            return Result.Failure($"the default sampler was not made: {sampler.Error}");
-
         Result<RenderView> made = TryGetView(graph, width, height, instanceCount, instances, materials, cull);
         if (!made.Ok)
             return made;
@@ -73,7 +69,6 @@ internal sealed class FrameView(GpuResources resources)
             Near = camera.Near,
             InstanceCount = (uint)instanceCount,
             MaxVisibleClusters = Visibility.MaxVisibleClusters,
-            DefaultSampler = sampler.Value.Id,
             Instances = instances.Id,
             Clusters = resources.ClusterPool.Id,
             Vertices = resources.VertexPool.Id,

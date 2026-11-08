@@ -103,14 +103,13 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
         Cull = CullMode.None,
     };
     private readonly ShaderEntry _buildHzbShader = PassShaders.GetEntry(assets, "BuildHzb", "BuildHzb");
-    private readonly ShaderEntry _resolveShader = PassShaders.GetEntry(
-        assets,
-        "ResolveMaterial",
-        "ResolveMaterial"
-    ) with
-    {
-        TypeArguments = [PassShaders.GetStandard(assets)],
-    };
+    private readonly ShaderEntry _resolveShader = PassShaders.GetEntry(assets, "ResolveMaterial", "ResolveMaterial");
+
+    /// <summary>
+    /// The resolve entry specialised to each of the resources' material shaders, by the number rows name it by: kept, so
+    /// a frame makes none.
+    /// </summary>
+    private readonly List<ShaderEntry> _resolveShaders = [];
 
     public ImmutableArray<ShaderEntry> Shaders =>
         [
@@ -122,7 +121,6 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
             _impostorShaders.Vertex,
             _impostorShaders.Pixel,
             _buildHzbShader,
-            _resolveShader,
         ];
 
     /// <summary>
@@ -292,11 +290,37 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
         );
         RecordHzb(view);
 
-        // Resolve each pixel's material into the GBuffer.
-        view.Graph.Compute(
-                "Resolve standard material",
-                _resolveShader,
-                new GpuConstants(view.Constants.Id, resources.ImpostorTable.Id)
+        // Resolve each pixel's material into the GBuffer, a pass for each material shader, which resolves the pixels whose
+        // rows it draws.
+        ReadOnlySpan<ShaderEntry> resolves = GetResolveShaders();
+        for (int shader = 0; shader < resolves.Length; shader++)
+        {
+            RecordResolve(view, heapTextures, shader);
+        }
+    }
+
+    /// <summary>
+    /// The resolve entry for each material shader the resources have numbered, one made for each newly numbered.
+    /// </summary>
+    public ReadOnlySpan<ShaderEntry> GetResolveShaders()
+    {
+        for (int shader = _resolveShaders.Count; shader < resources.MaterialShaders.Count; shader++)
+        {
+            _resolveShaders.Add(_resolveShader with { TypeArguments = [resources.MaterialShaders[shader]] });
+        }
+
+        return System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_resolveShaders);
+    }
+
+    /// <summary>
+    /// The pixels whose rows material shader <paramref name="shader"/> draws, resolved into the GBuffer.
+    /// </summary>
+    private void RecordResolve(in RenderView view, ImmutableArray<GpuResource> heapTextures, int shader) =>
+        view
+            .Graph.Compute(
+                "Resolve materials",
+                _resolveShaders[shader],
+                new GpuConstants(view.Constants.Id, resources.ImpostorTable.Id, (uint)shader)
             )
             .Reads(
                 view.Constants,
@@ -306,13 +330,12 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
                 resources.VertexPool,
                 resources.IndexPool,
                 view.Materials,
-                cull.VisibleClusters,
+                view.Cull.VisibleClusters,
                 view.Visibility
             )
             .Reads(heapTextures.AsSpan())
             .Writes(view.GBufferNormal, view.GBufferBase, view.GBufferSurface, view.Velocity)
             .DispatchOver(view.Width, view.Height);
-    }
 
     /// <summary>
     /// The visible clusters of one region of the draws, drawn with <paramref name="shaders"/> into the view's visibility

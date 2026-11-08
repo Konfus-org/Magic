@@ -71,8 +71,6 @@ internal record struct FrameConstants
 
     public uint FrameIndex;
 
-    public uint DefaultSampler;
-
     public uint Instances;
 
     public uint Clusters;
@@ -184,6 +182,30 @@ internal record struct GpuInstance
 /// </summary>
 [InlineArray(MaterialSlots.Capacity)]
 internal struct GpuMaterialRows
+{
+    private uint _first;
+}
+
+/// <summary>
+/// A material slot as the GPU reads it from the material table, 64 bytes, the twin of <c>Scene/Materials.slang</c>'s:
+/// which of <see cref="GpuResources.MaterialShaders"/> draws it, then that shader's struct, its params as the shader's
+/// reflection lays them out.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal struct GpuMaterial
+{
+    public const int Bytes = 64;
+
+    public uint Shader;
+
+    public GpuMaterialParams Params;
+}
+
+/// <summary>
+/// A <see cref="GpuMaterial"/>'s params, inline: the bytes the material shader's struct reads.
+/// </summary>
+[InlineArray((GpuMaterial.Bytes / 4) - 1)]
+internal struct GpuMaterialParams
 {
     private uint _first;
 }

@@ -51,7 +51,6 @@ public struct FrameConstants
     public uint instanceCount;
     public uint maxVisibleClusters;
     public uint frameIndex;
-    public uint defaultSampler;
 
     // The heap ids of the tables and textures.
     public uint instances;

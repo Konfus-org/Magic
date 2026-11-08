@@ -15,7 +15,8 @@ namespace Magic.GIRendering;
 /// of rows that changed are uploaded in runs; a still scene uploads none. Beside it, the material table: a row per
 /// distinct <see cref="MaterialInstance"/> drawn, which every slot holding it shares, made again each frame from what
 /// <paramref name="resources"/> has then, and uploaded whole. <paramref name="failure"/> is the material a model that
-/// failed is drawn with, every slot; an empty slot when there is none.
+/// failed, or a material that did not load, is drawn with; an empty slot when there is none. Row 0 is the default
+/// material, which an empty slot and a material still loading are drawn with.
 /// </summary>
 internal sealed class InstanceTable(AssetManager assets, GpuResources resources, MaterialInstance failure)
 {
@@ -47,14 +48,14 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
 
     /// <summary>
     /// The material rows, as many as there are instance rows, which holds every drawn slot of a world whose renderers
-    /// fill one each; row 0 the default an empty slot is drawn with.
+    /// fill one each.
     /// </summary>
-    private readonly GpuMaterial[] _materialRows = CreateMaterialRows();
+    private readonly GpuMaterial[] _materialRows = new GpuMaterial[Capacity];
 
     /// <summary>
-    /// The slot each material row is made from, by row; row 0 the empty slot.
+    /// The slot each material row is made from, by row; row 0 the default material's.
     /// </summary>
-    private readonly List<MaterialInstance> _materialSlots = [default];
+    private readonly List<MaterialInstance> _materialSlots = [new() { Handle = assets.GetDefault<Material>() }];
 
     private readonly Dictionary<MaterialInstance, uint> _materialRowOf = [];
 
@@ -144,27 +145,24 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
         if (!materials.Ok)
             return Result.Failure(materials.Error);
 
-        // Every material row made again, so a material or texture that arrived shows with no renderer written.
-        for (int row = 1; row < _materialSlots.Count; row++)
+        // Every material row made again, so a material or texture that arrived shows with no renderer written: one still
+        // loading as the default, row 0, and one that failed as the failure.
+        for (int row = 0; row < _materialSlots.Count; row++)
         {
-            resources.Get(_materialSlots[row], out _materialRows[row]);
+            ResourceState state = resources.Get(_materialSlots[row], out _materialRows[row]);
+            if (state == ResourceState.Loading)
+                _materialRows[row] = _materialRows[0];
+            else if (
+                state == ResourceState.Failed
+                && resources.Get(failure, out GpuMaterial failed) == ResourceState.Failed
+            )
+                _materialRows[row] = failed;
         }
 
         graph.Upload(materials.Value, _materialRows.AsSpan(0, _materialSlots.Count));
         UploadChangedRows(graph, rows.Value);
 
         return Result.Success((rows.Value, materials.Value));
-    }
-
-    /// <summary>
-    /// The material rows, row 0 the default an empty slot is drawn with.
-    /// </summary>
-    private static GpuMaterial[] CreateMaterialRows()
-    {
-        GpuMaterial[] rows = new GpuMaterial[Capacity];
-        rows[0] = GpuResources.DefaultMaterial;
-
-        return rows;
     }
 
     /// <summary>
