@@ -1,7 +1,7 @@
 # Third-party notices
 
-The library's temporal anti-aliasing, `Post/TemporalAntiAliasing`, is adapted from Wicked Engine
-(https://github.com/turanszkij/WickedEngine), under this licence:
+The library's temporal anti-aliasing and bloom, `Post/TemporalAntiAliasing` and `Post/Bloom`, are adapted from
+Wicked Engine (https://github.com/turanszkij/WickedEngine), under this licence:
 
 ```
 The MIT License (MIT)

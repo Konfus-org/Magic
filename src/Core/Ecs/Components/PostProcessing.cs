@@ -13,11 +13,4 @@ public record struct PostProcessing : IComponent
     /// Stops added to what the meter picks: positive brightens.
     /// </summary>
     public float ExposureCompensation;
-
-    /// <summary>
-    /// How much of the bloom is added to the picture, 0 for none.
-    /// </summary>
-    public float BloomStrength = 0.04f;
-
-    public PostProcessing() { }
 }

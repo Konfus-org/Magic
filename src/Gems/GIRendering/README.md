@@ -63,7 +63,7 @@ texture reader.
 - The exposure is metered each frame from a histogram of the picture's luminance, as the effects leave it, and adapts to
   a change over about a second, as an eye does; a new domain or window size takes its first reading at once. The
   first `PostProcessing`'s `ExposureCompensation` adds stops to it. The picture then goes through the AgX tonemap to the
-  output. There is no bloom yet.
+  output.
 - Glass isn't drawn yet: a glass material draws as an opaque one.
 
 ## Settings
