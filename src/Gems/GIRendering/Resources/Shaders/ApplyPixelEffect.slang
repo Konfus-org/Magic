@@ -55,6 +55,10 @@ PixelEffectInputs CreateInputs(FrameConstants frame, GpuEffectPass pass, uint2 p
     inputs.sunRadiance = frame.sunRadiance.rgb;
     // PROTO: the sky's light as the shading draws a missing sky, until the sky's tables are handed on.
     inputs.skyRadiance = frame.skyRadiance.rgb * frame.sunRadiance.r;
+    // The sun as a point infinitely far along its direction, whose clip w is its depth along the view: the cosine.
+    float4 sunClip = mul(float4(inputs.sunDirection, 0.0), frame.viewProjection);
+    inputs.sunUv = float2(sunClip.x, -sunClip.y) / sunClip.w * 0.5 + 0.5;
+    inputs.sunFacing = sunClip.w;
     inputs.picture.id = pass.picture;
     inputs.target.id = pass.target;
     inputs.history.id = pass.history;

@@ -36,6 +36,10 @@ public struct PixelEffectInputs
     public float3 sunDirection;
     public float3 sunRadiance;
     public float3 skyRadiance;
+    // Where the sun is in the picture, 0 to 1 from the top left and past that off its edges, and the cosine between the
+    // camera's view and the sun: 1 straight ahead, 0 or less beside or behind the camera, where sunUv means nothing.
+    public float2 sunUv;
+    public float sunFacing;
     // The pixel's surface: its unit normal in the world, its base colour, its roughness and its metalness, all 0 where
     // nothing was drawn.
     public float3 normal;
