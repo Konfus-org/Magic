@@ -1,8 +1,9 @@
+using System.Collections.Immutable;
 using System.Numerics;
 using Magic.Assets;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Gpu;
+using Magic.Rendering;
 using Magic.Utils;
 
 namespace Magic.GIRendering;
@@ -11,14 +12,14 @@ namespace Magic.GIRendering;
 /// The view's surfaces lit into the HDR picture, and the sky drawn where nothing was: the lighting constants, naming
 /// the sky's tables, the lights and the shadow mask, uploaded before the view is drawn, and the shading after them.
 /// </summary>
-internal sealed class Lighting(IGraphicsApi gpu, GpuResources resources, GpuPipelines pipelines)
+internal sealed class Lighting(AssetManager assets)
 {
-    private readonly GpuPass _shadePass = pipelines.Compute(
-        "Shade surfaces",
-        "ShadeSurfaces",
-        "ShadeSurfaces",
-        PassShaders.Atmosphere
-    );
+    private readonly ShaderEntry _shadeShader = PassShaders.GetEntry(assets, "ShadeSurfaces", "ShadeSurfaces") with
+    {
+        TypeArguments = [PassShaders.GetAtmosphere(assets)],
+    };
+
+    public ImmutableArray<ShaderEntry> Shaders => [_shadeShader];
 
     /// <summary>
     /// The lighting constants asked for and uploaded, in a transfer pass the caller opened, after the sky's tables, the
@@ -34,11 +35,13 @@ internal sealed class Lighting(IGraphicsApi gpu, GpuResources resources, GpuPipe
         ShadowBuffers? shadows
     )
     {
-        Result<GpuBuffer> made = resources.TryGetBuffer("Lighting constants", LightingConstants.Bytes);
+        Result<GpuBuffer> made = view.Graph.Buffer(
+            GpuDescriptions.GetBuffer("Lighting constants", LightingConstants.Bytes)
+        );
         if (!made.Ok)
             return made;
 
-        Result<GpuSampler> sampler = resources.TryGetSampler(
+        Result<GpuSampler> sampler = view.Graph.Sampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
         if (!sampler.Ok)
@@ -61,7 +64,7 @@ internal sealed class Lighting(IGraphicsApi gpu, GpuResources resources, GpuPipe
             TracedShadows = shadows?.Traced.Id ?? 0,
             SunTiles = shadows?.SunTiles.Id ?? 0,
         };
-        view.Graph.Upload(gpu, made.Value, in constants);
+        view.Graph.Upload(made.Value, [constants]);
 
         return made;
     }
@@ -79,8 +82,8 @@ internal sealed class Lighting(IGraphicsApi gpu, GpuResources resources, GpuPipe
         ShadowBuffers? shadows
     )
     {
-        GpuPassRun shade = _shadePass
-            .Run(view.Graph, header)
+        ComputePass shade = view
+            .Graph.Compute("Shade surfaces", _shadeShader, header)
             .Reads(
                 view.Constants,
                 constants,

@@ -18,3 +18,6 @@
 
 # The forest's chunks: text, but a hundred thousand generated placements no diff should show.
 samples/Forest/Domains/Forest/*_0_*.prefab -diff
+
+# The terrain sample's landscape: ten thousand generated tree placements.
+samples/Terrain/Domains/Terrain/landscape.prefab -diff

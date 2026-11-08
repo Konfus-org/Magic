@@ -3,8 +3,8 @@
 Draws the world into the window: every renderer's model, GPU-driven, lit by the sun and the sky. When the console
 asks for a screenshot, it hands the frame as a texture to the gem that writes textures.
 
-To use it, list `GIRendering` in a project's `.magic` file after the GPU provider, the shader compiler, the ECS, the
-model reader and the texture reader.
+To use it, list `GIRendering` in a project's `.magic` file after the GPU provider, the ECS, the model reader and the
+texture reader.
 
 ## What it draws
 
@@ -15,6 +15,12 @@ model reader and the texture reader.
   simplifying.
 - A model shows once it is on the GPU. One that doesn't load is drawn as the failure model, and a material or texture
   that doesn't load as the magenta failure material.
+- Every model also gets an octahedral impostor atlas: 12 by 12 views over the whole sphere, 64 texels a side each,
+  every texel the surface's normal, its depth, its material slot and its texture coordinates as the view sees it,
+  baked on the CPU from the clusters the hierarchy draws at an atlas texel's error.
+- An instance whose model has an impostor atlas draws as it once it is under 32 pixels in radius on screen, half a
+  view of the atlas, so the atlas is never magnified. Over a quarter of that the clusters and the impostor share the
+  pixels by a dither, so nothing pops.
 - A model nothing has drawn or waited for in a minute leaves the GPU, and loads again when it is next drawn.
 - As a domain replaces the world, the loading screen stays until the models, materials and textures of what comes are
   on the GPU, or failed, and nothing drawn before carries into the frames after.
@@ -35,6 +41,11 @@ Set these in the console with `set GIRendering.<name>=<value>`. A wrong value lo
 
 - `debug` shows one part of the GBuffer alone. `final` shows the finished frame again. The names are in `DebugView`.
 - `window` is `true` or `false`, and opens the Rendering window.
+- `impostorPixels` is the radius on screen, in pixels, under which a model draws as its impostor. 0 turns that test
+  off.
+- `impostorDistance` is the distance in metres past which a model draws as its impostor. 0 turns that test off.
+- When the frame's clusters near the renderer's limit, it raises both tests on its own, then lets cluster detail
+  coarsen, until they fit.
 
 With a gem that provides the debug UI, F2 opens the Rendering window, which chooses the view. F5 and F6 step through the
 views, and a line on screen names any view but the finished frame. A screenshot is of the renderer's picture alone,
@@ -47,16 +58,17 @@ in turn and exits, so a release ships with the caches full.
 
 `GIRenderingGem.Render` is the frame in order, top to bottom: start there.
 
-- An area is the passes of one part of the frame, which it declares with `GpuPipelines`, or records with the graph's
-  `Compute` by naming a shader entry the GPU provider builds. It keeps only those passes and what it carries from one
-  frame to the next, such as last frame's view.
-- A pass is one `GpuPass.Run` or `RenderGraph.Compute` call saying what it reads and writes, which puts its barriers
-  in. The frame is not drawn until the graph's shaders are built.
-- A texture, material or model asset, or a sampler, comes from `GpuResources`, which makes it on the first ask and
-  frees it with the gem, or a model once nothing has asked for it in a while and no renderer drawn holds it. A
+- An area is the passes of one part of the frame, each naming the shader entries the GPU provider builds, which it
+  lists in its `Shaders`. It keeps only those entries and what it carries from one frame to the next, such as last
+  frame's view.
+- A pass is one `RenderGraph.Compute` or `RenderGraph.Draw` call saying what it reads and writes, which puts its
+  barriers in. The frame is not drawn until every area's shaders are built.
+- A texture, material or model asset comes from `GpuResources`, which reads it on the first ask. It asks the graph
+  for the model pools, each texture and its sampler, and each resident model's acceleration structure and impostor
+  atlases every frame, and evicts a model once nothing has asked for it in a while and no renderer drawn holds it. A
   renderer's instance row is built again, asking for its model, when the renderer is written and when a model
   arrives; the material rows its slots are drawn with are made again each frame.
-- Each frame, an area's `Prepare` asks `GpuResources` for its own textures and buffers by description, uploads what
+- Each frame, an area's `Prepare` asks the graph for its own textures and buffers by description, uploads what
   goes in them in the frame's upload pass, and returns their handles. Its `Record` takes what its passes read and
   write as arguments, and `Render` hands the handles on from one area to the next. The same description under a name
   is the same resource, holding what the last frame left in it; another one, as at a new window size, makes it again,

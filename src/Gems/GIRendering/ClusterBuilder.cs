@@ -65,6 +65,18 @@ internal static unsafe class ClusterBuilder
         SetRootParents(clusters, center, radius);
         DistanceField field = DistanceFieldBuilder.Build(model);
 
+        // The box around the model, which its impostor's quad is fitted to.
+        Vector3 boundsMin = new(float.MaxValue);
+        Vector3 boundsMax = new(float.MinValue);
+        foreach (GpuVertex vertex in vertices)
+        {
+            boundsMin = Vector3.Min(boundsMin, vertex.Position);
+            boundsMax = Vector3.Max(boundsMax, vertex.Position);
+        }
+
+        // Every model stands far away as an impostor once it is a few pixels across.
+        (Half[] Surface, Half[] Uv) impostor = ImpostorBuilder.Bake(vertices, indices, clusters, center, radius);
+
         return new MeshDerived
         {
             Vertices = vertices.ToImmutable(),
@@ -76,6 +88,10 @@ internal static unsafe class ClusterBuilder
             FieldOrigin = field.Origin,
             FieldVoxel = field.Voxel,
             FieldBand = field.Band,
+            Impostor = [.. impostor.Surface],
+            ImpostorUv = [.. impostor.Uv],
+            BoundsMin = boundsMin,
+            BoundsMax = boundsMax,
         };
     }
 

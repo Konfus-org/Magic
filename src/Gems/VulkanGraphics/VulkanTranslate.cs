@@ -1,6 +1,6 @@
 using System.Collections.Frozen;
 using Magic.Assets;
-using Magic.Gpu;
+using Magic.Rendering;
 using Vortice.Vulkan;
 
 namespace Magic.VulkanGraphics;

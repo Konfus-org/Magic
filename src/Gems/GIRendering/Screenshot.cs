@@ -1,6 +1,5 @@
 using Magic.Assets;
 using Magic.Debugging;
-using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
 
@@ -11,21 +10,6 @@ namespace Magic.GIRendering;
 /// </summary>
 internal static class Screenshot
 {
-    /// <summary>
-    /// The frame's output copied into <paramref name="readback"/>, where the CPU can read it.
-    /// </summary>
-    public static void RecordReadback(RenderGraph graph, GpuTexture output, GpuBuffer readback)
-    {
-        graph.BeginTransferPass("Read the output back");
-        graph.Use(output, GpuAccess.CopySource);
-        graph.Use(readback, GpuAccess.CopyDestination);
-        graph.CopyTextureToBuffer(output, 0, 0, readback, 0);
-        graph.EndPass();
-        graph.BeginTransferPass("Output to the host");
-        graph.Use(readback, GpuAccess.HostRead);
-        graph.EndPass();
-    }
-
     /// <summary>
     /// Writes what was read back to <paramref name="path"/> once the GPU is done with it, as a texture through the gem
     /// that writes them.

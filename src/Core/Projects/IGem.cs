@@ -1,4 +1,3 @@
-using Magic.Gpu;
 using Magic.Rendering;
 
 namespace Magic.Projects;

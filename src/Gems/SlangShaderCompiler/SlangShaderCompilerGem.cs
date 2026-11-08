@@ -8,7 +8,7 @@ using System.Text.RegularExpressions;
 using Magic.Assets;
 using Magic.Files;
 using Magic.Projects;
-using Magic.Shaders;
+using Magic.Rendering;
 using Magic.Utils;
 
 namespace Magic.SlangShaderCompiler;

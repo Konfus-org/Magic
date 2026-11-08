@@ -60,7 +60,10 @@ internal record struct FrameConstants
 
     public float ErrorThreshold;
 
-    public float Padding0;
+    /// <summary>
+    /// The pixel radius on screen under which an instance hands off to its impostor; 0 hands off by distance alone.
+    /// </summary>
+    public float ImpostorPixels;
 
     public uint InstanceCount;
 
@@ -112,7 +115,11 @@ internal record struct FrameConstants
 
     public uint Velocity;
 
-    public uint Padding1;
+    /// <summary>
+    /// The distance in metres to an instance's sphere past which it hands off to its impostor; 0 hands off by size
+    /// alone.
+    /// </summary>
+    public float ImpostorDistance;
 
     public uint Padding2;
 }
@@ -160,7 +167,10 @@ internal record struct GpuInstance
     /// </summary>
     public uint MovedFrame;
 
-    public uint Padding1;
+    /// <summary>
+    /// The model's row of the impostor table, 0 for none.
+    /// </summary>
+    public uint Impostor;
 
     /// <summary>
     /// The material table's row for each of the instance's slots.
@@ -385,4 +395,25 @@ public record struct GpuCluster
     public uint MaterialSlot;
 
     public uint Padding;
+}
+
+/// <summary>
+/// One model's impostor, 32 bytes: the twin of <c>Scene/Impostors.slang</c>'s: the box around the model in its
+/// frame, and the heap id of its atlas.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal record struct GpuImpostor
+{
+    public const int Bytes = 32;
+
+    public Vector3 BoundsMin;
+
+    public uint Atlas;
+
+    public Vector3 BoundsMax;
+
+    /// <summary>
+    /// The heap id of the atlas of the texture coordinates its surface texels show.
+    /// </summary>
+    public uint UvAtlas;
 }

@@ -1,5 +1,5 @@
 using Magic.Debugging;
-using Magic.Gpu;
+using Magic.Rendering;
 using Vortice.Vulkan;
 
 namespace Magic.VulkanGraphics;
@@ -31,9 +31,12 @@ internal sealed unsafe class VulkanRecorder(
         {
             GpuPass pass = commands.Passes[passIndex];
 
-            // A pass whose shader is not built yet is left out, and what it writes keeps what it held.
+            // A pass whose shaders are not built yet is left out, and what it writes keeps what it held.
             VulkanShader? shader = pass.Shader is { } entry ? shaders.Get(entry) : null;
-            if (pass.Shader is not null && shader is null)
+            GpuPipeline pipeline = pass.DrawShaders is { } drawn
+                ? shaders.Get(drawn, pass.Targets)
+                : shader?.Pipeline ?? GpuPipeline.None;
+            if ((pass.Shader is not null || pass.DrawShaders is not null) && pipeline.IsNone)
                 continue;
 
             BeginGroup(cmd, pass.Name);
@@ -41,8 +44,8 @@ internal sealed unsafe class VulkanRecorder(
             frame.WriteTimestamp(pass.Name, passIndex);
             bool isDrawing = pass.Kind == GpuPassKind.Draw && BeginRendering(cmd, pass);
             (uint X, uint Y, uint Z) groupSize = shader?.GroupSize ?? (1, 1, 1);
-            if (shader is not null)
-                Run(frame, new GpuCommand { Kind = GpuCommandKind.BindPipeline, Id = shader.Pipeline.Id }, groupSize);
+            if (resources.Pipelines[pipeline.Id] is { } bound)
+                api.vkCmdBindPipeline(cmd, bound.BindPoint, bound.Pipeline);
 
             foreach (GpuCommand command in pass.Commands)
             {
@@ -336,13 +339,6 @@ internal sealed unsafe class VulkanRecorder(
         VkDeviceApi api = device.Api;
         switch (command.Kind)
         {
-            case GpuCommandKind.BindPipeline:
-                if (resources.Pipelines[command.Id] is { } pipeline)
-                    api.vkCmdBindPipeline(cmd, pipeline.BindPoint, pipeline.Pipeline);
-                else
-                    Log.Warn($"Pipeline {command.Id} is gone and is not bound.");
-
-                break;
             case GpuCommandKind.PushConstants:
             {
                 GpuConstants constants = command.Constants;
@@ -375,9 +371,7 @@ internal sealed unsafe class VulkanRecorder(
 
                 break;
             case GpuCommandKind.SetScissor:
-                if (command.Z > 0 && command.W > 0)
-                    api.vkCmdSetScissor(cmd, (int)command.X, (int)command.Y, command.Z, command.W);
-
+                api.vkCmdSetScissor(cmd, (int)command.X, (int)command.Y, command.Z, command.W);
                 break;
             case GpuCommandKind.BindIndexBuffer:
                 if (resources.Buffers[command.Id] is { } indices)

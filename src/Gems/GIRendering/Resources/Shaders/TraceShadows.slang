@@ -13,6 +13,7 @@ import Core.Random;
 import Core.Sampling;
 import Scene.Instances;
 import Scene.Visibility;
+import Scene.Impostors;
 import Scene.Lighting;
 import Scene.Lights;
 import Scene.Shadows;
@@ -76,7 +77,9 @@ uint4 Trace(FrameConstants frame, LightingConstants lighting, uint2 pixel)
     TextureRef normalTexture = { frame.gbufferNormal };
     float3 relative = ReconstructRelative(frame, uv, depthTexture.Load(pixel, 0u).x);
     float3 normal = DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0);
-    float3 world = LiftOffTriangle(frame, id, uv, relative) + frame.cameraPosition.xyz;
+    // An impostor's pixel has no triangle to lift off.
+    float3 lifted = (id & ImpostorFlag) != 0u ? relative : LiftOffTriangle(frame, id, uv, relative);
+    float3 world = lifted + frame.cameraPosition.xyz;
     float offset = 0.01 + OffsetPixels * length(relative) / frame.pixelsPerRadian;
     float3 origin = world + normal * offset;
     AccelerationRef acceleration = { frame.acceleration };

@@ -1,0 +1,23 @@
+{
+    "entities": [
+        {
+            "name": "Aspen",
+            "components": {
+                "Transform": {},
+                "Renderer": {
+                    "model": {
+                        "id": 300004
+                    },
+                    "materials": [
+                        {
+                            "id": 300014
+                        },
+                        {
+                            "id": 300015
+                        }
+                    ]
+                }
+            }
+        }
+    ]
+}

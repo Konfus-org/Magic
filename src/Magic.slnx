@@ -30,6 +30,10 @@
   <Folder Name="/Samples/">
     <File Path="../samples/README.md" />
   </Folder>
+    <Folder Name="/Samples/Terrain/">
+      <File Path="../samples/Terrain/Terrain.magic" />
+      <Project Path="../samples/Terrain/Samples.Terrain.csproj" />
+    </Folder>
     <Folder Name="/Samples/Forest/">
       <File Path="../samples/Forest/Forest.magic" />
       <Project Path="../samples/Forest/Samples.Forest.csproj" />
