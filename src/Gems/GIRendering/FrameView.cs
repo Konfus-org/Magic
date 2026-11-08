@@ -12,6 +12,7 @@ internal sealed class FrameView(GpuResources resources)
 {
     private const float ErrorThresholdPixels = 1;
     private const float SkyBrightness = 0.3f;
+    private const uint JitterFrames = 256;
 
     /// <summary>
     /// Last frame's view and its size, while a frame was drawn since the view was last forgotten: what a thing that
@@ -55,6 +56,14 @@ internal sealed class FrameView(GpuResources resources)
         float aspect = (float)width / height;
         Matrix4x4.Invert(Matrix4x4.CreateFromQuaternion(camera.Transform.Rotation), out Matrix4x4 view);
         Matrix4x4 projection = CreatePerspective(camera.FieldOfView, aspect, camera.Near);
+        Matrix4x4 unjittered = view * projection;
+
+        // The jitter, a point in the pixel from the Halton sequence in bases 2 and 3 that starts again every 256
+        // frames, shifts what each frame draws, so the temporal resolve sees another point of each pixel each frame.
+        uint term = (frameIndex % JitterFrames) + 1;
+        Vector2 jitter = new(GetHalton(term, 2) - 0.5f, GetHalton(term, 3) - 0.5f);
+        projection.M31 = jitter.X * 2 / width;
+        projection.M32 = -jitter.Y * 2 / height;
         Matrix4x4 viewProjection = view * projection;
         Matrix4x4.Invert(viewProjection, out Matrix4x4 inverse);
         FrameConstants frame = new()
@@ -100,6 +109,7 @@ internal sealed class FrameView(GpuResources resources)
             ImpostorPixels = impostorPixels,
             ImpostorDistance = impostorDistance,
             FrameIndex = frameIndex,
+            Jitter = jitter,
             Acceleration = acceleration.Id,
             LeafClusters = resources.LeafClusters.Id,
         };
@@ -119,12 +129,12 @@ internal sealed class FrameView(GpuResources resources)
         frame.FrustumPlane5 = Normalize(c2);
 
         // Where the view was last frame, or where it is now when no frame was drawn at this size since it was
-        // forgotten.
+        // forgotten, with no jitter, so a velocity is the surface's move alone.
         (frame.PreviousViewProjection, frame.PreviousCameraPosition) =
             _previous is { } last && targets.HasHistory
                 ? (last.ViewProjection, last.CameraPosition)
-                : (viewProjection, frame.CameraPosition);
-        _previous = (viewProjection, frame.CameraPosition, width, height);
+                : (unjittered, frame.CameraPosition);
+        _previous = (unjittered, frame.CameraPosition, width, height);
         graph.Upload(targets.Constants, [frame]);
 
         return made;
@@ -138,6 +148,23 @@ internal sealed class FrameView(GpuResources resources)
         float length = MathF.Sqrt((plane.X * plane.X) + (plane.Y * plane.Y) + (plane.Z * plane.Z));
 
         return length > 0 ? plane / length : plane;
+    }
+
+    /// <summary>
+    /// The Halton sequence's term in a base, 0 to 1: a different one each frame that fills the pixel evenly.
+    /// </summary>
+    private static float GetHalton(uint index, uint radix)
+    {
+        float result = 0;
+        float fraction = 1f / radix;
+        while (index > 0)
+        {
+            result += fraction * (index % radix);
+            index /= radix;
+            fraction /= radix;
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -202,7 +229,15 @@ internal sealed class FrameView(GpuResources resources)
         Result<GpuTexture> baseColor = graph.Texture(GetTarget("GBuffer base", GpuFormat.R8G8B8A8Unorm));
         Result<GpuTexture> surface = graph.Texture(GetTarget("GBuffer surface", GpuFormat.R8G8B8A8Unorm));
         Result<GpuTexture> velocity = graph.Texture(GetTarget("Velocity", GpuFormat.R16G16B16A16Sfloat));
-        Result<GpuTexture> hdr = graph.Texture(GetTarget("HDR", GpuFormat.R16G16B16A16Sfloat));
+        Result<GpuTexture> hdr = graph.Texture(
+            GpuDescriptions.GetTexture(
+                "HDR",
+                width,
+                height,
+                GpuFormat.R16G16B16A16Sfloat,
+                TextureUsages.Storage | TextureUsages.Sampled | TextureUsages.CopyDestination
+            )
+        );
         Result<GpuTexture> output = graph.Texture(
             GpuDescriptions.GetTexture(
                 "Output",

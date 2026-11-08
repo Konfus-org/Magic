@@ -32,6 +32,8 @@ texture reader.
 - Shadows are traced one ray a pixel and light, then denoised. The sun's are smoothed over frames and across the
   screen. The tile lights' are only smoothed over frames, so their soft edges stay grainy, and one can trail for a moment
   where a tile's lights change.
+- Each frame draws a different point of each pixel and blends with the frames before it where they saw the same
+  surface, so edges come out smooth and hold still. A debug view of the GBuffer shows one frame, so its edges crawl.
 - The first `Weather`'s effects, such as the fog, and then the first `PostProcessing`'s run over the lit picture in
   order, before the output: each is a material whose shader implements the pixel effect contract, with params of its
   own as a surface material's are. An effect shows once its material and its pass are built, and not while either
@@ -86,4 +88,5 @@ in turn and exits, so a release ships with the caches full.
   - `Scene/Shadows` is the shadow mask: how much of the sun and of each of its tile's first lights reaches a pixel,
     and the sun's tiles the denoiser reads.
   - `Light/` is what a local light gives a point: a point, spot or rect light's direction and irradiance there.
-- Parts of the lighting are adapted from another engine under the MIT licence; `THIRD-PARTY-NOTICES.md` holds it.
+- Parts of the lighting and the temporal anti-aliasing are adapted from another engine under the MIT licence;
+  `THIRD-PARTY-NOTICES.md` holds it.

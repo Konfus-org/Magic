@@ -1,7 +1,7 @@
 # Third-party notices
 
-Parts of this gem's lighting are adapted from Wicked Engine (https://github.com/turanszkij/WickedEngine), under this
-licence:
+Parts of this gem's lighting and its temporal anti-aliasing are adapted from Wicked Engine
+(https://github.com/turanszkij/WickedEngine), under this licence:
 
 ```
 The MIT License (MIT)

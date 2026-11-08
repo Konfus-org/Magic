@@ -2,8 +2,8 @@
 // barycentrics and their derivatives, the attributes interpolate from them, and the material decides the surface,
 // written to the GBuffer. The entry is specialised to one material shader, numbered in the pass header's z, and
 // resolves only the pixels whose rows that shader draws, loading its struct from each; every pass writes the sky's
-// velocity, the same each time. The pixel's velocity is written beside it: where the surface was on last frame's screen, from where its
-// instance was and where the camera was; a pixel of sky moves with the camera alone.
+// velocity, the same each time. The pixel's velocity is written beside it: where the surface was on last frame's
+// screen, from where its instance was and where the camera was; a pixel of sky moves with the camera alone.
 module "ResolveMaterial";
 
 import Core.Heap;
@@ -30,14 +30,16 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
     UintTextureRef visibility = { frame.visibility };
     uint visibleIndex = 0u;
     uint triangle = 0u;
-    float2 unjittered = GetTexelCenterUv(thread.xy, size) - frame.jitter.xy / float2(size);
+    // The pixel's centre is where the jittered view saw its surface, which is unjittered where the camera saw it.
+    float2 center = GetTexelCenterUv(thread.xy, size);
+    float2 unjittered = center - frame.jitter.xy / float2(size);
     StorageRef velocityTarget = { frame.velocity, 0u };
     uint id = visibility.Load(thread.xy, 0u);
     bool isImpostor = (id & ImpostorFlag) != 0u;
     uint shader = GetPassHeader().z;
     if (!isImpostor && !DecodeVisibilityId(id, visibleIndex, triangle))
     {
-        float3 far = ReconstructRelative(frame, unjittered, 1e-6);
+        float3 far = ReconstructRelative(frame, center, 1e-6);
         float4 previousClip = mul(float4(far, 1.0), frame.previousViewProjection);
         float2 previousUv = ToUv(previousClip.xy / max(previousClip.w, Epsilon));
         velocityTarget.Store(thread.xy, float4(previousUv - unjittered, 0.0, 0.0));
@@ -60,7 +62,7 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
         if (LoadMaterialShader(frame.materials, GetMaterial(instance, slot)) != shader)
             return;
 
-        ImpostorRay ray = GetModelRay(frame, instance, ReconstructRelative(frame, unjittered, 0.5));
+        ImpostorRay ray = GetModelRay(frame, instance, ReconstructRelative(frame, center, 0.5));
         GpuImpostor impostor = LoadImpostor(GetPassHeader().y, instance.impostor);
         ImpostorHit hit = TraceImpostor(instance, impostor, ray, 0.0);
         model = hit.position;
@@ -81,7 +83,7 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
     }
     else
     {
-        PixelTriangle shown = LoadPixelTriangle(frame, visibleIndex, triangle, ToClip(GetTexelCenterUv(thread.xy, size)));
+        PixelTriangle shown = LoadPixelTriangle(frame, visibleIndex, triangle, ToClip(center));
         float3 lambda = shown.bary.lambda;
         instance = shown.instance;
         model = Interpolate(shown.v0.position, shown.v1.position, shown.v2.position, lambda);
