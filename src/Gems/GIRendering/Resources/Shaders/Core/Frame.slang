@@ -90,7 +90,8 @@ public struct FrameConstants
     // What the picture is multiplied by to land near a middle grey, and the seconds the run has taken.
     public float exposure;
     public float timeSec;
-    public uint padding2;
+    // On a GPU that traces rays: each material row as a ray hit reads it, Trace/HitSurface's GpuHitMaterial.
+    public uint hitMaterials;
     public uint padding3;
 }
 

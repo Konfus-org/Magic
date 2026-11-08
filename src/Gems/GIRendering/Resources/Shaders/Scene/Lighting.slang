@@ -8,6 +8,9 @@ import Core.Pass;
 import Core.Frame;
 import Sky.ISky;
 
+// The sun's angular radius as it looks from the Earth: how wide a disc its shadow rays aim through.
+public static const float SunAngularRadius = 0.00465;
+
 public struct LightingConstants
 {
     // Colour times intensity, in lux, before the air.

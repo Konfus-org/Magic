@@ -29,7 +29,7 @@ internal sealed class FrameView(GpuResources resources)
     /// <summary>
     /// The main view at a size, its targets asked for, and its constants, the camera, the sun and the frame's
     /// resources, copied in a transfer pass the caller opened: the instance and material tables, the cull's buffers and
-    /// the world's acceleration structure, which the caller asked for before.
+    /// the world's acceleration structure and hit materials, which the caller asked for before.
     /// </summary>
     public Result<RenderView> Upload(
         RenderGraph graph,
@@ -44,6 +44,7 @@ internal sealed class FrameView(GpuResources resources)
         GpuBuffer materials,
         in CullBuffers cull,
         GpuAcceleration acceleration,
+        GpuBuffer hitMaterials,
         float impostorPixels,
         float impostorDistance
     )
@@ -99,6 +100,7 @@ internal sealed class FrameView(GpuResources resources)
             Output = targets.Output.Id,
             Hdr = targets.Hdr.Id,
             Exposure = sun.Exposure,
+            HitMaterials = hitMaterials.Id,
             TimeSec = timeSec,
             SunDirection = new Vector4(sun.Direction, 0),
             SunRadiance = new Vector4(sun.Radiance, 0),

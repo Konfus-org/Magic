@@ -42,6 +42,12 @@ internal enum DebugView : uint
     /// How far the surface moved on the screen since last frame.
     /// </summary>
     Velocity,
+
+    /// <summary>
+    /// The finished frame with the probe grid over it, on a GPU that traces rays: each probe a sphere showing the light
+    /// it holds from each direction.
+    /// </summary>
+    Probes,
 }
 
 /// <summary>

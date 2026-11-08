@@ -86,6 +86,11 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
     public ReadOnlySpan<InstanceExtra> Extras => _extras.AsSpan(0, Count);
 
     /// <summary>
+    /// How many rows the material table holds: one per distinct slot drawn, the default material's first.
+    /// </summary>
+    public int MaterialCount => _materialSlots.Count;
+
+    /// <summary>
     /// The rows of <paramref name="renderers"/>, from what changed since the last fill: each its model's place in the
     /// pools and the material rows of its slots, or an empty row while its model is being made. How many rows the cull
     /// walks.
@@ -225,7 +230,11 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
             _rows[index] = row;
             _entities[index] = entity;
             _extras[index] = resident is { Acceleration.IsNone: false } traced
-                ? new InstanceExtra(traced.Acceleration.Address, traced.LeafOffset)
+                ? new InstanceExtra(
+                    traced.Acceleration.Address,
+                    traced.LeafOffset,
+                    ToWorldBox(traced.BoundsMin, traced.BoundsMax, renderers.First[index].Matrix)
+                )
                 : default;
         }
 
@@ -235,6 +244,23 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
         }
 
         HasChanges = true;
+    }
+
+    /// <summary>
+    /// The box in the world around a box in a model's frame placed by <paramref name="world"/>: its centre placed, and
+    /// its half extent along each world axis the sum of how far each of the model's axes reaches along it.
+    /// </summary>
+    private static (Vector3 Min, Vector3 Max) ToWorldBox(Vector3 min, Vector3 max, Matrix4x4 world)
+    {
+        Vector3 center = Vector3.Transform((min + max) / 2, world);
+        Vector3 extent = (max - min) / 2;
+        Vector3 reach = new(
+            (Math.Abs(world.M11) * extent.X) + (Math.Abs(world.M21) * extent.Y) + (Math.Abs(world.M31) * extent.Z),
+            (Math.Abs(world.M12) * extent.X) + (Math.Abs(world.M22) * extent.Y) + (Math.Abs(world.M32) * extent.Z),
+            (Math.Abs(world.M13) * extent.X) + (Math.Abs(world.M23) * extent.Y) + (Math.Abs(world.M33) * extent.Z)
+        );
+
+        return (center - reach, center + reach);
     }
 
     /// <summary>

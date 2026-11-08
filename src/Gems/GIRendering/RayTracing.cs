@@ -1,17 +1,36 @@
+using System.Collections.Immutable;
 using System.Numerics;
+using Magic.Assets;
 using Magic.Rendering;
 using Magic.Utils;
 
 namespace Magic.GIRendering;
 
 /// <summary>
-/// The top-level acceleration structure over the instances, on a GPU that traces rays: an instance row for every
-/// instance whose model has its triangles' structure, built again when the instances change, what a ray query traces
-/// through.
+/// The world as rays see it, on a GPU that traces rays: the top-level acceleration structure over the instances, an
+/// instance row for every instance whose model has its triangles' structure, built again when the instances change,
+/// what a ray query traces through; and the hit materials table, each material row averaged by a pass of its material
+/// shader each frame, what a ray hit reads its surface from.
 /// </summary>
-internal sealed class RayTracing
+internal sealed class RayTracing(AssetManager assets, GpuResources resources)
 {
+    /// <summary>
+    /// The twin of <c>Trace/HitSurface.slang</c>'s <c>GpuHitMaterial</c>, which only the GPU writes.
+    /// </summary>
+    private const int HitMaterialBytes = 32;
+
+    /// <summary>
+    /// The twin of <c>AverageMaterials.slang</c>'s group size, a material row each thread.
+    /// </summary>
+    private const int AverageGroupSize = 64;
+
     private readonly GpuAccelerationInstance[] _rows = new GpuAccelerationInstance[InstanceTable.Capacity];
+    private readonly ShaderEntry _averageShader = PassShaders.GetEntry(assets, "AverageMaterials", "AverageMaterials");
+
+    /// <summary>
+    /// The average entry for each material shader the resources have numbered, in their order.
+    /// </summary>
+    private readonly List<ShaderEntry> _averageShaders = [];
 
     /// <summary>
     /// The structure the last build left, what the frame traces through; none while it holds no instance.
@@ -19,10 +38,17 @@ internal sealed class RayTracing
     public GpuAcceleration Acceleration { get; private set; }
 
     /// <summary>
-    /// The structure and its instances asked for, every frame, so the structure built last stays.
+    /// The structure and its instances asked for, every frame, so the structure built last stays, and the hit materials
+    /// table.
     /// </summary>
     public static Result<TracedWorld> Prepare(RenderGraph graph)
     {
+        Result<GpuBuffer> hitMaterials = graph.Buffer(
+            GpuDescriptions.GetBuffer("Hit materials", (long)InstanceTable.Capacity * HitMaterialBytes)
+        );
+        if (!hitMaterials.Ok)
+            return Result.Failure(hitMaterials.Error);
+
         Result<GpuBuffer> instances = graph.Buffer(
             GpuDescriptions.GetBuffer(
                 "Acceleration instances",
@@ -43,7 +69,7 @@ internal sealed class RayTracing
         if (!acceleration.Ok)
             return Result.Failure(acceleration.Error);
 
-        return Result.Success(new TracedWorld(instances.Value, acceleration.Value));
+        return Result.Success(new TracedWorld(instances.Value, acceleration.Value, hitMaterials.Value));
     }
 
     /// <summary>
@@ -72,7 +98,7 @@ internal sealed class RayTracing
                 Row1 = new(world.M12, world.M22, world.M32, world.M42),
                 Row2 = new(world.M13, world.M23, world.M33, world.M43),
                 CustomIndexAndMask = (uint)i | (0xFFu << 24),
-                OffsetAndFlags = extra.LeafOffset | (GpuAccelerationInstance.FlagNoFaceCull << 24),
+                OffsetAndFlags = extra.LeafOffset,
                 Reference = extra.Acceleration,
             };
         }
@@ -84,15 +110,42 @@ internal sealed class RayTracing
         graph.Upload(traced.Instances, _rows.AsSpan(0, count));
         graph.BuildAcceleration(traced.Structure, (uint)count);
     }
+
+    /// <summary>
+    /// Each of the view's <paramref name="materialCount"/> material rows averaged into <paramref name="hitMaterials"/>,
+    /// a pass for each material shader, which fills the rows it draws.
+    /// </summary>
+    public void RecordHitMaterials(in RenderView view, GpuBuffer hitMaterials, int materialCount)
+    {
+        for (int shader = _averageShaders.Count; shader < resources.MaterialShaders.Count; shader++)
+        {
+            _averageShaders.Add(_averageShader with { TypeArguments = [resources.MaterialShaders[shader]] });
+        }
+
+        ImmutableArray<GpuResource> heapTextures = resources.GetHeapTextures(view.Graph);
+        uint groups = (uint)((materialCount + AverageGroupSize - 1) / AverageGroupSize);
+        for (int shader = 0; shader < _averageShaders.Count; shader++)
+        {
+            view.Graph.Compute(
+                    "Average materials",
+                    _averageShaders[shader],
+                    new GpuConstants(view.Constants.Id, hitMaterials.Id, (uint)shader, (uint)materialCount)
+                )
+                .Reads(view.Constants, view.Materials)
+                .Reads(heapTextures.AsSpan())
+                .Writes(hitMaterials)
+                .Dispatch(groups);
+        }
+    }
 }
 
 /// <summary>
-/// The world's top-level acceleration structure and the buffer its instances are built from.
+/// The world's top-level acceleration structure, the buffer its instances are built from, and the hit materials table.
 /// </summary>
-internal readonly record struct TracedWorld(GpuBuffer Instances, GpuAcceleration Structure);
+internal readonly record struct TracedWorld(GpuBuffer Instances, GpuAcceleration Structure, GpuBuffer HitMaterials);
 
 /// <summary>
 /// What the CPU keeps beside an instance's row: its model's acceleration structure's address, 0 when it has none,
-/// and where its leaf clusters start in the leaf table.
+/// where its leaf clusters start in the leaf table, and the box around it in the world, which the probe grid covers.
 /// </summary>
-internal readonly record struct InstanceExtra(ulong Acceleration, uint LeafOffset);
+internal readonly record struct InstanceExtra(ulong Acceleration, uint LeafOffset, (Vector3 Min, Vector3 Max) Box);

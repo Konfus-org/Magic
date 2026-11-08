@@ -715,7 +715,9 @@ internal sealed class GpuResources(
             (uint)_clusterRanges.Allocate(made.Clusters.Length),
             (uint)made.Clusters.Length,
             made.BoundsCenter,
-            made.BoundsRadius
+            made.BoundsRadius,
+            made.BoundsMin,
+            made.BoundsMax
         );
         // A leaf table is there only on a GPU that traces rays.
         if (!LeafClusters.IsNone)
@@ -885,7 +887,7 @@ internal sealed class GpuResources(
 }
 
 /// <summary>
-/// Where a model is in the pools, each range its offset and count, and the sphere around it in its own frame;
+/// Where a model is in the pools, each range its offset and count, and the sphere and the box around it in its own frame;
 /// <paramref name="IsFailure"/> when it stands in for a model that could not be made, to be drawn as a failure.
 /// </summary>
 internal readonly record struct ResidentModel(
@@ -897,6 +899,8 @@ internal readonly record struct ResidentModel(
     uint ClusterCount,
     Vector3 BoundsCenter,
     float BoundsRadius,
+    Vector3 BoundsMin,
+    Vector3 BoundsMax,
     bool IsFailure = false,
     uint LeafOffset = 0,
     uint LeafCount = 0,

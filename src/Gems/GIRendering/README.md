@@ -34,6 +34,12 @@ texture reader.
   where a tile's lights change.
 - Each frame draws a different point of each pixel and blends with the frames before it where they saw the same
   surface, so edges come out smooth and hold still. A debug view of the GBuffer shows one frame, so its edges crawl.
+- On a GPU that traces rays, a grid of probes over the bounds of what is drawn gathers the light that bounces: each
+  frame its probes trace rays, more of them where their light still changes and in view, each lit where it lands by
+  one light picked at random, the sun among them, by the sky where it hits nothing, and by the probes themselves. Each
+  probe blends them into the light it holds from each direction and how far it sees, and moves away from a surface
+  it is too near. Nothing is shaded with it yet; the `probes` debug view draws each probe as a sphere of its light. A
+  ray reads the material it lands on averaged over its whole texture.
 - The first `Weather`'s effects, such as the fog, and then the first `PostProcessing`'s run over the lit picture in
   order, before the output: each is a material whose shader implements the pixel effect contract, with params of its
   own as a surface material's are. An effect shows once its material and its pass are built, and not while either
@@ -87,6 +93,8 @@ in turn and exits, so a release ships with the caches full.
   - `Scene/Lights` is the light table and the bits of each tile of the screen that say which lights reach it.
   - `Scene/Shadows` is the shadow mask: how much of the sun and of each of its tile's first lights reaches a pixel,
     and the sun's tiles the denoiser reads.
+  - `Scene/Probes` is the probe grid: where each probe is, what it holds, and the light a point gets from it.
   - `Light/` is what a local light gives a point: a point, spot or rect light's direction and irradiance there.
+  - `Trace/` is what rays read of the world: whether a ray reaches a point, and the surface one lands on.
 - Parts of the lighting and the temporal anti-aliasing are adapted from another engine under the MIT licence;
   `THIRD-PARTY-NOTICES.md` holds it.

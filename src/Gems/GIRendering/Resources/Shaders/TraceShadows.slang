@@ -18,9 +18,7 @@ import Scene.Lighting;
 import Scene.Lights;
 import Scene.Shadows;
 import Light.Lights;
-
-// The sun's angular radius as it looks from the Earth.
-static const float SunAngularRadius = 0.00465;
+import Trace.HitSurface;
 
 // How many pixels' width a ray starts off its surface, beyond a centimetre: the drawn cut of a model's clusters may
 // stand that far from the full detail rays hit.
@@ -28,20 +26,6 @@ static const float OffsetPixels = 4.0;
 
 // The sun's bits of the group's two tiles, the upper and the lower 8 by 4 pixels.
 groupshared uint groupSunTiles[2];
-
-// Whether nothing is in the way along a ray up to a distance.
-bool CanReach(RaytracingAccelerationStructure world, float3 origin, float3 direction, float distance)
-{
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
-    RayDesc ray;
-    ray.Origin = origin;
-    ray.Direction = direction;
-    ray.TMin = 0.0;
-    ray.TMax = distance;
-    query.TraceRayInline(world, RAY_FLAG_NONE, 0xFFu, ray);
-    query.Proceed();
-    return query.CommittedStatus() == COMMITTED_NOTHING;
-}
 
 // How far a point must rise along a vertex's normal to reach the plane through the vertex square to it, when it lies
 // below that plane.

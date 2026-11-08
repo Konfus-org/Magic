@@ -1,7 +1,7 @@
-// What the output shows: the lit picture scaled by the exposure, or each pixel's GBuffer as the view the pass header's
-// y names asks, encoded for the screen, so a roughness of a half reads as a half and an albedo as the colour it is. A
-// GBuffer view is black where nothing was drawn, but for the velocity, which the sky has too. The header's z is the HDR
-// picture and w the exposure's bits.
+// What the output shows: the lit picture scaled by the exposure, also under the probes in their view, or each pixel's
+// GBuffer as the view the pass header's y names asks, encoded for the screen, so a roughness of a half reads as a half
+// and an albedo as the colour it is. A GBuffer view is black where nothing was drawn, but for the velocity, which the
+// sky has too. The header's z is the HDR picture and w the exposure's bits.
 module "ShowSurface";
 
 import Core.Heap;
@@ -22,6 +22,7 @@ enum SurfaceView : uint
     Metalness,
     Occlusion,
     Velocity,
+    Probes,
 }
 
 // How far a depth view reaches, in metres: what is this far away or farther is black.
@@ -79,7 +80,8 @@ void ShowSurface(uint3 thread : SV_DispatchThreadID)
 
     PassHeader header = GetPassHeader();
     SurfaceView view = (SurfaceView)header.y;
-    float3 color = view == SurfaceView.Final ? GetPicture(header.z, asfloat(header.w), thread.xy) : GetSurfaceView(frame, view, thread.xy);
+    bool isPicture = view == SurfaceView.Final || view == SurfaceView.Probes;
+    float3 color = isPicture ? GetPicture(header.z, asfloat(header.w), thread.xy) : GetSurfaceView(frame, view, thread.xy);
     StorageRef output = { frame.output, 0u };
     output.Store(thread.xy, float4(color, 1.0));
 }

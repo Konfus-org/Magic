@@ -61,3 +61,48 @@ public float UnpackSnorm16(uint packed)
 
     return max(float(bits) / 32767.0, -1.0);
 }
+
+// A number of 0 or more as the bits of a small float: a 5-bit exponent over a mantissa of mantissaBits, rounded to the
+// nearest from the 32-bit float's own bits, so no 16-bit type is needed. Under 2^-14 is 0, and the format's largest
+// finite value the most; a float of 0 or more orders as its bits do, so the bits' min is the value's.
+uint PackSmallFloat(float value, uint mantissaBits)
+{
+    uint largest = ((30u + 112u) << 23u) | (((1u << mantissaBits) - 1u) << (23u - mantissaBits));
+    uint bits = min(asuint(max(value, 0.0)) + (1u << (22u - mantissaBits)), largest);
+    int exponent = int((bits >> 23u) & 0xFFu) - 112;
+    if (!(value > 0.0) || exponent <= 0)
+        return 0u;
+
+    return (uint(exponent) << mantissaBits) | ((bits >> (23u - mantissaBits)) & ((1u << mantissaBits) - 1u));
+}
+
+float UnpackSmallFloat(uint packed, uint mantissaBits)
+{
+    uint exponent = packed >> mantissaBits;
+    uint mantissa = packed & ((1u << mantissaBits) - 1u);
+    return exponent == 0u ? 0.0 : asfloat(((exponent + 112u) << 23u) | (mantissa << (23u - mantissaBits)));
+}
+
+// A number as a 16-bit float in the low half of a word.
+public uint PackHalf(float value) { return (value < 0.0 ? 0x8000u : 0u) | PackSmallFloat(abs(value), 10u); }
+
+public float UnpackHalf(uint packed)
+{
+    float magnitude = UnpackSmallFloat(packed & 0x7FFFu, 10u);
+    return (packed & 0x8000u) != 0u ? -magnitude : magnitude;
+}
+
+// A colour of 0 or more as one word: 11, 11 and 10-bit floats, red in the low bits.
+public uint PackR11G11B10(float3 color)
+{
+    return PackSmallFloat(color.r, 6u) | (PackSmallFloat(color.g, 6u) << 11u) | (PackSmallFloat(color.b, 5u) << 22u);
+}
+
+public float3 UnpackR11G11B10(uint packed)
+{
+    return float3(
+        UnpackSmallFloat(packed & 0x7FFu, 6u),
+        UnpackSmallFloat((packed >> 11u) & 0x7FFu, 6u),
+        UnpackSmallFloat(packed >> 22u, 5u)
+    );
+}

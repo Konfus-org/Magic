@@ -125,7 +125,7 @@ internal record struct FrameConstants
 
     public float TimeSec;
 
-    public uint Padding2;
+    public uint HitMaterials;
 
     public uint Padding3;
 }
@@ -320,6 +320,59 @@ internal record struct ShadowDenoiseConstants
     /// 0 on the first frame at a size, when last frame's targets hold nothing to blend with.
     /// </summary>
     public uint HasHistory;
+}
+
+/// <summary>
+/// The probe grid's place and the heap ids of its buffers, the twin of <c>Scene/Probes.slang</c>'s.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal record struct ProbeGridConstants
+{
+    public const int Bytes = 80;
+
+    /// <summary>
+    /// Probes along x; with the two after, the twin of <c>dimensions</c>.
+    /// </summary>
+    public uint DimensionX;
+
+    public uint DimensionY;
+
+    public uint DimensionZ;
+
+    /// <summary>
+    /// How far a probe's depth reaches: one and a half cells.
+    /// </summary>
+    public float MaxDistance;
+
+    /// <summary>
+    /// Where the first probe rests in the world.
+    /// </summary>
+    public Vector3 Origin;
+
+    public uint Probes;
+
+    public Vector3 CellSize;
+
+    public uint Depth;
+
+    public uint DepthSampler;
+
+    public uint Rays;
+
+    public uint RayList;
+
+    public uint RayArguments;
+
+    public uint RayCounts;
+
+    public uint Variance;
+
+    /// <summary>
+    /// 0 while the probes hold nothing: this update starts them afresh.
+    /// </summary>
+    public uint HasHistory;
+
+    public uint Padding0;
 }
 
 /// <summary>
