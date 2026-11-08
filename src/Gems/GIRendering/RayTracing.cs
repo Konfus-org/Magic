@@ -98,7 +98,7 @@ internal sealed class RayTracing(AssetManager assets, GpuResources resources)
                 Row1 = new(world.M12, world.M22, world.M32, world.M42),
                 Row2 = new(world.M13, world.M23, world.M33, world.M43),
                 CustomIndexAndMask = (uint)i | (0xFFu << 24),
-                OffsetAndFlags = extra.LeafOffset,
+                OffsetAndFlags = extra.LeafOffset | (GpuAccelerationInstance.FlagNoOpaque << 24),
                 Reference = extra.Acceleration,
             };
         }

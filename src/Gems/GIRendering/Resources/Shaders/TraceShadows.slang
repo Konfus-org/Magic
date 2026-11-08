@@ -1,13 +1,15 @@
 // Each pixel's traced shadow mask: a ray from its surface towards the sun, and one towards each of the first lights its
-// tile lists, each aimed at a random point of the light so that a wider light casts a softer shadow; 1 where the ray
-// reaches the light and 0 where something is in the way. The sun's rays also go into its tiles, for the denoiser. The
-// pass header's x is the frame's constants and z the lighting constants.
+// tile lists, each aimed at a random point of the light so that a wider light casts a softer shadow; how much of the
+// light gets through, 1 where nothing is in the way and 0 past something opaque. The sun's rays also go into its tiles,
+// for the denoiser, one bit a pixel: lit at random as often as the light gets through. The pass header's x is the
+// frame's constants and z the lighting constants.
 module "TraceShadows";
 
 import Core.Heap;
 import Core.Pass;
 import Core.Frame;
 import Core.Math;
+import Core.Color;
 import Core.Pack;
 import Core.Random;
 import Core.Sampling;
@@ -64,12 +66,13 @@ uint4 Trace(FrameConstants frame, LightingConstants lighting, uint2 pixel)
     AccelerationRef acceleration = { frame.acceleration };
     RaytracingAccelerationStructure scene = acceleration.Get();
 
-    // The sun, through a random point of its disc.
+    // The sun, through a random point of its disc, lit as often as its light gets through.
     uint4 words = uint4(0u);
     float3 toSun = frame.sunDirection.xyz;
-    float2 disc = SampleConcentricDisk(GetRandom(pixel, frame.frameIndex, 0u).xy) * SunAngularRadius;
+    float3 xi = GetRandom(pixel, frame.frameIndex, 0u);
+    float2 disc = SampleConcentricDisk(xi.xy) * SunAngularRadius;
     float3 sunRay = normalize(ToWorld(CreateBasis(toSun), float3(disc, 1.0)));
-    if (dot(normal, toSun) > 0.0 && CanReach(scene, origin, sunRay, 1e6))
+    if (dot(normal, toSun) > 0.0 && GetLuminance(GetTransmittance(frame, scene, origin, sunRay, 1e6)) > xi.z)
         words = EncodeShadow(words, 0u, 1.0);
 
     // The tile's lights in the order shading reads them, until the slots run out.
@@ -90,8 +93,11 @@ uint4 Trace(FrameConstants frame, LightingConstants lighting, uint2 pixel)
             float3 toLight = target - origin;
             float distance = length(toLight);
             float3 direction = toLight / max(distance, Epsilon);
-            if (dot(normal, direction) > 0.0 && CanReach(scene, origin, direction, distance * 0.999))
-                words = EncodeShadow(words, slot, 1.0);
+            if (dot(normal, direction) > 0.0)
+            {
+                float through = GetLuminance(GetTransmittance(frame, scene, origin, direction, distance * 0.999));
+                words = EncodeShadow(words, slot, through);
+            }
 
             slot++;
         }

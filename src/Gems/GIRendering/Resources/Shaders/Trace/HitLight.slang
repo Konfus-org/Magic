@@ -1,6 +1,6 @@
 // The light a ray brings back: the sky's where it hits nothing, and where it hits, what the surface there reflects of
-// one light picked at random, the sun among them, with a ray to say nothing is in the way, and of the probes' light.
-// The pass header's x is the frame's constants and z the lighting constants.
+// one light picked at random, the sun among them, with a ray to say how much of it gets through, and of the probes'
+// light. The pass header's x is the frame's constants and z the lighting constants.
 module "Trace/HitLight";
 
 import Core.Heap;
@@ -50,10 +50,11 @@ public float3 GetDirectLight<S : ISky>(
     }
 
     float cosine = dot(surface.normal, direction);
-    if (cosine <= 0.0 || !CanReach(world, origin, direction, distance))
+    if (cosine <= 0.0)
         return float3(0.0);
 
-    return float(lightCount + 1u) * irradiance * cosine * InvPi;
+    float3 through = GetTransmittance(frame, world, origin, direction, distance);
+    return float(lightCount + 1u) * irradiance * through * cosine * InvPi;
 }
 
 // The sky along a direction, without the sun's disc, whose light the sun's own rays bring.

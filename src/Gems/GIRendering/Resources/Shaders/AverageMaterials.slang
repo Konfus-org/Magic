@@ -8,6 +8,7 @@ module "AverageMaterials";
 import Core.Heap;
 import Core.Pass;
 import Core.Frame;
+import Core.Pack;
 import Scene.Materials;
 import Surface.Surface;
 import Material.IMaterial;
@@ -39,7 +40,7 @@ void AverageMaterials<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
 
     GpuHitMaterial hit;
     hit.diffuse = surface.baseColor * (1.0 - surface.metalness);
-    hit.padding0 = 0u;
+    hit.transmission = PackUnorm4x8(float4(surface.baseColor * (1.0 - surface.alpha), 0.0));
     hit.emissive = surface.emissive;
     hit.padding1 = 0u;
     ArrayRef<GpuHitMaterial> table = { header.y };

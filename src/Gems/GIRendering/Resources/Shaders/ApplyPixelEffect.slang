@@ -12,9 +12,26 @@ import Core.Math;
 import Core.Pack;
 import Scene.Materials;
 import Post.IPixelEffect;
+import Trace.HitSurface;
 
 // The reversed depth a pixel where nothing was drawn is put at: far along its ray, short of infinity.
 static const float FarDepth = 1e-6;
+
+// The world as the frame's acceleration structure has it, for the effects' rays.
+struct TracedWorld : IWorldRays
+{
+    static float3 GetTransmittance(float3 origin, float3 direction, float distance)
+    {
+        FrameConstants frame = GetFrame();
+        if (frame.acceleration == 0u)
+            return float3(1.0);
+
+        AccelerationRef acceleration = { frame.acceleration };
+        return GetTransmittance(frame, acceleration.Get(), origin, direction, distance);
+    }
+}
+
+export struct WorldRays : IWorldRays = TracedWorld;
 
 // One pass of an effect, C#'s GpuEffectPass: the heap id of the table of the effects' params and the effect's row in
 // it, the level of its target the pass fills, 0 for Apply, and the heap ids of the picture it reads, of what it writes,

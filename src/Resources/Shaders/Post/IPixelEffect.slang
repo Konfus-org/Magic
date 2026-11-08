@@ -12,6 +12,10 @@
 //
 // An effect that blends frames declares `static const uint Jitters = 1;`: while it runs, the camera draws each frame
 // through a different point in each pixel.
+//
+// An effect that asks what lies along a ray through the world, such as whether a point in the air sees the sun, asks
+// WorldRays, which the renderer the effects run in supplies, and declares `static const uint Rays = 1;`: on a GPU that
+// doesn't trace rays, it doesn't run.
 module "Post/IPixelEffect";
 
 import Core.Heap;
@@ -59,6 +63,17 @@ public struct PixelEffectInputs
     public TextureRef velocity;
     public SamplerRef sampler;
 }
+
+// What a ray through the world finds, as the renderer sees the world.
+public interface IWorldRays
+{
+    // How much of the light along a ray from origin, in the world, up to a distance gets through, by colour: all where
+    // nothing is in the way, none past what is opaque, and through glass what its clarity and colour let through.
+    static float3 GetTransmittance(float3 origin, float3 direction, float distance);
+}
+
+// The renderer's world as rays see it, which its effect pass names with `export struct WorldRays : IWorldRays = ...;`.
+public extern struct WorldRays : IWorldRays;
 
 public interface IPixelEffect
 {

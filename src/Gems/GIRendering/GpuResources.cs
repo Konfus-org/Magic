@@ -603,10 +603,14 @@ internal sealed class GpuResources(
         Result<long> jitters = await shaders
             .ReflectConstantAsync(shader, "Jitters", CancellationToken.None)
             .ConfigureAwait(false);
+        Result<long> rays = await shaders
+            .ReflectConstantAsync(shader, "Rays", CancellationToken.None)
+            .ConfigureAwait(false);
         await threads.Enter(EngineThread.Render);
         _effectNeeds[shader.Module.Id] = new EffectNeeds(
             levels.Ok ? (int)levels.Value : 0,
-            jitters.Ok && jitters.Value != 0
+            jitters.Ok && jitters.Value != 0,
+            rays.Ok && rays.Value != 0
         );
     }
 
@@ -928,10 +932,10 @@ internal sealed class GpuResources(
 }
 
 /// <summary>
-/// What an effect shader's struct declares it needs from the renderer: the levels of a target of its own, and whether
-/// the camera jitters while it runs.
+/// What an effect shader's struct declares it needs from the renderer: the levels of a target of its own, whether the
+/// camera jitters while it runs, and whether it traces rays through the world.
 /// </summary>
-internal readonly record struct EffectNeeds(int Levels, bool HasJitter);
+internal readonly record struct EffectNeeds(int Levels, bool HasJitter, bool HasRays);
 
 /// <summary>
 /// Where a model is in the pools, each range its offset and count, and the sphere and the box around it in its own frame;

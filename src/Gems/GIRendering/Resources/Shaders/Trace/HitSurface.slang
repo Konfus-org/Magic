@@ -1,12 +1,13 @@
-// What a ray finds in the world's acceleration structure: whether anything lies along it, and what it landed on as a
-// surface, its triangle found through the instance and leaf cluster tables and its material as the hit materials table
-// averages it. An instance's geometries are its model's leaf clusters, its hit group offset where they start in the leaf
-// table.
+// What a ray finds in the world's acceleration structure: how much light gets through along it, and what it landed on
+// as a surface, its triangle found through the instance and leaf cluster tables and its material as the hit materials
+// table averages it. An instance's geometries are its model's leaf clusters, its hit group offset where they start in
+// the leaf table.
 module "Trace/HitSurface";
 
 import Core.Heap;
 import Core.Frame;
 import Core.Math;
+import Core.Pack;
 import Scene.Instances;
 import Scene.Clusters;
 import Scene.Vertices;
@@ -16,7 +17,8 @@ public struct GpuHitMaterial
 {
     // The base colour a surface reflects diffusely: none of it where it is metal.
     public float3 diffuse;
-    public uint padding0;
+    // What of the light along a ray gets through the surface, by colour, in 8 bits each: none for an opaque one.
+    public uint transmission;
     public float3 emissive;
     public uint padding1;
 }
@@ -43,18 +45,34 @@ public float GetRayOffset(FrameConstants frame, float3 relative)
     return 0.01 + RayOffsetPixels * length(relative) / frame.pixelsPerRadian;
 }
 
-// Whether nothing is in the way along a ray from origin up to a distance.
-public bool CanReach(RaytracingAccelerationStructure world, float3 origin, float3 direction, float distance)
+// How much of the light along a ray from origin up to a distance gets through, by colour: all where nothing is in the
+// way, none past an opaque surface, and through each other what its material lets through. The world's instances are
+// non-opaque, so the query is handed each triangle it lands on, in any order, and stops at the first that lets nothing
+// through.
+public float3 GetTransmittance(
+    FrameConstants frame, RaytracingAccelerationStructure world, float3 origin, float3 direction, float distance)
 {
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
     RayDesc ray;
     ray.Origin = origin;
     ray.Direction = direction;
     ray.TMin = 0.0;
     ray.TMax = distance;
     query.TraceRayInline(world, RAY_FLAG_NONE, 0xFFu, ray);
-    query.Proceed();
-    return query.CommittedStatus() == COMMITTED_NOTHING;
+    ArrayRef<uint> leaves = { frame.leafClusters };
+    ArrayRef<GpuHitMaterial> materials = { frame.hitMaterials };
+    float3 through = float3(1.0);
+    while (query.Proceed())
+    {
+        GpuInstance instance = LoadInstance(frame.instances, query.CandidateInstanceID());
+        uint leaf = query.CandidateInstanceContributionToHitGroupIndex() + query.CandidateGeometryIndex();
+        GpuCluster cluster = LoadCluster(frame.clusters, leaves[leaf]);
+        through *= UnpackUnorm4x8(materials[GetMaterial(instance, cluster.materialSlot)].transmission).rgb;
+        if (Max3(through) <= 0.0)
+            query.CommitNonOpaqueTriangleHit();
+    }
+
+    return query.CommittedStatus() == COMMITTED_NOTHING ? through : float3(0.0);
 }
 
 // What a ray landed on first: whether it landed on anything, the instance's row, the leaf as its hit group offset plus

@@ -29,6 +29,9 @@ texture reader.
 - Point, spot and rect lights are in physical units: lux for the sun, candela for the rest. A frame draws the first
   1024. On a GPU that traces rays, the first 15 lighting each tile of the screen cast shadows, soft as wide as the
   light, and `IsShadowless` doesn't stop them yet.
+- A shadow ray passes glass, and anything else whose material's alpha is under 1, by its colour times what its alpha
+  doesn't hold back, so a window lets the sun in. Shadows take how much of the light gets through, uncoloured; the
+  light a traced ray brings back takes it coloured.
 - Shadows are traced one ray a pixel and light, then denoised. The sun's are smoothed over frames and across the
   screen. The tile lights' are only smoothed over frames, so their soft edges stay grainy, and one can trail for a moment
   where a tile's lights change.
@@ -60,7 +63,10 @@ texture reader.
   left and writes another; one that declares levels first fills each level of a target of its own, which it keeps from
   frame to frame as its history. While an effect that declares jitter runs, as the temporal anti-aliasing does, the
   camera draws each frame through a different point in each pixel. An effect shows once its material and its passes
-  are built, and not while one loads or when one failed. The fog is lit by the sun and the sky alone, unshadowed.
+  are built, and not while one loads or when one failed. An effect that asks what lies along a ray, as the volumetric
+  light does, is answered through the world the shadows trace, and doesn't run on a GPU that doesn't trace rays.
+  The fog is lit by the sun and the sky alone, unshadowed; with the fog's `sun` param at 0 and `VolumetricLight`
+  listed, the sun's light in the fog comes only where the air sees the sun, in shafts.
 - The `Exposure` effect meters the picture each frame from its average log luminance, as the effects before it leave
   it, and adapts to a change over about a second, as an eye does; a new domain or window size takes its first reading
   at once. Its `compensation` param adds stops to it. The `Agx` effect is the AgX tonemap.
@@ -120,7 +126,7 @@ in turn and exits, so a release ships with the caches full.
     the picture reads it back. `Scene/TracedDiffuse` and `Scene/TracedReflections` are the traced diffuse light's and
     the traced reflections' textures.
   - `Light/` is what a local light gives a point: a point, spot or rect light's direction and irradiance there.
-  - `Trace/` is what rays read of the world: whether a ray reaches a point, the surface one lands on, and the light
-    it brings back from there.
+  - `Trace/` is what rays read of the world: how much light gets through along a ray, the surface one lands on, and
+    the light it brings back from there.
 - Parts of the lighting and the traced reflections are adapted from another engine under the MIT licence;
   `THIRD-PARTY-NOTICES.md` holds it.

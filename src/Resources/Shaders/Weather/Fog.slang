@@ -1,6 +1,6 @@
 // The air of the world: a haze that scatters the sun's and the sky's light, thinning by half every halfHeight above its
 // height, so the far fades into it. A fog material's params are this struct's fields by name, "density", "halfHeight",
-// "height", "color" and "anisotropy". It draws as a pixel effect, before the post effects.
+// "height", "color", "anisotropy" and "sun". It draws as a pixel effect, before the post effects.
 module "Weather/Fog";
 
 import Core.Math;
@@ -9,6 +9,15 @@ import Post.IPixelEffect;
 // Under this much rise along a ray, in units of the falloff, the air is taken as level, where the closed form divides
 // by nothing.
 static const float LevelRise = 1e-4;
+
+// How much of the light the air scatters goes off at an angle from its path, per steradian, by the cosine of that
+// angle: evenly at an anisotropy of 0, towards 1 mostly onward, by the Henyey-Greenstein phase function (Henyey and
+// Greenstein, "Diffuse radiation in the galaxy", 1941).
+public float GetScatteringPhase(float anisotropy, float cosine)
+{
+    float g = clamp(anisotropy, -0.99, 0.99);
+    return (1.0 - g * g) / (4.0 * Pi * pow(max(1.0 + g * g - 2.0 * g * cosine, 1e-4), 1.5));
+}
 
 public struct Fog : IPixelEffect
 {
@@ -23,6 +32,9 @@ public struct Fog : IPixelEffect
     // How much the air scatters light onward rather than everywhere, -1 to 1: 0 evenly, towards 1 mostly ahead, as
     // mist does.
     public float anisotropy;
+    // How much of the sun's light the fog scatters itself, everywhere as if nothing stood in its way: 1, or 0 where the
+    // volumetric light post effect scatters it only where the air sees the sun.
+    public float sun;
 
     public float3 Apply(float3 picture, PixelEffectInputs inputs)
     {
@@ -37,12 +49,9 @@ public struct Fog : IPixelEffect
         float opticalDepth = atCamera * distance * (abs(rise) > LevelRise ? (1.0 - exp(-rise)) / rise : 1.0);
         float transmittance = exp(-opticalDepth);
 
-        // What the air scatters towards the camera: the sky's light evenly and the sun's by the Henyey-Greenstein
-        // phase function (Henyey and Greenstein, "Diffuse radiation in the galaxy", 1941).
-        float g = clamp(anisotropy, -0.99, 0.99);
-        float cosine = dot(direction, inputs.sunDirection);
-        float phase = (1.0 - g * g) / (4.0 * Pi * pow(max(1.0 + g * g - 2.0 * g * cosine, 1e-4), 1.5));
-        float3 scattered = color.rgb * (inputs.skyRadiance + inputs.sunRadiance * phase);
+        // What the air scatters towards the camera: the sky's light evenly and the sun's by the angle to it.
+        float phase = GetScatteringPhase(anisotropy, dot(direction, inputs.sunDirection));
+        float3 scattered = color.rgb * (inputs.skyRadiance + sun * inputs.sunRadiance * phase);
         return picture * transmittance + scattered * (1.0 - transmittance);
     }
 }

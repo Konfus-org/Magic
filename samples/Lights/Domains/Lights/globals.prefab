@@ -21,6 +21,19 @@
                 "PostProcessing": {
                     "effects": [
                         {
+                            "handle": {
+                                "id": 4000506431506868452
+                            },
+                            "overrides": {
+                                "intensity": {
+                                    "x": 4
+                                },
+                                "anisotropy": {
+                                    "x": 0.6
+                                }
+                            }
+                        },
+                        {
                             "id": 7784721301031534182
                         },
                         {
@@ -81,11 +94,11 @@
                                 "id": 8828027672504642575
                             },
                             "overrides": {
-                                "halfHeight": {
-                                    "x": 40
-                                },
                                 "anisotropy": {
                                     "x": 0.6
+                                },
+                                "sun": {
+                                    "x": 0
                                 }
                             }
                         }

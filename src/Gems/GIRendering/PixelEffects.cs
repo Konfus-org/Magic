@@ -219,8 +219,8 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
     }
 
     /// <summary>
-    /// Whether the effect in <paramref name="slot"/> runs: its material and its textures on the GPU and its passes
-    /// built; its row, its passes and what it needs when it does.
+    /// Whether the effect in <paramref name="slot"/> runs: its material and its textures on the GPU, its rays traced if it
+    /// traces any, and its passes built; its row, its passes and what it needs when it does.
     /// </summary>
     private bool IsReady(
         RenderGraph graph,
@@ -235,6 +235,7 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
         if (
             slot.Handle == Handle<Material>.None
             || resources.GetEffect(slot, out row, out ShaderTypeArgument shader, out needs) != ResourceState.Ready
+            || (needs.HasRays && !graph.Features.HasRayQuery)
         )
             return false;
 
