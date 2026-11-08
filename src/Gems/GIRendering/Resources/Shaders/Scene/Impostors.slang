@@ -142,7 +142,7 @@ public float3 GetImpostorCorner(FrameConstants frame, GpuInstance instance, GpuI
 
 // What the ray from origin along direction, in the model's frame, sees of the impostor: a model point and normal and
 // the material slot, isHit false where less than minCoverage of the views' weight sees something. The draw asks for
-// half, so a silhouette is where the views agree; the resolve, whose ray can differ from the draw's by a jitter, for any,
+// half, so a silhouette is where the views agree; the resolve, whose ray can differ from the draw's by rounding, for any,
 // so a pixel the draw kept always finds its surface.
 public struct ImpostorHit
 {

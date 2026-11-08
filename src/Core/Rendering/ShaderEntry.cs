@@ -20,6 +20,12 @@ public enum ShaderStage : byte
 public readonly record struct ShaderTypeArgument(Handle<Shader> Module, string Type);
 
 /// <summary>
+/// One field of a shader's struct as a buffer lays it out: its name, its byte offset and size, and, for a field that is
+/// itself a struct such as <c>TextureRef</c>, that struct's name; empty for a number or a vector.
+/// </summary>
+public readonly record struct ShaderField(string Name, uint Offset, uint Size, string Struct);
+
+/// <summary>
 /// One entry point to compile: a function of a <see cref="Shader"/> module, its stage, and the types it is specialised
 /// with, in the order of its generic parameters. Equal entries compile to the same code, which is how the compiled
 /// shader is cached.

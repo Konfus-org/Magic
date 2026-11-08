@@ -18,7 +18,7 @@ public struct FrameConstants
     // so a point is inside where dot(xyz, p) + w >= 0 for every one; the sixth is the far plane, which never rejects.
     public float4 frustumPlanes[6];
 
-    // Towards the sun, unit, and the sun's and the sky's radiance at the output's exposure.
+    // Towards the sun, unit, and the sun's and the sky's radiance, before the exposure.
     public float4 sunDirection;
     public float4 sunRadiance;
     public float4 skyRadiance;
@@ -51,7 +51,6 @@ public struct FrameConstants
     public uint instanceCount;
     public uint maxVisibleClusters;
     public uint frameIndex;
-    public uint defaultSampler;
 
     // The heap ids of the tables and textures.
     public uint instances;
@@ -86,7 +85,15 @@ public struct FrameConstants
     // The distance in metres to an instance's sphere past which it hands off to its impostor; 0 hands off by size
     // alone.
     public float impostorDistance;
-    public uint padding2;
+    // The heap id of the picture: the lit picture in linear light, until the post effects finish it for the screen.
+    public uint hdr;
+    // The seconds the run has taken, and since the frame before.
+    public float timeSec;
+    public float deltaSec;
+    // On a GPU that traces rays: each material row as a ray hit reads it, Trace/HitSurface's GpuHitMaterial.
+    public uint hitMaterials;
+    // The nearest translucent surface in front of the opaque ones: its visibility id, 0 where there is none.
+    public uint glassVisibility;
 }
 
 public FrameConstants GetFrame() { return LoadConstants<FrameConstants>(); }

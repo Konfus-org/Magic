@@ -63,7 +63,6 @@ internal static unsafe class ClusterBuilder
 
         (Vector3 center, float radius) = GetSphere(vertices);
         SetRootParents(clusters, center, radius);
-        DistanceField field = DistanceFieldBuilder.Build(model);
 
         // The box around the model, which its impostor's quad is fitted to.
         Vector3 boundsMin = new(float.MaxValue);
@@ -84,10 +83,6 @@ internal static unsafe class ClusterBuilder
             Clusters = [.. clusters],
             BoundsCenter = center,
             BoundsRadius = radius,
-            Field = field.Voxels,
-            FieldOrigin = field.Origin,
-            FieldVoxel = field.Voxel,
-            FieldBand = field.Band,
             Impostor = [.. impostor.Surface],
             ImpostorUv = [.. impostor.Uv],
             BoundsMin = boundsMin,

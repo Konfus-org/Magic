@@ -1,0 +1,7 @@
+{
+    "shader": { "id": 8359748682623657146 },
+    "params": {
+        "threshold": { "x": 1 },
+        "strength": { "x": 1 }
+    }
+}

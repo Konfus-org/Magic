@@ -10,7 +10,7 @@ using Magic.Utils;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// Makes what the renderer draws a model as, its cluster hierarchy and distance field, as the model loads, and says how
+/// Makes what the renderer draws a model as, its cluster hierarchy and impostor, as the model loads, and says how
 /// the cache keeps it: <see cref="AssetManager"/> keeps it under the model's version, so a model is clustered once per
 /// change to its file.
 /// </summary>
@@ -19,7 +19,7 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
     /// <summary>
     /// Raised when the bytes written change shape, or the hierarchy is built otherwise.
     /// </summary>
-    public int Version => 15;
+    public int Version => 16;
 
     public MeshDerived Preprocess(Model asset) => ClusterBuilder.Build(asset);
 
@@ -33,10 +33,6 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
                 value.Clusters.Length,
                 value.BoundsCenter,
                 value.BoundsRadius,
-                value.FieldOrigin,
-                value.FieldVoxel,
-                value.FieldBand,
-                value.Field.Length,
                 value.Impostor.Length,
                 value.ImpostorUv.Length,
                 value.BoundsMin,
@@ -47,7 +43,6 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
         bytes.Write(MemoryMarshal.AsBytes(value.Vertices.AsSpan()));
         bytes.Write(MemoryMarshal.AsBytes(value.Indices.AsSpan()));
         bytes.Write(MemoryMarshal.AsBytes(value.Clusters.AsSpan()));
-        bytes.Write(value.Field.AsSpan());
         bytes.Write(MemoryMarshal.AsBytes(value.Impostor.AsSpan()));
         bytes.Write(MemoryMarshal.AsBytes(value.ImpostorUv.AsSpan()));
     }
@@ -62,14 +57,12 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
             ((long)header.VertexCount * GpuVertex.Bytes)
             + ((long)header.IndexCount * sizeof(uint))
             + ((long)header.ClusterCount * GpuCluster.Bytes)
-            + header.FieldBytes
             + ((long)header.ImpostorHalves * sizeof(ushort))
             + ((long)header.ImpostorUvHalves * sizeof(ushort));
         if (
             header.VertexCount < 0
             || header.IndexCount < 0
             || header.ClusterCount < 0
-            || header.FieldBytes < 0
             || header.ImpostorHalves < 0
             || header.ImpostorUvHalves < 0
             || bytes.Length < needed
@@ -79,7 +72,6 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
         ImmutableArray<GpuVertex> vertices = Take<GpuVertex>(ref bytes, header.VertexCount);
         ImmutableArray<uint> indices = Take<uint>(ref bytes, header.IndexCount);
         ImmutableArray<GpuCluster> clusters = Take<GpuCluster>(ref bytes, header.ClusterCount);
-        ImmutableArray<byte> field = Take<byte>(ref bytes, header.FieldBytes);
         ImmutableArray<Half> impostor = Take<Half>(ref bytes, header.ImpostorHalves);
         ImmutableArray<Half> impostorUv = Take<Half>(ref bytes, header.ImpostorUvHalves);
 
@@ -91,10 +83,6 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
                 Clusters = clusters,
                 BoundsCenter = header.BoundsCenter,
                 BoundsRadius = header.BoundsRadius,
-                Field = field,
-                FieldOrigin = header.FieldOrigin,
-                FieldVoxel = header.FieldVoxel,
-                FieldBand = header.FieldBand,
                 Impostor = impostor,
                 ImpostorUv = impostorUv,
                 BoundsMin = header.BoundsMin,
@@ -123,10 +111,6 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
         int ClusterCount,
         Vector3 BoundsCenter,
         float BoundsRadius,
-        Vector3 FieldOrigin,
-        float FieldVoxel,
-        float FieldBand,
-        int FieldBytes,
         int ImpostorHalves,
         int ImpostorUvHalves,
         Vector3 BoundsMin,

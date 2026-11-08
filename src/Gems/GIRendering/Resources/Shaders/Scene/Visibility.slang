@@ -7,9 +7,11 @@ module "Scene/Visibility";
 
 import Core.Heap;
 import Core.Frame;
+import Core.Math;
 import Scene.Instances;
 import Scene.Clusters;
 import Scene.Vertices;
+import Surface.Surface;
 
 // One cluster drawn this frame: its row of the visible list is what the visibility buffer's ids name.
 public struct VisibleCluster
@@ -36,6 +38,9 @@ public static const uint CountVisibleDraws = 0u;
 public static const uint CountRetest = 4u;
 public static const uint CountRetestDraws = 8u;
 public static const uint CountVisibleList = 12u;
+// The translucent clusters' draws, from both cull passes, in the draws' fifth region.
+public static const uint CountGlassDraws = 40u;
+public static const uint GlassRegion = 4u;
 
 // The rows of the visible list the frame's instances asked for, which the cluster budget reads next frame, and the
 // first distance bin with no room left: instances in it and past it draw as their impostors.
@@ -152,4 +157,23 @@ public PixelTriangle LoadPixelTriangle(FrameConstants frame, uint visibleIndex, 
         float2(frame.width, frame.height)
     );
     return result;
+}
+
+// What a material is handed at the pixel of a triangle: its attributes interpolated from the triangle's vertices, in
+// the camera-relative world, and how its texture coordinates change over the pixel.
+public SurfaceInputs CreateSurfaceInputs(PixelTriangle shown)
+{
+    float3 lambda = shown.bary.lambda;
+    SurfaceInputs inputs;
+    inputs.position = Interpolate(shown.p0, shown.p1, shown.p2, lambda);
+    float3 normal = Interpolate(shown.v0.normal, shown.v1.normal, shown.v2.normal, lambda);
+    float3 tangent = Interpolate(shown.v0.tangent, shown.v1.tangent, shown.v2.tangent, lambda);
+    inputs.normal = ToWorldNormal(shown.instance.world, normal);
+    inputs.tangent = ToWorldDirection(shown.instance.world, tangent);
+    inputs.tangentSign = shown.v0.tangentSign;
+    inputs.uv = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, lambda);
+    inputs.uvDdx = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, shown.bary.ddx);
+    inputs.uvDdy = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, shown.bary.ddy);
+    inputs.viewDirection = NormalizeSafe(-inputs.position, float3(0.0, 0.0, -1.0));
+    return inputs;
 }

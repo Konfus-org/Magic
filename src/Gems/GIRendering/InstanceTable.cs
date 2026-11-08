@@ -15,7 +15,8 @@ namespace Magic.GIRendering;
 /// of rows that changed are uploaded in runs; a still scene uploads none. Beside it, the material table: a row per
 /// distinct <see cref="MaterialInstance"/> drawn, which every slot holding it shares, made again each frame from what
 /// <paramref name="resources"/> has then, and uploaded whole. <paramref name="failure"/> is the material a model that
-/// failed is drawn with, every slot; an empty slot when there is none.
+/// failed, or a material that did not load, is drawn with; an empty slot when there is none. Row 0 is the default
+/// material, which an empty slot and a material still loading are drawn with.
 /// </summary>
 internal sealed class InstanceTable(AssetManager assets, GpuResources resources, MaterialInstance failure)
 {
@@ -47,14 +48,14 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
 
     /// <summary>
     /// The material rows, as many as there are instance rows, which holds every drawn slot of a world whose renderers
-    /// fill one each; row 0 the default an empty slot is drawn with.
+    /// fill one each.
     /// </summary>
-    private readonly GpuMaterial[] _materialRows = CreateMaterialRows();
+    private readonly GpuMaterial[] _materialRows = new GpuMaterial[Capacity];
 
     /// <summary>
-    /// The slot each material row is made from, by row; row 0 the empty slot.
+    /// The slot each material row is made from, by row; row 0 the default material's.
     /// </summary>
-    private readonly List<MaterialInstance> _materialSlots = [default];
+    private readonly List<MaterialInstance> _materialSlots = [new() { Handle = assets.GetDefault<Material>() }];
 
     private readonly Dictionary<MaterialInstance, uint> _materialRowOf = [];
 
@@ -83,6 +84,11 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
     /// What the CPU keeps beside each row, by instance index.
     /// </summary>
     public ReadOnlySpan<InstanceExtra> Extras => _extras.AsSpan(0, Count);
+
+    /// <summary>
+    /// How many rows the material table holds: one per distinct slot drawn, the default material's first.
+    /// </summary>
+    public int MaterialCount => _materialSlots.Count;
 
     /// <summary>
     /// The rows of <paramref name="renderers"/>, from what changed since the last fill: each its model's place in the
@@ -144,27 +150,24 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
         if (!materials.Ok)
             return Result.Failure(materials.Error);
 
-        // Every material row made again, so a material or texture that arrived shows with no renderer written.
-        for (int row = 1; row < _materialSlots.Count; row++)
+        // Every material row made again, so a material or texture that arrived shows with no renderer written: one still
+        // loading as the default, row 0, and one that failed as the failure.
+        for (int row = 0; row < _materialSlots.Count; row++)
         {
-            resources.Get(_materialSlots[row], out _materialRows[row]);
+            ResourceState state = resources.Get(_materialSlots[row], out _materialRows[row]);
+            if (state == ResourceState.Loading)
+                _materialRows[row] = _materialRows[0];
+            else if (
+                state == ResourceState.Failed
+                && resources.Get(failure, out GpuMaterial failed) == ResourceState.Failed
+            )
+                _materialRows[row] = failed;
         }
 
         graph.Upload(materials.Value, _materialRows.AsSpan(0, _materialSlots.Count));
         UploadChangedRows(graph, rows.Value);
 
         return Result.Success((rows.Value, materials.Value));
-    }
-
-    /// <summary>
-    /// The material rows, row 0 the default an empty slot is drawn with.
-    /// </summary>
-    private static GpuMaterial[] CreateMaterialRows()
-    {
-        GpuMaterial[] rows = new GpuMaterial[Capacity];
-        rows[0] = GpuResources.DefaultMaterial;
-
-        return rows;
     }
 
     /// <summary>
@@ -227,7 +230,11 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
             _rows[index] = row;
             _entities[index] = entity;
             _extras[index] = resident is { Acceleration.IsNone: false } traced
-                ? new InstanceExtra(traced.Acceleration.Address, traced.LeafOffset)
+                ? new InstanceExtra(
+                    traced.Acceleration.Address,
+                    traced.LeafOffset,
+                    ToWorldBox(traced.BoundsMin, traced.BoundsMax, renderers.First[index].Matrix)
+                )
                 : default;
         }
 
@@ -237,6 +244,23 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
         }
 
         HasChanges = true;
+    }
+
+    /// <summary>
+    /// The box in the world around a box in a model's frame placed by <paramref name="world"/>: its centre placed, and
+    /// its half extent along each world axis the sum of how far each of the model's axes reaches along it.
+    /// </summary>
+    private static (Vector3 Min, Vector3 Max) ToWorldBox(Vector3 min, Vector3 max, Matrix4x4 world)
+    {
+        Vector3 center = Vector3.Transform((min + max) / 2, world);
+        Vector3 extent = (max - min) / 2;
+        Vector3 reach = new(
+            (Math.Abs(world.M11) * extent.X) + (Math.Abs(world.M21) * extent.Y) + (Math.Abs(world.M31) * extent.Z),
+            (Math.Abs(world.M12) * extent.X) + (Math.Abs(world.M22) * extent.Y) + (Math.Abs(world.M32) * extent.Z),
+            (Math.Abs(world.M13) * extent.X) + (Math.Abs(world.M23) * extent.Y) + (Math.Abs(world.M33) * extent.Z)
+        );
+
+        return (center - reach, center + reach);
     }
 
     /// <summary>

@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- The tests of the GI renderer's model preprocessing: the cluster hierarchy and the distance field on known meshes. They
-       run on the testing platform xunit v3 carries, which dotnet test drives. -->
+  <!-- The tests of the GI renderer's model preprocessing: the cluster hierarchy on known meshes. They run on the
+       testing platform xunit v3 carries, which dotnet test drives. -->
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>

@@ -1,6 +1,7 @@
 // The visible clusters drawn into the visibility buffer: one indirect draw a cluster, its row of the visible list in
 // the draw's first instance, each vertex fetched from the pool by the index at its place in the cluster's run of the
-// index pool. The pixel is the row and the triangle, packed, with the hardware depth beside it.
+// index pool. The pixel is the row and the triangle, packed, with the hardware depth beside it. The translucent ones
+// draw the same way into the glass's buffer and depth, behind none of the opaque.
 module "DrawVisibility";
 
 import Core.Heap;
@@ -43,6 +44,18 @@ Varyings DrawVisibilityVertex(uint vertexIndex : SV_VertexID, uint instanceIndex
 
 [shader("pixel")]
 uint DrawVisibilityPixel(Varyings input) : SV_Target0 { return input.id; }
+
+// A translucent cluster's pixel, kept where it is nearer than the opaque surface there, so the glass's own depth keeps
+// the nearest pane.
+[shader("pixel")]
+uint DrawGlassPixel(Varyings input) : SV_Target0
+{
+    TextureRef opaque = { GetFrame().depth };
+    if (input.position.z < opaque.Load(uint2(input.position.xy), 0u).x)
+        discard;
+
+    return input.id;
+}
 
 // A cluster of an instance in the impostor handoff, its own pipeline so the plain draw above keeps its early
 // depth test: the dither keeps the clusters' share of the pixels, and the impostor draws the rest.

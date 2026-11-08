@@ -1,4 +1,6 @@
 {
     "shader": { "id": 1700000000000283 },
-    "params": {}
+    "params": {
+        "strength": { "x": 1 }
+    }
 }

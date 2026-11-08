@@ -61,6 +61,12 @@ public record struct GpuAccelerationInstance
     /// </summary>
     public const uint FlagNoFaceCull = 1;
 
+    /// <summary>
+    /// A ray query that doesn't make every hit opaque is handed each of the instance's triangles it lands on to decide
+    /// whether it stops the ray, as one through glass does.
+    /// </summary>
+    public const uint FlagNoOpaque = 8;
+
     public Vector4 Row0;
 
     public Vector4 Row1;

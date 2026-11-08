@@ -23,6 +23,10 @@ internal sealed class RenderInputs
 
     public EcsSnapshot<Sky> Skies { get; } = new();
 
+    public EcsSnapshot<PostProcessing> PostProcessing { get; } = new();
+
+    public EcsSnapshot<Weather> Weather { get; } = new();
+
     public DebugView DebugView { get; set; }
 
     /// <summary>

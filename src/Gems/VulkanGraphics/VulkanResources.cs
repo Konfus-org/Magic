@@ -223,7 +223,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             geometries[i] = new VkAccelerationStructureGeometryKHR
             {
                 geometryType = VkGeometryTypeKHR.Triangles,
-                flags = VkGeometryFlagsKHR.Opaque,
+                flags = VkGeometryFlagsKHR.Opaque | VkGeometryFlagsKHR.NoDuplicateAnyHitInvocation,
                 geometry = new VkAccelerationStructureGeometryDataKHR
                 {
                     triangles = new VkAccelerationStructureGeometryTrianglesDataKHR

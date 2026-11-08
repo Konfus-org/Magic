@@ -7,7 +7,10 @@ import Material.IMaterial;
 
 public struct Failure : IMaterial
 {
-    public static SurfaceOutputs Evaluate(SurfaceInputs inputs)
+    // The kind of failure the failure assets set; every kind draws alike. A row's struct has a field to be loaded.
+    public float kind;
+
+    public SurfaceOutputs Evaluate(SurfaceInputs inputs)
     {
         SurfaceOutputs surface;
         surface.baseColor = float3(1.0, 0.0, 1.0);

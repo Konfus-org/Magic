@@ -1,7 +1,10 @@
-// What the output shows: the lit picture scaled by the exposure, or each pixel's GBuffer as the view the pass header's
-// y names asks, encoded for the screen, so a roughness of a half reads as a half and an albedo as the colour it is. A
-// GBuffer view is black where nothing was drawn, but for the velocity, which the sky has too. The header's z is the HDR
-// picture and w the exposure's bits.
+// What the output shows, as the view the pass header's y names asks: the picture as its effects finished it, encoded for
+// the screen, or each pixel's GBuffer, so a roughness of a half reads as a half and an albedo as the colour it is. A
+// GBuffer view is black where nothing was drawn, but for the velocity, which the sky has too. A view of light alone
+// first writes it into the picture in place of the lit one, so the effects finish it as they would the picture: the
+// traced diffuse light as shading reads it, which a white diffuse surface would reflect, or the traced reflections'
+// light. For that pass the header's z is the traced reflections' light and w the traced diffuse constants, each 0 where
+// there are none.
 module "ShowSurface";
 
 import Core.Heap;
@@ -10,6 +13,8 @@ import Core.Frame;
 import Core.Math;
 import Core.Color;
 import Core.Pack;
+import Scene.TracedDiffuse;
+import Scene.Traced;
 
 // C#'s DebugView.
 enum SurfaceView : uint
@@ -22,6 +27,9 @@ enum SurfaceView : uint
     Metalness,
     Occlusion,
     Velocity,
+    Probes,
+    TracedDiffuse,
+    Reflections,
 }
 
 // How far a depth view reaches, in metres: what is this far away or farther is black.
@@ -62,11 +70,41 @@ float3 GetSurfaceView(FrameConstants frame, SurfaceView view, uint2 pixel)
     }
 }
 
-// The lit picture for the screen. PROTO: a plain exposure curve until the tonemap is ported.
-float3 GetPicture(uint hdr, float exposure, uint2 pixel)
+// The light the traced diffuse or the traced reflections view shows at the pixel, black where none was traced.
+float3 GetLightView(FrameConstants frame, SurfaceView view, uint2 pixel)
 {
-    TextureRef picture = { hdr };
-    return ToSrgb(1.0 - exp(-picture.Load(pixel, 0u).rgb * exposure));
+    PassHeader header = GetPassHeader();
+    UintTextureRef visibility = { frame.visibility };
+    if (visibility.Load(pixel, 0u) == 0u)
+        return float3(0.0);
+
+    if (view == SurfaceView.Reflections)
+    {
+        TextureRef reflections = { header.z };
+        return reflections.id == 0u ? float3(0.0) : reflections.Load(pixel / TracedScale, 0u).rgb;
+    }
+
+    if (header.w == 0u)
+        return float3(0.0);
+
+    TextureRef depthTexture = { frame.depth };
+    TextureRef normalTexture = { frame.gbufferNormal };
+    float2 uv = GetTexelCenterUv(pixel, uint2(frame.width, frame.height));
+    float3 relative = ReconstructRelative(frame, uv, depthTexture.Load(pixel, 0u).x);
+    float3 normal = DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0);
+    return SampleTracedDiffuse(frame, GetTracedDiffuse(), pixel, relative, normal);
+}
+
+[shader("compute")]
+[numthreads(8, 8, 1)]
+void ShowLight(uint3 thread : SV_DispatchThreadID)
+{
+    FrameConstants frame = GetFrame();
+    if (any(thread.xy >= uint2(frame.width, frame.height)))
+        return;
+
+    StorageRef picture = { frame.hdr, 0u };
+    picture.Store(thread.xy, float4(GetLightView(frame, (SurfaceView)GetPassHeader().y, thread.xy), 1.0));
 }
 
 [shader("compute")]
@@ -79,7 +117,10 @@ void ShowSurface(uint3 thread : SV_DispatchThreadID)
 
     PassHeader header = GetPassHeader();
     SurfaceView view = (SurfaceView)header.y;
-    float3 color = view == SurfaceView.Final ? GetPicture(header.z, asfloat(header.w), thread.xy) : GetSurfaceView(frame, view, thread.xy);
+    bool isPicture = view == SurfaceView.Final || view == SurfaceView.Probes || view == SurfaceView.TracedDiffuse
+        || view == SurfaceView.Reflections;
+    TextureRef picture = { frame.hdr };
+    float3 color = isPicture ? ToSrgb(picture.Load(thread.xy, 0u).rgb) : GetSurfaceView(frame, view, thread.xy);
     StorageRef output = { frame.output, 0u };
     output.Store(thread.xy, float4(color, 1.0));
 }
