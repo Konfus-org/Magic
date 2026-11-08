@@ -325,7 +325,10 @@ internal record struct LightingConstants
     /// </summary>
     public uint Reflections;
 
-    public uint Padding0;
+    /// <summary>
+    /// The colour the sun's light takes on through glass; 0 on a GPU that traces no rays.
+    /// </summary>
+    public uint SunTint;
 
     public uint Padding1;
 

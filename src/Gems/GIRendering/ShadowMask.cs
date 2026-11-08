@@ -7,14 +7,16 @@ namespace Magic.GIRendering;
 
 /// <summary>
 /// A frame's shadow mask and the denoiser's buffers and targets. <paramref name="Mask"/> is the denoised mask shading
-/// reads, <paramref name="Traced"/> the mask as the rays left it, and <paramref name="SunTiles"/> a bit for each pixel
-/// its sun ray reached the sun from, a word for each 8 by 4 pixels; the previous ones are what the last frame wrote.
+/// reads, <paramref name="Traced"/> the mask as the rays left it, <paramref name="SunTiles"/> a bit for each pixel its
+/// sun ray reached the sun from, a word for each 8 by 4 pixels, and <paramref name="SunTint"/> the colour the sun's
+/// light takes on through glass; the previous ones are what the last frame wrote.
 /// </summary>
 internal readonly record struct ShadowBuffers(
     GpuBuffer Constants,
     GpuBuffer TileStates,
     GpuBuffer Traced,
     GpuBuffer SunTiles,
+    GpuTexture SunTint,
     GpuBuffer Mask,
     GpuBuffer PreviousMask,
     GpuTexture SunBlend,
@@ -79,6 +81,9 @@ internal sealed class ShadowMask(AssetManager assets, GpuResources resources)
         RenderGraph graph = view.Graph;
         Result<GpuBuffer> traced = graph.Buffer(GpuDescriptions.GetBuffer("Traced shadows", maskBytes));
         Result<GpuBuffer> sunTiles = graph.Buffer(GpuDescriptions.GetBuffer("Sun shadow tiles", tiles * sizeof(uint)));
+        Result<GpuTexture> sunTint = graph.Texture(
+            GpuDescriptions.GetTexture("Sun tint", width, height, GpuFormat.R16G16B16A16Sfloat)
+        );
         Result<GpuBuffer> constants = graph.Buffer(
             GpuDescriptions.GetBuffer("Shadow denoiser constants", ShadowDenoiseConstants.Bytes)
         );
@@ -107,6 +112,7 @@ internal sealed class ShadowMask(AssetManager assets, GpuResources resources)
                 [
                     traced,
                     sunTiles,
+                    sunTint,
                     constants,
                     tileStates,
                     mask,
@@ -133,6 +139,7 @@ internal sealed class ShadowMask(AssetManager assets, GpuResources resources)
             tileStates.Value,
             traced.Value,
             sunTiles.Value,
+            sunTint.Value,
             _mask,
             previousMask,
             sunBlend.Value,
@@ -183,7 +190,7 @@ internal sealed class ShadowMask(AssetManager assets, GpuResources resources)
                 view.Depth,
                 view.GBufferNormal
             )
-            .Writes(shadows.Traced, shadows.SunTiles)
+            .Writes(shadows.Traced, shadows.SunTiles, shadows.SunTint)
             .DispatchOver(view.Width, view.Height);
 
         // Denoise: classify the sun's tiles, filter three times, blend with last frame.

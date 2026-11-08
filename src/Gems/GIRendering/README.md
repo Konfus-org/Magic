@@ -30,8 +30,8 @@ texture reader.
   1024. On a GPU that traces rays, the first 15 lighting each tile of the screen cast shadows, soft as wide as the
   light, and `IsShadowless` doesn't stop them yet.
 - A shadow ray passes glass, and anything else whose material's alpha is under 1, by its colour times what its alpha
-  doesn't hold back, so a window lets the sun in. Shadows take how much of the light gets through, uncoloured; the
-  light a traced ray brings back takes it coloured.
+  doesn't hold back, so a window lets the sun in. The sun's light through glass takes on its colour; a tile light's
+  takes how much gets through, uncoloured.
 - Shadows are traced one ray a pixel and light, then denoised. The sun's are smoothed over frames and across the
   screen. The tile lights' are only smoothed over frames, so their soft edges stay grainy, and one can trail for a moment
   where a tile's lights change.

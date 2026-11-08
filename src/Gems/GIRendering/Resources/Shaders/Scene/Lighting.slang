@@ -35,7 +35,8 @@ public struct LightingConstants
     // The traced reflections' light at half the picture's size, blended over frames; 0 where none are traced. Read
     // through Scene/TracedReflections.
     public uint reflections;
-    public uint padding0;
+    // The colour the sun's light takes on through glass, read through Scene/Shadows; 0 on a GPU that traces no rays.
+    public uint sunTint;
     public uint padding1;
     public uint padding2;
 }

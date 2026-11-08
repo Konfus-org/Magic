@@ -1,8 +1,8 @@
 // Every pixel of the picture lit, into the HDR picture: a surface by the sun through the air, by the local lights its
-// tile lists, each dimmed by the shadow mask, and by the light around it, traced on a GPU that traces rays and else the
-// sky's, and what it reflects, traced where it is smooth enough, its direct and indirect light summed over the shared
-// BRDF; and the sky itself where nothing was drawn. The pass header's x is the frame's constants, z the lighting
-// constants and w the traced diffuse constants, or 0 where there are none.
+// tile lists, each dimmed by the shadow mask and the sun coloured by its tint through glass, and by the light around
+// it, traced on a GPU that traces rays and else the sky's, and what it reflects, traced where it is smooth enough, its
+// direct and indirect light summed over the shared BRDF; and the sky itself where nothing was drawn. The pass header's
+// x is the frame's constants, z the lighting constants and w the traced diffuse constants, or 0 where there are none.
 module "ShadeSurfaces";
 
 import Core.Heap;
@@ -102,7 +102,8 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
         ? S.GetSunIlluminance(CreateSkyInputs(frame, lighting, toSun, false))
         : lighting.sunIlluminance.rgb;
     uint4 shadows = LoadShadowMask(lighting.shadowMask, thread.xy, size.x);
-    float3 color = Evaluate(brdf, normal, view, toSun) * sunIlluminance * GetShadow(shadows, 0u);
+    float3 sunLight = sunIlluminance * GetShadow(shadows, 0u) * LoadSunTint(lighting.sunTint, thread.xy);
+    float3 color = Evaluate(brdf, normal, view, toSun) * sunLight;
 
     // The lights of the pixel's tile, a word of bits at a time.
     float3 world = relative + frame.cameraPosition.xyz;

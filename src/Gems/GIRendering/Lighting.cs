@@ -66,6 +66,7 @@ internal sealed class Lighting(AssetManager assets)
             ShadowMask = shadows?.Mask.Id ?? 0,
             TracedShadows = shadows?.Traced.Id ?? 0,
             SunTiles = shadows?.SunTiles.Id ?? 0,
+            SunTint = shadows?.SunTint.Id ?? 0,
             Reflections = reflections?.Light.Id ?? 0,
         };
         view.Graph.Upload(made.Value, [constants]);
@@ -105,7 +106,7 @@ internal sealed class Lighting(AssetManager assets)
                 view.GBufferSurface
             );
         if (shadows is { } shadowed)
-            shade.Reads(shadowed.Mask);
+            shade.Reads(shadowed.Mask, shadowed.SunTint);
 
         if (diffuse is { } traced)
             shade.Reads(traced.Constants, traced.Light);
