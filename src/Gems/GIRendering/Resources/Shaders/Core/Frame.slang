@@ -85,7 +85,13 @@ public struct FrameConstants
     // The distance in metres to an instance's sphere past which it hands off to its impostor; 0 hands off by size
     // alone.
     public float impostorDistance;
+    // The heap id of the lit picture, in linear light before the exposure.
+    public uint hdr;
+    // What the picture is multiplied by to land near a middle grey, and the seconds the run has taken.
+    public float exposure;
+    public float timeSec;
     public uint padding2;
+    public uint padding3;
 }
 
 public FrameConstants GetFrame() { return LoadConstants<FrameConstants>(); }

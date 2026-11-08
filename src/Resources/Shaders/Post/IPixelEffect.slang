@@ -1,6 +1,7 @@
-// The post effect contract: a module implements it in a struct, a PostProcessing lists a material over that module,
-// and the post pass specialised to the structs runs each over every pixel of the picture, in linear light, after the
-// exposure and before the tonemap.
+// The post effect contract: a module implements it in a struct named for its file, whose fields are the effect's params
+// by name, laid out as a material's are (Material/IMaterial). A PostProcessing lists a material over that module, and
+// the post pass specialised to the struct runs each over every pixel of the picture, in order, in linear light, after
+// the exposure and before the tonemap.
 module "Post/IPixelEffect";
 
 public struct PixelEffectInputs
@@ -18,5 +19,5 @@ public struct PixelEffectInputs
 public interface IPixelEffect
 {
     // The pixel's colour after the effect, from its colour before it.
-    static float3 Apply(float3 color, PixelEffectInputs inputs);
+    float3 Apply(float3 color, PixelEffectInputs inputs);
 }

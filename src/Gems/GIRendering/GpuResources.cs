@@ -287,11 +287,39 @@ internal sealed class GpuResources(
     /// params over the material's make: each field of the struct by its name, a texture's heap id in a <c>TextureRef</c>
     /// and its sampler's in the <c>SamplerRef</c> named for it with "Sampler" after, and 0 where neither sets one. Failed
     /// when the material, its shader's struct or a texture did not load, or the material is the failure. The first ask
-    /// starts loading the material.
+    /// starts loading the material. The row names its shader by its place in <see cref="MaterialShaders"/>, which it
+    /// takes on the first row that names it.
     /// </summary>
     public ResourceState Get(in MaterialInstance slot, out GpuMaterial row)
     {
+        ResourceState state = Pack(slot, out row, out MaterialLayout layout);
+        if (!layout.Fields.IsDefault)
+            row.Shader = GetMaterialShader(layout.Shader);
+
+        return state;
+    }
+
+    /// <summary>
+    /// Whether the effect's material, its shader's struct and the textures it names are on the GPU, its row packed as
+    /// <see cref="Get(in MaterialInstance, out GpuMaterial)"/> packs a surface's, and the struct its pass is specialised
+    /// to. An effect's shader is not one of the <see cref="MaterialShaders"/>, which only surfaces are resolved with.
+    /// </summary>
+    public ResourceState GetEffect(in MaterialInstance slot, out GpuMaterial row, out ShaderTypeArgument shader)
+    {
+        ResourceState state = Pack(slot, out row, out MaterialLayout layout);
+        shader = layout.Shader;
+
+        return state;
+    }
+
+    /// <summary>
+    /// Whether the slot's material, its shader's struct and the textures it names are on the GPU, its params packed into
+    /// the row, and its shader's struct as reflection laid it out; the default struct while it loads.
+    /// </summary>
+    private ResourceState Pack(in MaterialInstance slot, out GpuMaterial row, out MaterialLayout layout)
+    {
         row = default;
+        layout = default;
         if (!_materials.TryGetValue(slot.Handle.Id, out Material? asked))
         {
             _materials[slot.Handle.Id] = null;
@@ -300,16 +328,16 @@ internal sealed class GpuResources(
             return ResourceState.Loading;
         }
 
-        if (asked is not { } material || _layouts.GetValueOrDefault(material.Shader.Id) is not { } layout)
+        if (asked is not { } material || _layouts.GetValueOrDefault(material.Shader.Id) is not { } reflected)
             return ResourceState.Loading;
 
+        layout = reflected;
         if (layout.Fields.IsDefault)
             return ResourceState.Failed;
 
         MaterialOverrides overrides = slot.Overrides;
         ResourceState state =
             material.Shader == assets.Find<Shader>(FailureShader) ? ResourceState.Failed : ResourceState.Ready;
-        row.Shader = layout.Shader;
         Span<uint> words = row.Params;
         foreach (ShaderField field in layout.Fields)
         {
@@ -513,8 +541,8 @@ internal sealed class GpuResources(
 
     /// <summary>
     /// Reflects the struct of <paramref name="shader"/>, which a material draws with, once: named for its file, as
-    /// Material/Standard.slang declares Standard. It numbers the shader for the rows once it has, or leaves it failed
-    /// when it can't, or the struct is more than a row holds.
+    /// Material/Standard.slang declares Standard. It leaves it failed when it can't, or the struct is more than a row
+    /// holds.
     /// </summary>
     private async Task ReflectAsync(Handle<Shader> shader)
     {
@@ -533,13 +561,26 @@ internal sealed class GpuResources(
                 ? $"its params are {bytes} bytes, over a row's {GpuMaterial.Bytes - 4}"
                 : fields.Error;
             Log.Error($"Materials drawn with {path} are drawn as the failure: {why}");
-            _layouts[shader.Id] = new MaterialLayout(default, 0);
+            _layouts[shader.Id] = new MaterialLayout(default, type);
 
             return;
         }
 
-        _layouts[shader.Id] = new MaterialLayout(fields.Value, (uint)_materialShaders.Count);
-        _materialShaders.Add(type);
+        _layouts[shader.Id] = new MaterialLayout(fields.Value, type);
+    }
+
+    /// <summary>
+    /// The place of <paramref name="shader"/> in <see cref="MaterialShaders"/>, which it takes at the end the first time.
+    /// </summary>
+    private uint GetMaterialShader(ShaderTypeArgument shader)
+    {
+        int number = _materialShaders.IndexOf(shader);
+        if (number >= 0)
+            return (uint)number;
+
+        _materialShaders.Add(shader);
+
+        return (uint)_materialShaders.Count - 1;
     }
 
     /// <summary>
@@ -838,9 +879,9 @@ internal sealed class GpuResources(
 
     /// <summary>
     /// A material shader's struct as its rows are packed: its fields as reflection lays them out, default when it could
-    /// not be, and the number its rows name it by.
+    /// not be, and the struct a pass is specialised to.
     /// </summary>
-    private readonly record struct MaterialLayout(ImmutableArray<ShaderField> Fields, uint Shader);
+    private readonly record struct MaterialLayout(ImmutableArray<ShaderField> Fields, ShaderTypeArgument Shader);
 }
 
 /// <summary>

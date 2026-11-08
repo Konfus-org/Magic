@@ -58,6 +58,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly LightTiles _lightTiles;
     private readonly ShadowMask? _shadowMask;
     private readonly Lighting _lighting;
+    private readonly PostEffects _postEffects;
     private readonly SurfaceView _surfaceView;
     private readonly RendererDebugWindow? _debugWindow;
 
@@ -130,6 +131,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _lightTiles = new LightTiles(assets);
         _shadowMask = _rayTracing is null ? null : new ShadowMask(assets, _resources);
         _lighting = new Lighting(assets);
+        _postEffects = new PostEffects(assets, _resources);
         _surfaceView = new SurfaceView(assets);
         _shaders =
         [
@@ -176,6 +178,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _ecs.Snapshot(back.SpotLights);
         _ecs.Snapshot(back.RectLights);
         _ecs.Snapshot(back.Skies);
+        _ecs.Snapshot(back.PostProcessing);
         back.DebugView = _debugView;
         back.ImpostorPixels = _impostorPixels;
         back.ImpostorDistance = _impostorDistance;
@@ -254,7 +257,15 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         // The frame's tables, and the view's targets at the window's size.
         RenderCamera camera = GetCamera(inputs.Cameras);
         RenderSun sun = GetSun(inputs.DirectionalLights);
-        Result<UploadedFrame> uploaded = UploadFrame(graph, inputs, camera, sun, frame.Index, instanceCount);
+        Result<UploadedFrame> uploaded = UploadFrame(
+            graph,
+            inputs,
+            camera,
+            sun,
+            frame.Index,
+            (float)frame.AppSec,
+            instanceCount
+        );
         if (!uploaded.Ok)
         {
             Log.Error($"The frame is not drawn: {uploaded.Error}");
@@ -264,7 +275,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
         // The passes, in the order they run, each reading what the ones before it wrote: what the view sees, the sky's
         // tables while there is a sky, each tile's lights, each pixel's shadows on a GPU that traces rays, the shading,
-        // and the output.
+        // the first post processing's effects, and the output.
         (RenderView view, SkyTables sky, LightBuffers lights, ShadowBuffers? shadows, GpuBuffer lighting) =
             uploaded.Value;
         GpuConstants header = new(view.Constants.Id, 0, lighting.Id);
@@ -277,6 +288,9 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             _shadowMask.Record(view, header, lighting, lights, shadowed);
 
         _lighting.Record(view, header, lighting, sky, lights, shadows);
+        if (inputs.PostProcessing.Count > 0)
+            _postEffects.Record(view, inputs.PostProcessing.First[0].Effects);
+
         _surfaceView.Record(view, inputs.DebugView, sun.Exposure);
 
         GpuTexture target = graph.WindowTarget;
@@ -474,6 +488,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         RenderCamera camera,
         RenderSun sun,
         uint frameIndex,
+        float timeSec,
         int instanceCount
     )
     {
@@ -503,6 +518,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             camera,
             sun,
             frameIndex,
+            timeSec,
             inputs.Width,
             inputs.Height,
             instanceCount,
