@@ -1,5 +1,5 @@
-// The standard material: a base colour, tinted by a texture when the row names one, with roughness, metalness and an
-// emissive colour from the row. Its params are "color", "roughness", "metalness", "emissive" and "colorMap".
+// The standard material: a base colour, tinted by a colour map when it names one, with a roughness, a metalness and an
+// emissive colour.
 module "Material/Standard";
 
 import Core.Heap;
@@ -8,23 +8,27 @@ import Material.IMaterial;
 
 public struct Standard : IMaterial
 {
-    public static SurfaceOutputs Evaluate(SurfaceInputs inputs)
+    public float4 color;
+    public float roughness;
+    public float metalness;
+    public float3 emissive;
+    // The colour map and the sampler it is read with; 0 for none.
+    public TextureRef colorMap;
+    public SamplerRef colorMapSampler;
+
+    public SurfaceOutputs Evaluate(SurfaceInputs inputs)
     {
-        float4 base = inputs.material.baseColor;
-        if (inputs.material.baseColorTexture != 0u)
-        {
-            TextureRef texture = { inputs.material.baseColorTexture };
-            SamplerRef sampler = { inputs.sampler };
-            base *= texture.SampleGrad(sampler, inputs.uv, inputs.uvDdx, inputs.uvDdy);
-        }
+        float4 base = color;
+        if (colorMap.id != 0u)
+            base *= colorMap.SampleGrad(colorMapSampler, inputs.uv, inputs.uvDdx, inputs.uvDdy);
 
         SurfaceOutputs surface;
         surface.baseColor = base.rgb;
         surface.alpha = base.a;
         surface.normal = inputs.normal;
-        surface.roughness = inputs.material.roughness;
-        surface.metalness = inputs.material.metalness;
-        surface.emissive = inputs.material.emissive;
+        surface.roughness = roughness;
+        surface.metalness = metalness;
+        surface.emissive = emissive;
         surface.occlusion = 1.0;
         return surface;
     }

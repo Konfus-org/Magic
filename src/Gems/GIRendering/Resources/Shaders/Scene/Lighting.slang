@@ -8,6 +8,9 @@ import Core.Pass;
 import Core.Frame;
 import Sky.ISky;
 
+// The sun's angular radius as it looks from the Earth: how wide a disc its shadow rays aim through.
+public static const float SunAngularRadius = 0.00465;
+
 public struct LightingConstants
 {
     // Colour times intensity, in lux, before the air.
@@ -29,6 +32,13 @@ public struct LightingConstants
     // The mask and the sun's tiles as the rays left them, for the denoiser.
     public uint tracedShadows;
     public uint sunTiles;
+    // The traced reflections' light at half the picture's size, blended over frames; 0 where none are traced. Read
+    // through Scene/TracedReflections.
+    public uint reflections;
+    // The colour the sun's light takes on through glass, read through Scene/Shadows; 0 on a GPU that traces no rays.
+    public uint sunTint;
+    public uint padding1;
+    public uint padding2;
 }
 
 public LightingConstants GetLighting() { return LoadConstants<LightingConstants>(GetPassHeader().z); }

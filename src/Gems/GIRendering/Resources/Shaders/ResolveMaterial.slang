@@ -1,8 +1,9 @@
 // Every pixel of the visibility buffer to a surface: the id names the triangle, its three vertices give the pixel its
 // barycentrics and their derivatives, the attributes interpolate from them, and the material decides the surface,
-// written to the GBuffer: the one the entry is specialised to, or the failure material for a row of that kind. The
-// pixel's velocity is written beside it: where the surface was on last frame's screen, from where its instance was
-// and where the camera was; a pixel of sky moves with the camera alone.
+// written to the GBuffer. The entry is specialised to one material shader, numbered in the pass header's z, and
+// resolves only the pixels whose rows that shader draws, loading its struct from each; every pass writes the sky's
+// velocity, the same each time. The pixel's velocity is written beside it: where the surface was on last frame's
+// screen, from where its instance was and where the camera was; a pixel of sky moves with the camera alone.
 module "ResolveMaterial";
 
 import Core.Heap;
@@ -16,7 +17,6 @@ import Scene.Visibility;
 import Scene.Impostors;
 import Surface.Surface;
 import Material.IMaterial;
-import Material.Failure;
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
@@ -30,13 +30,16 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
     UintTextureRef visibility = { frame.visibility };
     uint visibleIndex = 0u;
     uint triangle = 0u;
-    float2 unjittered = GetTexelCenterUv(thread.xy, size) - frame.jitter.xy / float2(size);
+    // The pixel's centre is where the jittered view saw its surface, which is unjittered where the camera saw it.
+    float2 center = GetTexelCenterUv(thread.xy, size);
+    float2 unjittered = center - frame.jitter.xy / float2(size);
     StorageRef velocityTarget = { frame.velocity, 0u };
     uint id = visibility.Load(thread.xy, 0u);
     bool isImpostor = (id & ImpostorFlag) != 0u;
+    uint shader = GetPassHeader().z;
     if (!isImpostor && !DecodeVisibilityId(id, visibleIndex, triangle))
     {
-        float3 far = ReconstructRelative(frame, unjittered, 1e-6);
+        float3 far = ReconstructRelative(frame, center, 1e-6);
         float4 previousClip = mul(float4(far, 1.0), frame.previousViewProjection);
         float2 previousUv = ToUv(previousClip.xy / max(previousClip.w, Epsilon));
         velocityTarget.Store(thread.xy, float4(previousUv - unjittered, 0.0, 0.0));
@@ -53,11 +56,16 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
     if (isImpostor)
     {
         instance = LoadInstance(frame.instances, id & ImpostorInstanceMask);
-        ImpostorRay ray = GetModelRay(frame, instance, ReconstructRelative(frame, unjittered, 0.5));
+        slot = (id >> ImpostorSlotShift) & 7u;
+
+        // Another pass's pixel goes before its atlas is traced.
+        if (LoadMaterialShader(frame.materials, GetMaterial(instance, slot)) != shader)
+            return;
+
+        ImpostorRay ray = GetModelRay(frame, instance, ReconstructRelative(frame, center, 0.5));
         GpuImpostor impostor = LoadImpostor(GetPassHeader().y, instance.impostor);
         ImpostorHit hit = TraceImpostor(instance, impostor, ray, 0.0);
         model = hit.position;
-        slot = (id >> ImpostorSlotShift) & 7u;
         inputs.position = Relative(frame, ToWorld(instance.world, hit.position));
         inputs.normal = ToWorldNormal(instance.world, hit.normal);
         float3 side = abs(inputs.normal.y) < 0.999 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0);
@@ -72,29 +80,23 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
         inputs.uv = uv.uv;
         inputs.uvDdx = uv.perTexelX * (pixel / atlasTexel);
         inputs.uvDdy = uv.perTexelY * (pixel / atlasTexel);
+        inputs.viewDirection = NormalizeSafe(-inputs.position, float3(0.0, 0.0, -1.0));
     }
     else
     {
-        PixelTriangle shown = LoadPixelTriangle(frame, visibleIndex, triangle, ToClip(GetTexelCenterUv(thread.xy, size)));
-        float3 lambda = shown.bary.lambda;
+        PixelTriangle shown = LoadPixelTriangle(frame, visibleIndex, triangle, ToClip(center));
         instance = shown.instance;
-        model = Interpolate(shown.v0.position, shown.v1.position, shown.v2.position, lambda);
+        model = Interpolate(shown.v0.position, shown.v1.position, shown.v2.position, shown.bary.lambda);
         slot = shown.cluster.materialSlot;
-        inputs.position = Interpolate(shown.p0, shown.p1, shown.p2, lambda);
-        float3 normal = Interpolate(shown.v0.normal, shown.v1.normal, shown.v2.normal, lambda);
-        float3 tangent = Interpolate(shown.v0.tangent, shown.v1.tangent, shown.v2.tangent, lambda);
-        inputs.normal = ToWorldNormal(shown.instance.world, normal);
-        inputs.tangent = ToWorldDirection(shown.instance.world, tangent);
-        inputs.tangentSign = shown.v0.tangentSign;
-        inputs.uv = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, lambda);
-        inputs.uvDdx = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, shown.bary.ddx);
-        inputs.uvDdy = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, shown.bary.ddy);
+        inputs = CreateSurfaceInputs(shown);
     }
 
-    inputs.viewDirection = NormalizeSafe(-inputs.position, float3(0.0, 0.0, -1.0));
-    inputs.material = LoadMaterial(frame.materials, GetMaterial(instance, slot));
-    inputs.sampler = inputs.material.baseColorSampler != 0u ? inputs.material.baseColorSampler : frame.defaultSampler;
-    SurfaceOutputs surface = inputs.material.kind == MaterialKindFailure ? Failure.Evaluate(inputs) : M.Evaluate(inputs);
+    uint row = GetMaterial(instance, slot);
+    if (LoadMaterialShader(frame.materials, row) != shader)
+        return;
+
+    M material = LoadMaterialParams<M>(frame.materials, row);
+    SurfaceOutputs surface = material.Evaluate(inputs);
 
     float3 previous = ToWorld(GetPreviousWorld(instance, frame.frameIndex), model) - frame.previousCameraPosition.xyz;
     float4 previousClip = mul(float4(previous, 1.0), frame.previousViewProjection);

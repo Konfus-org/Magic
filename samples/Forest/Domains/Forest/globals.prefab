@@ -21,6 +21,19 @@
             }
         },
         {
+            "name": "PostProcessing",
+            "components": {
+                "PostProcessing": {
+                    "effects": [
+                        { "id": 3939370898736311348 },
+                        { "id": 7784721301031534182 },
+                        { "id": 6176367544898210812 },
+                        { "id": 5350400469144486248 }
+                    ]
+                }
+            }
+        },
+        {
             "name": "Ground",
             "components": {
                 "Transform": { "scale": { "x": 2200, "y": 1, "z": 2200 } },

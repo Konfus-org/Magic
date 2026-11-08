@@ -5,6 +5,7 @@
 module "Surface/Brdf";
 
 import Core.Math;
+import Core.Sampling;
 
 public struct Brdf
 {
@@ -24,14 +25,16 @@ public Brdf CreateBrdf(float3 baseColor, float metalness, float roughness, float
     return brdf;
 }
 
-float DistributionGgx(float alpha, float nDotH)
+// The density of microfacet normals along the half vector.
+public float DistributionGgx(float alpha, float nDotH)
 {
     float a2 = alpha * alpha;
     float d = (nDotH * nDotH * (a2 - 1.0)) + 1.0;
     return a2 / max(Pi * d * d, Epsilon);
 }
 
-float VisibilitySmith(float alpha, float nDotV, float nDotL)
+// The share of microfacets both the view and the light see, over the 4 nDotV nDotL the specular divides by.
+public float VisibilitySmith(float alpha, float nDotV, float nDotL)
 {
     float a2 = alpha * alpha;
     float v = nDotL * sqrt(nDotV * nDotV * (1.0 - a2) + a2);
@@ -84,6 +87,25 @@ public float3 SampleGgxVisibleNormal(float3 viewLocal, float alpha, float2 xi)
     p2 = (1.0 - s) * sqrt(max(0.0, 1.0 - p1 * p1)) + s * p2;
     float3 half = p1 * tangent + p2 * bitangent + sqrt(max(0.0, 1.0 - p1 * p1 - p2 * p2)) * stretched;
     return normalize(float3(alpha * half.x, alpha * half.y, max(half.z, 0.0)));
+}
+
+// A direction the specular reflects the view into, in xyz, from a microfacet normal drawn as SampleGgxVisibleNormal
+// draws it with a tenth of its tail cut, which only adds noise, and that normal's density in w: the mirror direction
+// at a density of 1 where the surface is all but smooth.
+public float4 SampleGgxReflection(float3 normal, float3 view, float roughness, float2 xi)
+{
+    if (roughness <= 0.05)
+        return float4(reflect(-view, normal), 1.0);
+
+    float alpha = Pow2(max(roughness, 0.045));
+    float3x3 basis = CreateBasis(normal);
+    float3 viewLocal = ToLocal(basis, view);
+    float3 half = SampleGgxVisibleNormal(viewLocal, alpha, float2(xi.x * 0.9, xi.y));
+    float nDotV = max(viewLocal.z, 1e-4);
+    float a2 = alpha * alpha;
+    float masking = 2.0 * nDotV / (sqrt(nDotV * (nDotV - nDotV * a2) + a2) + nDotV);
+    float pdf = masking * saturate(dot(viewLocal, half)) * DistributionGgx(alpha, half.z) / nDotV;
+    return float4(reflect(-view, ToWorld(basis, half)), pdf);
 }
 
 // What the surface reflects of light from everywhere at once, as the sky's: the diffuse under the average Fresnel.

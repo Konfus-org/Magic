@@ -12,7 +12,7 @@ namespace Magic.GIRendering;
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct FrameConstants
 {
-    public const int Bytes = 640;
+    public const int Bytes = 660;
 
     public Matrix4x4 View;
 
@@ -71,8 +71,6 @@ internal record struct FrameConstants
 
     public uint FrameIndex;
 
-    public uint DefaultSampler;
-
     public uint Instances;
 
     public uint Clusters;
@@ -121,7 +119,15 @@ internal record struct FrameConstants
     /// </summary>
     public float ImpostorDistance;
 
-    public uint Padding2;
+    public uint Hdr;
+
+    public float TimeSec;
+
+    public float DeltaSec;
+
+    public uint HitMaterials;
+
+    public uint GlassVisibility;
 }
 
 /// <summary>
@@ -189,6 +195,63 @@ internal struct GpuMaterialRows
 }
 
 /// <summary>
+/// A material slot as the GPU reads it from the material table, 64 bytes, the twin of <c>Scene/Materials.slang</c>'s:
+/// which of <see cref="GpuResources.MaterialShaders"/> draws it, with <see cref="TranslucentBit"/> where that shader is
+/// translucent, then that shader's struct, its params as the shader's reflection lays them out.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal struct GpuMaterial
+{
+    public const int Bytes = 64;
+
+    /// <summary>
+    /// The bit of <see cref="Shader"/> set for a translucent shader's row, which draws over the lit picture.
+    /// </summary>
+    public const uint TranslucentBit = 0x80000000;
+
+    public uint Shader;
+
+    public GpuMaterialParams Params;
+}
+
+/// <summary>
+/// A <see cref="GpuMaterial"/>'s params, inline: the bytes the material shader's struct reads.
+/// </summary>
+[InlineArray((GpuMaterial.Bytes / 4) - 1)]
+internal struct GpuMaterialParams
+{
+    private uint _first;
+}
+
+/// <summary>
+/// One pass of a pixel effect, the twin of <c>ApplyPixelEffect.slang</c>'s: the heap id of the effects' params table
+/// and the effect's row in it, the level of its target the pass fills, 0 for its apply, and the heap ids of the picture
+/// it reads, of what it writes, and of the effect's target and history, with whether the history holds last frame's
+/// target, and of the sampler that filters between texels.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal record struct GpuEffectPass
+{
+    public uint Rows;
+
+    public uint Row;
+
+    public uint Level;
+
+    public uint Picture;
+
+    public uint Output;
+
+    public uint Target;
+
+    public uint History;
+
+    public uint HasHistory;
+
+    public uint Sampler;
+}
+
+/// <summary>
 /// A light as the GPU reads it from the light table, 64 bytes: the twin of <c>Scene/Lights.slang</c>'s.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
@@ -225,12 +288,13 @@ internal record struct GpuLight
 
 /// <summary>
 /// What the lighting passes read beyond the frame, the twin of <c>Scene/Lighting.slang</c>'s: the sun above the air, the
-/// viewer's height, the sky's tables, the HDR picture they light, the light table and its tiles, and the shadow masks.
+/// viewer's height, the sky's tables, the HDR picture they light, the light table and its tiles, the shadow masks and
+/// the traced reflections.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct LightingConstants
 {
-    public const int Bytes = 80;
+    public const int Bytes = 96;
 
     public Vector4 SunIlluminance;
 
@@ -262,6 +326,56 @@ internal record struct LightingConstants
     public uint TracedShadows;
 
     public uint SunTiles;
+
+    /// <summary>
+    /// The traced reflections' blended light; 0 where none are traced.
+    /// </summary>
+    public uint Reflections;
+
+    /// <summary>
+    /// The colour the sun's light takes on through glass; 0 on a GPU that traces no rays.
+    /// </summary>
+    public uint SunTint;
+
+    public uint Padding1;
+
+    public uint Padding2;
+}
+
+/// <summary>
+/// The heap ids of the traced reflections' textures and sampler, the twin of <c>Scene/TracedReflections.slang</c>'s.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal record struct TracedReflectionConstants
+{
+    public const int Bytes = 48;
+
+    public uint Traced;
+
+    public uint Rays;
+
+    public uint Resolved;
+
+    public uint Distance;
+
+    public uint Light;
+
+    public uint Depth;
+
+    public uint LightHistory;
+
+    public uint DepthHistory;
+
+    public uint Sampler;
+
+    /// <summary>
+    /// 0 while the history holds nothing of the view: this frame starts it afresh.
+    /// </summary>
+    public uint HasHistory;
+
+    public uint Padding0;
+
+    public uint Padding1;
 }
 
 /// <summary>
@@ -288,6 +402,87 @@ internal record struct ShadowDenoiseConstants
 
     /// <summary>
     /// 0 on the first frame at a size, when last frame's targets hold nothing to blend with.
+    /// </summary>
+    public uint HasHistory;
+}
+
+/// <summary>
+/// The probe grid's place and the heap ids of its buffers, the twin of <c>Scene/Probes.slang</c>'s.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal record struct ProbeGridConstants
+{
+    public const int Bytes = 80;
+
+    /// <summary>
+    /// Probes along x; with the two after, the twin of <c>dimensions</c>.
+    /// </summary>
+    public uint DimensionX;
+
+    public uint DimensionY;
+
+    public uint DimensionZ;
+
+    /// <summary>
+    /// How far a probe's depth reaches: one and a half cells.
+    /// </summary>
+    public float MaxDistance;
+
+    /// <summary>
+    /// Where the first probe rests in the world.
+    /// </summary>
+    public Vector3 Origin;
+
+    public uint Probes;
+
+    public Vector3 CellSize;
+
+    public uint Depth;
+
+    public uint DepthSampler;
+
+    public uint Rays;
+
+    public uint RayList;
+
+    public uint RayArguments;
+
+    public uint RayCounts;
+
+    public uint Variance;
+
+    /// <summary>
+    /// 0 while the probes hold nothing: this update starts them afresh.
+    /// </summary>
+    public uint HasHistory;
+
+    public uint Padding0;
+}
+
+/// <summary>
+/// The heap ids of the traced diffuse light's textures and sampler, the twin of <c>Scene/TracedDiffuse.slang</c>'s.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal record struct TracedDiffuseConstants
+{
+    public const int Bytes = 32;
+
+    public uint Traced;
+
+    public uint Filtered;
+
+    public uint Light;
+
+    public uint Depth;
+
+    public uint LightHistory;
+
+    public uint DepthHistory;
+
+    public uint Sampler;
+
+    /// <summary>
+    /// 0 while the history holds nothing of the view: this frame starts it afresh.
     /// </summary>
     public uint HasHistory;
 }

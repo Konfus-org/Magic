@@ -127,9 +127,63 @@ internal static unsafe partial class Slang
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     public static partial void* spReflection_FindTypeByName(void* programLayout, byte* name);
 
+    // A struct's static const, read by name: what a shader declares for a renderer beyond its params.
+    [LibraryImport(Library)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    public static partial void* spReflection_FindVarByNameInType(void* programLayout, void* type, byte* name);
+
+    [LibraryImport(Library)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    public static partial int spReflectionVariable_GetDefaultValueInt(void* variable, long* value);
+
     [LibraryImport(Library)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     public static partial void* spReflection_getEntryPointByIndex(void* programLayout, ulong index);
+
+    // The type layout reflection a material's row is packed from.
+    [LibraryImport(Library)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    public static partial void* spReflection_GetTypeLayout(void* programLayout, void* type, int rules);
+
+    [LibraryImport(Library)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    public static partial uint spReflectionTypeLayout_GetFieldCount(void* typeLayout);
+
+    [LibraryImport(Library)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    public static partial void* spReflectionTypeLayout_GetFieldByIndex(void* typeLayout, uint index);
+
+    [LibraryImport(Library)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    public static partial nuint spReflectionTypeLayout_GetSize(void* typeLayout, int category);
+
+    [LibraryImport(Library)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    public static partial void* spReflectionTypeLayout_GetType(void* typeLayout);
+
+    [LibraryImport(Library)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    public static partial int spReflectionType_GetKind(void* type);
+
+    [LibraryImport(Library)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    public static partial byte* spReflectionType_GetName(void* type);
+
+    [LibraryImport(Library)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    public static partial nuint spReflectionVariableLayout_GetOffset(void* variableLayout, int category);
+
+    [LibraryImport(Library)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    public static partial void* spReflectionVariableLayout_GetVariable(void* variableLayout);
+
+    [LibraryImport(Library)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    public static partial void* spReflectionVariableLayout_GetTypeLayout(void* variableLayout);
+
+    [LibraryImport(Library)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    public static partial byte* spReflectionVariable_GetName(void* variable);
 
     [LibraryImport(Library)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]

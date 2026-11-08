@@ -1,13 +1,15 @@
 // Each pixel's traced shadow mask: a ray from its surface towards the sun, and one towards each of the first lights its
-// tile lists, each aimed at a random point of the light so that a wider light casts a softer shadow; 1 where the ray
-// reaches the light and 0 where something is in the way. The sun's rays also go into its tiles, for the denoiser. The
-// pass header's x is the frame's constants and z the lighting constants.
+// tile lists, each aimed at a random point of the light so that a wider light casts a softer shadow; how much of the
+// light gets through, 1 where nothing is in the way and 0 past something opaque. The sun's rays also go into its tiles,
+// for the denoiser, one bit a pixel: lit at random as often as the light gets through; and the colour its light takes
+// on through glass into the sun's tint. The pass header's x is the frame's constants and z the lighting constants.
 module "TraceShadows";
 
 import Core.Heap;
 import Core.Pass;
 import Core.Frame;
 import Core.Math;
+import Core.Color;
 import Core.Pack;
 import Core.Random;
 import Core.Sampling;
@@ -18,30 +20,10 @@ import Scene.Lighting;
 import Scene.Lights;
 import Scene.Shadows;
 import Light.Lights;
-
-// The sun's angular radius as it looks from the Earth.
-static const float SunAngularRadius = 0.00465;
-
-// How many pixels' width a ray starts off its surface, beyond a centimetre: the drawn cut of a model's clusters may
-// stand that far from the full detail rays hit.
-static const float OffsetPixels = 4.0;
+import Trace.HitSurface;
 
 // The sun's bits of the group's two tiles, the upper and the lower 8 by 4 pixels.
 groupshared uint groupSunTiles[2];
-
-// Whether nothing is in the way along a ray up to a distance.
-bool CanReach(RaytracingAccelerationStructure world, float3 origin, float3 direction, float distance)
-{
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
-    RayDesc ray;
-    ray.Origin = origin;
-    ray.Direction = direction;
-    ray.TMin = 0.0;
-    ray.TMax = distance;
-    query.TraceRayInline(world, RAY_FLAG_NONE, 0xFFu, ray);
-    query.Proceed();
-    return query.CommittedStatus() == COMMITTED_NOTHING;
-}
 
 // How far a point must rise along a vertex's normal to reach the plane through the vertex square to it, when it lies
 // below that plane.
@@ -63,9 +45,11 @@ float3 LiftOffTriangle(FrameConstants frame, uint id, float2 uv, float3 relative
         + lambda.z * GetLift(relative - shown.p2, ToWorldNormal(shown.instance.world, shown.v2.normal));
 }
 
-// A pixel's words: all lit for the sky and where there is nothing to hit.
-uint4 Trace(FrameConstants frame, LightingConstants lighting, uint2 pixel)
+// A pixel's words, all lit for the sky and where there is nothing to hit, and the sun's tint, white unless its ray
+// went through glass.
+uint4 Trace(FrameConstants frame, LightingConstants lighting, uint2 pixel, out float3 sunTint)
 {
+    sunTint = float3(1.0);
     uint2 size = uint2(frame.width, frame.height);
     UintTextureRef visibility = { frame.visibility };
     uint id = visibility.Load(pixel, 0u);
@@ -80,18 +64,24 @@ uint4 Trace(FrameConstants frame, LightingConstants lighting, uint2 pixel)
     // An impostor's pixel has no triangle to lift off.
     float3 lifted = (id & ImpostorFlag) != 0u ? relative : LiftOffTriangle(frame, id, uv, relative);
     float3 world = lifted + frame.cameraPosition.xyz;
-    float offset = 0.01 + OffsetPixels * length(relative) / frame.pixelsPerRadian;
-    float3 origin = world + normal * offset;
+    float3 origin = world + normal * GetRayOffset(frame, relative);
     AccelerationRef acceleration = { frame.acceleration };
     RaytracingAccelerationStructure scene = acceleration.Get();
 
-    // The sun, through a random point of its disc.
+    // The sun, through a random point of its disc, lit as often as its light gets through, its colour over its
+    // brightness the tint.
     uint4 words = uint4(0u);
     float3 toSun = frame.sunDirection.xyz;
-    float2 disc = SampleConcentricDisk(GetRandom(pixel, frame.frameIndex, 0u).xy) * SunAngularRadius;
+    float3 xi = GetRandom(pixel, frame.frameIndex, 0u);
+    float2 disc = SampleConcentricDisk(xi.xy) * SunAngularRadius;
     float3 sunRay = normalize(ToWorld(CreateBasis(toSun), float3(disc, 1.0)));
-    if (dot(normal, toSun) > 0.0 && CanReach(scene, origin, sunRay, 1e6))
+    float3 sunThrough = dot(normal, toSun) > 0.0 ? GetTransmittance(frame, scene, origin, sunRay, 1e6) : float3(0.0);
+    float sunBrightness = GetLuminance(sunThrough);
+    if (sunBrightness > xi.z)
         words = EncodeShadow(words, 0u, 1.0);
+
+    if (sunBrightness > 0.0)
+        sunTint = sunThrough / sunBrightness;
 
     // The tile's lights in the order shading reads them, until the slots run out.
     ArrayRef<uint> tiles = { lighting.lightTiles };
@@ -111,8 +101,11 @@ uint4 Trace(FrameConstants frame, LightingConstants lighting, uint2 pixel)
             float3 toLight = target - origin;
             float distance = length(toLight);
             float3 direction = toLight / max(distance, Epsilon);
-            if (dot(normal, direction) > 0.0 && CanReach(scene, origin, direction, distance * 0.999))
-                words = EncodeShadow(words, slot, 1.0);
+            if (dot(normal, direction) > 0.0)
+            {
+                float through = GetLuminance(GetTransmittance(frame, scene, origin, direction, distance * 0.999));
+                words = EncodeShadow(words, slot, through);
+            }
 
             slot++;
         }
@@ -135,8 +128,11 @@ void TraceShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupThre
     bool isInside = all(thread.xy < size);
     if (isInside)
     {
-        uint4 words = Trace(frame, lighting, thread.xy);
+        float3 sunTint;
+        uint4 words = Trace(frame, lighting, thread.xy, sunTint);
         StoreShadowMask(lighting.tracedShadows, thread.xy, size.x, words);
+        StorageRef tints = { lighting.sunTint, 0u };
+        tints.Store(thread.xy, float4(sunTint, 1.0));
         if (GetShadow(words, 0u) > 0.5)
             InterlockedOr(groupSunTiles[local.y / SunTileSize.y], GetSunTileBit(thread.xy));
     }

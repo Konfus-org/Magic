@@ -23,12 +23,6 @@ internal static class PassShaders
         };
 
     /// <summary>
-    /// The standard material, for an entry generic over the material it resolves.
-    /// </summary>
-    public static ShaderTypeArgument GetStandard(AssetManager assets) =>
-        new(assets.Find<Shader>("Shaders/Material/Standard.slang"), "Standard");
-
-    /// <summary>
     /// The atmosphere, for an entry generic over the sky it shades with.
     /// </summary>
     public static ShaderTypeArgument GetAtmosphere(AssetManager assets) =>

@@ -27,9 +27,11 @@ internal readonly record struct SlangModule(string Name, string Path, string Sou
 public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICache<CompiledShader>, IDisposable
 {
     private const string ShadersFolder = "Shaders";
+
     private const string Extension = ".slang";
 
     private readonly AssetManager _assets;
+
     private readonly Caches _caches;
 
     /// <summary>
@@ -58,7 +60,7 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
     /// <summary>
     /// Raised when the bytes written change shape, and when the compiler's options or tag change.
     /// </summary>
-    public int Version => 3;
+    public int Version => 4;
 
     public unsafe void Dispose()
     {
@@ -98,32 +100,8 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
         if (cached.Ok)
             return cached;
 
-        Result<CompiledShader> compiled = await Task.Run(
-                async () =>
-                {
-                    // A compile that comes once the gem is disposed ends cancelled, as one still waiting for its turn does.
-                    try
-                    {
-                        using CancellationTokenSource waiting = CancellationTokenSource.CreateLinkedTokenSource(
-                            cancel,
-                            _lifetime
-                        );
-                        await _compiling.WaitAsync(waiting.Token).ConfigureAwait(false);
-                    }
-                    catch (ObjectDisposedException) when (_lifetime.IsCancellationRequested)
-                    {
-                        throw new OperationCanceledException("The shader compiler is disposed.");
-                    }
-
-                    try
-                    {
-                        return Compile(modules.Value, entryPath, entry, typeArguments);
-                    }
-                    finally
-                    {
-                        _compiling.Release();
-                    }
-                },
+        Result<CompiledShader> compiled = await RunAsync(
+                () => Compile(modules.Value, entryPath, entry, typeArguments),
                 cancel
             )
             .ConfigureAwait(false);
@@ -134,6 +112,20 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
 
         return compiled;
     }
+
+    /// <summary>
+    /// The fields of the struct <paramref name="type"/> names, as a buffer lays them out; or why not. Not cached: a
+    /// renderer asks once for each material shader it draws with.
+    /// </summary>
+    public Task<Result<ImmutableArray<ShaderField>>> ReflectAsync(ShaderTypeArgument type, CancellationToken cancel) =>
+        ReflectAsync(type, ReadFields, cancel);
+
+    /// <summary>
+    /// The integer constant the struct <paramref name="type"/> names declares under <paramref name="name"/>; or why
+    /// not. Not cached, as <see cref="ReflectAsync(ShaderTypeArgument, CancellationToken)"/> isn't.
+    /// </summary>
+    public Task<Result<long>> ReflectConstantAsync(ShaderTypeArgument type, string name, CancellationToken cancel) =>
+        ReflectAsync(type, (layout, found) => ReadConstant(layout, found, name), cancel);
 
     public void Write(CompiledShader value, IBufferWriter<byte> bytes)
     {
@@ -239,6 +231,58 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
     }
 
     /// <summary>
+    /// The fields of the struct <paramref name="type"/> in <paramref name="layout"/>, as a buffer lays them out: each
+    /// one's name, offset and size, and a struct field's type's name.
+    /// </summary>
+    private static unsafe Result<ImmutableArray<ShaderField>> ReadFields(nint layout, nint type)
+    {
+        // Slang's SlangTypeKind of a struct, and its SlangParameterCategory of a field's bytes.
+        const int Struct = 1;
+        const int Uniform = 8;
+        void* typeLayout = Slang.spReflection_GetTypeLayout((void*)layout, (void*)type, 0);
+        uint count = Slang.spReflectionTypeLayout_GetFieldCount(typeLayout);
+        ImmutableArray<ShaderField>.Builder fields = ImmutableArray.CreateBuilder<ShaderField>((int)count);
+        for (uint i = 0; i < count; i++)
+        {
+            void* field = Slang.spReflectionTypeLayout_GetFieldByIndex(typeLayout, i);
+            void* fieldLayout = Slang.spReflectionVariableLayout_GetTypeLayout(field);
+            void* fieldType = Slang.spReflectionTypeLayout_GetType(fieldLayout);
+            void* variable = Slang.spReflectionVariableLayout_GetVariable(field);
+            fields.Add(
+                new ShaderField(
+                    CString.Read(Slang.spReflectionVariable_GetName(variable)),
+                    (uint)Slang.spReflectionVariableLayout_GetOffset(field, Uniform),
+                    (uint)Slang.spReflectionTypeLayout_GetSize(fieldLayout, Uniform),
+                    Slang.spReflectionType_GetKind(fieldType) == Struct
+                        ? CString.Read(Slang.spReflectionType_GetName(fieldType))
+                        : string.Empty
+                )
+            );
+        }
+
+        return Result.Success(fields.MoveToImmutable());
+    }
+
+    /// <summary>
+    /// The value of the integer constant <paramref name="name"/> the struct <paramref name="type"/> declares, a
+    /// <c>static const</c> whose initialiser is a literal.
+    /// </summary>
+    private static unsafe Result<long> ReadConstant(nint layout, nint type, string name)
+    {
+        void* variable;
+        fixed (byte* named = CString.ToBytes(name))
+        {
+            variable = Slang.spReflection_FindVarByNameInType((void*)layout, (void*)type, named);
+        }
+
+        long value;
+
+        return variable != null && Slang.spReflectionVariable_GetDefaultValueInt(variable, &value) >= 0
+            ? Result.Success(value)
+            : Result.Failure($"declares no integer constant {name}.");
+    }
+
+    /// <summary>
     /// One compile of one entry: a session over the global one, the modules loaded into it in dependency order, the
     /// entry found, specialised, linked and turned into SPIR-V, and everything released. Pure over its inputs, apart from
     /// the compiler it drives, so <see cref="_compiling"/> is all the thread safety it needs.
@@ -256,84 +300,26 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
         int result;
         try
         {
-            // The session: SPIR-V 1.6, row-major, entry names kept, warnings as errors. A change here raises Version.
-            void* session;
-            fixed (byte* profileName = "spirv_1_6\0"u8)
-            fixed (byte* all = "all\0"u8)
-            fixed (byte* profileUpgrade = "41012\0"u8)
-            {
-                int profile = Slang.FindProfile(_globalSession, profileName);
-                if (profile == 0)
-                    return Result.Failure("the compiler has no spirv_1_6 profile.");
+            Result<nint> made = CreateSession();
+            if (!made.Ok)
+                return Result.Failure(made.Error);
 
-                Slang.CompilerOptionEntry* options = stackalloc Slang.CompilerOptionEntry[7];
-                options[0] = Int(Slang.Option.EmitSpirvDirectly, 1);
-                options[1] = Int(Slang.Option.VulkanUseEntryPointName, 1);
-                options[2] = Int(Slang.Option.MatrixLayoutRow, 1);
-                options[3] = Int(Slang.Option.DefaultImageFormatUnknown, 1);
-                options[4] = Int(Slang.Option.Optimization, 1);
-                options[5] = new Slang.CompilerOptionEntry
-                {
-                    Name = Slang.Option.WarningsAsErrors,
-                    Value = new Slang.CompilerOptionValue { Kind = Slang.Target.OptionKindString, StringValue0 = all },
-                };
-                // The heap's image queries need capabilities past the bare profile, which the compiler adds per entry:
-                // a warning on every entry that every GPU Magic runs on has no need of.
-                options[6] = new Slang.CompilerOptionEntry
-                {
-                    Name = Slang.Option.DisableWarning,
-                    Value = new Slang.CompilerOptionValue
-                    {
-                        Kind = Slang.Target.OptionKindString,
-                        StringValue0 = profileUpgrade,
-                    },
-                };
-                Slang.TargetDesc target = new()
-                {
-                    StructureSize = (nuint)sizeof(Slang.TargetDesc),
-                    Format = Slang.Target.Spirv,
-                    Profile = profile,
-                };
-                Slang.SessionDesc desc = new()
-                {
-                    StructureSize = (nuint)sizeof(Slang.SessionDesc),
-                    Targets = &target,
-                    TargetCount = 1,
-                    DefaultMatrixLayoutMode = Slang.Target.MatrixLayoutRowMajor,
-                    CompilerOptionEntries = options,
-                    CompilerOptionEntryCount = 7,
-                };
-                result = Slang.CreateSession(_globalSession, &desc, &session);
-                if (result < 0 || session == null)
-                    return Result.Failure($"the compiler gave no session: {result:X}.");
-            }
+            void* session = (void*)made.Value;
+            owned.Add(made.Value);
+            Result<Dictionary<string, nint>> loaded = LoadModules(session, modules);
+            if (!loaded.Ok)
+                return Result.Failure(loaded.Error);
 
-            owned.Add((nint)session);
-
-            // The modules, which the session owns and frees with itself; the entry's and its type arguments' are kept.
-            void* module = null;
-            List<nint> typeModules = [];
-            foreach (SlangModule source in modules)
-            {
-                void* loaded;
-                fixed (
-                    byte* name = CString.ToBytes(source.Name),
-                        path = CString.ToBytes(source.Path),
-                        text = CString.ToBytes(source.Source)
-                )
-                {
-                    loaded = Slang.LoadModuleFromSourceString(session, name, path, text, &diagnostics);
-                }
-
-                messages = TakeDiagnostics(ref diagnostics);
-                if (loaded == null)
-                    return Result.Failure($"{source.Path} does not compile:\n{messages}");
-
-                if (source.Path == entryPath)
-                    module = loaded;
-                else if (typeArguments.Any(argument => argument.Path == source.Path))
-                    typeModules.Add((nint)loaded);
-            }
+            // The entry's module, and its type arguments' in the order they loaded.
+            void* module = (void*)loaded.Value[entryPath];
+            List<nint> typeModules =
+            [
+                .. modules
+                    .Where(source =>
+                        source.Path != entryPath && typeArguments.Any(argument => argument.Path == source.Path)
+                    )
+                    .Select(source => loaded.Value[source.Path]),
+            ];
 
             // The entry point, composed with its module and the type arguments' modules into one program, so a type
             // argument is found in the program's own layout.
@@ -442,6 +428,195 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
             {
                 Slang.Release((void*)owned[i]);
             }
+        }
+    }
+
+    /// <summary>
+    /// <paramref name="work"/> on a worker, once the compiler is free: one at a time, as the global session allows. Work
+    /// that comes once the gem is disposed ends cancelled, as work still waiting for its turn does.
+    /// </summary>
+    private Task<T> RunAsync<T>(Func<T> work, CancellationToken cancel) =>
+        Task.Run(
+            async () =>
+            {
+                try
+                {
+                    using CancellationTokenSource waiting = CancellationTokenSource.CreateLinkedTokenSource(
+                        cancel,
+                        _lifetime
+                    );
+                    await _compiling.WaitAsync(waiting.Token).ConfigureAwait(false);
+                }
+                catch (ObjectDisposedException) when (_lifetime.IsCancellationRequested)
+                {
+                    throw new OperationCanceledException("The shader compiler is disposed.");
+                }
+
+                try
+                {
+                    return work();
+                }
+                finally
+                {
+                    _compiling.Release();
+                }
+            },
+            cancel
+        );
+
+    /// <summary>
+    /// The session: SPIR-V 1.6, row-major, entry names kept, warnings as errors, and buffers laid out scalar, as C# packs
+    /// a struct and the heap reads one. A change here raises Version.
+    /// </summary>
+    private unsafe Result<nint> CreateSession()
+    {
+        int result;
+        void* session;
+        fixed (byte* profileName = "spirv_1_6\0"u8)
+        fixed (byte* all = "all\0"u8)
+        fixed (byte* profileUpgrade = "41012\0"u8)
+        {
+            int profile = Slang.FindProfile(_globalSession, profileName);
+            if (profile == 0)
+                return Result.Failure("the compiler has no spirv_1_6 profile.");
+
+            Slang.CompilerOptionEntry* options = stackalloc Slang.CompilerOptionEntry[7];
+            options[0] = Int(Slang.Option.EmitSpirvDirectly, 1);
+            options[1] = Int(Slang.Option.VulkanUseEntryPointName, 1);
+            options[2] = Int(Slang.Option.MatrixLayoutRow, 1);
+            options[3] = Int(Slang.Option.DefaultImageFormatUnknown, 1);
+            options[4] = Int(Slang.Option.Optimization, 1);
+            options[5] = new Slang.CompilerOptionEntry
+            {
+                Name = Slang.Option.WarningsAsErrors,
+                Value = new Slang.CompilerOptionValue { Kind = Slang.Target.OptionKindString, StringValue0 = all },
+            };
+            // The heap's image queries need capabilities past the bare profile, which the compiler adds per entry:
+            // a warning on every entry that every GPU Magic runs on has no need of.
+            options[6] = new Slang.CompilerOptionEntry
+            {
+                Name = Slang.Option.DisableWarning,
+                Value = new Slang.CompilerOptionValue
+                {
+                    Kind = Slang.Target.OptionKindString,
+                    StringValue0 = profileUpgrade,
+                },
+            };
+            Slang.TargetDesc target = new()
+            {
+                StructureSize = (nuint)sizeof(Slang.TargetDesc),
+                Format = Slang.Target.Spirv,
+                Profile = profile,
+                ForceGlslScalarBufferLayout = 1,
+            };
+            Slang.SessionDesc desc = new()
+            {
+                StructureSize = (nuint)sizeof(Slang.SessionDesc),
+                Targets = &target,
+                TargetCount = 1,
+                DefaultMatrixLayoutMode = Slang.Target.MatrixLayoutRowMajor,
+                CompilerOptionEntries = options,
+                CompilerOptionEntryCount = 7,
+            };
+            result = Slang.CreateSession(_globalSession, &desc, &session);
+            if (result < 0 || session == null)
+                return Result.Failure($"the compiler gave no session: {result:X}.");
+        }
+
+        return Result.Success((nint)session);
+    }
+
+    /// <summary>
+    /// <paramref name="modules"/> loaded into <paramref name="session"/>, which owns and frees them with itself, by their
+    /// paths; or the first that does not compile.
+    /// </summary>
+    private unsafe Result<Dictionary<string, nint>> LoadModules(void* session, ImmutableArray<SlangModule> modules)
+    {
+        void* diagnostics = null;
+        Dictionary<string, nint> loaded = new(StringComparer.Ordinal);
+        foreach (SlangModule source in modules)
+        {
+            void* module;
+            fixed (
+                byte* name = CString.ToBytes(source.Name),
+                    path = CString.ToBytes(source.Path),
+                    text = CString.ToBytes(source.Source)
+            )
+            {
+                module = Slang.LoadModuleFromSourceString(session, name, path, text, &diagnostics);
+            }
+
+            string messages = TakeDiagnostics(ref diagnostics);
+            if (module == null)
+                return Result.Failure($"{source.Path} does not compile:\n{messages}");
+
+            loaded[source.Path] = (nint)module;
+        }
+
+        return Result.Success(loaded);
+    }
+
+    /// <summary>
+    /// What <paramref name="read"/> reads of the struct <paramref name="type"/> names, in a session of its module and
+    /// what it imports; or why not.
+    /// </summary>
+    private async Task<Result<T>> ReflectAsync<T>(
+        ShaderTypeArgument type,
+        Func<nint, nint, Result<T>> read,
+        CancellationToken cancel
+    )
+    {
+        if (_assets.GetPath(type.Module) is not { } path)
+            return Result.Failure($"the shader {type.Module.Id} is not an asset.");
+
+        Result<ImmutableArray<SlangModule>> modules = await LoadModulesAsync([path], cancel).ConfigureAwait(false);
+        if (!modules.Ok)
+            return Result.Failure(modules.Error);
+
+        return await RunAsync(() => Reflect(modules.Value, path, type.Type, read), cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// What <paramref name="read"/> reads of <paramref name="typeName"/> in the module at <paramref name="typePath"/>,
+    /// handed the session's layout and the type, both alive until it returns.
+    /// </summary>
+    private unsafe Result<T> Reflect<T>(
+        ImmutableArray<SlangModule> modules,
+        string typePath,
+        string typeName,
+        Func<nint, nint, Result<T>> read
+    )
+    {
+        Result<nint> made = CreateSession();
+        if (!made.Ok)
+            return Result.Failure(made.Error);
+
+        void* session = (void*)made.Value;
+        try
+        {
+            Result<Dictionary<string, nint>> loaded = LoadModules(session, modules);
+            if (!loaded.Ok)
+                return Result.Failure(loaded.Error);
+
+            void* diagnostics = null;
+            void* layout = Slang.GetLayout((void*)loaded.Value[typePath], 0, &diagnostics);
+            TakeDiagnostics(ref diagnostics);
+            void* type;
+            fixed (byte* named = CString.ToBytes(typeName))
+            {
+                type = layout == null ? null : Slang.spReflection_FindTypeByName(layout, named);
+            }
+
+            if (type == null)
+                return Result.Failure($"{typePath} declares no type {typeName}.");
+
+            Result<T> value = read((nint)layout, (nint)type);
+
+            return value.Ok ? value : Result.Failure($"{typePath}'s {typeName} {value.Error}");
+        }
+        finally
+        {
+            Slang.Release(session);
         }
     }
 

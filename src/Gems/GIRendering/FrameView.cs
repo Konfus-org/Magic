@@ -1,4 +1,5 @@
 using System.Numerics;
+using Magic.Projects;
 using Magic.Rendering;
 using Magic.Utils;
 
@@ -12,6 +13,7 @@ internal sealed class FrameView(GpuResources resources)
 {
     private const float ErrorThresholdPixels = 1;
     private const float SkyBrightness = 0.3f;
+    private const uint JitterFrames = 256;
 
     /// <summary>
     /// Last frame's view and its size, while a frame was drawn since the view was last forgotten: what a thing that
@@ -20,21 +22,35 @@ internal sealed class FrameView(GpuResources resources)
     private (Matrix4x4 ViewProjection, Vector4 CameraPosition, int Width, int Height)? _previous;
 
     /// <summary>
+    /// The jitter of frame <paramref name="frameIndex"/>, in pixels from the pixel's middle: a point in the pixel from
+    /// the Halton sequence in bases 2 and 3 that starts again every 256 frames, so an effect that blends frames sees
+    /// another point of each pixel each frame.
+    /// </summary>
+    public static Vector2 GetJitter(uint frameIndex)
+    {
+        uint term = (frameIndex % JitterFrames) + 1;
+
+        return new Vector2(GetHalton(term, 2) - 0.5f, GetHalton(term, 3) - 0.5f);
+    }
+
+    /// <summary>
     /// Forgets the last frame's camera, depth pyramid and shadows, so the next frame moves nothing on from where a view
     /// that is gone looked, culls against no pyramid of it and blends no shadows of it.
     /// </summary>
     public void ClearHistory() => _previous = null;
 
     /// <summary>
-    /// The main view at a size, its targets asked for, and its constants, the camera, the sun and the frame's
-    /// resources, copied in a transfer pass the caller opened: the instance and material tables, the cull's buffers and
-    /// the world's acceleration structure, which the caller asked for before.
+    /// The main view at a size, its targets asked for, and its constants, the camera shifted by
+    /// <paramref name="jitter"/>, the sun and the frame's resources, copied in a transfer pass the caller opened: the
+    /// instance and material tables, the cull's buffers and the world's acceleration structure and hit materials, which
+    /// the caller asked for before.
     /// </summary>
     public Result<RenderView> Upload(
         RenderGraph graph,
         RenderCamera camera,
         RenderSun sun,
-        uint frameIndex,
+        in Frame frame,
+        Vector2 jitter,
         int width,
         int height,
         int instanceCount,
@@ -42,14 +58,11 @@ internal sealed class FrameView(GpuResources resources)
         GpuBuffer materials,
         in CullBuffers cull,
         GpuAcceleration acceleration,
+        GpuBuffer hitMaterials,
         float impostorPixels,
         float impostorDistance
     )
     {
-        Result<GpuSampler> sampler = graph.Sampler(new SamplerDescription { Anisotropy = 8 });
-        if (!sampler.Ok)
-            return Result.Failure($"the default sampler was not made: {sampler.Error}");
-
         Result<RenderView> made = TryGetView(graph, width, height, instanceCount, instances, materials, cull);
         if (!made.Ok)
             return made;
@@ -58,9 +71,12 @@ internal sealed class FrameView(GpuResources resources)
         float aspect = (float)width / height;
         Matrix4x4.Invert(Matrix4x4.CreateFromQuaternion(camera.Transform.Rotation), out Matrix4x4 view);
         Matrix4x4 projection = CreatePerspective(camera.FieldOfView, aspect, camera.Near);
+        Matrix4x4 unjittered = view * projection;
+        projection.M31 = jitter.X * 2 / width;
+        projection.M32 = -jitter.Y * 2 / height;
         Matrix4x4 viewProjection = view * projection;
         Matrix4x4.Invert(viewProjection, out Matrix4x4 inverse);
-        FrameConstants frame = new()
+        FrameConstants constants = new()
         {
             View = view,
             Projection = projection,
@@ -73,7 +89,6 @@ internal sealed class FrameView(GpuResources resources)
             Near = camera.Near,
             InstanceCount = (uint)instanceCount,
             MaxVisibleClusters = Visibility.MaxVisibleClusters,
-            DefaultSampler = sampler.Value.Id,
             Instances = instances.Id,
             Clusters = resources.ClusterPool.Id,
             Vertices = resources.VertexPool.Id,
@@ -87,11 +102,16 @@ internal sealed class FrameView(GpuResources resources)
             Hzb = targets.Hzb.Id,
             Visibility = targets.Visibility.Id,
             Depth = targets.Depth.Id,
+            GlassVisibility = targets.GlassVisibility.Id,
             GBufferNormal = targets.GBufferNormal.Id,
             GBufferBase = targets.GBufferBase.Id,
             GBufferSurface = targets.GBufferSurface.Id,
             Velocity = targets.Velocity.Id,
             Output = targets.Output.Id,
+            Hdr = targets.Hdr.Id,
+            HitMaterials = hitMaterials.Id,
+            TimeSec = (float)frame.AppSec,
+            DeltaSec = (float)frame.AppDeltaSec,
             SunDirection = new Vector4(sun.Direction, 0),
             SunRadiance = new Vector4(sun.Radiance, 0),
             SkyRadiance = new Vector4(SkyBrightness * 0.8f, SkyBrightness * 0.9f, SkyBrightness, 0),
@@ -100,7 +120,8 @@ internal sealed class FrameView(GpuResources resources)
             ErrorThreshold = ErrorThresholdPixels,
             ImpostorPixels = impostorPixels,
             ImpostorDistance = impostorDistance,
-            FrameIndex = frameIndex,
+            FrameIndex = frame.Index,
+            Jitter = jitter,
             Acceleration = acceleration.Id,
             LeafClusters = resources.LeafClusters.Id,
         };
@@ -112,21 +133,21 @@ internal sealed class FrameView(GpuResources resources)
         Vector4 c1 = new(viewProjection.M12, viewProjection.M22, viewProjection.M32, viewProjection.M42);
         Vector4 c2 = new(viewProjection.M13, viewProjection.M23, viewProjection.M33, viewProjection.M43);
         Vector4 c3 = new(viewProjection.M14, viewProjection.M24, viewProjection.M34, viewProjection.M44);
-        frame.FrustumPlane0 = Normalize(c3 + c0);
-        frame.FrustumPlane1 = Normalize(c3 - c0);
-        frame.FrustumPlane2 = Normalize(c3 + c1);
-        frame.FrustumPlane3 = Normalize(c3 - c1);
-        frame.FrustumPlane4 = Normalize(c3 - c2);
-        frame.FrustumPlane5 = Normalize(c2);
+        constants.FrustumPlane0 = Normalize(c3 + c0);
+        constants.FrustumPlane1 = Normalize(c3 - c0);
+        constants.FrustumPlane2 = Normalize(c3 + c1);
+        constants.FrustumPlane3 = Normalize(c3 - c1);
+        constants.FrustumPlane4 = Normalize(c3 - c2);
+        constants.FrustumPlane5 = Normalize(c2);
 
         // Where the view was last frame, or where it is now when no frame was drawn at this size since it was
-        // forgotten.
-        (frame.PreviousViewProjection, frame.PreviousCameraPosition) =
+        // forgotten, with no jitter, so a velocity is the surface's move alone.
+        (constants.PreviousViewProjection, constants.PreviousCameraPosition) =
             _previous is { } last && targets.HasHistory
                 ? (last.ViewProjection, last.CameraPosition)
-                : (viewProjection, frame.CameraPosition);
-        _previous = (viewProjection, frame.CameraPosition, width, height);
-        graph.Upload(targets.Constants, [frame]);
+                : (unjittered, constants.CameraPosition);
+        _previous = (unjittered, constants.CameraPosition, width, height);
+        graph.Upload(targets.Constants, [constants]);
 
         return made;
     }
@@ -139,6 +160,23 @@ internal sealed class FrameView(GpuResources resources)
         float length = MathF.Sqrt((plane.X * plane.X) + (plane.Y * plane.Y) + (plane.Z * plane.Z));
 
         return length > 0 ? plane / length : plane;
+    }
+
+    /// <summary>
+    /// The Halton sequence's term in a base, 0 to 1: a different one each frame that fills the pixel evenly.
+    /// </summary>
+    private static float GetHalton(uint index, uint radix)
+    {
+        float result = 0;
+        float fraction = 1f / radix;
+        while (index > 0)
+        {
+            result += fraction * (index % radix);
+            index /= radix;
+            fraction /= radix;
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -190,6 +228,18 @@ internal sealed class FrameView(GpuResources resources)
                 TextureUsages.DepthTarget | TextureUsages.Sampled
             )
         );
+        Result<GpuTexture> glassVisibility = graph.Texture(
+            GpuDescriptions.GetTexture(
+                "Glass visibility",
+                width,
+                height,
+                GpuFormat.R32Uint,
+                TextureUsages.ColorTarget | TextureUsages.Sampled
+            )
+        );
+        Result<GpuTexture> glassDepth = graph.Texture(
+            GpuDescriptions.GetTexture("Glass depth", width, height, GpuFormat.D32Sfloat, TextureUsages.DepthTarget)
+        );
         Result<GpuTexture> hzb = graph.Texture(
             GpuDescriptions.GetTexture(
                 "Depth pyramid",
@@ -203,7 +253,18 @@ internal sealed class FrameView(GpuResources resources)
         Result<GpuTexture> baseColor = graph.Texture(GetTarget("GBuffer base", GpuFormat.R8G8B8A8Unorm));
         Result<GpuTexture> surface = graph.Texture(GetTarget("GBuffer surface", GpuFormat.R8G8B8A8Unorm));
         Result<GpuTexture> velocity = graph.Texture(GetTarget("Velocity", GpuFormat.R16G16B16A16Sfloat));
-        Result<GpuTexture> hdr = graph.Texture(GetTarget("HDR", GpuFormat.R16G16B16A16Sfloat));
+        Result<GpuTexture> hdr = graph.Texture(
+            GpuDescriptions.GetTexture(
+                "HDR",
+                width,
+                height,
+                GpuFormat.R16G16B16A16Sfloat,
+                TextureUsages.Storage
+                    | TextureUsages.ColorTarget
+                    | TextureUsages.Sampled
+                    | TextureUsages.CopyDestination
+            )
+        );
         Result<GpuTexture> output = graph.Texture(
             GpuDescriptions.GetTexture(
                 "Output",
@@ -215,7 +276,20 @@ internal sealed class FrameView(GpuResources resources)
         );
         foreach (
             Result asked in (ReadOnlySpan<Result>)
-                [constants, visibilityBuffer, depth, hzb, normal, baseColor, surface, velocity, hdr, output]
+                [
+                    constants,
+                    visibilityBuffer,
+                    depth,
+                    glassVisibility,
+                    glassDepth,
+                    hzb,
+                    normal,
+                    baseColor,
+                    surface,
+                    velocity,
+                    hdr,
+                    output,
+                ]
         )
         {
             if (!asked.Ok)
@@ -234,6 +308,8 @@ internal sealed class FrameView(GpuResources resources)
                 HasHistory: _previous is { } last && last.Width == width && last.Height == height,
                 visibilityBuffer.Value,
                 depth.Value,
+                glassVisibility.Value,
+                glassDepth.Value,
                 hzb.Value,
                 normal.Value,
                 baseColor.Value,
