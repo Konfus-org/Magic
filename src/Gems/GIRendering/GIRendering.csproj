@@ -11,7 +11,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
-    <!-- The tests drive the cluster and distance field builders directly. -->
+    <!-- The tests drive the cluster builder directly. -->
     <InternalsVisibleTo Include="GIRendering.Tests" />
   </ItemGroup>
   <ItemGroup>

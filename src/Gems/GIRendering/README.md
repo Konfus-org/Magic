@@ -9,10 +9,9 @@ texture reader.
 ## What it draws
 
 - As a model loads, the gem makes what it draws it as, once per change to its file, and keeps it in the cache: its
-  vertices as the GPU reads them, a hierarchy of clusters of up to 128 triangles, and a signed distance field around
-  it. Each level of the hierarchy groups neighbouring clusters of the one below and simplifies them, so the GPU picks
-  per cluster how much detail to draw. meshoptimizer, which the kit builds from source, does the clustering and the
-  simplifying.
+  vertices as the GPU reads them and a hierarchy of clusters of up to 128 triangles. Each level of the hierarchy
+  groups neighbouring clusters of the one below and simplifies them, so the GPU picks per cluster how much detail to
+  draw. meshoptimizer, which the kit builds from source, does the clustering and the simplifying.
 - A model shows once it is on the GPU. One that doesn't load is drawn as the failure model, and a material or texture
   that doesn't load as the magenta failure material.
 - Every model also gets an octahedral impostor atlas: 12 by 12 views over the whole sphere, 64 texels a side each,
