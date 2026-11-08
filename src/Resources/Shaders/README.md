@@ -9,7 +9,7 @@ compiler loads a module and its imports from the assets, so a game's `Shaders/` 
 - `Scene/Materials` is the material table's row: which material shader draws it, then that shader's struct.
 - `Surface/` is what a material is handed for a pixel and what it gives back.
 - `Material/` is the material contract, `IMaterial`, and the materials every project has: the standard one, the one
-  a broken asset is drawn with, and glass.
+  a broken asset is drawn with, and glass, which is translucent.
 - `Sky/` is the sky contract, `ISky`, and the Earth's atmosphere, which gives the sky, the sun's colour through the
   air and the sky's light on the ground from three tables made each frame.
 - `Post/` is the pixel effect contract, `IPixelEffect`, which post and weather effects implement, a vignette, a blur,

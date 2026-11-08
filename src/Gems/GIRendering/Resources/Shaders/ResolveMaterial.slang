@@ -80,26 +80,17 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
         inputs.uv = uv.uv;
         inputs.uvDdx = uv.perTexelX * (pixel / atlasTexel);
         inputs.uvDdy = uv.perTexelY * (pixel / atlasTexel);
+        inputs.viewDirection = NormalizeSafe(-inputs.position, float3(0.0, 0.0, -1.0));
     }
     else
     {
         PixelTriangle shown = LoadPixelTriangle(frame, visibleIndex, triangle, ToClip(center));
-        float3 lambda = shown.bary.lambda;
         instance = shown.instance;
-        model = Interpolate(shown.v0.position, shown.v1.position, shown.v2.position, lambda);
+        model = Interpolate(shown.v0.position, shown.v1.position, shown.v2.position, shown.bary.lambda);
         slot = shown.cluster.materialSlot;
-        inputs.position = Interpolate(shown.p0, shown.p1, shown.p2, lambda);
-        float3 normal = Interpolate(shown.v0.normal, shown.v1.normal, shown.v2.normal, lambda);
-        float3 tangent = Interpolate(shown.v0.tangent, shown.v1.tangent, shown.v2.tangent, lambda);
-        inputs.normal = ToWorldNormal(shown.instance.world, normal);
-        inputs.tangent = ToWorldDirection(shown.instance.world, tangent);
-        inputs.tangentSign = shown.v0.tangentSign;
-        inputs.uv = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, lambda);
-        inputs.uvDdx = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, shown.bary.ddx);
-        inputs.uvDdy = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, shown.bary.ddy);
+        inputs = CreateSurfaceInputs(shown);
     }
 
-    inputs.viewDirection = NormalizeSafe(-inputs.position, float3(0.0, 0.0, -1.0));
     uint row = GetMaterial(instance, slot);
     if (LoadMaterialShader(frame.materials, row) != shader)
         return;

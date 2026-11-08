@@ -11,16 +11,45 @@ namespace Magic.GIRendering;
 /// <summary>
 /// The view's surfaces lit into the HDR picture, and the sky drawn where nothing was: the lighting constants, naming
 /// the sky's tables, the lights, the shadow mask and the traced reflections, uploaded before the view is drawn, and
-/// the shading after them, lit indirectly by the traced diffuse light where there is any.
+/// the shading after them, lit indirectly by the traced diffuse light where there is any; then the nearest glass shaded
+/// over it.
 /// </summary>
-internal sealed class Lighting(AssetManager assets)
+internal sealed class Lighting(AssetManager assets, GpuResources resources)
 {
     private readonly ShaderEntry _shadeShader = PassShaders.GetEntry(assets, "ShadeSurfaces", "ShadeSurfaces") with
     {
         TypeArguments = [PassShaders.GetAtmosphere(assets)],
     };
 
+    private readonly ShaderEntry _glassShader = PassShaders.GetEntry(assets, "ShadeGlass", "ShadeGlass");
+
+    /// <summary>
+    /// The glass entry specialised to each translucent material shader and the sky, by the number rows name the shader
+    /// by: kept, so a frame makes none.
+    /// </summary>
+    private readonly Dictionary<int, ShaderEntry> _glassShaders = [];
+
     public ImmutableArray<ShaderEntry> Shaders => [_shadeShader];
+
+    /// <summary>
+    /// The glass entry for each translucent material shader the resources have numbered, one made for each newly
+    /// numbered.
+    /// </summary>
+    public IReadOnlyCollection<ShaderEntry> GetGlassShaders()
+    {
+        for (int shader = 0; shader < resources.MaterialShaders.Count; shader++)
+        {
+            if (resources.IsTranslucent(shader) && !_glassShaders.ContainsKey(shader))
+            {
+                _glassShaders[shader] = _glassShader with
+                {
+                    TypeArguments = [resources.MaterialShaders[shader], PassShaders.GetAtmosphere(assets)],
+                };
+            }
+        }
+
+        return _glassShaders.Values;
+    }
 
     /// <summary>
     /// The lighting constants asked for and uploaded, in a transfer pass the caller opened, after the sky's tables, the
@@ -76,7 +105,9 @@ internal sealed class Lighting(AssetManager assets)
 
     /// <summary>
     /// Every pixel's surface shaded from the sky's tables, its tile's lights and, on a GPU that traces rays, its
-    /// shadows, its traced diffuse light and what it reflects, and the sky where there is none.
+    /// shadows, its traced diffuse light and what it reflects, and the sky where there is none; then the nearest glass
+    /// over it, lit by the light around it from <paramref name="probes"/> where there are any, and its rays through
+    /// <paramref name="world"/> on a GPU that traces them.
     /// </summary>
     public void Record(
         in RenderView view,
@@ -86,7 +117,9 @@ internal sealed class Lighting(AssetManager assets)
         in LightBuffers lights,
         ShadowBuffers? shadows,
         TracedDiffuseBuffers? diffuse,
-        TracedReflectionBuffers? reflections
+        TracedReflectionBuffers? reflections,
+        ProbeBuffers? probes,
+        TracedWorld? world
     )
     {
         ComputePass shade = view
@@ -115,5 +148,38 @@ internal sealed class Lighting(AssetManager assets)
             shade.Reads(reflected.Light);
 
         shade.Writes(view.Hdr).DispatchOver(view.Width, view.Height);
+
+        // The nearest glass over the shaded picture, a pass for each translucent material shader, which shades the
+        // pixels whose rows it draws.
+        GetGlassShaders();
+        ImmutableArray<GpuResource> heapTextures = resources.GetHeapTextures(view.Graph);
+        foreach ((int shader, ShaderEntry entry) in _glassShaders)
+        {
+            ComputePass glass = view
+                .Graph.Compute("Shade glass", entry, header with { Y = probes?.Constants.Id ?? 0, W = (uint)shader })
+                .Reads(
+                    view.Constants,
+                    constants,
+                    sky.Transmittance,
+                    sky.MultiScattering,
+                    sky.View,
+                    view.Instances,
+                    view.Materials,
+                    resources.ClusterPool,
+                    resources.VertexPool,
+                    resources.IndexPool,
+                    view.Cull.VisibleClusters,
+                    view.GlassVisibility,
+                    view.Depth
+                )
+                .Reads(heapTextures.AsSpan());
+            if (probes is { } probed)
+                glass.Reads(probed.Constants, probed.Probes, probed.Depth);
+
+            if (world is { } rays)
+                glass.Reads(rays.HitMaterials, resources.LeafClusters);
+
+            glass.Writes(view.Hdr).DispatchOver(view.Width, view.Height);
+        }
     }
 }

@@ -102,6 +102,7 @@ internal sealed class FrameView(GpuResources resources)
             Hzb = targets.Hzb.Id,
             Visibility = targets.Visibility.Id,
             Depth = targets.Depth.Id,
+            GlassVisibility = targets.GlassVisibility.Id,
             GBufferNormal = targets.GBufferNormal.Id,
             GBufferBase = targets.GBufferBase.Id,
             GBufferSurface = targets.GBufferSurface.Id,
@@ -227,6 +228,18 @@ internal sealed class FrameView(GpuResources resources)
                 TextureUsages.DepthTarget | TextureUsages.Sampled
             )
         );
+        Result<GpuTexture> glassVisibility = graph.Texture(
+            GpuDescriptions.GetTexture(
+                "Glass visibility",
+                width,
+                height,
+                GpuFormat.R32Uint,
+                TextureUsages.ColorTarget | TextureUsages.Sampled
+            )
+        );
+        Result<GpuTexture> glassDepth = graph.Texture(
+            GpuDescriptions.GetTexture("Glass depth", width, height, GpuFormat.D32Sfloat, TextureUsages.DepthTarget)
+        );
         Result<GpuTexture> hzb = graph.Texture(
             GpuDescriptions.GetTexture(
                 "Depth pyramid",
@@ -263,7 +276,20 @@ internal sealed class FrameView(GpuResources resources)
         );
         foreach (
             Result asked in (ReadOnlySpan<Result>)
-                [constants, visibilityBuffer, depth, hzb, normal, baseColor, surface, velocity, hdr, output]
+                [
+                    constants,
+                    visibilityBuffer,
+                    depth,
+                    glassVisibility,
+                    glassDepth,
+                    hzb,
+                    normal,
+                    baseColor,
+                    surface,
+                    velocity,
+                    hdr,
+                    output,
+                ]
         )
         {
             if (!asked.Ok)
@@ -282,6 +308,8 @@ internal sealed class FrameView(GpuResources resources)
                 HasHistory: _previous is { } last && last.Width == width && last.Height == height,
                 visibilityBuffer.Value,
                 depth.Value,
+                glassVisibility.Value,
+                glassDepth.Value,
                 hzb.Value,
                 normal.Value,
                 baseColor.Value,

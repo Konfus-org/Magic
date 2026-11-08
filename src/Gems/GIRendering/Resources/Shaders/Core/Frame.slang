@@ -92,6 +92,8 @@ public struct FrameConstants
     public float deltaSec;
     // On a GPU that traces rays: each material row as a ray hit reads it, Trace/HitSurface's GpuHitMaterial.
     public uint hitMaterials;
+    // The nearest translucent surface in front of the opaque ones: its visibility id, 0 where there is none.
+    public uint glassVisibility;
 }
 
 public FrameConstants GetFrame() { return LoadConstants<FrameConstants>(); }

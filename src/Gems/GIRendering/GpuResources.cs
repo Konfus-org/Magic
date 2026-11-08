@@ -299,10 +299,16 @@ internal sealed class GpuResources(
     {
         ResourceState state = Pack(slot, out row, out MaterialLayout layout);
         if (!layout.Fields.IsDefault)
-            row.Shader = GetMaterialShader(layout.Shader);
+            row.Shader = GetMaterialShader(layout.Shader) | (layout.IsTranslucent ? GpuMaterial.TranslucentBit : 0);
 
         return state;
     }
+
+    /// <summary>
+    /// Whether material shader <paramref name="shader"/>, by its place in <see cref="MaterialShaders"/>, is
+    /// translucent.
+    /// </summary>
+    public bool IsTranslucent(int shader) => _layouts[_materialShaders[shader].Module.Id]?.IsTranslucent ?? false;
 
     /// <summary>
     /// Whether the effect's material, its shader's struct and the textures it names are on the GPU, its row packed as
@@ -574,6 +580,9 @@ internal sealed class GpuResources(
         Result<ImmutableArray<ShaderField>> fields = await shaders
             .ReflectAsync(type, CancellationToken.None)
             .ConfigureAwait(false);
+        Result<long> translucent = await shaders
+            .ReflectConstantAsync(type, "Translucent", CancellationToken.None)
+            .ConfigureAwait(false);
         await threads.Enter(EngineThread.Render);
         int bytes = fields.Ok
             ? fields.Value.Select(field => (int)(field.Offset + field.Size)).DefaultIfEmpty().Max()
@@ -584,12 +593,12 @@ internal sealed class GpuResources(
                 ? $"its params are {bytes} bytes, over a row's {GpuMaterial.Bytes - 4}"
                 : fields.Error;
             Log.Error($"Materials drawn with {path} are drawn as the failure: {why}");
-            _layouts[shader.Id] = new MaterialLayout(default, type);
+            _layouts[shader.Id] = new MaterialLayout(default, type, false);
 
             return;
         }
 
-        _layouts[shader.Id] = new MaterialLayout(fields.Value, type);
+        _layouts[shader.Id] = new MaterialLayout(fields.Value, type, translucent.Ok && translucent.Value != 0);
     }
 
     /// <summary>
@@ -928,7 +937,11 @@ internal sealed class GpuResources(
     /// A material shader's struct as its rows are packed: its fields as reflection lays them out, default when it could
     /// not be, and the struct a pass is specialised to.
     /// </summary>
-    private readonly record struct MaterialLayout(ImmutableArray<ShaderField> Fields, ShaderTypeArgument Shader);
+    private readonly record struct MaterialLayout(
+        ImmutableArray<ShaderField> Fields,
+        ShaderTypeArgument Shader,
+        bool IsTranslucent
+    );
 }
 
 /// <summary>

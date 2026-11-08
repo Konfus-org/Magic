@@ -15,6 +15,7 @@ import Core.Pass;
 import Core.Frame;
 import Scene.Instances;
 import Scene.Clusters;
+import Scene.Materials;
 import Scene.Culling;
 import Scene.Visibility;
 import Scene.Impostors;
@@ -184,7 +185,7 @@ void Place(
         VisibleCluster entry = { instanceIndex, clusterIndex };
         visible[row] = entry;
         if (outcome == Outcome.Shown || !TryAddRetest(frame, row, clusterIndex))
-            AddDraw(frame, clusterIndex, row, isFading, false);
+            AddDraw(frame, instance, clusterIndex, row, isFading, false);
     }
 }
 
@@ -209,7 +210,7 @@ void Retest(FrameConstants frame, uint impostorDraws, uint index)
     VisibleCluster cluster = visible[entry.index];
     GpuInstance instance = LoadInstance(frame.instances, cluster.instance);
     if (Test(frame, instance, cluster.cluster, true) == Outcome.Shown)
-        AddDraw(frame, cluster.cluster, entry.index, GetImpostorFade(frame, instance) > 0.0, true);
+        AddDraw(frame, instance, cluster.cluster, entry.index, GetImpostorFade(frame, instance) > 0.0, true);
 }
 
 // The tests on one cluster: the frustum, the cut, the cone and the depth pyramid, last frame's on the first pass and
@@ -265,15 +266,20 @@ bool TryAddRetest(FrameConstants frame, uint row, uint clusterIndex)
 }
 
 // Appends the draw of the cluster at row to its region of the draws: by pass, and by whether its instance is in the
-// impostor handoff, which draws with the dither. Each row draws once, so no region outgrows the visible list.
-void AddDraw(FrameConstants frame, uint clusterIndex, uint row, bool isFading, bool isRetest)
+// impostor handoff, which draws with the dither; a translucent cluster to the glass's, from either pass. Each row draws
+// once, so no region outgrows the visible list.
+void AddDraw(FrameConstants frame, GpuInstance instance, uint clusterIndex, uint row, bool isFading, bool isRetest)
 {
-    static const uint countOffsets[4] = { CountVisibleDraws, CountRetestDraws, CountFadingDraws, CountRetestFadingDraws };
-    uint region = (isRetest ? 1u : 0u) + (isFading ? 2u : 0u);
+    static const uint countOffsets[5] = {
+        CountVisibleDraws, CountRetestDraws, CountFadingDraws, CountRetestFadingDraws, CountGlassDraws
+    };
+    GpuCluster cluster = LoadCluster(frame.clusters, clusterIndex);
+    bool isGlass = IsTranslucent(frame.materials, GetMaterial(instance, cluster.materialSlot));
+    uint region = isGlass ? GlassRegion : (isRetest ? 1u : 0u) + (isFading ? 2u : 0u);
     BufferRef counts = { frame.counts };
     uint drawIndex = counts.InterlockedAdd(countOffsets[region], 1u);
     ArrayRef<DrawArguments> draws = { frame.drawArguments };
-    DrawArguments arguments = { LoadCluster(frame.clusters, clusterIndex).triangleCount * 3u, 1u, 0u, row };
+    DrawArguments arguments = { cluster.triangleCount * 3u, 1u, 0u, row };
     draws[region * frame.maxVisibleClusters + drawIndex] = arguments;
 }
 

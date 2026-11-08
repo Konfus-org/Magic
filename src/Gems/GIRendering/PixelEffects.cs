@@ -53,9 +53,10 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
     private readonly ulong[] _lastFrame = new ulong[Places];
 
     /// <summary>
-    /// Runs the effects of each of <paramref name="lists"/>, in order, on frame <paramref name="frameIndex"/>.
+    /// Runs the effects of each of <paramref name="lists"/>, in order, on frame <paramref name="frameIndex"/>, their
+    /// rays through <paramref name="world"/> on a GPU that traces them.
     /// </summary>
-    public void Record(in RenderView view, uint frameIndex, ReadOnlySpan<MaterialSlots> lists)
+    public void Record(in RenderView view, uint frameIndex, ReadOnlySpan<MaterialSlots> lists, TracedWorld? world)
     {
         RenderGraph graph = view.Graph;
 
@@ -146,6 +147,11 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
             view.GBufferSurface,
             view.Velocity,
         ];
+
+        // What an effect's rays read of the world, on a GPU that traces them.
+        ReadOnlySpan<GpuResource> rays = world is { } traced
+            ? [traced.HitMaterials, resources.LeafClusters, view.Instances, resources.ClusterPool]
+            : [];
         (GpuTexture picture, GpuTexture other) = (view.Hdr, otherPicture.Value);
         int pass = 0;
         for (int effect = 0; effect < count; effect++)
@@ -171,6 +177,7 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
                         new GpuConstants(view.Constants.Id, passTable.Value.Id, (uint)pass)
                     )
                     .Reads(surface)
+                    .Reads(rays)
                     .Reads(picture, running.History);
                 if (level > 0)
                     fill.Reads(running.Target, level - 1);
@@ -188,6 +195,7 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
                     new GpuConstants(view.Constants.Id, passTable.Value.Id, (uint)pass)
                 )
                 .Reads(surface)
+                .Reads(rays)
                 .Reads(picture);
             if (running.Levels > 0)
                 applied.Reads(running.Target, running.History);

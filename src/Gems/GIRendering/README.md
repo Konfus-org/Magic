@@ -72,7 +72,11 @@ texture reader.
   at once. Its `compensation` param adds stops to it. The `Agx` effect is the AgX tonemap.
 - The `tracedDiffuse`, `reflections` and `probes` debug views put their light into the picture before the post
   effects, so the effects expose and tonemap it.
-- Glass isn't drawn yet: a glass material draws as an opaque one.
+- A translucent material, such as the engine's `Glass`, draws over the lit picture instead of with the opaque
+  surfaces, so it hides nothing behind it from the depth pyramid or the lighting. The nearest pane in front of each
+  pixel's opaque surface lets what is behind through its colour and its clarity, and through any pane between on a
+  GPU that traces rays; it reflects the light around it, more at a grazing angle, and the sun lights it. A glass
+  instance far enough to draw as its impostor draws opaque.
 
 ## Settings
 

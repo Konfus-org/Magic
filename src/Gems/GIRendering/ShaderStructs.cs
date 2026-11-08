@@ -12,7 +12,7 @@ namespace Magic.GIRendering;
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct FrameConstants
 {
-    public const int Bytes = 656;
+    public const int Bytes = 660;
 
     public Matrix4x4 View;
 
@@ -126,6 +126,8 @@ internal record struct FrameConstants
     public float DeltaSec;
 
     public uint HitMaterials;
+
+    public uint GlassVisibility;
 }
 
 /// <summary>
@@ -194,13 +196,18 @@ internal struct GpuMaterialRows
 
 /// <summary>
 /// A material slot as the GPU reads it from the material table, 64 bytes, the twin of <c>Scene/Materials.slang</c>'s:
-/// which of <see cref="GpuResources.MaterialShaders"/> draws it, then that shader's struct, its params as the shader's
-/// reflection lays them out.
+/// which of <see cref="GpuResources.MaterialShaders"/> draws it, with <see cref="TranslucentBit"/> where that shader is
+/// translucent, then that shader's struct, its params as the shader's reflection lays them out.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal struct GpuMaterial
 {
     public const int Bytes = 64;
+
+    /// <summary>
+    /// The bit of <see cref="Shader"/> set for a translucent shader's row, which draws over the lit picture.
+    /// </summary>
+    public const uint TranslucentBit = 0x80000000;
 
     public uint Shader;
 

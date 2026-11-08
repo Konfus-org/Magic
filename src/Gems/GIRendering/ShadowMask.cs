@@ -172,7 +172,8 @@ internal sealed class ShadowMask(AssetManager assets, GpuResources resources)
         in GpuConstants header,
         GpuBuffer lightingConstants,
         in LightBuffers lights,
-        in ShadowBuffers shadows
+        in ShadowBuffers shadows,
+        GpuBuffer hitMaterials
     )
     {
         view.Graph.Compute("Trace shadows", _traceShader, header)
@@ -188,7 +189,9 @@ internal sealed class ShadowMask(AssetManager assets, GpuResources resources)
                 view.Cull.VisibleClusters,
                 view.Visibility,
                 view.Depth,
-                view.GBufferNormal
+                view.GBufferNormal,
+                resources.LeafClusters,
+                hitMaterials
             )
             .Writes(shadows.Traced, shadows.SunTiles, shadows.SunTint)
             .DispatchOver(view.Width, view.Height);

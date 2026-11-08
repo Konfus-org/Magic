@@ -143,7 +143,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _probes = _rayTracing is null ? null : new Probes(assets, _resources);
         _tracedDiffuse = _rayTracing is null ? null : new TracedDiffuse(assets, _resources);
         _reflections = _rayTracing is null ? null : new TracedReflections(assets, _resources);
-        _lighting = new Lighting(assets);
+        _lighting = new Lighting(assets, _resources);
         _pixelEffects = new PixelEffects(assets, _resources);
         _surfaceView = new SurfaceView(assets);
         _shaders =
@@ -261,6 +261,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             _preparing is { } preparing
             && IsPrepared(preparing)
             && GetState(graph, _visibility.GetResolveShaders()) != GpuState.Loading
+            && GetState(graph, [.. _lighting.GetGlassShaders()]) != GpuState.Loading
         )
         {
             Log.Info(
@@ -321,17 +322,17 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
                 _reflections.Record(view, lighting, world.HitMaterials, sky, lights, probed, reflected);
         }
 
-        if (_shadowMask is not null && shadows is { } shadowed)
-            _shadowMask.Record(view, header, lighting, lights, shadowed);
+        if (_shadowMask is not null && shadows is { } shadowed && traced is { } shadowWorld)
+            _shadowMask.Record(view, header, lighting, lights, shadowed, shadowWorld.HitMaterials);
 
-        _lighting.Record(view, header, lighting, sky, lights, shadows, diffuse, reflections);
+        _lighting.Record(view, header, lighting, sky, lights, shadows, diffuse, reflections, probes, traced);
 
         // A debug view of light draws it into the picture, so the effects finish it as they do the picture.
         _surfaceView.RecordLight(view, inputs.DebugView, diffuse, reflections?.Light ?? GpuTexture.None);
         if (_probes is not null && inputs.DebugView == DebugView.Probes && probes is { } shown)
             _probes.RecordDraw(view, shown);
 
-        _pixelEffects.Record(view, frame.Index, effects);
+        _pixelEffects.Record(view, frame.Index, effects, traced);
         _surfaceView.Record(view, inputs.DebugView);
 
         GpuTexture target = graph.WindowTarget;
