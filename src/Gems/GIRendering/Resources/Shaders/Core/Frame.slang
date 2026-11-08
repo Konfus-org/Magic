@@ -42,9 +42,10 @@ public struct FrameConstants
     // Pixels a metre covers at a metre's distance: the output's height over twice the tangent of half the field of
     // view.
     public float pixelsPerRadian;
-    // Pixels of projected error a drawn cluster may have.
+    // Pixels of projected error a drawn cluster may have, as the cluster budget raises it.
     public float errorThreshold;
-    // The pixel radius on screen under which an instance hands off to its impostor; 0 draws no impostors.
+    // The pixel radius on screen under which an instance hands off to its impostor, as the cluster budget raises it;
+    // 0 hands off by distance alone.
     public float impostorPixels;
 
     public uint instanceCount;
@@ -82,7 +83,9 @@ public struct FrameConstants
     // Where each pixel's surface was on last frame's screen: the move to there from its place now, in texture
     // coordinates, in xy, and its view depth then in z.
     public uint velocity;
-    public uint padding1;
+    // The distance in metres to an instance's sphere past which it hands off to its impostor; 0 hands off by size
+    // alone.
+    public float impostorDistance;
     public uint padding2;
 }
 

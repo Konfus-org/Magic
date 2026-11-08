@@ -61,7 +61,7 @@ internal record struct FrameConstants
     public float ErrorThreshold;
 
     /// <summary>
-    /// The pixel radius on screen under which an instance hands off to its impostor; 0 draws no impostors.
+    /// The pixel radius on screen under which an instance hands off to its impostor; 0 hands off by distance alone.
     /// </summary>
     public float ImpostorPixels;
 
@@ -115,7 +115,11 @@ internal record struct FrameConstants
 
     public uint Velocity;
 
-    public uint Padding1;
+    /// <summary>
+    /// The distance in metres to an instance's sphere past which it hands off to its impostor; 0 hands off by size
+    /// alone.
+    /// </summary>
+    public float ImpostorDistance;
 
     public uint Padding2;
 }

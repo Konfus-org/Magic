@@ -71,9 +71,15 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
     /// <summary>
     /// The pixel radius on screen under which an instance hands off to its impostor: half an atlas view, so an impostor
-    /// is never magnified. Set with GIRendering.impostorPixels; 0 draws no impostors.
+    /// is never magnified. Set with GIRendering.impostorPixels; 0 hands off by distance alone.
     /// </summary>
     private float _impostorPixels = MeshDerived.ImpostorTile / 2;
+
+    /// <summary>
+    /// The distance in metres to an instance past which it hands off to its impostor, however large on screen. Set with
+    /// GIRendering.impostorDistance; 0 hands off by size alone.
+    /// </summary>
+    private float _impostorDistance = 1000;
 
     /// <summary>
     /// The inputs <see cref="Render"/> draws, taken from <see cref="_inputs"/>, until newer are. Render thread.
@@ -171,6 +177,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _ecs.Snapshot(back.Skies);
         back.DebugView = _debugView;
         back.ImpostorPixels = _impostorPixels;
+        back.ImpostorDistance = _impostorDistance;
         (back.Width, back.Height) = _app.Window is { Width: > 0, Height: > 0 } window
             ? (window.Width, window.Height)
             : (DefaultWidth, DefaultHeight);
@@ -498,7 +505,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             tables.Value.Materials,
             cull.Value,
             _rayTracing?.Acceleration ?? GpuAcceleration.None,
-            inputs.ImpostorPixels
+            inputs.ImpostorPixels,
+            inputs.ImpostorDistance
         );
         if (!view.Ok)
             return Result.Failure(view.Error);
@@ -573,6 +581,16 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
                 _impostorPixels = pixels;
             else
                 Log.Error($"{setting.Key} takes a pixel radius of 0 or more, not '{setting.Value}'.");
+
+            return;
+        }
+
+        if (setting.Key == "GIRendering.impostorDistance")
+        {
+            if (float.TryParse(setting.Value, CultureInfo.InvariantCulture, out float metres) && metres >= 0)
+                _impostorDistance = metres;
+            else
+                Log.Error($"{setting.Key} takes a distance in metres of 0 or more, not '{setting.Value}'.");
 
             return;
         }

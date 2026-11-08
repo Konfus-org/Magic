@@ -37,6 +37,18 @@ public static const uint CountRetest = 4u;
 public static const uint CountRetestDraws = 8u;
 public static const uint CountVisibleList = 12u;
 
+// The rows of the visible list the frame's instances asked for, which the cluster budget reads next frame, and the
+// first distance bin with no room left: instances in it and past it draw as their impostors.
+public static const uint CountWantedRows = 32u;
+public static const uint CountFitBins = 36u;
+
+// The counts buffer's distance bins from DemandBinsOffset, a word each: the rows asked for by the instances whose
+// nearest point is that far from the camera, four bins to each doubling of the distance in metres.
+public static const uint DemandBinsOffset = 64u;
+public static const uint DemandBins = 64u;
+
+public uint GetDemandBin(float distance) { return min(uint(log2(max(distance, 1.0)) * 4.0), DemandBins - 1u); }
+
 // The retest arguments buffer: the groups of the retest dispatch, then 1 and 1.
 public static const uint RetestGroups = 0u;
 public static const uint RetestThreads = 64u;

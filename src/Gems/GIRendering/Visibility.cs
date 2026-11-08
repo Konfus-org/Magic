@@ -35,11 +35,14 @@ internal readonly record struct RenderView(
 }
 
 /// <summary>
-/// The cull's buffers: what each pass of it counts, the visible clusters and their draws, and what last frame's depth
-/// pyramid hid, to retest.
+/// The cull's buffers: what each pass of it counts, with the rows asked for by distance, the rows each instance asks
+/// for, the visible clusters and their draws, what last frame's depth pyramid hid, to retest, and the cluster budget's
+/// level, which carries from frame to frame.
 /// </summary>
 internal readonly record struct CullBuffers(
+    GpuBuffer Budget,
     GpuBuffer Counts,
+    GpuBuffer InstanceRows,
     GpuBuffer RetestArguments,
     GpuBuffer VisibleClusters,
     GpuBuffer DrawArguments,
@@ -48,20 +51,30 @@ internal readonly record struct CullBuffers(
 );
 
 /// <summary>
-/// What a view sees: every instance's clusters culled on the GPU against the frustum, their cones, the pixel error
-/// threshold and last frame's depth pyramid; the visible ones drawn into a visibility buffer; what the old pyramid hid
-/// retested against the new one; and every pixel's material resolved into the GBuffer.
+/// What a view sees: the cluster budget's handoff and error threshold set from what last frame asked for; every
+/// instance's clusters culled on the GPU against the frustum, their cones, the pixel error threshold and last frame's
+/// depth pyramid; the visible ones drawn into a visibility buffer; what the old pyramid hid retested against the new
+/// one; and every pixel's material resolved into the GBuffer.
 /// </summary>
 internal sealed class Visibility(AssetManager assets, GpuResources resources)
 {
     public const int MaxVisibleClusters = 1 << 18;
 
-    private const int CountsBytes = 64;
+    private const int BudgetBytes = 16;
+    private const int CountsBytes = 320;
     private const int DrawArgumentsBytes = 16;
     private const int RetestArgumentsBytes = 12;
     private const int CullGroupsPerRow = 65535;
     private const BufferUsages IndirectUsage = BufferUsages.Storage | BufferUsages.Indirect;
 
+    // The cull's passes, the pass header's y: count each instance's rows by distance, find how many distances from the
+    // nearest fit, give those their rows, and retest what last frame's pyramid hid.
+    private const uint ModeCount = 0;
+    private const uint ModeFit = 1;
+    private const uint ModePlace = 2;
+    private const uint ModeRetest = 3;
+
+    private readonly ShaderEntry _budgetShader = PassShaders.GetEntry(assets, "BudgetClusters", "BudgetClusters");
     private readonly ShaderEntry _cullShader = PassShaders.GetEntry(assets, "CullClusters", "CullClusters");
     private readonly DrawShaders _drawShaders = new(
         PassShaders.GetEntry(assets, "DrawVisibility", "DrawVisibilityVertex", ShaderStage.Vertex),
@@ -101,6 +114,7 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
 
     public ImmutableArray<ShaderEntry> Shaders =>
         [
+            _budgetShader,
             _cullShader,
             _drawShaders.Vertex,
             _drawShaders.Pixel,
@@ -112,12 +126,16 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
         ];
 
     /// <summary>
-    /// The cull's buffers asked for, which the frame's constants name, then the counts at zero and the retest dispatch at
-    /// no groups, in a transfer pass.
+    /// The cull's buffers asked for, which the frame's constants name, then the retest dispatch at no groups, in a
+    /// transfer pass. The budget pass zeroes the counts once it has read last frame's.
     /// </summary>
     public static Result<CullBuffers> Prepare(RenderGraph graph)
     {
+        Result<GpuBuffer> budget = graph.Buffer(GpuDescriptions.GetBuffer("Cluster budget", BudgetBytes));
         Result<GpuBuffer> counts = graph.Buffer(GpuDescriptions.GetBuffer("Counts", CountsBytes, IndirectUsage));
+        Result<GpuBuffer> instanceRows = graph.Buffer(
+            GpuDescriptions.GetBuffer("Instance rows", (long)InstanceTable.Capacity * sizeof(uint))
+        );
         Result<GpuBuffer> retestArguments = graph.Buffer(
             GpuDescriptions.GetBuffer("Retest arguments", RetestArgumentsBytes, IndirectUsage)
         );
@@ -143,19 +161,29 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
         );
         foreach (
             Result made in (ReadOnlySpan<Result>)
-                [counts, retestArguments, visibleClusters, drawArguments, retestList, impostorDraws]
+                [
+                    budget,
+                    counts,
+                    instanceRows,
+                    retestArguments,
+                    visibleClusters,
+                    drawArguments,
+                    retestList,
+                    impostorDraws,
+                ]
         )
         {
             if (!made.Ok)
                 return Result.Failure(made.Error);
         }
 
-        graph.Clear(counts.Value);
         graph.Upload(retestArguments.Value, [0u, 1u, 1u]);
 
         return Result.Success(
             new CullBuffers(
+                budget.Value,
                 counts.Value,
+                instanceRows.Value,
                 retestArguments.Value,
                 visibleClusters.Value,
                 drawArguments.Value,
@@ -166,17 +194,40 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
     }
 
     /// <summary>
-    /// The main view drawn twice, what last frame's pyramid shows, then what it hid and this frame's shows, and every
-    /// pixel's material resolved into the GBuffer.
+    /// The cluster budget set, the main view drawn twice, what last frame's pyramid shows, then what it hid and this
+    /// frame's shows, and every pixel's material resolved into the GBuffer.
     /// </summary>
     public void Record(in RenderView view)
     {
         CullBuffers cull = view.Cull;
 
-        // Cull: one group an instance over its clusters, what last frame's pyramid hid onto the retest list.
-        int rows = (view.InstanceCount + CullGroupsPerRow - 1) / CullGroupsPerRow;
-        view.Graph.Compute("Cull clusters", _cullShader, new GpuConstants(view.Constants.Id, 0, cull.ImpostorDraws.Id))
+        // Budget: last frame's count steers the frame's handoff and error threshold, then the counts start again.
+        view.Graph.Compute("Budget clusters", _budgetShader, new GpuConstants(view.Constants.Id, 0, cull.Budget.Id))
+            .Writes(view.Constants, cull.Counts, cull.Budget)
+            .Dispatch(1, 1);
+
+        // Cull: one group an instance over its clusters, counted by distance, the nearest given their rows while the
+        // list has room and the rest drawn as their impostors, what last frame's pyramid hid onto the retest list.
+        uint across = (uint)Math.Min(view.InstanceCount, CullGroupsPerRow);
+        uint down = (uint)Math.Max((view.InstanceCount + CullGroupsPerRow - 1) / CullGroupsPerRow, 1);
+        view.Graph.Compute(
+                "Count clusters",
+                _cullShader,
+                new GpuConstants(view.Constants.Id, ModeCount, cull.ImpostorDraws.Id, cull.InstanceRows.Id)
+            )
             .Reads(view.Constants, view.Instances, resources.ClusterPool, view.Hzb)
+            .Writes(cull.Counts, cull.InstanceRows)
+            .Dispatch(across, down);
+        view.Graph.Compute("Fit clusters", _cullShader, new GpuConstants(view.Constants.Id, ModeFit))
+            .Reads(view.Constants)
+            .Writes(cull.Counts)
+            .Dispatch(1, 1);
+        view.Graph.Compute(
+                "Place clusters",
+                _cullShader,
+                new GpuConstants(view.Constants.Id, ModePlace, cull.ImpostorDraws.Id, cull.InstanceRows.Id)
+            )
+            .Reads(view.Constants, view.Instances, resources.ClusterPool, view.Hzb, cull.InstanceRows)
             .Writes(
                 cull.Counts,
                 cull.VisibleClusters,
@@ -185,7 +236,7 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
                 cull.RetestArguments,
                 cull.ImpostorDraws
             )
-            .Dispatch((uint)Math.Min(view.InstanceCount, CullGroupsPerRow), (uint)Math.Max(rows, 1));
+            .Dispatch(across, down);
         RecordDraw(view, _drawShaders, "Draw visibility", TargetLoad.Clear, drawsOffset: 0, countOffset: 0);
         RecordDraw(
             view,
@@ -203,10 +254,17 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
         view.Graph.Compute(
                 "Retest clusters",
                 _cullShader,
-                new GpuConstants(view.Constants.Id, 1, cull.ImpostorDraws.Id)
+                new GpuConstants(view.Constants.Id, ModeRetest, cull.ImpostorDraws.Id)
             )
-            .Reads(view.Constants, view.Instances, resources.ClusterPool, view.Hzb, cull.RetestList)
-            .Writes(cull.Counts, cull.VisibleClusters, cull.DrawArguments, cull.ImpostorDraws)
+            .Reads(
+                view.Constants,
+                view.Instances,
+                resources.ClusterPool,
+                view.Hzb,
+                cull.RetestList,
+                cull.VisibleClusters
+            )
+            .Writes(cull.Counts, cull.DrawArguments, cull.ImpostorDraws)
             .Indirect(cull.RetestArguments)
             .DispatchIndirect(cull.RetestArguments, 0);
         RecordDraw(

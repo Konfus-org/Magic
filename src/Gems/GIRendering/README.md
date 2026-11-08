@@ -41,7 +41,11 @@ Set these in the console with `set GIRendering.<name>=<value>`. A wrong value lo
 
 - `debug` shows one part of the GBuffer alone. `final` shows the finished frame again. The names are in `DebugView`.
 - `window` is `true` or `false`, and opens the Rendering window.
-- `impostorPixels` is the radius on screen, in pixels, under which a model draws as its impostor. 0 draws none.
+- `impostorPixels` is the radius on screen, in pixels, under which a model draws as its impostor. 0 turns that test
+  off.
+- `impostorDistance` is the distance in metres past which a model draws as its impostor. 0 turns that test off.
+- When the frame's clusters near the renderer's limit, it raises both tests on its own, then lets cluster detail
+  coarsen, until they fit.
 
 With a gem that provides the debug UI, F2 opens the Rendering window, which chooses the view. F5 and F6 step through the
 views, and a line on screen names any view but the finished frame. A screenshot is of the renderer's picture alone,

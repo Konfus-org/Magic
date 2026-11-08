@@ -1,6 +1,7 @@
 // The impostors the cull left, one indirect draw each of a quad fitted to the instance's box, its instance in
 // the draw's first instance. A pixel traces the atlas, writes the impostor's id and the depth of what it sees, and
-// shows the impostor's share of the handoff's dither. The pass header's z is the impostor table.
+// shows the impostor's share of the handoff's dither, or all of it when the first instance carries ImpostorWhole. The
+// pass header's z is the impostor table.
 module "DrawImpostors";
 
 import Core.Heap;
@@ -25,8 +26,9 @@ struct Targets
 };
 
 [shader("vertex")]
-Varyings DrawImpostorsVertex(uint vertexIndex : SV_VertexID, uint instanceIndex : SV_StartInstanceLocation)
+Varyings DrawImpostorsVertex(uint vertexIndex : SV_VertexID, uint start : SV_StartInstanceLocation)
 {
+    uint instanceIndex = start & ~ImpostorWhole;
     FrameConstants frame = GetFrame();
     PassHeader header = GetPassHeader();
     GpuInstance instance = LoadInstance(frame.instances, instanceIndex);
@@ -37,7 +39,7 @@ Varyings DrawImpostorsVertex(uint vertexIndex : SV_VertexID, uint instanceIndex 
     output.relative = GetImpostorCorner(frame, instance, impostor, corners[vertexIndex]);
     output.position = mul(float4(output.relative, 1.0), frame.viewProjection);
     output.instance = instanceIndex;
-    output.fade = GetImpostorFade(frame, instance);
+    output.fade = (start & ImpostorWhole) != 0u ? 1.0 : GetImpostorFade(frame, instance);
     return output;
 }
 

@@ -1,7 +1,7 @@
 // Octahedral impostors. An instance whose model baked an atlas (the mesh preprocessor's ImpostorBuilder) draws
-// as a quad fitted to its box once it is under a handoff's pixel radius on screen, the three views nearest the
-// camera's direction blended; in the handoff its clusters draw too, each pixel shown by one of the two by a dither on
-// the fade, so nothing pops (Brucks, "Octahedral Impostors", 2018).
+// as a quad fitted to its box once it is under a handoff's pixel radius on screen or past its distance, the three
+// views nearest the camera's direction blended; in the handoff its clusters draw too, each pixel shown by one of the
+// two by a dither on the fade, so nothing pops (Brucks, "Octahedral Impostors", 2018).
 module "Scene/Impostors";
 
 import Core.Heap;
@@ -13,9 +13,14 @@ import Scene.Culling;
 public static const uint ImpostorViews = 12u;
 public static const uint ImpostorTile = 64u;
 
-// The handoff runs from the frame's impostorPixels, a pixel radius on screen, down to three quarters of it; a radius of
-// 0 draws no impostors.
+// The handoff runs from the frame's impostorPixels, a pixel radius on screen, down to three quarters of it, and from
+// its impostorDistance, in metres to the instance's sphere, out to a quarter past it; whichever is further along
+// counts, and a 0 draws no impostors by that one.
 public static const float ImpostorBand = 0.25;
+
+// An impostor draw's first instance with this bit draws the impostor whole, with no dither: in place of the clusters
+// of an instance the visible list had no room for.
+public static const uint ImpostorWhole = 0x40000000u;
 
 // The visibility id's top bit marks an impostor's pixel, the next three the material slot the draw saw, the rest its
 // instance: the resolve takes the slot from the id, as its own trace of the atlas can land on another texel.
@@ -35,8 +40,9 @@ public static const uint CountRetestImpostorDraws = 20u;
 public static const uint CountFadingDraws = 24u;
 public static const uint CountRetestFadingDraws = 28u;
 
-// A retest list entry's cluster for an instance whose impostor the old pyramid hid.
+// A retest list entry's cluster for an instance whose impostor the old pyramid hid, and for one drawn whole.
 public static const uint RetestImpostor = 0xFFFFFFFFu;
+public static const uint RetestWholeImpostor = 0xFFFFFFFEu;
 
 // One model's impostor, C#'s GpuImpostor: the box around the model in its frame, the heap id of its atlas and of the
 // atlas of the texture coordinates each texel shows.
@@ -57,12 +63,23 @@ public GpuImpostor LoadImpostor(uint table, uint row)
 // How far into the handoff an instance is, 0 for clusters alone, 1 for the impostor alone.
 public float GetImpostorFade(FrameConstants frame, GpuInstance instance)
 {
-    float start = frame.impostorPixels;
-    if (instance.impostor == 0u || start <= 0.0)
+    if (instance.impostor == 0u)
         return 0.0;
 
-    float pixels = GetPixelRadius(frame, Relative(frame, instance.boundsCenter), instance.boundsRadius);
-    return saturate((start - pixels) / (start * ImpostorBand));
+    float3 center = Relative(frame, instance.boundsCenter);
+    float fade = 0.0;
+    float start = frame.impostorPixels;
+    if (start > 0.0)
+        fade = saturate((start - GetPixelRadius(frame, center, instance.boundsRadius)) / (start * ImpostorBand));
+
+    float far = frame.impostorDistance;
+    if (far > 0.0)
+    {
+        float distance = max(length(center) - instance.boundsRadius, 0.0);
+        fade = max(fade, saturate((distance - far) / (far * ImpostorBand)));
+    }
+
+    return fade;
 }
 
 // A threshold in [0, 1) for the pixel, even over the screen (Jimenez, interleaved gradient noise).
