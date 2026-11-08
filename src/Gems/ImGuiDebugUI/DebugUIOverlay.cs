@@ -1,11 +1,11 @@
+using System.Buffers;
+using System.Drawing;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Magic.Assets;
 using Magic.Debugging;
-using Magic.Gpu;
 using Magic.Rendering;
-using Magic.Shaders;
 using Magic.Threading;
 using Magic.Utils;
 
@@ -13,79 +13,63 @@ namespace Magic.ImGuiDebugUI;
 
 /// <summary>
 /// ImGui's frame drawn over the window's image from the newest copy the UI published, again until a newer comes, in the
-/// overlay layer so it shows over the picture whichever gem drew it: it takes in the
-/// texture changes queued up to that frame, uploads the vertices and indices, and records the draws into a pass of their
-/// own, its shaders reading the vertices, the draw's texture and the constants through the heap. It owns every GPU object
-/// it draws with. Render thread, but the compile on its worker.
+/// overlay layer so it shows over the picture whichever gem drew it: it takes in the texture changes queued up to that
+/// frame, uploads the vertices, indices and constants into buffers named on the graph, and draws each of ImGui's draws
+/// clipped to its rectangle in one draw pass, its shaders reading the vertices, the draw's texture and the constants
+/// through the heap. It asks the graph for ImGui's textures every frame while the UI holds them, and for its sampler.
+/// Render thread.
 /// </summary>
-internal sealed class DebugUIOverlay : IDisposable
+internal sealed class DebugUIOverlay
 {
     private const string ShaderPath = "Shaders/DrawDebugUI.slang";
     private const int MinBufferBytes = 16 * 1024;
 
-    private readonly IGraphicsApi _gpu;
     private readonly Mailbox<DebugUIFrame> _frames;
     private readonly ChannelReader<DebugUITextureChange> _textureChanges;
+    private readonly DrawShaders _shaders;
 
     /// <summary>
-    /// By the id the UI gave it, each of ImGui's textures made.
+    /// By the id the UI gave it, each of ImGui's textures the UI holds: what it is made to and the texture made.
     /// </summary>
-    private readonly Dictionary<ulong, GpuTexture> _textures = [];
-    private GpuBuffer _constants;
-    private GpuBuffer _vertices;
-    private GpuBuffer _indices;
-    private GpuSampler _sampler;
-    private GpuPipeline _pipeline;
-    private GpuFormat _pipelineFormat;
+    private readonly Dictionary<ulong, (TextureDescription Description, GpuTexture Made)> _textures = [];
 
     /// <summary>
     /// The newest copy taken, this overlay's until a newer is.
     /// </summary>
     private DebugUIFrame? _frame;
 
-    /// <summary>
-    /// Both stages, written whole by the compile on its worker and read by <see cref="Record"/>: null while it compiles,
-    /// and for good once it or the pipeline fails, which is logged.
-    /// </summary>
-    private volatile CompiledStages? _compiled;
-
-    /// <summary>
-    /// Starts compiling the overlay's shaders, which stop with <paramref name="lifetime"/>.
-    /// </summary>
     public DebugUIOverlay(
-        IGraphicsApi gpu,
-        IShaderCompiler shaders,
         AssetManager assets,
         Mailbox<DebugUIFrame> frames,
-        ChannelReader<DebugUITextureChange> textureChanges,
-        CancellationToken lifetime
+        ChannelReader<DebugUITextureChange> textureChanges
     )
     {
-        _gpu = gpu;
         _frames = frames;
         _textureChanges = textureChanges;
-        CompileAsync(shaders, assets.Find<Shader>(ShaderPath), lifetime).FireAndForget();
-    }
-
-    public void Dispose()
-    {
-        foreach (GpuTexture texture in _textures.Values)
+        Handle<Shader> shader = assets.Find<Shader>(ShaderPath);
+        _shaders = new DrawShaders(
+            new ShaderEntry
+            {
+                Module = shader,
+                Name = "DrawDebugUIVertex",
+                Stage = ShaderStage.Vertex,
+            },
+            new ShaderEntry
+            {
+                Module = shader,
+                Name = "DrawDebugUIPixel",
+                Stage = ShaderStage.Pixel,
+            }
+        )
         {
-            _gpu.Destroy(texture);
-        }
-
-        foreach (GpuBuffer buffer in (ReadOnlySpan<GpuBuffer>)[_constants, _vertices, _indices])
-        {
-            _gpu.Destroy(buffer);
-        }
-
-        _gpu.Destroy(_sampler);
-        _gpu.Destroy(_pipeline);
+            Blend = BlendMode.Alpha,
+            Cull = CullMode.None,
+        };
     }
 
     /// <summary>
     /// The newest frame the UI published over the window's image, the texture changes up to it taken in first, and
-    /// nothing drawn while there is no window, nothing to draw or the pipeline isn't made.
+    /// nothing drawn while there is no window or nothing to draw.
     /// </summary>
     public void Record(RenderGraph graph)
     {
@@ -100,113 +84,23 @@ internal sealed class DebugUIOverlay : IDisposable
         if (_frame is not { } frame)
             return;
 
-        // The texture changes are taken whether or not there is a window to draw over, so none wait for good.
+        // The texture changes are taken and the textures asked for whether or not there is a window to draw over, so
+        // none wait for good and none are let go of.
         TakeTextureChanges(frame.Index, graph);
-        GpuTexture target = _gpu.WindowTarget;
-        if (target.IsNone)
+        AskTextures(graph);
+        GpuTexture target = graph.WindowTarget;
+        if (target.IsNone || frame.Indices.Count == 0)
             return;
 
-        TextureDescription description = _gpu.GetDescription(target);
-        if (!TryCreateResources(description.Format))
-            return;
-
-        graph.BeginTransferPass("Debug UI: upload", RenderLayer.Overlay);
-        bool canDraw = frame.Indices.Count > 0 && TryUpload(frame, graph, description);
-        graph.EndPass();
-        if (canDraw)
-            RecordDraws(frame, graph, target, description);
-    }
-
-    /// <summary>
-    /// The compiled stages, compiling one each from <paramref name="shader"/>; a stage that fails is logged, and the UI
-    /// stays undrawn.
-    /// </summary>
-    private async Task CompileAsync(IShaderCompiler shaders, Handle<Shader> shader, CancellationToken cancel)
-    {
-        ShaderEntry vertex = new()
-        {
-            Module = shader,
-            Name = "DrawDebugUIVertex",
-            Stage = ShaderStage.Vertex,
-        };
-        ShaderEntry pixel = new()
-        {
-            Module = shader,
-            Name = "DrawDebugUIPixel",
-            Stage = ShaderStage.Pixel,
-        };
-        Task<Result<CompiledShader>> vertexCompile = shaders.CompileAsync(vertex, cancel);
-        Task<Result<CompiledShader>> pixelCompile = shaders.CompileAsync(pixel, cancel);
-        Result<CompiledShader> vertexResult = await vertexCompile.ConfigureAwait(false);
-        Result<CompiledShader> pixelResult = await pixelCompile.ConfigureAwait(false);
-        if (!vertexResult.Ok || !pixelResult.Ok)
-        {
-            Log.Error($"The debug UI is not drawn: {(vertexResult.Ok ? pixelResult.Error : vertexResult.Error)}");
-
-            return;
-        }
-
-        _compiled = new CompiledStages(vertexResult.Value, pixelResult.Value);
-    }
-
-    /// <summary>
-    /// Whether everything that lasts is made: the sampler, the constants and the pipeline for <paramref name="format"/>,
-    /// once the shaders compile. A failure is logged once, and the UI stays undrawn.
-    /// </summary>
-    private bool TryCreateResources(GpuFormat format)
-    {
-        if (_compiled is not { } compiled)
-            return false;
-
-        if (!_pipeline.IsNone && _pipelineFormat == format)
-            return true;
-
-        Result made = CreateResources(compiled, format);
-        if (made.Ok)
-            return true;
-
-        Log.Error($"The debug UI is not drawn: {made.Error}");
-        _compiled = null;
-
-        return false;
-    }
-
-    private Result CreateResources(CompiledStages compiled, GpuFormat format)
-    {
-        Result<GpuPipeline> pipeline = _gpu.CreatePipeline(
-            new GraphicsPipelineDescription
-            {
-                VertexSpirv = compiled.Vertex.Spirv,
-                VertexEntryPoint = compiled.Vertex.EntryPoint,
-                PixelSpirv = compiled.Pixel.Spirv,
-                PixelEntryPoint = compiled.Pixel.EntryPoint,
-                ColorFormats = [format],
-                Blend = BlendMode.Alpha,
-                Cull = CullMode.None,
-                Name = "Debug UI",
-            }
+        ReadOnlySpan<ImDrawVert_t> vertexRows = CollectionsMarshal.AsSpan(frame.Vertices);
+        ReadOnlySpan<uint> indexRows = CollectionsMarshal.AsSpan(frame.Indices);
+        Result<GpuBuffer> vertices = graph.Buffer(
+            GetDescription("Debug UI vertices", MemoryMarshal.AsBytes(vertexRows).Length, BufferUsages.Storage)
         );
-        if (!pipeline.Ok)
-            return Result.Failure(pipeline.Error);
-
-        _gpu.Destroy(_pipeline);
-        _pipeline = pipeline.Value;
-        _pipelineFormat = format;
-        if (_sampler.IsNone)
-        {
-            Result<GpuSampler> sampler = _gpu.CreateSampler(
-                new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
-            );
-            if (!sampler.Ok)
-                return Result.Failure(sampler.Error);
-
-            _sampler = sampler.Value;
-        }
-
-        if (!_constants.IsNone)
-            return Result.Success();
-
-        Result<GpuBuffer> constants = _gpu.CreateBuffer(
+        Result<GpuBuffer> indices = graph.Buffer(
+            GetDescription("Debug UI indices", indexRows.Length * sizeof(uint), BufferUsages.Index)
+        );
+        Result<GpuBuffer> constants = graph.Buffer(
             new BufferDescription
             {
                 Bytes = DebugUIConstants.Bytes,
@@ -214,16 +108,64 @@ internal sealed class DebugUIOverlay : IDisposable
                 Name = "Debug UI constants",
             }
         );
-        if (!constants.Ok)
-            return Result.Failure(constants.Error);
+        Result<GpuSampler> sampler = graph.Sampler(
+            new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
+        );
+        Result made =
+            !vertices.Ok ? vertices
+            : !indices.Ok ? indices
+            : !constants.Ok ? constants
+            : sampler;
+        if (!made.Ok)
+        {
+            Log.Error($"The debug UI is not drawn: {made.Error}");
 
-        _constants = constants.Value;
+            return;
+        }
 
-        return Result.Success();
+        TextureDescription description = graph.GetDescription(target);
+        graph.Upload(vertices.Value, vertexRows);
+        graph.Upload(indices.Value, indexRows);
+        graph.Upload(
+            constants.Value,
+            [
+                new DebugUIConstants
+                {
+                    InverseSize = new Vector2(1f / description.Width, 1f / description.Height),
+                    Vertices = vertices.Value.Id,
+                    Sampler = sampler.Value.Id,
+                },
+            ]
+        );
+        RecordDraws(frame, graph, target, description, vertices.Value, indices.Value, constants.Value);
     }
 
     /// <summary>
-    /// The texture changes queued up to <paramref name="frame"/>: a texture made or filled again, or destroyed. One let go of in a later frame may still be drawn in this one, so later changes wait.
+    /// A buffer of the power of two that holds <paramref name="bytes"/>, so it is seldom made again as the UI changes.
+    /// </summary>
+    private static BufferDescription GetDescription(string name, int bytes, BufferUsages usage) =>
+        new()
+        {
+            Bytes = BitOperations.RoundUpToPowerOf2((uint)Math.Max(bytes, MinBufferBytes)),
+            Usage = usage,
+            Name = name,
+        };
+
+    /// <summary>
+    /// Every texture the UI holds asked for, so the GPU provider keeps it: each was made to its description when it was
+    /// filled and is asked for every frame since, so the ask hands back the same texture.
+    /// </summary>
+    private void AskTextures(RenderGraph graph)
+    {
+        foreach ((TextureDescription description, GpuTexture _) in _textures.Values)
+        {
+            _ = graph.Texture(description);
+        }
+    }
+
+    /// <summary>
+    /// The texture changes queued up to <paramref name="frame"/>: a texture made or filled again, or destroyed. One let
+    /// go of in a later frame may still be drawn in this one, so later changes wait.
     /// </summary>
     private void TakeTextureChanges(uint frame, RenderGraph graph)
     {
@@ -233,122 +175,34 @@ internal sealed class DebugUIOverlay : IDisposable
             if (change.Pixels is { } pixels)
                 FillTexture(change, pixels, graph);
             else
-                DestroyTexture(change.Texture);
+                _textures.Remove(change.Texture);
         }
     }
 
     /// <summary>
-    /// The texture made, unless it is, and filled with <paramref name="pixels"/> whole.
+    /// The texture asked for at the change's size, under a name of its own, and filled with <paramref name="pixels"/>
+    /// whole.
     /// </summary>
     private void FillTexture(in DebugUITextureChange change, byte[] pixels, RenderGraph graph)
     {
-        if (!_textures.TryGetValue(change.Texture, out GpuTexture texture))
+        TextureDescription description = new()
         {
-            Result<GpuTexture> made = _gpu.CreateTexture(
-                new TextureDescription
-                {
-                    Width = change.Width,
-                    Height = change.Height,
-                    Format = GpuFormat.R8G8B8A8Unorm,
-                    Usage = TextureUsages.Sampled | TextureUsages.CopyDestination,
-                    Name = "Debug UI texture",
-                }
-            );
-            if (!made.Ok)
-            {
-                Log.Error($"A debug UI texture was not made: {made.Error}");
-
-                return;
-            }
-
-            texture = made.Value;
-            _textures.Add(change.Texture, texture);
-        }
-
-        GpuUpload upload = _gpu.BeginUpload(pixels.Length);
-        pixels.CopyTo(upload.Bytes);
-        // A pass each, as a pass's barriers come before all of it and a texture filled twice in a frame needs one between.
-        graph.BeginTransferPass("Debug UI: texture", RenderLayer.Overlay);
-        graph.Use(texture, GpuAccess.CopyDestination);
-        graph.CopyBufferToTexture(upload.Buffer, upload.Offset, texture);
-        graph.EndPass();
-    }
-
-    private void DestroyTexture(ulong id)
-    {
-        if (!_textures.Remove(id, out GpuTexture gone))
-            return;
-
-        _gpu.Destroy(gone);
-    }
-
-    /// <summary>
-    /// The frame's vertices and indices into their buffers, with the constants, in the transfer pass open; whether they
-    /// fit, as the frame has nothing to draw from if not.
-    /// </summary>
-    private bool TryUpload(DebugUIFrame frame, RenderGraph graph, in TextureDescription target)
-    {
-        ReadOnlySpan<byte> vertices = MemoryMarshal.AsBytes(CollectionsMarshal.AsSpan(frame.Vertices));
-        ReadOnlySpan<byte> indices = MemoryMarshal.AsBytes(CollectionsMarshal.AsSpan(frame.Indices));
-        int vertexBytes = vertices.Length;
-        int indexBytes = indices.Length;
-        if (!TryFit(ref _vertices, vertexBytes, BufferUsages.Storage, "Debug UI vertices"))
-            return false;
-
-        if (!TryFit(ref _indices, indexBytes, BufferUsages.Index, "Debug UI indices"))
-            return false;
-
-        GpuUpload vertexUpload = _gpu.BeginUpload(vertexBytes);
-        GpuUpload indexUpload = _gpu.BeginUpload(indexBytes);
-        vertices.CopyTo(vertexUpload.Bytes);
-        indices.CopyTo(indexUpload.Bytes);
-        graph.Use(_vertices, GpuAccess.CopyDestination);
-        graph.CopyBuffer(vertexUpload.Buffer, vertexUpload.Offset, _vertices, 0, (ulong)vertexBytes);
-        graph.Use(_indices, GpuAccess.CopyDestination);
-        graph.CopyBuffer(indexUpload.Buffer, indexUpload.Offset, _indices, 0, (ulong)indexBytes);
-
-        DebugUIConstants constants = new()
-        {
-            InverseSize = new Vector2(1f / target.Width, 1f / target.Height),
-            Vertices = _vertices.Id,
-            Sampler = _sampler.Id,
+            Width = change.Width,
+            Height = change.Height,
+            Format = GpuFormat.R8G8B8A8Unorm,
+            Usage = TextureUsages.Sampled | TextureUsages.CopyDestination,
+            Name = $"Debug UI texture {change.Texture}",
         };
-        GpuUpload constantUpload = _gpu.BeginUpload(DebugUIConstants.Bytes);
-        MemoryMarshal.Write(constantUpload.Bytes, in constants);
-        graph.Use(_constants, GpuAccess.CopyDestination);
-        graph.CopyBuffer(constantUpload.Buffer, constantUpload.Offset, _constants, 0, DebugUIConstants.Bytes);
-
-        return true;
-    }
-
-    /// <summary>
-    /// Whether <paramref name="buffer"/> holds <paramref name="bytes"/>, made again at the power of two that does when it
-    /// doesn't, so it seldom has to grow.
-    /// </summary>
-    private bool TryFit(ref GpuBuffer buffer, int bytes, BufferUsages usage, string name)
-    {
-        if (!buffer.IsNone && _gpu.GetDescription(buffer).Bytes >= bytes)
-            return true;
-
-        Result<GpuBuffer> made = _gpu.CreateBuffer(
-            new BufferDescription
-            {
-                Bytes = BitOperations.RoundUpToPowerOf2((uint)Math.Max(bytes, MinBufferBytes)),
-                Usage = usage,
-                Name = name,
-            }
-        );
+        Result<GpuTexture> made = graph.Texture(description);
         if (!made.Ok)
         {
-            Log.Error($"The {name} buffer was not made: {made.Error}");
+            Log.Error($"A debug UI texture was not made: {made.Error}");
 
-            return false;
+            return;
         }
 
-        _gpu.Destroy(buffer);
-        buffer = made.Value;
-
-        return true;
+        _textures[change.Texture] = (description, made.Value);
+        graph.Upload(made.Value, pixels);
     }
 
     /// <summary>
@@ -359,55 +213,71 @@ internal sealed class DebugUIOverlay : IDisposable
         DebugUIFrame frame,
         RenderGraph graph,
         GpuTexture target,
-        in TextureDescription description
+        in TextureDescription description,
+        GpuBuffer vertices,
+        GpuBuffer indices,
+        GpuBuffer constants
     )
     {
-        graph.BeginDrawPass(
-            "Debug UI",
-            new GpuRenderTargets { Colors = [new GpuTarget { Texture = target, Load = TargetLoad.Keep }] },
-            RenderLayer.Overlay
-        );
-        graph.Use(_constants, GpuAccess.ShaderRead);
-        graph.Use(_vertices, GpuAccess.ShaderRead);
-        graph.Use(_indices, GpuAccess.Index);
-        foreach (GpuTexture texture in _textures.Values)
+        DrawPass pass = graph
+            .Draw(
+                "Debug UI",
+                _shaders,
+                new GpuRenderTargets { Colors = [new GpuTarget { Texture = target }] },
+                new GpuConstants(constants.Id),
+                RenderLayer.Overlay
+            )
+            .Reads(constants, vertices);
+        foreach ((TextureDescription _, GpuTexture texture) in _textures.Values)
         {
-            graph.Use(texture, GpuAccess.ShaderRead);
+            pass.Reads(texture);
         }
 
-        graph.BindPipeline(_pipeline);
-        graph.BindIndexBuffer(_indices);
+        IndexedDraw[] draws = ArrayPool<IndexedDraw>.Shared.Rent(frame.Draws.Count);
+        int count = 0;
         foreach (DebugUIDraw draw in frame.Draws)
         {
-            RecordDraw(graph, draw, description);
+            if (TryGetDraw(draw, constants, description, out IndexedDraw indexed))
+                draws[count++] = indexed;
         }
 
-        graph.EndPass();
+        pass.DrawIndexed(indices, draws.AsSpan(0, count));
+        ArrayPool<IndexedDraw>.Shared.Return(draws);
     }
 
-    private void RecordDraw(RenderGraph graph, in DebugUIDraw draw, in TextureDescription target)
+    /// <summary>
+    /// The draw clipped to the target in whole pixels rounded out; none when nothing of it is left or its texture is not
+    /// made yet.
+    /// </summary>
+    private bool TryGetDraw(
+        in DebugUIDraw draw,
+        GpuBuffer constants,
+        in TextureDescription target,
+        out IndexedDraw indexed
+    )
     {
-        // Clipped to the target, in whole pixels rounded out.
+        indexed = default;
         int left = Math.Max((int)MathF.Floor(draw.Clip.X), 0);
         int top = Math.Max((int)MathF.Floor(draw.Clip.Y), 0);
         int right = Math.Min((int)MathF.Ceiling(draw.Clip.Z), target.Width);
         int bottom = Math.Min((int)MathF.Ceiling(draw.Clip.W), target.Height);
-        if (right <= left || bottom <= top)
-            return;
+        if (
+            right <= left
+            || bottom <= top
+            || !_textures.TryGetValue(draw.Texture, out (TextureDescription, GpuTexture Made) texture)
+        )
+            return false;
 
-        // A texture not made yet is left out.
-        if (!_textures.TryGetValue(draw.Texture, out GpuTexture texture))
-            return;
+        indexed = new IndexedDraw
+        {
+            Scissor = Rectangle.FromLTRB(left, top, right, bottom),
+            Constants = new GpuConstants(constants.Id, draw.FirstVertex, texture.Made.Id),
+            IndexCount = draw.IndexCount,
+            FirstIndex = draw.FirstIndex,
+        };
 
-        graph.SetScissor((uint)left, (uint)top, (uint)(right - left), (uint)(bottom - top));
-        graph.PushConstants(new GpuConstants(_constants.Id, draw.FirstVertex, texture.Id));
-        graph.DrawIndexed(draw.IndexCount, firstIndex: draw.FirstIndex);
+        return true;
     }
-
-    /// <summary>
-    /// The two stages as compiled, boxed so they are written whole from the compile's worker.
-    /// </summary>
-    private sealed record CompiledStages(CompiledShader Vertex, CompiledShader Pixel);
 }
 
 /// <summary>

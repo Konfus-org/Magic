@@ -1,10 +1,8 @@
 using System.Numerics;
-using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
 
@@ -19,12 +17,7 @@ namespace Magic.GIRendering;
 /// <paramref name="resources"/> has then, and uploaded whole. <paramref name="failure"/> is the material a model that
 /// failed is drawn with, every slot; an empty slot when there is none.
 /// </summary>
-internal sealed class InstanceTable(
-    IGraphicsApi gpu,
-    AssetManager assets,
-    GpuResources resources,
-    MaterialInstance failure
-)
+internal sealed class InstanceTable(AssetManager assets, GpuResources resources, MaterialInstance failure)
 {
     public const int Capacity = 1 << 18;
 
@@ -139,11 +132,15 @@ internal sealed class InstanceTable(
     /// </summary>
     public Result<(GpuBuffer Rows, GpuBuffer Materials)> Upload(RenderGraph graph)
     {
-        Result<GpuBuffer> rows = resources.TryGetBuffer("Instance table", (long)Capacity * GpuInstance.Bytes);
+        Result<GpuBuffer> rows = graph.Buffer(
+            GpuDescriptions.GetBuffer("Instance table", (long)Capacity * GpuInstance.Bytes)
+        );
         if (!rows.Ok)
             return Result.Failure(rows.Error);
 
-        Result<GpuBuffer> materials = resources.TryGetBuffer("Material table", (long)Capacity * GpuMaterial.Bytes);
+        Result<GpuBuffer> materials = graph.Buffer(
+            GpuDescriptions.GetBuffer("Material table", (long)Capacity * GpuMaterial.Bytes)
+        );
         if (!materials.Ok)
             return Result.Failure(materials.Error);
 
@@ -153,7 +150,7 @@ internal sealed class InstanceTable(
             resources.Get(_materialSlots[row], out _materialRows[row]);
         }
 
-        graph.Upload(gpu, materials.Value, _materialRows.AsSpan(0, _materialSlots.Count));
+        graph.Upload(materials.Value, _materialRows.AsSpan(0, _materialSlots.Count));
         UploadChangedRows(graph, rows.Value);
 
         return Result.Success((rows.Value, materials.Value));
@@ -178,22 +175,8 @@ internal sealed class InstanceTable(
         if (!HasChanges)
             return;
 
-        int blocks = (Count + BlockSize - 1) / BlockSize;
-        int dirtyRows = 0;
-        for (int counted = 0; counted < blocks; counted++)
-        {
-            if (_isDirty[counted])
-                dirtyRows += GetBlockLength(counted);
-        }
-
         HasChanges = false;
-        if (dirtyRows == 0)
-            return;
-
-        GpuUpload upload = gpu.BeginUpload(dirtyRows * GpuInstance.Bytes);
-        Span<GpuInstance> staged = MemoryMarshal.Cast<byte, GpuInstance>(upload.Bytes);
-        graph.Use(table, GpuAccess.CopyDestination);
-        int stagedRows = 0;
+        int blocks = (Count + BlockSize - 1) / BlockSize;
         int block = 0;
         while (block < blocks)
         {
@@ -210,15 +193,7 @@ internal sealed class InstanceTable(
                 runRows += GetBlockLength(block);
             }
 
-            _rows.AsSpan(runStart, runRows).CopyTo(staged[stagedRows..]);
-            graph.CopyBuffer(
-                upload.Buffer,
-                upload.Offset + ((ulong)stagedRows * GpuInstance.Bytes),
-                table,
-                (ulong)runStart * GpuInstance.Bytes,
-                (ulong)runRows * GpuInstance.Bytes
-            );
-            stagedRows += runRows;
+            graph.Upload(table, _rows.AsSpan(runStart, runRows), (ulong)runStart * GpuInstance.Bytes);
         }
 
         Array.Clear(_isDirty);
@@ -252,7 +227,7 @@ internal sealed class InstanceTable(
             _rows[index] = row;
             _entities[index] = entity;
             _extras[index] = resident is { Acceleration.IsNone: false } traced
-                ? new InstanceExtra(gpu.GetAddress(traced.Acceleration), traced.LeafOffset)
+                ? new InstanceExtra(traced.Acceleration.Address, traced.LeafOffset)
                 : default;
         }
 
@@ -283,6 +258,7 @@ internal sealed class InstanceTable(
             BoundsRadius = resident.BoundsRadius * maxScale,
             ClusterOffset = resident.ClusterOffset,
             ClusterCount = resident.ClusterCount,
+            Impostor = resident.ImpostorRow,
         };
         for (int slot = 0; slot < MaterialSlots.Capacity; slot++)
         {

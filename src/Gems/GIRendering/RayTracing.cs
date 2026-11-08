@@ -1,5 +1,4 @@
 using System.Numerics;
-using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Utils;
 
@@ -10,7 +9,7 @@ namespace Magic.GIRendering;
 /// instance whose model has its triangles' structure, built again when the instances change, what a ray query traces
 /// through.
 /// </summary>
-internal sealed class RayTracing(IGraphicsApi gpu, GpuResources resources)
+internal sealed class RayTracing
 {
     private readonly GpuAccelerationInstance[] _rows = new GpuAccelerationInstance[InstanceTable.Capacity];
 
@@ -20,19 +19,20 @@ internal sealed class RayTracing(IGraphicsApi gpu, GpuResources resources)
     public GpuAcceleration Acceleration { get; private set; }
 
     /// <summary>
-    /// The structure and its instances asked for, and the structure built again over the instances, in a transfer pass
-    /// the caller opened after the models' structures were uploaded.
+    /// The structure and its instances asked for, every frame, so the structure built last stays.
     /// </summary>
-    public Result Build(RenderGraph graph, ReadOnlySpan<GpuInstance> rows, ReadOnlySpan<InstanceExtra> extras)
+    public static Result<TracedWorld> Prepare(RenderGraph graph)
     {
-        Result<GpuBuffer> instances = resources.TryGetBuffer(
-            "Acceleration instances",
-            (long)InstanceTable.Capacity * GpuAccelerationInstance.Bytes
+        Result<GpuBuffer> instances = graph.Buffer(
+            GpuDescriptions.GetBuffer(
+                "Acceleration instances",
+                (long)InstanceTable.Capacity * GpuAccelerationInstance.Bytes
+            )
         );
         if (!instances.Ok)
             return Result.Failure(instances.Error);
 
-        Result<GpuAcceleration> acceleration = resources.TryGetAcceleration(
+        Result<GpuAcceleration> acceleration = graph.Acceleration(
             new TopLevelDescription
             {
                 MaxInstances = InstanceTable.Capacity,
@@ -43,6 +43,20 @@ internal sealed class RayTracing(IGraphicsApi gpu, GpuResources resources)
         if (!acceleration.Ok)
             return Result.Failure(acceleration.Error);
 
+        return Result.Success(new TracedWorld(instances.Value, acceleration.Value));
+    }
+
+    /// <summary>
+    /// The structure built again over the instances, in a transfer pass the caller opened after the models' structures
+    /// were uploaded.
+    /// </summary>
+    public void Build(
+        RenderGraph graph,
+        in TracedWorld traced,
+        ReadOnlySpan<GpuInstance> rows,
+        ReadOnlySpan<InstanceExtra> extras
+    )
+    {
         int count = 0;
         for (int i = 0; i < rows.Length; i++)
         {
@@ -63,16 +77,19 @@ internal sealed class RayTracing(IGraphicsApi gpu, GpuResources resources)
             };
         }
 
-        Acceleration = count == 0 ? GpuAcceleration.None : acceleration.Value;
+        Acceleration = count == 0 ? GpuAcceleration.None : traced.Structure;
         if (count == 0)
-            return Result.Success();
+            return;
 
-        graph.Upload(gpu, instances.Value, _rows.AsSpan(0, count));
-        graph.BuildAcceleration(acceleration.Value, (uint)count);
-
-        return Result.Success();
+        graph.Upload(traced.Instances, _rows.AsSpan(0, count));
+        graph.BuildAcceleration(traced.Structure, (uint)count);
     }
 }
+
+/// <summary>
+/// The world's top-level acceleration structure and the buffer its instances are built from.
+/// </summary>
+internal readonly record struct TracedWorld(GpuBuffer Instances, GpuAcceleration Structure);
 
 /// <summary>
 /// What the CPU keeps beside an instance's row: its model's acceleration structure's address, 0 when it has none,

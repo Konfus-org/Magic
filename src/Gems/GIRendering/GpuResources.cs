@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -5,7 +6,6 @@ using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs.Components;
 using Magic.Files;
-using Magic.Gpu;
 using Magic.Rendering;
 using Magic.Threading;
 using Magic.Utils;
@@ -23,29 +23,23 @@ internal enum ResourceState : byte
 }
 
 /// <summary>
-/// The GPU resources the gem draws with, each made once on its first ask: a texture asset by its handle, read and made
-/// with every level and the sampler its asset asks for, then copied up in the frame after it arrives; a sampler by its
-/// description, shared by every ask for the same one; a material asset by its handle, read once, with the texture it
-/// names asked for, and handed out as the material row a slot's params make over its own; a model asset by its handle,
-/// made by the preprocessor on a worker and copied into the pools of vertices, indices, clusters and leaf clusters in
-/// the frame after it arrives. Each pool hands out ranges first fit from a free list. A model not asked for in
-/// <see cref="UnusedSec"/>, and held by no renderer drawn, is evicted: its ranges go back to the free lists and its
-/// acceleration structure is destroyed, and the next ask makes it again. The gem's own textures, buffers and acceleration structure are asked for
-/// by description, each by its name: the same description again is the same one, so what it holds carries from frame
-/// to frame, and another one under the name, as at a new window size, destroys it and makes it again. The rest is freed
-/// with the gem.
+/// The GPU resources the gem draws with, each read once on its first ask: a texture asset by its handle, read and asked
+/// of the graph with every level and the sampler its asset asks for, then copied up in the frame after it arrives; a
+/// material asset by its handle, read once, with the texture it names asked for, and handed out as the material row a
+/// slot's params make over its own; a model asset by its handle, made by the preprocessor on a worker, settled into the
+/// pools of vertices, indices, clusters and leaf clusters with its acceleration structure at the start of the next
+/// frame, and copied up in it. The pools, the textures and each resident model's acceleration structure and atlases are
+/// asked of the graph every frame, so the GPU provider keeps what they hold. Each pool hands out ranges first fit from a
+/// free list. A model not asked for in <see cref="UnusedSec"/>, and held by no renderer drawn, is evicted: its ranges go
+/// back to the free lists and its structure and atlases are no longer asked for, so the GPU provider frees them, and the
+/// next ask makes it again.
 /// </summary>
-internal sealed class GpuResources(
-    IGraphicsApi gpu,
-    ModelPreprocessor models,
-    Caches caches,
-    AssetManager assets,
-    Threads threads
-) : IDisposable
+internal sealed class GpuResources(ModelPreprocessor models, Caches caches, AssetManager assets, Threads threads)
 {
-    private const int VertexCapacity = 1 << 20;
-    private const int IndexCapacity = 1 << 22;
-    private const int ClusterCapacity = 1 << 16;
+    private const int VertexCapacity = 1 << 22;
+    private const int IndexCapacity = 1 << 24;
+    private const int ClusterCapacity = 1 << 17;
+    private const int ImpostorCapacity = 1024;
     private const string FailureShader = "Shaders/Material/Failure.slang";
 
     /// <summary>
@@ -59,11 +53,10 @@ internal sealed class GpuResources(
     /// Each material asked for, by its id, null while it loads; one that did not load is the failure material.
     /// </summary>
     private readonly Dictionary<ulong, Material?> _materials = [];
-    private readonly Dictionary<SamplerDescription, GpuSampler> _samplers = [];
-    private readonly Dictionary<string, (TextureDescription Description, GpuTexture Made)> _targets = [];
-    private readonly Dictionary<string, (BufferDescription Description, GpuBuffer Made)> _buffers = [];
-    private readonly Dictionary<string, (TopLevelDescription Description, GpuAcceleration Made)> _topLevels = [];
-    private readonly List<(Texture Asset, GpuTexture Texture)> _arrivedTextures = [];
+    private readonly List<(Texture Asset, TextureEntry Entry)> _arrivedTextures = [];
+
+    // The impostor table's rows; row 0 is no impostor, so it is taken from the start.
+    private readonly FreeList _impostorRows = CreateImpostorRows();
 
     /// <summary>
     /// Each model asked for and not evicted, by its id, made or not, with when it was last asked, in
@@ -73,6 +66,12 @@ internal sealed class GpuResources(
     private readonly Dictionary<ulong, ResidentModel> _residentModels = [];
     private readonly HashSet<ulong> _failedModels = [];
     private readonly List<(MeshDerived Derived, ResidentModel Where)> _arrivedModels = [];
+
+    /// <summary>
+    /// The models made since the last frame, by their id with their name, which the next <see cref="SettleModels"/>
+    /// settles.
+    /// </summary>
+    private readonly List<(ulong Model, string Name, MeshDerived Made)> _madeModels = [];
     private readonly FreeList _vertexRanges = new(VertexCapacity);
     private readonly FreeList _indexRanges = new(IndexCapacity);
     private readonly FreeList _clusterRanges = new(ClusterCapacity);
@@ -101,6 +100,11 @@ internal sealed class GpuResources(
     /// </summary>
     public GpuBuffer LeafClusters { get; private set; }
 
+    /// <summary>
+    /// Every resident model's impostor, a <see cref="GpuImpostor"/> a row, by the row its instances name.
+    /// </summary>
+    public GpuBuffer ImpostorTable { get; private set; }
+
     private static GpuMaterial FailureMaterial =>
         new()
         {
@@ -109,81 +113,108 @@ internal sealed class GpuResources(
             Kind = (uint)MaterialKind.Failure,
         };
 
-    public void Dispose()
+    /// <summary>
+    /// The textures shaders read through the heap, by the id in a row rather than by a pass's name: every material's
+    /// texture on the GPU and every resident model's impostor atlases, which are asked of the graph here, every frame that
+    /// reads them. A pass that samples them names them in its reads, so each is readable, its copy done, before the pass
+    /// runs.
+    /// </summary>
+    public ImmutableArray<GpuResource> GetHeapTextures(RenderGraph graph)
     {
+        ImmutableArray<GpuResource>.Builder textures = ImmutableArray.CreateBuilder<GpuResource>();
         foreach (TextureEntry entry in _textures.Values)
         {
-            gpu.Destroy(entry.Texture);
-        }
-
-        foreach (GpuSampler sampler in _samplers.Values)
-        {
-            gpu.Destroy(sampler);
+            if (entry.State == ResourceState.Ready)
+                textures.Add(entry.Texture);
         }
 
         foreach (ResidentModel resident in _residentModels.Values)
         {
-            gpu.Destroy(resident.Acceleration);
+            if (resident.Impostor is not { } atlas || resident.ImpostorUv is not { } uvAtlas)
+                continue;
+
+            if (graph.Texture(atlas) is { Ok: true } surface)
+                textures.Add(surface.Value);
+
+            if (graph.Texture(uvAtlas) is { Ok: true } uvs)
+                textures.Add(uvs.Value);
         }
 
-        foreach ((_, GpuTexture texture) in _targets.Values)
-        {
-            gpu.Destroy(texture);
-        }
-
-        foreach ((_, GpuAcceleration topLevel) in _topLevels.Values)
-        {
-            gpu.Destroy(topLevel);
-        }
-
-        foreach ((_, GpuBuffer buffer) in _buffers.Values)
-        {
-            gpu.Destroy(buffer);
-        }
-
-        gpu.Destroy(LeafClusters);
-        gpu.Destroy(VertexPool);
-        gpu.Destroy(IndexPool);
-        gpu.Destroy(ClusterPool);
+        return textures.ToImmutable();
     }
 
     /// <summary>
-    /// Makes the pools models are copied into.
+    /// The pools models are copied into, asked for every frame before any model is, so what they hold stays.
     /// </summary>
-    public Result Create()
+    public Result Prepare(RenderGraph graph)
     {
-        Result<GpuBuffer> vertices = gpu.CreateBuffer("Vertex pool", (long)VertexCapacity * GpuVertex.Bytes);
+        Result<GpuBuffer> vertices = graph.Buffer(
+            GpuDescriptions.GetBuffer("Vertex pool", (long)VertexCapacity * GpuVertex.Bytes)
+        );
         if (!vertices.Ok)
             return Result.Failure(vertices.Error);
 
         VertexPool = vertices.Value;
-        Result<GpuBuffer> indices = gpu.CreateBuffer("Index pool", (long)IndexCapacity * sizeof(uint));
+        Result<GpuBuffer> indices = graph.Buffer(
+            GpuDescriptions.GetBuffer("Index pool", (long)IndexCapacity * sizeof(uint))
+        );
         if (!indices.Ok)
             return Result.Failure(indices.Error);
 
         IndexPool = indices.Value;
-        Result<GpuBuffer> clusters = gpu.CreateBuffer("Cluster pool", (long)ClusterCapacity * GpuCluster.Bytes);
+        Result<GpuBuffer> clusters = graph.Buffer(
+            GpuDescriptions.GetBuffer("Cluster pool", (long)ClusterCapacity * GpuCluster.Bytes)
+        );
         if (!clusters.Ok)
             return Result.Failure(clusters.Error);
 
         ClusterPool = clusters.Value;
-        if (gpu.Features.HasRayQuery)
-        {
-            Result<GpuBuffer> leaves = gpu.CreateBuffer("Leaf clusters", (long)ClusterCapacity * sizeof(uint));
-            if (!leaves.Ok)
-                return Result.Failure(leaves.Error);
+        Result<GpuBuffer> impostors = graph.Buffer(
+            GpuDescriptions.GetBuffer("Impostor table", (long)ImpostorCapacity * GpuImpostor.Bytes)
+        );
+        if (!impostors.Ok)
+            return Result.Failure(impostors.Error);
 
-            LeafClusters = leaves.Value;
-        }
+        ImpostorTable = impostors.Value;
+        if (!graph.Features.HasRayQuery)
+            return Result.Success();
+
+        Result<GpuBuffer> leaves = graph.Buffer(
+            GpuDescriptions.GetBuffer("Leaf clusters", (long)ClusterCapacity * sizeof(uint))
+        );
+        if (!leaves.Ok)
+            return Result.Failure(leaves.Error);
+
+        LeafClusters = leaves.Value;
 
         return Result.Success();
     }
 
     /// <summary>
+    /// Every resident model's acceleration structure asked for, so the GPU provider keeps it, and the models made since
+    /// the last frame settled into the pools, after the pools were asked for and before any renderer's row is built.
+    /// </summary>
+    public void SettleModels(RenderGraph graph)
+    {
+        foreach (ResidentModel resident in _residentModels.Values)
+        {
+            if (resident.AccelerationDescription is { } acceleration)
+                _ = graph.Acceleration(acceleration);
+        }
+
+        foreach ((ulong model, string name, MeshDerived made) in _madeModels)
+        {
+            Settle(graph, model, name, made);
+        }
+
+        _madeModels.Clear();
+    }
+
+    /// <summary>
     /// Evicts every model not asked for in <see cref="UnusedSec"/> that none of <paramref name="drawn"/> holds: its
-    /// ranges go back to the pools' free lists and its acceleration structure is destroyed. Renderers not written since
-    /// their rows were built ask for nothing, so once a model looks unused each model <paramref name="drawn"/> holds is
-    /// asked for first.
+    /// ranges go back to the pools' free lists and its acceleration structure and atlases are no longer asked for.
+    /// Renderers not written since their rows were built ask for nothing, so once a model looks unused each model
+    /// <paramref name="drawn"/> holds is asked for first.
     /// </summary>
     public void EvictUnusedModels(ReadOnlySpan<Renderer> drawn)
     {
@@ -208,7 +239,10 @@ internal sealed class GpuResources(
             if (!where.Acceleration.IsNone)
                 _leafRanges.Free((int)where.LeafOffset, (int)where.LeafCount);
 
-            gpu.Destroy(where.Acceleration);
+            // Its acceleration structure and atlases go once no frame asks for them.
+            if (where.ImpostorRow != 0)
+                _impostorRows.Free((int)where.ImpostorRow, 1);
+
             _residentModels.Remove(id);
             _askedModels.Remove(id);
             Log.Info(
@@ -345,111 +379,31 @@ internal sealed class GpuResources(
     public bool HasFailed(Handle<Model> model) => _failedModels.Contains(model.Id);
 
     /// <summary>
-    /// The sampler <paramref name="description"/> makes, made on the first ask for it.
-    /// </summary>
-    public Result<GpuSampler> TryGetSampler(in SamplerDescription description)
-    {
-        if (_samplers.TryGetValue(description, out GpuSampler sampler))
-            return Result.Success(sampler);
-
-        Result<GpuSampler> made = gpu.CreateSampler(description);
-        if (made.Ok)
-            _samplers[description] = made.Value;
-
-        return made;
-    }
-
-    /// <summary>
-    /// The texture under <paramref name="name"/>, as <see cref="TryGet"/> makes it.
-    /// </summary>
-    public Result<GpuTexture> TryGetTexture(
-        string name,
-        int width,
-        int height,
-        GpuFormat format,
-        TextureUsages usage = TextureUsages.Storage | TextureUsages.Sampled,
-        int levels = 1
-    ) =>
-        TryGet(
-            _targets,
-            new TextureDescription
-            {
-                Width = width,
-                Height = height,
-                Format = format,
-                Usage = usage,
-                Levels = levels,
-                Name = name,
-            },
-            name,
-            static (gpu, description) => gpu.CreateTexture(description),
-            static (gpu, texture) => gpu.Destroy(texture)
-        );
-
-    /// <summary>
-    /// The buffer under <paramref name="name"/>, as <see cref="TryGet"/> makes it.
-    /// </summary>
-    public Result<GpuBuffer> TryGetBuffer(string name, long bytes, BufferUsages usage = BufferUsages.Storage) =>
-        TryGet(
-            _buffers,
-            new BufferDescription
-            {
-                Bytes = bytes,
-                Usage = usage,
-                Name = name,
-            },
-            name,
-            static (gpu, description) => gpu.CreateBuffer(description),
-            static (gpu, buffer) => gpu.Destroy(buffer)
-        );
-
-    /// <summary>
-    /// The top-level acceleration structure under its description's name, as <see cref="TryGet"/> makes it.
-    /// </summary>
-    public Result<GpuAcceleration> TryGetAcceleration(in TopLevelDescription description) =>
-        TryGet(
-            _topLevels,
-            description,
-            description.Name,
-            static (gpu, made) => gpu.CreateAcceleration(made),
-            static (gpu, acceleration) => gpu.Destroy(acceleration)
-        );
-
-    /// <summary>
-    /// Copies the models and the levels of the textures that arrived since the last frame, in the frame's upload pass.
+    /// Copies the models that arrived since the last frame, asks for every texture read and its sampler, and copies the
+    /// levels of the textures that arrived, in the frame's upload pass.
     /// </summary>
     public void Upload(RenderGraph graph)
     {
-        if (_arrivedModels.Count > 0)
-        {
-            graph.Use(IndexPool, GpuAccess.CopyDestination);
-            graph.Use(ClusterPool, GpuAccess.CopyDestination);
-        }
-
         foreach ((MeshDerived derived, ResidentModel where) in _arrivedModels)
         {
-            graph.Upload(gpu, VertexPool, derived.Vertices.AsSpan(), (ulong)where.VertexOffset * GpuVertex.Bytes);
+            graph.Upload(VertexPool, derived.Vertices.AsSpan(), (ulong)where.VertexOffset * GpuVertex.Bytes);
 
             // Indices point into the whole pool, and clusters into the whole index pool.
-            int indexBytes = derived.Indices.Length * sizeof(uint);
-            GpuUpload indices = gpu.BeginUpload(indexBytes);
-            Span<uint> rebased = MemoryMarshal.Cast<byte, uint>(indices.Bytes);
+            Span<uint> rebased = graph.Upload<uint>(
+                IndexPool,
+                derived.Indices.Length,
+                (ulong)where.IndexOffset * sizeof(uint)
+            );
             for (int i = 0; i < derived.Indices.Length; i++)
             {
                 rebased[i] = derived.Indices[i] + where.VertexOffset;
             }
 
-            graph.CopyBuffer(
-                indices.Buffer,
-                indices.Offset,
-                IndexPool,
-                (ulong)where.IndexOffset * sizeof(uint),
-                (ulong)indexBytes
+            Span<GpuCluster> rows = graph.Upload<GpuCluster>(
+                ClusterPool,
+                derived.Clusters.Length,
+                (ulong)where.ClusterOffset * GpuCluster.Bytes
             );
-
-            int clusterBytes = derived.Clusters.Length * GpuCluster.Bytes;
-            GpuUpload clusters = gpu.BeginUpload(clusterBytes);
-            Span<GpuCluster> rows = MemoryMarshal.Cast<byte, GpuCluster>(clusters.Bytes);
             for (int i = 0; i < derived.Clusters.Length; i++)
             {
                 GpuCluster cluster = derived.Clusters[i];
@@ -457,30 +411,63 @@ internal sealed class GpuResources(
                 rows[i] = cluster;
             }
 
-            graph.CopyBuffer(
-                clusters.Buffer,
-                clusters.Offset,
-                ClusterPool,
-                (ulong)where.ClusterOffset * GpuCluster.Bytes,
-                (ulong)clusterBytes
-            );
             UploadLeaves(graph, derived, where);
+            if (where.ImpostorRow != 0)
+                UploadImpostor(graph, derived, where);
         }
 
         _arrivedModels.Clear();
-        foreach ((Texture asset, GpuTexture texture) in _arrivedTextures)
+        foreach (TextureEntry entry in _textures.Values)
         {
-            graph.Use(texture, GpuAccess.CopyDestination);
+            Ask(graph, entry);
+        }
+
+        foreach ((Texture asset, TextureEntry entry) in _arrivedTextures)
+        {
+            if (entry.State != ResourceState.Ready)
+                continue;
+
             for (int level = 0; level < asset.Levels.Length; level++)
             {
                 TextureLevel source = asset.Levels[level];
-                GpuUpload upload = gpu.BeginUpload(source.Size);
-                asset.Pixels.Span.Slice(source.Offset, source.Size).CopyTo(upload.Bytes);
-                graph.CopyBufferToTexture(upload.Buffer, upload.Offset, texture, level);
+                graph.Upload(entry.Texture, asset.Pixels.Span.Slice(source.Offset, source.Size), level);
             }
         }
 
         _arrivedTextures.Clear();
+    }
+
+    /// <summary>
+    /// The texture and its sampler asked for, once it was read, and ready with their heap ids; failed, and drawn as the
+    /// failure, when either was not made.
+    /// </summary>
+    private static void Ask(RenderGraph graph, TextureEntry entry)
+    {
+        if (entry.State == ResourceState.Failed || entry.Description is not { } description)
+            return;
+
+        Result<GpuTexture> texture = graph.Texture(description);
+        Result<GpuSampler> sampler = graph.Sampler(entry.SamplerDescription);
+        Result made = !texture.Ok ? texture : sampler;
+        if (!made.Ok)
+        {
+            Log.Error($"{description.Name} is drawn as a failure: {made.Error}");
+            entry.State = ResourceState.Failed;
+
+            return;
+        }
+
+        entry.Texture = texture.Value;
+        entry.Sampler = sampler.Value;
+        entry.State = ResourceState.Ready;
+    }
+
+    private static FreeList CreateImpostorRows()
+    {
+        FreeList rows = new(ImpostorCapacity);
+        rows.Allocate(1);
+
+        return rows;
     }
 
     private static GpuFormat ToGpu(TextureFormat format) =>
@@ -524,38 +511,6 @@ internal sealed class GpuResources(
 
     private bool IsUnused(ulong model, long now) => now - _askedModels[model] >= UnusedSec * 1000L;
 
-    /// <summary>
-    /// What <paramref name="description"/> makes, under <paramref name="name"/> in <paramref name="made"/>: made on the
-    /// first ask, the same one while the name is asked for with the same description, so what it holds carries from frame
-    /// to frame, and made again, the old one destroyed, when the description changes.
-    /// </summary>
-    private Result<T> TryGet<TDescription, T>(
-        Dictionary<string, (TDescription Description, T Made)> made,
-        TDescription description,
-        string name,
-        Func<IGraphicsApi, TDescription, Result<T>> create,
-        Action<IGraphicsApi, T> destroy
-    )
-        where TDescription : struct, IEquatable<TDescription>
-    {
-        if (made.TryGetValue(name, out (TDescription Description, T Made) old))
-        {
-            if (old.Description.Equals(description))
-                return Result.Success(old.Made);
-
-            destroy(gpu, old.Made);
-            made.Remove(name);
-        }
-
-        Result<T> created = create(gpu, description);
-        if (!created.Ok)
-            return Result.Failure($"the {name} was not made: {created.Error}");
-
-        made[name] = (description, created.Value);
-
-        return created;
-    }
-
     private async Task LoadAsync(Handle<Material> handle)
     {
         Result<Material> loaded = await assets.LoadAsync(handle, null, CancellationToken.None).ConfigureAwait(false);
@@ -586,47 +541,24 @@ internal sealed class GpuResources(
             return;
         }
 
+        // The next upload asks for the texture and its sampler and copies its levels in.
         Texture asset = loaded.Value;
-        Result<GpuTexture> texture = gpu.CreateTexture(
-            new TextureDescription
-            {
-                Width = asset.Width,
-                Height = asset.Height,
-                Format = ToGpu(asset.Format),
-                Usage = TextureUsages.Sampled | TextureUsages.CopyDestination,
-                Levels = asset.Levels.Length,
-                Name = name,
-            }
-        );
-        if (!texture.Ok)
+        entry.Description = new TextureDescription
         {
-            Log.Error($"{name} is drawn as a failure: {texture.Error}");
-            entry.State = ResourceState.Failed;
-
-            return;
-        }
-
-        Result<GpuSampler> sampler = TryGetSampler(
-            new SamplerDescription
-            {
-                Filter = asset.Filter,
-                Wrap = asset.Wrap,
-                Anisotropy = asset.Filter == TextureFilter.Linear ? 8 : 1,
-            }
-        );
-        if (!sampler.Ok)
+            Width = asset.Width,
+            Height = asset.Height,
+            Format = ToGpu(asset.Format),
+            Usage = TextureUsages.Sampled | TextureUsages.CopyDestination,
+            Levels = asset.Levels.Length,
+            Name = name,
+        };
+        entry.SamplerDescription = new SamplerDescription
         {
-            Log.Error($"{name} is drawn as a failure: {sampler.Error}");
-            gpu.Destroy(texture.Value);
-            entry.State = ResourceState.Failed;
-
-            return;
-        }
-
-        entry.Texture = texture.Value;
-        entry.Sampler = sampler.Value;
-        entry.State = ResourceState.Ready;
-        _arrivedTextures.Add((asset, texture.Value));
+            Filter = asset.Filter,
+            Wrap = asset.Wrap,
+            Anisotropy = asset.Filter == TextureFilter.Linear ? 8 : 1,
+        };
+        _arrivedTextures.Add((asset, entry));
     }
 
     private async Task LoadAsync(Handle<Model> model)
@@ -659,7 +591,17 @@ internal sealed class GpuResources(
             return;
         }
 
-        MeshDerived made = derived.Value;
+        _madeModels.Add((model.Id, name, derived.Value));
+    }
+
+    /// <summary>
+    /// The model made into the pools' ranges, with its acceleration structure over its leaf clusters on a GPU that
+    /// traces rays and its impostor's table row and atlases when it baked one, all copied up by the next upload; the
+    /// failure model when the pools are full.
+    /// </summary>
+    private void Settle(RenderGraph graph, ulong model, string name, MeshDerived made)
+    {
+        SettledModels++;
         bool fits =
             _vertexRanges.CanAllocate(made.Vertices.Length)
             && _indexRanges.CanAllocate(made.Indices.Length)
@@ -667,8 +609,7 @@ internal sealed class GpuResources(
         if (!fits)
         {
             Log.Error($"{name} is drawn as the failure model: the geometry pools are full.");
-            _failedModels.Add(model.Id);
-            SettledModels++;
+            _failedModels.Add(model);
 
             return;
         }
@@ -683,15 +624,27 @@ internal sealed class GpuResources(
             made.BoundsCenter,
             made.BoundsRadius
         );
-        if (gpu.Features.HasRayQuery)
-            where = CreateAcceleration(name, made, where);
+        // A leaf table is there only on a GPU that traces rays.
+        if (!LeafClusters.IsNone)
+            where = AskAcceleration(graph, name, made, where);
+
+        // A model that baked an impostor gets a row of the impostor table, and its atlases' descriptions, which the graph
+        // makes on the first ask and keeps while frames read them.
+        if (!made.Impostor.IsEmpty && _impostorRows.CanAllocate(1))
+        {
+            where = where with
+            {
+                Impostor = GetAtlasDescription($"{name} impostor", GpuFormat.R16G16B16A16Sfloat),
+                ImpostorUv = GetAtlasDescription($"{name} impostor uv", GpuFormat.R16G16Sfloat),
+                ImpostorRow = (uint)_impostorRows.Allocate(1),
+            };
+        }
 
         // An arrival is a use, so a model that took longer to make than it may go unused is copied up before it can be
         // evicted.
-        _askedModels[model.Id] = Environment.TickCount64;
-        _residentModels[model.Id] = where;
+        _askedModels[model] = Environment.TickCount64;
+        _residentModels[model] = where;
         _arrivedModels.Add((made, where));
-        SettledModels++;
         int leafTriangles = 0;
         foreach (GpuCluster cluster in made.Clusters)
         {
@@ -705,10 +658,10 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// The model's place with its acceleration structure over its leaf clusters, a geometry each, and their range in the
-    /// leaf table; as it was, with none, when the structure could not be made.
+    /// The model's place with its acceleration structure over its leaf clusters, a geometry each, asked for, what it is
+    /// made to, and their range in the leaf table; as it was, with none, when the structure could not be made.
     /// </summary>
-    private ResidentModel CreateAcceleration(string name, MeshDerived made, ResidentModel where)
+    private ResidentModel AskAcceleration(RenderGraph graph, string name, MeshDerived made, ResidentModel where)
     {
         List<TriangleGeometry> geometries = [];
         foreach (GpuCluster cluster in made.Clusters)
@@ -732,9 +685,8 @@ internal sealed class GpuResources(
         if (geometries.Count == 0 || !_leafRanges.CanAllocate(geometries.Count))
             return where;
 
-        Result<GpuAcceleration> acceleration = gpu.CreateAcceleration(
-            new BottomLevelDescription { Geometries = [.. geometries], Name = $"{name} acceleration" }
-        );
+        BottomLevelDescription description = new() { Geometries = [.. geometries], Name = $"{name} acceleration" };
+        Result<GpuAcceleration> acceleration = graph.Acceleration(description);
         if (!acceleration.Ok)
         {
             Log.Warn($"{name} has no acceleration structure, so rays pass through it: {acceleration.Error}");
@@ -747,6 +699,7 @@ internal sealed class GpuResources(
             LeafOffset = (uint)_leafRanges.Allocate(geometries.Count),
             LeafCount = (uint)geometries.Count,
             Acceleration = acceleration.Value,
+            AccelerationDescription = description,
         };
     }
 
@@ -766,13 +719,65 @@ internal sealed class GpuResources(
                 leaves.Add(where.ClusterOffset + (uint)i);
         }
 
-        graph.Upload(gpu, LeafClusters, CollectionsMarshal.AsSpan(leaves), (ulong)where.LeafOffset * sizeof(uint));
+        graph.Upload(LeafClusters, CollectionsMarshal.AsSpan(leaves), (ulong)where.LeafOffset * sizeof(uint));
         graph.BuildAcceleration(where.Acceleration);
     }
 
+    /// <summary>
+    /// An impostor atlas of <see cref="MeshDerived.ImpostorSize"/> texels a side, in <paramref name="format"/>.
+    /// </summary>
+    private static TextureDescription GetAtlasDescription(string name, GpuFormat format) =>
+        new()
+        {
+            Width = MeshDerived.ImpostorSize,
+            Height = MeshDerived.ImpostorSize,
+            Format = format,
+            Usage = TextureUsages.Sampled | TextureUsages.CopyDestination,
+            Levels = 1,
+            Name = name,
+        };
+
+    /// <summary>
+    /// The model's impostor atlases asked of the graph and copied up, and its row of the impostor table written; the row
+    /// stays empty when an atlas was not made, and the model draws no impostor.
+    /// </summary>
+    private void UploadImpostor(RenderGraph graph, MeshDerived derived, ResidentModel where)
+    {
+        if (where.Impostor is not { } atlasDescription || where.ImpostorUv is not { } uvDescription)
+            return;
+
+        Result<GpuTexture> atlas = graph.Texture(atlasDescription);
+        Result<GpuTexture> uvAtlas = graph.Texture(uvDescription);
+        if (!atlas.Ok || !uvAtlas.Ok)
+        {
+            Log.Warn($"{atlasDescription.Name} is not drawn: {(atlas.Ok ? uvAtlas.Error : atlas.Error)}");
+
+            return;
+        }
+
+        graph.Upload(atlas.Value, MemoryMarshal.AsBytes(derived.Impostor.AsSpan()));
+        graph.Upload(uvAtlas.Value, MemoryMarshal.AsBytes(derived.ImpostorUv.AsSpan()));
+        GpuImpostor row = new()
+        {
+            BoundsMin = derived.BoundsMin,
+            Atlas = atlas.Value.Id,
+            BoundsMax = derived.BoundsMax,
+            UvAtlas = uvAtlas.Value.Id,
+        };
+        graph.Upload(ImpostorTable, [row], (ulong)where.ImpostorRow * GpuImpostor.Bytes);
+    }
+
+    /// <summary>
+    /// A texture asked for: where it is in the loading, what it and its sampler are made to once it is read, and their
+    /// heap ids once they are made.
+    /// </summary>
     private sealed class TextureEntry
     {
         public ResourceState State { get; set; }
+
+        public TextureDescription? Description { get; set; }
+
+        public SamplerDescription SamplerDescription { get; set; }
 
         public GpuTexture Texture { get; set; }
 
@@ -796,5 +801,9 @@ internal readonly record struct ResidentModel(
     bool IsFailure = false,
     uint LeafOffset = 0,
     uint LeafCount = 0,
-    GpuAcceleration Acceleration = default
+    GpuAcceleration Acceleration = default,
+    BottomLevelDescription? AccelerationDescription = null,
+    TextureDescription? Impostor = null,
+    TextureDescription? ImpostorUv = null,
+    uint ImpostorRow = 0
 );

@@ -1,7 +1,6 @@
+using System.Collections.Immutable;
 using Magic.Assets;
-using Magic.Gpu;
 using Magic.Rendering;
-using Magic.Shaders;
 using Magic.Utils;
 
 namespace Magic.GIRendering;
@@ -17,11 +16,11 @@ internal readonly record struct SkyTables(GpuTexture Transmittance, GpuTexture M
 /// </summary>
 internal sealed class SkyLuts(AssetManager assets)
 {
-    private const string Module = "Shaders/SkyLuts.slang";
+    private readonly ShaderEntry _transmittanceShader = PassShaders.GetEntry(assets, "SkyLuts", "SkyTransmittance");
+    private readonly ShaderEntry _multiScatteringShader = PassShaders.GetEntry(assets, "SkyLuts", "SkyMultiScattering");
+    private readonly ShaderEntry _viewShader = PassShaders.GetEntry(assets, "SkyLuts", "SkyView");
 
-    private readonly ShaderEntry _transmittanceShader = GetEntry(assets, "SkyTransmittance");
-    private readonly ShaderEntry _multiScatteringShader = GetEntry(assets, "SkyMultiScattering");
-    private readonly ShaderEntry _viewShader = GetEntry(assets, "SkyView");
+    public ImmutableArray<ShaderEntry> Shaders => [_transmittanceShader, _multiScatteringShader, _viewShader];
 
     /// <summary>
     /// The tables asked for, before the lighting constants name them.
@@ -38,24 +37,6 @@ internal sealed class SkyLuts(AssetManager assets)
         }
 
         return Result.Success(new SkyTables(transmittance.Value, multiScattering.Value, view.Value));
-    }
-
-    /// <summary>
-    /// Where the three passes' shaders are: failed if any failed, loading while any loads, else ready. Each is asked,
-    /// so the first ask starts all three.
-    /// </summary>
-    public GpuState GetState(RenderGraph graph)
-    {
-        ReadOnlySpan<GpuState> states =
-        [
-            graph.GetState(_transmittanceShader),
-            graph.GetState(_multiScatteringShader),
-            graph.GetState(_viewShader),
-        ];
-        if (states.Contains(GpuState.Failed))
-            return GpuState.Failed;
-
-        return states.Contains(GpuState.Loading) ? GpuState.Loading : GpuState.Ready;
     }
 
     public void Record(
@@ -83,21 +64,6 @@ internal sealed class SkyLuts(AssetManager assets)
             .DispatchOver(192, 108);
     }
 
-    private static ShaderEntry GetEntry(AssetManager assets, string name) =>
-        new()
-        {
-            Module = assets.Find<Shader>(Module),
-            Name = name,
-            Stage = ShaderStage.Compute,
-        };
-
     private static TextureDescription GetTable(string name, int width, int height) =>
-        new()
-        {
-            Width = width,
-            Height = height,
-            Format = GpuFormat.R16G16B16A16Sfloat,
-            Usage = TextureUsages.Storage | TextureUsages.Sampled,
-            Name = name,
-        };
+        GpuDescriptions.GetTexture(name, width, height, GpuFormat.R16G16B16A16Sfloat);
 }

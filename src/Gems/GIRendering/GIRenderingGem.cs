@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using System.Linq;
 using System.Numerics;
 using System.Threading.Channels;
@@ -8,11 +9,9 @@ using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Events;
 using Magic.Files;
-using Magic.Gpu;
 using Magic.Input;
 using Magic.Projects;
 using Magic.Rendering;
-using Magic.Shaders;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
@@ -45,7 +44,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly Channel<ScreenshotRequested> _screenshots = Channel.CreateUnbounded<ScreenshotRequested>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
     );
-    private readonly GpuPipelines _pipelines;
     private readonly GpuResources _resources;
     private readonly RayTracing? _rayTracing;
     private readonly InstanceTable _instances;
@@ -64,12 +62,24 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly RendererDebugWindow? _debugWindow;
 
     /// <summary>
-    /// Ends the start when the gem is disposed before it is done, so nothing is made for a gem that is gone.
+    /// Every shader the areas' passes run, which the GPU provider builds before the frame is drawn.
     /// </summary>
-    private readonly CancellationTokenSource _stopping = new();
+    private readonly ImmutableArray<ShaderEntry> _shaders;
     private readonly Subscription _preprocessing;
 
     private DebugView _debugView;
+
+    /// <summary>
+    /// The pixel radius on screen under which an instance hands off to its impostor: half an atlas view, so an impostor
+    /// is never magnified. Set with GIRendering.impostorPixels; 0 hands off by distance alone.
+    /// </summary>
+    private float _impostorPixels = MeshDerived.ImpostorTile / 2;
+
+    /// <summary>
+    /// The distance in metres to an instance past which it hands off to its impostor, however large on screen. Set with
+    /// GIRendering.impostorDistance; 0 hands off by size alone.
+    /// </summary>
+    private float _impostorDistance = 1000;
 
     /// <summary>
     /// The inputs <see cref="Render"/> draws, taken from <see cref="_inputs"/>, until newer are. Render thread.
@@ -78,10 +88,9 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private bool _hasDrawn;
 
     /// <summary>
-    /// How the start ended: null while the passes compile, then whether the pipelines and the pools were made. Render
-    /// thread.
+    /// Whether the renderer draws: failed once a shader or a pool is not made. Render thread.
     /// </summary>
-    private Result? _started;
+    private Result _started = Result.Success();
 
     /// <summary>
     /// What a domain loading needs on the GPU before it shows, until <see cref="Render"/> has uploaded it all. Render
@@ -91,7 +100,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
     public GIRenderingGem(
         IGraphicsApi gpu,
-        IShaderCompiler shaders,
         AssetManager assets,
         Caches caches,
         IEcs ecs,
@@ -109,31 +117,34 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _app = app;
         _events = events;
         _threads = threads;
-        _pipelines = new GpuPipelines(gpu, shaders, assets);
         ModelPreprocessor models = new();
         _preprocessing = assets.Register(models);
-        _resources = new GpuResources(gpu, models, caches, assets, threads);
+        _resources = new GpuResources(models, caches, assets, threads);
         _failure = new MaterialInstance { Handle = assets.GetFailure<Material, Model>() };
-        _instances = new InstanceTable(gpu, assets, _resources, _failure);
-        _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(gpu, _resources) : null;
-        _visibility = new Visibility(gpu, _pipelines, _resources);
-        _frameView = new FrameView(gpu, _resources);
+        _instances = new InstanceTable(assets, _resources, _failure);
+        _rayTracing = gpu.Features.HasRayQuery ? new RayTracing() : null;
+        _visibility = new Visibility(assets, _resources);
+        _frameView = new FrameView(_resources);
         _sky = new SkyLuts(assets);
-        _lightTiles = new LightTiles(gpu, _resources, _pipelines);
-        _shadowMask = _rayTracing is null ? null : new ShadowMask(gpu, _pipelines, _resources);
-        _lighting = new Lighting(gpu, _resources, _pipelines);
-        _surfaceView = new SurfaceView(_pipelines);
-        StartAsync().FireAndForget();
+        _lightTiles = new LightTiles(assets);
+        _shadowMask = _rayTracing is null ? null : new ShadowMask(assets, _resources);
+        _lighting = new Lighting(assets);
+        _surfaceView = new SurfaceView(assets);
+        _shaders =
+        [
+            .. _visibility.Shaders,
+            .. _sky.Shaders,
+            .. _lightTiles.Shaders,
+            .. _shadowMask?.Shaders ?? [],
+            .. _lighting.Shaders,
+            .. _surfaceView.Shaders,
+        ];
     }
 
     public void Dispose()
     {
         _preprocessing.Dispose();
-        _stopping.Cancel();
-        _stopping.Dispose();
         EndPreparing();
-        _pipelines.Dispose();
-        _resources.Dispose();
     }
 
     /// <summary>
@@ -165,6 +176,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _ecs.Snapshot(back.RectLights);
         _ecs.Snapshot(back.Skies);
         back.DebugView = _debugView;
+        back.ImpostorPixels = _impostorPixels;
+        back.ImpostorDistance = _impostorDistance;
         (back.Width, back.Height) = _app.Window is { Width: > 0, Height: > 0 } window
             ? (window.Width, window.Height)
             : (DefaultWidth, DefaultHeight);
@@ -181,16 +194,29 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph)
     {
-        if (_started is not { Ok: true })
+        if (!_started.Ok)
             return;
 
-        // The sky's shaders are the GPU provider's to build; one that fails ends the start as a pipeline would.
-        GpuState skyShaders = _sky.GetState(graph);
-        if (skyShaders == GpuState.Failed)
-            FailStart("a sky shader was not built.");
+        // The shaders are the GPU provider's to build, the first ask starting each; one that fails ends the start.
+        GpuState shaders = GetState(graph, _shaders.AsSpan());
+        if (shaders == GpuState.Failed)
+            FailStart("a shader was not built.");
 
-        if (skyShaders != GpuState.Ready)
+        if (shaders != GpuState.Ready)
             return;
+
+        // The pools before any model is asked for, whose acceleration structure names them, and every frame, so what
+        // they hold stays.
+        Result pools = _resources.Prepare(graph);
+        if (!pools.Ok)
+        {
+            FailStart(pools.Error);
+
+            return;
+        }
+
+        // The models made since the last frame settle into the pools before any renderer's row is built.
+        _resources.SettleModels(graph);
 
         if (_inputs.TryTake(out RenderInputs? newest))
         {
@@ -218,16 +244,12 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             EndPreparing();
         }
 
-        graph.BeginTransferPass("Upload arrivals");
         _resources.Upload(graph);
-        graph.EndPass();
 
         // The frame's tables, and the view's targets at the window's size.
         RenderCamera camera = GetCamera(inputs.Cameras);
         RenderSun sun = GetSun(inputs.DirectionalLights);
-        graph.BeginTransferPass("Upload frame");
         Result<UploadedFrame> uploaded = UploadFrame(graph, inputs, camera, sun, frame.Index, instanceCount);
-        graph.EndPass();
         if (!uploaded.Ok)
         {
             Log.Error($"The frame is not drawn: {uploaded.Error}");
@@ -252,15 +274,9 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _lighting.Record(view, header, lighting, sky, lights, shadows);
         _surfaceView.Record(view, inputs.DebugView, sun.Exposure);
 
-        GpuTexture target = _gpu.WindowTarget;
+        GpuTexture target = graph.WindowTarget;
         if (!target.IsNone)
-        {
-            graph.BeginTransferPass("Show");
-            graph.Use(view.Output, GpuAccess.CopySource);
-            graph.Use(target, GpuAccess.CopyDestination);
-            graph.BlitTexture(view.Output, target);
-            graph.EndPass();
-        }
+            graph.Blit(view.Output, target);
 
         // One readback buffer, so one screenshot a frame: the last asked for.
         ScreenshotRequested? shot = null;
@@ -300,7 +316,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     )
     {
         await _threads.Enter(EngineThread.Render);
-        if (_started is { Ok: false })
+        if (!_started.Ok)
             return;
 
         Renderer[] renderers =
@@ -329,6 +345,25 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         );
         _preparing = preparing;
         await preparing.Done.Task.WaitAsync(cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Where <paramref name="shaders"/> are: failed if any failed, loading while any loads, else ready. Each is asked,
+    /// so the first ask starts them all.
+    /// </summary>
+    private static GpuState GetState(RenderGraph graph, ReadOnlySpan<ShaderEntry> shaders)
+    {
+        GpuState all = GpuState.Ready;
+        foreach (ShaderEntry shader in shaders)
+        {
+            GpuState state = graph.GetState(shader);
+            if (state == GpuState.Failed)
+                all = GpuState.Failed;
+            else if (state == GpuState.Loading && all == GpuState.Ready)
+                all = GpuState.Loading;
+        }
+
+        return all;
     }
 
     /// <summary>
@@ -415,31 +450,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     }
 
     /// <summary>
-    /// Compiles the passes on a worker, then makes the pipelines from them and the pools on the render
-    /// thread, whose the GPU is: a run that ends before that draws nothing, and finds a shader that does not compile only
-    /// if it runs long enough to.
-    /// </summary>
-    private async Task StartAsync()
-    {
-        CancellationToken stopping = _stopping.Token;
-        Result<ImmutableArray<CompiledShader>> compiled = await _pipelines.CompileAsync(stopping).ConfigureAwait(false);
-        await _threads.Enter(EngineThread.Render);
-        stopping.ThrowIfCancellationRequested();
-        Result made = compiled.Ok ? _pipelines.Create(compiled.Value) : Result.Failure(compiled.Error);
-        if (made.Ok)
-            made = _resources.Create();
-
-        if (!made.Ok)
-        {
-            FailStart(made.Error);
-
-            return;
-        }
-
-        _started = made;
-    }
-
-    /// <summary>
     /// Ends the start as failed: the renderer draws nothing, and holds no domain back.
     /// </summary>
     private void FailStart(string error)
@@ -462,13 +472,16 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         int instanceCount
     )
     {
-        // The world's structure is built again only when the rows changed, before their upload marks them unchanged; a
-        // model's arrival builds every row again, so it builds the structure too.
-        if (_rayTracing is not null && _instances.HasChanges)
+        // The world's structure is asked for every frame, so it stays, and built again only when the rows changed, before
+        // their upload marks them unchanged; a model's arrival builds every row again, so it builds the structure too.
+        if (_rayTracing is not null)
         {
-            Result built = _rayTracing.Build(graph, _instances.Rows, _instances.Extras);
-            if (!built.Ok)
-                return Result.Failure(built.Error);
+            Result<TracedWorld> world = RayTracing.Prepare(graph);
+            if (!world.Ok)
+                return Result.Failure(world.Error);
+
+            if (_instances.HasChanges)
+                _rayTracing.Build(graph, world.Value, _instances.Rows, _instances.Extras);
         }
 
         Result<(GpuBuffer Rows, GpuBuffer Materials)> tables = _instances.Upload(graph);
@@ -476,7 +489,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             return Result.Failure(tables.Error);
 
         // The cull's buffers before the view's constants, which name them.
-        Result<CullBuffers> cull = _visibility.Prepare(graph);
+        Result<CullBuffers> cull = Visibility.Prepare(graph);
         if (!cull.Ok)
             return Result.Failure(cull.Error);
 
@@ -491,7 +504,9 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             tables.Value.Rows,
             tables.Value.Materials,
             cull.Value,
-            _rayTracing?.Acceleration ?? GpuAcceleration.None
+            _rayTracing?.Acceleration ?? GpuAcceleration.None,
+            inputs.ImpostorPixels,
+            inputs.ImpostorDistance
         );
         if (!view.Ok)
             return Result.Failure(view.Error);
@@ -534,10 +549,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     /// </summary>
     private void SaveScreenshot(RenderGraph graph, in RenderView view, string path)
     {
-        Result<GpuBuffer> readback = _resources.TryGetBuffer(
-            "Output readback",
-            (long)view.Width * view.Height * 4,
-            BufferUsages.Readback
+        Result<GpuBuffer> readback = graph.Buffer(
+            GpuDescriptions.GetBuffer("Output readback", (long)view.Width * view.Height * 4, BufferUsages.Readback)
         );
         if (!readback.Ok)
         {
@@ -546,7 +559,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             return;
         }
 
-        Screenshot.RecordReadback(graph, view.Output, readback.Value);
+        graph.ReadBack(view.Output, readback.Value);
         Screenshot.SaveAsync(_gpu, _assets, readback.Value, path, view.Width, view.Height).FireAndForget();
     }
 
@@ -558,6 +571,26 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
                 _debugWindow.IsOpen = isOpen;
             else
                 Log.Error($"{setting.Key} takes true or false, with a debug UI to draw it, not '{setting.Value}'.");
+
+            return;
+        }
+
+        if (setting.Key == "GIRendering.impostorPixels")
+        {
+            if (float.TryParse(setting.Value, CultureInfo.InvariantCulture, out float pixels) && pixels >= 0)
+                _impostorPixels = pixels;
+            else
+                Log.Error($"{setting.Key} takes a pixel radius of 0 or more, not '{setting.Value}'.");
+
+            return;
+        }
+
+        if (setting.Key == "GIRendering.impostorDistance")
+        {
+            if (float.TryParse(setting.Value, CultureInfo.InvariantCulture, out float metres) && metres >= 0)
+                _impostorDistance = metres;
+            else
+                Log.Error($"{setting.Key} takes a distance in metres of 0 or more, not '{setting.Value}'.");
 
             return;
         }

@@ -1,8 +1,10 @@
+using System.Collections.Immutable;
 using System.Numerics;
+using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Gpu;
+using Magic.Rendering;
 using Magic.Utils;
 
 namespace Magic.GIRendering;
@@ -16,7 +18,7 @@ internal readonly record struct LightBuffers(GpuBuffer Table, GpuBuffer Tiles, i
 /// The light table and the tiles of the screen each light reaches: the world's local lights uploaded each frame, and a
 /// pass that sets each tile's bit for every light that touches what the tile shows.
 /// </summary>
-internal sealed class LightTiles(IGraphicsApi gpu, GpuResources resources, GpuPipelines pipelines)
+internal sealed class LightTiles(AssetManager assets)
 {
     /// <summary>
     /// The twin of <c>Scene/Lights.slang</c>'s.
@@ -35,9 +37,11 @@ internal sealed class LightTiles(IGraphicsApi gpu, GpuResources resources, GpuPi
     /// </summary>
     private readonly GpuLight[] _lights = new GpuLight[MaxLights];
 
-    private readonly GpuPass _cullPass = pipelines.Compute("Cull lights", "CullLights", "CullLights");
+    private readonly ShaderEntry _cullShader = PassShaders.GetEntry(assets, "CullLights", "CullLights");
 
     private bool _isFullLogged;
+
+    public ImmutableArray<ShaderEntry> Shaders => [_cullShader];
 
     /// <summary>
     /// The table and the view's tiles asked for, and the world's lights into the table, point lights first, in a
@@ -50,13 +54,17 @@ internal sealed class LightTiles(IGraphicsApi gpu, GpuResources resources, GpuPi
         EcsSnapshot<Transform, RectLight> rects
     )
     {
-        Result<GpuBuffer> table = resources.TryGetBuffer("Light table", (long)MaxLights * GpuLight.Bytes);
+        Result<GpuBuffer> table = view.Graph.Buffer(
+            GpuDescriptions.GetBuffer("Light table", (long)MaxLights * GpuLight.Bytes)
+        );
         if (!table.Ok)
             return Result.Failure(table.Error);
 
-        Result<GpuBuffer> tiles = resources.TryGetBuffer(
-            "Light tiles",
-            (long)GetTiles(view.Width) * GetTiles(view.Height) * Buckets * sizeof(uint)
+        Result<GpuBuffer> tiles = view.Graph.Buffer(
+            GpuDescriptions.GetBuffer(
+                "Light tiles",
+                (long)GetTiles(view.Width) * GetTiles(view.Height) * Buckets * sizeof(uint)
+            )
         );
         if (!tiles.Ok)
             return Result.Failure(tiles.Error);
@@ -88,7 +96,7 @@ internal sealed class LightTiles(IGraphicsApi gpu, GpuResources resources, GpuPi
             _lights[row++] = ToGpuLight(rects.First[i], rects.Second[i]);
         }
 
-        view.Graph.Upload(gpu, lights.Table, _lights.AsSpan(0, lights.Count));
+        view.Graph.Upload(lights.Table, _lights.AsSpan(0, lights.Count));
 
         return Result.Success(lights);
     }
@@ -98,8 +106,7 @@ internal sealed class LightTiles(IGraphicsApi gpu, GpuResources resources, GpuPi
     /// </summary>
     public void Record(in RenderView view, in GpuConstants header, GpuBuffer lightingConstants, in LightBuffers lights)
     {
-        _cullPass
-            .Run(view.Graph, header)
+        view.Graph.Compute("Cull lights", _cullShader, header)
             .Reads(view.Constants, lightingConstants, lights.Table, view.Depth)
             .Writes(lights.Tiles)
             .Dispatch((uint)GetTiles(view.Width), (uint)GetTiles(view.Height));

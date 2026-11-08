@@ -1,4 +1,4 @@
-using Magic.Gpu;
+using System.Drawing;
 
 namespace Magic.Rendering;
 
@@ -65,13 +65,69 @@ public readonly ref struct ComputePass
 
     private ComputePass Use(scoped ReadOnlySpan<GpuResource> resources, GpuAccess access)
     {
-        foreach (GpuResource resource in resources)
-        {
-            if (resource.IsTexture)
-                _graph.Use(resource.Texture, access);
-            else
-                _graph.Use(resource.Buffer, access);
-        }
+        _graph.Use(resources, access);
+
+        return this;
+    }
+}
+
+/// <summary>
+/// One indexed draw of a <see cref="DrawPass"/>: <see cref="IndexCount"/> indices from <see cref="FirstIndex"/> on,
+/// drawn only inside <see cref="Scissor"/>'s pixels of the target, with <see cref="Constants"/> pushed over the pass's.
+/// </summary>
+public readonly record struct IndexedDraw
+{
+    public required Rectangle Scissor { get; init; }
+
+    public required GpuConstants Constants { get; init; }
+
+    public required uint IndexCount { get; init; }
+
+    public uint FirstIndex { get; init; }
+}
+
+/// <summary>
+/// A draw pass being recorded, begun by <see cref="RenderGraph.Draw"/>: say what it reads, which the GPU provider puts
+/// the barriers in for, then end it with what it draws.
+/// </summary>
+public readonly ref struct DrawPass
+{
+    private readonly RenderGraph _graph;
+
+    internal DrawPass(RenderGraph graph) => _graph = graph;
+
+    public DrawPass Reads(params ReadOnlySpan<GpuResource> resources) => Use(resources, GpuAccess.ShaderRead);
+
+    public DrawPass Indirect(params ReadOnlySpan<GpuResource> resources) => Use(resources, GpuAccess.Indirect);
+
+    /// <summary>
+    /// As <see cref="RenderGraph.DrawIndirectCount"/> draws.
+    /// </summary>
+    public void DrawIndirectCount(
+        GpuBuffer arguments,
+        ulong argumentsOffset,
+        GpuBuffer count,
+        ulong countOffset,
+        uint maxDraws,
+        uint stride = 16
+    )
+    {
+        _graph.DrawIndirectCount(arguments, argumentsOffset, count, countOffset, maxDraws, stride);
+        _graph.EndPass();
+    }
+
+    /// <summary>
+    /// Each of <paramref name="draws"/> in order, their 32-bit indices read from <paramref name="indices"/>.
+    /// </summary>
+    public void DrawIndexed(GpuBuffer indices, scoped ReadOnlySpan<IndexedDraw> draws)
+    {
+        _graph.DrawIndexed(indices, draws);
+        _graph.EndPass();
+    }
+
+    private DrawPass Use(scoped ReadOnlySpan<GpuResource> resources, GpuAccess access)
+    {
+        _graph.Use(resources, access);
 
         return this;
     }

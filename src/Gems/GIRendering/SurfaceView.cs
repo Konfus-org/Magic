@@ -1,4 +1,6 @@
-using Magic.Gpu;
+using System.Collections.Immutable;
+using Magic.Assets;
+using Magic.Rendering;
 
 namespace Magic.GIRendering;
 
@@ -45,15 +47,17 @@ internal enum DebugView : uint
 /// <summary>
 /// The output drawn from the lit picture, or from one of the GBuffer's properties when a debug view asks.
 /// </summary>
-internal sealed class SurfaceView(GpuPipelines pipelines)
+internal sealed class SurfaceView(AssetManager assets)
 {
-    private readonly GpuPass _showPass = pipelines.Compute("Show surface", "ShowSurface", "ShowSurface");
+    private readonly ShaderEntry _showShader = PassShaders.GetEntry(assets, "ShowSurface", "ShowSurface");
+
+    public ImmutableArray<ShaderEntry> Shaders => [_showShader];
 
     public void Record(in RenderView view, DebugView debugView, float exposure)
     {
-        _showPass
-            .Run(
-                view.Graph,
+        view.Graph.Compute(
+                "Show surface",
+                _showShader,
                 new GpuConstants(
                     view.Constants.Id,
                     (uint)debugView,
