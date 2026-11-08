@@ -54,6 +54,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private readonly ShadowMask? _shadowMask;
     private readonly Probes? _probes;
     private readonly TracedDiffuse? _tracedDiffuse;
+    private readonly TracedReflections? _reflections;
     private readonly Lighting _lighting;
     private readonly TemporalAntiAliasing _temporal;
     private readonly PixelEffects _pixelEffects;
@@ -131,6 +132,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _shadowMask = _rayTracing is null ? null : new ShadowMask(assets, _resources);
         _probes = _rayTracing is null ? null : new Probes(assets, _resources);
         _tracedDiffuse = _rayTracing is null ? null : new TracedDiffuse(assets, _resources);
+        _reflections = _rayTracing is null ? null : new TracedReflections(assets, _resources);
         _lighting = new Lighting(assets);
         _temporal = new TemporalAntiAliasing(assets);
         _pixelEffects = new PixelEffects(assets, _resources);
@@ -144,6 +146,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             .. _shadowMask?.Shaders ?? [],
             .. _probes?.Shaders ?? [],
             .. _tracedDiffuse?.Shaders ?? [],
+            .. _reflections?.Shaders ?? [],
             .. _lighting.Shaders,
             .. _temporal.Shaders,
             .. _exposureMeter.Shaders,
@@ -283,9 +286,9 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
         // The passes, in the order they run, each reading what the ones before it wrote: what the view sees, the sky's
         // tables while there is a sky, each tile's lights, on a GPU that traces rays the probes' light, the traced
-        // diffuse light and each pixel's shadows, the shading, the picture resolved over time, the first weather's
-        // effects and the first post processing's, the exposure metered from what they leave, and the output through the
-        // tonemap, with the probes over it in their debug view.
+        // diffuse light, the traced reflections and each pixel's shadows, the shading, the picture resolved over time,
+        // the first weather's effects and the first post processing's, the exposure metered from what they leave, and
+        // the output through the tonemap, with the probes over it in their debug view.
         (
             RenderView view,
             SkyTables sky,
@@ -294,7 +297,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             GpuBuffer lighting,
             TracedWorld? traced,
             ProbeBuffers? probes,
-            TracedDiffuseBuffers? diffuse
+            TracedDiffuseBuffers? diffuse,
+            TracedReflectionBuffers? reflections
         ) = uploaded.Value;
         GpuConstants header = new(view.Constants.Id, 0, lighting.Id);
         _visibility.Record(view);
@@ -308,12 +312,14 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             _probes.Record(view, lighting, world.HitMaterials, sky, lights, probed);
             if (_tracedDiffuse is not null && diffuse is { } bounced)
                 _tracedDiffuse.Record(view, lighting, world.HitMaterials, sky, lights, probed, bounced);
+            if (_reflections is not null && reflections is { } reflected)
+                _reflections.Record(view, lighting, world.HitMaterials, sky, lights, probed, reflected);
         }
 
         if (_shadowMask is not null && shadows is { } shadowed)
             _shadowMask.Record(view, header, lighting, lights, shadowed);
 
-        _lighting.Record(view, header, lighting, sky, lights, shadows, diffuse);
+        _lighting.Record(view, header, lighting, sky, lights, shadows, diffuse, reflections);
         _temporal.Record(view);
 
         // The air's effects before the picture's, so a post effect works on the fogged picture.
@@ -322,7 +328,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _pixelEffects.Record(view, frame.Index, [air, post.Effects]);
 
         _exposureMeter.Record(view, (float)frame.AppDeltaSec, post.ExposureCompensation);
-        _surfaceView.Record(view, inputs.DebugView, diffuse);
+        _surfaceView.Record(view, inputs.DebugView, diffuse, reflections?.Light ?? GpuTexture.None);
         if (_probes is not null && inputs.DebugView == DebugView.Probes && probes is { } shown)
             _probes.RecordDraw(view, shown);
 
@@ -578,7 +584,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         if (!lights.Ok)
             return Result.Failure(lights.Error);
 
-        // The sky's tables and the shadow mask before the lighting constants, which name them.
+        // The sky's tables, the shadow mask and, while there is a world to trace, the traced reflections, before the
+        // lighting constants, which name them.
         Result<SkyTables> sky = SkyLuts.Prepare(graph);
         if (!sky.Ok)
             return Result.Failure(sky.Error);
@@ -587,6 +594,13 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         if (shadows is { Ok: false } failed)
             return Result.Failure(failed.Error);
 
+        bool isTraced = _rayTracing is { Acceleration.IsNone: false };
+        Result<TracedReflectionBuffers>? reflections = isTraced
+            ? TracedReflections.Prepare(view.Value, frameIndex)
+            : null;
+        if (reflections is { Ok: false } unreflected)
+            return Result.Failure(unreflected.Error);
+
         Result<GpuBuffer> lighting = _lighting.Prepare(
             view.Value,
             inputs.Skies,
@@ -594,15 +608,14 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             sun,
             sky.Value,
             lights.Value,
-            shadows?.Value
+            shadows?.Value,
+            reflections?.Value
         );
         if (!lighting.Ok)
             return Result.Failure(lighting.Error);
 
         // The probes while there is a world to trace.
-        Result<ProbeBuffers>? probes = _rayTracing is { Acceleration.IsNone: false }
-            ? _probes?.Prepare(view.Value, _instances.Extras)
-            : null;
+        Result<ProbeBuffers>? probes = isTraced ? _probes?.Prepare(view.Value, _instances.Extras) : null;
         if (probes is { Ok: false } unprobed)
             return Result.Failure(unprobed.Error);
 
@@ -622,7 +635,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
                 lighting.Value,
                 traced,
                 probes?.Value,
-                diffuse?.Value
+                diffuse?.Value,
+                reflections?.Value
             )
         );
     }
@@ -691,7 +705,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     /// <summary>
     /// What the frame's upload hands its passes: the view, the sky's tables, the lights, the shadow mask on a GPU that
     /// traces rays, the lighting constants that name them, and on a GPU that traces rays the world as rays see it, the
-    /// probes and the traced diffuse light, while there is a world.
+    /// probes, the traced diffuse light and the traced reflections, while there is a world.
     /// </summary>
     private readonly record struct UploadedFrame(
         RenderView View,
@@ -701,7 +715,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         GpuBuffer Lighting,
         TracedWorld? Traced,
         ProbeBuffers? Probes,
-        TracedDiffuseBuffers? Diffuse
+        TracedDiffuseBuffers? Diffuse,
+        TracedReflectionBuffers? Reflections
     );
 
     /// <summary>

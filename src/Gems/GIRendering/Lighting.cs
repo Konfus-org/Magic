@@ -10,8 +10,8 @@ namespace Magic.GIRendering;
 
 /// <summary>
 /// The view's surfaces lit into the HDR picture, and the sky drawn where nothing was: the lighting constants, naming
-/// the sky's tables, the lights and the shadow mask, uploaded before the view is drawn, and the shading after them,
-/// lit indirectly by the traced diffuse light where there is any.
+/// the sky's tables, the lights, the shadow mask and the traced reflections, uploaded before the view is drawn, and
+/// the shading after them, lit indirectly by the traced diffuse light where there is any.
 /// </summary>
 internal sealed class Lighting(AssetManager assets)
 {
@@ -24,7 +24,8 @@ internal sealed class Lighting(AssetManager assets)
 
     /// <summary>
     /// The lighting constants asked for and uploaded, in a transfer pass the caller opened, after the sky's tables, the
-    /// lights and, on a GPU that traces rays, the shadow mask were asked for; the buffer they are in.
+    /// lights and, on a GPU that traces rays, the shadow mask and the traced reflections were asked for; the buffer they
+    /// are in.
     /// </summary>
     public Result<GpuBuffer> Prepare(
         in RenderView view,
@@ -33,7 +34,8 @@ internal sealed class Lighting(AssetManager assets)
         RenderSun sun,
         in SkyTables sky,
         in LightBuffers lights,
-        ShadowBuffers? shadows
+        ShadowBuffers? shadows,
+        TracedReflectionBuffers? reflections
     )
     {
         Result<GpuBuffer> made = view.Graph.Buffer(
@@ -64,6 +66,7 @@ internal sealed class Lighting(AssetManager assets)
             ShadowMask = shadows?.Mask.Id ?? 0,
             TracedShadows = shadows?.Traced.Id ?? 0,
             SunTiles = shadows?.SunTiles.Id ?? 0,
+            Reflections = reflections?.Light.Id ?? 0,
         };
         view.Graph.Upload(made.Value, [constants]);
 
@@ -72,7 +75,7 @@ internal sealed class Lighting(AssetManager assets)
 
     /// <summary>
     /// Every pixel's surface shaded from the sky's tables, its tile's lights and, on a GPU that traces rays, its
-    /// shadows and its traced diffuse light, and the sky where there is none.
+    /// shadows, its traced diffuse light and what it reflects, and the sky where there is none.
     /// </summary>
     public void Record(
         in RenderView view,
@@ -81,7 +84,8 @@ internal sealed class Lighting(AssetManager assets)
         in SkyTables sky,
         in LightBuffers lights,
         ShadowBuffers? shadows,
-        TracedDiffuseBuffers? diffuse
+        TracedDiffuseBuffers? diffuse,
+        TracedReflectionBuffers? reflections
     )
     {
         ComputePass shade = view
@@ -105,6 +109,9 @@ internal sealed class Lighting(AssetManager assets)
 
         if (diffuse is { } traced)
             shade.Reads(traced.Constants, traced.Light);
+
+        if (reflections is { } reflected)
+            shade.Reads(reflected.Light);
 
         shade.Writes(view.Hdr).DispatchOver(view.Width, view.Height);
     }

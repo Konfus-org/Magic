@@ -28,7 +28,7 @@ internal readonly record struct TracedDiffuseBuffers(
 internal sealed class TracedDiffuse(AssetManager assets, GpuResources resources)
 {
     /// <summary>
-    /// The twin of <c>Scene/TracedDiffuse.slang</c>'s.
+    /// The twin of <c>Scene/Traced.slang</c>'s.
     /// </summary>
     private const int TracedScale = 2;
 

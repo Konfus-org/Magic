@@ -1,8 +1,8 @@
 // Every pixel of the picture lit, into the HDR picture: a surface by the sun through the air, by the local lights its
 // tile lists, each dimmed by the shadow mask, and by the light around it, traced on a GPU that traces rays and else the
-// sky's, its direct and indirect light summed over the shared BRDF; and the sky itself where nothing was drawn. The pass
-// header's x is the frame's constants, z the lighting constants and w the traced diffuse constants, or 0 where there are
-// none.
+// sky's, and what it reflects, traced where it is smooth enough, its direct and indirect light summed over the shared
+// BRDF; and the sky itself where nothing was drawn. The pass header's x is the frame's constants, z the lighting
+// constants and w the traced diffuse constants, or 0 where there are none.
 module "ShadeSurfaces";
 
 import Core.Heap;
@@ -14,13 +14,17 @@ import Scene.Lighting;
 import Scene.Lights;
 import Scene.Shadows;
 import Scene.TracedDiffuse;
+import Scene.TracedReflections;
 import Light.Lights;
 import Sky.ISky;
 import Surface.Brdf;
 
 // The light a surface at a pixel reflects of what reaches it indirectly. The diffuse is what a white diffuse surface
 // reflects, its irradiance over pi: the traced light where it was traced, which sees what shades and bounces the light
-// near the surface and the probes' beyond; else the open sky's over its hemisphere. The specular is the sky along the mirror direction, giving way to the diffuse as it roughens.
+// near the surface and the probes' beyond; else the open sky's over its hemisphere. The specular is the traced
+// reflections as far as they cover the pixel, where the surface is smooth enough for them. Elsewhere it is the sky along
+// the mirror direction, giving way to the diffuse as the surface roughens; where the diffuse is traced it is the diffuse
+// alone, so a closed room reflects none of the sky.
 float3 GetIndirectLight<S : ISky>(
     FrameConstants frame,
     LightingConstants lighting,
@@ -32,19 +36,29 @@ float3 GetIndirectLight<S : ISky>(
     float3 view
 )
 {
+    bool isTraced = GetPassHeader().w != 0u;
     float3 diffuse;
-    if (GetPassHeader().w != 0u)
+    if (isTraced)
         diffuse = SampleTracedDiffuse(frame, GetTracedDiffuse(), pixel, relative, normal);
     else if (lighting.hasSky != 0u)
         diffuse = S.GetAmbient(CreateSkyInputs(frame, lighting, normal, false), normal) * InvPi;
     else
         diffuse = lighting.sunIlluminance.rgb * 0.1 * (0.5 + 0.5 * normal.y) * InvPi;
 
-    float3 reflected = lighting.hasSky != 0u
-        ? S.Evaluate(CreateSkyInputs(frame, lighting, reflect(-view, normal), false))
-        : diffuse;
+    float3 specular = diffuse;
+    if (!isTraced && lighting.hasSky != 0u)
+    {
+        float3 reflected = S.Evaluate(CreateSkyInputs(frame, lighting, reflect(-view, normal), false));
+        specular = lerp(reflected, diffuse, saturate(roughness));
+    }
+
+    if (lighting.reflections != 0u && roughness <= TracedRoughness)
+    {
+        float4 traced = SampleTracedReflections(frame, lighting.reflections, pixel, relative, normal, roughness);
+        specular = lerp(specular, traced.rgb, traced.a);
+    }
+
     float3 fresnel = GetEnvironmentBrdf(brdf.f0, roughness, max(dot(normal, view), 1e-4));
-    float3 specular = lerp(reflected, diffuse, saturate(roughness));
     return brdf.diffuse * (1.0 - fresnel) * diffuse + fresnel * specular;
 }
 

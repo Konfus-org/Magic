@@ -215,15 +215,6 @@ float3x3 GetRandomRotation(uint frameIndex)
     );
 }
 
-// The sky along a direction, without the sun's disc, whose light the sun's own ray brings.
-float3 GetSkyRadiance<S : ISky>(FrameConstants frame, LightingConstants lighting, float3 direction)
-{
-    if (lighting.hasSky == 0u)
-        return frame.skyRadiance.rgb * lighting.sunIlluminance.r;
-
-    return S.Evaluate(CreateSkyInputs(frame, lighting, direction, false));
-}
-
 // A thread a ray of the list: traced from its probe, it brings back the sky where it hits nothing, and where it hits,
 // what the surface there reflects of the lights and of the probes' light, and gives off.
 [shader("compute")]

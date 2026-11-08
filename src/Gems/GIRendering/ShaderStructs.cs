@@ -281,12 +281,13 @@ internal record struct GpuLight
 
 /// <summary>
 /// What the lighting passes read beyond the frame, the twin of <c>Scene/Lighting.slang</c>'s: the sun above the air, the
-/// viewer's height, the sky's tables, the HDR picture they light, the light table and its tiles, and the shadow masks.
+/// viewer's height, the sky's tables, the HDR picture they light, the light table and its tiles, the shadow masks and
+/// the traced reflections.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct LightingConstants
 {
-    public const int Bytes = 80;
+    public const int Bytes = 96;
 
     public Vector4 SunIlluminance;
 
@@ -318,6 +319,53 @@ internal record struct LightingConstants
     public uint TracedShadows;
 
     public uint SunTiles;
+
+    /// <summary>
+    /// The traced reflections' blended light; 0 where none are traced.
+    /// </summary>
+    public uint Reflections;
+
+    public uint Padding0;
+
+    public uint Padding1;
+
+    public uint Padding2;
+}
+
+/// <summary>
+/// The heap ids of the traced reflections' textures and sampler, the twin of <c>Scene/TracedReflections.slang</c>'s.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal record struct TracedReflectionConstants
+{
+    public const int Bytes = 48;
+
+    public uint Traced;
+
+    public uint Rays;
+
+    public uint Resolved;
+
+    public uint Distance;
+
+    public uint Light;
+
+    public uint Depth;
+
+    public uint LightHistory;
+
+    public uint DepthHistory;
+
+    public uint Sampler;
+
+    /// <summary>
+    /// 0 while the history holds nothing of the view: this frame starts it afresh.
+    /// </summary>
+    public uint HasHistory;
+
+    public uint Padding0;
+
+    public uint Padding1;
 }
 
 /// <summary>

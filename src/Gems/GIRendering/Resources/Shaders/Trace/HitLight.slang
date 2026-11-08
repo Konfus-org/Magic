@@ -1,5 +1,6 @@
-// The light that reaches a ray's hit from the lights: one picked at random, the sun among them, with a ray to say
-// nothing is in the way.
+// The light a ray brings back: the sky's where it hits nothing, and where it hits, what the surface there reflects of
+// one light picked at random, the sun among them, with a ray to say nothing is in the way, and of the probes' light.
+// The pass header's x is the frame's constants and z the lighting constants.
 module "Trace/HitLight";
 
 import Core.Heap;
@@ -8,6 +9,7 @@ import Core.Math;
 import Core.Sampling;
 import Scene.Lighting;
 import Scene.Lights;
+import Scene.Probes;
 import Light.Lights;
 import Sky.ISky;
 import Trace.HitSurface;
@@ -52,4 +54,29 @@ public float3 GetDirectLight<S : ISky>(
         return float3(0.0);
 
     return float(lightCount + 1u) * irradiance * cosine * InvPi;
+}
+
+// The sky along a direction, without the sun's disc, whose light the sun's own rays bring.
+public float3 GetSkyRadiance<S : ISky>(FrameConstants frame, LightingConstants lighting, float3 direction)
+{
+    if (lighting.hasSky == 0u)
+        return frame.skyRadiance.rgb * lighting.sunIlluminance.r;
+
+    return S.Evaluate(CreateSkyInputs(frame, lighting, direction, false));
+}
+
+// The light a surface a ray landed on sends back along it: what it reflects of one light picked at random by xi and of
+// the probes' light around it, and what it gives off.
+public float3 GetHitLight<S : ISky>(
+    FrameConstants frame,
+    LightingConstants lighting,
+    ProbeGridConstants grid,
+    RaytracingAccelerationStructure world,
+    HitSurface surface,
+    float3 xi
+)
+{
+    float3 light = GetDirectLight<S>(frame, lighting, world, surface, xi)
+        + GetProbeIrradiance(grid, surface.position, surface.normal);
+    return light * surface.diffuse + surface.emissive;
 }

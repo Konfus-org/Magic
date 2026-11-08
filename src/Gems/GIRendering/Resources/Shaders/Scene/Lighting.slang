@@ -32,6 +32,12 @@ public struct LightingConstants
     // The mask and the sun's tiles as the rays left them, for the denoiser.
     public uint tracedShadows;
     public uint sunTiles;
+    // The traced reflections' light at half the picture's size, blended over frames; 0 where none are traced. Read
+    // through Scene/TracedReflections.
+    public uint reflections;
+    public uint padding0;
+    public uint padding1;
+    public uint padding2;
 }
 
 public LightingConstants GetLighting() { return LoadConstants<LightingConstants>(GetPassHeader().z); }
