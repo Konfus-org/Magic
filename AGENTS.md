@@ -30,6 +30,8 @@ The scripts run under `pwsh` and Windows PowerShell ([Tools](tools/README.md)).
   screenshots each and prints the paths.
 - **Screenshot:** `tools/Scripts/Screenshot.ps1` runs a project until its world loads and prints the screenshot's
   path. Use `-Domains`, `-Project` and `-Commands` to reach what the samples don't show.
+- **Claim:** `tools/Scripts/Claim.ps1 -Slice <title> -Scope <paths>` tells every other session what the slice will
+  change, and prints any overlap with theirs ([Worktrees](#worktrees)).
 - **Review:** `plannotator review` opens the change as a diff in the user's browser and returns when they comment or
   approve (the finish skill).
 
@@ -247,9 +249,16 @@ Every task runs in its own worktree. Never edit or commit in the main checkout.
   `refactor`, `docs`, `test`, `build`, `ci`. The worktree folder has the branch's name.
 - **Start:** branch from the branch checked out in the main checkout. That branch is the merge target. Title the
   session with the branch's name, as `fix/material-cache-leak`.
+- **Claim:** right after making the worktree, claim the files and folders the slice will change:
+  `tools/Scripts/Claim.ps1 -Slice <title> -Scope <paths>`. Include any file every slice touches that you need:
+  `src/Magic.slnx`, `Directory.Packages.props`, `Directory.Build.props`, `Directory.Build.targets`, `AGENTS.md` and
+  `docs/`. Claim again when the scope grows. If it reports overlap with another claim or worktree, stop and ask the
+  user whether to wait for that work, narrow the slice, or go ahead. Never edit inside another session's claim
+  without that yes. Release the claim with `-Release` once the slice merges, is answered or is dropped.
 - **Finish** and merge as the finish skill says, once the user approves.
-- **Abandoned work:** if the user drops the task, leave the worktree and branch and say so.
-- **Start of every session:** remove what is finished and report the rest (the tidy-worktrees skill). Never remove a
+- **Abandoned work:** if the user drops the task, release its claim, leave the worktree and branch and say so.
+- **Start of every session:** remove what is finished, stale claims included, and report the rest (the
+  tidy-worktrees skill). Never remove a
   worktree or branch with work found nowhere else.
 
 ### Sessions

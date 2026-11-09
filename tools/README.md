@@ -44,6 +44,13 @@ Runs `Format.ps1`, then the steps of `Validate.ps1` that `-Change` needs: `Docs`
 Headless, and `Visual` adds Test and Screenshot. If they pass, it stamps the checkout's exact files with the level,
 and a state already stamped returns at once. It also points git at the repository's [hooks](../.githooks/README.md).
 
+## Claim.ps1
+
+Claims the files and folders a slice will change, in the repository's git folder, which every worktree shares, and
+prints any other claim or worktree that touches them; it exits `1` when one does. `-Release` takes the claim back.
+The SessionStart hook lists the claims, and the edit hook refuses an edit inside another session's claim
+([AGENTS.md](../AGENTS.md#worktrees)).
+
 ## Templates
 
 `VS Templates/` holds the `dotnet new` templates for a gem and a sample project, and `InstallTemplates.ps1` installs

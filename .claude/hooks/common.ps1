@@ -1,4 +1,4 @@
-# Shared by the hooks in this folder. Runs under Windows PowerShell 5.1 and pwsh.
+# Shared by the hooks in this folder and tools/Scripts/Claim.ps1. Runs under Windows PowerShell 5.1 and pwsh.
 # Every hook fails open: an error in a hook lets the action through rather than blocking work.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -93,7 +93,24 @@ function Get-ValidationStamp($checkout, [string] $tree) {
     return Join-Path (Join-Path $checkout.Common 'agent-task-complete') $tree
 }
 
+# A branch's name as one file name, for the stamps and claims kept per branch.
+function ConvertTo-BranchFileName([string] $branch) { return $branch -replace '[\\/:]', '__' }
+
 # A slice is reviewed once per branch. The stamp's first line is the slice's changed lines when it was reviewed.
 function Get-ReviewStamp($checkout, [string] $branch) {
-    return Join-Path (Join-Path $checkout.Common 'agent-review') ($branch -replace '[\\/:]', '__')
+    return Join-Path (Join-Path $checkout.Common 'agent-review') (ConvertTo-BranchFileName $branch)
 }
+
+# A claim tools/Scripts/Claim.ps1 wrote: its branch, worktree, slice and scope, one key a line.
+function Read-Claim([string] $path) {
+    $claim = @{ branch = ''; worktree = ''; slice = ''; scope = '' }
+    foreach ($line in [System.IO.File]::ReadAllLines($path)) {
+        if ($line -match '^(\w+):\s*(.*)$') { $claim[$Matches[1]] = $Matches[2] }
+    }
+    $claim.scope = @(([string]$claim.scope) -split ',\s*' | Where-Object { $_ })
+
+    return [pscustomobject]$claim
+}
+
+# Whether a claim's worktree still exists. One whose worktree is gone is stale, and the tidy-worktrees skill removes it.
+function Test-ClaimLive($claim) { return [bool]$claim.worktree -and (Test-Path -LiteralPath $claim.worktree) }

@@ -34,7 +34,8 @@ description: Validates, reviews, presents and merges a built slice. Use it on yo
       nothing landed it returns at once; if it validates again, look at a `Visual` change's new screenshots.
       Resolve conflicts in your own changes only; if one needs another agent's work changed, stop and ask.
    3. Fast-forward the merge target to your branch. Push nothing.
-   4. `git worktree remove`, then `git branch -d` (never `-D`).
+   4. Release the claim: `tools/Scripts/Claim.ps1 -Release`. Then `git worktree remove`, then `git branch -d` (never
+      `-D`).
    5. Remove every other worktree and branch made for the task the same way, including the one the app made for
       the session. A branch cut from a remote branch goes with `-d` once its upstream is set to that remote branch.
    6. Delete the side sessions you started that are done ([tidy-worktrees skill](../tidy-worktrees/SKILL.md)).

@@ -28,7 +28,7 @@ description: Starts a slice. Use it on your own, without being asked, whenever t
    Goal: <one sentence>
    Serves: <the bucket goal it moves forward>
 
-   In scope: <files or members>
+   In scope: <the files and folders it changes, as it will claim them>
    Out of scope: <the tempting next step, named>
 
    Works when: <a command, a sample and what it shows, or a test name>
@@ -41,7 +41,8 @@ description: Starts a slice. Use it on your own, without being asked, whenever t
 
 5. If the request is clear and the slice needs no hard-to-reverse decision, state the brief in the chat, make the
    worktree ([AGENTS.md](../../../AGENTS.md#worktrees)) and start building. Don't wait for approval: the request, or
-   the user's yes to the slice list, is the approval.
+   the user's yes to the slice list, is the approval. Claim the brief's scope as soon as the worktree exists
+   ([AGENTS.md](../../../AGENTS.md#worktrees)); if the claim reports an overlap, stop and ask before building.
 6. Otherwise, present a proposal led by the brief, and make no edits until the user approves, trims or splits it:
    1. The approach.
    2. The smallest version that could work, the alternatives you considered, and why the chosen one is the
