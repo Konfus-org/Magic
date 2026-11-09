@@ -12,8 +12,8 @@ import Sky.ISky;
 // The sun's angular radius as it looks from the Earth: how wide a disc its shadow rays aim through.
 public static const float SunAngularRadius = 0.00465;
 
-// Where the lights are in the frame's buffer, right after the models, and their bytes: C#'s GpuLights.
-public static const uint LightsOffset = ModelsOffset + ModelsBytes;
+// Where the lights are in the frame's buffer, right after the world as rays see it, and their bytes: C#'s GpuLights.
+public static const uint LightsOffset = TracedWorldOffset + TracedWorldBytes;
 public static const uint LightsBytes = 84u;
 
 public struct Lights

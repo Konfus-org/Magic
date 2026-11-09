@@ -8,9 +8,10 @@ compiler loads a module and its imports from the assets, so a game's `Shaders/` 
   (`Pass`), what every pass of a frame reads (`Frame`), numbers, colour, packing, sampling and hashing.
 - `Scene/Materials` is the material table's row: which material shader draws it, then that shader's struct.
 - `Scene/Models` is the frame's models, in the frame's buffer after the frame: the instance table, the pools of
-  vertices and indices the instances are drawn from, the material table, and on a GPU that traces rays the world's
-  acceleration structure, with a geometry for each mesh of each model, and the mesh table that says where each mesh's
-  triangles are and which material slot they take, and the box over what rays see. `Scene/Instances` and
+  vertices and indices the instances are drawn from, the material table, and the mesh table that says where each
+  mesh's triangles are and which material slot they take. After them is the world as rays see it, all 0 where nothing
+  builds it: the acceleration structure, with a geometry for each mesh of each model, the materials as a ray hit reads
+  them, and the box over what rays see. `Scene/Instances` and
   `Scene/Vertices` are an instance's and a
   vertex's rows. `Trace/HitSurface` is what rays read of the world through them: how much light gets through along a
   ray, and the surface one lands on.

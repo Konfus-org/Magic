@@ -53,7 +53,7 @@ void PlaceProbes()
         indirect.grid.placed = 0u;
 
     FrameConstants frame = GetFrame();
-    if (!IsWrittenFor(GetPassHeader().z, frame) || GetModels().acceleration == 0u)
+    if (!IsWrittenFor(GetPassHeader().z, frame) || GetTracedWorld().acceleration == 0u)
     {
         indirect.frameNumber = 0u;
         indirect.grid.placed = 0u;
@@ -61,13 +61,13 @@ void PlaceProbes()
         return;
     }
 
-    Models models = GetModels();
+    TracedWorld traced = GetTracedWorld();
     ProbeGridConstants grid = indirect.grid;
     float3 cells = float3(grid.dimensions - 1u);
     bool isFresh = grid.placed == 0u;
     float blend = isFresh ? 1.0 : BoxBlend;
-    float3 boxMin = lerp(grid.origin, models.boxMin - BoxMargin, blend);
-    float3 boxMax = lerp(grid.origin + grid.cellSize * cells, models.boxMax + BoxMargin, blend);
+    float3 boxMin = lerp(grid.origin, traced.boxMin - BoxMargin, blend);
+    float3 boxMax = lerp(grid.origin + grid.cellSize * cells, traced.boxMax + BoxMargin, blend);
     indirect.grid.origin = boxMin;
     indirect.grid.cellSize = (boxMax - boxMin) / cells;
     indirect.grid.maxDistance = Max3(indirect.grid.cellSize) * 1.5;
@@ -289,7 +289,7 @@ void TraceProbes<S : ISky>(uint3 thread : SV_DispatchThreadID)
     uint rayCount = counts.Load<uint>(GetProbeRayCountOffset(probe));
     float3 direction = normalize(mul(GetFibonacciDirection(rayIndex, rayCount), GetRandomRotation(frame.frameIndex)));
 
-    AccelerationRef acceleration = { GetModels().acceleration };
+    AccelerationRef acceleration = { GetTracedWorld().acceleration };
     RaytracingAccelerationStructure world = acceleration.Get();
     RayHit hit = GetClosestHit(world, origin, direction, 1e30, RAY_FLAG_NONE);
     ProbeRay ray;

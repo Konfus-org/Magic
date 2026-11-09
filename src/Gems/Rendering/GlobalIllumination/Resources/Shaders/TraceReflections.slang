@@ -90,7 +90,7 @@ void TraceReflections<S : ISky>(uint3 thread : SV_DispatchThreadID)
         surface.normal, surface.view, surface.roughness, GetRandom(thread.xy, frame.frameIndex, 1u).xy);
     float3 world = surface.relative + frame.cameraPosition.xyz;
     float3 origin = world + surface.normal * GetRayOffset(frame, surface.relative);
-    AccelerationRef acceleration = { GetModels().acceleration };
+    AccelerationRef acceleration = { GetTracedWorld().acceleration };
     RaytracingAccelerationStructure scene = acceleration.Get();
     RayHit hit = GetClosestHit(scene, origin, ray.xyz, RayRange, RAY_FLAG_CULL_BACK_FACING_TRIANGLES);
     Lights lights = GetLights();

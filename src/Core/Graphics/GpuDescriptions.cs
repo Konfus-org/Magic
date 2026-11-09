@@ -1,11 +1,9 @@
-using Magic.Graphics;
-
-namespace Magic.Deferred;
+namespace Magic.Graphics;
 
 /// <summary>
-/// The descriptions the gem's own buffers and textures are asked for by, each under its name.
+/// The descriptions a gem's own buffers and textures are asked for by, each under its name.
 /// </summary>
-internal static class GpuDescriptions
+public static class GpuDescriptions
 {
     public static BufferDescription GetBuffer(string name, long bytes, BufferUsages usage = BufferUsages.Storage) =>
         new()

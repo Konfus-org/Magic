@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A gem: Magic loads it from Gems/AccelerationStructures/AccelerationStructures.dll when a project lists AccelerationStructures. -->
+  <PropertyGroup>
+    <!-- Shown beside the gem as Magic starts it. -->
+    <Description>Builds the world as rays see it on a GPU that traces rays: the acceleration structure over the instances and the materials a ray hit reads.</Description>
+    <Version>1.0.0</Version>
+    <Authors>Konfus</Authors>
+    <!-- Copies the gem's own NuGet dependencies next to it, where its load context finds them. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its interfaces, and
+         the world's gem a project lists beside it, whose instances it builds from. -->
+    <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" Private="false" />
+    <ProjectReference Include="../GpuWorld/GpuWorld.csproj" Private="false" />
+  </ItemGroup>
+</Project>

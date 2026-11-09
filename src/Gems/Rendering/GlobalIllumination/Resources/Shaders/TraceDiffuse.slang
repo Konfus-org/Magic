@@ -69,7 +69,7 @@ void TraceDiffuse<S : ISky>(uint3 thread : SV_DispatchThreadID)
     float3 origin = world + normal * GetRayOffset(frame, relative);
     float3 beyond = GetProbeIrradiance(grid, world, normal);
     float3x3 basis = CreateBasis(normal);
-    AccelerationRef acceleration = { GetModels().acceleration };
+    AccelerationRef acceleration = { GetTracedWorld().acceleration };
     RaytracingAccelerationStructure scene = acceleration.Get();
     float3 sum = float3(0.0);
     for (uint i = 0u; i < RayCount; i++)

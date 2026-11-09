@@ -12,17 +12,11 @@ To use it, list `Deferred` in a project's `.magic` file beside the gem that keep
   view of the atlas, so the atlas is never magnified. Over a quarter of that the clusters and the impostor share the
   pixels by a dither, so nothing pops.
 - The directional light is the sun while it is above the horizon, else the moon while it is, else the first there is.
-  On a GPU that traces rays it casts shadows, soft as wide as the sun's disc.
 - A sky entity's material draws the sky and colours the sun through the air, and the sky lights what it shines on.
 - Point, spot and rect lights are in physical units: lux for the sun, candela for the rest. A frame draws the first
-  1024. On a GPU that traces rays, the first 15 lighting each tile of the screen cast shadows, soft as wide as the
-  light, and `IsShadowless` doesn't stop them yet.
-- A shadow ray passes glass, and anything else whose material's alpha is under 1, by its colour times what its alpha
-  doesn't hold back, so a window lets the sun in. The sun's light through glass takes on its colour; a tile light's
-  takes how much gets through, uncoloured.
-- Shadows are traced one ray a pixel and light, then denoised. The sun's are smoothed over frames and across the
-  screen. The tile lights' are only smoothed over frames, so their soft edges stay grainy, and one can trail for a moment
-  where a tile's lights change.
+  1024.
+- A surface is shadowed by the frame's shadow mask, where a gem that traces shadows made one for the frame, and lit
+  unshadowed everywhere else.
 - Each frame draws a different point of each pixel and blends with the frames before it where they saw the same
   surface, so edges come out smooth and hold still. A debug view of the GBuffer shows one frame, so its edges crawl.
 - A surface takes the light that reaches it indirectly from the frame's indirect light, where a gem that traces it
@@ -37,7 +31,8 @@ To use it, list `Deferred` in a project's `.magic` file beside the gem that keep
   frame to frame as its history. While an effect that declares jitter runs, as the temporal anti-aliasing does, the
   camera draws each frame through a different point in each pixel. An effect shows once its material and its passes
   are built, and not while one loads or when one failed. An effect that asks what lies along a ray, as the volumetric
-  light does, is answered through the world the shadows trace, and doesn't run on a GPU that doesn't trace rays.
+  light does, is answered through the world as rays see it, which lets all the light through where no gem builds it,
+  and doesn't run on a GPU that doesn't trace rays.
   The fog thickens with the air, and the volumetric light gathers its shafts, up to the nearest surface, a pane of glass
   included, so a pane keeps its colour, and what is seen through a pane is fogged only as far as the pane. The fog is lit by the sun and the sky alone,
   unshadowed; with the fog's `sun` param at 0 and `VolumetricLight` listed, the sun's light in the fog comes only where
@@ -49,8 +44,8 @@ To use it, list `Deferred` in a project's `.magic` file beside the gem that keep
   effects, so the effects expose and tonemap it; black where nothing traced it.
 - A translucent material, such as the engine's `Glass`, draws over the lit picture instead of with the opaque
   surfaces, so it hides nothing behind it from the depth pyramid or the lighting. The nearest pane in front of each
-  pixel's opaque surface lets what is behind through its colour and its clarity, and through any pane between on a
-  GPU that traces rays; it reflects the light around it, more at a grazing angle, and the sun lights it. A glass
+  pixel's opaque surface lets what is behind through its colour and its clarity, and through any pane between where a
+  gem builds the world as rays see it; it reflects the light around it, more at a grazing angle, and the sun lights it. A glass
   instance far enough to draw as its impostor draws opaque.
 
 ## Settings

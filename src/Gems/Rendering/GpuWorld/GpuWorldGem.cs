@@ -31,8 +31,6 @@ public sealed class GpuWorldGem : IGem, IRender<Nothing, GpuView>, IHookIntoDoma
     private readonly Threads _threads;
     private readonly Mailbox<RenderInputs> _inputs = new();
     private readonly GpuResources _resources;
-    private readonly RayTracing? _rayTracing;
-    private readonly InstanceTable _instances;
 
     /// <summary>
     /// The material a model that failed is drawn with, every slot; an empty slot when there is no failure material.
@@ -83,14 +81,13 @@ public sealed class GpuWorldGem : IGem, IRender<Nothing, GpuView>, IHookIntoDoma
     /// </summary>
     private int _preparedDomains;
 
-    public GpuWorldGem(
-        IGraphicsApi gpu,
-        IShaderCompiler shaders,
-        AssetManager assets,
-        Caches caches,
-        IEcs ecs,
-        Threads threads
-    )
+    /// <summary>
+    /// The instance table, filled for the frame by <see cref="Render"/>: what the gems that build from each instance read,
+    /// on the render thread, after it.
+    /// </summary>
+    public InstanceTable Instances { get; }
+
+    public GpuWorldGem(IShaderCompiler shaders, AssetManager assets, Caches caches, IEcs ecs, Threads threads)
     {
         _ecs = ecs;
         _threads = threads;
@@ -104,8 +101,7 @@ public sealed class GpuWorldGem : IGem, IRender<Nothing, GpuView>, IHookIntoDoma
         };
         _defaultPost.Effects[1] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Exposure.mat") };
         _defaultPost.Effects[2] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Agx.mat") };
-        _instances = new InstanceTable(assets, _resources, _failure);
-        _rayTracing = gpu.Features.HasRayQuery ? new RayTracing(assets, _resources) : null;
+        Instances = new InstanceTable(assets, _resources, _failure);
         _frameView = new FrameView(_resources);
         _sky = new SkyLuts(assets);
         _lightTiles = new LightTiles(assets);
@@ -187,7 +183,7 @@ public sealed class GpuWorldGem : IGem, IRender<Nothing, GpuView>, IHookIntoDoma
         // Entities -> resources -> rows: the renderers written since the inputs before ask for their models and have
         // their rows built again, the materials' rows are made again at upload, and a model no renderer drawn holds
         // leaves once nothing asked for it in a while.
-        int instanceCount = _instances.Fill(inputs.Renderers, frame.Index);
+        int instanceCount = Instances.Fill(inputs.Renderers, frame.Index);
         _resources.EvictUnusedModels(inputs.Renderers.Second[..instanceCount]);
 
         // The loading domain shows once what it draws and its effects are on the GPU.
@@ -226,8 +222,7 @@ public sealed class GpuWorldGem : IGem, IRender<Nothing, GpuView>, IHookIntoDoma
             return null;
         }
 
-        // The sky's tables while there is a sky, each tile's lights, and on a GPU that traces rays the materials as rays
-        // see them.
+        // The sky's tables while there is a sky, and each tile's lights.
         GpuConstants header = new(view.Value.Frame.Id);
         SkyTables sky = new(view.Value.SkyTransmittance, view.Value.SkyMultiScattering, view.Value.SkyView);
         if (inputs.Skies.Count > 0)
@@ -239,9 +234,6 @@ public sealed class GpuWorldGem : IGem, IRender<Nothing, GpuView>, IHookIntoDoma
             header,
             new LightBuffers(view.Value.LightTable, view.Value.LightTiles, view.Value.LightCount)
         );
-        if (_rayTracing is not null && !view.Value.HitMaterials.IsNone)
-            _rayTracing.RecordHitMaterials(graph, view.Value, _instances.MaterialCount);
-
         return view.Value;
     }
 
@@ -458,21 +450,7 @@ public sealed class GpuWorldGem : IGem, IRender<Nothing, GpuView>, IHookIntoDoma
         (ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows) effects
     )
     {
-        // The world's structure is asked for every frame, so it stays, and built again only when the rows changed, before
-        // their upload marks them unchanged; a model's arrival builds every row again, so it builds the structure too.
-        TracedWorld? traced = null;
-        if (_rayTracing is not null)
-        {
-            Result<TracedWorld> world = RayTracing.Prepare(graph);
-            if (!world.Ok)
-                return Result.Failure(world.Error);
-
-            traced = world.Value;
-            if (_instances.HasChanges)
-                _rayTracing.Build(graph, world.Value, _instances.Rows, _instances.Extras);
-        }
-
-        Result<(GpuBuffer Rows, GpuBuffer Materials)> tables = _instances.Upload(graph);
+        Result<(GpuBuffer Rows, GpuBuffer Materials)> tables = Instances.Upload(graph);
         if (!tables.Ok)
             return Result.Failure(tables.Error);
 
@@ -489,10 +467,7 @@ public sealed class GpuWorldGem : IGem, IRender<Nothing, GpuView>, IHookIntoDoma
             height,
             instanceCount,
             tables.Value.Rows,
-            tables.Value.Materials,
-            _rayTracing?.Acceleration ?? GpuAcceleration.None,
-            traced?.HitMaterials ?? GpuBuffer.None,
-            RayTracing.GetBox(_instances.Extras)
+            tables.Value.Materials
         );
         if (!targets.Ok)
             return Result.Failure(targets.Error);
@@ -556,7 +531,6 @@ public sealed class GpuWorldGem : IGem, IRender<Nothing, GpuView>, IHookIntoDoma
                 ImpostorTable = _resources.ImpostorTable,
                 MaterialShaders = _resources.MaterialShaders,
                 HeapTextures = _resources.GetHeapTextures(graph),
-                HitMaterials = traced?.HitMaterials ?? GpuBuffer.None,
                 LightTable = lights.Value.Table,
                 LightTiles = lights.Value.Tiles,
                 LightCount = lights.Value.Count,

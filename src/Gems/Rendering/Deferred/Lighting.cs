@@ -6,8 +6,8 @@ using Magic.Utils;
 namespace Magic.Deferred;
 
 /// <summary>
-/// The view's surfaces lit into the HDR picture, and the sky drawn where nothing was: the frame's shadows, naming the
-/// shadow mask, uploaded before the view is drawn, and the shading after them, lit indirectly by the frame's indirect light where there is any; then the nearest translucent surface
+/// The view's surfaces lit into the HDR picture, and the sky drawn where nothing was, shadowed by the frame's shadow
+/// mask and lit indirectly by the frame's indirect light where there are any; then the nearest translucent surface
 /// shaded over it.
 /// </summary>
 internal sealed class Lighting(AssetManager assets)
@@ -27,22 +27,6 @@ internal sealed class Lighting(AssetManager assets)
     };
 
     public ImmutableArray<ShaderEntry> Shaders => [_shadeShader, _translucentShader];
-
-    /// <summary>
-    /// The frame's shadows uploaded into the frame's buffer, after the lights' row: the mask's ids, all 0 where nothing
-    /// traces shadows.
-    /// </summary>
-    public static void UploadShadows(in RenderView view, ShadowBuffers? shadows)
-    {
-        GpuShadows frameShadows = new()
-        {
-            Mask = shadows?.Mask.Id ?? 0,
-            Traced = shadows?.Traced.Id ?? 0,
-            SunTiles = shadows?.SunTiles.Id ?? 0,
-            SunTint = shadows?.SunTint.Id ?? 0,
-        };
-        view.Graph.Upload(view.Gpu.Frame, [frameShadows], GpuShadows.Offset);
-    }
 
     /// <summary>
     /// The frame's indirect light, its buffer and, on a GPU that traces rays, what it can name, asked for by Core's
@@ -82,15 +66,16 @@ internal sealed class Lighting(AssetManager assets)
     }
 
     /// <summary>
-    /// Every pixel's surface shaded from the sky's tables, its tile's lights and, on a GPU that traces rays, its
-    /// shadows, and from <paramref name="indirect"/>, or the sky where it was not written for the frame; then the
-    /// nearest glass over it, lit by the light around it from the probes where there are any, and its rays through the
-    /// world on a GPU that traces them.
+    /// Every pixel's surface shaded from the sky's tables, its tile's lights and <paramref name="shadows"/> where there
+    /// are any, and from <paramref name="indirect"/>, or the sky where it was not written for the frame; then the
+    /// nearest glass over it, lit by the light around it from the probes where there are any, and its rays through
+    /// <paramref name="traced"/> where there is one.
     /// </summary>
     public void Record(
         in RenderView view,
         in GpuConstants header,
-        ShadowBuffers? shadows,
+        ShadowMask? shadows,
+        TracedWorld? traced,
         ImmutableArray<GpuResource> indirect
     )
     {
@@ -132,8 +117,8 @@ internal sealed class Lighting(AssetManager assets)
             );
         translucent.Reads(indirect.AsSpan());
 
-        if (!view.Gpu.HitMaterials.IsNone)
-            translucent.Reads(view.Gpu.HitMaterials, view.Gpu.Meshes, view.Gpu.Instances);
+        if (traced is { } world)
+            translucent.Reads(world.HitMaterials, view.Gpu.Meshes, view.Gpu.Instances);
 
         translucent.Writes(view.Gpu.Hdr).DispatchOver(view.Gpu.Width, view.Gpu.Height);
     }

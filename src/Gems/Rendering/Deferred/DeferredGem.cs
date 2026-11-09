@@ -15,14 +15,16 @@ using Magic.Worlds;
 namespace Magic.Deferred;
 
 /// <summary>
-/// What the deferred renderer takes each frame: the world as the GPU holds it.
+/// What the deferred renderer takes each frame: the world as the GPU holds it, and, where a gem makes them, the world
+/// as rays see it and each pixel's shadows.
 /// </summary>
-public readonly record struct DeferredInput(GpuView View);
+public readonly record struct DeferredInput(GpuView View, TracedWorld? Traced, ShadowMask? Shadows);
 
 /// <summary>
 /// Draws the world the GPU holds, deferred: each frame, from the view the world's gem made, the clusters culled, drawn
-/// and resolved into the GBuffer, each pixel's shadows on a GPU that traces rays, the shading, the nearest glass over
-/// it, the effects, a debug view where one is asked for, and the output into the window and any screenshot asked for.
+/// and resolved into the GBuffer, the shading, shadowed by the frame's shadow mask where there is one, the nearest
+/// glass over it, the effects, a debug view where one is asked for, and the output into the window and any screenshot
+/// asked for. Where nothing made the world as rays see it or the shadows, their rows of the frame's buffer are 0.
 /// As a domain loads, it holds the loading screen until its resolve passes are built. It is public because nothing in
 /// its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
@@ -37,7 +39,6 @@ public sealed class DeferredGem : IGem, IRender<DeferredInput, Nothing>, IHookIn
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
     );
     private readonly Visibility _visibility;
-    private readonly ShadowMask? _shadowMask;
     private readonly Lighting _lighting;
     private readonly PixelEffects _pixelEffects = new();
     private readonly SurfaceView _surfaceView;
@@ -95,16 +96,9 @@ public sealed class DeferredGem : IGem, IRender<DeferredInput, Nothing>, IHookIn
         _events = events;
         _threads = threads;
         _visibility = new Visibility(assets);
-        _shadowMask = gpu.Features.HasRayQuery ? new ShadowMask(assets) : null;
         _lighting = new Lighting(assets);
         _surfaceView = new SurfaceView(assets);
-        _shaders =
-        [
-            .. _visibility.Shaders,
-            .. _shadowMask?.Shaders ?? [],
-            .. _lighting.Shaders,
-            .. _surfaceView.Shaders,
-        ];
+        _shaders = [.. _visibility.Shaders, .. _lighting.Shaders, .. _surfaceView.Shaders];
     }
 
     /// <summary>
@@ -187,33 +181,31 @@ public sealed class DeferredGem : IGem, IRender<DeferredInput, Nothing>, IHookIn
         }
 
         RenderView view = made.Value;
-        Result<ShadowBuffers>? shadows = gpu.HitMaterials.IsNone ? null : _shadowMask?.Prepare(view);
         Result<ImmutableArray<GpuResource>> indirect = Lighting.GetIndirect(view);
-        foreach (Result asked in (ReadOnlySpan<Result>)[shadows ?? Result.Success(), indirect])
+        if (!indirect.Ok)
         {
-            if (!asked.Ok)
-            {
-                Log.Error($"The frame is not drawn: {asked.Error}");
+            Log.Error($"The frame is not drawn: {indirect.Error}");
 
-                return null;
-            }
+            return null;
         }
 
-        // The passes, each in its stage, each reading what the ones before it wrote: what the view sees, on a GPU that
-        // traces rays each pixel's shadows, the shading, lit by the indirect light whatever traces it wrote for the
-        // frame, a debug view's light in its place, the effects, which finish the picture, and the output.
-        ShadowBuffers? shadowed = shadows?.Value;
-        Lighting.UploadShadows(view, shadowed);
+        // The rows of what no gem made this frame are 0, so the shaders that read them trace and shadow nothing.
+        if (input.Traced is null)
+            graph.Upload(gpu.Frame, [default(GpuTracedWorld)], GpuTracedWorld.Offset);
+
+        if (input.Shadows is null)
+            graph.Upload(gpu.Frame, [default(GpuShadows)], GpuShadows.Offset);
+
+        // The passes, each in its stage, each reading what the ones before it wrote: what the view sees, the shading,
+        // lit by the indirect light whatever traces it wrote for the frame, a debug view's light in its place, the
+        // effects, which finish the picture, and the output.
         GpuConstants header = new(gpu.Frame.Id);
         _visibility.Record(view);
-        if (_shadowMask is not null && shadowed is { } traced)
-            _shadowMask.Record(view, header, traced);
-
-        _lighting.Record(view, header, shadowed, indirect.Value);
+        _lighting.Record(view, header, input.Shadows, input.Traced, indirect.Value);
 
         // A debug view of light draws it into the picture, so the effects finish it as they do the picture.
         _surfaceView.RecordLight(view, inputs.DebugView, indirect.Value);
-        _pixelEffects.Record(view, frame.Index);
+        _pixelEffects.Record(view, input.Traced, frame.Index);
         _surfaceView.Record(view, inputs.DebugView);
 
         GpuTexture target = graph.WindowTarget;

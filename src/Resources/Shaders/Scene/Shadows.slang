@@ -30,11 +30,11 @@ public struct Shadows
 // glass what its clarity and colour let through.
 public float3 GetTransmittance(float3 origin, float3 direction, float distance)
 {
-    Models models = GetModels();
-    if (models.acceleration == 0u)
+    TracedWorld traced = GetTracedWorld();
+    if (traced.acceleration == 0u)
         return float3(1.0);
 
-    AccelerationRef world = { models.acceleration };
+    AccelerationRef world = { traced.acceleration };
     return GetTransmittance(world.Get(), origin, direction, distance);
 }
 

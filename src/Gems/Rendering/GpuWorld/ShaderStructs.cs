@@ -10,7 +10,7 @@ namespace Magic.GpuWorld;
 /// in the world; the GPU takes the camera's position off a position once transformed.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
-internal record struct GpuInstance
+public record struct GpuInstance
 {
     public const int Bytes = 248;
 
@@ -57,7 +57,7 @@ internal record struct GpuInstance
 /// bytes.
 /// </summary>
 [InlineArray(MaterialSlots.Capacity)]
-internal struct GpuMaterialRows
+public struct GpuMaterialRows
 {
     private uint _first;
 }

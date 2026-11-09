@@ -27,12 +27,12 @@ groupshared uint groupSunTiles[2];
 // went through glass.
 uint4 Trace(FrameConstants frame, Lights lights, uint2 pixel, out float3 sunTint)
 {
-    Models models = GetModels();
+    TracedWorld traced = GetTracedWorld();
     sunTint = float3(1.0);
     uint2 size = uint2(frame.width, frame.height);
     TextureRef depthTexture = { frame.depth };
     float depth = depthTexture.Load(pixel, 0u).x;
-    if (depth == 0.0 || models.acceleration == 0u)
+    if (depth == 0.0 || traced.acceleration == 0u)
         return uint4(0xFFFFFFFFu);
 
     // The point lifted off its flat triangle towards the curve its vertex normals describe, as the resolve found it,
@@ -45,7 +45,7 @@ uint4 Trace(FrameConstants frame, Lights lights, uint2 pixel, out float3 sunTint
     float lift = DecodeLift(frame, relative, surfaceTexture.Load(pixel, 0u).w);
     float3 world = relative + normal * lift + frame.cameraPosition.xyz;
     float3 origin = world + normal * GetRayOffset(frame, relative);
-    AccelerationRef acceleration = { models.acceleration };
+    AccelerationRef acceleration = { traced.acceleration };
     RaytracingAccelerationStructure scene = acceleration.Get();
 
     // The sun, through a random point of its disc, lit as often as its light gets through, its colour over its

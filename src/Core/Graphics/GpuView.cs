@@ -91,11 +91,6 @@ public readonly record struct GpuView
     public required ImmutableArray<GpuResource> HeapTextures { get; init; }
 
     /// <summary>
-    /// Each material row as a ray hit reads it; none on a GPU that doesn't trace rays.
-    /// </summary>
-    public required GpuBuffer HitMaterials { get; init; }
-
-    /// <summary>
     /// The local lights, each tile's lights and the sky's tables.
     /// </summary>
     public required GpuBuffer LightTable { get; init; }

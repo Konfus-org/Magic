@@ -45,10 +45,10 @@ internal sealed class PixelEffects
     private readonly ulong[] _lastFrame = new ulong[Places];
 
     /// <summary>
-    /// Runs the view's effects that are ready, in order, on frame <paramref name="frameIndex"/>, their rays through the
-    /// world on a GPU that traces them.
+    /// Runs the view's effects that are ready, in order, on frame <paramref name="frameIndex"/>, their rays through
+    /// <paramref name="traced"/> where there is one.
     /// </summary>
-    public void Record(in RenderView view, uint frameIndex)
+    public void Record(in RenderView view, TracedWorld? traced, uint frameIndex)
     {
         RenderGraph graph = view.Graph;
 
@@ -131,9 +131,9 @@ internal sealed class PixelEffects
         ];
 
         // What an effect's rays read of the world, on a GPU that traces them.
-        ReadOnlySpan<GpuResource> rays = view.Gpu.HitMaterials.IsNone
-            ? []
-            : [view.Gpu.HitMaterials, view.Gpu.Meshes, view.Gpu.Instances];
+        ReadOnlySpan<GpuResource> rays = traced is { } world
+            ? [world.HitMaterials, view.Gpu.Meshes, view.Gpu.Instances]
+            : [];
         (GpuTexture picture, GpuTexture other) = (view.Gpu.Hdr, otherPicture.Value);
         int pass = 0;
         for (int effect = 0; effect < count; effect++)

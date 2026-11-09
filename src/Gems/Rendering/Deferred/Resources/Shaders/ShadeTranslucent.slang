@@ -58,7 +58,7 @@ void ShadeTranslucent<S : ISky>(uint3 thread : SV_DispatchThreadID)
     float3 view = NormalizeSafe(-position, float3(0.0, 0.0, -1.0));
     float3 paneNormal = DecodeOctahedral(normals.Load(thread.xy, 0u).xy * 2.0 - 1.0);
     Lights lights = GetLights();
-    Models models = GetModels();
+    TracedWorld traced = GetTracedWorld();
     // A pane is seen from either side.
     float3 normal = dot(paneNormal, view) < 0.0 ? -paneNormal : paneNormal;
     float3 world = position + frame.cameraPosition.xyz;
@@ -71,9 +71,9 @@ void ShadeTranslucent<S : ISky>(uint3 thread : SV_DispatchThreadID)
     float3 sunIlluminance = lights.hasSky != 0u
         ? S.GetSunIlluminance(CreateSkyInputs(lights, toSun, false))
         : lights.sunIlluminance.rgb;
-    if (models.acceleration != 0u)
+    if (traced.acceleration != 0u)
     {
-        AccelerationRef acceleration = { models.acceleration };
+        AccelerationRef acceleration = { traced.acceleration };
         RaytracingAccelerationStructure scene = acceleration.Get();
         TextureRef depth = { frame.depth };
         float3 opaque = ReconstructRelative(frame, center, max(depth.Load(thread.xy, 0u).x, 1e-6));

@@ -39,8 +39,7 @@ internal sealed class FrameView(GpuResources resources)
 
     /// <summary>
     /// The main view at a size, its targets asked for, and its constants, the camera shifted by
-    /// <paramref name="jitter"/>, and the frame's models, uploaded: the instance and material tables, and the world's
-    /// acceleration structure and hit materials, which the caller asked for before.
+    /// <paramref name="jitter"/>, and the frame's models, uploaded: the instance and material tables.
     /// </summary>
     public Result<FrameTargets> Upload(
         RenderGraph graph,
@@ -51,10 +50,7 @@ internal sealed class FrameView(GpuResources resources)
         int height,
         int instanceCount,
         GpuBuffer instances,
-        GpuBuffer materials,
-        GpuAcceleration acceleration,
-        GpuBuffer hitMaterials,
-        (Vector3 Min, Vector3 Max) tracedBox
+        GpuBuffer materials
     )
     {
         Result<FrameTargets> made = TryGetTargets(graph, width, height);
@@ -105,11 +101,7 @@ internal sealed class FrameView(GpuResources resources)
             Vertices = resources.VertexPool.Id,
             Indices = resources.IndexPool.Id,
             Materials = materials.Id,
-            Acceleration = acceleration.Id,
-            HitMaterials = hitMaterials.Id,
             Meshes = resources.Meshes.Id,
-            BoxMin = tracedBox.Min,
-            BoxMax = tracedBox.Max,
         };
 
         // The frustum's planes from the view-projection, for row vectors: each a column added to or taken from the

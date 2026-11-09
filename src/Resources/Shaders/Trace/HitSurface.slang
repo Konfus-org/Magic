@@ -59,7 +59,7 @@ public float3 GetTransmittance(RaytracingAccelerationStructure world, float3 ori
     ray.TMin = 0.0;
     ray.TMax = distance;
     query.TraceRayInline(world, RAY_FLAG_NONE, 0xFFu, ray);
-    ArrayRef<GpuHitMaterial> materials = { models.hitMaterials };
+    ArrayRef<GpuHitMaterial> materials = { GetTracedWorld().hitMaterials };
     float3 through = float3(1.0);
     while (query.Proceed())
     {
@@ -125,7 +125,7 @@ public HitSurface LoadHitSurface(RayHit hit, float3 origin, float3 direction)
     float3 lambda = float3(1.0 - hit.barycentrics.x - hit.barycentrics.y, hit.barycentrics.x, hit.barycentrics.y);
     float3 normal = ToWorldNormal(instance.world, n0 * lambda.x + n1 * lambda.y + n2 * lambda.z);
 
-    ArrayRef<GpuHitMaterial> materials = { models.hitMaterials };
+    ArrayRef<GpuHitMaterial> materials = { GetTracedWorld().hitMaterials };
     GpuHitMaterial material = materials[GetMaterial(instance, mesh.materialSlot)];
     HitSurface surface;
     surface.position = origin + direction * hit.distance;

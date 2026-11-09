@@ -84,15 +84,15 @@ public record struct FrameConstants
 
 /// <summary>
 /// The frame's models, the twin of the library's <c>Scene/Models.slang</c>: the instance table and its count, the
-/// pools and tables the instances are drawn from, and on a GPU that traces rays the world's acceleration structure, the
-/// hit materials, the mesh table and the box over what rays see, written once a frame into the frame's buffer after <see cref="FrameConstants"/>.
+/// pools and tables the instances are drawn from, and the mesh table rays find triangles through, written once a frame
+/// into the frame's buffer after <see cref="FrameConstants"/>.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public record struct GpuModels
 {
     public const int Offset = FrameConstants.Bytes;
 
-    public const int Bytes = 56;
+    public const int Bytes = 24;
 
     public uint Instances;
 
@@ -104,11 +104,24 @@ public record struct GpuModels
 
     public uint Materials;
 
+    public uint Meshes;
+}
+
+/// <summary>
+/// The world as rays see it, the twin of the library's <c>Scene/Models.slang</c> TracedWorld: the acceleration structure
+/// over the instances, the hit materials and the box over what rays see, written once a frame into the frame's buffer
+/// after <see cref="GpuModels"/> by what builds the structure, and all 0 where nothing does.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public record struct GpuTracedWorld
+{
+    public const int Offset = GpuModels.Offset + GpuModels.Bytes;
+
+    public const int Bytes = 32;
+
     public uint Acceleration;
 
     public uint HitMaterials;
-
-    public uint Meshes;
 
     /// <summary>
     /// The box over the world boxes of the instances rays see; min over max where none do.
@@ -120,12 +133,12 @@ public record struct GpuModels
 
 /// <summary>
 /// The frame's lights, the twin of the library's <c>Scene/Lights.slang</c>: the sun, the sky's tables and the light
-/// table, written once a frame into the frame's buffer after <see cref="GpuModels"/>.
+/// table, written once a frame into the frame's buffer after <see cref="GpuTracedWorld"/>.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public record struct GpuLights
 {
-    public const int Offset = GpuModels.Offset + GpuModels.Bytes;
+    public const int Offset = GpuTracedWorld.Offset + GpuTracedWorld.Bytes;
 
     public const int Bytes = 84;
 
@@ -156,7 +169,8 @@ public record struct GpuLights
 
 /// <summary>
 /// The frame's shadows, the twin of the library's <c>Scene/Shadows.slang</c>: the masks, the sun's tiles and its tint,
-/// each 0 on a GPU that traces no rays, written once a frame into the frame's buffer after <see cref="GpuLights"/>.
+/// written once a frame into the frame's buffer after <see cref="GpuLights"/> by what traces them, and all 0 where nothing
+/// does.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public record struct GpuShadows

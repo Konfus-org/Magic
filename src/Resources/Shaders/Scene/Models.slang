@@ -1,7 +1,7 @@
 // The frame's models: the instances drawn and the pools and tables they are drawn from, C#'s GpuModels, in the frame's
-// buffer right after the frame. On a GPU that traces rays, each model's acceleration structure has a geometry for
-// each of its meshes, whose row of the mesh table says where its triangles are in the index pool and which material
-// slot they take.
+// buffer right after the frame; then the world as rays see it, C#'s GpuTracedWorld. On a GPU that traces rays, each
+// model's acceleration structure has a geometry for each of its meshes, whose row of the mesh table says where its
+// triangles are in the index pool and which material slot they take.
 module "Scene/Models";
 
 import Core.Heap;
@@ -10,7 +10,7 @@ import Core.Frame;
 
 // Where the models are in the frame's buffer, and their bytes: C#'s GpuModels.
 public static const uint ModelsOffset = FrameBytes;
-public static const uint ModelsBytes = 56u;
+public static const uint ModelsBytes = 24u;
 
 public struct Models
 {
@@ -21,12 +21,21 @@ public struct Models
     public uint vertices;
     public uint indices;
     public uint materials;
-    // On a GPU that traces rays: the top-level acceleration structure over the instances, 0 when none, each material
-    // row as a ray hit reads it, and the mesh table its instances' geometries name.
+    // The mesh table the instances' geometries name.
+    public uint meshes;
+}
+
+// Where the world as rays see it is in the frame's buffer, right after the models, and its bytes: C#'s GpuTracedWorld.
+public static const uint TracedWorldOffset = ModelsOffset + ModelsBytes;
+public static const uint TracedWorldBytes = 32u;
+
+// The world as rays see it, all 0 where nothing builds it: the top-level acceleration structure over the instances,
+// 0 when none, each material row as a ray hit reads it, and the box over the world boxes of the instances rays see,
+// min over max where none do.
+public struct TracedWorld
+{
     public uint acceleration;
     public uint hitMaterials;
-    public uint meshes;
-    // The box over the world boxes of the instances rays see; min over max where none do.
     public float3 boxMin;
     public float3 boxMax;
 }
@@ -42,6 +51,12 @@ public Models GetModels()
 {
     BufferRef frame = { GetPassHeader().x };
     return frame.Load<Models>(ModelsOffset);
+}
+
+public TracedWorld GetTracedWorld()
+{
+    BufferRef frame = { GetPassHeader().x };
+    return frame.Load<TracedWorld>(TracedWorldOffset);
 }
 
 public GpuMesh LoadMesh(uint table, uint index)
