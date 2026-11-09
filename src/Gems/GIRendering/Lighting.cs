@@ -120,15 +120,7 @@ internal sealed class Lighting(AssetManager assets, GpuResources resources)
     )
     {
         ComputePass shade = view
-            .Graph.Compute(
-                "Shade surfaces",
-                _shadeShader,
-                header with
-                {
-                    Z = reflections?.Light.Id ?? 0,
-                    W = diffuse?.Constants.Id ?? 0,
-                }
-            )
+            .Graph.Compute("Shade surfaces", _shadeShader, header)
             .Reads(
                 view.Constants,
                 sky.Transmittance,
@@ -146,7 +138,7 @@ internal sealed class Lighting(AssetManager assets, GpuResources resources)
             shade.Reads(shadowed.Mask, shadowed.SunTint);
 
         if (diffuse is { } traced)
-            shade.Reads(traced.Constants, traced.Light);
+            shade.Reads(traced.Light);
 
         if (reflections is { } reflected)
             shade.Reads(reflected.Light);
@@ -160,7 +152,7 @@ internal sealed class Lighting(AssetManager assets, GpuResources resources)
         foreach ((int shader, ShaderEntry entry) in _glassShaders)
         {
             ComputePass glass = view
-                .Graph.Compute("Shade glass", entry, header with { Y = probes?.Constants.Id ?? 0, W = (uint)shader })
+                .Graph.Compute("Shade glass", entry, header with { W = (uint)shader })
                 .Reads(
                     view.Constants,
                     sky.Transmittance,
@@ -177,7 +169,7 @@ internal sealed class Lighting(AssetManager assets, GpuResources resources)
                 )
                 .Reads(heapTextures.AsSpan());
             if (probes is { } probed)
-                glass.Reads(probed.Constants, probed.Probes, probed.Depth);
+                glass.Reads(probed.Probes, probed.Depth);
 
             if (world is { } rays)
                 glass.Reads(rays.HitMaterials, resources.Meshes);

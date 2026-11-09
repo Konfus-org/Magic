@@ -3,8 +3,7 @@
 // GBuffer view is black where nothing was drawn, but for the velocity, which the sky has too. A view of light alone
 // first writes it into the picture in place of the lit one, so the effects finish it as they would the picture: the
 // traced diffuse light as shading reads it, which a white diffuse surface would reflect, or the traced reflections'
-// light. For that pass the header's z is the traced reflections' light and w the traced diffuse constants, each 0 where
-// there are none.
+// light, which it reads from the frame's GI constants, whose light ids are 0 where nothing is traced.
 module "ShowSurface";
 
 import Core.Heap;
@@ -14,6 +13,7 @@ import Core.Math;
 import Core.Color;
 import Core.Pack;
 import Scene.TracedDiffuse;
+import Scene.TracedReflections;
 import Scene.Traced;
 import Scene.Clusters;
 
@@ -81,11 +81,11 @@ float3 GetLightView(FrameConstants frame, SurfaceView view, uint2 pixel)
 
     if (view == SurfaceView.Reflections)
     {
-        TextureRef reflections = { header.z };
+        TextureRef reflections = { GetTracedReflections().light };
         return reflections.id == 0u ? float3(0.0) : reflections.Load(pixel / TracedScale, 0u).rgb;
     }
 
-    if (header.w == 0u)
+    if (GetTracedDiffuse().light == 0u)
         return float3(0.0);
 
     TextureRef depthTexture = { frame.depth };

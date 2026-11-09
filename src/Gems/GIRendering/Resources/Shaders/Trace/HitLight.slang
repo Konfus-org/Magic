@@ -58,7 +58,7 @@ public float3 GetDirectLight<S : ISky>(
 public float3 GetSkyRadiance<S : ISky>(Lights lights, float3 direction)
 {
     if (lights.hasSky == 0u)
-        return lights.skyRadiance.rgb * lights.sunIlluminance.r;
+        return GetOpenSkyRadiance(lights);
 
     return S.Evaluate(CreateSkyInputs(lights, direction, false));
 }

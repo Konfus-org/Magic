@@ -126,7 +126,9 @@ in turn and exits, so a release ships with the caches full.
     cull's tests.
   - `Scene/Clusters` is also what the cluster passes read beyond the library's frame: the cull's limits and buffers,
     the depth pyramid, the visibility ids and the impostor handoff, in the frame's buffer after the library's models,
-    lights and shadows.
+    lights and shadows and the GI constants.
+  - `Scene/Probes`, `Scene/TracedDiffuse` and `Scene/TracedReflections` read their constants from the GI constants, one
+    row of the frame's buffer after the shadows, each part's ids 0 where it isn't drawn.
   - `Scene/Probes` is the probe grid: where each probe is, what it holds, and the light a point gets from it.
   - `Scene/Traced` is what the light traced at half the picture's size shares: which pixel traces, its history and how
     the picture reads it back. `Scene/TracedDiffuse` and `Scene/TracedReflections` are the traced diffuse light's and

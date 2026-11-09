@@ -2,7 +2,7 @@
 // Ray-Traced Irradiance Fields", 2019): each probe is given rays as its light still changes, each ray is traced into the
 // world and lit where it lands by one light picked at random and by the probes themselves, and each probe blends its
 // rays into its light's harmonics and its map of distances, moving away from a surface it is near. The pass header's x
-// is the frame's buffer, which holds the lights, and y the grid's constants.
+// is the frame's buffer, which holds the lights and the grid's constants.
 module "UpdateProbes";
 
 import Core.Heap;

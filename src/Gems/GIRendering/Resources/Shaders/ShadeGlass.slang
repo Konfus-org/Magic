@@ -2,8 +2,8 @@
 // through the pane's colour, and through any other pane between, which a ray finds on a GPU that traces rays; what it
 // reflects of the light around it, more of it at a grazing angle (Schlick's Fresnel); and the sun on it, its
 // highlight and what its body scatters. The entry is specialised to one translucent material shader, numbered in the
-// pass header's w, and to the sky; the header's x is the frame's buffer, which holds the lights, and y the probe
-// grid's constants, or 0 where there are none.
+// pass header's w, and to the sky; the header's x is the frame's buffer, which holds the lights and the probe grid's
+// constants, whose probes are 0 where there are none.
 module "ShadeGlass";
 
 import Core.Heap;
@@ -30,7 +30,7 @@ static const float GlassReflectance = 0.04;
 // The light reaching a point from a direction: the probes' where there are any, else the sky's.
 float3 GetSurroundings<S : ISky>(Lights lights, float3 world, float3 direction)
 {
-    if (GetPassHeader().y != 0u)
+    if (GetProbeGrid().probes != 0u)
         return GetProbeIrradiance(GetProbeGrid(), world, direction);
 
     return GetSkyRadiance<S>(lights, direction);

@@ -648,6 +648,15 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         if (diffuse is { Ok: false } untraced)
             return Result.Failure(untraced.Error);
 
+        // The GI constants, each part empty where it isn't drawn, in one row after the lights and the shadows.
+        GIConstants gi = new()
+        {
+            Grid = probes?.Value.Constants ?? default,
+            Diffuse = diffuse?.Value.Constants ?? default,
+            Reflections = reflections?.Value.Constants ?? default,
+        };
+        graph.Upload(view.Value.Constants, [gi], GIConstants.Offset);
+
         return Result.Success(
             new UploadedFrame(
                 view.Value,

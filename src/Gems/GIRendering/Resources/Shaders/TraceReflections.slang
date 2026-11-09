@@ -4,8 +4,7 @@
 // neighbours, each weighed by how much the pixel's own specular would reflect its ray, and blended with the frames
 // before where the surface, or what it reflects, was. Shading reads the result through Scene/TracedReflections.
 // Adapted from Wicked Engine's ray-traced reflections and its stochastic screen-space reflection resolve. The pass
-// header's x is the frame's buffer, which holds the lights, y the probe grid's constants and w the traced reflection
-// constants.
+// header's x is the frame's buffer, which holds the lights and the GI constants.
 module "TraceReflections";
 
 import Core.Heap;

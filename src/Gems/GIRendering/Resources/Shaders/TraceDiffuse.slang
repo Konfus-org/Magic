@@ -3,7 +3,7 @@
 // one light at random and by the probes, or the probes' light at the pixel where it reaches nothing within range; then
 // filtered over its neighbours, and blended with the frames before where they saw the same surface. Shading reads the
 // result through Scene/TracedDiffuse. Adapted from Wicked Engine's ray-traced diffuse. The pass header's x is the
-// frame's buffer, which holds the lights, y the probe grid's constants and w the traced diffuse constants.
+// frame's buffer, which holds the lights and the GI constants.
 module "TraceDiffuse";
 
 import Core.Heap;

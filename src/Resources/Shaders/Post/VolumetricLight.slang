@@ -6,8 +6,11 @@
 // blended with last frame's where each pixel's surface was then.
 module "Post/VolumetricLight";
 
+import Core.Frame;
 import Core.Random;
 import Post.IPixelEffect;
+import Scene.Lights;
+import Scene.Shadows;
 import Weather.Fog;
 
 // The most steps along a ray, which keeps the march short.
@@ -36,21 +39,23 @@ public struct VolumetricLight : IPixelEffect
     {
         // As far as the nearest surface, a pane of glass included, and no farther than distance, which is all
         // where nothing was drawn, so what the shafts cross shows through a pane in its own colour.
+        FrameConstants frame = GetFrame();
+        Lights lights = GetLights();
         float3 direction = normalize(inputs.nearestPosition);
         float reach = min(length(inputs.nearestPosition), distance);
         float count = clamp(round(samples), 1.0, MostSamples);
         float step = reach / count;
-        float start = GetRandom(inputs.pixel, asuint(inputs.time), 0u).x;
+        float start = GetRandom(inputs.pixel, asuint(frame.timeSec), 0u).x;
         float3 lit = float3(0.0);
         for (float i = 0.0; i < count; i++)
         {
             float along = (i + start) * step;
-            float3 point = inputs.cameraPosition + direction * along;
-            lit += WorldRays.GetTransmittance(point, inputs.sunDirection, 1e6) * exp(-density * along);
+            float3 point = frame.cameraPosition.xyz + direction * along;
+            lit += GetTransmittance(point, lights.sunDirection.xyz, 1e6) * exp(-density * along);
         }
 
-        float phase = GetScatteringPhase(anisotropy, dot(direction, inputs.sunDirection));
-        return inputs.sunRadiance * phase * density * step * lit;
+        float phase = GetScatteringPhase(anisotropy, dot(direction, lights.sunDirection.xyz));
+        return lights.sunIlluminance.rgb * phase * density * step * lit;
     }
 
     public override float4 Level(PixelEffectInputs inputs)

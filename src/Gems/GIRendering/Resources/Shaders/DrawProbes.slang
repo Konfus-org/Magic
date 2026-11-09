@@ -1,6 +1,6 @@
 // The probe grid's debug view: each probe drawn where it is as a small sphere, each point of it the light the probe
 // holds from that direction, drawn into the lit picture before its effects and behind what is nearer. One draw, an
-// instance a probe. The pass header's x is the frame's constants and y the grid's.
+// instance a probe. The pass header's x is the frame's buffer, which holds the grid's constants.
 module "DrawProbes";
 
 import Core.Heap;

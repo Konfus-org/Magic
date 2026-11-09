@@ -28,8 +28,8 @@ compiler loads a module and its imports from the assets, so a game's `Shaders/` 
   it in exposed light and one after the tonemap in the screen's. An effect that needs a target of its own, or last
   frame's, declares levels of it, which the blur and the exposure show, each of which may read the one before it, as the
   bloom's chain of ever blurrier halves does; one that blends frames declares jitter, which the temporal anti-aliasing
-  shows. An effect asks how much light gets through along a ray with `WorldRays`, which the renderer supplies, and
-  declares rays, as the volumetric light does.
+  shows. An effect reads the frame and its lights itself, and asks how much light gets through along a ray with
+  `Scene/Shadows`' `GetTransmittance`, and declares rays, as the volumetric light does.
 - `Weather/` is the weather's effects: the fog, a pixel effect whose fields are a fog material's params.
 - A contract between shaders is an interface, `I` plus a noun, and a pass that works with any implementation is
   generic over it. A game adds a material, a sky or a post effect by implementing the contract in a module of its own

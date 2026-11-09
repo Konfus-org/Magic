@@ -3,8 +3,10 @@
 // "height", "color", "anisotropy" and "sun". It draws as a pixel effect, before the post effects.
 module "Weather/Fog";
 
+import Core.Frame;
 import Core.Math;
 import Post.IPixelEffect;
+import Scene.Lights;
 
 // Under this much rise along a ray, in units of the falloff, the air is taken as level, where the closed form divides
 // by nothing.
@@ -41,18 +43,20 @@ public struct Fog : IPixelEffect
         // The air between the camera and the nearest surface, a pane of glass included, so a pane keeps its own colour,
         // its density falling off exponentially with height, integrated in closed form along the ray (Wenzel,
         // "Real-Time Atmospheric Effects in Games", 2006).
+        FrameConstants frame = GetFrame();
+        Lights lights = GetLights();
         float falloff = 0.693147 / max(halfHeight, 0.01);
         float distance = length(inputs.nearestPosition);
         float3 direction = inputs.nearestPosition / max(distance, 1e-6);
         // Clamped going down only, where exp(-rise) would overflow; going up it falls to 0 and the form stays exact.
         float rise = max(direction.y * distance * falloff, -80.0);
-        float atCamera = density * exp(-falloff * (inputs.cameraPosition.y - height));
+        float atCamera = density * exp(-falloff * (frame.cameraPosition.y - height));
         float opticalDepth = atCamera * distance * (abs(rise) > LevelRise ? (1.0 - exp(-rise)) / rise : 1.0);
         float transmittance = exp(-opticalDepth);
 
         // What the air scatters towards the camera: the sky's light evenly and the sun's by the angle to it.
-        float phase = GetScatteringPhase(anisotropy, dot(direction, inputs.sunDirection));
-        float3 scattered = color.rgb * (inputs.skyRadiance + sun * inputs.sunRadiance * phase);
+        float phase = GetScatteringPhase(anisotropy, dot(direction, lights.sunDirection.xyz));
+        float3 scattered = color.rgb * (GetOpenSkyRadiance(lights) + sun * lights.sunIlluminance.rgb * phase);
         return picture * transmittance + scattered * (1.0 - transmittance);
     }
 }

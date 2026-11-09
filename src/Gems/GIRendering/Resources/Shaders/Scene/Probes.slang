@@ -1,13 +1,14 @@
 // The probe grid of diffuse light (Majercik et al., "Dynamic Diffuse Global Illumination with Ray-Traced Irradiance
 // Fields", 2019): probes in a box over the world, each holding the light that reaches it as L1 spherical harmonics and
 // the distance to what it sees as an octahedral map of means and squared means, and what a point's light from them is.
-// C#'s ProbeGridConstants is in the buffer whose heap id is the pass header's y.
+// C#'s ProbeGridConstants is in the frame's buffer after the shadows, the GI constants' first part.
 module "Scene/Probes";
 
 import Core.Heap;
 import Core.Pass;
 import Core.Math;
 import Core.Pack;
+import Scene.Shadows;
 
 // The most rays a probe traces in a frame, C#'s Probes.MaxRays, and the step its count of rays moves in.
 public static const uint MaxProbeRays = 256u;
@@ -47,7 +48,16 @@ public struct ProbeGridConstants
     public uint padding0;
 }
 
-public ProbeGridConstants GetProbeGrid() { return LoadConstants<ProbeGridConstants>(GetPassHeader().y); }
+// Where the probe grid's constants are in the frame's buffer, after the shadows, as the GI constants' first part, and
+// their bytes: C#'s GIConstants.
+public static const uint ProbeGridOffset = ShadowsOffset + ShadowsBytes;
+public static const uint ProbeGridBytes = 80u;
+
+public ProbeGridConstants GetProbeGrid()
+{
+    BufferRef frame = { GetPassHeader().x };
+    return frame.Load<ProbeGridConstants>(ProbeGridOffset);
+}
 
 // The ray counts buffer's words: the rays the probes were given this frame in all at 0, then each probe's.
 public uint GetProbeRayCountOffset(uint probe) { return 4u + probe * 4u; }

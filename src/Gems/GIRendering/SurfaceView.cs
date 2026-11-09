@@ -89,14 +89,10 @@ internal sealed class SurfaceView(AssetManager assets)
             return;
 
         ComputePass show = view
-            .Graph.Compute(
-                "Show light",
-                _lightShader,
-                new GpuConstants(view.Constants.Id, (uint)debugView, reflections.Id, diffuse?.Constants.Id ?? 0)
-            )
+            .Graph.Compute("Show light", _lightShader, new GpuConstants(view.Constants.Id, (uint)debugView))
             .Reads(view.Constants, view.Visibility, view.Depth, view.GBufferNormal);
         if (diffuse is { } traced)
-            show.Reads(traced.Constants, traced.Light);
+            show.Reads(traced.Light);
 
         if (!reflections.IsNone)
             show.Reads(reflections);

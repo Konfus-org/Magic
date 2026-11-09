@@ -1,13 +1,14 @@
 // The traced reflections: the light a surface's specular reflects along the directions it reflects the view into,
 // traced at half the picture's size for surfaces no rougher than TracedRoughness, resolved over the neighbours and
 // blended over frames, and how the picture reads it back at its own size. C#'s TracedReflectionConstants is in the
-// buffer whose heap id is the pass header's w.
+// frame's buffer after the traced diffuse light's, the GI constants' last part.
 module "Scene/TracedReflections";
 
 import Core.Heap;
 import Core.Pass;
 import Core.Frame;
 import Scene.Traced;
+import Scene.TracedDiffuse;
 
 // The roughest surface whose reflections are traced; a rougher one reflects its traced diffuse light, or the sky giving
 // way to its diffuse light where none is traced.
@@ -37,9 +38,15 @@ public struct TracedReflectionConstants
     public uint padding1;
 }
 
+// Where the traced reflections' constants are in the frame's buffer, after the traced diffuse light's, the GI
+// constants' last part, and their bytes.
+public static const uint TracedReflectionsOffset = TracedDiffuseOffset + TracedDiffuseBytes;
+public static const uint TracedReflectionsBytes = 48u;
+
 public TracedReflectionConstants GetTracedReflections()
 {
-    return LoadConstants<TracedReflectionConstants>(GetPassHeader().w);
+    BufferRef frame = { GetPassHeader().x };
+    return frame.Load<TracedReflectionConstants>(TracedReflectionsOffset);
 }
 
 // The light reflected towards the view at a pixel of the picture whose surface is at a camera-relative point facing a

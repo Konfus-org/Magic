@@ -74,14 +74,34 @@ internal record struct FrameConstants
 }
 
 /// <summary>
+/// What the GI passes read beyond the frame, written once a frame into the frame's buffer after
+/// <see cref="GpuShadows"/>: the probe grid's, the traced diffuse light's and the traced reflections' constants,
+/// each left empty, its ids 0, where it isn't drawn; the twins of <c>Scene/Probes.slang</c>'s,
+/// <c>Scene/TracedDiffuse.slang</c>'s and <c>Scene/TracedReflections.slang</c>'s, which read each at its offset.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal record struct GIConstants
+{
+    public const int Offset = GpuShadows.Offset + GpuShadows.Bytes;
+
+    public const int Bytes = ProbeGridConstants.Bytes + TracedDiffuseConstants.Bytes + TracedReflectionConstants.Bytes;
+
+    public ProbeGridConstants Grid;
+
+    public TracedDiffuseConstants Diffuse;
+
+    public TracedReflectionConstants Reflections;
+}
+
+/// <summary>
 /// What the cluster passes read beyond the frame, the twin of <c>Scene/Clusters.slang</c>'s: the cull's limits and
 /// buffers, the depth pyramid, the visibility ids and the impostor handoff, written once a frame into the constants
-/// buffer after <see cref="GpuShadows"/>.
+/// buffer after <see cref="GIConstants"/>.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct ClusterConstants
 {
-    public const int Offset = GpuShadows.Offset + GpuShadows.Bytes;
+    public const int Offset = GIConstants.Offset + GIConstants.Bytes;
 
     public const int Bytes = 64;
 

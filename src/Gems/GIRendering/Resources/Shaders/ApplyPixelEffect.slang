@@ -1,8 +1,8 @@
 // A pixel effect's passes: each level of its target filled, then the effect applied over every pixel of the picture.
 // A pass reads its GpuEffectPass from the table whose heap id is the pass header's y, at the row its z names, and the
 // effect's struct from its row of the params table that names. The effect is handed each pixel as the effects before
-// it left it, with where its surface and the nearest pane of glass in front of it are and the sun's and the sky's
-// light; what it gives back is written into the other picture, for the next effect or the output.
+// it left it, with where its surface and the nearest pane of glass in front of it are; what it gives back is written
+// into the other picture, for the next effect or the output.
 module "ApplyPixelEffect";
 
 import Core.Heap;
@@ -12,29 +12,10 @@ import Core.Math;
 import Core.Pack;
 import Scene.Materials;
 import Post.IPixelEffect;
-import Trace.HitSurface;
 import Scene.Clusters;
-import Scene.Lights;
-import Scene.Models;
 
 // The reversed depth a pixel where nothing was drawn is put at: far along its ray, short of infinity.
 static const float FarDepth = 1e-6;
-
-// The world as the frame's acceleration structure has it, for the effects' rays.
-struct TracedWorld : IWorldRays
-{
-    static float3 GetTransmittance(float3 origin, float3 direction, float distance)
-    {
-        Models models = GetModels();
-        if (models.acceleration == 0u)
-            return float3(1.0);
-
-        AccelerationRef acceleration = { models.acceleration };
-        return GetTransmittance(acceleration.Get(), origin, direction, distance);
-    }
-}
-
-export struct WorldRays : IWorldRays = TracedWorld;
 
 // One pass of an effect, C#'s GpuEffectPass: the heap id of the table of the effects' params and the effect's row in
 // it, the level of its target the pass fills, 0 for Apply, and the heap ids of the picture it reads, of what it writes,
@@ -63,23 +44,11 @@ GpuEffectPass LoadPass()
 // What an effect is handed for a texel of what the pass writes, which is size texels across.
 PixelEffectInputs CreateInputs(FrameConstants frame, GpuEffectPass pass, uint2 pixel, uint2 size)
 {
-    Lights lights = GetLights();
     PixelEffectInputs inputs;
     inputs.size = size;
     inputs.pixel = pixel;
     inputs.uv = (float2(pixel) + 0.5) / float2(size);
     inputs.level = pass.level;
-    inputs.deltaSec = frame.deltaSec;
-    inputs.time = frame.timeSec;
-    inputs.cameraPosition = frame.cameraPosition.xyz;
-    inputs.sunDirection = lights.sunDirection.xyz;
-    inputs.sunRadiance = lights.sunIlluminance.rgb;
-    // PROTO: the sky's light as the shading draws a missing sky, until the sky's tables are handed on.
-    inputs.skyRadiance = lights.skyRadiance.rgb * lights.sunIlluminance.r;
-    // The sun as a point infinitely far along its direction, whose clip w is its depth along the view: the cosine.
-    float4 sunClip = mul(float4(inputs.sunDirection, 0.0), frame.viewProjection);
-    inputs.sunUv = float2(sunClip.x, -sunClip.y) / sunClip.w * 0.5 + 0.5;
-    inputs.sunFacing = sunClip.w;
     inputs.picture.id = pass.picture;
     inputs.target.id = pass.target;
     inputs.history.id = pass.history;

@@ -5,6 +5,7 @@ module "Scene/Lights";
 
 import Core.Heap;
 import Core.Pass;
+import Core.Frame;
 import Scene.Models;
 import Sky.ISky;
 
@@ -41,6 +42,20 @@ public Lights GetLights()
     BufferRef frame = { GetPassHeader().x };
     return frame.Load<Lights>(LightsOffset);
 }
+
+// Where the sun is in the picture, 0 to 1 from the top left and past that off its edges, in xy, and the cosine
+// between the camera's view and the sun in z: 1 straight ahead, 0 or less beside or behind the camera, where xy
+// means nothing.
+public float3 GetSunOnScreen(FrameConstants frame, Lights lights)
+{
+    // The sun as a point infinitely far along its direction, whose clip w is its depth along the view: the cosine.
+    float4 clip = mul(float4(lights.sunDirection.xyz, 0.0), frame.viewProjection);
+    return float3(float2(clip.x, -clip.y) / clip.w * 0.5 + 0.5, clip.w);
+}
+
+// PROTO: the open sky's light where no sky entity draws the sky, as the shading draws a missing sky, until the
+// sky's tables are handed on.
+public float3 GetOpenSkyRadiance(Lights lights) { return lights.skyRadiance.rgb * lights.sunIlluminance.r; }
 
 // What a sky is handed to answer for a direction from the camera.
 public SkyInputs CreateSkyInputs(Lights lights, float3 direction, bool hasSunDisc)

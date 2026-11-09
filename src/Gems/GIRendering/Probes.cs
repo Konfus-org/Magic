@@ -10,7 +10,7 @@ namespace Magic.GIRendering;
 /// The probe grid's buffers and depth texture, and the constants that name them.
 /// </summary>
 internal readonly record struct ProbeBuffers(
-    GpuBuffer Constants,
+    ProbeGridConstants Constants,
     GpuBuffer Probes,
     GpuBuffer Rays,
     GpuBuffer RayList,
@@ -102,15 +102,13 @@ internal sealed class Probes(AssetManager assets, GpuResources resources)
 
     /// <summary>
     /// The grid's buffers and depth texture asked for, the box moved towards the boxes of the instances in the world's
-    /// acceleration structure, and the constants uploaded, in a transfer pass the caller opened.
+    /// acceleration structure, the constants that name them, and the draw arguments and counts set, in a transfer pass
+    /// the caller opened.
     /// </summary>
     public Result<ProbeBuffers> Prepare(in RenderView view, ReadOnlySpan<InstanceExtra> instances)
     {
         RenderGraph graph = view.Graph;
         long probes = ProbeCount;
-        Result<GpuBuffer> constants = graph.Buffer(
-            GpuDescriptions.GetBuffer("Probe grid constants", ProbeGridConstants.Bytes)
-        );
         Result<GpuBuffer> probeTable = graph.Buffer(GpuDescriptions.GetBuffer("Probes", probes * ProbeBytes));
         Result<GpuBuffer> rays = graph.Buffer(GpuDescriptions.GetBuffer("Probe rays", probes * MaxRays * RayBytes));
         Result<GpuBuffer> list = graph.Buffer(GpuDescriptions.GetBuffer("Probe ray list", probes * MaxRays * 4));
@@ -135,7 +133,7 @@ internal sealed class Probes(AssetManager assets, GpuResources resources)
         Result<GpuSampler> sampler = graph.Sampler(new SamplerDescription { Wrap = TextureWrap.Clamp });
         foreach (
             Result made in (ReadOnlySpan<Result>)
-                [constants, probeTable, rays, list, arguments, counts, variance, depth, draw, sampler]
+                [probeTable, rays, list, arguments, counts, variance, depth, draw, sampler]
         )
         {
             if (!made.Ok)
@@ -161,8 +159,26 @@ internal sealed class Probes(AssetManager assets, GpuResources resources)
         bool hasHistory = _box is not null;
         _box = box;
         Vector3 cellSize = (box.Max - box.Min) / new Vector3(ProbesAcross - 1, ProbesUp - 1, ProbesAcross - 1);
+        ProbeGridConstants grid = new()
+        {
+            DimensionX = ProbesAcross,
+            DimensionY = ProbesUp,
+            DimensionZ = ProbesAcross,
+            MaxDistance = Math.Max(cellSize.X, Math.Max(cellSize.Y, cellSize.Z)) * 1.5f,
+            Origin = box.Min,
+            CellSize = cellSize,
+            Probes = probeTable.Value.Id,
+            Depth = depth.Value.Id,
+            DepthSampler = sampler.Value.Id,
+            Rays = rays.Value.Id,
+            RayList = list.Value.Id,
+            RayArguments = arguments.Value.Id,
+            RayCounts = counts.Value.Id,
+            Variance = variance.Value.Id,
+            HasHistory = hasHistory ? 1u : 0u,
+        };
         ProbeBuffers buffers = new(
-            constants.Value,
+            grid,
             probeTable.Value,
             rays.Value,
             list.Value,
@@ -172,25 +188,6 @@ internal sealed class Probes(AssetManager assets, GpuResources resources)
             depth.Value,
             draw.Value
         );
-        ProbeGridConstants grid = new()
-        {
-            DimensionX = ProbesAcross,
-            DimensionY = ProbesUp,
-            DimensionZ = ProbesAcross,
-            MaxDistance = Math.Max(cellSize.X, Math.Max(cellSize.Y, cellSize.Z)) * 1.5f,
-            Origin = box.Min,
-            CellSize = cellSize,
-            Probes = buffers.Probes.Id,
-            Depth = buffers.Depth.Id,
-            DepthSampler = sampler.Value.Id,
-            Rays = buffers.Rays.Id,
-            RayList = buffers.RayList.Id,
-            RayArguments = buffers.RayArguments.Id,
-            RayCounts = buffers.RayCounts.Id,
-            Variance = buffers.Variance.Id,
-            HasHistory = hasHistory ? 1u : 0u,
-        };
-        graph.Upload(buffers.Constants, [grid]);
         graph.Upload(buffers.DrawArguments, [(uint)SphereVertices, (uint)ProbeCount, 0u, 0u, 1u]);
 
         // The counts start each frame at none, and the probes at none on the first update.
@@ -213,22 +210,21 @@ internal sealed class Probes(AssetManager assets, GpuResources resources)
     )
     {
         RenderGraph graph = view.Graph;
-        GpuConstants header = new(view.Constants.Id, probes.Constants.Id);
+        GpuConstants header = new(view.Constants.Id);
         graph
             .Compute("Allocate probe rays", _allocateShader, header)
-            .Reads(view.Constants, probes.Constants, probes.Probes, probes.Variance)
+            .Reads(view.Constants, probes.Probes, probes.Variance)
             .Writes(probes.RayCounts, probes.RayList)
             .Dispatch(ProbeCount);
         graph
             .Compute("Prepare probe rays", _prepareShader, header)
-            .Reads(probes.Constants, probes.RayCounts)
+            .Reads(view.Constants, probes.RayCounts)
             .Writes(probes.RayArguments)
             .Dispatch(1);
         graph
             .Compute("Trace probes", _traceShader, header)
             .Reads(
                 view.Constants,
-                probes.Constants,
                 sky.Transmittance,
                 sky.MultiScattering,
                 sky.View,
@@ -248,12 +244,12 @@ internal sealed class Probes(AssetManager assets, GpuResources resources)
             .DispatchIndirect(probes.RayArguments, 0);
         graph
             .Compute("Blend probe irradiance", _irradianceShader, header)
-            .Reads(probes.Constants, probes.Rays, probes.RayCounts)
+            .Reads(view.Constants, probes.Rays, probes.RayCounts)
             .Writes(probes.Probes, probes.Variance)
             .Dispatch(ProbeCount);
         graph
             .Compute("Blend probe depth", _depthShader, header)
-            .Reads(probes.Constants, probes.Rays, probes.RayCounts)
+            .Reads(view.Constants, probes.Rays, probes.RayCounts)
             .Writes(probes.Probes, probes.Depth)
             .Dispatch(ProbeCount);
     }
@@ -272,9 +268,9 @@ internal sealed class Probes(AssetManager assets, GpuResources resources)
                     Colors = [new GpuTarget { Texture = view.Hdr }],
                     Depth = new GpuTarget { Texture = view.Depth },
                 },
-                new GpuConstants(view.Constants.Id, probes.Constants.Id)
+                new GpuConstants(view.Constants.Id)
             )
-            .Reads(view.Constants, probes.Constants, probes.Probes)
+            .Reads(view.Constants, probes.Probes)
             .Indirect(probes.DrawArguments)
             .DrawIndirectCount(probes.DrawArguments, 0, probes.DrawArguments, 16, 1);
 }

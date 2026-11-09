@@ -2,8 +2,8 @@
 // tile lists, each dimmed by the shadow mask and the sun coloured by its tint through glass, and by the light around
 // it, traced on a GPU that traces rays and else the sky's, and what it reflects, traced where it is smooth enough, its
 // direct and indirect light summed over the shared BRDF; and the sky itself where nothing was drawn. The pass header's
-// x is the frame's buffer, which holds the lights and the shadows, z the traced reflections' light and w the traced
-// diffuse constants, each 0 where there are none.
+// x is the frame's buffer, which holds the lights, the shadows and the GI constants, whose light ids are 0 where
+// nothing is traced.
 module "ShadeSurfaces";
 
 import Core.Heap;
@@ -37,7 +37,7 @@ float3 GetIndirectLight<S : ISky>(
     float3 view
 )
 {
-    bool isTraced = GetPassHeader().w != 0u;
+    bool isTraced = GetTracedDiffuse().light != 0u;
     float3 diffuse;
     if (isTraced)
         diffuse = SampleTracedDiffuse(frame, GetTracedDiffuse(), pixel, relative, normal);
@@ -53,7 +53,7 @@ float3 GetIndirectLight<S : ISky>(
         specular = lerp(reflected, diffuse, saturate(roughness));
     }
 
-    uint reflections = GetPassHeader().z;
+    uint reflections = GetTracedReflections().light;
     if (reflections != 0u && roughness <= TracedRoughness)
     {
         float4 traced = SampleTracedReflections(frame, reflections, pixel, relative, normal, roughness);
@@ -86,7 +86,7 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
     {
         float3 sky = lights.hasSky != 0u
             ? S.Evaluate(CreateSkyInputs(lights, -view, true))
-            : lights.skyRadiance.rgb * lights.sunIlluminance.r * lerp(0.6, 1.4, 1.0 - uv.y);
+            : GetOpenSkyRadiance(lights) * lerp(0.6, 1.4, 1.0 - uv.y);
         hdr.Store(thread.xy, float4(sky, 1.0));
         return;
     }

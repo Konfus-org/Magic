@@ -6,6 +6,7 @@
 module "Post/Exposure";
 
 import Core.Color;
+import Core.Frame;
 import Post.IPixelEffect;
 
 // What the average luminance is brought to, and how fast the adapted luminance follows it, per second.
@@ -39,7 +40,7 @@ public struct Exposure : IPixelEffect
         float frameLog = average.y > 0.0 ? average.x / average.y : LeastLog;
         float4 last = inputs.history.Load(uint2(0u), inputs.level);
         float adapted = inputs.hasHistory
-            ? lerp(last.z + last.w, frameLog, 1.0 - exp(-inputs.deltaSec * AdaptionRate))
+            ? lerp(last.z + last.w, frameLog, 1.0 - exp(-GetFrame().deltaSec * AdaptionRate))
             : frameLog;
         float high = f16tof32(f32tof16(adapted));
         return float4(average, high, adapted - high);

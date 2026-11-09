@@ -1,11 +1,13 @@
 // The traced diffuse light: what a white diffuse surface reflects of the light that reaches it indirectly, its
 // irradiance over pi, traced at half the picture's size, filtered and blended over frames, and how the picture reads it
-// back at its own size. C#'s TracedDiffuseConstants is in the buffer whose heap id is the pass header's w.
+// back at its own size. C#'s TracedDiffuseConstants is in the frame's buffer after the probe grid's, in the GI
+// constants.
 module "Scene/TracedDiffuse";
 
 import Core.Heap;
 import Core.Pass;
 import Core.Frame;
+import Scene.Probes;
 import Scene.Traced;
 
 public struct TracedDiffuseConstants
@@ -26,7 +28,15 @@ public struct TracedDiffuseConstants
     public uint hasHistory;
 }
 
-public TracedDiffuseConstants GetTracedDiffuse() { return LoadConstants<TracedDiffuseConstants>(GetPassHeader().w); }
+// Where the traced diffuse light's constants are in the frame's buffer, after the probe grid's, and their bytes.
+public static const uint TracedDiffuseOffset = ProbeGridOffset + ProbeGridBytes;
+public static const uint TracedDiffuseBytes = 32u;
+
+public TracedDiffuseConstants GetTracedDiffuse()
+{
+    BufferRef frame = { GetPassHeader().x };
+    return frame.Load<TracedDiffuseConstants>(TracedDiffuseOffset);
+}
 
 // The diffuse light at a pixel of the picture whose surface is at a camera-relative point facing a unit normal, read
 // back from the blended light and blurred over up to 8 pixels where it is still noisy.
