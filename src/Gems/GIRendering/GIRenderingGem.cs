@@ -272,12 +272,11 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _resources.EvictUnusedModels(inputs.Renderers.Second[..instanceCount]);
 
         // The loading domain shows once what it draws and its effects are on the GPU, and the resolve for each material
-        // shader and the glass for each translucent one are built.
+        // shader is built.
         if (
             _preparing is { } preparing
             && IsPrepared(graph, preparing)
             && GetState(graph, _visibility.GetResolveShaders()) != GpuState.Loading
-            && GetState(graph, [.. _lighting.GetGlassShaders()]) != GpuState.Loading
         )
         {
             Log.Info(

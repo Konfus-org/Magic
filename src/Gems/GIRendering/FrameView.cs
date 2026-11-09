@@ -94,6 +94,9 @@ internal sealed class FrameView(GpuResources resources)
             TimeSec = (float)frame.AppSec,
             DeltaSec = (float)frame.AppDeltaSec,
             GlassDepth = targets.GlassDepth.Id,
+            GlassBase = targets.GlassBase.Id,
+            GlassNormal = targets.GlassNormal.Id,
+            GlassSurface = targets.GlassSurface.Id,
             PixelsPerRadian = height / (2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360)),
             FrameIndex = frame.Index,
             Jitter = jitter,
@@ -253,6 +256,9 @@ internal sealed class FrameView(GpuResources resources)
                 TextureUsages.DepthTarget | TextureUsages.Sampled
             )
         );
+        Result<GpuTexture> glassBase = graph.Texture(GetTarget("Glass base", GpuFormat.R8G8B8A8Unorm));
+        Result<GpuTexture> glassNormal = graph.Texture(GetTarget("Glass normal", GpuFormat.R16G16Unorm));
+        Result<GpuTexture> glassSurface = graph.Texture(GetTarget("Glass surface", GpuFormat.R16G16B16A16Sfloat));
         Result<GpuTexture> hzb = graph.Texture(
             GpuDescriptions.GetTexture(
                 "Depth pyramid",
@@ -295,6 +301,9 @@ internal sealed class FrameView(GpuResources resources)
                     depth,
                     glassVisibility,
                     glassDepth,
+                    glassBase,
+                    glassNormal,
+                    glassSurface,
                     hzb,
                     normal,
                     baseColor,
@@ -323,6 +332,9 @@ internal sealed class FrameView(GpuResources resources)
                 depth.Value,
                 glassVisibility.Value,
                 glassDepth.Value,
+                glassBase.Value,
+                glassNormal.Value,
+                glassSurface.Value,
                 hzb.Value,
                 normal.Value,
                 baseColor.Value,

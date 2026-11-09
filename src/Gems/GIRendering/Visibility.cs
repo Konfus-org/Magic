@@ -23,6 +23,9 @@ internal readonly record struct RenderView(
     GpuTexture Depth,
     GpuTexture GlassVisibility,
     GpuTexture GlassDepth,
+    GpuTexture GlassBase,
+    GpuTexture GlassNormal,
+    GpuTexture GlassSurface,
     GpuTexture Hzb,
     GpuTexture GBufferNormal,
     GpuTexture GBufferBase,
@@ -381,7 +384,8 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
         };
 
     /// <summary>
-    /// The pixels whose rows material shader <paramref name="shader"/> draws, resolved into the GBuffer.
+    /// The pixels whose rows material shader <paramref name="shader"/> draws, resolved into the GBuffer, and the panes
+    /// it draws into the glass targets.
     /// </summary>
     private void RecordResolve(in RenderView view, ImmutableArray<GpuResource> heapTextures, int shader) =>
         view
@@ -400,10 +404,12 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
                 resources.IndexPool,
                 view.Materials,
                 view.Cull.VisibleClusters,
-                view.Visibility
+                view.Visibility,
+                view.GlassVisibility
             )
             .Reads(heapTextures.AsSpan())
             .Writes(view.GBufferNormal, view.GBufferBase, view.GBufferSurface, view.Velocity)
+            .Writes(view.GlassBase, view.GlassNormal, view.GlassSurface)
             .DispatchOver(view.Width, view.Height);
 
     /// <summary>

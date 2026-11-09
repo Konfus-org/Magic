@@ -12,7 +12,7 @@ namespace Magic.GIRendering;
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct FrameConstants
 {
-    public const int Bytes = 516;
+    public const int Bytes = 528;
 
     public Matrix4x4 View;
 
@@ -71,6 +71,12 @@ internal record struct FrameConstants
     public float DeltaSec;
 
     public uint GlassDepth;
+
+    public uint GlassBase;
+
+    public uint GlassNormal;
+
+    public uint GlassSurface;
 }
 
 /// <summary>

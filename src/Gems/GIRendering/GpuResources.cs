@@ -337,12 +337,6 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// Whether material shader <paramref name="shader"/>, by its place in <see cref="MaterialShaders"/>, is
-    /// translucent.
-    /// </summary>
-    public bool IsTranslucent(int shader) => _layouts[_materialShaders[shader].Module.Id]?.IsTranslucent ?? false;
-
-    /// <summary>
     /// Whether the effect's material, its shader's struct and the textures it names are on the GPU, its row packed as
     /// <see cref="Get(in MaterialInstance, out GpuMaterial)"/> packs a surface's, and the struct its pass is specialised
     /// to, with what it declares it needs. An effect's shader is not one of the <see cref="MaterialShaders"/>, which

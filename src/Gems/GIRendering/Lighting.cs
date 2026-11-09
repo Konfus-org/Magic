@@ -11,8 +11,8 @@ namespace Magic.GIRendering;
 /// <summary>
 /// The view's surfaces lit into the HDR picture, and the sky drawn where nothing was: the frame's lights and shadows,
 /// naming the sky's tables, the light table and the shadow mask, uploaded before the view is drawn, and the shading
-/// after them, lit indirectly by the traced diffuse light where there is any; then the nearest glass shaded
-/// over it.
+/// after them, lit indirectly by the traced diffuse light where there is any; then the nearest translucent surface
+/// shaded over it.
 /// </summary>
 internal sealed class Lighting(AssetManager assets, GpuResources resources)
 {
@@ -23,15 +23,16 @@ internal sealed class Lighting(AssetManager assets, GpuResources resources)
         TypeArguments = [PassShaders.GetAtmosphere(assets)],
     };
 
-    private readonly ShaderEntry _glassShader = PassShaders.GetEntry(assets, "ShadeGlass", "ShadeGlass");
+    private readonly ShaderEntry _translucentShader = PassShaders.GetEntry(
+        assets,
+        "ShadeTranslucent",
+        "ShadeTranslucent"
+    ) with
+    {
+        TypeArguments = [PassShaders.GetAtmosphere(assets)],
+    };
 
-    /// <summary>
-    /// The glass entry specialised to each translucent material shader and the sky, by the number rows name the shader
-    /// by: kept, so a frame makes none.
-    /// </summary>
-    private readonly Dictionary<int, ShaderEntry> _glassShaders = [];
-
-    public ImmutableArray<ShaderEntry> Shaders => [_shadeShader];
+    public ImmutableArray<ShaderEntry> Shaders => [_shadeShader, _translucentShader];
 
     /// <summary>
     /// The frame's lights and shadows uploaded into the frame's buffer, in a transfer pass the caller opened, after the
@@ -82,26 +83,6 @@ internal sealed class Lighting(AssetManager assets, GpuResources resources)
     }
 
     /// <summary>
-    /// The glass entry for each translucent material shader the resources have numbered, one made for each newly
-    /// numbered.
-    /// </summary>
-    public IReadOnlyCollection<ShaderEntry> GetGlassShaders()
-    {
-        for (int shader = 0; shader < resources.MaterialShaders.Count; shader++)
-        {
-            if (resources.IsTranslucent(shader) && !_glassShaders.ContainsKey(shader))
-            {
-                _glassShaders[shader] = _glassShader with
-                {
-                    TypeArguments = [resources.MaterialShaders[shader], PassShaders.GetAtmosphere(assets)],
-                };
-            }
-        }
-
-        return _glassShaders.Values;
-    }
-
-    /// <summary>
     /// Every pixel's surface shaded from the sky's tables, its tile's lights and, on a GPU that traces rays, its
     /// shadows, its traced diffuse light and what it reflects, and the sky where there is none; then the nearest glass
     /// over it, lit by the light around it from <paramref name="probes"/> where there are any, and its rays through
@@ -145,36 +126,26 @@ internal sealed class Lighting(AssetManager assets, GpuResources resources)
 
         shade.Writes(view.Hdr).DispatchOver(view.Width, view.Height);
 
-        // The nearest glass over the shaded picture, a pass for each translucent material shader, which shades the
-        // pixels whose rows it draws.
-        GetGlassShaders();
-        ImmutableArray<GpuResource> heapTextures = resources.GetHeapTextures(view.Graph);
-        foreach ((int shader, ShaderEntry entry) in _glassShaders)
-        {
-            ComputePass glass = view
-                .Graph.Compute("Shade glass", entry, header with { W = (uint)shader })
-                .Reads(
-                    view.Constants,
-                    sky.Transmittance,
-                    sky.MultiScattering,
-                    sky.View,
-                    view.Instances,
-                    view.Materials,
-                    resources.ClusterPool,
-                    resources.VertexPool,
-                    resources.IndexPool,
-                    view.Cull.VisibleClusters,
-                    view.GlassVisibility,
-                    view.Depth
-                )
-                .Reads(heapTextures.AsSpan());
-            if (probes is { } probed)
-                glass.Reads(probed.Probes, probed.Depth);
+        // The nearest pane over the shaded picture, from what the resolve left in the glass targets.
+        ComputePass translucent = view
+            .Graph.Compute("Shade translucent", _translucentShader, header)
+            .Reads(
+                view.Constants,
+                sky.Transmittance,
+                sky.MultiScattering,
+                sky.View,
+                view.GlassDepth,
+                view.GlassBase,
+                view.GlassNormal,
+                view.GlassSurface,
+                view.Depth
+            );
+        if (probes is { } probed)
+            translucent.Reads(probed.Probes, probed.Depth);
 
-            if (world is { } rays)
-                glass.Reads(rays.HitMaterials, resources.Meshes);
+        if (world is { } rays)
+            translucent.Reads(rays.HitMaterials, resources.Meshes, view.Instances);
 
-            glass.Writes(view.Hdr).DispatchOver(view.Width, view.Height);
-        }
+        translucent.Writes(view.Hdr).DispatchOver(view.Width, view.Height);
     }
 }

@@ -5,9 +5,10 @@ module "Core/Frame";
 
 import Core.Heap;
 import Core.Pass;
+import Core.Math;
 
 // The frame's bytes, C#'s FrameConstants.Bytes: where the rows after it in its buffer start.
-public static const uint FrameBytes = 516u;
+public static const uint FrameBytes = 528u;
 
 public struct FrameConstants
 {
@@ -59,11 +60,32 @@ public struct FrameConstants
     // The seconds the run has taken, and since the frame before.
     public float timeSec;
     public float deltaSec;
-    // The nearest glass's reversed depth in front of the opaque surfaces, 0 where there is none.
+    // The nearest glass's reversed depth in front of the opaque surfaces, 0 where there is none, and its surface as
+    // its material decided it: its base colour and alpha, its normal, and its roughness and what it gives off.
     public uint glassDepth;
+    public uint glassBase;
+    public uint glassNormal;
+    public uint glassSurface;
 }
 
 public FrameConstants GetFrame() { return LoadConstants<FrameConstants>(); }
+
+// The most a pixel's point rises off its flat triangle, in widths of the pixel at its distance, as the GBuffer
+// surface's w holds it: square-rooted, so a small rise keeps its precision in 8 bits.
+static const float MostLiftPixels = 64.0;
+
+// How far a pixel's point at a camera-relative position rises off its flat triangle, as the GBuffer surface's w holds
+// it, and back.
+public float EncodeLift(FrameConstants frame, float3 relative, float lift)
+{
+    float footprint = max(length(relative) / frame.pixelsPerRadian, Epsilon);
+    return sqrt(saturate(lift / (MostLiftPixels * footprint)));
+}
+
+public float DecodeLift(FrameConstants frame, float3 relative, float encoded)
+{
+    return encoded * encoded * MostLiftPixels * length(relative) / frame.pixelsPerRadian;
+}
 
 // A world position relative to the camera.
 public float3 Relative(FrameConstants frame, float3 worldPosition) { return worldPosition - frame.cameraPosition.xyz; }

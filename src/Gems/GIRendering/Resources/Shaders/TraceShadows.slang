@@ -14,38 +14,14 @@ import Core.Color;
 import Core.Pack;
 import Core.Random;
 import Core.Sampling;
-import Scene.Instances;
-import Scene.Visibility;
-import Scene.Impostors;
 import Scene.Lights;
 import Scene.Shadows;
 import Light.Lights;
 import Trace.HitSurface;
-import Scene.Clusters;
 import Scene.Models;
 
 // The sun's bits of the group's two tiles, the upper and the lower 8 by 4 pixels.
 groupshared uint groupSunTiles[2];
-
-// How far a point must rise along a vertex's normal to reach the plane through the vertex square to it, when it lies
-// below that plane.
-float3 GetLift(float3 fromVertex, float3 normal) { return -min(0.0, dot(fromVertex, normal)) * normal; }
-
-// A pixel's point lifted off its flat triangle towards the curved surface the triangle's vertex normals describe, so
-// that a ray from the lit side of a curve doesn't hit the next triangle and shadow the curve a facet at a time (Hanika,
-// "Hacking the Shadow Terminator", Ray Tracing Gems II, 2021). A point in a hollow stays where it is.
-float3 LiftOffTriangle(FrameConstants frame, uint id, float2 uv, float3 relative)
-{
-    uint visibleIndex;
-    uint triangle;
-    DecodeVisibilityId(id, visibleIndex, triangle);
-    PixelTriangle shown = LoadPixelTriangle(frame, visibleIndex, triangle, ToClip(uv));
-    float3 lambda = shown.bary.lambda;
-    return relative
-        + lambda.x * GetLift(relative - shown.p0, ToWorldNormal(shown.instance.world, shown.v0.normal))
-        + lambda.y * GetLift(relative - shown.p1, ToWorldNormal(shown.instance.world, shown.v1.normal))
-        + lambda.z * GetLift(relative - shown.p2, ToWorldNormal(shown.instance.world, shown.v2.normal));
-}
 
 // A pixel's words, all lit for the sky and where there is nothing to hit, and the sun's tint, white unless its ray
 // went through glass.
@@ -54,19 +30,20 @@ uint4 Trace(FrameConstants frame, Lights lights, uint2 pixel, out float3 sunTint
     Models models = GetModels();
     sunTint = float3(1.0);
     uint2 size = uint2(frame.width, frame.height);
-    UintTextureRef visibility = { GetClusters().visibility };
-    uint id = visibility.Load(pixel, 0u);
-    if (id == 0u || models.acceleration == 0u)
+    TextureRef depthTexture = { frame.depth };
+    float depth = depthTexture.Load(pixel, 0u).x;
+    if (depth == 0.0 || models.acceleration == 0u)
         return uint4(0xFFFFFFFFu);
 
+    // The point lifted off its flat triangle towards the curve its vertex normals describe, as the resolve found it,
+    // so that a ray from the lit side of a curve doesn't shadow it a facet at a time.
     float2 uv = GetTexelCenterUv(pixel, size);
-    TextureRef depthTexture = { frame.depth };
     TextureRef normalTexture = { frame.gbufferNormal };
-    float3 relative = ReconstructRelative(frame, uv, depthTexture.Load(pixel, 0u).x);
+    TextureRef surfaceTexture = { frame.gbufferSurface };
+    float3 relative = ReconstructRelative(frame, uv, depth);
     float3 normal = DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0);
-    // An impostor's pixel has no triangle to lift off.
-    float3 lifted = (id & ImpostorFlag) != 0u ? relative : LiftOffTriangle(frame, id, uv, relative);
-    float3 world = lifted + frame.cameraPosition.xyz;
+    float lift = DecodeLift(frame, relative, surfaceTexture.Load(pixel, 0u).w);
+    float3 world = relative + normal * lift + frame.cameraPosition.xyz;
     float3 origin = world + normal * GetRayOffset(frame, relative);
     AccelerationRef acceleration = { models.acceleration };
     RaytracingAccelerationStructure scene = acceleration.Get();

@@ -181,13 +181,9 @@ internal sealed class ShadowMask(AssetManager assets, GpuResources resources)
                 lights.Table,
                 lights.Tiles,
                 view.Instances,
-                resources.ClusterPool,
-                resources.VertexPool,
-                resources.IndexPool,
-                view.Cull.VisibleClusters,
-                view.Visibility,
                 view.Depth,
                 view.GBufferNormal,
+                view.GBufferSurface,
                 resources.Meshes,
                 hitMaterials
             )
