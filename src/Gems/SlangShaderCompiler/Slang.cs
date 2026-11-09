@@ -195,10 +195,6 @@ internal static unsafe partial class Slang
 
     [LibraryImport(Library)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-    public static partial void slang_shutdown();
-
-    [LibraryImport(Library)]
-    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     private static partial int slang_createGlobalSession(long apiVersion, void** outGlobalSession);
 
     private static void** VTable(void* unknown) => *(void***)unknown;
