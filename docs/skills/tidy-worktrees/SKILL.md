@@ -14,7 +14,8 @@ description: Removes finished worktrees, branches and sessions, and reports the 
 4. Delete the sessions that are done. A session is done when it isn't running, its work has merged or its question
    was answered, and nothing in it waits on the user. Keep any session that was interrupted, never started, or
    waits on the user.
-   - The user approves each delete.
+   - The user approves each delete. A coordinator closes its own workers without a new approval
+     ([parallelize skill](../parallelize/SKILL.md)).
    - Before deleting a session, detach the side sessions it started that are still going, or leave it until they
      finish.
    - After deleting a session, remove its leftover worktree and branch as in step 3, and delete its claim.

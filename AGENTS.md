@@ -299,7 +299,7 @@ Every task runs in its own worktree. Never edit or commit in the main checkout.
 
 A session is done when it isn't running, its work has merged or its question was answered, and nothing in it waits
 on the user. Delete the side sessions you started once they're done, with the user's approval of each (the
-tidy-worktrees skill).
+tidy-worktrees skill). A coordinator closes its own workers without a new approval (the parallelize skill).
 
 ### Commits
 

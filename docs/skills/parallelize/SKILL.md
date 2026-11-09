@@ -30,7 +30,7 @@ don't build.
    branch if there is one, the review count, and a table of each slice's branch, mode, check, scope, what it waits on,
    and its state from its worker: merged, answered, with the answer, or blocked, with the question. Follow-ups go at
    the end. Only you write it; rewrite it whenever something changes. Present it in the chat. A yes approves every
-   slice in it. Wait for it.
+   slice in it, and the close of each worker. Wait for it.
 5. **Start every slice that is ready** as a worker, up to the review count. A slice is ready once each slice it waits
    on has merged, or for a spike, answered, and no running slice changes the same files or the same gem. Start with
    the riskiest spike alone, unless the user says the risk is known. Each worker runs in its own session: a side
@@ -47,13 +47,19 @@ don't build.
      step 7 again.
    - Build only its slice, touch no other worker's worktree, and stop and report when blocked
      ([AGENTS.md](../../../AGENTS.md#when-blocked)).
-   - End its last message with one line:
-     `SLICE: <branch>  STATE: merged | answered | blocked  NOTE: <what it did, its answer or its question>`.
+   - End its last message with one line, and give its context use if it can see it:
+     `SLICE: <branch>  STATE: merged | answered | blocked  CONTEXT: <percent>  NOTE: <what it did, its answer or its
+     question>`.
 6. **Read each slice's state from the plan, git and plannotator, not from memory.** Merged, answered and blocked come
    from its worker's `SLICE:` line, which you copy into the plan, since a merged branch is deleted. A slice waits on
    the user's review when `plannotator sessions --json` lists its worktree, and is being built while it has a claim.
    After a restart or a compaction, rebuild the picture from these.
-7. **Keep the user up to date.** Post one update when a review starts waiting on them, a slice merges or answers, a
+7. **Watch the workers.** Examine each worker when it sends a message, and at least every 10 minutes while workers
+   run. If the tool can schedule a check, schedule one.
+   - If a building worker has no new commit, claim or message since your last two checks, ask it for its status.
+   - If a worker ends without a `SLICE:` line, read its last message. Start a new worker on the same branch and
+     worktree, and give it that message.
+8. **Keep the user up to date.** Post one update when a review starts waiting on them, a slice merges or answers, a
    worker is blocked, or the plan changes, and none in between, always in this shape:
 
    ```text
@@ -66,17 +72,28 @@ don't build.
    Put first the review that unblocks the most slices. Pass on a blocked worker's question as it is; never answer a
    design question for the user. Where the tool can send a notification, send one each time something new waits on
    the user.
-8. **When a slice merges or answers,** check the plan against what came of it and add the worker's follow-ups to it.
-   Reorder, or split a slice that grew too big, and report it in the next update. Adding or dropping a slice, or
-   changing a decision from step 1, needs the user's yes; start no worker until they give it. Then start the slices
-   that are now ready (step 5).
-9. **When every slice has merged or answered:**
+9. **When a slice merges or answers:**
+   1. Check the plan against what came of it, and add the worker's follow-ups to it. Reorder, or split a slice that
+      grew too big, and report it in the next update. Adding or dropping a slice, or changing a decision from step 1,
+      needs the user's yes. Start no worker until the user gives it.
+   2. Give the finished worker the next ready slice, or close the worker:
+      - If a ready slice is in the same area as the worker's last slice, give it to the worker with a new brief
+        (step 5). Do this only while the worker has built fewer than three slices and its context is less than half
+        full.
+      - If a ready slice does not agree with these conditions, close the worker and start a new one for the slice.
+      - If no slice is ready, close the worker.
+   3. Start the other slices that are now ready (step 5).
+   4. Do steps 6 to 9 again until each slice has merged or answered.
+
+   To close a worker, end its session and delete it. The user's yes to the plan covers the workers that you close,
+   so do not ask again.
+10. **When every slice has merged or answered:**
    1. With a root: in its worktree, rebase onto the merge target and run `tools/Scripts/AgentTaskComplete.ps1` at
       the highest level any slice used, looking at any screenshots. Have the root reviewed in a fresh context as one
       integration ([review-slice skill](../review-slice/SKILL.md)), and fix its findings as a slice of their own.
       Then fast-forward the merge target to the root, release the root's claim, and remove its worktree and branch as
       in finish step 7. Each slice was already approved, so this needs no review by the user, unless the rebase
       needed conflicts resolved: then show those and wait for their yes.
-   2. Run the [tidy-worktrees skill](../tidy-worktrees/SKILL.md), delete the workers' sessions with the user's
-      approval, and delete the plan.
+   2. Close each worker that is still open. Run the [tidy-worktrees skill](../tidy-worktrees/SKILL.md), and delete the
+      plan.
    3. Sum up what landed, what was dropped, the follow-ups, and the next effort you propose.
