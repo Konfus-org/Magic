@@ -176,7 +176,8 @@ assumptions and decisions a reviewer would question as you make them.
 ### Finish
 
 A built slice is validated, reviewed in a fresh context, summarized and shown to the user, and merges only on their
-approval (the finish skill).
+approval (the finish skill). A swarm's root branch, whose slices the user approved one by one, merges once it is
+validated and reviewed as a whole (the parallelize skill).
 
 ### When Blocked
 
@@ -250,7 +251,8 @@ Every task runs in its own worktree. Never edit or commit in the main checkout.
 - **Name:** `<type>/<feature>` in kebab-case, for example `fix/material-cache-leak`. Types: `feature`, `fix`,
   `refactor`, `docs`, `test`, `build`, `ci`. The worktree folder has the branch's name.
 - **Start:** branch from the branch checked out in the main checkout. That branch is the merge target. Title the
-  session with the branch's name, as `fix/material-cache-leak`.
+  session with the branch's name, as `fix/material-cache-leak`. A worker in a swarm branches from the swarm's root
+  branch instead, with `--track`, which makes the root its merge target (the parallelize skill).
 - **Claim:** right after making the worktree, claim the files and folders the slice will change:
   `tools/Scripts/Claim.ps1 -Slice <title> -Scope <paths>`. Include any file every slice touches that you need:
   `src/Magic.slnx`, `Directory.Packages.props`, `Directory.Build.props`, `Directory.Build.targets`, `AGENTS.md` and

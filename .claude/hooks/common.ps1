@@ -28,7 +28,8 @@ function ConvertTo-Key([string] $path) { return $path.Replace('\', '/').TrimEnd(
 function Write-HookJson($value) { [Console]::Out.Write(($value | ConvertTo-Json -Compress -Depth 6)) }
 
 # The checkout a path is in: its top folder, whether it is a linked worktree, the repository's shared git folder,
-# and the merge target, which is the branch checked out in the main checkout. One git call.
+# and the merge target: the branch's upstream when that is a local branch, as a swarm worker's root is, otherwise the
+# branch checked out in the main checkout. Two git calls.
 function Get-Checkout([string] $path) {
     if (-not $path) { return $null }
     $folder = $path
@@ -38,8 +39,11 @@ function Get-Checkout([string] $path) {
     if ($lines.Count -lt 3) { return $null }
     $common = [string]$lines[2]
     $target = $null
+    $upstream = [string](Invoke-Git $folder @('rev-parse', '--symbolic-full-name', '@{upstream}'))
     $head = Join-Path $common 'HEAD'
-    if (Test-Path -LiteralPath $head) {
+    if ($upstream -match '^refs/heads/(.+)$') {
+        $target = $Matches[1]
+    } elseif (Test-Path -LiteralPath $head) {
         $ref = [string](Get-Content -LiteralPath $head -TotalCount 1)
         if ($ref -match '^ref: refs/heads/(.+)$') { $target = $Matches[1].Trim() }
     }

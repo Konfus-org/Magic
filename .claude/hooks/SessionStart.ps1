@@ -14,7 +14,8 @@ try {
     } else {
         $out.Add("- Main checkout, on $($checkout.Target). Edits here are refused: make a worktree before the first edit (AGENTS.md, Worktrees).")
     }
-    $out.Add('- A clear request starts after a short brief (the slice skill); a new effort too big for one slice starts with the kickoff skill.')
+    $out.Add('- Tidy finished worktrees and stale claims first (the tidy-worktrees skill).')
+    $out.Add('- A clear request starts after a short brief (the slice skill); a new effort too big for one slice starts with the kickoff skill; a list of separate tasks, or a feature that splits into slices that can run side by side, runs as a swarm (the parallelize skill).')
     $out.Add('- git commit needs AgentTaskComplete and one slice-reviewer review first.')
 
     # Every slice in progress, from tools/Scripts/Claim.ps1, so this session works around them.

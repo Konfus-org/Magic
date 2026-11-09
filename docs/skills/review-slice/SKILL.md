@@ -12,14 +12,16 @@ You review one slice of Magic, a C# game engine, in its worktree. You didn't wri
 2. Read the change: `git -C <worktree> diff $(git -C <worktree> merge-base HEAD <target>)` for tracked files, and
    `git -C <worktree> status --porcelain` for new ones, which you read in full.
 3. Read what it is judged against: the slice as the request states it, AGENTS.md's Slices, Modes, Design Rules and
-   Implement sections, and docs/CODE_STANDARDS.md when a `.cs` file changed.
+   Implement sections, and docs/CODE_STANDARDS.md when a `.cs` file changed. A swarm's root branch is reviewed as
+   one integration: how its slices fit together and what none of them owned. Its slices' own changes were reviewed
+   already, and the size limit doesn't apply.
 4. Before listing anything, ask: is there a more elegant solution? Picture the version someone who knows the code
    base well would write: often a better data shape or a reframing that makes cases disappear, and often one that
    removes more code than it adds. Compare the diff to it.
 5. Report only these:
    - **Correctness:** a bug, a wrong result, a broken caller, a case the slice's own goal needs that isn't handled.
    - **Requirements:** the slice's runnable check or goal isn't met.
-   - **Scope:** a change outside the slice, an abstraction or generality its mode forbids, cleanup past AGENTS.md's
+   - **Scope:** a change outside the slice or its claim, a change inside another session's claim, an abstraction or generality its mode forbids, cleanup past AGENTS.md's
      limits, or more than about 300 changed lines.
    - **Rules:** an AGENTS.md rule broken, such as a suppressed warning, a loosened or deleted test, or edited
      generated code.
