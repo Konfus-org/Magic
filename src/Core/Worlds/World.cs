@@ -853,7 +853,10 @@ public sealed class World : IEcs, IDisposable
         DestroyEntities(loading);
         await RunHooksAsync(hooks => hooks.OnDomainUnloadedAsync(cancel), "cleaning up").ConfigureAwait(false);
 
+        // The low-latency GC Program asks for seldom collects gen 2, so what the load and the unloads threw away would
+        // stay committed: one collection that compacts and decommits gives it back, before anything of the world shows.
         await _threads.Enter(EngineThread.Game);
+        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
         arrive();
         IsShowingLoadingScreen = false;
 
