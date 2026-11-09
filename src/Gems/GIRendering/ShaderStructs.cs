@@ -7,12 +7,12 @@ namespace Magic.GIRendering;
 
 /// <summary>
 /// What every pass of a frame reads, the twin of the library's <c>Core/Frame.slang</c>: the view, the output's size and
-/// the heap ids of the frame's tables and textures, written once a frame at the start of the frame's buffer.
+/// the heap ids of the view's textures, written once a frame at the start of the frame's buffer.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct FrameConstants
 {
-    public const int Bytes = 544;
+    public const int Bytes = 516;
 
     public Matrix4x4 View;
 
@@ -48,17 +48,7 @@ internal record struct FrameConstants
 
     public float PixelsPerRadian;
 
-    public uint InstanceCount;
-
     public uint FrameIndex;
-
-    public uint Instances;
-
-    public uint Vertices;
-
-    public uint Indices;
-
-    public uint Materials;
 
     public uint Depth;
 
@@ -72,8 +62,6 @@ internal record struct FrameConstants
 
     public Vector2 Jitter;
 
-    public uint Acceleration;
-
     public uint Velocity;
 
     public uint Hdr;
@@ -81,8 +69,6 @@ internal record struct FrameConstants
     public float TimeSec;
 
     public float DeltaSec;
-
-    public uint HitMaterials;
 
     public uint GlassDepth;
 }
@@ -113,7 +99,7 @@ internal record struct ClusterConstants
 
     public uint Clusters;
 
-    public uint LeafClusters;
+    public uint Models;
 
     public uint VisibleClusters;
 
@@ -139,7 +125,7 @@ internal record struct ClusterConstants
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct GpuInstance
 {
-    public const int Bytes = 256;
+    public const int Bytes = 248;
 
     /// <summary>
     /// The model's frame to the world, row-major, as <see cref="Matrix4x4"/> is.
@@ -164,21 +150,14 @@ internal record struct GpuInstance
     public float BoundsRadius;
 
     /// <summary>
-    /// The instance's clusters in the cluster pool.
+    /// The model's index, 0 for none: its row of any table a renderer keeps a row a model in.
     /// </summary>
-    public uint ClusterOffset;
-
-    public uint ClusterCount;
+    public uint Model;
 
     /// <summary>
     /// The frame <see cref="World"/> last changed in: in any other, the instance stood still.
     /// </summary>
     public uint MovedFrame;
-
-    /// <summary>
-    /// The model's row of the impostor table, 0 for none.
-    /// </summary>
-    public uint Impostor;
 
     /// <summary>
     /// The material table's row for each of the instance's slots.
@@ -289,13 +268,62 @@ internal record struct GpuLight
 }
 
 /// <summary>
+/// The frame's models, the twin of the library's <c>Scene/Models.slang</c>: the instance table and its count, the
+/// pools and tables the instances are drawn from, and on a GPU that traces rays the world's acceleration structure, the
+/// hit materials and the mesh table, written once a frame into the frame's buffer after <see cref="FrameConstants"/>.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal record struct GpuModels
+{
+    public const int Offset = FrameConstants.Bytes;
+
+    public const int Bytes = 32;
+
+    public uint Instances;
+
+    public uint Count;
+
+    public uint Vertices;
+
+    public uint Indices;
+
+    public uint Materials;
+
+    public uint Acceleration;
+
+    public uint HitMaterials;
+
+    public uint Meshes;
+}
+
+/// <summary>
+/// A mesh as a ray sees it, the twin of <c>Scene/Models.slang</c>'s: where its triangles start in the index pool and
+/// its material slot, the row of the mesh table an acceleration structure's geometry names.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal readonly record struct GpuMesh(uint IndexOffset, uint MaterialSlot)
+{
+    public const int Bytes = 8;
+}
+
+/// <summary>
+/// A model's clusters in the cluster pool and its row of the impostor table, 0 for none, the twin of
+/// <c>Scene/Clusters.slang</c>'s: the row of the cluster model table an instance's model index names.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal readonly record struct GpuClusterModel(uint ClusterOffset, uint ClusterCount, uint Impostor)
+{
+    public const int Bytes = 12;
+}
+
+/// <summary>
 /// The frame's lights, the twin of the library's <c>Scene/Lights.slang</c>: the sun, the sky's tables and the light
-/// table, written once a frame into the frame's buffer after <see cref="FrameConstants"/>.
+/// table, written once a frame into the frame's buffer after <see cref="GpuModels"/>.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct GpuLights
 {
-    public const int Offset = FrameConstants.Bytes;
+    public const int Offset = GpuModels.Offset + GpuModels.Bytes;
 
     public const int Bytes = 84;
 

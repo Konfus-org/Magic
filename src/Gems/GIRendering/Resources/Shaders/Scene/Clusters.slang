@@ -10,8 +10,8 @@ import Scene.Shadows;
 
 public static const uint MaxClusterTriangles = 128u;
 
-// Where the cluster constants are in the buffer every pass header's x names: after the frame, the lights and the
-// shadows.
+// Where the cluster constants are in the buffer every pass header's x names: after the frame, the models, the lights
+// and the shadows.
 public static const uint ClusterConstantsOffset = ShadowsOffset + ShadowsBytes;
 
 // What the cluster passes read beyond the frame, C#'s ClusterConstants, written once a frame after the lights and the
@@ -30,10 +30,10 @@ public struct ClusterConstants
     // alone.
     public float impostorDistance;
     public uint maxVisibleClusters;
-    // The heap ids of the cluster pool, of the table of leaf clusters the acceleration structure's geometries name,
+    // The heap ids of the cluster pool, of each model's row of clusters and impostor, by the instances' model index,
     // and of what the cull leaves for the draw and the resolve.
     public uint clusters;
-    public uint leafClusters;
+    public uint models;
     public uint visibleClusters;
     public uint drawArguments;
     public uint counts;
@@ -49,6 +49,21 @@ public ClusterConstants GetClusters()
 {
     BufferRef constants = { GetPassHeader().x };
     return constants.Load<ClusterConstants>(ClusterConstantsOffset);
+}
+
+// A model's clusters in the cluster pool and its row of the impostor table, 0 for none: C#'s GpuClusterModel, the row
+// of the model table an instance's model index names.
+public struct GpuClusterModel
+{
+    public uint clusterOffset;
+    public uint clusterCount;
+    public uint impostor;
+}
+
+public GpuClusterModel LoadClusterModel(uint model)
+{
+    ArrayRef<GpuClusterModel> models = { GetClusters().models };
+    return models[model];
 }
 
 public struct GpuCluster

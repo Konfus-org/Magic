@@ -1,5 +1,5 @@
 // The vertex pool: every resident model's vertices in one buffer, C#'s GpuVertex, 32 bytes each, which the index pool
-// points into. A cluster's triangles are three pool indices each.
+// points into. A triangle is three pool indices.
 module "Scene/Vertices";
 
 import Core.Heap;

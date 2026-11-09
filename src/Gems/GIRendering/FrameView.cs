@@ -84,11 +84,6 @@ internal sealed class FrameView(GpuResources resources)
             Width = (uint)width,
             Height = (uint)height,
             Near = camera.Near,
-            InstanceCount = (uint)instanceCount,
-            Instances = instances.Id,
-            Vertices = resources.VertexPool.Id,
-            Indices = resources.IndexPool.Id,
-            Materials = materials.Id,
             Depth = targets.Depth.Id,
             GBufferNormal = targets.GBufferNormal.Id,
             GBufferBase = targets.GBufferBase.Id,
@@ -96,14 +91,23 @@ internal sealed class FrameView(GpuResources resources)
             Velocity = targets.Velocity.Id,
             Output = targets.Output.Id,
             Hdr = targets.Hdr.Id,
-            HitMaterials = hitMaterials.Id,
             TimeSec = (float)frame.AppSec,
             DeltaSec = (float)frame.AppDeltaSec,
             GlassDepth = targets.GlassDepth.Id,
             PixelsPerRadian = height / (2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360)),
             FrameIndex = frame.Index,
             Jitter = jitter,
+        };
+        GpuModels models = new()
+        {
+            Instances = instances.Id,
+            Count = (uint)instanceCount,
+            Vertices = resources.VertexPool.Id,
+            Indices = resources.IndexPool.Id,
+            Materials = materials.Id,
             Acceleration = acceleration.Id,
+            HitMaterials = hitMaterials.Id,
+            Meshes = resources.Meshes.Id,
         };
         ClusterConstants clusters = new()
         {
@@ -114,7 +118,7 @@ internal sealed class FrameView(GpuResources resources)
             ImpostorDistance = impostorDistance,
             MaxVisibleClusters = Visibility.MaxVisibleClusters,
             Clusters = resources.ClusterPool.Id,
-            LeafClusters = resources.LeafClusters.Id,
+            Models = resources.ClusterModels.Id,
             VisibleClusters = cull.VisibleClusters.Id,
             DrawArguments = cull.DrawArguments.Id,
             Counts = cull.Counts.Id,
@@ -147,6 +151,7 @@ internal sealed class FrameView(GpuResources resources)
                 : (unjittered, constants.CameraPosition);
         _previous = (unjittered, constants.CameraPosition, width, height);
         graph.Upload(targets.Constants, [constants]);
+        graph.Upload(targets.Constants, [models], GpuModels.Offset);
         graph.Upload(targets.Constants, [clusters], ClusterConstants.Offset);
 
         return made;

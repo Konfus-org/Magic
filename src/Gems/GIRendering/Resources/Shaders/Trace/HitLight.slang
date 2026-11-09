@@ -4,7 +4,6 @@
 module "Trace/HitLight";
 
 import Core.Heap;
-import Core.Frame;
 import Core.Math;
 import Core.Sampling;
 import Scene.Lights;
@@ -17,7 +16,6 @@ import Trace.HitSurface;
 // by xi.yz, over pi and times how many there are to pick from: what a white diffuse surface reflects of them all, on
 // average.
 public float3 GetDirectLight<S : ISky>(
-    FrameConstants frame,
     Lights lights,
     RaytracingAccelerationStructure world,
     HitSurface surface,
@@ -52,7 +50,7 @@ public float3 GetDirectLight<S : ISky>(
     if (cosine <= 0.0)
         return float3(0.0);
 
-    float3 through = GetTransmittance(frame, world, origin, direction, distance);
+    float3 through = GetTransmittance(world, origin, direction, distance);
     return float(lightCount + 1u) * irradiance * through * cosine * InvPi;
 }
 
@@ -68,7 +66,6 @@ public float3 GetSkyRadiance<S : ISky>(Lights lights, float3 direction)
 // The light a surface a ray landed on sends back along it: what it reflects of one light picked at random by xi and of
 // the probes' light around it, and what it gives off.
 public float3 GetHitLight<S : ISky>(
-    FrameConstants frame,
     Lights lights,
     ProbeGridConstants grid,
     RaytracingAccelerationStructure world,
@@ -76,7 +73,7 @@ public float3 GetHitLight<S : ISky>(
     float3 xi
 )
 {
-    float3 light = GetDirectLight<S>(frame, lights, world, surface, xi)
+    float3 light = GetDirectLight<S>(lights, world, surface, xi)
         + GetProbeIrradiance(grid, surface.position, surface.normal);
     return light * surface.diffuse + surface.emissive;
 }

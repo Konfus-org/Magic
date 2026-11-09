@@ -188,7 +188,7 @@ internal sealed class ShadowMask(AssetManager assets, GpuResources resources)
                 view.Visibility,
                 view.Depth,
                 view.GBufferNormal,
-                resources.LeafClusters,
+                resources.Meshes,
                 hitMaterials
             )
             .Writes(shadows.Traced, shadows.SunTiles, shadows.SunTint)

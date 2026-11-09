@@ -15,6 +15,7 @@ import Post.IPixelEffect;
 import Trace.HitSurface;
 import Scene.Clusters;
 import Scene.Lights;
+import Scene.Models;
 
 // The reversed depth a pixel where nothing was drawn is put at: far along its ray, short of infinity.
 static const float FarDepth = 1e-6;
@@ -24,12 +25,12 @@ struct TracedWorld : IWorldRays
 {
     static float3 GetTransmittance(float3 origin, float3 direction, float distance)
     {
-        FrameConstants frame = GetFrame();
-        if (frame.acceleration == 0u)
+        Models models = GetModels();
+        if (models.acceleration == 0u)
             return float3(1.0);
 
-        AccelerationRef acceleration = { frame.acceleration };
-        return GetTransmittance(frame, acceleration.Get(), origin, direction, distance);
+        AccelerationRef acceleration = { models.acceleration };
+        return GetTransmittance(acceleration.Get(), origin, direction, distance);
     }
 }
 

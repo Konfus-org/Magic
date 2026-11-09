@@ -151,7 +151,7 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
 
         // What an effect's rays read of the world, on a GPU that traces them.
         ReadOnlySpan<GpuResource> rays = world is { } traced
-            ? [traced.HitMaterials, resources.LeafClusters, view.Instances, resources.ClusterPool]
+            ? [traced.HitMaterials, resources.Meshes, view.Instances]
             : [];
         (GpuTexture picture, GpuTexture other) = (view.Hdr, otherPicture.Value);
         int pass = 0;

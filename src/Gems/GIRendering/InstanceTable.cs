@@ -171,6 +171,23 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
     }
 
     /// <summary>
+    /// The box in the world around a box in a model's frame placed by <paramref name="world"/>: its centre placed, and
+    /// its half extent along each world axis the sum of how far each of the model's axes reaches along it.
+    /// </summary>
+    private static (Vector3 Min, Vector3 Max) ToWorldBox(Vector3 min, Vector3 max, Matrix4x4 world)
+    {
+        Vector3 center = Vector3.Transform((min + max) / 2, world);
+        Vector3 extent = (max - min) / 2;
+        Vector3 reach = new(
+            (Math.Abs(world.M11) * extent.X) + (Math.Abs(world.M21) * extent.Y) + (Math.Abs(world.M31) * extent.Z),
+            (Math.Abs(world.M12) * extent.X) + (Math.Abs(world.M22) * extent.Y) + (Math.Abs(world.M32) * extent.Z),
+            (Math.Abs(world.M13) * extent.X) + (Math.Abs(world.M23) * extent.Y) + (Math.Abs(world.M33) * extent.Z)
+        );
+
+        return (center - reach, center + reach);
+    }
+
+    /// <summary>
     /// Copies the blocks of rows that changed into <paramref name="table"/>, each run of them in one copy.
     /// </summary>
     private void UploadChangedRows(RenderGraph graph, GpuBuffer table)
@@ -220,7 +237,7 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
             Renderer renderer = renderers.Second[index];
             ResidentModel? resident = renderer.Model == Handle<Model>.None ? null : resources.Get(renderer.Model);
             GpuInstance row = resident is { } model ? CreateRow(renderers.First[index], renderer, model) : default;
-            bool wasDrawnHere = index < lastCount && _entities[index] == entity && _rows[index].ClusterCount > 0;
+            bool wasDrawnHere = index < lastCount && _entities[index] == entity && _rows[index].Model != 0;
             if (wasDrawnHere && _rows[index].World != row.World)
             {
                 row.PreviousWorld = _rows[index].World;
@@ -232,7 +249,7 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
             _extras[index] = resident is { Acceleration.IsNone: false } traced
                 ? new InstanceExtra(
                     traced.Acceleration.Address,
-                    traced.LeafOffset,
+                    traced.MeshOffset,
                     ToWorldBox(traced.BoundsMin, traced.BoundsMax, renderers.First[index].Matrix)
                 )
                 : default;
@@ -244,23 +261,6 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
         }
 
         HasChanges = true;
-    }
-
-    /// <summary>
-    /// The box in the world around a box in a model's frame placed by <paramref name="world"/>: its centre placed, and
-    /// its half extent along each world axis the sum of how far each of the model's axes reaches along it.
-    /// </summary>
-    private static (Vector3 Min, Vector3 Max) ToWorldBox(Vector3 min, Vector3 max, Matrix4x4 world)
-    {
-        Vector3 center = Vector3.Transform((min + max) / 2, world);
-        Vector3 extent = (max - min) / 2;
-        Vector3 reach = new(
-            (Math.Abs(world.M11) * extent.X) + (Math.Abs(world.M21) * extent.Y) + (Math.Abs(world.M31) * extent.Z),
-            (Math.Abs(world.M12) * extent.X) + (Math.Abs(world.M22) * extent.Y) + (Math.Abs(world.M32) * extent.Z),
-            (Math.Abs(world.M13) * extent.X) + (Math.Abs(world.M23) * extent.Y) + (Math.Abs(world.M33) * extent.Z)
-        );
-
-        return (center - reach, center + reach);
     }
 
     /// <summary>
@@ -280,9 +280,7 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
             PreviousWorld = worldMatrix,
             BoundsCenter = Vector3.Transform(resident.BoundsCenter, worldMatrix),
             BoundsRadius = resident.BoundsRadius * maxScale,
-            ClusterOffset = resident.ClusterOffset,
-            ClusterCount = resident.ClusterCount,
-            Impostor = resident.ImpostorRow,
+            Model = resident.ModelIndex,
         };
         for (int slot = 0; slot < MaterialSlots.Capacity; slot++)
         {

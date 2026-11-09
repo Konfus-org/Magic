@@ -24,6 +24,7 @@ import Sky.ISky;
 import Surface.Brdf;
 import Trace.HitSurface;
 import Trace.HitLight;
+import Scene.Models;
 
 // How far a ray reaches, and the distance a ray that hits nothing counts as having gone.
 static const float RayRange = 10000.0;
@@ -86,16 +87,16 @@ void TraceReflections<S : ISky>(uint3 thread : SV_DispatchThreadID)
         surface.normal, surface.view, surface.roughness, GetRandom(thread.xy, frame.frameIndex, 1u).xy);
     float3 world = surface.relative + frame.cameraPosition.xyz;
     float3 origin = world + surface.normal * GetRayOffset(frame, surface.relative);
-    AccelerationRef acceleration = { frame.acceleration };
+    AccelerationRef acceleration = { GetModels().acceleration };
     RaytracingAccelerationStructure scene = acceleration.Get();
     RayHit hit = GetClosestHit(scene, origin, ray.xyz, RayRange, RAY_FLAG_CULL_BACK_FACING_TRIANGLES);
     Lights lights = GetLights();
     float4 light = float4(GetSkyRadiance<S>(lights, ray.xyz), RayRange);
     if (hit.isHit)
     {
-        HitSurface landed = LoadHitSurface(frame, hit, origin, ray.xyz);
+        HitSurface landed = LoadHitSurface(hit, origin, ray.xyz);
         float3 xi = GetRandom(thread.xy, frame.frameIndex, 2u);
-        light = float4(GetHitLight<S>(frame, lights, GetProbeGrid(), scene, landed, xi), hit.distance);
+        light = float4(GetHitLight<S>(lights, GetProbeGrid(), scene, landed, xi), hit.distance);
     }
 
     traced.Store(thread.xy, light);

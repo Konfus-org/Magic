@@ -5,14 +5,14 @@ module "Scene/Lights";
 
 import Core.Heap;
 import Core.Pass;
-import Core.Frame;
+import Scene.Models;
 import Sky.ISky;
 
 // The sun's angular radius as it looks from the Earth: how wide a disc its shadow rays aim through.
 public static const float SunAngularRadius = 0.00465;
 
-// Where the lights are in the frame's buffer, right after the frame, and their bytes: C#'s GpuLights.
-public static const uint LightsOffset = FrameBytes;
+// Where the lights are in the frame's buffer, right after the models, and their bytes: C#'s GpuLights.
+public static const uint LightsOffset = ModelsOffset + ModelsBytes;
 public static const uint LightsBytes = 84u;
 
 public struct Lights

@@ -18,6 +18,7 @@ import Scene.Probes;
 import Sky.ISky;
 import Trace.HitSurface;
 import Trace.HitLight;
+import Scene.Models;
 
 // The rays the trace runs a group of.
 static const uint TraceGroupSize = 64u;
@@ -236,7 +237,7 @@ void TraceProbes<S : ISky>(uint3 thread : SV_DispatchThreadID)
     uint rayCount = counts.Load<uint>(GetProbeRayCountOffset(probe));
     float3 direction = normalize(mul(GetFibonacciDirection(rayIndex, rayCount), GetRandomRotation(frame.frameIndex)));
 
-    AccelerationRef acceleration = { frame.acceleration };
+    AccelerationRef acceleration = { GetModels().acceleration };
     RaytracingAccelerationStructure world = acceleration.Get();
     RayHit hit = GetClosestHit(world, origin, direction, 1e30, RAY_FLAG_NONE);
     ProbeRay ray;
@@ -248,12 +249,12 @@ void TraceProbes<S : ISky>(uint3 thread : SV_DispatchThreadID)
     }
     else
     {
-        HitSurface surface = LoadHitSurface(frame, hit, origin, direction);
+        HitSurface surface = LoadHitSurface(hit, origin, direction);
 
         // A ray that reached a back is cut short, so a probe sees the inside closer than it is and doesn't leak it.
         ray.depth = surface.isBackface ? hit.distance * 0.9 : hit.distance;
         float3 xi = GetRandom(uint2(thread.x, 0u), frame.frameIndex, 1u);
-        float3 light = GetDirectLight<S>(frame, lights, world, surface, xi);
+        float3 light = GetDirectLight<S>(lights, world, surface, xi);
         if (grid.hasHistory != 0u)
             light += 0.95 * GetProbeIrradiance(grid, surface.position, surface.normal);
 

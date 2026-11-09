@@ -21,6 +21,7 @@ import Scene.TracedDiffuse;
 import Sky.ISky;
 import Trace.HitSurface;
 import Trace.HitLight;
+import Scene.Models;
 
 // The rays a traced pixel sends, and how far each reaches before the probes' light stands for what lies beyond.
 static const uint RayCount = 2u;
@@ -64,7 +65,7 @@ void TraceDiffuse<S : ISky>(uint3 thread : SV_DispatchThreadID)
     float3 origin = world + normal * GetRayOffset(frame, relative);
     float3 beyond = GetProbeIrradiance(grid, world, normal);
     float3x3 basis = CreateBasis(normal);
-    AccelerationRef acceleration = { frame.acceleration };
+    AccelerationRef acceleration = { GetModels().acceleration };
     RaytracingAccelerationStructure scene = acceleration.Get();
     float3 sum = float3(0.0);
     for (uint i = 0u; i < RayCount; i++)
@@ -78,9 +79,9 @@ void TraceDiffuse<S : ISky>(uint3 thread : SV_DispatchThreadID)
             continue;
         }
 
-        HitSurface surface = LoadHitSurface(frame, hit, origin, direction);
+        HitSurface surface = LoadHitSurface(hit, origin, direction);
         float3 xi = GetRandom(thread.xy, frame.frameIndex, 1u + RayCount + i);
-        sum += GetHitLight<S>(frame, lights, grid, scene, surface, xi);
+        sum += GetHitLight<S>(lights, grid, scene, surface, xi);
     }
 
     traced.Store(thread.xy, float4(sum / float(RayCount), 1.0));

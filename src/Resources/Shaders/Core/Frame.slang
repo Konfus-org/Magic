@@ -1,13 +1,13 @@
-// What every pass of a frame reads: the view, the picture's size and the heap ids of the frame's tables and textures,
-// C#'s FrameConstants, written once a frame at the start of the buffer whose heap id is every pass header's x. The
-// lights and the shadows follow it in that buffer, then a renderer's own constants.
+// What every pass of a frame reads: the view, the picture's size and the heap ids of the view's textures, C#'s
+// FrameConstants, written once a frame at the start of the buffer whose heap id is every pass header's x. The models,
+// the lights and the shadows follow it in that buffer, then a renderer's own constants.
 module "Core/Frame";
 
 import Core.Heap;
 import Core.Pass;
 
 // The frame's bytes, C#'s FrameConstants.Bytes: where the rows after it in its buffer start.
-public static const uint FrameBytes = 544u;
+public static const uint FrameBytes = 516u;
 
 public struct FrameConstants
 {
@@ -39,14 +39,9 @@ public struct FrameConstants
     // view.
     public float pixelsPerRadian;
 
-    public uint instanceCount;
     public uint frameIndex;
 
-    // The heap ids of the tables and textures.
-    public uint instances;
-    public uint vertices;
-    public uint indices;
-    public uint materials;
+    // The heap ids of the view's textures.
     public uint depth;
     public uint gbufferNormal;
     public uint gbufferBase;
@@ -56,9 +51,6 @@ public struct FrameConstants
     // Pixels the projection is shifted by this frame, for the resolve to take off.
     public float2 jitter;
 
-    // On a GPU that traces rays: the top-level acceleration structure over the instances, 0 when none.
-    public uint acceleration;
-
     // Where each pixel's surface was on last frame's screen: the move to there from its place now, in texture
     // coordinates, in xy, and its view depth then in z.
     public uint velocity;
@@ -67,8 +59,6 @@ public struct FrameConstants
     // The seconds the run has taken, and since the frame before.
     public float timeSec;
     public float deltaSec;
-    // On a GPU that traces rays: each material row as a ray hit reads it, Trace/HitSurface's GpuHitMaterial.
-    public uint hitMaterials;
     // The nearest glass's reversed depth in front of the opaque surfaces, 0 where there is none.
     public uint glassDepth;
 }

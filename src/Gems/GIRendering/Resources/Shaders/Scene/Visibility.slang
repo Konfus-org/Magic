@@ -12,6 +12,7 @@ import Scene.Instances;
 import Scene.Clusters;
 import Scene.Vertices;
 import Surface.Surface;
+import Scene.Models;
 
 // One cluster drawn this frame: its row of the visible list is what the visibility buffer's ids name.
 public struct VisibleCluster
@@ -136,17 +137,18 @@ public struct PixelTriangle
 // [-1, 1] with y up.
 public PixelTriangle LoadPixelTriangle(FrameConstants frame, uint visibleIndex, uint triangle, float2 pixelNdc)
 {
+    Models models = GetModels();
     ClusterConstants clusters = GetClusters();
     ArrayRef<VisibleCluster> visible = { clusters.visibleClusters };
     VisibleCluster entry = visible[visibleIndex];
     PixelTriangle result;
-    result.instance = LoadInstance(frame.instances, entry.instance);
+    result.instance = LoadInstance(models.instances, entry.instance);
     result.cluster = LoadCluster(clusters.clusters, entry.cluster);
 
     uint first = result.cluster.indexOffset + triangle * 3u;
-    result.v0 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first));
-    result.v1 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first + 1u));
-    result.v2 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first + 2u));
+    result.v0 = LoadVertex(models.vertices, LoadIndex(models.indices, first));
+    result.v1 = LoadVertex(models.vertices, LoadIndex(models.indices, first + 1u));
+    result.v2 = LoadVertex(models.vertices, LoadIndex(models.indices, first + 2u));
     result.p0 = Relative(frame, ToWorld(result.instance.world, result.v0.position));
     result.p1 = Relative(frame, ToWorld(result.instance.world, result.v1.position));
     result.p2 = Relative(frame, ToWorld(result.instance.world, result.v2.position));

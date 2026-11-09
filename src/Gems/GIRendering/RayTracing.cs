@@ -88,7 +88,7 @@ internal sealed class RayTracing(AssetManager assets, GpuResources resources)
         {
             GpuInstance row = rows[i];
             InstanceExtra extra = extras[i];
-            if (row.ClusterCount == 0 || extra.Acceleration == 0)
+            if (row.Model == 0 || extra.Acceleration == 0)
                 continue;
 
             Matrix4x4 world = row.World;
@@ -98,7 +98,7 @@ internal sealed class RayTracing(AssetManager assets, GpuResources resources)
                 Row1 = new(world.M12, world.M22, world.M32, world.M42),
                 Row2 = new(world.M13, world.M23, world.M33, world.M43),
                 CustomIndexAndMask = (uint)i | (0xFFu << 24),
-                OffsetAndFlags = extra.LeafOffset | (GpuAccelerationInstance.FlagNoOpaque << 24),
+                OffsetAndFlags = extra.MeshOffset | (GpuAccelerationInstance.FlagNoOpaque << 24),
                 Reference = extra.Acceleration,
             };
         }
@@ -146,6 +146,6 @@ internal readonly record struct TracedWorld(GpuBuffer Instances, GpuAcceleration
 
 /// <summary>
 /// What the CPU keeps beside an instance's row: its model's acceleration structure's address, 0 when it has none,
-/// where its leaf clusters start in the leaf table, and the box around it in the world, which the probe grid covers.
+/// where its meshes start in the mesh table, and the box around it in the world, which the probe grid covers.
 /// </summary>
-internal readonly record struct InstanceExtra(ulong Acceleration, uint LeafOffset, (Vector3 Min, Vector3 Max) Box);
+internal readonly record struct InstanceExtra(ulong Acceleration, uint MeshOffset, (Vector3 Min, Vector3 Max) Box);

@@ -121,17 +121,17 @@ in turn and exits, so a release ships with the caches full.
   empty.
 - The shaders are the `Shaders/` modules in this gem's `Resources`, built on the shader library
   ([Shaders](../../Resources/Shaders/README.md)). The passes are at the folder's root, and what they share is under it:
-  - `Scene/` is the GPU tables and how to read them: the instance table, the pools of vertices, indices and clusters,
-    what the cull leaves for the draw and the resolve, the triangle a pixel shows, and the cull's tests.
+  - `Scene/` is the cluster renderer's tables and how to read them: the cluster pool, each model's clusters and
+    impostor by its model index, what the cull leaves for the draw and the resolve, the triangle a pixel shows, and the
+    cull's tests.
   - `Scene/Clusters` is also what the cluster passes read beyond the library's frame: the cull's limits and buffers,
-    the depth pyramid, the visibility ids and the impostor handoff, in the frame's buffer after the library's lights
-    and shadows.
+    the depth pyramid, the visibility ids and the impostor handoff, in the frame's buffer after the library's models,
+    lights and shadows.
   - `Scene/Probes` is the probe grid: where each probe is, what it holds, and the light a point gets from it.
   - `Scene/Traced` is what the light traced at half the picture's size shares: which pixel traces, its history and how
     the picture reads it back. `Scene/TracedDiffuse` and `Scene/TracedReflections` are the traced diffuse light's and
     the traced reflections' textures.
   - `Light/` is what a local light gives a point: a point, spot or rect light's direction and irradiance there.
-  - `Trace/` is what rays read of the world: how much light gets through along a ray, the surface one lands on, and
-    the light it brings back from there.
+  - `Trace/HitLight` is the light a ray brings back from what it lands on.
 - Parts of the lighting and the traced reflections are adapted from another engine under the MIT licence;
   `THIRD-PARTY-NOTICES.md` holds it.

@@ -1,4 +1,4 @@
-// The instance table: everything drawn this frame, C#'s GpuInstance, 256 bytes each, in the world; a position goes
+// The instance table: everything drawn this frame, C#'s GpuInstance, 248 bytes each, in the world; a position goes
 // camera-relative once transformed (Core/Frame's Relative).
 module "Scene/Instances";
 
@@ -16,11 +16,9 @@ public struct GpuInstance
     // The sphere around the instance in the world.
     public float3 boundsCenter;
     public float boundsRadius;
-    // The instance's clusters in the cluster pool.
-    public uint clusterOffset;
-    public uint clusterCount;
+    // The model's index, 0 for none: its row of any table a renderer keeps a row a model in.
+    public uint model;
     public uint movedFrame;
-    public uint impostor;
     // The material table's row for each slot.
     public uint materials[MaterialSlots];
 }

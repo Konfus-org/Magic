@@ -63,21 +63,31 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
     public const int MaxVisibleClusters = 1 << 18;
 
     private const int BudgetBytes = 16;
+
     private const int CountsBytes = 320;
+
     private const int DrawArgumentsBytes = 16;
+
     private const int RetestArgumentsBytes = 12;
+
     private const int CullGroupsPerRow = 65535;
+
     private const BufferUsages IndirectUsage = BufferUsages.Storage | BufferUsages.Indirect;
 
     // The cull's passes, the pass header's y: count each instance's rows by distance, find how many distances from the
     // nearest fit, give those their rows, and retest what last frame's pyramid hid.
     private const uint ModeCount = 0;
+
     private const uint ModeFit = 1;
+
     private const uint ModePlace = 2;
+
     private const uint ModeRetest = 3;
 
     private readonly ShaderEntry _budgetShader = PassShaders.GetEntry(assets, "BudgetClusters", "BudgetClusters");
+
     private readonly ShaderEntry _cullShader = PassShaders.GetEntry(assets, "CullClusters", "CullClusters");
+
     private readonly DrawShaders _drawShaders = new(
         PassShaders.GetEntry(assets, "DrawVisibility", "DrawVisibilityVertex", ShaderStage.Vertex),
         PassShaders.GetEntry(assets, "DrawVisibility", "DrawVisibilityPixel", ShaderStage.Pixel)
@@ -114,7 +124,9 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
         Depth = DepthMode.TestAndWrite,
         Cull = CullMode.None,
     };
+
     private readonly ShaderEntry _buildHzbShader = PassShaders.GetEntry(assets, "BuildHzb", "BuildHzb");
+
     private readonly ShaderEntry _resolveShader = PassShaders.GetEntry(assets, "ResolveMaterial", "ResolveMaterial");
 
     /// <summary>
@@ -227,7 +239,7 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
                 _cullShader,
                 new GpuConstants(view.Constants.Id, ModeCount, cull.ImpostorDraws.Id, cull.InstanceRows.Id)
             )
-            .Reads(view.Constants, view.Instances, resources.ClusterPool, view.Hzb)
+            .Reads(view.Constants, view.Instances, resources.ClusterPool, resources.ClusterModels, view.Hzb)
             .Writes(cull.Counts, cull.InstanceRows)
             .Dispatch(across, down);
         view.Graph.Compute("Fit clusters", _cullShader, new GpuConstants(view.Constants.Id, ModeFit))
@@ -239,7 +251,15 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
                 _cullShader,
                 new GpuConstants(view.Constants.Id, ModePlace, cull.ImpostorDraws.Id, cull.InstanceRows.Id)
             )
-            .Reads(view.Constants, view.Instances, view.Materials, resources.ClusterPool, view.Hzb, cull.InstanceRows)
+            .Reads(
+                view.Constants,
+                view.Instances,
+                view.Materials,
+                resources.ClusterPool,
+                resources.ClusterModels,
+                view.Hzb,
+                cull.InstanceRows
+            )
             .Writes(
                 cull.Counts,
                 cull.VisibleClusters,
@@ -280,6 +300,7 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
                 view.Instances,
                 view.Materials,
                 resources.ClusterPool,
+                resources.ClusterModels,
                 view.Hzb,
                 cull.RetestList,
                 cull.VisibleClusters
@@ -350,6 +371,16 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
     }
 
     /// <summary>
+    /// The view's visibility buffer and depth, kept or cleared.
+    /// </summary>
+    private static GpuRenderTargets GetTargets(in RenderView view, TargetLoad load) =>
+        new()
+        {
+            Colors = [new GpuTarget { Texture = view.Visibility, Load = load }],
+            Depth = new GpuTarget { Texture = view.Depth, Load = load },
+        };
+
+    /// <summary>
     /// The pixels whose rows material shader <paramref name="shader"/> draws, resolved into the GBuffer.
     /// </summary>
     private void RecordResolve(in RenderView view, ImmutableArray<GpuResource> heapTextures, int shader) =>
@@ -364,6 +395,7 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
                 view.Instances,
                 resources.ImpostorTable,
                 resources.ClusterPool,
+                resources.ClusterModels,
                 resources.VertexPool,
                 resources.IndexPool,
                 view.Materials,
@@ -373,16 +405,6 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
             .Reads(heapTextures.AsSpan())
             .Writes(view.GBufferNormal, view.GBufferBase, view.GBufferSurface, view.Velocity)
             .DispatchOver(view.Width, view.Height);
-
-    /// <summary>
-    /// The view's visibility buffer and depth, kept or cleared.
-    /// </summary>
-    private static GpuRenderTargets GetTargets(in RenderView view, TargetLoad load) =>
-        new()
-        {
-            Colors = [new GpuTarget { Texture = view.Visibility, Load = load }],
-            Depth = new GpuTarget { Texture = view.Depth, Load = load },
-        };
 
     /// <summary>
     /// The visible clusters of one region of the draws, drawn with <paramref name="shaders"/> into
@@ -405,6 +427,7 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
                 view.Instances,
                 resources.VertexPool,
                 resources.ClusterPool,
+                resources.ClusterModels,
                 resources.IndexPool,
                 view.Cull.VisibleClusters
             )
@@ -441,7 +464,7 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
                 },
                 new GpuConstants(view.Constants.Id, 0, resources.ImpostorTable.Id)
             )
-            .Reads(view.Constants, view.Instances, resources.ImpostorTable)
+            .Reads(view.Constants, view.Instances, resources.ImpostorTable, resources.ClusterModels)
             .Reads(heapTextures.AsSpan())
             .Indirect(view.Cull.ImpostorDraws, view.Cull.Counts)
             .DrawIndirectCount(

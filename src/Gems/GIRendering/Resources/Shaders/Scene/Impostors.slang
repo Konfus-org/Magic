@@ -64,7 +64,7 @@ public GpuImpostor LoadImpostor(uint table, uint row)
 // How far into the handoff an instance is, 0 for clusters alone, 1 for the impostor alone.
 public float GetImpostorFade(FrameConstants frame, GpuInstance instance)
 {
-    if (instance.impostor == 0u)
+    if (LoadClusterModel(instance.model).impostor == 0u)
         return 0.0;
 
     ClusterConstants clusters = GetClusters();

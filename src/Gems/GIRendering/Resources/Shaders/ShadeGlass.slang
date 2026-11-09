@@ -22,6 +22,7 @@ import Sky.ISky;
 import Trace.HitSurface;
 import Trace.HitLight;
 import Scene.Clusters;
+import Scene.Models;
 
 // How much of the light glass reflects straight on: an index of refraction of 1.5.
 static const float GlassReflectance = 0.04;
@@ -39,6 +40,7 @@ float3 GetSurroundings<S : ISky>(Lights lights, float3 world, float3 direction)
 [numthreads(8, 8, 1)]
 void ShadeGlass<M : IMaterial, S : ISky>(uint3 thread : SV_DispatchThreadID)
 {
+    Models models = GetModels();
     FrameConstants frame = GetFrame();
     uint2 size = uint2(frame.width, frame.height);
     if (any(thread.xy >= size))
@@ -53,11 +55,11 @@ void ShadeGlass<M : IMaterial, S : ISky>(uint3 thread : SV_DispatchThreadID)
     float2 center = GetTexelCenterUv(thread.xy, size);
     PixelTriangle shown = LoadPixelTriangle(frame, visibleIndex, triangle, ToClip(center));
     uint row = GetMaterial(shown.instance, shown.cluster.materialSlot);
-    if (LoadMaterialShader(frame.materials, row) != GetPassHeader().w)
+    if (LoadMaterialShader(models.materials, row) != GetPassHeader().w)
         return;
 
     SurfaceInputs inputs = CreateSurfaceInputs(shown);
-    M material = LoadMaterialParams<M>(frame.materials, row);
+    M material = LoadMaterialParams<M>(models.materials, row);
     SurfaceOutputs surface = material.Evaluate(inputs);
     Lights lights = GetLights();
     float3 view = inputs.viewDirection;
@@ -73,17 +75,17 @@ void ShadeGlass<M : IMaterial, S : ISky>(uint3 thread : SV_DispatchThreadID)
     float3 sunIlluminance = lights.hasSky != 0u
         ? S.GetSunIlluminance(CreateSkyInputs(lights, toSun, false))
         : lights.sunIlluminance.rgb;
-    if (frame.acceleration != 0u)
+    if (models.acceleration != 0u)
     {
-        AccelerationRef acceleration = { frame.acceleration };
+        AccelerationRef acceleration = { models.acceleration };
         RaytracingAccelerationStructure scene = acceleration.Get();
         TextureRef depth = { frame.depth };
         float3 opaque = ReconstructRelative(frame, center, max(depth.Load(thread.xy, 0u).x, 1e-6));
         float offset = GetRayOffset(frame, inputs.position);
         float behind = length(opaque - inputs.position) * 0.999;
-        through *= GetTransmittance(frame, scene, world - view * offset, -view, behind);
+        through *= GetTransmittance(scene, world - view * offset, -view, behind);
         float3 sunSide = dot(normal, toSun) > 0.0 ? normal : -normal;
-        sunIlluminance *= GetTransmittance(frame, scene, world + sunSide * offset, toSun, 1e6);
+        sunIlluminance *= GetTransmittance(scene, world + sunSide * offset, toSun, 1e6);
     }
 
     Brdf body = CreateBrdf(surface.baseColor * surface.alpha, 0.0, surface.roughness, 0.5);

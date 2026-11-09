@@ -7,7 +7,13 @@ compiler loads a module and its imports from the assets, so a game's `Shaders/` 
 - `Core/` is what every module needs: the heap every resource is read through (`Heap`), what a pass is handed
   (`Pass`), what every pass of a frame reads (`Frame`), numbers, colour, packing, sampling and hashing.
 - `Scene/Materials` is the material table's row: which material shader draws it, then that shader's struct.
-- `Scene/Lights` is the frame's lights, in the frame's buffer after the frame: the sun, the sky's tables, and the light
+- `Scene/Models` is the frame's models, in the frame's buffer after the frame: the instance table, the pools of
+  vertices and indices the instances are drawn from, the material table, and on a GPU that traces rays the world's
+  acceleration structure, with a geometry for each mesh of each model, and the mesh table that says where each mesh's
+  triangles are and which material slot they take. `Scene/Instances` and `Scene/Vertices` are an instance's and a
+  vertex's rows. `Trace/HitSurface` is what rays read of the world through them: how much light gets through along a
+  ray, and the surface one lands on.
+- `Scene/Lights` is the frame's lights, in the frame's buffer after the models: the sun, the sky's tables, and the light
   table with the bits of each tile of the screen that say which lights reach it. `Scene/Shadows`, after them, is the
   shadow mask: how much of the sun and of each of its tile's first lights reaches a pixel, the sun's tiles the denoiser
   reads and the colour the sun takes on through glass.

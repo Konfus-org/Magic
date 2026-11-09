@@ -22,6 +22,7 @@ import Scene.Shadows;
 import Light.Lights;
 import Trace.HitSurface;
 import Scene.Clusters;
+import Scene.Models;
 
 // The sun's bits of the group's two tiles, the upper and the lower 8 by 4 pixels.
 groupshared uint groupSunTiles[2];
@@ -50,11 +51,12 @@ float3 LiftOffTriangle(FrameConstants frame, uint id, float2 uv, float3 relative
 // went through glass.
 uint4 Trace(FrameConstants frame, Lights lights, uint2 pixel, out float3 sunTint)
 {
+    Models models = GetModels();
     sunTint = float3(1.0);
     uint2 size = uint2(frame.width, frame.height);
     UintTextureRef visibility = { GetClusters().visibility };
     uint id = visibility.Load(pixel, 0u);
-    if (id == 0u || frame.acceleration == 0u)
+    if (id == 0u || models.acceleration == 0u)
         return uint4(0xFFFFFFFFu);
 
     float2 uv = GetTexelCenterUv(pixel, size);
@@ -66,7 +68,7 @@ uint4 Trace(FrameConstants frame, Lights lights, uint2 pixel, out float3 sunTint
     float3 lifted = (id & ImpostorFlag) != 0u ? relative : LiftOffTriangle(frame, id, uv, relative);
     float3 world = lifted + frame.cameraPosition.xyz;
     float3 origin = world + normal * GetRayOffset(frame, relative);
-    AccelerationRef acceleration = { frame.acceleration };
+    AccelerationRef acceleration = { models.acceleration };
     RaytracingAccelerationStructure scene = acceleration.Get();
 
     // The sun, through a random point of its disc, lit as often as its light gets through, its colour over its
@@ -76,7 +78,7 @@ uint4 Trace(FrameConstants frame, Lights lights, uint2 pixel, out float3 sunTint
     float3 xi = GetRandom(pixel, frame.frameIndex, 0u);
     float2 disc = SampleConcentricDisk(xi.xy) * SunAngularRadius;
     float3 sunRay = normalize(ToWorld(CreateBasis(toSun), float3(disc, 1.0)));
-    float3 sunThrough = dot(normal, toSun) > 0.0 ? GetTransmittance(frame, scene, origin, sunRay, 1e6) : float3(0.0);
+    float3 sunThrough = dot(normal, toSun) > 0.0 ? GetTransmittance(scene, origin, sunRay, 1e6) : float3(0.0);
     float sunBrightness = GetLuminance(sunThrough);
     if (sunBrightness > xi.z)
         words = EncodeShadow(words, 0u, 1.0);
@@ -104,7 +106,7 @@ uint4 Trace(FrameConstants frame, Lights lights, uint2 pixel, out float3 sunTint
             float3 direction = toLight / max(distance, Epsilon);
             if (dot(normal, direction) > 0.0)
             {
-                float through = GetLuminance(GetTransmittance(frame, scene, origin, direction, distance * 0.999));
+                float through = GetLuminance(GetTransmittance(scene, origin, direction, distance * 0.999));
                 words = EncodeShadow(words, slot, through);
             }
 

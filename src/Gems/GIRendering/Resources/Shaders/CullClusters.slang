@@ -19,6 +19,7 @@ import Scene.Materials;
 import Scene.Culling;
 import Scene.Visibility;
 import Scene.Impostors;
+import Scene.Models;
 
 static const uint ModeCount = 0u;
 static const uint ModeFit = 1u;
@@ -51,6 +52,7 @@ groupshared uint takenRows;
 [numthreads(64, 1, 1)]
 void CullClusters(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
 {
+    Models models = GetModels();
     FrameConstants frame = GetFrame();
     PassHeader header = GetPassHeader();
     if (header.y == ModeFit)
@@ -68,14 +70,14 @@ void CullClusters(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
     }
 
     uint instanceIndex = (group.y * CullGroupsPerRow) + group.x;
-    if (instanceIndex >= frame.instanceCount)
+    if (instanceIndex >= models.count)
         return;
 
     // An instance less than five pixels across on screen draws nothing: neither clusters nor impostor.
-    GpuInstance instance = LoadInstance(frame.instances, instanceIndex);
+    GpuInstance instance = LoadInstance(models.instances, instanceIndex);
     float3 center = Relative(frame, instance.boundsCenter);
     bool isInView =
-        instance.clusterCount != 0u
+        instance.model != 0u
         && IsSphereInFrustum(frame, center, instance.boundsRadius)
         && GetPixelRadius(frame, center, instance.boundsRadius) >= MinPixelRadius;
     if (!isInView)
@@ -106,9 +108,10 @@ void Count(FrameConstants frame, ArrayRef<uint> instanceRows, uint instanceIndex
         passedCount = 0u;
 
     GroupMemoryBarrierWithGroupSync();
-    for (uint i = thread; i < instance.clusterCount; i += 64u)
+    GpuClusterModel model = LoadClusterModel(instance.model);
+    for (uint i = thread; i < model.clusterCount; i += 64u)
     {
-        if (Test(frame, instance, instance.clusterOffset + i, false) != Outcome.Culled)
+        if (Test(frame, instance, model.clusterOffset + i, false) != Outcome.Culled)
             InterlockedAdd(passedCount, 1u);
     }
 
@@ -158,7 +161,8 @@ void Place(
     ClusterConstants clusters = GetClusters();
     BufferRef counts = { clusters.counts };
     bool fits = bin < counts.Load<uint>(CountFitBins);
-    if (thread == 0u && (fade > 0.0 || !fits) && instance.impostor != 0u)
+    GpuClusterModel model = LoadClusterModel(instance.model);
+    if (thread == 0u && (fade > 0.0 || !fits) && model.impostor != 0u)
         TestImpostor(frame, impostorDraws, instanceIndex, instance, !fits, false);
 
     uint rows = instanceRows[instanceIndex];
@@ -173,9 +177,9 @@ void Place(
 
     GroupMemoryBarrierWithGroupSync();
     bool isFading = fade > 0.0;
-    for (uint i = thread; i < instance.clusterCount; i += 64u)
+    for (uint i = thread; i < model.clusterCount; i += 64u)
     {
-        uint clusterIndex = instance.clusterOffset + i;
+        uint clusterIndex = model.clusterOffset + i;
         Outcome outcome = Test(frame, instance, clusterIndex, false);
         if (outcome == Outcome.Culled)
             continue;
@@ -187,7 +191,7 @@ void Place(
         VisibleCluster entry = { instanceIndex, clusterIndex };
         visible[row] = entry;
         if (outcome == Outcome.Shown || !TryAddRetest(row, clusterIndex))
-            AddDraw(frame, instance, clusterIndex, row, isFading, false);
+            AddDraw(instance, clusterIndex, row, isFading, false);
     }
 }
 
@@ -195,6 +199,7 @@ void Place(
 // as its first test would have.
 void Retest(FrameConstants frame, uint impostorDraws, uint index)
 {
+    Models models = GetModels();
     ClusterConstants clusters = GetClusters();
     BufferRef counts = { clusters.counts };
     if (index >= min(counts.Load<uint>(CountRetest), clusters.maxVisibleClusters))
@@ -204,16 +209,16 @@ void Retest(FrameConstants frame, uint impostorDraws, uint index)
     RetestEntry entry = retest[index];
     if (entry.cluster == RetestImpostor || entry.cluster == RetestWholeImpostor)
     {
-        GpuInstance instance = LoadInstance(frame.instances, entry.index);
+        GpuInstance instance = LoadInstance(models.instances, entry.index);
         TestImpostor(frame, impostorDraws, entry.index, instance, entry.cluster == RetestWholeImpostor, true);
         return;
     }
 
     ArrayRef<VisibleCluster> visible = { clusters.visibleClusters };
     VisibleCluster cluster = visible[entry.index];
-    GpuInstance instance = LoadInstance(frame.instances, cluster.instance);
+    GpuInstance instance = LoadInstance(models.instances, cluster.instance);
     if (Test(frame, instance, cluster.cluster, true) == Outcome.Shown)
-        AddDraw(frame, instance, cluster.cluster, entry.index, GetImpostorFade(frame, instance) > 0.0, true);
+        AddDraw(instance, cluster.cluster, entry.index, GetImpostorFade(frame, instance) > 0.0, true);
 }
 
 // The tests on one cluster: the frustum, the cut, the cone and the depth pyramid, last frame's on the first pass and
@@ -273,14 +278,14 @@ bool TryAddRetest(uint row, uint clusterIndex)
 // Appends the draw of the cluster at row to its region of the draws: by pass, and by whether its instance is in the
 // impostor handoff, which draws with the dither; a translucent cluster to the glass's, from either pass. Each row draws
 // once, so no region outgrows the visible list.
-void AddDraw(FrameConstants frame, GpuInstance instance, uint clusterIndex, uint row, bool isFading, bool isRetest)
+void AddDraw(GpuInstance instance, uint clusterIndex, uint row, bool isFading, bool isRetest)
 {
     ClusterConstants clusters = GetClusters();
     static const uint countOffsets[5] = {
         CountVisibleDraws, CountRetestDraws, CountFadingDraws, CountRetestFadingDraws, CountGlassDraws
     };
     GpuCluster cluster = LoadCluster(clusters.clusters, clusterIndex);
-    bool isGlass = IsTranslucent(frame.materials, GetMaterial(instance, cluster.materialSlot));
+    bool isGlass = IsTranslucent(GetModels().materials, GetMaterial(instance, cluster.materialSlot));
     uint region = isGlass ? GlassRegion : (isRetest ? 1u : 0u) + (isFading ? 2u : 0u);
     BufferRef counts = { clusters.counts };
     uint drawIndex = counts.InterlockedAdd(countOffsets[region], 1u);

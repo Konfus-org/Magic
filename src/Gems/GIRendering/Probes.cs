@@ -218,7 +218,7 @@ internal sealed class Probes(AssetManager assets, GpuResources resources)
             .Compute("Allocate probe rays", _allocateShader, header)
             .Reads(view.Constants, probes.Constants, probes.Probes, probes.Variance)
             .Writes(probes.RayCounts, probes.RayList)
-            .Dispatch((uint)ProbeCount);
+            .Dispatch(ProbeCount);
         graph
             .Compute("Prepare probe rays", _prepareShader, header)
             .Reads(probes.Constants, probes.RayCounts)
@@ -234,10 +234,9 @@ internal sealed class Probes(AssetManager assets, GpuResources resources)
                 sky.View,
                 lights.Table,
                 view.Instances,
-                resources.ClusterPool,
                 resources.VertexPool,
                 resources.IndexPool,
-                resources.LeafClusters,
+                resources.Meshes,
                 hitMaterials,
                 probes.Probes,
                 probes.RayList,
@@ -251,12 +250,12 @@ internal sealed class Probes(AssetManager assets, GpuResources resources)
             .Compute("Blend probe irradiance", _irradianceShader, header)
             .Reads(probes.Constants, probes.Rays, probes.RayCounts)
             .Writes(probes.Probes, probes.Variance)
-            .Dispatch((uint)ProbeCount);
+            .Dispatch(ProbeCount);
         graph
             .Compute("Blend probe depth", _depthShader, header)
             .Reads(probes.Constants, probes.Rays, probes.RayCounts)
             .Writes(probes.Probes, probes.Depth)
-            .Dispatch((uint)ProbeCount);
+            .Dispatch(ProbeCount);
     }
 
     /// <summary>

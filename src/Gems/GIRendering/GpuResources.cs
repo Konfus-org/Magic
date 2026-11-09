@@ -29,10 +29,10 @@ internal enum ResourceState : byte
 /// of the graph with every level and the sampler its asset asks for, then copied up in the frame after it arrives; a
 /// material asset by its handle, read once, with the textures it names asked for and its shader's struct reflected,
 /// and handed out as the row a slot's params make over its own, packed as that struct lays them out; a model asset by
-/// its handle, made by the preprocessor on a worker, settled into the pools of vertices, indices, clusters and leaf clusters with its acceleration structure at the start of the next
-/// frame, and copied up in it. The pools, the textures and each resident model's acceleration structure and atlases are
-/// asked of the graph every frame, so the GPU provider keeps what they hold. Each pool hands out ranges first fit from a
-/// free list. A model not asked for in <see cref="UnusedSec"/>, and held by no renderer drawn, is evicted: its ranges go
+/// its handle, made by the preprocessor on a worker, settled into the pools of vertices, indices and clusters and the
+/// mesh table with its acceleration structure at the start of the next frame, and copied up in it. The pools, the
+/// textures and each resident model's acceleration structure and atlases are asked of the graph every frame, so the
+/// GPU provider keeps what they hold. Each pool hands out ranges first fit from a free list. A model not asked for in <see cref="UnusedSec"/>, and held by no renderer drawn, is evicted: its ranges go
 /// back to the free lists and its structure and atlases are no longer asked for, so the GPU provider frees them, and the
 /// next ask makes it again.
 /// </summary>
@@ -45,9 +45,17 @@ internal sealed class GpuResources(
 )
 {
     private const int VertexCapacity = 1 << 22;
+
     private const int IndexCapacity = 1 << 24;
+
     private const int ClusterCapacity = 1 << 17;
+
     private const int ImpostorCapacity = 1024;
+
+    private const int ModelCapacity = 4096;
+
+    private const int MeshCapacity = 1 << 16;
+
     private const string FailureShader = "Shaders/Material/Failure.slang";
 
     /// <summary>
@@ -61,6 +69,7 @@ internal sealed class GpuResources(
     /// Each material asked for, by its id, null while it loads; one that did not load is the failure material.
     /// </summary>
     private readonly Dictionary<ulong, Material?> _materials = [];
+
     private readonly List<(Texture Asset, TextureEntry Entry)> _arrivedTextures = [];
 
     /// <summary>
@@ -68,6 +77,7 @@ internal sealed class GpuResources(
     /// fields are default when it was not, and its materials are drawn as the failure.
     /// </summary>
     private readonly Dictionary<ulong, MaterialLayout?> _layouts = [];
+
     private readonly List<ShaderTypeArgument> _materialShaders = [];
 
     /// <summary>
@@ -75,16 +85,21 @@ internal sealed class GpuResources(
     /// </summary>
     private readonly Dictionary<ulong, EffectNeeds?> _effectNeeds = [];
 
-    // The impostor table's rows; row 0 is no impostor, so it is taken from the start.
-    private readonly FreeList _impostorRows = CreateImpostorRows();
+    // The impostor table's rows and the models' indices; row 0 is none, so each is taken from the start.
+    private readonly FreeList _impostorRows = CreateRows(ImpostorCapacity);
+
+    private readonly FreeList _modelRows = CreateRows(ModelCapacity);
 
     /// <summary>
     /// Each model asked for and not evicted, by its id, made or not, with when it was last asked, in
     /// <see cref="Environment.TickCount64"/> milliseconds.
     /// </summary>
     private readonly Dictionary<ulong, long> _askedModels = [];
+
     private readonly Dictionary<ulong, ResidentModel> _residentModels = [];
+
     private readonly HashSet<ulong> _failedModels = [];
+
     private readonly List<(MeshDerived Derived, ResidentModel Where)> _arrivedModels = [];
 
     /// <summary>
@@ -92,10 +107,14 @@ internal sealed class GpuResources(
     /// settles.
     /// </summary>
     private readonly List<(ulong Model, string Name, MeshDerived Made)> _madeModels = [];
+
     private readonly FreeList _vertexRanges = new(VertexCapacity);
+
     private readonly FreeList _indexRanges = new(IndexCapacity);
+
     private readonly FreeList _clusterRanges = new(ClusterCapacity);
-    private readonly FreeList _leafRanges = new(ClusterCapacity);
+
+    private readonly FreeList _meshRanges = new(MeshCapacity);
 
     /// <summary>
     /// How many models were made or failed, ever: when it changes, a renderer waiting for its model may draw now.
@@ -109,10 +128,15 @@ internal sealed class GpuResources(
     public GpuBuffer ClusterPool { get; private set; }
 
     /// <summary>
-    /// The leaf clusters of every resident model, in the order its acceleration structure's geometries name them;
-    /// none on a GPU that traces no rays.
+    /// Every resident model's meshes as rays see them, a <see cref="GpuMesh"/> a row, in the order its acceleration
+    /// structure's geometries name them; none on a GPU that traces no rays.
     /// </summary>
-    public GpuBuffer LeafClusters { get; private set; }
+    public GpuBuffer Meshes { get; private set; }
+
+    /// <summary>
+    /// Every resident model's clusters and impostor row, a <see cref="GpuClusterModel"/> a row, by its model index.
+    /// </summary>
+    public GpuBuffer ClusterModels { get; private set; }
 
     /// <summary>
     /// Every resident model's impostor, a <see cref="GpuImpostor"/> a row, by the row its instances name.
@@ -188,16 +212,23 @@ internal sealed class GpuResources(
             return Result.Failure(impostors.Error);
 
         ImpostorTable = impostors.Value;
+        Result<GpuBuffer> models = graph.Buffer(
+            GpuDescriptions.GetBuffer("Cluster model table", (long)ModelCapacity * GpuClusterModel.Bytes)
+        );
+        if (!models.Ok)
+            return Result.Failure(models.Error);
+
+        ClusterModels = models.Value;
         if (!graph.Features.HasRayQuery)
             return Result.Success();
 
-        Result<GpuBuffer> leaves = graph.Buffer(
-            GpuDescriptions.GetBuffer("Leaf clusters", (long)ClusterCapacity * sizeof(uint))
+        Result<GpuBuffer> meshes = graph.Buffer(
+            GpuDescriptions.GetBuffer("Mesh table", (long)MeshCapacity * GpuMesh.Bytes)
         );
-        if (!leaves.Ok)
-            return Result.Failure(leaves.Error);
+        if (!meshes.Ok)
+            return Result.Failure(meshes.Error);
 
-        LeafClusters = leaves.Value;
+        Meshes = meshes.Value;
 
         return Result.Success();
     }
@@ -248,8 +279,9 @@ internal sealed class GpuResources(
             _vertexRanges.Free((int)where.VertexOffset, (int)where.VertexCount);
             _indexRanges.Free((int)where.IndexOffset, (int)where.IndexCount);
             _clusterRanges.Free((int)where.ClusterOffset, (int)where.ClusterCount);
+            _modelRows.Free((int)where.ModelIndex, 1);
             if (!where.Acceleration.IsNone)
-                _leafRanges.Free((int)where.LeafOffset, (int)where.LeafCount);
+                _meshRanges.Free((int)where.MeshOffset, (int)where.MeshCount);
 
             // Its acceleration structure and atlases go once no frame asks for them.
             if (where.ImpostorRow != 0)
@@ -342,64 +374,6 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// Whether the slot's material, its shader's struct and the textures it names are on the GPU, its params packed into
-    /// the row, and its shader's struct as reflection laid it out; the default struct while it loads.
-    /// </summary>
-    private ResourceState Pack(in MaterialInstance slot, out GpuMaterial row, out MaterialLayout layout)
-    {
-        row = default;
-        layout = default;
-        if (!_materials.TryGetValue(slot.Handle.Id, out Material? asked))
-        {
-            _materials[slot.Handle.Id] = null;
-            LoadAsync(slot.Handle).FireAndForget();
-
-            return ResourceState.Loading;
-        }
-
-        if (asked is not { } material || _layouts.GetValueOrDefault(material.Shader.Id) is not { } reflected)
-            return ResourceState.Loading;
-
-        layout = reflected;
-        if (layout.Fields.IsDefault)
-            return ResourceState.Failed;
-
-        MaterialOverrides overrides = slot.Overrides;
-        ResourceState state =
-            material.Shader == assets.Find<Shader>(FailureShader) ? ResourceState.Failed : ResourceState.Ready;
-        Span<uint> words = row.Params;
-        foreach (ShaderField field in layout.Fields)
-        {
-            if (!TryGetParam(field.Name, out MaterialParam? param))
-                continue;
-
-            Span<uint> into = words.Slice((int)field.Offset / 4, (int)field.Size / 4);
-            if (field.Struct == "TextureRef")
-            {
-                ResourceState texture = PackTexture(layout, field.Name, param.Texture, words);
-                state = texture == ResourceState.Ready || state == ResourceState.Failed ? state : texture;
-
-                continue;
-            }
-
-            // PROTO: a param that sets a colour fills the field from it, and one that sets none from its vector.
-            bool isColor = param.R != 0 || param.G != 0 || param.B != 0 || param.A != 0;
-            ReadOnlySpan<float> values = isColor
-                ? [param.R, param.G, param.B, param.A]
-                : [param.X, param.Y, param.Z, param.W];
-            for (int i = 0; i < into.Length && i < values.Length; i++)
-            {
-                into[i] = BitConverter.SingleToUInt32Bits(values[i]);
-            }
-        }
-
-        return state;
-
-        bool TryGetParam(string name, [MaybeNullWhen(false)] out MaterialParam param) =>
-            overrides.TryGet(name, out param) || material.Params.TryGetValue(name, out param);
-    }
-
-    /// <summary>
     /// Where the model is in the pools, or null while it is being made; the first ask starts making it, and every ask
     /// keeps it from being evicted. A model that could not be made is the failure model, marked so.
     /// </summary>
@@ -477,7 +451,9 @@ internal sealed class GpuResources(
                 rows[i] = cluster;
             }
 
-            UploadLeaves(graph, derived, where);
+            GpuClusterModel model = new(where.ClusterOffset, where.ClusterCount, where.ImpostorRow);
+            graph.Upload(ClusterModels, [model], (ulong)where.ModelIndex * GpuClusterModel.Bytes);
+            UploadMeshes(graph, derived, where);
             if (where.ImpostorRow != 0)
                 UploadImpostor(graph, derived, where);
         }
@@ -528,9 +504,9 @@ internal sealed class GpuResources(
         entry.State = ResourceState.Ready;
     }
 
-    private static FreeList CreateImpostorRows()
+    private static FreeList CreateRows(int capacity)
     {
-        FreeList rows = new(ImpostorCapacity);
+        FreeList rows = new(capacity);
         rows.Allocate(1);
 
         return rows;
@@ -545,6 +521,106 @@ internal sealed class GpuResources(
             TextureFormat.Bc7Srgb => GpuFormat.Bc7Srgb,
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "not a texture format"),
         };
+
+    /// <summary>
+    /// The model's meshes as rays see them, from <paramref name="indexOffset"/> in the index pool, with their
+    /// triangles: each run of leaf clusters, its full detail, that follow on in the index pool with one material slot.
+    /// A mesh's leaves come first in its clusters and its indices, so its full detail is one run.
+    /// </summary>
+    private static List<(GpuMesh Mesh, uint Triangles)> GetMeshes(MeshDerived made, uint indexOffset)
+    {
+        List<(GpuMesh Mesh, uint Triangles)> meshes = [];
+        foreach (GpuCluster cluster in made.Clusters)
+        {
+            if (cluster.Error != 0)
+                continue;
+
+            uint start = indexOffset + cluster.IndexOffset;
+            (GpuMesh Mesh, uint Triangles) last = meshes.Count > 0 ? meshes[^1] : default;
+            bool followsOn =
+                meshes.Count > 0
+                && last.Mesh.MaterialSlot == cluster.MaterialSlot
+                && last.Mesh.IndexOffset + (last.Triangles * 3) == start;
+            if (followsOn)
+                meshes[^1] = last with { Triangles = last.Triangles + cluster.TriangleCount };
+            else
+                meshes.Add((new GpuMesh(start, cluster.MaterialSlot), cluster.TriangleCount));
+        }
+
+        return meshes;
+    }
+
+    /// <summary>
+    /// An impostor atlas of <see cref="MeshDerived.ImpostorSize"/> texels a side, in <paramref name="format"/>.
+    /// </summary>
+    private static TextureDescription GetAtlasDescription(string name, GpuFormat format) =>
+        new()
+        {
+            Width = MeshDerived.ImpostorSize,
+            Height = MeshDerived.ImpostorSize,
+            Format = format,
+            Usage = TextureUsages.Sampled | TextureUsages.CopyDestination,
+            Levels = 1,
+            Name = name,
+        };
+
+    /// <summary>
+    /// Whether the slot's material, its shader's struct and the textures it names are on the GPU, its params packed into
+    /// the row, and its shader's struct as reflection laid it out; the default struct while it loads.
+    /// </summary>
+    private ResourceState Pack(in MaterialInstance slot, out GpuMaterial row, out MaterialLayout layout)
+    {
+        row = default;
+        layout = default;
+        if (!_materials.TryGetValue(slot.Handle.Id, out Material? asked))
+        {
+            _materials[slot.Handle.Id] = null;
+            LoadAsync(slot.Handle).FireAndForget();
+
+            return ResourceState.Loading;
+        }
+
+        if (asked is not { } material || _layouts.GetValueOrDefault(material.Shader.Id) is not { } reflected)
+            return ResourceState.Loading;
+
+        layout = reflected;
+        if (layout.Fields.IsDefault)
+            return ResourceState.Failed;
+
+        MaterialOverrides overrides = slot.Overrides;
+        ResourceState state =
+            material.Shader == assets.Find<Shader>(FailureShader) ? ResourceState.Failed : ResourceState.Ready;
+        Span<uint> words = row.Params;
+        foreach (ShaderField field in layout.Fields)
+        {
+            if (!TryGetParam(field.Name, out MaterialParam? param))
+                continue;
+
+            Span<uint> into = words.Slice((int)field.Offset / 4, (int)field.Size / 4);
+            if (field.Struct == "TextureRef")
+            {
+                ResourceState texture = PackTexture(layout, field.Name, param.Texture, words);
+                state = texture == ResourceState.Ready || state == ResourceState.Failed ? state : texture;
+
+                continue;
+            }
+
+            // PROTO: a param that sets a colour fills the field from it, and one that sets none from its vector.
+            bool isColor = param.R != 0 || param.G != 0 || param.B != 0 || param.A != 0;
+            ReadOnlySpan<float> values = isColor
+                ? [param.R, param.G, param.B, param.A]
+                : [param.X, param.Y, param.Z, param.W];
+            for (int i = 0; i < into.Length && i < values.Length; i++)
+            {
+                into[i] = BitConverter.SingleToUInt32Bits(values[i]);
+            }
+        }
+
+        return state;
+
+        bool TryGetParam(string name, [MaybeNullWhen(false)] out MaterialParam param) =>
+            overrides.TryGet(name, out param) || material.Params.TryGetValue(name, out param);
+    }
 
     /// <summary>
     /// Writes <paramref name="texture"/>'s heap id into the field named <paramref name="name"/> of <paramref name="words"/>,
@@ -742,9 +818,9 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// The model made into the pools' ranges, with its acceleration structure over its leaf clusters on a GPU that
-    /// traces rays and its impostor's table row and atlases when it baked one, all copied up by the next upload; the
-    /// failure model when the pools are full.
+    /// The model made into the pools' ranges and given its index, with its acceleration structure over its meshes on
+    /// a GPU that traces rays and its impostor's table row and atlases when it baked one, all copied up by the next
+    /// upload; the failure model when the pools are full.
     /// </summary>
     private void Settle(RenderGraph graph, ulong model, string name, MeshDerived made)
     {
@@ -752,7 +828,8 @@ internal sealed class GpuResources(
         bool fits =
             _vertexRanges.CanAllocate(made.Vertices.Length)
             && _indexRanges.CanAllocate(made.Indices.Length)
-            && _clusterRanges.CanAllocate(made.Clusters.Length);
+            && _clusterRanges.CanAllocate(made.Clusters.Length)
+            && _modelRows.CanAllocate(1);
         if (!fits)
         {
             Log.Error($"{name} is drawn as the failure model: the geometry pools are full.");
@@ -771,10 +848,11 @@ internal sealed class GpuResources(
             made.BoundsCenter,
             made.BoundsRadius,
             made.BoundsMin,
-            made.BoundsMax
+            made.BoundsMax,
+            (uint)_modelRows.Allocate(1)
         );
-        // A leaf table is there only on a GPU that traces rays.
-        if (!LeafClusters.IsNone)
+        // A mesh table is there only on a GPU that traces rays.
+        if (!Meshes.IsNone)
             where = AskAcceleration(graph, name, made, where);
 
         // A model that baked an impostor gets a row of the impostor table, and its atlases' descriptions, which the graph
@@ -807,17 +885,18 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// The model's place with its acceleration structure over its leaf clusters, a geometry each, asked for, what it is
-    /// made to, and their range in the leaf table; as it was, with none, when the structure could not be made.
+    /// The model's place with its acceleration structure over its meshes, a geometry each, asked for, what it is made
+    /// to, and their range in the mesh table; as it was, with none, when the structure could not be made.
     /// </summary>
     private ResidentModel AskAcceleration(RenderGraph graph, string name, MeshDerived made, ResidentModel where)
     {
-        List<TriangleGeometry> geometries = [];
-        foreach (GpuCluster cluster in made.Clusters)
-        {
-            if (cluster.Error != 0)
-                continue;
+        List<(GpuMesh Mesh, uint Triangles)> meshes = GetMeshes(made, where.IndexOffset);
+        if (meshes.Count == 0 || !_meshRanges.CanAllocate(meshes.Count))
+            return where;
 
+        List<TriangleGeometry> geometries = [];
+        foreach ((GpuMesh mesh, uint triangles) in meshes)
+        {
             geometries.Add(
                 new TriangleGeometry(
                     VertexPool,
@@ -825,14 +904,11 @@ internal sealed class GpuResources(
                     GpuVertex.Bytes,
                     VertexCapacity,
                     IndexPool,
-                    (ulong)(where.IndexOffset + cluster.IndexOffset) * sizeof(uint),
-                    cluster.TriangleCount
+                    (ulong)mesh.IndexOffset * sizeof(uint),
+                    triangles
                 )
             );
         }
-
-        if (geometries.Count == 0 || !_leafRanges.CanAllocate(geometries.Count))
-            return where;
 
         BottomLevelDescription description = new() { Geometries = [.. geometries], Name = $"{name} acceleration" };
         Result<GpuAcceleration> acceleration = graph.Acceleration(description);
@@ -845,46 +921,30 @@ internal sealed class GpuResources(
 
         return where with
         {
-            LeafOffset = (uint)_leafRanges.Allocate(geometries.Count),
-            LeafCount = (uint)geometries.Count,
+            MeshOffset = (uint)_meshRanges.Allocate(meshes.Count),
+            MeshCount = (uint)meshes.Count,
             Acceleration = acceleration.Value,
             AccelerationDescription = description,
         };
     }
 
     /// <summary>
-    /// The model's leaf clusters into the leaf table and its acceleration structure built, after its pools landed.
+    /// The model's meshes into the mesh table and its acceleration structure built, after its pools landed.
     /// </summary>
-    private void UploadLeaves(RenderGraph graph, MeshDerived derived, ResidentModel where)
+    private void UploadMeshes(RenderGraph graph, MeshDerived derived, ResidentModel where)
     {
         if (where.Acceleration.IsNone)
             return;
 
-        List<uint> leaves = [];
-        for (int i = 0; i < derived.Clusters.Length; i++)
+        List<(GpuMesh Mesh, uint Triangles)> meshes = GetMeshes(derived, where.IndexOffset);
+        Span<GpuMesh> rows = graph.Upload<GpuMesh>(Meshes, meshes.Count, (ulong)where.MeshOffset * GpuMesh.Bytes);
+        for (int i = 0; i < meshes.Count; i++)
         {
-            GpuCluster cluster = derived.Clusters[i];
-            if (cluster.Error == 0)
-                leaves.Add(where.ClusterOffset + (uint)i);
+            rows[i] = meshes[i].Mesh;
         }
 
-        graph.Upload(LeafClusters, CollectionsMarshal.AsSpan(leaves), (ulong)where.LeafOffset * sizeof(uint));
         graph.BuildAcceleration(where.Acceleration);
     }
-
-    /// <summary>
-    /// An impostor atlas of <see cref="MeshDerived.ImpostorSize"/> texels a side, in <paramref name="format"/>.
-    /// </summary>
-    private static TextureDescription GetAtlasDescription(string name, GpuFormat format) =>
-        new()
-        {
-            Width = MeshDerived.ImpostorSize,
-            Height = MeshDerived.ImpostorSize,
-            Format = format,
-            Usage = TextureUsages.Sampled | TextureUsages.CopyDestination,
-            Levels = 1,
-            Name = name,
-        };
 
     /// <summary>
     /// The model's impostor atlases asked of the graph and copied up, and its row of the impostor table written; the row
@@ -917,6 +977,16 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
+    /// A material shader's struct as its rows are packed: its fields as reflection lays them out, default when it could
+    /// not be, and the struct a pass is specialised to.
+    /// </summary>
+    private readonly record struct MaterialLayout(
+        ImmutableArray<ShaderField> Fields,
+        ShaderTypeArgument Shader,
+        bool IsTranslucent
+    );
+
+    /// <summary>
     /// A texture asked for: where it is in the loading, what it and its sampler are made to once it is read, and their
     /// heap ids once they are made.
     /// </summary>
@@ -932,16 +1002,6 @@ internal sealed class GpuResources(
 
         public GpuSampler Sampler { get; set; }
     }
-
-    /// <summary>
-    /// A material shader's struct as its rows are packed: its fields as reflection lays them out, default when it could
-    /// not be, and the struct a pass is specialised to.
-    /// </summary>
-    private readonly record struct MaterialLayout(
-        ImmutableArray<ShaderField> Fields,
-        ShaderTypeArgument Shader,
-        bool IsTranslucent
-    );
 }
 
 /// <summary>
@@ -965,9 +1025,10 @@ internal readonly record struct ResidentModel(
     float BoundsRadius,
     Vector3 BoundsMin,
     Vector3 BoundsMax,
+    uint ModelIndex,
     bool IsFailure = false,
-    uint LeafOffset = 0,
-    uint LeafCount = 0,
+    uint MeshOffset = 0,
+    uint MeshCount = 0,
     GpuAcceleration Acceleration = default,
     BottomLevelDescription? AccelerationDescription = null,
     TextureDescription? Impostor = null,

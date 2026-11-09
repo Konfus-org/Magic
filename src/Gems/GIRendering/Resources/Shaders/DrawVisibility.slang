@@ -12,6 +12,7 @@ import Scene.Clusters;
 import Scene.Vertices;
 import Scene.Visibility;
 import Scene.Impostors;
+import Scene.Models;
 
 struct Varyings
 {
@@ -27,16 +28,17 @@ struct Varyings
 [shader("vertex")]
 Varyings DrawVisibilityVertex(uint vertexIndex : SV_VertexID, uint instanceIndex : SV_StartInstanceLocation)
 {
+    Models models = GetModels();
     ClusterConstants clusters = GetClusters();
     FrameConstants frame = GetFrame();
     ArrayRef<VisibleCluster> visible = { clusters.visibleClusters };
     VisibleCluster entry = visible[instanceIndex];
-    GpuInstance instance = LoadInstance(frame.instances, entry.instance);
+    GpuInstance instance = LoadInstance(models.instances, entry.instance);
     GpuCluster cluster = LoadCluster(clusters.clusters, entry.cluster);
 
     Varyings output;
     output.id = EncodeVisibilityId(instanceIndex, vertexIndex / 3u);
-    Vertex vertex = LoadVertex(frame.vertices, LoadIndex(frame.indices, cluster.indexOffset + vertexIndex));
+    Vertex vertex = LoadVertex(models.vertices, LoadIndex(models.indices, cluster.indexOffset + vertexIndex));
     float3 relative = Relative(frame, ToWorld(instance.world, vertex.position));
     output.position = mul(float4(relative, 1.0), frame.viewProjection);
     output.fade = GetImpostorFade(frame, instance);

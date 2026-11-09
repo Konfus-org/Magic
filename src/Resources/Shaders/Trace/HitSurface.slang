@@ -1,7 +1,7 @@
 // What a ray finds in the world's acceleration structure: how much light gets through along it, and what it landed on
-// as a surface, its triangle found through the instance and leaf cluster tables and its material as the hit materials
-// table averages it. An instance's geometries are its model's leaf clusters, its hit group offset where they start in
-// the leaf table.
+// as a surface, its triangle found through the instance and mesh tables and its material as the hit materials table
+// averages it. An instance's geometries are its model's meshes, its hit group offset where they start in the mesh
+// table.
 module "Trace/HitSurface";
 
 import Core.Heap;
@@ -9,7 +9,7 @@ import Core.Frame;
 import Core.Math;
 import Core.Pack;
 import Scene.Instances;
-import Scene.Clusters;
+import Scene.Models;
 import Scene.Vertices;
 
 // A material row as a ray sees it, C#'s RayTracing.HitMaterialBytes long: its surface averaged over its whole texture.
@@ -49,10 +49,9 @@ public float GetRayOffset(FrameConstants frame, float3 relative)
 // way, none past an opaque surface, and through each other what its material lets through. The world's instances are
 // non-opaque, so the query is handed each triangle it lands on, in any order, and stops at the first that lets nothing
 // through.
-public float3 GetTransmittance(
-    FrameConstants frame, RaytracingAccelerationStructure world, float3 origin, float3 direction, float distance)
+public float3 GetTransmittance(RaytracingAccelerationStructure world, float3 origin, float3 direction, float distance)
 {
-    ClusterConstants clusters = GetClusters();
+    Models models = GetModels();
     RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
     RayDesc ray;
     ray.Origin = origin;
@@ -60,15 +59,14 @@ public float3 GetTransmittance(
     ray.TMin = 0.0;
     ray.TMax = distance;
     query.TraceRayInline(world, RAY_FLAG_NONE, 0xFFu, ray);
-    ArrayRef<uint> leaves = { clusters.leafClusters };
-    ArrayRef<GpuHitMaterial> materials = { frame.hitMaterials };
+    ArrayRef<GpuHitMaterial> materials = { models.hitMaterials };
     float3 through = float3(1.0);
     while (query.Proceed())
     {
-        GpuInstance instance = LoadInstance(frame.instances, query.CandidateInstanceID());
-        uint leaf = query.CandidateInstanceContributionToHitGroupIndex() + query.CandidateGeometryIndex();
-        GpuCluster cluster = LoadCluster(clusters.clusters, leaves[leaf]);
-        through *= UnpackUnorm4x8(materials[GetMaterial(instance, cluster.materialSlot)].transmission).rgb;
+        GpuInstance instance = LoadInstance(models.instances, query.CandidateInstanceID());
+        uint mesh = query.CandidateInstanceContributionToHitGroupIndex() + query.CandidateGeometryIndex();
+        uint slot = LoadMesh(models.meshes, mesh).materialSlot;
+        through *= UnpackUnorm4x8(materials[GetMaterial(instance, slot)].transmission).rgb;
         if (Max3(through) <= 0.0)
             query.CommitNonOpaqueTriangleHit();
     }
@@ -76,14 +74,14 @@ public float3 GetTransmittance(
     return query.CommittedStatus() == COMMITTED_NOTHING ? through : float3(0.0);
 }
 
-// What a ray landed on first: whether it landed on anything, the instance's row, the leaf as its hit group offset plus
-// its geometry, the triangle in the leaf and the barycentrics of the hit in it, whether it faces the ray, and how far
+// What a ray landed on first: whether it landed on anything, the instance's row, the mesh as its hit group offset plus
+// its geometry, the triangle in the mesh and the barycentrics of the hit in it, whether it faces the ray, and how far
 // along the ray it is.
 public struct RayHit
 {
     public bool isHit;
     public uint instance;
-    public uint leaf;
+    public uint mesh;
     public uint triangle;
     public float2 barycentrics;
     public bool isFrontFace;
@@ -106,7 +104,7 @@ public RayHit GetClosestHit(
     RayHit hit;
     hit.isHit = query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
     hit.instance = query.CommittedInstanceID();
-    hit.leaf = query.CommittedInstanceContributionToHitGroupIndex() + query.CommittedGeometryIndex();
+    hit.mesh = query.CommittedInstanceContributionToHitGroupIndex() + query.CommittedGeometryIndex();
     hit.triangle = query.CommittedPrimitiveIndex();
     hit.barycentrics = query.CommittedTriangleBarycentrics();
     hit.isFrontFace = query.CommittedTriangleFrontFace();
@@ -115,21 +113,20 @@ public RayHit GetClosestHit(
 }
 
 // The surface at a hit of a ray from origin along direction.
-public HitSurface LoadHitSurface(FrameConstants frame, RayHit hit, float3 origin, float3 direction)
+public HitSurface LoadHitSurface(RayHit hit, float3 origin, float3 direction)
 {
-    ClusterConstants clusters = GetClusters();
-    ArrayRef<uint> leaves = { clusters.leafClusters };
-    GpuInstance instance = LoadInstance(frame.instances, hit.instance);
-    GpuCluster cluster = LoadCluster(clusters.clusters, leaves[hit.leaf]);
-    uint first = cluster.indexOffset + hit.triangle * 3u;
-    float3 n0 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first)).normal;
-    float3 n1 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first + 1u)).normal;
-    float3 n2 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first + 2u)).normal;
+    Models models = GetModels();
+    GpuInstance instance = LoadInstance(models.instances, hit.instance);
+    GpuMesh mesh = LoadMesh(models.meshes, hit.mesh);
+    uint first = mesh.indexOffset + hit.triangle * 3u;
+    float3 n0 = LoadVertex(models.vertices, LoadIndex(models.indices, first)).normal;
+    float3 n1 = LoadVertex(models.vertices, LoadIndex(models.indices, first + 1u)).normal;
+    float3 n2 = LoadVertex(models.vertices, LoadIndex(models.indices, first + 2u)).normal;
     float3 lambda = float3(1.0 - hit.barycentrics.x - hit.barycentrics.y, hit.barycentrics.x, hit.barycentrics.y);
     float3 normal = ToWorldNormal(instance.world, n0 * lambda.x + n1 * lambda.y + n2 * lambda.z);
 
-    ArrayRef<GpuHitMaterial> materials = { frame.hitMaterials };
-    GpuHitMaterial material = materials[GetMaterial(instance, cluster.materialSlot)];
+    ArrayRef<GpuHitMaterial> materials = { models.hitMaterials };
+    GpuHitMaterial material = materials[GetMaterial(instance, mesh.materialSlot)];
     HitSurface surface;
     surface.position = origin + direction * hit.distance;
     surface.normal = dot(normal, direction) > 0.0 ? -normal : normal;

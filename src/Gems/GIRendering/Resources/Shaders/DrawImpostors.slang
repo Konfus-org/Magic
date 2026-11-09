@@ -9,6 +9,8 @@ import Core.Pass;
 import Core.Frame;
 import Scene.Instances;
 import Scene.Impostors;
+import Scene.Clusters;
+import Scene.Models;
 
 struct Varyings
 {
@@ -31,8 +33,8 @@ Varyings DrawImpostorsVertex(uint vertexIndex : SV_VertexID, uint start : SV_Sta
     uint instanceIndex = start & ~ImpostorWhole;
     FrameConstants frame = GetFrame();
     PassHeader header = GetPassHeader();
-    GpuInstance instance = LoadInstance(frame.instances, instanceIndex);
-    GpuImpostor impostor = LoadImpostor(header.z, instance.impostor);
+    GpuInstance instance = LoadInstance(GetModels().instances, instanceIndex);
+    GpuImpostor impostor = LoadImpostor(header.z, LoadClusterModel(instance.model).impostor);
     static const float2 corners[6] = { float2(0, 0), float2(1, 0), float2(1, 1), float2(0, 0), float2(1, 1), float2(0, 1) };
 
     Varyings output;
@@ -50,8 +52,8 @@ Targets DrawImpostorsPixel(Varyings input)
         discard;
 
     FrameConstants frame = GetFrame();
-    GpuInstance instance = LoadInstance(frame.instances, input.instance);
-    GpuImpostor impostor = LoadImpostor(GetPassHeader().z, instance.impostor);
+    GpuInstance instance = LoadInstance(GetModels().instances, input.instance);
+    GpuImpostor impostor = LoadImpostor(GetPassHeader().z, LoadClusterModel(instance.model).impostor);
     ImpostorHit hit = TraceImpostor(instance, impostor, GetModelRay(frame, instance, input.relative), 0.5);
     if (!hit.isHit)
         discard;

@@ -180,7 +180,7 @@ internal sealed class Lighting(AssetManager assets, GpuResources resources)
                 glass.Reads(probed.Constants, probed.Probes, probed.Depth);
 
             if (world is { } rays)
-                glass.Reads(rays.HitMaterials, resources.LeafClusters);
+                glass.Reads(rays.HitMaterials, resources.Meshes);
 
             glass.Writes(view.Hdr).DispatchOver(view.Width, view.Height);
         }

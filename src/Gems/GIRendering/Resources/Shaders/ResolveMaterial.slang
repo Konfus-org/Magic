@@ -18,11 +18,13 @@ import Scene.Impostors;
 import Surface.Surface;
 import Material.IMaterial;
 import Scene.Clusters;
+import Scene.Models;
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
 {
+    Models models = GetModels();
     FrameConstants frame = GetFrame();
     uint2 size = uint2(frame.width, frame.height);
     if (any(thread.xy >= size))
@@ -56,15 +58,15 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
     uint slot;
     if (isImpostor)
     {
-        instance = LoadInstance(frame.instances, id & ImpostorInstanceMask);
+        instance = LoadInstance(models.instances, id & ImpostorInstanceMask);
         slot = (id >> ImpostorSlotShift) & 7u;
 
         // Another pass's pixel goes before its atlas is traced.
-        if (LoadMaterialShader(frame.materials, GetMaterial(instance, slot)) != shader)
+        if (LoadMaterialShader(models.materials, GetMaterial(instance, slot)) != shader)
             return;
 
         ImpostorRay ray = GetModelRay(frame, instance, ReconstructRelative(frame, center, 0.5));
-        GpuImpostor impostor = LoadImpostor(GetPassHeader().y, instance.impostor);
+        GpuImpostor impostor = LoadImpostor(GetPassHeader().y, LoadClusterModel(instance.model).impostor);
         ImpostorHit hit = TraceImpostor(instance, impostor, ray, 0.0);
         model = hit.position;
         inputs.position = Relative(frame, ToWorld(instance.world, hit.position));
@@ -93,10 +95,10 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
     }
 
     uint row = GetMaterial(instance, slot);
-    if (LoadMaterialShader(frame.materials, row) != shader)
+    if (LoadMaterialShader(models.materials, row) != shader)
         return;
 
-    M material = LoadMaterialParams<M>(frame.materials, row);
+    M material = LoadMaterialParams<M>(models.materials, row);
     SurfaceOutputs surface = material.Evaluate(inputs);
 
     float3 previous = ToWorld(GetPreviousWorld(instance, frame.frameIndex), model) - frame.previousCameraPosition.xyz;

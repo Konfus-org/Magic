@@ -7,21 +7,21 @@ module "AverageMaterials";
 
 import Core.Heap;
 import Core.Pass;
-import Core.Frame;
 import Core.Pack;
 import Scene.Materials;
 import Surface.Surface;
 import Material.IMaterial;
 import Trace.HitSurface;
+import Scene.Models;
 
 [shader("compute")]
 [numthreads(64, 1, 1)]
 void AverageMaterials<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
 {
-    FrameConstants frame = GetFrame();
+    Models models = GetModels();
     PassHeader header = GetPassHeader();
     uint row = thread.x;
-    if (row >= header.w || LoadMaterialShader(frame.materials, row) != header.z)
+    if (row >= header.w || LoadMaterialShader(models.materials, row) != header.z)
         return;
 
     // A surface facing up whose texture coordinates change by a whole texture over a pixel: a texture sampled with
@@ -35,7 +35,7 @@ void AverageMaterials<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
     inputs.uvDdx = float2(1.0, 0.0);
     inputs.uvDdy = float2(0.0, 1.0);
     inputs.viewDirection = float3(0.0, 1.0, 0.0);
-    M material = LoadMaterialParams<M>(frame.materials, row);
+    M material = LoadMaterialParams<M>(models.materials, row);
     SurfaceOutputs surface = material.Evaluate(inputs);
 
     GpuHitMaterial hit;
