@@ -36,13 +36,15 @@ public struct Exposure : IPixelEffect
             return float4(average, 0.0, 0.0);
 
         // The adapted log luminance moved towards the frame's, or set to it with no history. A half float alone would
-        // round a frame's small step away, so it is kept as one and what that one rounded off.
+        // round a frame's small step away, so it is kept as one and what that one rounded off. The one is rounded to
+        // a 64th, which a half holds exactly under 32. The compiler folds a half round trip away, which leaves nothing
+        // rounded off.
         float frameLog = average.y > 0.0 ? average.x / average.y : LeastLog;
         float4 last = inputs.history.Load(uint2(0u), inputs.level);
         float adapted = inputs.hasHistory
             ? lerp(last.z + last.w, frameLog, 1.0 - exp(-GetFrame().deltaSec * AdaptionRate))
             : frameLog;
-        float high = f16tof32(f32tof16(adapted));
+        float high = round(adapted * 64.0) / 64.0;
         return float4(average, high, adapted - high);
     }
 
