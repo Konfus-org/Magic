@@ -8,7 +8,7 @@ using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs.Components;
 using Magic.Files;
-using Magic.Rendering;
+using Magic.Graphics;
 using Magic.Threading;
 using Magic.Utils;
 

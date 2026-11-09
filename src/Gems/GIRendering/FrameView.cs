@@ -1,6 +1,6 @@
 using System.Numerics;
+using Magic.Graphics;
 using Magic.Projects;
-using Magic.Rendering;
 using Magic.Utils;
 
 namespace Magic.GIRendering;

@@ -1,6 +1,6 @@
 using Magic.Assets;
 
-namespace Magic.Rendering;
+namespace Magic.Graphics;
 
 /// <summary>
 /// What a sampler makes of the texels under a sample: their blend, or the least or greatest of them, which is what a

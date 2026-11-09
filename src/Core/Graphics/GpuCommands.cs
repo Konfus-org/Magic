@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using System.Runtime.InteropServices;
 
-namespace Magic.Rendering;
+namespace Magic.Graphics;
 
 /// <summary>
 /// A frame's commands as a value: passes in the order they run, each with what it uses. The gems record it into

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The tests of Core: how the gems' render steps are ordered and run. They run on the testing platform xunit v3
+       carries, which dotnet test drives. -->
+  <PropertyGroup>
+    <RootNamespace>Magic.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <OutputType>Exe</OutputType>
+    <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" />
+  </ItemGroup>
+</Project>

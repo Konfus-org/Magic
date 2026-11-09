@@ -8,6 +8,7 @@ using Magic.Assets.Pipeline;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Files;
+using Magic.Graphics;
 using Magic.Utils;
 using Magic.Worlds;
 using Microsoft.Extensions.DependencyInjection;
@@ -216,7 +217,7 @@ internal static class GemRegistry
     /// Whether a gem implementing <paramref name="contract"/> hands it to the host, rather than provide it to other gems.
     /// </summary>
     private static bool IsHostContract(Type contract) =>
-        contract == typeof(IAssetImporter<>) || contract == typeof(IAssetExporter<>);
+        contract == typeof(IAssetImporter<>) || contract == typeof(IAssetExporter<>) || contract == typeof(IRender<,>);
 
     /// <summary>
     /// The assembly at <paramref name="path"/>, loaded from its file into <paramref name="context"/>.

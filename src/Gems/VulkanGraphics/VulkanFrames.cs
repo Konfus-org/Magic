@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using Magic.Debugging;
-using Magic.Rendering;
+using Magic.Graphics;
 using Magic.Utils;
 using Vortice.Vulkan;
 

@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 using Magic.Assets;
-using Magic.Rendering;
+using Magic.Graphics;
 using Magic.Utils;
 
 namespace Magic.GlobalIllumination;

@@ -1,4 +1,4 @@
-namespace Magic.Rendering;
+namespace Magic.Graphics;
 
 /// <summary>
 /// How a pass touches a resource, which a transition names before and after: enough for the GPU provider to put the

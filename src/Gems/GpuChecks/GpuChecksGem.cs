@@ -1,7 +1,7 @@
 using Magic.Assets;
 using Magic.Debugging;
+using Magic.Graphics;
 using Magic.Projects;
-using Magic.Rendering;
 using Magic.Threading;
 using Magic.Utils;
 
@@ -15,7 +15,7 @@ namespace Magic.GpuChecks;
 /// frame while the check runs and records the dispatch once the entry is built. It is public because nothing in its
 /// assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class GpuChecksGem : IGem, IDisposable
+public sealed class GpuChecksGem : IGem, IRender<Nothing, Nothing>, IDisposable
 {
     private const int Size = 256;
     private const int Bytes = Size * Size * 4;
@@ -74,15 +74,15 @@ public sealed class GpuChecksGem : IGem, IDisposable
     /// The gradient and its readback buffer asked for while the check runs, so they last until it has read back, and
     /// the gradient's dispatch and its copy into the buffer once the check asks and the GPU provider has built the entry.
     /// </summary>
-    public void Render(in Frame frame, RenderGraph graph)
+    public Nothing? Render(in Frame frame, RenderGraph graph, in Nothing input)
     {
         if (_check.IsCompleted)
-            return;
+            return null;
 
         Result<GpuTexture> gradient = graph.Texture(_gradient);
         Result<GpuBuffer> readback = graph.Buffer(_readback);
         if (_fill is not { } fill)
-            return;
+            return null;
 
         GpuState state = graph.GetState(fill);
         Result made =
@@ -91,14 +91,14 @@ public sealed class GpuChecksGem : IGem, IDisposable
             : state == GpuState.Failed ? Result.Failure("the gradient shader was not built")
             : Result.Success();
         if (made.Ok && state == GpuState.Loading)
-            return;
+            return null;
 
         _fill = null;
         if (!made.Ok)
         {
             _recorded.SetResult(Result.Failure(made.Error));
 
-            return;
+            return null;
         }
 
         graph
@@ -107,6 +107,8 @@ public sealed class GpuChecksGem : IGem, IDisposable
             .DispatchOver(Size, Size);
         graph.ReadBack(gradient.Value, readback.Value, RenderStage.Post);
         _recorded.SetResult(readback);
+
+        return null;
     }
 
     private async Task CheckAsync(AssetManager assets, Threads threads)

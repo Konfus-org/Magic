@@ -1,6 +1,6 @@
 using Magic.Assets;
 using Magic.Debugging;
-using Magic.Rendering;
+using Magic.Graphics;
 using Magic.Utils;
 
 namespace Magic.GIRendering;

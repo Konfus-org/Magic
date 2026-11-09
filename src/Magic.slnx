@@ -27,6 +27,7 @@
   </Folder>
   <Folder Name="/Tests/">
     <Project Path="../tests/GIRendering.Tests/GIRendering.Tests.csproj" />
+    <Project Path="../tests/Magic.Core.Tests/Magic.Core.Tests.csproj" />
   </Folder>
   <Folder Name="/Samples/">
     <File Path="../samples/README.md" />

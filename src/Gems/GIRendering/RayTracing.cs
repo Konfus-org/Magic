@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using System.Numerics;
 using Magic.Assets;
-using Magic.Rendering;
+using Magic.Graphics;
 using Magic.Utils;
 
 namespace Magic.GIRendering;

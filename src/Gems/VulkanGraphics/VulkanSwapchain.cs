@@ -1,6 +1,6 @@
 using Magic.Debugging;
+using Magic.Graphics;
 using Magic.Platform;
-using Magic.Rendering;
 using Magic.Utils;
 using Vortice.Vulkan;
 

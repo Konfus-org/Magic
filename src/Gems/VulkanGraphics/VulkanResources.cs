@@ -1,7 +1,7 @@
 using System.Linq;
 using Magic.Assets;
 using Magic.Debugging;
-using Magic.Rendering;
+using Magic.Graphics;
 using Magic.Utils;
 using Vortice.Vulkan;
 

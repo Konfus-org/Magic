@@ -6,8 +6,8 @@ using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Events;
 using Magic.Files;
+using Magic.Graphics;
 using Magic.Platform;
-using Magic.Rendering;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
@@ -60,12 +60,6 @@ internal sealed class Gems : IDisposable
         "From one frame the render thread draws to the next, the waits for the GPU and the display among it."
     );
 
-    private static readonly Histogram<double> _hookDuration = Metrics.Meter.CreateHistogram<double>(
-        Metrics.HookDuration,
-        "s",
-        "One gem's hook."
-    );
-
     private readonly IServiceProvider _provider;
 
     private readonly App _app;
@@ -86,6 +80,8 @@ internal sealed class Gems : IDisposable
     private readonly Stopwatch _clock = new();
 
     private readonly List<LoadedGem> _loaded = [];
+
+    private readonly Rendering _rendering = new();
 
     private readonly Subscriptions _watches = [];
 
@@ -287,9 +283,6 @@ internal sealed class Gems : IDisposable
                 case Hook.LateUpdate:
                     gem.Instance.LateUpdate(in frame);
                     break;
-                case Hook.Render:
-                    gem.Instance.Render(in frame, _graph);
-                    break;
                 case Hook.Present:
                     if (gem.Instance is IGraphicsApi gpu)
                         gpu.Present(_graph.Finish());
@@ -320,7 +313,7 @@ internal sealed class Gems : IDisposable
         if (frame.Index > 0)
             _renderFrameDuration.Record(frame.AppDeltaSec);
 
-        RunHook(Hook.Render, frame);
+        _rendering.Pump(frame, _graph);
         RunHook(Hook.Present, frame);
 
         // Without a GPU provider, nothing presents what the gems recorded, so it goes.
@@ -403,8 +396,20 @@ internal sealed class Gems : IDisposable
             if (made is IHookIntoDomainLoading hooks)
                 loaded.Ends.Add(_world.Register(hooks));
 
+            loaded.Ends.Add(_rendering.Register(made));
+
             string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
             Log.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");
+        }
+
+        // A gem whose input no listed gem makes, two gems that make one type or a cycle leaves the frame undrawn.
+        try
+        {
+            _rendering.Order();
+        }
+        catch (InvalidOperationException ex)
+        {
+            Log.Error($"The gems render nothing: {ex.Message}");
         }
     }
 
@@ -432,9 +437,9 @@ internal sealed class Gems : IDisposable
             if (gem.HasFailed)
                 continue;
 
-            long start = _hookDuration.Start();
+            long start = Metrics.HookDurations.Start();
             RunHook(hook, frame, gem);
-            _hookDuration.RecordSince(
+            Metrics.HookDurations.RecordSince(
                 start,
                 new KeyValuePair<string, object?>(Metrics.GemNameTag, gem.Name),
                 new KeyValuePair<string, object?>(Metrics.HookTag, _hookNames[(int)hook])
@@ -470,7 +475,6 @@ internal sealed class Gems : IDisposable
         Update,
         FixedUpdate,
         LateUpdate,
-        Render,
         Present,
     }
 

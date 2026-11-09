@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs.Components;
-using Magic.Rendering;
+using Magic.Graphics;
 using Magic.Utils;
 
 namespace Magic.GIRendering;

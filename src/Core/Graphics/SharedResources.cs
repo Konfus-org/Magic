@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 
-namespace Magic.Rendering;
+namespace Magic.Graphics;
 
 /// <summary>
 /// What gems share on the GPU, beside the library's shader structs that read it: a gem that asks the graph with one of

@@ -1,6 +1,6 @@
 using System.Numerics;
 
-namespace Magic.Rendering;
+namespace Magic.Graphics;
 
 /// <summary>
 /// A texture's shape, which picks how a shader declares what reads it.

@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 using Magic.Debugging;
 using Magic.Utils;
 
-namespace Magic.Rendering;
+namespace Magic.Graphics;
 
 /// <summary>
 /// A frame's passes as data: a compute or draw pass named by its shaders, told what it reads and ended by what it

@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 
-namespace Magic.Rendering;
+namespace Magic.Graphics;
 
 /// <summary>
 /// Which faces of a triangle a draw skips. Triangles are clockwise from outside (<see cref="Assets.Model"/>).

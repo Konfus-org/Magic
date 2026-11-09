@@ -1,6 +1,6 @@
 using Magic.Utils;
 
-namespace Magic.Rendering;
+namespace Magic.Graphics;
 
 /// <summary>
 /// The GPU, as a gem that provides it: resources made by name from descriptions into one bindless heap, and one

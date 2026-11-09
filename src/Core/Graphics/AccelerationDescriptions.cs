@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 using System.Numerics;
 using System.Runtime.InteropServices;
 
-namespace Magic.Rendering;
+namespace Magic.Graphics;
 
 /// <summary>
 /// Triangles of the heap's buffers for a bottom-level acceleration structure: positions as three floats at a stride

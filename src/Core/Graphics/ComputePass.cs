@@ -1,6 +1,6 @@
 using System.Drawing;
 
-namespace Magic.Rendering;
+namespace Magic.Graphics;
 
 /// <summary>
 /// A buffer or a texture, as a pass names what it reads or writes.

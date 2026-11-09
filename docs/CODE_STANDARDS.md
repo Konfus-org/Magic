@@ -45,12 +45,13 @@ Write the engine as data flowing through functions, not objects calling each oth
 - A gem's constructor takes everything it depends on and starts what the gem is; `Dispose` ends it. Only code that
   builds objects from constructors takes `IServiceProvider`. Gems are made in dependency order, then in the order the
   project lists them, and disposed in reverse.
-- A hook is what the engine calls on a gem each frame: `IGem`'s `Update`, `FixedUpdate`, `LateUpdate` and `Render`, in
-  that order over the gems. `Render` runs on the render thread, which owns the GPU, and the others on the game thread.
-  The platform thread, the process's first, pumps the OS's window and events through the gem that implements
-  `IPlatform`, which hands the game thread the input they make as data.
+- A hook is what the engine calls on a gem each frame: `IGem`'s `Update`, `FixedUpdate` and `LateUpdate`, in that order
+  over the gems, on the game thread, then the `Render` of each gem that implements `IRender<TInput, TOutput>`, on the
+  render thread, which owns the GPU. The platform thread, the process's first, pumps the OS's window and events through
+  the gem that implements `IPlatform`, which hands the game thread the input they make as data.
   `Render` records into the frame's `RenderGraph`, each pass in its `RenderStage`, and Core hands it to the GPU provider
-  once every gem has.
+  once every gem has. It takes other gems' render output as its input and returns its own, and Core runs each after
+  the gems whose output it takes; gems pass what they draw from one another that way, as data.
   `LateUpdate` hands `Render` what it draws as data, the newest through a `Mailbox<T>` and what must not be lost
   through a `Channel<T>`. A gem implements the ones it needs. One that throws in a hook is logged
   and leaves every hook.
@@ -71,7 +72,7 @@ Write the engine as data flowing through functions, not objects calling each oth
   needs slow setup starts it in its constructor and reads what came of it in a hook.
 - `Dispose` frees what the gem started, once none of its work still runs on a worker.
 - A gem's csproj states its `Description`, `Version` and `Authors`. Nothing else does.
-- Gems depend on Core's interfaces, never on each other.
+- Gems may depend on each other and reference one another. A gem throws when a dependency it needs isn't there.
 - A component is an unmanaged struct with public fields that implements `IComponent`, and members for what follows from
   those fields.
 - Work over many entities is a system: a function over chunks a gem calls from a hook, through `IEcs.Query` to read or `IEcs.Mutate` to write, on its own

@@ -221,8 +221,8 @@ Agents tend to over-build. Less is more: the best change often removes more code
 
 - **Prefer removing code to adding it.** Match the surrounding style. No abstraction before a second real use.
 - **Project conventions first, then .NET's** (the Framework Design Guidelines).
-- **One responsibility each.** Split interfaces by what their user needs. Gems depend on Core's interfaces, never on
-  each other.
+- **One responsibility each.** Split interfaces by what their user needs. Gems may depend on each other and reference one
+  another; a gem throws when a dependency it needs isn't there.
 - **Stateless where possible.** State that must exist follows [Code Standards](docs/CODE_STANDARDS.md#how-we-write-code).
 - **Data-oriented, explicit data flow.** Only the inheritance, interfaces and indirection the problem needs.
 - **Dependencies come from NuGet.** Never vendor or copy external code.

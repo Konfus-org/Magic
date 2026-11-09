@@ -9,9 +9,9 @@ using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Events;
 using Magic.Files;
+using Magic.Graphics;
 using Magic.Input;
 using Magic.Projects;
-using Magic.Rendering;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
@@ -24,7 +24,7 @@ namespace Magic.GIRendering;
 /// replaces the world, it forgets what it drew before and holds the loading screen until what comes is on the GPU. It is
 /// public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
+public sealed class GIRenderingGem : IGem, IRender<Nothing, Nothing>, IHookIntoDomainLoading, IDisposable
 {
     private const int DefaultWidth = 1280;
     private const int DefaultHeight = 720;
@@ -205,10 +205,10 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     /// <summary>
     /// Records the newest inputs published, or the last again when none are newer, into the frame's graph.
     /// </summary>
-    public void Render(in Frame frame, RenderGraph graph)
+    public Nothing? Render(in Frame frame, RenderGraph graph, in Nothing input)
     {
         if (!_started.Ok)
-            return;
+            return null;
 
         // The shaders are the GPU provider's to build, the first ask starting each; one that fails ends the start.
         GpuState shaders = GetState(graph, _shaders.AsSpan());
@@ -216,7 +216,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             FailStart("a shader was not built.");
 
         if (shaders != GpuState.Ready)
-            return;
+            return null;
 
         // The pools before any model is asked for, whose acceleration structure names them, and every frame, so what
         // they hold stays.
@@ -225,7 +225,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         {
             FailStart(pools.Error);
 
-            return;
+            return null;
         }
 
         // The models made since the last frame settle into the pools before any renderer's row is built.
@@ -245,7 +245,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         }
 
         if (_current is not { } inputs)
-            return;
+            return null;
 
         // Entities -> resources -> rows: the renderers written since the inputs before ask for their models and have
         // their rows built again, the materials' rows are made again at upload, and a model no renderer drawn holds
@@ -284,7 +284,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         {
             Log.Error($"The frame is not drawn: {uploaded.Error}");
 
-            return;
+            return null;
         }
 
         // The passes, each in its stage, each reading what the ones before it wrote: what the view sees, the sky's
@@ -339,6 +339,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             _hasDrawn = true;
             _events.Publish(new FirstFrameDrawn());
         }
+
+        return null;
     }
 
     /// <summary>
