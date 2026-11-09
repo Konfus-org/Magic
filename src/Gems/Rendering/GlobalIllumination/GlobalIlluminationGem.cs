@@ -16,7 +16,7 @@ namespace Magic.GlobalIllumination;
 /// reads the frame, the view's GBuffer and the world as the renderer shares them, by <see cref="SharedResources"/>. It is
 /// public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class GlobalIlluminationGem : IGem, IRender<Nothing, Nothing>, IHookIntoDomainLoading
+public sealed class GlobalIlluminationGem : IGem, IRender, IHookIntoDomainLoading
 {
     private const int HeadlessWidth = 1280;
     private const int HeadlessHeight = 720;
@@ -50,13 +50,13 @@ public sealed class GlobalIlluminationGem : IGem, IRender<Nothing, Nothing>, IHo
     /// <summary>
     /// The frame's indirect light, while the passes' shaders are built and what they read and write is made.
     /// </summary>
-    public Nothing? Render(in Frame frame, RenderGraph graph, in Nothing input)
+    public void Render(in Frame frame, RenderGraph graph)
     {
         if (!graph.Features.HasRayQuery)
         {
             _built.TrySetResult();
 
-            return null;
+            return;
         }
 
         // The shaders are the GPU provider's to build, the first ask starting each; one that fails holds no domain back.
@@ -65,14 +65,14 @@ public sealed class GlobalIlluminationGem : IGem, IRender<Nothing, Nothing>, IHo
             _built.TrySetResult();
 
         if (shaders != GpuState.Ready)
-            return null;
+            return;
 
         Result<GIView> view = GetView(graph, _traced);
         if (!view.Ok)
         {
             Log.Error($"The indirect light is not traced: {view.Error}");
 
-            return null;
+            return;
         }
 
         Result<ProbeBuffers> probes = Probes.Prepare(graph, _traced is not null);
@@ -84,7 +84,7 @@ public sealed class GlobalIlluminationGem : IGem, IRender<Nothing, Nothing>, IHo
             {
                 Log.Error($"The indirect light is not traced: {made.Error}");
 
-                return null;
+                return;
             }
         }
 
@@ -108,8 +108,6 @@ public sealed class GlobalIlluminationGem : IGem, IRender<Nothing, Nothing>, IHo
         _diffuse.Record(view.Value, probes.Value, diffuse.Value);
         _reflections.Record(view.Value, probes.Value, reflections.Value);
         _traced = (view.Value.Width, view.Value.Height);
-
-        return null;
     }
 
     /// <summary>

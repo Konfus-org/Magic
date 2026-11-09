@@ -28,7 +28,7 @@ public readonly record struct DeferredInput(GpuView View, TracedWorld? Traced, S
 /// As a domain loads, it holds the loading screen until its resolve passes are built. It is public because nothing in
 /// its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class DeferredGem : IGem, IRender<DeferredInput, Nothing>, IHookIntoDomainLoading
+public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDomainLoading
 {
     private readonly IGraphicsApi _gpu;
     private readonly AssetManager _assets;
@@ -135,10 +135,10 @@ public sealed class DeferredGem : IGem, IRender<DeferredInput, Nothing>, IHookIn
     /// <summary>
     /// Records the frame's passes, each in its stage, from the view the world's gem made.
     /// </summary>
-    public Nothing? Render(in Frame frame, RenderGraph graph, in DeferredInput input)
+    public void Render(in Frame frame, RenderGraph graph, in DeferredInput input)
     {
         if (!_started.Ok)
-            return null;
+            return;
 
         // The shaders are the GPU provider's to build, the first ask starting each; one that fails ends the start.
         GpuState shaders = GetState(graph, _shaders.AsSpan());
@@ -146,7 +146,7 @@ public sealed class DeferredGem : IGem, IRender<DeferredInput, Nothing>, IHookIn
             FailStart("a shader was not built.");
 
         if (shaders != GpuState.Ready)
-            return null;
+            return;
 
         if (_inputs.TryTake(out RenderInputs? newest))
         {
@@ -157,7 +157,7 @@ public sealed class DeferredGem : IGem, IRender<DeferredInput, Nothing>, IHookIn
         }
 
         if (_current is not { } inputs)
-            return null;
+            return;
 
         // The loading domain shows once its models and materials are on the GPU and the resolve for each material shader
         // is built.
@@ -177,7 +177,7 @@ public sealed class DeferredGem : IGem, IRender<DeferredInput, Nothing>, IHookIn
         {
             Log.Error($"The frame is not drawn: {made.Error}");
 
-            return null;
+            return;
         }
 
         RenderView view = made.Value;
@@ -186,7 +186,7 @@ public sealed class DeferredGem : IGem, IRender<DeferredInput, Nothing>, IHookIn
         {
             Log.Error($"The frame is not drawn: {indirect.Error}");
 
-            return null;
+            return;
         }
 
         // The rows of what no gem made this frame are 0, so the shaders that read them trace and shadow nothing.
@@ -227,8 +227,6 @@ public sealed class DeferredGem : IGem, IRender<DeferredInput, Nothing>, IHookIn
             _hasDrawn = true;
             _events.Publish(new FirstFrameDrawn());
         }
-
-        return default(Nothing);
     }
 
     /// <summary>

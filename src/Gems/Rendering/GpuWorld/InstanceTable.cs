@@ -14,12 +14,11 @@ namespace Magic.GpuWorld;
 /// asking for its model, and the rest stay as they are. Every row is built again once a model is made or fails. Blocks
 /// of rows that changed are uploaded in runs; a still scene uploads none. Beside it, the material table: a row per
 /// distinct <see cref="MaterialInstance"/> drawn, which every slot holding it shares, made again each frame from what
-/// the GPU resources have then, and uploaded whole. A model that failed, or a material that did not load, is drawn with
-/// the failure material; an empty slot when there is none. Row 0 is the default
-/// material, which an empty slot and a material still loading are drawn with. Public for the gems that build from the
-/// rows, on the render thread, after the world's gem has filled them for the frame.
+/// <paramref name="resources"/> has then, and uploaded whole. <paramref name="failure"/> is the material a model that
+/// failed, or a material that did not load, is drawn with; an empty slot when there is none. Row 0 is the default
+/// material, which an empty slot and a material still loading are drawn with.
 /// </summary>
-public sealed class InstanceTable
+internal sealed class InstanceTable(AssetManager assets, GpuResources resources, MaterialInstance failure)
 {
     public static readonly int Capacity = (int)(SharedResources.Instances.Bytes / GpuInstance.Bytes);
 
@@ -56,70 +55,47 @@ public sealed class InstanceTable
     /// <summary>
     /// The slot each material row is made from, by row; row 0 the default material's.
     /// </summary>
-    private readonly List<MaterialInstance> _materialSlots;
+    private readonly List<MaterialInstance> _materialSlots = [new() { Handle = assets.GetDefault<Material>() }];
 
     private readonly Dictionary<MaterialInstance, uint> _materialRowOf = [];
 
     private long _filledAt;
 
-    private readonly AssetManager _assets;
-
-    private readonly GpuResources _resources;
-
-    private readonly MaterialInstance _failure;
-
     private int _settledModels = -1;
 
     /// <summary>
-    /// The <see cref="Version"/> of the rows <see cref="Upload"/> last copied.
+    /// The count of changes of the rows <see cref="Upload"/> last copied.
     /// </summary>
     private long _uploadedVersion;
 
     private bool _isFullLogged;
 
-    internal InstanceTable(AssetManager assets, GpuResources resources, MaterialInstance failure)
-    {
-        _assets = assets;
-        _resources = resources;
-        _failure = failure;
-        _materialSlots = [new() { Handle = assets.GetDefault<Material>() }];
-    }
+    /// <summary>
+    /// How many times the rows have changed.
+    /// </summary>
+    private long _version;
 
     /// <summary>
     /// How many rows the cull walks: the renderers of the last fill, up to <see cref="Capacity"/>.
     /// </summary>
-    internal int Count { get; private set; }
+    public int Count { get; private set; }
 
     /// <summary>
-    /// How many times the rows have changed: what is built from them is built again when it differs from the count it
-    /// was built at.
+    /// The frame's instances as the gems that build from them take them: the rows, what the CPU keeps beside each, how
+    /// many rows the material table holds, and how many times the rows have changed.
     /// </summary>
-    public long Version { get; private set; }
-
-    /// <summary>
-    /// The rows as the GPU reads them, by instance index.
-    /// </summary>
-    public ReadOnlySpan<GpuInstance> Rows => _rows.AsSpan(0, Count);
-
-    /// <summary>
-    /// What the CPU keeps beside each row, by instance index.
-    /// </summary>
-    public ReadOnlySpan<InstanceExtra> Extras => _extras.AsSpan(0, Count);
-
-    /// <summary>
-    /// How many rows the material table holds: one per distinct slot drawn, the default material's first.
-    /// </summary>
-    public int MaterialCount => _materialSlots.Count;
+    public GpuInstances Instances =>
+        new(_rows.AsMemory(0, Count), _extras.AsMemory(0, Count), _materialSlots.Count, _version);
 
     /// <summary>
     /// The rows of <paramref name="renderers"/>, from what changed since the last fill: each its model's place in the
     /// pools and the material rows of its slots, or an empty row while its model is being made. How many rows the cull
     /// walks.
     /// </summary>
-    internal int Fill(EcsSnapshot<Transform, Renderer> renderers, uint frameIndex)
+    public int Fill(EcsSnapshot<Transform, Renderer> renderers, uint frameIndex)
     {
         // The same snapshot again, with the same models, makes the same rows.
-        bool isRebuild = _resources.SettledModels != _settledModels;
+        bool isRebuild = resources.SettledModels != _settledModels;
         if (renderers.Version == _filledAt && !isRebuild)
             return Count;
 
@@ -132,9 +108,9 @@ public sealed class InstanceTable
         int lastCount = Count;
         Count = Math.Min(renderers.Count, Capacity);
         if (Count != lastCount)
-            Version++;
+            _version++;
 
-        _settledModels = _resources.SettledModels;
+        _settledModels = resources.SettledModels;
 
         // A chunk the last fill read in the same place, and not written since, has its rows already.
         ReadOnlySpan<EcsSnapshotChunk> chunks = renderers.Chunks;
@@ -159,7 +135,7 @@ public sealed class InstanceTable
     /// them in one copy, and the material rows made again from what the GPU resources have now and copied into theirs,
     /// in the frame's upload pass.
     /// </summary>
-    internal Result<(GpuBuffer Rows, GpuBuffer Materials)> Upload(RenderGraph graph)
+    public Result<(GpuBuffer Rows, GpuBuffer Materials)> Upload(RenderGraph graph)
     {
         Result<GpuBuffer> rows = graph.Buffer(SharedResources.Instances);
         if (!rows.Ok)
@@ -175,12 +151,12 @@ public sealed class InstanceTable
         // loading as the default, row 0, and one that failed as the failure.
         for (int row = 0; row < _materialSlots.Count; row++)
         {
-            ResourceState state = _resources.Get(_materialSlots[row], out _materialRows[row]);
+            ResourceState state = resources.Get(_materialSlots[row], out _materialRows[row]);
             if (state == ResourceState.Loading)
                 _materialRows[row] = _materialRows[0];
             else if (
                 state == ResourceState.Failed
-                && _resources.Get(_failure, out GpuMaterial failed) == ResourceState.Failed
+                && resources.Get(failure, out GpuMaterial failed) == ResourceState.Failed
             )
                 _materialRows[row] = failed;
         }
@@ -213,10 +189,10 @@ public sealed class InstanceTable
     /// </summary>
     private void UploadChangedRows(RenderGraph graph, GpuBuffer table)
     {
-        if (Version == _uploadedVersion)
+        if (_version == _uploadedVersion)
             return;
 
-        _uploadedVersion = Version;
+        _uploadedVersion = _version;
         int blocks = (Count + BlockSize - 1) / BlockSize;
         int block = 0;
         while (block < blocks)
@@ -256,7 +232,7 @@ public sealed class InstanceTable
         {
             Entity entity = renderers.Entities[index];
             Renderer renderer = renderers.Second[index];
-            ResidentModel? resident = renderer.Model == Handle<Model>.None ? null : _resources.Get(renderer.Model);
+            ResidentModel? resident = renderer.Model == Handle<Model>.None ? null : resources.Get(renderer.Model);
             GpuInstance row = resident is { } model ? CreateRow(renderers.First[index], renderer, model) : default;
             bool wasDrawnHere = index < lastCount && _entities[index] == entity && _rows[index].Model != 0;
             if (wasDrawnHere && _rows[index].World != row.World)
@@ -281,7 +257,7 @@ public sealed class InstanceTable
             _isDirty[block] = true;
         }
 
-        Version++;
+        _version++;
     }
 
     /// <summary>
@@ -305,7 +281,7 @@ public sealed class InstanceTable
         };
         for (int slot = 0; slot < MaterialSlots.Capacity; slot++)
         {
-            row.Materials[slot] = GetMaterialRow(resident.IsFailure ? _failure : renderer.Materials[slot]);
+            row.Materials[slot] = GetMaterialRow(resident.IsFailure ? failure : renderer.Materials[slot]);
         }
 
         return row;
@@ -325,7 +301,7 @@ public sealed class InstanceTable
 
         if (_materialSlots.Count >= Capacity)
         {
-            Log.Error($"{_assets.GetPath(slot.Handle)} is drawn as the default material: the material table is full.");
+            Log.Error($"{assets.GetPath(slot.Handle)} is drawn as the default material: the material table is full.");
             _materialRowOf[slot] = 0;
 
             return 0;
@@ -340,6 +316,19 @@ public sealed class InstanceTable
 
     private int GetBlockLength(int block) => Math.Min(BlockSize, Count - (block * BlockSize));
 }
+
+/// <summary>
+/// The frame's instances as the instance table holds them on the CPU, for the gems that build from each instance: the
+/// rows as the GPU reads them, what the CPU keeps beside each by instance index, how many rows the material table holds,
+/// and how many times the rows have changed, so what is built from them is built again when it differs. Read on the
+/// render thread in the frame it is made for.
+/// </summary>
+public readonly record struct GpuInstances(
+    ReadOnlyMemory<GpuInstance> Rows,
+    ReadOnlyMemory<InstanceExtra> Extras,
+    int MaterialCount,
+    long Version
+);
 
 /// <summary>
 /// What the CPU keeps beside an instance's row: its model's acceleration structure's address, 0 when it has none,

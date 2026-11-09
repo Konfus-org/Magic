@@ -87,6 +87,24 @@ public sealed class RenderingTests
         Assert.Null(shade.Taken);
     }
 
+    [Fact]
+    public void PumpCallsAGemThatTakesAndMakesNothingInItsOrder()
+    {
+        List<string> calls = [];
+        Pump(new Overlay(calls), new World(calls, new View(1)));
+
+        Assert.Equal(["Overlay", "World"], calls);
+    }
+
+    [Fact]
+    public void PumpHandsEachPartOfATupleOutputToItsOwnTakers()
+    {
+        Shade shade = new([]);
+        Pump(new Sun(), shade);
+
+        Assert.Equal(new ShadeInput(new View(3), new Light(4)), shade.Taken);
+    }
+
     private static Rendering Register(params IGem[] gems)
     {
         Rendering rendering = new();
@@ -114,9 +132,9 @@ public sealed class RenderingTests
 
     private sealed class Plain : IGem;
 
-    private sealed class World(List<string> calls, View? made) : IGem, IRender<Nothing, View>
+    private sealed class World(List<string> calls, View? made) : IGem, IRenderInto<View>
     {
-        public View? Render(in Frame frame, RenderGraph graph, in Nothing input)
+        public View? Render(in Frame frame, RenderGraph graph)
         {
             calls.Add(nameof(World));
 
@@ -134,27 +152,30 @@ public sealed class RenderingTests
         }
     }
 
-    private sealed class Shade(List<string> calls) : IGem, IRender<ShadeInput, Nothing>
+    private sealed class Shade(List<string> calls) : IGem, IRenderFrom<ShadeInput>
     {
         public ShadeInput? Taken { get; private set; }
 
-        public Nothing? Render(in Frame frame, RenderGraph graph, in ShadeInput input)
+        public void Render(in Frame frame, RenderGraph graph, in ShadeInput input)
         {
             calls.Add(nameof(Shade));
             Taken = input;
-
-            return default(Nothing);
         }
     }
 
-    private sealed class Lost(List<string> calls) : IGem, IRender<EggInput, Nothing>
+    private sealed class Lost(List<string> calls) : IGem, IRenderFrom<EggInput>
     {
-        public Nothing? Render(in Frame frame, RenderGraph graph, in EggInput input)
-        {
-            calls.Add(nameof(Lost));
+        public void Render(in Frame frame, RenderGraph graph, in EggInput input) => calls.Add(nameof(Lost));
+    }
 
-            return default(Nothing);
-        }
+    private sealed class Overlay(List<string> calls) : IGem, IRender
+    {
+        public void Render(in Frame frame, RenderGraph graph) => calls.Add(nameof(Overlay));
+    }
+
+    private sealed class Sun : IGem, IRenderInto<(View, Light)>
+    {
+        public (View, Light)? Render(in Frame frame, RenderGraph graph) => (new View(3), new Light(4));
     }
 
     private sealed class Egg : IGem, IRender<EggInput, View>

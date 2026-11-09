@@ -15,7 +15,7 @@ namespace Magic.GpuChecks;
 /// frame while the check runs and records the dispatch once the entry is built. It is public because nothing in its
 /// assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class GpuChecksGem : IGem, IRender<Nothing, Nothing>, IDisposable
+public sealed class GpuChecksGem : IGem, IRender, IDisposable
 {
     private const int Size = 256;
     private const int Bytes = Size * Size * 4;
@@ -74,15 +74,15 @@ public sealed class GpuChecksGem : IGem, IRender<Nothing, Nothing>, IDisposable
     /// The gradient and its readback buffer asked for while the check runs, so they last until it has read back, and
     /// the gradient's dispatch and its copy into the buffer once the check asks and the GPU provider has built the entry.
     /// </summary>
-    public Nothing? Render(in Frame frame, RenderGraph graph, in Nothing input)
+    public void Render(in Frame frame, RenderGraph graph)
     {
         if (_check.IsCompleted)
-            return null;
+            return;
 
         Result<GpuTexture> gradient = graph.Texture(_gradient);
         Result<GpuBuffer> readback = graph.Buffer(_readback);
         if (_fill is not { } fill)
-            return null;
+            return;
 
         GpuState state = graph.GetState(fill);
         Result made =
@@ -91,14 +91,14 @@ public sealed class GpuChecksGem : IGem, IRender<Nothing, Nothing>, IDisposable
             : state == GpuState.Failed ? Result.Failure("the gradient shader was not built")
             : Result.Success();
         if (made.Ok && state == GpuState.Loading)
-            return null;
+            return;
 
         _fill = null;
         if (!made.Ok)
         {
             _recorded.SetResult(Result.Failure(made.Error));
 
-            return null;
+            return;
         }
 
         graph
@@ -107,8 +107,6 @@ public sealed class GpuChecksGem : IGem, IRender<Nothing, Nothing>, IDisposable
             .DispatchOver(Size, Size);
         graph.ReadBack(gradient.Value, readback.Value, RenderStage.Post);
         _recorded.SetResult(readback);
-
-        return null;
     }
 
     private async Task CheckAsync(AssetManager assets, Threads threads)

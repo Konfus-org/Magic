@@ -48,7 +48,7 @@ namespace Magic.ImGuiDebugUI;
 /// nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </para>
 /// </summary>
-public sealed class ImGuiDebugUIGem : IGem, IRender<Nothing, Nothing>, IDebugUI, ILogSink, IDisposable
+public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDisposable
 {
     private const int InputBytes = 256;
 
@@ -281,12 +281,7 @@ public sealed class ImGuiDebugUIGem : IGem, IRender<Nothing, Nothing>, IDebugUI,
     /// <summary>
     /// The newest frame ImGui ended, over the window's image.
     /// </summary>
-    public Nothing? Render(in Frame frame, RenderGraph graph, in Nothing input)
-    {
-        _overlay.Record(graph);
-
-        return null;
-    }
+    public void Render(in Frame frame, RenderGraph graph) => _overlay.Record(graph);
 
     public void Text(Vector3 position, string text, Color? color = null, string? tooltip = null) =>
         _reports.Add(new Report(text, ReportKind.Plain, color ?? _white, position, tooltip, 0));

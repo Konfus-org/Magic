@@ -9,9 +9,9 @@ using Magic.Utils;
 namespace Magic.AccelerationStructures;
 
 /// <summary>
-/// What the acceleration structures take each frame: the world as the GPU holds it.
+/// What the acceleration structures take each frame: the world as the GPU holds it, and its instances as the CPU does.
 /// </summary>
-public readonly record struct AccelerationStructuresInput(GpuView View);
+public readonly record struct AccelerationStructuresInput(GpuView View, GpuInstances Instances);
 
 /// <summary>
 /// The world as rays see it, on a GPU that traces rays: the top-level acceleration structure over the instances, an
@@ -19,10 +19,10 @@ public readonly record struct AccelerationStructuresInput(GpuView View);
 /// what a ray query traces through; and the hit materials table, each material row averaged by a pass of its material
 /// shader each frame, what a ray hit reads its surface from. Each frame it writes them into the frame's buffer and makes
 /// the frame's <see cref="TracedWorld"/>; on a GPU that doesn't trace rays it makes none. The instances, their models'
-/// structures and the material rows are the world's gem's. It is public because nothing in its assembly makes it:
-/// Magic does, by reflection, when a project lists the gem.
+/// structures and the material rows are the world's gem's, taken as its <see cref="GpuInstances"/>. It is public
+/// because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class AccelerationStructuresGem(AssetManager assets, GpuWorldGem world)
+public sealed class AccelerationStructuresGem(AssetManager assets)
     : IGem,
         IRender<AccelerationStructuresInput, TracedWorld>
 {
@@ -31,7 +31,6 @@ public sealed class AccelerationStructuresGem(AssetManager assets, GpuWorldGem w
     /// </summary>
     private const int AverageGroupSize = 64;
 
-    private readonly GpuAccelerationInstance[] _rows = new GpuAccelerationInstance[InstanceTable.Capacity];
     private readonly ShaderEntry _averageShader = new()
     {
         Module = assets.Find<Shader>("Shaders/AverageMaterials.slang"),
@@ -50,6 +49,11 @@ public sealed class AccelerationStructuresGem(AssetManager assets, GpuWorldGem w
     private GpuAcceleration _acceleration;
 
     /// <summary>
+    /// The instance rows of the last build, as many as the world had instances at most.
+    /// </summary>
+    private GpuAccelerationInstance[] _rows = [];
+
+    /// <summary>
     /// The instance table's version the last build was of.
     /// </summary>
     private long _builtVersion;
@@ -64,7 +68,11 @@ public sealed class AccelerationStructuresGem(AssetManager assets, GpuWorldGem w
             return null;
 
         GpuView view = input.View;
-        Result<(GpuBuffer Instances, GpuAcceleration Structure, GpuBuffer HitMaterials)> made = Prepare(graph);
+        GpuInstances world = input.Instances;
+        Result<(GpuBuffer Instances, GpuAcceleration Structure, GpuBuffer HitMaterials)> made = Prepare(
+            graph,
+            view.InstanceCapacity
+        );
         if (!made.Ok)
         {
             Log.Error($"The world's acceleration structure is not made: {made.Error}");
@@ -74,14 +82,14 @@ public sealed class AccelerationStructuresGem(AssetManager assets, GpuWorldGem w
 
         // Built again whenever the rows changed since the last build; a model's arrival builds every row again.
         (GpuBuffer instances, GpuAcceleration structure, GpuBuffer hitMaterials) = made.Value;
-        if (world.Instances.Version != _builtVersion)
+        if (world.Version != _builtVersion)
         {
-            Build(graph, instances, structure, world.Instances.Rows, world.Instances.Extras);
-            _builtVersion = world.Instances.Version;
+            Build(graph, instances, structure, world.Rows.Span, world.Extras.Span);
+            _builtVersion = world.Version;
         }
 
-        RecordHitMaterials(graph, view, hitMaterials, world.Instances.MaterialCount);
-        (Vector3 boxMin, Vector3 boxMax) = GetBox(world.Instances.Extras);
+        RecordHitMaterials(graph, view, hitMaterials, world.MaterialCount);
+        (Vector3 boxMin, Vector3 boxMax) = GetBox(world.Extras.Span);
         GpuTracedWorld traced = new()
         {
             Acceleration = _acceleration.Id,
@@ -95,11 +103,12 @@ public sealed class AccelerationStructuresGem(AssetManager assets, GpuWorldGem w
     }
 
     /// <summary>
-    /// The structure and its instances asked for, every frame, so the structure built last stays, and the hit materials
-    /// table.
+    /// The structure over at most <paramref name="capacity"/> instances and its instances asked for, every frame, so the
+    /// structure built last stays, and the hit materials table.
     /// </summary>
     private static Result<(GpuBuffer Instances, GpuAcceleration Structure, GpuBuffer HitMaterials)> Prepare(
-        RenderGraph graph
+        RenderGraph graph,
+        int capacity
     )
     {
         Result<GpuBuffer> hitMaterials = graph.Buffer(SharedResources.HitMaterials);
@@ -107,10 +116,7 @@ public sealed class AccelerationStructuresGem(AssetManager assets, GpuWorldGem w
             return Result.Failure(hitMaterials.Error);
 
         Result<GpuBuffer> instances = graph.Buffer(
-            GpuDescriptions.GetBuffer(
-                "Acceleration instances",
-                (long)InstanceTable.Capacity * GpuAccelerationInstance.Bytes
-            )
+            GpuDescriptions.GetBuffer("Acceleration instances", (long)capacity * GpuAccelerationInstance.Bytes)
         );
         if (!instances.Ok)
             return Result.Failure(instances.Error);
@@ -118,7 +124,7 @@ public sealed class AccelerationStructuresGem(AssetManager assets, GpuWorldGem w
         Result<GpuAcceleration> acceleration = graph.Acceleration(
             new TopLevelDescription
             {
-                MaxInstances = InstanceTable.Capacity,
+                MaxInstances = capacity,
                 Instances = instances.Value,
                 Name = "World acceleration",
             }
@@ -156,6 +162,9 @@ public sealed class AccelerationStructuresGem(AssetManager assets, GpuWorldGem w
         ReadOnlySpan<InstanceExtra> extras
     )
     {
+        if (_rows.Length < rows.Length)
+            _rows = new GpuAccelerationInstance[rows.Length];
+
         int count = 0;
         for (int i = 0; i < rows.Length; i++)
         {

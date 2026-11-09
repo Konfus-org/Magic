@@ -228,7 +228,8 @@ internal static class GemRegistry
                 contract == typeof(IGem)
                 || contract == typeof(IDisposable)
                 || contract == typeof(ILogSink)
-                || contract == typeof(IHookIntoDomainLoading);
+                || contract == typeof(IHookIntoDomainLoading)
+                || contract == typeof(IRender);
             if (!isHostTaken)
                 provides.Add(contract);
         }
@@ -266,7 +267,11 @@ internal static class GemRegistry
     /// Whether a gem implementing <paramref name="contract"/> hands it to the host, rather than provide it to other gems.
     /// </summary>
     private static bool IsHostContract(Type contract) =>
-        contract == typeof(IAssetImporter<>) || contract == typeof(IAssetExporter<>) || contract == typeof(IRender<,>);
+        contract == typeof(IAssetImporter<>)
+        || contract == typeof(IAssetExporter<>)
+        || contract == typeof(IRender<,>)
+        || contract == typeof(IRenderFrom<>)
+        || contract == typeof(IRenderInto<>);
 
     /// <summary>
     /// The assembly at <paramref name="path"/>, loaded from its file into <paramref name="context"/>.

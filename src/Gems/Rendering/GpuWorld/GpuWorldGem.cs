@@ -18,11 +18,11 @@ namespace Magic.GpuWorld;
 /// Keeps the world on the GPU for the gems that draw it. <c>LateUpdate</c> copies what the frame draws out of the
 /// entities and publishes it; <c>Render</c>, on the render thread, takes the newest published, puts the models,
 /// materials, textures, instances, lights and sky's tables on the GPU, uploads the frame's rows, and makes the frame's
-/// <see cref="GpuView"/>. As a domain replaces the world, it forgets the view's history and holds the loading screen
-/// until what comes is on the GPU. It is public because nothing in its assembly makes it: Magic does, by reflection,
-/// when a project lists the gem.
+/// <see cref="GpuView"/> and its <see cref="GpuInstances"/>. As a domain replaces the world, it forgets the view's
+/// history and holds the loading screen until what comes is on the GPU. It is public because nothing in its assembly
+/// makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class GpuWorldGem : IGem, IRender<Nothing, GpuView>, IHookIntoDomainLoading, IDisposable
+public sealed class GpuWorldGem : IGem, IRenderInto<(GpuView, GpuInstances)>, IHookIntoDomainLoading, IDisposable
 {
     private const int DefaultWidth = 1280;
     private const int DefaultHeight = 720;
@@ -31,6 +31,7 @@ public sealed class GpuWorldGem : IGem, IRender<Nothing, GpuView>, IHookIntoDoma
     private readonly Threads _threads;
     private readonly Mailbox<RenderInputs> _inputs = new();
     private readonly GpuResources _resources;
+    private readonly InstanceTable _instances;
 
     /// <summary>
     /// The material a model that failed is drawn with, every slot; an empty slot when there is no failure material.
@@ -81,12 +82,6 @@ public sealed class GpuWorldGem : IGem, IRender<Nothing, GpuView>, IHookIntoDoma
     /// </summary>
     private int _preparedDomains;
 
-    /// <summary>
-    /// The instance table, filled for the frame by <see cref="Render"/>: what the gems that build from each instance read,
-    /// on the render thread, after it.
-    /// </summary>
-    public InstanceTable Instances { get; }
-
     public GpuWorldGem(IShaderCompiler shaders, AssetManager assets, Caches caches, IEcs ecs, Threads threads)
     {
         _ecs = ecs;
@@ -101,7 +96,7 @@ public sealed class GpuWorldGem : IGem, IRender<Nothing, GpuView>, IHookIntoDoma
         };
         _defaultPost.Effects[1] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Exposure.mat") };
         _defaultPost.Effects[2] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Agx.mat") };
-        Instances = new InstanceTable(assets, _resources, _failure);
+        _instances = new InstanceTable(assets, _resources, _failure);
         _frameView = new FrameView(_resources);
         _sky = new SkyLuts(assets);
         _lightTiles = new LightTiles(assets);
@@ -135,10 +130,10 @@ public sealed class GpuWorldGem : IGem, IRender<Nothing, GpuView>, IHookIntoDoma
     }
 
     /// <summary>
-    /// The newest inputs published, or the last again when none are newer, on the GPU, and the frame's view of them;
-    /// none while the shaders build, the pools are not made, or nothing was published yet.
+    /// The newest inputs published, or the last again when none are newer, on the GPU, and the frame's view of them and
+    /// its instances; none while the shaders build, the pools are not made, or nothing was published yet.
     /// </summary>
-    public GpuView? Render(in Frame frame, RenderGraph graph, in Nothing input)
+    public (GpuView, GpuInstances)? Render(in Frame frame, RenderGraph graph)
     {
         if (!_started.Ok)
             return null;
@@ -183,7 +178,7 @@ public sealed class GpuWorldGem : IGem, IRender<Nothing, GpuView>, IHookIntoDoma
         // Entities -> resources -> rows: the renderers written since the inputs before ask for their models and have
         // their rows built again, the materials' rows are made again at upload, and a model no renderer drawn holds
         // leaves once nothing asked for it in a while.
-        int instanceCount = Instances.Fill(inputs.Renderers, frame.Index);
+        int instanceCount = _instances.Fill(inputs.Renderers, frame.Index);
         _resources.EvictUnusedModels(inputs.Renderers.Second[..instanceCount]);
 
         // The loading domain shows once what it draws and its effects are on the GPU.
@@ -234,7 +229,7 @@ public sealed class GpuWorldGem : IGem, IRender<Nothing, GpuView>, IHookIntoDoma
             header,
             new LightBuffers(view.Value.LightTable, view.Value.LightTiles, view.Value.LightCount)
         );
-        return view.Value;
+        return (view.Value, _instances.Instances);
     }
 
     /// <summary>
@@ -450,7 +445,7 @@ public sealed class GpuWorldGem : IGem, IRender<Nothing, GpuView>, IHookIntoDoma
         (ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows) effects
     )
     {
-        Result<(GpuBuffer Rows, GpuBuffer Materials)> tables = Instances.Upload(graph);
+        Result<(GpuBuffer Rows, GpuBuffer Materials)> tables = _instances.Upload(graph);
         if (!tables.Ok)
             return Result.Failure(tables.Error);
 

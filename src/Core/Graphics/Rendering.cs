@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using Magic.Debugging;
 using Magic.Projects;
 using Magic.Utils;
@@ -27,14 +28,10 @@ internal sealed class Rendering
     /// </summary>
     public Subscription Register(IGem gem)
     {
-        Type? contract = Array.Find(
-            gem.GetType().GetInterfaces(),
-            static contract => contract.IsGenericType && contract.GetGenericTypeDefinition() == typeof(IRender<,>)
-        );
-        if (contract is null)
+        if (GetForm(gem) is not var (input, output))
             return new Subscription(static () => { });
 
-        Type type = typeof(Step<,>).MakeGenericType(contract.GenericTypeArguments);
+        Type type = typeof(Step<,>).MakeGenericType(input, output);
         Step step = (Step)(Activator.CreateInstance(type, gem) ?? throw new InvalidOperationException(type.Name));
         Order([.. _steps, step]);
 
@@ -82,19 +79,53 @@ internal sealed class Rendering
     }
 
     /// <summary>
+    /// What the render form <paramref name="gem"/> implements takes and makes, <see cref="None"/> for either it lacks;
+    /// null when it renders nothing.
+    /// </summary>
+    private static (Type Input, Type Output)? GetForm(IGem gem)
+    {
+        if (gem is IRender)
+            return (typeof(None), typeof(None));
+
+        foreach (Type contract in gem.GetType().GetInterfaces())
+        {
+            if (!contract.IsGenericType)
+                continue;
+
+            Type form = contract.GetGenericTypeDefinition();
+            Type[] types = contract.GenericTypeArguments;
+            if (form == typeof(IRender<,>))
+                return (types[0], types[1]);
+
+            if (form == typeof(IRenderFrom<>))
+                return (types[0], typeof(None));
+
+            if (form == typeof(IRenderInto<>))
+                return (typeof(None), types[0]);
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// <paramref name="steps"/> in place of the gems before, each after every gem that makes what it takes, in their own
     /// order otherwise, and each bound to its makers. Throws before changing anything when two make one type, or when
     /// some take what others among them make round a cycle.
     /// </summary>
     private void Order(List<Step> steps)
     {
-        Dictionary<Type, Step> makers = [];
-        foreach (Step step in steps.Where(static step => step.Output != typeof(Nothing)))
+        Dictionary<Type, Maker> makers = [];
+        foreach (Step step in steps)
         {
-            if (makers.TryGetValue(step.Output, out Step? other))
-                throw new InvalidOperationException($"Gems {other.Gem} and {step.Gem} both make {step.Output.Name}.");
+            foreach (Maker maker in step.Outputs)
+            {
+                if (makers.TryGetValue(maker.Type, out Maker other))
+                    throw new InvalidOperationException(
+                        $"Gems {other.Step.Gem} and {step.Gem} both make {maker.Type.Name}."
+                    );
 
-            makers[step.Output] = step;
+                makers[maker.Type] = maker;
+            }
         }
 
         // The first waiting gem whose makers are all placed goes next, so gems keep their order where it is free.
@@ -102,7 +133,9 @@ internal sealed class Rendering
         while (steps.Count > 0)
         {
             int next = steps.FindIndex(step =>
-                step.Inputs.All(input => !makers.TryGetValue(input.Type, out Step? maker) || ordered.Contains(maker))
+                step.Inputs.All(input =>
+                    !makers.TryGetValue(input.Type, out Maker maker) || ordered.Contains(maker.Step)
+                )
             );
             if (next < 0)
             {
@@ -124,17 +157,27 @@ internal sealed class Rendering
     }
 
     /// <summary>
-    /// A gem's <see cref="IRender{TInput, TOutput}"/>: what it takes, what it makes, and what it made at its last run,
-    /// which the gems after it take.
+    /// What a render form lacks: the input of one that takes nothing, the output of one that makes nothing.
+    /// </summary>
+    private readonly record struct None;
+
+    /// <summary>
+    /// A type a step makes, and where in what it made the type is: the item of a tuple, or the whole when null.
+    /// </summary>
+    private readonly record struct Maker(Type Type, Step Step, string? Item);
+
+    /// <summary>
+    /// A gem's render form: what it takes, what it makes, and what it made at its last run, which the gems after it
+    /// take.
     /// </summary>
     private abstract class Step(IGem gem)
     {
         public string Gem { get; } = gem.GetType().Assembly.GetName().Name ?? gem.GetType().Name;
 
         /// <summary>
-        /// The type it makes; <see cref="Nothing"/> is none another gem can take.
+        /// Each type it makes: none, one, or each of a tuple's.
         /// </summary>
-        public abstract Type Output { get; }
+        public abstract ImmutableArray<Maker> Outputs { get; }
 
         /// <summary>
         /// Each type it takes, and whether a gem must make it.
@@ -154,25 +197,43 @@ internal sealed class Rendering
         /// <summary>
         /// Builds, once, how its input is taken from <paramref name="makers"/>' outputs each frame.
         /// </summary>
-        public abstract void Bind(IReadOnlyDictionary<Type, Step> makers);
+        public abstract void Bind(IReadOnlyDictionary<Type, Maker> makers);
     }
 
     /// <summary>
     /// A step whose input is built each frame from its makers' typed outputs by a compiled constructor call, so a frame
-    /// boxes nothing and reflects on nothing.
+    /// boxes nothing and reflects on nothing. Each render form is called as <see cref="IRender{TInput, TOutput}"/>,
+    /// with <see cref="None"/> for what it lacks.
     /// </summary>
     private sealed class Step<TInput, TOutput>(IGem gem) : Step(gem)
         where TInput : struct
         where TOutput : struct
     {
         /// <summary>
-        /// The input record's constructor with the most parameters, one for each input; none for <see cref="Nothing"/>.
+        /// The input record's constructor with the most parameters, one for each input; none for <see cref="None"/>.
         /// </summary>
         private static readonly ConstructorInfo? _constructor = typeof(TInput)
             .GetConstructors()
             .MaxBy(static constructor => constructor.GetParameters().Length);
 
-        private readonly IRender<TInput, TOutput> _render = (IRender<TInput, TOutput>)gem;
+        private readonly Renders _render = gem switch
+        {
+            IRender<TInput, TOutput> both => both.Render,
+            IRenderFrom<TInput> from => (in Frame frame, RenderGraph graph, in TInput input) =>
+            {
+                from.Render(frame, graph, input);
+
+                return null;
+            },
+            IRenderInto<TOutput> into => (in Frame frame, RenderGraph graph, in TInput _) => into.Render(frame, graph),
+            IRender plain => (in Frame frame, RenderGraph graph, in TInput _) =>
+            {
+                plain.Render(frame, graph);
+
+                return null;
+            },
+            _ => throw new InvalidOperationException($"{gem.GetType().Name} has no render form."),
+        };
 
         private Func<TInput?> _take = static () => default(TInput);
 
@@ -181,7 +242,16 @@ internal sealed class Rendering
         /// </summary>
         public TOutput? Made { get; private set; }
 
-        public override Type Output => typeof(TOutput);
+        public override ImmutableArray<Maker> Outputs =>
+            typeof(TOutput) == typeof(None) ? []
+            : typeof(ITuple).IsAssignableFrom(typeof(TOutput))
+                ?
+                [
+                    .. typeof(TOutput).GenericTypeArguments.Select(
+                        (type, item) => new Maker(type, this, $"Item{item + 1}")
+                    ),
+                ]
+            : [new Maker(typeof(TOutput), this, null)];
 
         public override ImmutableArray<(Type Type, bool IsRequired)> Inputs =>
             [
@@ -199,14 +269,14 @@ internal sealed class Rendering
         {
             Made = null;
             if (_take() is { } input)
-                Made = _render.Render(frame, graph, input);
+                Made = _render(frame, graph, input);
         }
 
         /// <summary>
-        /// <c>input = madeA.HasValue &amp;&amp; ... ? new TInput(madeA.Value, madeB, ...) : null</c>, a nullable input with no
-        /// maker passed as null.
+        /// <c>input = madeA.HasValue &amp;&amp; ... ? new TInput(madeA.Value, madeB, ...) : null</c>, an item of a tuple
+        /// taken as <c>madeA.Value.Item1</c>, and a nullable input with no maker passed as null.
         /// </summary>
-        public override void Bind(IReadOnlyDictionary<Type, Step> makers)
+        public override void Bind(IReadOnlyDictionary<Type, Maker> makers)
         {
             Missing = null;
             if (_constructor is null)
@@ -217,22 +287,34 @@ internal sealed class Rendering
             foreach (ParameterInfo parameter in _constructor.GetParameters())
             {
                 Type type = Nullable.GetUnderlyingType(parameter.ParameterType) ?? parameter.ParameterType;
-                if (!makers.TryGetValue(type, out Step? maker))
+                if (!makers.TryGetValue(type, out Maker maker))
                 {
                     Missing ??= parameter.ParameterType == type ? type : null;
                     arguments.Add(Expression.Default(parameter.ParameterType));
                     continue;
                 }
 
-                Expression output = Expression.Property(Expression.Constant(maker), nameof(Made));
-                if (parameter.ParameterType != type)
+                Expression output = Expression.Property(Expression.Constant(maker.Step), nameof(Made));
+                Expression hasValue = Expression.Property(output, nameof(Nullable<>.HasValue));
+                Expression value = Expression.Property(output, nameof(Nullable<>.Value));
+                if (maker.Item is { } item)
+                    value = Expression.Field(value, item);
+
+                if (parameter.ParameterType == type)
                 {
-                    arguments.Add(output);
+                    made.Add(hasValue);
+                    arguments.Add(value);
                     continue;
                 }
 
-                made.Add(Expression.Property(output, nameof(Nullable<>.HasValue)));
-                arguments.Add(Expression.Property(output, nameof(Nullable<>.Value)));
+                // A nullable input is the made value, or null while its maker made nothing.
+                arguments.Add(
+                    Expression.Condition(
+                        hasValue,
+                        Expression.Convert(value, parameter.ParameterType),
+                        Expression.Default(parameter.ParameterType)
+                    )
+                );
             }
 
             Expression input = Expression.Convert(Expression.New(_constructor, arguments), typeof(TInput?));
@@ -246,5 +328,10 @@ internal sealed class Rendering
                     );
             _take = Expression.Lambda<Func<TInput?>>(body).Compile();
         }
+
+        /// <summary>
+        /// The gem's render form called as <see cref="IRender{TInput, TOutput}"/>'s <c>Render</c>.
+        /// </summary>
+        private delegate TOutput? Renders(in Frame frame, RenderGraph graph, in TInput input);
     }
 }
