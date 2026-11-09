@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- The tests of Core: how the gems' render steps are ordered and run. They run on the testing platform xunit v3
+  <!-- The tests of Core: how the gems load and reference one another, and how their render steps are ordered and run. They run on the testing platform xunit v3
        carries, which dotnet test drives. -->
   <PropertyGroup>
     <RootNamespace>Magic.Tests</RootNamespace>
@@ -11,6 +11,8 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" />

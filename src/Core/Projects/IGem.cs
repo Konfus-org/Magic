@@ -1,9 +1,9 @@
 namespace Magic.Projects;
 
 /// <summary>
-/// A plugin: the one class in a gem's assembly. Magic makes it after what its constructor takes, in dependency order, then
-/// in the order the project lists the gems, and disposes it in reverse. The hooks run every frame, in this order over the
-/// gems, on the game thread: implement the ones the gem needs. A gem that draws implements
+/// A plugin: the one class in a gem's assembly. Magic makes it after the gems its constructor takes and its code
+/// references, then in the order the project lists the gems, and disposes it in reverse. The hooks run every frame, in
+/// this order over the gems, on the game thread: implement the ones the gem needs. A gem that draws implements
 /// <see cref="Graphics.IRender{TInput, TOutput}"/>, which runs on the render thread at its own pace. Every other
 /// interface it implements is what it provides to the gems made after it.
 /// </summary>

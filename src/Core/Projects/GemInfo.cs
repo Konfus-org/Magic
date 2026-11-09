@@ -11,6 +11,7 @@ namespace Magic.Projects;
 /// <param name="Version">Its version; 1.0.0 when its project says nothing.</param>
 /// <param name="Type">Its one <see cref="IGem"/> class.</param>
 /// <param name="Provides">The interfaces it provides to other gems.</param>
+/// <param name="References">The listed gems its code references, which it loads after.</param>
 /// <param name="Resources">The folder of its own assets; null when it has none.</param>
 /// <param name="Folder">The folder its assemblies load from.</param>
 /// <param name="Context">
@@ -24,6 +25,7 @@ internal sealed record GemInfo(
     Version Version,
     Type Type,
     IReadOnlyList<Type> Provides,
+    IReadOnlyList<string> References,
     string? Resources,
     string Folder,
     AssemblyLoadContext Context
