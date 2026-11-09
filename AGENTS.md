@@ -8,14 +8,18 @@ code and docs follow.
 A skill is a step-by-step procedure in [`docs/skills/`](docs/skills). Any agent uses one on its own, without being
 asked, when its trigger fits: read its `SKILL.md` and follow it. Claude Code also finds them through `.claude/`.
 
-| Skill                                                 | Use it                                                                 |
-| ----------------------------------------------------- | ---------------------------------------------------------------------- |
-| [kickoff](docs/skills/kickoff/SKILL.md)               | A request starts something too big for one slice                       |
-| [parallelize](docs/skills/parallelize/SKILL.md)       | A list of separate tasks, or an effort too big for a few slices        |
-| [slice](docs/skills/slice/SKILL.md)                   | Any change to code, docs or tools, and the next agreed slice           |
-| [finish](docs/skills/finish/SKILL.md)                 | A slice's code is written, or the user's review comments are addressed |
-| [review-slice](docs/skills/review-slice/SKILL.md)     | Reviewing a validated slice from a context that didn't write it        |
-| [tidy-worktrees](docs/skills/tidy-worktrees/SKILL.md) | The start of every session                                             |
+| Skill                                                   | Use it                                                                  |
+| ------------------------------------------------------- | ----------------------------------------------------------------------- |
+| [kickoff](docs/skills/kickoff/SKILL.md)                 | A request starts something too big for one slice                        |
+| [parallelize](docs/skills/parallelize/SKILL.md)         | A list of separate tasks, or an effort too big for a few slices         |
+| [slice](docs/skills/slice/SKILL.md)                     | Any change to code, docs or tools, and the next agreed slice            |
+| [finish](docs/skills/finish/SKILL.md)                   | A slice's code is written, or the user's review comments are addressed  |
+| [review-slice](docs/skills/review-slice/SKILL.md)       | Reviewing a validated slice from a context that didn't write it         |
+| [tidy-worktrees](docs/skills/tidy-worktrees/SKILL.md)   | The start of every session                                              |
+| [investigate](docs/skills/investigate/SKILL.md)         | Something is broken, logs an error or draws wrong                       |
+| [new-gem](docs/skills/new-gem/SKILL.md)                 | A slice needs a new gem                                                 |
+| [simplify-review](docs/skills/simplify-review/SKILL.md) | The user asks to simplify or review an area                             |
+| [retro](docs/skills/retro/SKILL.md)                     | A swarm finishes, a slice went badly, or the user corrects the workflow |
 
 ## Commands
 

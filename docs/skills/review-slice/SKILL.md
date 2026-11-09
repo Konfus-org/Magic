@@ -21,8 +21,8 @@ You review one slice of Magic, a C# game engine, in its worktree. You didn't wri
 5. Report only these:
    - **Correctness:** a bug, a wrong result, a broken caller, a case the slice's own goal needs that isn't handled.
    - **Requirements:** the slice's runnable check or goal isn't met.
-   - **Scope:** a change outside the slice or its claim, a change inside another session's claim, an abstraction or generality its mode forbids, cleanup past AGENTS.md's
-     limits, or more than about 300 changed lines.
+   - **Scope:** a change outside the slice or its claim, a change inside another session's claim, an abstraction or
+     generality its mode forbids, cleanup past AGENTS.md's limits, or more than about 300 changed lines.
    - **Rules:** an AGENTS.md rule broken, such as a suppressed warning, a loosened or deleted test, or edited
      generated code.
    - **Simpler:** the same result with clearly less code or a clearly more elegant design: existing code the slice
