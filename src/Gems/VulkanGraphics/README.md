@@ -25,6 +25,8 @@ compiler.
 - Its resources and frames are the render thread's, and its members throw on any other.
 - It publishes each pass's and each frame's time on the GPU, and the device memory it holds and has, on its
   `Magic.Gems.VulkanGraphics` meter, whose tags name the Vulkan version, the GPU, its kind and its driver.
+- Each frame in flight uploads through a staging ring of host memory, which the memory gauge counts. A ring grows for
+  a big upload, such as a world's models arriving, and shrinks back a few seconds after uploads are small again.
 - A Debug build turns on the Khronos validation layer when the Vulkan SDK is installed, and logs what it reports.
 - Headless, there is no window image: `WindowTarget` is none, and everything else works the same, on a software
   device such as Mesa's lavapipe where there is no GPU.

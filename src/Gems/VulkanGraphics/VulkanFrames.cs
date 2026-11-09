@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using Magic.Debugging;
@@ -17,7 +18,17 @@ internal sealed unsafe class VulkanFrames : IDisposable
     public const int InFlight = 2;
 
     private const int TimestampCapacity = 512;
-    private const long StagingBytes = 64L * 1024 * 1024;
+
+    /// <summary>
+    /// A staging ring's size while frames upload only what a normal frame does.
+    /// </summary>
+    private const long StagingBytes = 8L * 1024 * 1024;
+
+    /// <summary>
+    /// How long a grown staging ring is kept after the last frame that needed more than <see cref="StagingBytes"/>,
+    /// so a load that uploads every few frames doesn't make it again each time.
+    /// </summary>
+    private const double StagingKeptSec = 2;
     private const string PassTag = "magic.gems.vulkan_graphics.gpu.pass";
 
     private readonly VulkanDevice _device;
@@ -29,6 +40,11 @@ internal sealed unsafe class VulkanFrames : IDisposable
     private int _current;
     private ulong _serial;
     private ulong _completedSerial;
+
+    /// <summary>
+    /// When a frame last needed more than <see cref="StagingBytes"/> (<see cref="Stopwatch.GetTimestamp"/>).
+    /// </summary>
+    private long _stagingNeededTimestamp;
 
     public VulkanFrames(VulkanDevice device, VulkanResources resources, Meter meter)
     {
@@ -84,6 +100,16 @@ internal sealed unsafe class VulkanFrames : IDisposable
             Complete(frame);
         }
 
+        // The GPU is done with the ring, so a grown one no frame has needed for a while is freed at once.
+        if (
+            frame.Staging.Description.Bytes > StagingBytes
+            && Stopwatch.GetElapsedTime(_stagingNeededTimestamp).TotalSeconds > StagingKeptSec
+        )
+        {
+            _resources.Free(new Trash(frame.StagingId, frame.Staging));
+            frame.Restage(StagingBytes);
+        }
+
         _device.Api.vkResetFences(frame.Fence);
         _device.Api.vkResetCommandPool(frame.Pool, VkCommandPoolResetFlags.None);
         frame.Serial = ++_serial;
@@ -110,12 +136,16 @@ internal sealed unsafe class VulkanFrames : IDisposable
     }
 
     /// <summary>
-    /// Room in the current frame's staging ring, grown when a frame needs more than it had.
+    /// Room in the current frame's staging ring, grown when a frame needs more than it had. A grown ring shrinks back
+    /// in <see cref="Begin"/> once no frame has needed more than <see cref="StagingBytes"/> for a while.
     /// </summary>
     public GpuUpload Upload(int bytes, int alignment)
     {
         Frame frame = Current;
         long offset = (frame.StagingOffset + alignment - 1) / alignment * alignment;
+        if (offset + bytes > StagingBytes)
+            _stagingNeededTimestamp = Stopwatch.GetTimestamp();
+
         if (offset + bytes > frame.Staging.Description.Bytes)
         {
             // The old ring stays in the heap until the frame has run: the copies recorded so far name it by its id
@@ -299,7 +329,7 @@ internal sealed unsafe class VulkanFrames : IDisposable
         }
 
         /// <summary>
-        /// A new staging ring of <paramref name="bytes"/>, in the heap; the old one, if any, is the caller's to trash.
+        /// A new staging ring of <paramref name="bytes"/>, in the heap; the old one, if any, is the caller's to free.
         /// </summary>
         [MemberNotNull(nameof(Staging))]
         public void Restage(long bytes)
