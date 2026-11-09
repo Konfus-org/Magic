@@ -67,6 +67,8 @@ In Claude Code, the hooks in `.claude/settings.json` hold the workflow without a
 - Each session, and each `/clear` or compaction, starts with the checkout and its merge target in context.
 - An edit to a file in the main checkout is refused. Starting Claude Code with `MAGIC_ALLOW_MAIN_EDITS=1` allows it
   for that session; only the user sets it.
+- An edit inside another session's claim is refused unless this worktree's own claim covers it too
+  ([Worktrees](#worktrees)).
 - The status line shows the slice's size against its limit of 300 lines, and how full the context is.
 - `git commit` and `git merge` are refused for a state `tools/Scripts/AgentTaskComplete.ps1` hasn't stamped, and for
   a slice the `slice-reviewer` subagent hasn't reviewed. One review covers the slice until fixes add more than about
