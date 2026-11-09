@@ -34,8 +34,10 @@ public struct VolumetricLight : IPixelEffect
     // The light the air along the pixel's ray scatters towards the camera.
     float3 March(PixelEffectInputs inputs)
     {
-        float3 direction = normalize(inputs.position);
-        float reach = min(inputs.viewDepth > 0.0 ? length(inputs.position) : distance, distance);
+        // As far as the nearest surface, a pane of glass included, and no farther than distance, which is all
+        // where nothing was drawn, so what the shafts cross shows through a pane in its own colour.
+        float3 direction = normalize(inputs.nearestPosition);
+        float reach = min(length(inputs.nearestPosition), distance);
         float count = clamp(round(samples), 1.0, MostSamples);
         float step = reach / count;
         float start = GetRandom(inputs.pixel, asuint(inputs.time), 0u).x;

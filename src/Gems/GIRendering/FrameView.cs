@@ -99,6 +99,7 @@ internal sealed class FrameView(GpuResources resources)
             HitMaterials = hitMaterials.Id,
             TimeSec = (float)frame.AppSec,
             DeltaSec = (float)frame.AppDeltaSec,
+            GlassDepth = targets.GlassDepth.Id,
             PixelsPerRadian = height / (2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360)),
             FrameIndex = frame.Index,
             Jitter = jitter,
@@ -239,7 +240,13 @@ internal sealed class FrameView(GpuResources resources)
             )
         );
         Result<GpuTexture> glassDepth = graph.Texture(
-            GpuDescriptions.GetTexture("Glass depth", width, height, GpuFormat.D32Sfloat, TextureUsages.DepthTarget)
+            GpuDescriptions.GetTexture(
+                "Glass depth",
+                width,
+                height,
+                GpuFormat.D32Sfloat,
+                TextureUsages.DepthTarget | TextureUsages.Sampled
+            )
         );
         Result<GpuTexture> hzb = graph.Texture(
             GpuDescriptions.GetTexture(

@@ -7,7 +7,7 @@ import Core.Heap;
 import Core.Pass;
 
 // The frame's bytes, C#'s FrameConstants.Bytes: where the rows after it in its buffer start.
-public static const uint FrameBytes = 540u;
+public static const uint FrameBytes = 544u;
 
 public struct FrameConstants
 {
@@ -69,6 +69,8 @@ public struct FrameConstants
     public float deltaSec;
     // On a GPU that traces rays: each material row as a ray hit reads it, Trace/HitSurface's GpuHitMaterial.
     public uint hitMaterials;
+    // The nearest glass's reversed depth in front of the opaque surfaces, 0 where there is none.
+    public uint glassDepth;
 }
 
 public FrameConstants GetFrame() { return LoadConstants<FrameConstants>(); }

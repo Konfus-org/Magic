@@ -87,6 +87,12 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     private float _impostorDistance = 1000;
 
     /// <summary>
+    /// The number of the world the frames <see cref="LateUpdate"/> publishes are of, a new one each time a domain
+    /// replaces it, so <see cref="Render"/> forgets what it drew before at the first frame of what comes. Game thread.
+    /// </summary>
+    private int _worldNumber;
+
+    /// <summary>
     /// The inputs <see cref="Render"/> draws, taken from <see cref="_inputs"/>, until newer are. Render thread.
     /// </summary>
     private RenderInputs? _current;
@@ -196,6 +202,7 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         _ecs.Snapshot(back.Skies);
         _ecs.Snapshot(back.PostProcessing);
         _ecs.Snapshot(back.Weather);
+        back.WorldNumber = _worldNumber;
         back.DebugView = _debugView;
         back.ImpostorPixels = _impostorPixels;
         back.ImpostorDistance = _impostorDistance;
@@ -241,6 +248,14 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
 
         if (_inputs.TryTake(out RenderInputs? newest))
         {
+            // The first frame of another world forgets last frame's depth, camera and shadows and the probes' light, so
+            // nothing drawn before shows in it, and its effects take their first reading of it at once.
+            if (newest.WorldNumber != _current?.WorldNumber)
+            {
+                _frameView.ClearHistory();
+                _probes?.ClearHistory();
+            }
+
             if (_current is not null)
                 _inputs.Return(_current);
 
@@ -256,10 +271,11 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         int instanceCount = _instances.Fill(inputs.Renderers, frame.Index);
         _resources.EvictUnusedModels(inputs.Renderers.Second[..instanceCount]);
 
-        // The loading domain shows once what it draws is on the GPU, and the resolve for each material shader is built.
+        // The loading domain shows once what it draws and its effects are on the GPU, and the resolve for each material
+        // shader and the glass for each translucent one are built.
         if (
             _preparing is { } preparing
-            && IsPrepared(preparing)
+            && IsPrepared(graph, preparing)
             && GetState(graph, _visibility.GetResolveShaders()) != GpuState.Loading
             && GetState(graph, [.. _lighting.GetGlassShaders()]) != GpuState.Loading
         )
@@ -356,21 +372,23 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     }
 
     /// <summary>
-    /// Forgets what was drawn before, last frame's depth, camera and shadows and the probes' light, so nothing of it
-    /// shows in what comes.
+    /// Numbers the world anew, so <see cref="Render"/> forgets what was drawn before at the first frame of what comes. On
+    /// the game thread, without leaving it, so the world goes on to what comes before another frame is published and no
+    /// frame shows it empty between the two.
     /// </summary>
-    public async Task OnDomainUnloadedAsync(CancellationToken cancel)
+    public Task OnDomainUnloadedAsync(CancellationToken cancel)
     {
-        await _threads.Enter(EngineThread.Render);
-        _frameView.ClearHistory();
-        _probes?.ClearHistory();
+        _worldNumber++;
+
+        return Task.CompletedTask;
     }
 
     /// <summary>
-    /// Asks for every model and material <paramref name="entities"/> draw, and ends in the frame they are on the GPU, or
-    /// failed and drawn as the failure, with the passes made. Materials are asked for at once; models once the pools are
-    /// made, by <see cref="Render"/>. One that comes while another waits ends that one. On the render thread, whose
-    /// tables these are.
+    /// Asks for every model and material <paramref name="entities"/> draw, and the effects of their first weather and
+    /// first post processing, or the default's, and ends in the frame they are on the GPU, or failed and drawn as the
+    /// failure or left out, with the passes made. Materials are asked for at once; models once the pools are made, and
+    /// the effects, by <see cref="Render"/>. One that comes while another waits ends that one. On the render thread,
+    /// whose tables these are.
     /// </summary>
     public async Task OnDomainLoadingAsync(
         ImmutableArray<ImmutableArray<IComponent>> entities,
@@ -399,10 +417,22 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             _resources.Get(material);
         }
 
+        // The effects as Render runs them: the first weather's, then the first post processing's, or the default's.
+        MaterialSlots air = entities
+            .SelectMany(entity => entity.OfType<Weather>())
+            .Select(weather => weather.Effects)
+            .FirstOrDefault();
+        MaterialSlots post = entities
+            .SelectMany(entity => entity.OfType<PostProcessing>())
+            .Select(processing => processing.Effects)
+            .DefaultIfEmpty(_defaultPost.Effects)
+            .First();
+
         EndPreparing();
         Preparing preparing = new(
             [.. renderers.Select(renderer => renderer.Model).Distinct()],
             materials,
+            [air, post],
             new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
         );
         _preparing = preparing;
@@ -474,14 +504,14 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     }
 
     /// <summary>
-    /// Asks for the models <paramref name="preparing"/> waits for, which the pools only take once they are made, and for
-    /// the failure material a model that failed is drawn with, an ask for one asked for already doing nothing; then
-    /// whether every one of them and every material is on the GPU, or failed and drawn as the failure, which is on the
-    /// GPU too.
+    /// Asks for the models and the effects <paramref name="preparing"/> waits for, which the pools only take once they are
+    /// made, and for the failure material a model that failed is drawn with, an ask for one asked for already doing
+    /// nothing; then whether every one of them and every material is on the GPU, or failed: drawn as the failure, which
+    /// is on the GPU too, or, for an effect, left out.
     /// </summary>
-    private bool IsPrepared(Preparing preparing)
+    private bool IsPrepared(RenderGraph graph, Preparing preparing)
     {
-        bool isPrepared = true;
+        bool isPrepared = !_pixelEffects.IsLoading(graph, preparing.Effects.AsSpan());
         bool hasFailure = false;
         foreach (Handle<Model> model in preparing.Models)
         {
@@ -710,11 +740,13 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     );
 
     /// <summary>
-    /// The models and materials a domain loading draws, and what ends once they are all on the GPU.
+    /// The models and materials a domain loading draws, the lists of effects its frames run, and what ends once they are
+    /// all on the GPU.
     /// </summary>
     private sealed record Preparing(
         ImmutableArray<Handle<Model>> Models,
         ImmutableArray<Handle<Material>> Materials,
+        ImmutableArray<MaterialSlots> Effects,
         TaskCompletionSource Done
     );
 }

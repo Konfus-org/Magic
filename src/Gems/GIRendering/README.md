@@ -21,8 +21,9 @@ texture reader.
   view of the atlas, so the atlas is never magnified. Over a quarter of that the clusters and the impostor share the
   pixels by a dither, so nothing pops.
 - A model nothing has drawn or waited for in a minute leaves the GPU, and loads again when it is next drawn.
-- As a domain replaces the world, the loading screen stays until the models, materials and textures of what comes are
-  on the GPU, or failed, and nothing drawn before carries into the frames after.
+- As a domain replaces the world, the loading screen stays until the models, materials and textures of what comes,
+  and the effects of its weather and its post processing with their passes, are on the GPU, or failed, so its first
+  frame is drawn whole, its effects included. Nothing drawn before carries into the frames after.
 - The directional light is the sun while it is above the horizon, else the moon while it is, else the first there is.
   On a GPU that traces rays it casts shadows, soft as wide as the sun's disc.
 - A sky entity's material draws the sky and colours the sun through the air, and the sky lights what it shines on.
@@ -65,8 +66,10 @@ texture reader.
   camera draws each frame through a different point in each pixel. An effect shows once its material and its passes
   are built, and not while one loads or when one failed. An effect that asks what lies along a ray, as the volumetric
   light does, is answered through the world the shadows trace, and doesn't run on a GPU that doesn't trace rays.
-  The fog is lit by the sun and the sky alone, unshadowed; with the fog's `sun` param at 0 and `VolumetricLight`
-  listed, the sun's light in the fog comes only where the air sees the sun, in shafts.
+  The fog thickens with the air, and the volumetric light gathers its shafts, up to the nearest surface, a pane of glass
+  included, so a pane keeps its colour, and what is seen through a pane is fogged only as far as the pane. The fog is lit by the sun and the sky alone,
+  unshadowed; with the fog's `sun` param at 0 and `VolumetricLight` listed, the sun's light in the fog comes only where
+  the air sees the sun, in shafts.
 - The `Exposure` effect meters the picture each frame from its average log luminance, as the effects before it leave
   it, and adapts to a change over about a second, as an eye does; a new domain or window size takes its first reading
   at once. Its `compensation` param adds stops to it. The `Agx` effect is the AgX tonemap.

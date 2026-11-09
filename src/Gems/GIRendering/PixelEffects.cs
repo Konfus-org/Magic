@@ -35,6 +35,7 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
     private static readonly string[] _targetNames = [.. Enumerable.Range(0, 2 * Places).Select(i => $"Effect {i}")];
 
     private readonly ShaderEntry _applyShader = PassShaders.GetEntry(assets, "ApplyPixelEffect", "ApplyPixelEffect");
+
     private readonly ShaderEntry _levelShader = PassShaders.GetEntry(assets, "ApplyPixelEffect", "FillEffectLevel");
 
     /// <summary>
@@ -69,16 +70,15 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
             MaterialInstance slot = lists[place / MaterialSlots.Capacity][place % MaterialSlots.Capacity];
             bool ranLastFrame = _lastFrame[place] == slot.Handle.Id;
             _lastFrame[place] = 0;
-            if (
-                !IsReady(
-                    graph,
-                    slot,
-                    out GpuMaterial row,
-                    out ShaderEntry apply,
-                    out ShaderEntry level,
-                    out EffectNeeds needs
-                )
-            )
+            GpuState state = GetState(
+                graph,
+                slot,
+                out GpuMaterial row,
+                out ShaderEntry apply,
+                out ShaderEntry level,
+                out EffectNeeds needs
+            );
+            if (state != GpuState.Ready)
                 continue;
 
             int levels = Math.Min(
@@ -142,6 +142,7 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
             passTable.Value,
             view.Visibility,
             view.Depth,
+            view.GlassDepth,
             view.GBufferNormal,
             view.GBufferBase,
             view.GBufferSurface,
@@ -218,7 +219,8 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
         {
             foreach (MaterialInstance slot in list)
             {
-                if (IsReady(graph, slot, out _, out _, out _, out EffectNeeds needs) && needs.HasJitter)
+                GpuState state = GetState(graph, slot, out _, out _, out _, out EffectNeeds needs);
+                if (state == GpuState.Ready && needs.HasJitter)
                     return true;
             }
         }
@@ -227,31 +229,21 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
     }
 
     /// <summary>
-    /// Whether the effect in <paramref name="slot"/> runs: its material and its textures on the GPU, its rays traced if it
-    /// traces any, and its passes built; its row, its passes and what it needs when it does.
+    /// Whether an effect of <paramref name="lists"/> still loads its material, its textures or its passes. Each is asked
+    /// for, so the first ask starts them all.
     /// </summary>
-    private bool IsReady(
-        RenderGraph graph,
-        in MaterialInstance slot,
-        out GpuMaterial row,
-        out ShaderEntry apply,
-        out ShaderEntry level,
-        out EffectNeeds needs
-    )
+    public bool IsLoading(RenderGraph graph, ReadOnlySpan<MaterialSlots> lists)
     {
-        (row, apply, level, needs) = (default, default, default, default);
-        if (
-            slot.Handle == Handle<Material>.None
-            || resources.GetEffect(slot, out row, out ShaderTypeArgument shader, out needs) != ResourceState.Ready
-            || (needs.HasRays && !graph.Features.HasRayQuery)
-        )
-            return false;
+        bool isLoading = false;
+        foreach (MaterialSlots list in lists)
+        {
+            foreach (MaterialInstance slot in list)
+            {
+                isLoading |= GetState(graph, slot, out _, out _, out _, out _) == GpuState.Loading;
+            }
+        }
 
-        apply = GetSpecialised(_applyShader, shader);
-        level = GetSpecialised(_levelShader, shader);
-
-        return graph.GetState(apply) == GpuState.Ready
-            && (needs.Levels == 0 || graph.GetState(level) == GpuState.Ready);
+        return isLoading;
     }
 
     /// <summary>
@@ -286,6 +278,39 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
             TextureUsages.Storage | TextureUsages.Sampled,
             levels
         );
+
+    /// <summary>
+    /// Where the effect in <paramref name="slot"/> is: ready to run once its material and its textures are on the GPU
+    /// and its passes built, with its row, its passes and what it needs; loading while one of them loads; failed, never
+    /// to run, when one failed, when it traces rays on a GPU that doesn't, or when the slot is empty.
+    /// </summary>
+    private GpuState GetState(
+        RenderGraph graph,
+        in MaterialInstance slot,
+        out GpuMaterial row,
+        out ShaderEntry apply,
+        out ShaderEntry level,
+        out EffectNeeds needs
+    )
+    {
+        (row, apply, level, needs) = (default, default, default, default);
+        if (slot.Handle == Handle<Material>.None)
+            return GpuState.Failed;
+
+        ResourceState materialState = resources.GetEffect(slot, out row, out ShaderTypeArgument shader, out needs);
+        if (materialState != ResourceState.Ready)
+            return materialState == ResourceState.Loading ? GpuState.Loading : GpuState.Failed;
+
+        if (needs.HasRays && !graph.Features.HasRayQuery)
+            return GpuState.Failed;
+
+        apply = GetSpecialised(_applyShader, shader);
+        level = GetSpecialised(_levelShader, shader);
+        GpuState applied = graph.GetState(apply);
+        GpuState levels = needs.Levels == 0 ? GpuState.Ready : graph.GetState(level);
+
+        return applied == GpuState.Ready ? levels : applied;
+    }
 
     private ShaderEntry GetSpecialised(ShaderEntry entry, ShaderTypeArgument shader)
     {

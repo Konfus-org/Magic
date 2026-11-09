@@ -31,11 +31,14 @@ public struct PixelEffectInputs
     // Seconds the run has taken, for an effect that moves, and since the frame before, for one that changes over time.
     public float time;
     public float deltaSec;
-    // The pixel's surface relative to the camera, in metres, or far along its ray where nothing was drawn, its depth
-    // along the camera's view, 0 where nothing was drawn, and where the camera is in the world.
+    // The pixel's opaque surface relative to the camera, in metres, or far along its ray where nothing was drawn, its
+    // depth along the camera's view, 0 where nothing was drawn, and where the camera is in the world.
     public float3 position;
     public float viewDepth;
     public float3 cameraPosition;
+    // The nearest surface along the pixel's ray relative to the camera, in metres: the nearest pane of glass in front
+    // of position where there is one, else position.
+    public float3 nearestPosition;
     // Towards the sun, unit, and the sun's and the sky's light, before the exposure.
     public float3 sunDirection;
     public float3 sunRadiance;
@@ -44,8 +47,8 @@ public struct PixelEffectInputs
     // camera's view and the sun: 1 straight ahead, 0 or less beside or behind the camera, where sunUv means nothing.
     public float2 sunUv;
     public float sunFacing;
-    // The pixel's surface: its unit normal in the world, its base colour, its roughness and its metalness, all 0 where
-    // nothing was drawn.
+    // The pixel's opaque surface: its unit normal in the world, its base colour, its roughness and its metalness, all 0
+    // where nothing was drawn.
     public float3 normal;
     public float3 baseColor;
     public float roughness;

@@ -27,6 +27,12 @@ internal sealed class RenderInputs
 
     public EcsSnapshot<Weather> Weather { get; } = new();
 
+    /// <summary>
+    /// The number of the world the frame is of, a new one each time a domain replaces it, so the render thread can tell
+    /// the first frame of another world.
+    /// </summary>
+    public int WorldNumber { get; set; }
+
     public DebugView DebugView { get; set; }
 
     /// <summary>
