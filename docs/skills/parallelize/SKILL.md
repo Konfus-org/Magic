@@ -28,30 +28,31 @@ don't build.
 4. **Write the plan** to `agent-swarm/<effort>.md` in the repository's git folder (`git rev-parse --git-common-dir`),
    which every worktree can read and nothing commits. It holds the goal in three lines, the decisions, the root
    branch if there is one, the review count, and a table of each slice's branch, mode, check, scope, what it waits on,
-   and its state where git can't show it: answered, with the answer, or blocked, with the question. Follow-ups go at
+   and its state from its worker: merged, answered, with the answer, or blocked, with the question. Follow-ups go at
    the end. Only you write it; rewrite it whenever something changes. Present it in the chat. A yes approves every
    slice in it. Wait for it.
 5. **Start every slice that is ready** as a worker, up to the review count. A slice is ready once each slice it waits
-   on has merged, or for a spike, answered, and no running slice's scope overlaps its own. Start with the riskiest
-   spike alone, unless the user says the risk is known. Each worker runs in its own session: a side session in Claude
-   Code, or whatever separate session or background agent the tool has. Give it the slice's brief in the slice
-   skill's format, its branch, the branch it starts from, the decisions from step 1, and the other running slices
-   with their scopes, and tell it to:
+   on has merged, or for a spike, answered, and no running slice changes the same files or the same gem. Start with
+   the riskiest spike alone, unless the user says the risk is known. Each worker runs in its own session: a side
+   session in Claude Code, or whatever separate session or background agent the tool has. Give it the slice's brief
+   in the slice skill's format, its branch, the branch it starts from, the decisions from step 1, and the other
+   running slices with their scopes, and tell it to:
    - Make its worktree, with a root as `git worktree add --track -b <branch> ../Magic-worktrees/<branch> <root>`,
      and claim its scope ([AGENTS.md](../../../AGENTS.md#worktrees)).
    - Follow the [slice skill](../slice/SKILL.md) from step 3, then the [finish skill](../finish/SKILL.md) through
      step 7: validation, a review in a fresh context, its summary, the user's review, and the merge once they
-     approve. A spike ends after its summary, with its answer.
+     approve. A spike releases its claim (`tools/Scripts/Claim.ps1 -Release`) and ends after its summary, with its
+     answer.
    - Merge one at a time: if the fast-forward fails because another worker merged first, rebase and run finish
      step 7 again.
    - Build only its slice, touch no other worker's worktree, and stop and report when blocked
      ([AGENTS.md](../../../AGENTS.md#when-blocked)).
    - End its last message with one line:
      `SLICE: <branch>  STATE: merged | answered | blocked  NOTE: <what it did, its answer or its question>`.
-6. **Read each slice's state from git, not from memory.** It has merged when `git branch --merged <root or merge
-   target>` lists its branch, waits on the user's review when `plannotator sessions --json` lists its worktree, and is
-   being built while it has a claim. Answered and blocked come from its worker's `SLICE:` line, which you copy into
-   the plan. After a restart or a compaction, rebuild the picture from the plan and these.
+6. **Read each slice's state from the plan, git and plannotator, not from memory.** Merged, answered and blocked come
+   from its worker's `SLICE:` line, which you copy into the plan, since a merged branch is deleted. A slice waits on
+   the user's review when `plannotator sessions --json` lists its worktree, and is being built while it has a claim.
+   After a restart or a compaction, rebuild the picture from these.
 7. **Keep the user up to date.** Post one update when a review starts waiting on them, a slice merges or answers, a
    worker is blocked, or the plan changes, and none in between, always in this shape:
 

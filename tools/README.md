@@ -1,7 +1,7 @@
 # Tools
 
 The scripts that build and check Magic are in `Scripts/`, and the analyzer that checks the house rules is in
-[`Analyzers/`](Analyzers/Magic.Analyzers/README.md). Nothing here ships.
+[`Analyzers/`](Analyzers/README.md). Nothing here ships.
 
 Each script is one PowerShell file that runs under both `pwsh` and Windows PowerShell 5.1, so don't use what 5.1
 lacks (`&&`, `?:`, `??`). A script runs from any folder and exits `0` when it passes. Its help comment lists its

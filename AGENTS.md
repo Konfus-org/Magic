@@ -103,7 +103,7 @@ Before changing an area, read every `README.md` from that area's root folder dow
 ### Slices
 
 Work moves one slice at a time, or one slice per worker in a swarm (the parallelize skill). The conversation holds
-the plan; no file does.
+the plan; no file does, except a swarm's plan in the git folder (the parallelize skill).
 
 - **A request is a slice, or gets split into slices.** A sweeping change becomes a list of slices you propose in the
   chat, and is never done as one task.
