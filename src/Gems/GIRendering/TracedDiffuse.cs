@@ -110,7 +110,6 @@ internal sealed class TracedDiffuse(AssetManager assets, GpuResources resources)
     /// </summary>
     public void Record(
         in RenderView view,
-        GpuBuffer lightingConstants,
         GpuBuffer hitMaterials,
         in SkyTables sky,
         in LightBuffers lights,
@@ -120,12 +119,11 @@ internal sealed class TracedDiffuse(AssetManager assets, GpuResources resources)
     {
         RenderGraph graph = view.Graph;
         (int width, int height) = GetSize(view);
-        GpuConstants header = new(view.Constants.Id, probes.Constants.Id, lightingConstants.Id, diffuse.Constants.Id);
+        GpuConstants header = new(view.Constants.Id, probes.Constants.Id, 0, diffuse.Constants.Id);
         graph
             .Compute("Trace diffuse", _traceShader, header)
             .Reads(
                 view.Constants,
-                lightingConstants,
                 diffuse.Constants,
                 view.Depth,
                 view.GBufferNormal,

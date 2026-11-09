@@ -6,14 +6,16 @@ module "Scene/Clusters";
 import Core.Heap;
 import Core.Pack;
 import Core.Pass;
+import Scene.Shadows;
 
 public static const uint MaxClusterTriangles = 128u;
 
-// Where the frame's constants end in the buffer every pass header's x names: C#'s FrameConstants.Bytes.
-public static const uint ClusterConstantsOffset = 588u;
+// Where the cluster constants are in the buffer every pass header's x names: after the frame, the lights and the
+// shadows.
+public static const uint ClusterConstantsOffset = ShadowsOffset + ShadowsBytes;
 
-// What the cluster passes read beyond the frame, C#'s ClusterConstants, written once a frame right after the frame's
-// constants; the cluster budget sets the handoff and the error threshold at the start of the frame.
+// What the cluster passes read beyond the frame, C#'s ClusterConstants, written once a frame after the lights and the
+// shadows; the cluster budget sets the handoff and the error threshold at the start of the frame.
 public struct ClusterConstants
 {
     public uint hzbLevels;

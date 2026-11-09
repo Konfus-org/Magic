@@ -4,7 +4,7 @@
 // running mean and variance of it; FilterShadows then blurs that three times, 1, 2 and 4 pixels apart, by how alike
 // neighbours' depths, normals and shadows are. A tile light's slot may hold another light in the next tile or the next
 // frame, so BlendShadows only blends those with last frame, and writes the mask. The pass header's x is the frame's
-// constants, y the denoiser's, z the lighting constants and w the filter's pass.
+// buffer, which holds the shadows, y the denoiser's constants and w the filter's pass.
 module "DenoiseShadows";
 
 import Core.Heap;
@@ -12,7 +12,7 @@ import Core.Pass;
 import Core.Frame;
 import Core.Math;
 import Core.Pack;
-import Scene.Lighting;
+import Scene.Lights;
 import Scene.Shadows;
 
 // C#'s ShadowDenoiseConstants: the heap ids of the denoiser's targets.
@@ -63,11 +63,11 @@ bool IsTrueForGroup(bool value)
 }
 
 // Whether the sun's rays reached it from every pixel, or from none, as far as the filter passes reach around a group.
-void SearchRegion(LightingConstants lighting, uint2 group, uint2 size, out bool isAllLit, out bool isAllDark)
+void SearchRegion(Shadows shadows, uint2 group, uint2 size, out bool isAllLit, out bool isAllDark)
 {
     int2 tiles = int2((size + SunTileSize - 1u) / SunTileSize);
     int2 baseTile = int2(group * 8u / SunTileSize);
-    ArrayRef<uint> sunTiles = { lighting.sunTiles };
+    ArrayRef<uint> sunTiles = { shadows.sunTiles };
     uint anyLit = 0u;
     uint everyLit = 0xFFFFFFFFu;
     for (int y = -2; y <= 3; y++)
@@ -86,12 +86,12 @@ void SearchRegion(LightingConstants lighting, uint2 group, uint2 size, out bool 
 }
 
 // The sun's lit share of the 17 pixels of a row centred on a pixel, Gaussian-weighted.
-float GetRowMoment(LightingConstants lighting, int2 pixel, uint2 size)
+float GetRowMoment(Shadows shadows, int2 pixel, uint2 size)
 {
     if (pixel.y < 0 || pixel.y >= int(size.y))
         return 0.0;
 
-    ArrayRef<uint> sunTiles = { lighting.sunTiles };
+    ArrayRef<uint> sunTiles = { shadows.sunTiles };
     uint2 tile = uint2(pixel) / SunTileSize;
     uint tilesAcross = (size.x + SunTileSize.x - 1u) / SunTileSize.x;
     uint index = GetSunTileIndex(tile, size.x);
@@ -113,11 +113,11 @@ float GetRowMoment(LightingConstants lighting, int2 pixel, uint2 size)
 
 // The sun's lit share of the 17 by 17 pixels around a pixel, Gaussian-weighted: its mean, and its variance too, as a
 // pixel holds a single 0 or 1.
-float GetNeighbourhood(LightingConstants lighting, int2 pixel, uint2 local, uint2 size)
+float GetNeighbourhood(Shadows shadows, int2 pixel, uint2 local, uint2 size)
 {
-    float upper = GetRowMoment(lighting, pixel - int2(0, 8), size);
-    float center = GetRowMoment(lighting, pixel, size);
-    float lower = GetRowMoment(lighting, pixel + int2(0, 8), size);
+    float upper = GetRowMoment(shadows, pixel - int2(0, 8), size);
+    float center = GetRowMoment(shadows, pixel, size);
+    float lower = GetRowMoment(shadows, pixel + int2(0, 8), size);
     groupRowMoments[local.x][local.y] = upper;
     groupRowMoments[local.x][local.y + 8u] = center;
     groupRowMoments[local.x][local.y + 16u] = lower;
@@ -175,7 +175,7 @@ bool IsDisoccluded(ShadowDenoiseConstants denoise, float2 historyUv, uint2 size,
 void ClassifyShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupThreadID, uint3 group : SV_GroupID)
 {
     FrameConstants frame = GetFrame();
-    LightingConstants lighting = GetLighting();
+    Shadows shadows = GetShadows();
     ShadowDenoiseConstants denoise = GetDenoise();
     uint2 size = uint2(frame.width, frame.height);
     bool isInside = all(thread.xy < size);
@@ -194,7 +194,7 @@ void ClassifyShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupT
     bool isAllDark = true;
     bool isSky = IsTrueForGroup(!isReceiver);
     if (!isSky)
-        SearchRegion(lighting, group.xy, size, isAllLit, isAllDark);
+        SearchRegion(shadows, group.xy, size, isAllLit, isAllDark);
 
     if (isSky || IsTrueForGroup(isAllLit || isAllDark))
     {
@@ -215,7 +215,7 @@ void ClassifyShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupT
         tileStates[stateIndex] = 0u;
 
     float2 velocity = GetNearestVelocity(frame, pixel, size);
-    float neighbourhood = GetNeighbourhood(lighting, int2(thread.xy), local.xy, size);
+    float neighbourhood = GetNeighbourhood(shadows, int2(thread.xy), local.xy, size);
     if (!isInside)
         return;
 
@@ -228,7 +228,7 @@ void ClassifyShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupT
 
     float2 uv = GetTexelCenterUv(pixel, size);
     float2 historyUv = uv + velocity;
-    ArrayRef<uint> sunTiles = { lighting.sunTiles };
+    ArrayRef<uint> sunTiles = { shadows.sunTiles };
     uint tile = sunTiles[GetSunTileIndex(pixel / SunTileSize, size.x)];
     float current = (tile & GetSunTileBit(pixel)) != 0u ? 1.0 : 0.0;
 
@@ -259,7 +259,7 @@ void ClassifyShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupT
     if (hasHistory)
     {
         TextureRef history = { denoise.sunHistory };
-        SamplerRef sampler = { lighting.lutSampler };
+        SamplerRef sampler = { GetLights().lutSampler };
         shadowBefore = history.SampleLevel(sampler, historyUv, 0.0).x;
     }
 
@@ -400,7 +400,7 @@ float GetStepTowards(float value, float target)
 void BlendShadows(uint3 thread : SV_DispatchThreadID)
 {
     FrameConstants frame = GetFrame();
-    LightingConstants lighting = GetLighting();
+    Shadows shadows = GetShadows();
     ShadowDenoiseConstants denoise = GetDenoise();
     uint2 size = uint2(frame.width, frame.height);
     if (any(thread.xy >= size))
@@ -409,13 +409,13 @@ void BlendShadows(uint3 thread : SV_DispatchThreadID)
     TextureRef depthTexture = { frame.depth };
     if (depthTexture.Load(thread.xy, 0u).x <= 0.0)
     {
-        StoreShadowMask(lighting.shadowMask, thread.xy, size.x, uint4(0xFFFFFFFFu));
+        StoreShadowMask(shadows.mask, thread.xy, size.x, uint4(0xFFFFFFFFu));
         return;
     }
 
     TextureRef denoised = { denoise.sunDenoised };
     TextureRef velocityTexture = { frame.velocity };
-    uint4 traced = LoadShadowMask(lighting.tracedShadows, thread.xy, size.x);
+    uint4 traced = LoadShadowMask(shadows.traced, thread.xy, size.x);
     float4 velocity = velocityTexture.Load(thread.xy, 0u);
     float2 historyUv = GetTexelCenterUv(thread.xy, size) + velocity.xy;
     bool isReprojected = denoise.hasHistory != 0u && all(saturate(historyUv) == historyUv);
@@ -444,5 +444,5 @@ void BlendShadows(uint3 thread : SV_DispatchThreadID)
         }
     }
 
-    StoreShadowMask(lighting.shadowMask, thread.xy, size.x, EncodeShadow(words, 0u, denoised.Load(thread.xy, 0u).x));
+    StoreShadowMask(shadows.mask, thread.xy, size.x, EncodeShadow(words, 0u, denoised.Load(thread.xy, 0u).x));
 }

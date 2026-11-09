@@ -121,11 +121,8 @@ in turn and exits, so a release ships with the caches full.
   - `Scene/` is the GPU tables and how to read them: the instance table, the pools of vertices, indices and clusters,
     what the cull leaves for the draw and the resolve, the triangle a pixel shows, and the cull's tests.
   - `Scene/Clusters` is also what the cluster passes read beyond the library's frame: the cull's limits and buffers,
-    the depth pyramid, the visibility ids and the impostor handoff, in the frame's buffer after the frame.
-  - `Scene/Lighting` is what the lighting passes share beyond the frame: the sun, the sky's tables and the HDR picture.
-  - `Scene/Lights` is the light table and the bits of each tile of the screen that say which lights reach it.
-  - `Scene/Shadows` is the shadow mask: how much of the sun and of each of its tile's first lights reaches a pixel,
-    and the sun's tiles the denoiser reads.
+    the depth pyramid, the visibility ids and the impostor handoff, in the frame's buffer after the library's lights
+    and shadows.
   - `Scene/Probes` is the probe grid: where each probe is, what it holds, and the light a point gets from it.
   - `Scene/Traced` is what the light traced at half the picture's size shares: which pixel traces, its history and how
     the picture reads it back. `Scene/TracedDiffuse` and `Scene/TracedReflections` are the traced diffuse light's and

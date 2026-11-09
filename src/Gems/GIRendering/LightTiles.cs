@@ -104,10 +104,10 @@ internal sealed class LightTiles(AssetManager assets)
     /// <summary>
     /// Each tile's lights, from the view's depth.
     /// </summary>
-    public void Record(in RenderView view, in GpuConstants header, GpuBuffer lightingConstants, in LightBuffers lights)
+    public void Record(in RenderView view, in GpuConstants header, in LightBuffers lights)
     {
         view.Graph.Compute("Cull lights", _cullShader, header)
-            .Reads(view.Constants, lightingConstants, lights.Table, view.Depth)
+            .Reads(view.Constants, lights.Table, view.Depth)
             .Writes(lights.Tiles)
             .Dispatch((uint)GetTiles(view.Width), (uint)GetTiles(view.Height));
     }

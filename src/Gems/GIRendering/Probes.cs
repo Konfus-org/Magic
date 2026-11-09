@@ -206,7 +206,6 @@ internal sealed class Probes(AssetManager assets, GpuResources resources)
     /// </summary>
     public void Record(
         in RenderView view,
-        GpuBuffer lightingConstants,
         GpuBuffer hitMaterials,
         in SkyTables sky,
         in LightBuffers lights,
@@ -214,7 +213,7 @@ internal sealed class Probes(AssetManager assets, GpuResources resources)
     )
     {
         RenderGraph graph = view.Graph;
-        GpuConstants header = new(view.Constants.Id, probes.Constants.Id, lightingConstants.Id);
+        GpuConstants header = new(view.Constants.Id, probes.Constants.Id);
         graph
             .Compute("Allocate probe rays", _allocateShader, header)
             .Reads(view.Constants, probes.Constants, probes.Probes, probes.Variance)
@@ -229,7 +228,6 @@ internal sealed class Probes(AssetManager assets, GpuResources resources)
             .Compute("Trace probes", _traceShader, header)
             .Reads(
                 view.Constants,
-                lightingConstants,
                 probes.Constants,
                 sky.Transmittance,
                 sky.MultiScattering,

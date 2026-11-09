@@ -1,10 +1,13 @@
-// What every pass of a frame reads: the view, the sun, the picture's size and the heap ids of the frame's tables and
-// textures, C#'s FrameConstants, written once a frame at the start of the buffer whose heap id is every pass header's
-// x. A renderer's own constants may follow it in that buffer.
+// What every pass of a frame reads: the view, the picture's size and the heap ids of the frame's tables and textures,
+// C#'s FrameConstants, written once a frame at the start of the buffer whose heap id is every pass header's x. The
+// lights and the shadows follow it in that buffer, then a renderer's own constants.
 module "Core/Frame";
 
 import Core.Heap;
 import Core.Pass;
+
+// The frame's bytes, C#'s FrameConstants.Bytes: where the rows after it in its buffer start.
+public static const uint FrameBytes = 540u;
 
 public struct FrameConstants
 {
@@ -18,11 +21,6 @@ public struct FrameConstants
     // The frustum's sides and near plane in the camera-relative world, xyz a unit normal pointing in and w the offset,
     // so a point is inside where dot(xyz, p) + w >= 0 for every one; the sixth is the far plane, which never rejects.
     public float4 frustumPlanes[6];
-
-    // Towards the sun, unit, and the sun's and the sky's radiance, before the exposure.
-    public float4 sunDirection;
-    public float4 sunRadiance;
-    public float4 skyRadiance;
 
     // Where the camera is in the world: what every world position has taken off it before it is used, so positions
     // keep their precision near the camera wherever it is.

@@ -6,13 +6,13 @@ using Magic.Ecs.Components;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// What every pass of a frame reads, the twin of the library's <c>Core/Frame.slang</c>: the view, the sun, the output's
-/// size and the heap ids of the frame's tables and textures, written once a frame at the start of the constants buffer.
+/// What every pass of a frame reads, the twin of the library's <c>Core/Frame.slang</c>: the view, the output's size and
+/// the heap ids of the frame's tables and textures, written once a frame at the start of the frame's buffer.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct FrameConstants
 {
-    public const int Bytes = 588;
+    public const int Bytes = 540;
 
     public Matrix4x4 View;
 
@@ -33,12 +33,6 @@ internal record struct FrameConstants
     public Vector4 FrustumPlane4;
 
     public Vector4 FrustumPlane5;
-
-    public Vector4 SunDirection;
-
-    public Vector4 SunRadiance;
-
-    public Vector4 SkyRadiance;
 
     public Vector4 CameraPosition;
 
@@ -94,11 +88,13 @@ internal record struct FrameConstants
 /// <summary>
 /// What the cluster passes read beyond the frame, the twin of <c>Scene/Clusters.slang</c>'s: the cull's limits and
 /// buffers, the depth pyramid, the visibility ids and the impostor handoff, written once a frame into the constants
-/// buffer right after <see cref="FrameConstants"/>.
+/// buffer after <see cref="GpuShadows"/>.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct ClusterConstants
 {
+    public const int Offset = GpuShadows.Offset + GpuShadows.Bytes;
+
     public const int Bytes = 64;
 
     public uint HzbLevels;
@@ -291,18 +287,23 @@ internal record struct GpuLight
 }
 
 /// <summary>
-/// What the lighting passes read beyond the frame, the twin of <c>Scene/Lighting.slang</c>'s: the sun above the air, the
-/// viewer's height, the sky's tables, the HDR picture they light, the light table and its tiles, the shadow masks and
-/// the traced reflections.
+/// The frame's lights, the twin of the library's <c>Scene/Lights.slang</c>: the sun, the sky's tables and the light
+/// table, written once a frame into the frame's buffer after <see cref="FrameConstants"/>.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
-internal record struct LightingConstants
+internal record struct GpuLights
 {
-    public const int Bytes = 96;
+    public const int Offset = FrameConstants.Bytes;
+
+    public const int Bytes = 84;
+
+    public Vector4 SunDirection;
 
     public Vector4 SunIlluminance;
 
-    public Vector4 CameraAltitude;
+    public Vector4 SkyRadiance;
+
+    public float CameraAltitude;
 
     public uint TransmittanceLut;
 
@@ -314,36 +315,31 @@ internal record struct LightingConstants
 
     public uint HasSky;
 
-    public uint Hdr;
+    public uint Table;
 
-    public uint Lights;
+    public uint Count;
 
-    public uint LightCount;
+    public uint Tiles;
+}
 
-    public uint LightTiles;
+/// <summary>
+/// The frame's shadows, the twin of the library's <c>Scene/Shadows.slang</c>: the masks, the sun's tiles and its tint,
+/// each 0 on a GPU that traces no rays, written once a frame into the frame's buffer after <see cref="GpuLights"/>.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal record struct GpuShadows
+{
+    public const int Offset = GpuLights.Offset + GpuLights.Bytes;
 
-    /// <summary>
-    /// The denoised mask shading reads; 0 on a GPU that traces no rays: nothing is shadowed.
-    /// </summary>
-    public uint ShadowMask;
+    public const int Bytes = 16;
 
-    public uint TracedShadows;
+    public uint Mask;
+
+    public uint Traced;
 
     public uint SunTiles;
 
-    /// <summary>
-    /// The traced reflections' blended light; 0 where none are traced.
-    /// </summary>
-    public uint Reflections;
-
-    /// <summary>
-    /// The colour the sun's light takes on through glass; 0 on a GPU that traces no rays.
-    /// </summary>
     public uint SunTint;
-
-    public uint Padding1;
-
-    public uint Padding2;
 }
 
 /// <summary>

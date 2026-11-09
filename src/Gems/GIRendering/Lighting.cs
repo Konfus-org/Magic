@@ -9,13 +9,15 @@ using Magic.Utils;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// The view's surfaces lit into the HDR picture, and the sky drawn where nothing was: the lighting constants, naming
-/// the sky's tables, the lights, the shadow mask and the traced reflections, uploaded before the view is drawn, and
-/// the shading after them, lit indirectly by the traced diffuse light where there is any; then the nearest glass shaded
+/// The view's surfaces lit into the HDR picture, and the sky drawn where nothing was: the frame's lights and shadows,
+/// naming the sky's tables, the light table and the shadow mask, uploaded before the view is drawn, and the shading
+/// after them, lit indirectly by the traced diffuse light where there is any; then the nearest glass shaded
 /// over it.
 /// </summary>
 internal sealed class Lighting(AssetManager assets, GpuResources resources)
 {
+    private const float SkyBrightness = 0.3f;
+
     private readonly ShaderEntry _shadeShader = PassShaders.GetEntry(assets, "ShadeSurfaces", "ShadeSurfaces") with
     {
         TypeArguments = [PassShaders.GetAtmosphere(assets)],
@@ -30,6 +32,54 @@ internal sealed class Lighting(AssetManager assets, GpuResources resources)
     private readonly Dictionary<int, ShaderEntry> _glassShaders = [];
 
     public ImmutableArray<ShaderEntry> Shaders => [_shadeShader];
+
+    /// <summary>
+    /// The frame's lights and shadows uploaded into the frame's buffer, in a transfer pass the caller opened, after the
+    /// sky's tables, the lights and, on a GPU that traces rays, the shadow mask were asked for.
+    /// </summary>
+    public static Result Upload(
+        in RenderView view,
+        EcsSnapshot<Sky> skies,
+        RenderCamera camera,
+        RenderSun sun,
+        in SkyTables sky,
+        in LightBuffers lights,
+        ShadowBuffers? shadows
+    )
+    {
+        Result<GpuSampler> sampler = view.Graph.Sampler(
+            new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
+        );
+        if (!sampler.Ok)
+            return Result.Failure($"the lighting sampler was not made: {sampler.Error}");
+
+        GpuLights frameLights = new()
+        {
+            SunDirection = new Vector4(sun.Direction, 0),
+            SunIlluminance = new Vector4(sun.Radiance, 0),
+            SkyRadiance = new Vector4(SkyBrightness * 0.8f, SkyBrightness * 0.9f, SkyBrightness, 0),
+            CameraAltitude = Math.Max(camera.Transform.Position.Y, 0),
+            TransmittanceLut = sky.Transmittance.Id,
+            MultiScatteringLut = sky.MultiScattering.Id,
+            SkyViewLut = sky.View.Id,
+            LutSampler = sampler.Value.Id,
+            HasSky = skies.Count > 0 ? 1u : 0u,
+            Table = lights.Table.Id,
+            Count = (uint)lights.Count,
+            Tiles = lights.Tiles.Id,
+        };
+        GpuShadows frameShadows = new()
+        {
+            Mask = shadows?.Mask.Id ?? 0,
+            Traced = shadows?.Traced.Id ?? 0,
+            SunTiles = shadows?.SunTiles.Id ?? 0,
+            SunTint = shadows?.SunTint.Id ?? 0,
+        };
+        view.Graph.Upload(view.Constants, [frameLights], GpuLights.Offset);
+        view.Graph.Upload(view.Constants, [frameShadows], GpuShadows.Offset);
+
+        return Result.Success();
+    }
 
     /// <summary>
     /// The glass entry for each translucent material shader the resources have numbered, one made for each newly
@@ -52,58 +102,6 @@ internal sealed class Lighting(AssetManager assets, GpuResources resources)
     }
 
     /// <summary>
-    /// The lighting constants asked for and uploaded, in a transfer pass the caller opened, after the sky's tables, the
-    /// lights and, on a GPU that traces rays, the shadow mask and the traced reflections were asked for; the buffer they
-    /// are in.
-    /// </summary>
-    public Result<GpuBuffer> Prepare(
-        in RenderView view,
-        EcsSnapshot<Sky> skies,
-        RenderCamera camera,
-        RenderSun sun,
-        in SkyTables sky,
-        in LightBuffers lights,
-        ShadowBuffers? shadows,
-        TracedReflectionBuffers? reflections
-    )
-    {
-        Result<GpuBuffer> made = view.Graph.Buffer(
-            GpuDescriptions.GetBuffer("Lighting constants", LightingConstants.Bytes)
-        );
-        if (!made.Ok)
-            return made;
-
-        Result<GpuSampler> sampler = view.Graph.Sampler(
-            new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
-        );
-        if (!sampler.Ok)
-            return Result.Failure($"the lighting sampler was not made: {sampler.Error}");
-
-        LightingConstants constants = new()
-        {
-            SunIlluminance = new Vector4(sun.Radiance, 0),
-            CameraAltitude = new Vector4(Math.Max(camera.Transform.Position.Y, 0), 0, 0, 0),
-            TransmittanceLut = sky.Transmittance.Id,
-            MultiScatteringLut = sky.MultiScattering.Id,
-            SkyViewLut = sky.View.Id,
-            LutSampler = sampler.Value.Id,
-            HasSky = skies.Count > 0 ? 1u : 0u,
-            Hdr = view.Hdr.Id,
-            Lights = lights.Table.Id,
-            LightCount = (uint)lights.Count,
-            LightTiles = lights.Tiles.Id,
-            ShadowMask = shadows?.Mask.Id ?? 0,
-            TracedShadows = shadows?.Traced.Id ?? 0,
-            SunTiles = shadows?.SunTiles.Id ?? 0,
-            SunTint = shadows?.SunTint.Id ?? 0,
-            Reflections = reflections?.Light.Id ?? 0,
-        };
-        view.Graph.Upload(made.Value, [constants]);
-
-        return made;
-    }
-
-    /// <summary>
     /// Every pixel's surface shaded from the sky's tables, its tile's lights and, on a GPU that traces rays, its
     /// shadows, its traced diffuse light and what it reflects, and the sky where there is none; then the nearest glass
     /// over it, lit by the light around it from <paramref name="probes"/> where there are any, and its rays through
@@ -112,7 +110,6 @@ internal sealed class Lighting(AssetManager assets, GpuResources resources)
     public void Record(
         in RenderView view,
         in GpuConstants header,
-        GpuBuffer constants,
         in SkyTables sky,
         in LightBuffers lights,
         ShadowBuffers? shadows,
@@ -123,10 +120,17 @@ internal sealed class Lighting(AssetManager assets, GpuResources resources)
     )
     {
         ComputePass shade = view
-            .Graph.Compute("Shade surfaces", _shadeShader, header with { W = diffuse?.Constants.Id ?? 0 })
+            .Graph.Compute(
+                "Shade surfaces",
+                _shadeShader,
+                header with
+                {
+                    Z = reflections?.Light.Id ?? 0,
+                    W = diffuse?.Constants.Id ?? 0,
+                }
+            )
             .Reads(
                 view.Constants,
-                constants,
                 sky.Transmittance,
                 sky.MultiScattering,
                 sky.View,
@@ -159,7 +163,6 @@ internal sealed class Lighting(AssetManager assets, GpuResources resources)
                 .Graph.Compute("Shade glass", entry, header with { Y = probes?.Constants.Id ?? 0, W = (uint)shader })
                 .Reads(
                     view.Constants,
-                    constants,
                     sky.Transmittance,
                     sky.MultiScattering,
                     sky.View,

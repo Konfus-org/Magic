@@ -300,32 +300,31 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
             SkyTables sky,
             LightBuffers lights,
             ShadowBuffers? shadows,
-            GpuBuffer lighting,
             TracedWorld? traced,
             ProbeBuffers? probes,
             TracedDiffuseBuffers? diffuse,
             TracedReflectionBuffers? reflections
         ) = uploaded.Value;
-        GpuConstants header = new(view.Constants.Id, 0, lighting.Id);
+        GpuConstants header = new(view.Constants.Id);
         _visibility.Record(view);
         if (inputs.Skies.Count > 0)
-            _sky.Record(graph, header, view.Constants, lighting, sky);
+            _sky.Record(graph, header, view.Constants, sky);
 
-        _lightTiles.Record(view, header, lighting, lights);
+        _lightTiles.Record(view, header, lights);
         if (_rayTracing is not null && _probes is not null && traced is { } world && probes is { } probed)
         {
             _rayTracing.RecordHitMaterials(view, world.HitMaterials, _instances.MaterialCount);
-            _probes.Record(view, lighting, world.HitMaterials, sky, lights, probed);
+            _probes.Record(view, world.HitMaterials, sky, lights, probed);
             if (_tracedDiffuse is not null && diffuse is { } bounced)
-                _tracedDiffuse.Record(view, lighting, world.HitMaterials, sky, lights, probed, bounced);
+                _tracedDiffuse.Record(view, world.HitMaterials, sky, lights, probed, bounced);
             if (_reflections is not null && reflections is { } reflected)
-                _reflections.Record(view, lighting, world.HitMaterials, sky, lights, probed, reflected);
+                _reflections.Record(view, world.HitMaterials, sky, lights, probed, reflected);
         }
 
         if (_shadowMask is not null && shadows is { } shadowed && traced is { } shadowWorld)
-            _shadowMask.Record(view, header, lighting, lights, shadowed, shadowWorld.HitMaterials);
+            _shadowMask.Record(view, header, lights, shadowed, shadowWorld.HitMaterials);
 
-        _lighting.Record(view, header, lighting, sky, lights, shadows, diffuse, reflections, probes, traced);
+        _lighting.Record(view, header, sky, lights, shadows, diffuse, reflections, probes, traced);
 
         // A debug view of light draws it into the picture, so the effects finish it as they do the picture.
         _surfaceView.RecordLight(view, inputs.DebugView, diffuse, reflections?.Light ?? GpuTexture.None);
@@ -561,7 +560,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         Result<RenderView> view = _frameView.Upload(
             graph,
             camera,
-            sun,
             frame,
             jitter,
             inputs.Width,
@@ -587,8 +585,8 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         if (!lights.Ok)
             return Result.Failure(lights.Error);
 
-        // The sky's tables, the shadow mask and, while there is a world to trace, the traced reflections, before the
-        // lighting constants, which name them.
+        // The sky's tables and the shadow mask before the frame's lights and shadows, which name them, and while there is
+        // a world to trace, the traced reflections.
         Result<SkyTables> sky = SkyLuts.Prepare(graph);
         if (!sky.Ok)
             return Result.Failure(sky.Error);
@@ -604,18 +602,9 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
         if (reflections is { Ok: false } unreflected)
             return Result.Failure(unreflected.Error);
 
-        Result<GpuBuffer> lighting = _lighting.Prepare(
-            view.Value,
-            inputs.Skies,
-            camera,
-            sun,
-            sky.Value,
-            lights.Value,
-            shadows?.Value,
-            reflections?.Value
-        );
-        if (!lighting.Ok)
-            return Result.Failure(lighting.Error);
+        Result lit = Lighting.Upload(view.Value, inputs.Skies, camera, sun, sky.Value, lights.Value, shadows?.Value);
+        if (!lit.Ok)
+            return Result.Failure(lit.Error);
 
         // The probes while there is a world to trace.
         Result<ProbeBuffers>? probes = isTraced ? _probes?.Prepare(view.Value, _instances.Extras) : null;
@@ -635,7 +624,6 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
                 sky.Value,
                 lights.Value,
                 shadows?.Value,
-                lighting.Value,
                 traced,
                 probes?.Value,
                 diffuse?.Value,
@@ -706,16 +694,15 @@ public sealed class GIRenderingGem : IGem, IHookIntoDomainLoading, IDisposable
     }
 
     /// <summary>
-    /// What the frame's upload hands its passes: the view, the sky's tables, the lights, the shadow mask on a GPU that
-    /// traces rays, the lighting constants that name them, and on a GPU that traces rays the world as rays see it, the
-    /// probes, the traced diffuse light and the traced reflections, while there is a world.
+    /// What the frame's upload hands its passes: the view, the sky's tables, the lights, and on a GPU that traces rays the
+    /// shadow mask, the world as rays see it, the probes, the traced diffuse light and the traced reflections, while there
+    /// is a world.
     /// </summary>
     private readonly record struct UploadedFrame(
         RenderView View,
         SkyTables Sky,
         LightBuffers Lights,
         ShadowBuffers? Shadows,
-        GpuBuffer Lighting,
         TracedWorld? Traced,
         ProbeBuffers? Probes,
         TracedDiffuseBuffers? Diffuse,

@@ -4,7 +4,7 @@
 // neighbours, each weighed by how much the pixel's own specular would reflect its ray, and blended with the frames
 // before where the surface, or what it reflects, was. Shading reads the result through Scene/TracedReflections.
 // Adapted from Wicked Engine's ray-traced reflections and its stochastic screen-space reflection resolve. The pass
-// header's x is the frame's constants, y the probe grid's, z the lighting constants and w the traced reflection
+// header's x is the frame's buffer, which holds the lights, y the probe grid's constants and w the traced reflection
 // constants.
 module "TraceReflections";
 
@@ -16,7 +16,7 @@ import Core.Pack;
 import Core.Color;
 import Core.Random;
 import Core.Sampling;
-import Scene.Lighting;
+import Scene.Lights;
 import Scene.Probes;
 import Scene.Traced;
 import Scene.TracedReflections;
@@ -89,13 +89,13 @@ void TraceReflections<S : ISky>(uint3 thread : SV_DispatchThreadID)
     AccelerationRef acceleration = { frame.acceleration };
     RaytracingAccelerationStructure scene = acceleration.Get();
     RayHit hit = GetClosestHit(scene, origin, ray.xyz, RayRange, RAY_FLAG_CULL_BACK_FACING_TRIANGLES);
-    LightingConstants lighting = GetLighting();
-    float4 light = float4(GetSkyRadiance<S>(frame, lighting, ray.xyz), RayRange);
+    Lights lights = GetLights();
+    float4 light = float4(GetSkyRadiance<S>(lights, ray.xyz), RayRange);
     if (hit.isHit)
     {
         HitSurface landed = LoadHitSurface(frame, hit, origin, ray.xyz);
         float3 xi = GetRandom(thread.xy, frame.frameIndex, 2u);
-        light = float4(GetHitLight<S>(frame, lighting, GetProbeGrid(), scene, landed, xi), hit.distance);
+        light = float4(GetHitLight<S>(frame, lights, GetProbeGrid(), scene, landed, xi), hit.distance);
     }
 
     traced.Store(thread.xy, light);

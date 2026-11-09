@@ -3,7 +3,7 @@
 // one light at random and by the probes, or the probes' light at the pixel where it reaches nothing within range; then
 // filtered over its neighbours, and blended with the frames before where they saw the same surface. Shading reads the
 // result through Scene/TracedDiffuse. Adapted from Wicked Engine's ray-traced diffuse. The pass header's x is the
-// frame's constants, y the probe grid's, z the lighting constants and w the traced diffuse constants.
+// frame's buffer, which holds the lights, y the probe grid's constants and w the traced diffuse constants.
 module "TraceDiffuse";
 
 import Core.Heap;
@@ -14,7 +14,7 @@ import Core.Pack;
 import Core.Color;
 import Core.Random;
 import Core.Sampling;
-import Scene.Lighting;
+import Scene.Lights;
 import Scene.Probes;
 import Scene.Traced;
 import Scene.TracedDiffuse;
@@ -55,7 +55,7 @@ void TraceDiffuse<S : ISky>(uint3 thread : SV_DispatchThreadID)
         return;
     }
 
-    LightingConstants lighting = GetLighting();
+    Lights lights = GetLights();
     ProbeGridConstants grid = GetProbeGrid();
     TextureRef normalTexture = { frame.gbufferNormal };
     float3 normal = DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0);
@@ -80,7 +80,7 @@ void TraceDiffuse<S : ISky>(uint3 thread : SV_DispatchThreadID)
 
         HitSurface surface = LoadHitSurface(frame, hit, origin, direction);
         float3 xi = GetRandom(thread.xy, frame.frameIndex, 1u + RayCount + i);
-        sum += GetHitLight<S>(frame, lighting, grid, scene, surface, xi);
+        sum += GetHitLight<S>(frame, lights, grid, scene, surface, xi);
     }
 
     traced.Store(thread.xy, float4(sum / float(RayCount), 1.0));

@@ -1,13 +1,11 @@
 // Each tile of the screen's lights: the depths its pixels hold bound a frustum, and a light whose sphere is inside the
 // frustum's sides and touches the box around it sets its bit in the tile's words (Harada et al., "Forward+: Bringing
-// Deferred Lighting to the Next Level", 2012). The pass header's x is the frame's constants and z the lighting
-// constants.
+// Deferred Lighting to the Next Level", 2012). The pass header's x is the frame's buffer, which holds the lights.
 module "CullLights";
 
 import Core.Heap;
 import Core.Pass;
 import Core.Frame;
-import Scene.Lighting;
 import Scene.Lights;
 
 static const uint Threads = 8u;
@@ -46,7 +44,7 @@ bool IsSphereTouchingBox(float3 center, float radius, float3 low, float3 high)
 void CullLights(uint3 group : SV_GroupID, uint3 thread : SV_DispatchThreadID, uint index : SV_GroupIndex)
 {
     FrameConstants frame = GetFrame();
-    LightingConstants lighting = GetLighting();
+    Lights lights = GetLights();
     uint2 size = uint2(frame.width, frame.height);
     for (uint i = index; i < LightBuckets; i += Threads * Threads)
     {
@@ -120,10 +118,10 @@ void CullLights(uint3 group : SV_GroupID, uint3 thread : SV_DispatchThreadID, ui
             }
         }
 
-        uint count = min(lighting.lightCount, MaxLights);
+        uint count = min(lights.count, MaxLights);
         for (uint l = index; l < count; l += Threads * Threads)
         {
-            GpuLight light = LoadLight(lighting.lights, l);
+            GpuLight light = LoadLight(lights.table, l);
             float3 center = Relative(frame, light.position);
             float radius = GetLightReach(light);
             bool isOutside = false;
@@ -139,7 +137,7 @@ void CullLights(uint3 group : SV_GroupID, uint3 thread : SV_DispatchThreadID, ui
 
     GroupMemoryBarrierWithGroupSync();
     uint tilesAcross = (size.x + LightTileSize - 1u) / LightTileSize;
-    ArrayRef<uint> tiles = { lighting.lightTiles };
+    ArrayRef<uint> tiles = { lights.tiles };
     uint offset = GetLightTileOffset(group.xy, tilesAcross);
     for (uint b = index; b < LightBuckets; b += Threads * Threads)
     {

@@ -1,13 +1,12 @@
 // The light a ray brings back: the sky's where it hits nothing, and where it hits, what the surface there reflects of
 // one light picked at random, the sun among them, with a ray to say how much of it gets through, and of the probes'
-// light. The pass header's x is the frame's constants and z the lighting constants.
+// light. The pass header's x is the frame's buffer, which holds the lights.
 module "Trace/HitLight";
 
 import Core.Heap;
 import Core.Frame;
 import Core.Math;
 import Core.Sampling;
-import Scene.Lighting;
 import Scene.Lights;
 import Scene.Probes;
 import Light.Lights;
@@ -19,13 +18,13 @@ import Trace.HitSurface;
 // average.
 public float3 GetDirectLight<S : ISky>(
     FrameConstants frame,
-    LightingConstants lighting,
+    Lights lights,
     RaytracingAccelerationStructure world,
     HitSurface surface,
     float3 xi
 )
 {
-    uint lightCount = min(lighting.lightCount, MaxLights);
+    uint lightCount = min(lights.count, MaxLights);
     uint picked = min(uint(xi.x * float(lightCount + 1u)), lightCount);
     float3 origin = surface.position + surface.normal * 0.01;
     float3 direction;
@@ -33,16 +32,16 @@ public float3 GetDirectLight<S : ISky>(
     float distance;
     if (picked == lightCount)
     {
-        float3 toSun = frame.sunDirection.xyz;
+        float3 toSun = lights.sunDirection.xyz;
         direction = normalize(ToWorld(CreateBasis(toSun), float3(SampleConcentricDisk(xi.yz) * SunAngularRadius, 1.0)));
-        irradiance = lighting.hasSky != 0u
-            ? S.GetSunIlluminance(CreateSkyInputs(frame, lighting, toSun, false))
-            : lighting.sunIlluminance.rgb;
+        irradiance = lights.hasSky != 0u
+            ? S.GetSunIlluminance(CreateSkyInputs(lights, toSun, false))
+            : lights.sunIlluminance.rgb;
         distance = 1e6;
     }
     else
     {
-        GpuLight light = LoadLight(lighting.lights, picked);
+        GpuLight light = LoadLight(lights.table, picked);
         float3 toTarget = SampleLightPoint(light, surface.position, xi.yz) - origin;
         distance = length(toTarget) * 0.999;
         direction = toTarget / max(length(toTarget), Epsilon);
@@ -58,26 +57,26 @@ public float3 GetDirectLight<S : ISky>(
 }
 
 // The sky along a direction, without the sun's disc, whose light the sun's own rays bring.
-public float3 GetSkyRadiance<S : ISky>(FrameConstants frame, LightingConstants lighting, float3 direction)
+public float3 GetSkyRadiance<S : ISky>(Lights lights, float3 direction)
 {
-    if (lighting.hasSky == 0u)
-        return frame.skyRadiance.rgb * lighting.sunIlluminance.r;
+    if (lights.hasSky == 0u)
+        return lights.skyRadiance.rgb * lights.sunIlluminance.r;
 
-    return S.Evaluate(CreateSkyInputs(frame, lighting, direction, false));
+    return S.Evaluate(CreateSkyInputs(lights, direction, false));
 }
 
 // The light a surface a ray landed on sends back along it: what it reflects of one light picked at random by xi and of
 // the probes' light around it, and what it gives off.
 public float3 GetHitLight<S : ISky>(
     FrameConstants frame,
-    LightingConstants lighting,
+    Lights lights,
     ProbeGridConstants grid,
     RaytracingAccelerationStructure world,
     HitSurface surface,
     float3 xi
 )
 {
-    float3 light = GetDirectLight<S>(frame, lighting, world, surface, xi)
+    float3 light = GetDirectLight<S>(frame, lights, world, surface, xi)
         + GetProbeIrradiance(grid, surface.position, surface.normal);
     return light * surface.diffuse + surface.emissive;
 }

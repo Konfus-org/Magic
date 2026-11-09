@@ -14,6 +14,7 @@ import Scene.Materials;
 import Post.IPixelEffect;
 import Trace.HitSurface;
 import Scene.Clusters;
+import Scene.Lights;
 
 // The reversed depth a pixel where nothing was drawn is put at: far along its ray, short of infinity.
 static const float FarDepth = 1e-6;
@@ -61,6 +62,7 @@ GpuEffectPass LoadPass()
 // What an effect is handed for a texel of what the pass writes, which is size texels across.
 PixelEffectInputs CreateInputs(FrameConstants frame, GpuEffectPass pass, uint2 pixel, uint2 size)
 {
+    Lights lights = GetLights();
     PixelEffectInputs inputs;
     inputs.size = size;
     inputs.pixel = pixel;
@@ -69,10 +71,10 @@ PixelEffectInputs CreateInputs(FrameConstants frame, GpuEffectPass pass, uint2 p
     inputs.deltaSec = frame.deltaSec;
     inputs.time = frame.timeSec;
     inputs.cameraPosition = frame.cameraPosition.xyz;
-    inputs.sunDirection = frame.sunDirection.xyz;
-    inputs.sunRadiance = frame.sunRadiance.rgb;
+    inputs.sunDirection = lights.sunDirection.xyz;
+    inputs.sunRadiance = lights.sunIlluminance.rgb;
     // PROTO: the sky's light as the shading draws a missing sky, until the sky's tables are handed on.
-    inputs.skyRadiance = frame.skyRadiance.rgb * frame.sunRadiance.r;
+    inputs.skyRadiance = lights.skyRadiance.rgb * lights.sunIlluminance.r;
     // The sun as a point infinitely far along its direction, whose clip w is its depth along the view: the cosine.
     float4 sunClip = mul(float4(inputs.sunDirection, 0.0), frame.viewProjection);
     inputs.sunUv = float2(sunClip.x, -sunClip.y) / sunClip.w * 0.5 + 0.5;

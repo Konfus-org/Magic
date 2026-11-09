@@ -12,7 +12,6 @@ namespace Magic.GIRendering;
 internal sealed class FrameView(GpuResources resources)
 {
     private const float ErrorThresholdPixels = 1;
-    private const float SkyBrightness = 0.3f;
     private const uint JitterFrames = 256;
 
     /// <summary>
@@ -41,14 +40,13 @@ internal sealed class FrameView(GpuResources resources)
 
     /// <summary>
     /// The main view at a size, its targets asked for, and its constants, the camera shifted by
-    /// <paramref name="jitter"/>, the sun and the frame's resources, copied in a transfer pass the caller opened: the
+    /// <paramref name="jitter"/>, and the frame's resources, copied in a transfer pass the caller opened: the
     /// instance and material tables, the cull's buffers and the world's acceleration structure and hit materials, which
     /// the caller asked for before.
     /// </summary>
     public Result<RenderView> Upload(
         RenderGraph graph,
         RenderCamera camera,
-        RenderSun sun,
         in Frame frame,
         Vector2 jitter,
         int width,
@@ -101,9 +99,6 @@ internal sealed class FrameView(GpuResources resources)
             HitMaterials = hitMaterials.Id,
             TimeSec = (float)frame.AppSec,
             DeltaSec = (float)frame.AppDeltaSec,
-            SunDirection = new Vector4(sun.Direction, 0),
-            SunRadiance = new Vector4(sun.Radiance, 0),
-            SkyRadiance = new Vector4(SkyBrightness * 0.8f, SkyBrightness * 0.9f, SkyBrightness, 0),
             PixelsPerRadian = height / (2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360)),
             FrameIndex = frame.Index,
             Jitter = jitter,
@@ -151,7 +146,7 @@ internal sealed class FrameView(GpuResources resources)
                 : (unjittered, constants.CameraPosition);
         _previous = (unjittered, constants.CameraPosition, width, height);
         graph.Upload(targets.Constants, [constants]);
-        graph.Upload(targets.Constants, [clusters], FrameConstants.Bytes);
+        graph.Upload(targets.Constants, [clusters], ClusterConstants.Offset);
 
         return made;
     }
@@ -214,7 +209,7 @@ internal sealed class FrameView(GpuResources resources)
     )
     {
         Result<GpuBuffer> constants = graph.Buffer(
-            GpuDescriptions.GetBuffer("Frame constants", FrameConstants.Bytes + ClusterConstants.Bytes)
+            GpuDescriptions.GetBuffer("Frame constants", ClusterConstants.Offset + ClusterConstants.Bytes)
         );
         Result<GpuTexture> visibilityBuffer = graph.Texture(
             GpuDescriptions.GetTexture(

@@ -170,7 +170,6 @@ internal sealed class ShadowMask(AssetManager assets, GpuResources resources)
     public void Record(
         in RenderView view,
         in GpuConstants header,
-        GpuBuffer lightingConstants,
         in LightBuffers lights,
         in ShadowBuffers shadows,
         GpuBuffer hitMaterials
@@ -179,7 +178,6 @@ internal sealed class ShadowMask(AssetManager assets, GpuResources resources)
         view.Graph.Compute("Trace shadows", _traceShader, header)
             .Reads(
                 view.Constants,
-                lightingConstants,
                 lights.Table,
                 lights.Tiles,
                 view.Instances,
@@ -204,7 +202,6 @@ internal sealed class ShadowMask(AssetManager assets, GpuResources resources)
         view.Graph.Compute("Classify shadows", _classifyShader, denoise)
             .Reads(
                 view.Constants,
-                lightingConstants,
                 shadows.Constants,
                 shadows.SunTiles,
                 view.Depth,
@@ -234,7 +231,6 @@ internal sealed class ShadowMask(AssetManager assets, GpuResources resources)
         view.Graph.Compute("Blend shadows", _blendShader, denoise)
             .Reads(
                 view.Constants,
-                lightingConstants,
                 shadows.Constants,
                 shadows.Traced,
                 view.Depth,

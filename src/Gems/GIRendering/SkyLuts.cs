@@ -23,7 +23,7 @@ internal sealed class SkyLuts(AssetManager assets)
     public ImmutableArray<ShaderEntry> Shaders => [_transmittanceShader, _multiScatteringShader, _viewShader];
 
     /// <summary>
-    /// The tables asked for, before the lighting constants name them.
+    /// The tables asked for, before the lights name them.
     /// </summary>
     public static Result<SkyTables> Prepare(RenderGraph graph)
     {
@@ -39,27 +39,21 @@ internal sealed class SkyLuts(AssetManager assets)
         return Result.Success(new SkyTables(transmittance.Value, multiScattering.Value, view.Value));
     }
 
-    public void Record(
-        RenderGraph graph,
-        in GpuConstants header,
-        GpuBuffer frameConstants,
-        GpuBuffer lightingConstants,
-        in SkyTables tables
-    )
+    public void Record(RenderGraph graph, in GpuConstants header, GpuBuffer frameConstants, in SkyTables tables)
     {
         graph
             .Compute("Sky: transmittance", _transmittanceShader, header)
-            .Reads(lightingConstants)
+            .Reads(frameConstants)
             .Writes(tables.Transmittance)
             .DispatchOver(256, 64);
         graph
             .Compute("Sky: multi-scattering", _multiScatteringShader, header)
-            .Reads(lightingConstants, tables.Transmittance)
+            .Reads(frameConstants, tables.Transmittance)
             .Writes(tables.MultiScattering)
             .DispatchOver(32, 32);
         graph
             .Compute("Sky: view", _viewShader, header)
-            .Reads(frameConstants, lightingConstants, tables.Transmittance, tables.MultiScattering)
+            .Reads(frameConstants, tables.Transmittance, tables.MultiScattering)
             .Writes(tables.View)
             .DispatchOver(192, 108);
     }

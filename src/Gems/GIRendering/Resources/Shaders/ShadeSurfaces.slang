@@ -2,7 +2,8 @@
 // tile lists, each dimmed by the shadow mask and the sun coloured by its tint through glass, and by the light around
 // it, traced on a GPU that traces rays and else the sky's, and what it reflects, traced where it is smooth enough, its
 // direct and indirect light summed over the shared BRDF; and the sky itself where nothing was drawn. The pass header's
-// x is the frame's constants, z the lighting constants and w the traced diffuse constants, or 0 where there are none.
+// x is the frame's buffer, which holds the lights and the shadows, z the traced reflections' light and w the traced
+// diffuse constants, each 0 where there are none.
 module "ShadeSurfaces";
 
 import Core.Heap;
@@ -10,7 +11,6 @@ import Core.Pass;
 import Core.Frame;
 import Core.Math;
 import Core.Pack;
-import Scene.Lighting;
 import Scene.Lights;
 import Scene.Shadows;
 import Scene.TracedDiffuse;
@@ -28,7 +28,7 @@ import Scene.Clusters;
 // alone, so a closed room reflects none of the sky.
 float3 GetIndirectLight<S : ISky>(
     FrameConstants frame,
-    LightingConstants lighting,
+    Lights lights,
     Brdf brdf,
     float roughness,
     uint2 pixel,
@@ -41,21 +41,22 @@ float3 GetIndirectLight<S : ISky>(
     float3 diffuse;
     if (isTraced)
         diffuse = SampleTracedDiffuse(frame, GetTracedDiffuse(), pixel, relative, normal);
-    else if (lighting.hasSky != 0u)
-        diffuse = S.GetAmbient(CreateSkyInputs(frame, lighting, normal, false), normal) * InvPi;
+    else if (lights.hasSky != 0u)
+        diffuse = S.GetAmbient(CreateSkyInputs(lights, normal, false), normal) * InvPi;
     else
-        diffuse = lighting.sunIlluminance.rgb * 0.1 * (0.5 + 0.5 * normal.y) * InvPi;
+        diffuse = lights.sunIlluminance.rgb * 0.1 * (0.5 + 0.5 * normal.y) * InvPi;
 
     float3 specular = diffuse;
-    if (!isTraced && lighting.hasSky != 0u)
+    if (!isTraced && lights.hasSky != 0u)
     {
-        float3 reflected = S.Evaluate(CreateSkyInputs(frame, lighting, reflect(-view, normal), false));
+        float3 reflected = S.Evaluate(CreateSkyInputs(lights, reflect(-view, normal), false));
         specular = lerp(reflected, diffuse, saturate(roughness));
     }
 
-    if (lighting.reflections != 0u && roughness <= TracedRoughness)
+    uint reflections = GetPassHeader().z;
+    if (reflections != 0u && roughness <= TracedRoughness)
     {
-        float4 traced = SampleTracedReflections(frame, lighting.reflections, pixel, relative, normal, roughness);
+        float4 traced = SampleTracedReflections(frame, reflections, pixel, relative, normal, roughness);
         specular = lerp(specular, traced.rgb, traced.a);
     }
 
@@ -68,7 +69,7 @@ float3 GetIndirectLight<S : ISky>(
 void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
 {
     FrameConstants frame = GetFrame();
-    LightingConstants lighting = GetLighting();
+    Lights lights = GetLights();
     uint2 size = uint2(frame.width, frame.height);
     if (any(thread.xy >= size))
         return;
@@ -78,14 +79,14 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
     float depth = depthTexture.Load(thread.xy, 0u).x;
     float3 relative = ReconstructRelative(frame, uv, depth > 0.0 ? depth : 1e-6);
     float3 view = NormalizeSafe(-relative, float3(0.0, 0.0, -1.0));
-    StorageRef hdr = { lighting.hdr, 0u };
+    StorageRef hdr = { frame.hdr, 0u };
 
     UintTextureRef visibility = { GetClusters().visibility };
     if (visibility.Load(thread.xy, 0u) == 0u)
     {
-        float3 sky = lighting.hasSky != 0u
-            ? S.Evaluate(CreateSkyInputs(frame, lighting, -view, true))
-            : frame.skyRadiance.rgb * lighting.sunIlluminance.r * lerp(0.6, 1.4, 1.0 - uv.y);
+        float3 sky = lights.hasSky != 0u
+            ? S.Evaluate(CreateSkyInputs(lights, -view, true))
+            : lights.skyRadiance.rgb * lights.sunIlluminance.r * lerp(0.6, 1.4, 1.0 - uv.y);
         hdr.Store(thread.xy, float4(sky, 1.0));
         return;
     }
@@ -98,20 +99,21 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
     float4 surface = surfaceTexture.Load(thread.xy, 0u);
     Brdf brdf = CreateBrdf(base.rgb, base.a, surface.x, surface.y);
 
-    float3 toSun = frame.sunDirection.xyz;
-    float3 sunIlluminance = lighting.hasSky != 0u
-        ? S.GetSunIlluminance(CreateSkyInputs(frame, lighting, toSun, false))
-        : lighting.sunIlluminance.rgb;
-    uint4 shadows = LoadShadowMask(lighting.shadowMask, thread.xy, size.x);
-    float3 sunLight = sunIlluminance * GetShadow(shadows, 0u) * LoadSunTint(lighting.sunTint, thread.xy);
+    float3 toSun = lights.sunDirection.xyz;
+    float3 sunIlluminance = lights.hasSky != 0u
+        ? S.GetSunIlluminance(CreateSkyInputs(lights, toSun, false))
+        : lights.sunIlluminance.rgb;
+    Shadows shadows = GetShadows();
+    uint4 shadowWords = LoadShadowMask(shadows.mask, thread.xy, size.x);
+    float3 sunLight = sunIlluminance * GetShadow(shadowWords, 0u) * LoadSunTint(shadows.sunTint, thread.xy);
     float3 color = Evaluate(brdf, normal, view, toSun) * sunLight;
 
     // The lights of the pixel's tile, a word of bits at a time.
     float3 world = relative + frame.cameraPosition.xyz;
-    ArrayRef<uint> tiles = { lighting.lightTiles };
+    ArrayRef<uint> tiles = { lights.tiles };
     uint tilesAcross = (size.x + LightTileSize - 1u) / LightTileSize;
     uint offset = GetLightTileOffset(thread.xy / LightTileSize, tilesAcross);
-    uint buckets = (min(lighting.lightCount, MaxLights) + 31u) / 32u;
+    uint buckets = (min(lights.count, MaxLights) + 31u) / 32u;
     uint slot = 1u;
     for (uint bucket = 0u; bucket < buckets; bucket++)
     {
@@ -120,11 +122,11 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
         {
             uint bit = firstbitlow(bits);
             bits &= bits - 1u;
-            LightSample sample = SampleLight(LoadLight(lighting.lights, bucket * 32u + bit), world, normal);
-            color += Evaluate(brdf, normal, view, sample.direction) * sample.irradiance * GetShadow(shadows, slot);
+            LightSample sample = SampleLight(LoadLight(lights.table, bucket * 32u + bit), world, normal);
+            color += Evaluate(brdf, normal, view, sample.direction) * sample.irradiance * GetShadow(shadowWords, slot);
             slot++;
         }
     }
-    color += GetIndirectLight<S>(frame, lighting, brdf, surface.x, thread.xy, relative, normal, view) * surface.z;
+    color += GetIndirectLight<S>(frame, lights, brdf, surface.x, thread.xy, relative, normal, view) * surface.z;
     hdr.Store(thread.xy, float4(color, 1.0));
 }

@@ -2,7 +2,7 @@
 // Ray-Traced Irradiance Fields", 2019): each probe is given rays as its light still changes, each ray is traced into the
 // world and lit where it lands by one light picked at random and by the probes themselves, and each probe blends its
 // rays into its light's harmonics and its map of distances, moving away from a surface it is near. The pass header's x
-// is the frame's constants, y the grid's and z the lighting constants.
+// is the frame's buffer, which holds the lights, and y the grid's constants.
 module "UpdateProbes";
 
 import Core.Heap;
@@ -13,7 +13,7 @@ import Core.Pack;
 import Core.Random;
 import Core.Sampling;
 import Scene.Culling;
-import Scene.Lighting;
+import Scene.Lights;
 import Scene.Probes;
 import Sky.ISky;
 import Trace.HitSurface;
@@ -222,7 +222,7 @@ float3x3 GetRandomRotation(uint frameIndex)
 void TraceProbes<S : ISky>(uint3 thread : SV_DispatchThreadID)
 {
     FrameConstants frame = GetFrame();
-    LightingConstants lighting = GetLighting();
+    Lights lights = GetLights();
     ProbeGridConstants grid = GetProbeGrid();
     BufferRef counts = { grid.rayCounts };
     if (thread.x >= counts.Load<uint>(0u))
@@ -244,7 +244,7 @@ void TraceProbes<S : ISky>(uint3 thread : SV_DispatchThreadID)
     if (!hit.isHit)
     {
         ray.depth = -1.0;
-        ray.radiance = GetSkyRadiance<S>(frame, lighting, direction);
+        ray.radiance = GetSkyRadiance<S>(lights, direction);
     }
     else
     {
@@ -253,7 +253,7 @@ void TraceProbes<S : ISky>(uint3 thread : SV_DispatchThreadID)
         // A ray that reached a back is cut short, so a probe sees the inside closer than it is and doesn't leak it.
         ray.depth = surface.isBackface ? hit.distance * 0.9 : hit.distance;
         float3 xi = GetRandom(uint2(thread.x, 0u), frame.frameIndex, 1u);
-        float3 light = GetDirectLight<S>(frame, lighting, world, surface, xi);
+        float3 light = GetDirectLight<S>(frame, lights, world, surface, xi);
         if (grid.hasHistory != 0u)
             light += 0.95 * GetProbeIrradiance(grid, surface.position, surface.normal);
 

@@ -2,8 +2,8 @@
 // through the pane's colour, and through any other pane between, which a ray finds on a GPU that traces rays; what it
 // reflects of the light around it, more of it at a grazing angle (Schlick's Fresnel); and the sun on it, its
 // highlight and what its body scatters. The entry is specialised to one translucent material shader, numbered in the
-// pass header's w, and to the sky; the header's x is the frame's constants, y the probe grid's, or 0 where there is
-// none, and z the lighting constants.
+// pass header's w, and to the sky; the header's x is the frame's buffer, which holds the lights, and y the probe
+// grid's constants, or 0 where there are none.
 module "ShadeGlass";
 
 import Core.Heap;
@@ -13,7 +13,7 @@ import Core.Math;
 import Scene.Instances;
 import Scene.Materials;
 import Scene.Visibility;
-import Scene.Lighting;
+import Scene.Lights;
 import Scene.Probes;
 import Surface.Surface;
 import Surface.Brdf;
@@ -27,12 +27,12 @@ import Scene.Clusters;
 static const float GlassReflectance = 0.04;
 
 // The light reaching a point from a direction: the probes' where there are any, else the sky's.
-float3 GetSurroundings<S : ISky>(FrameConstants frame, LightingConstants lighting, float3 world, float3 direction)
+float3 GetSurroundings<S : ISky>(Lights lights, float3 world, float3 direction)
 {
     if (GetPassHeader().y != 0u)
         return GetProbeIrradiance(GetProbeGrid(), world, direction);
 
-    return GetSkyRadiance<S>(frame, lighting, direction);
+    return GetSkyRadiance<S>(lights, direction);
 }
 
 [shader("compute")]
@@ -59,7 +59,7 @@ void ShadeGlass<M : IMaterial, S : ISky>(uint3 thread : SV_DispatchThreadID)
     SurfaceInputs inputs = CreateSurfaceInputs(shown);
     M material = LoadMaterialParams<M>(frame.materials, row);
     SurfaceOutputs surface = material.Evaluate(inputs);
-    LightingConstants lighting = GetLighting();
+    Lights lights = GetLights();
     float3 view = inputs.viewDirection;
     // A pane is seen from either side.
     float3 normal = dot(surface.normal, view) < 0.0 ? -surface.normal : surface.normal;
@@ -69,10 +69,10 @@ void ShadeGlass<M : IMaterial, S : ISky>(uint3 thread : SV_DispatchThreadID)
     // What is behind, through the pane and any other between it and the opaque surface.
     StorageRef picture = { frame.hdr, 0u };
     float3 through = surface.baseColor * (1.0 - surface.alpha);
-    float3 toSun = frame.sunDirection.xyz;
-    float3 sunIlluminance = lighting.hasSky != 0u
-        ? S.GetSunIlluminance(CreateSkyInputs(frame, lighting, toSun, false))
-        : lighting.sunIlluminance.rgb;
+    float3 toSun = lights.sunDirection.xyz;
+    float3 sunIlluminance = lights.hasSky != 0u
+        ? S.GetSunIlluminance(CreateSkyInputs(lights, toSun, false))
+        : lights.sunIlluminance.rgb;
     if (frame.acceleration != 0u)
     {
         AccelerationRef acceleration = { frame.acceleration };
@@ -88,8 +88,8 @@ void ShadeGlass<M : IMaterial, S : ISky>(uint3 thread : SV_DispatchThreadID)
 
     Brdf body = CreateBrdf(surface.baseColor * surface.alpha, 0.0, surface.roughness, 0.5);
     float3 color = picture.Load(thread.xy).rgb * through * (1.0 - fresnel)
-        + fresnel * GetSurroundings<S>(frame, lighting, world, reflect(-view, normal))
-        + body.diffuse * GetSurroundings<S>(frame, lighting, world, normal)
+        + fresnel * GetSurroundings<S>(lights, world, reflect(-view, normal))
+        + body.diffuse * GetSurroundings<S>(lights, world, normal)
         + Evaluate(body, normal, view, toSun) * sunIlluminance
         + surface.emissive;
     picture.Store(thread.xy, float4(color, 1.0));

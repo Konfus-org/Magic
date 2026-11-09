@@ -128,7 +128,6 @@ internal sealed class TracedReflections(AssetManager assets, GpuResources resour
     /// </summary>
     public void Record(
         in RenderView view,
-        GpuBuffer lightingConstants,
         GpuBuffer hitMaterials,
         in SkyTables sky,
         in LightBuffers lights,
@@ -138,17 +137,11 @@ internal sealed class TracedReflections(AssetManager assets, GpuResources resour
     {
         RenderGraph graph = view.Graph;
         (int width, int height) = GetSize(view);
-        GpuConstants header = new(
-            view.Constants.Id,
-            probes.Constants.Id,
-            lightingConstants.Id,
-            reflections.Constants.Id
-        );
+        GpuConstants header = new(view.Constants.Id, probes.Constants.Id, 0, reflections.Constants.Id);
         graph
             .Compute("Trace reflections", _traceShader, header)
             .Reads(
                 view.Constants,
-                lightingConstants,
                 reflections.Constants,
                 view.Depth,
                 view.GBufferNormal,
