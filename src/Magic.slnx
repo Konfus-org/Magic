@@ -17,6 +17,7 @@
     <Project Path="Gems/ImGuiDebugUI/ImGuiDebugUI.csproj" />
     <Project Path="Gems/DebugTools/DebugTools.csproj" />
     <Project Path="Gems/GIRendering/GIRendering.csproj" />
+    <Project Path="Gems/GlobalIllumination/GlobalIllumination.csproj" />
   </Folder>
   <Folder Name="/Docs/">
     <File Path="../AGENTS.md" />

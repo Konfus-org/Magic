@@ -12,6 +12,7 @@ namespace Magic.GIRendering;
 /// </summary>
 internal readonly record struct RenderView(
     GpuBuffer Constants,
+    GpuBuffer IndirectLight,
     GpuBuffer Instances,
     GpuBuffer Materials,
     int InstanceCount,
@@ -229,7 +230,12 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
         CullBuffers cull = view.Cull;
 
         // Budget: last frame's count steers the frame's handoff and error threshold, then the counts start again.
-        view.Graph.Compute("Budget clusters", _budgetShader, new GpuConstants(view.Constants.Id, 0, cull.Budget.Id))
+        view.Graph.Compute(
+                "Budget clusters",
+                _budgetShader,
+                new GpuConstants(view.Constants.Id, 0, cull.Budget.Id),
+                RenderStage.Geometry
+            )
             .Writes(view.Constants, cull.Counts, cull.Budget)
             .Dispatch(1, 1);
 
@@ -240,19 +246,26 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
         view.Graph.Compute(
                 "Count clusters",
                 _cullShader,
-                new GpuConstants(view.Constants.Id, ModeCount, cull.ImpostorDraws.Id, cull.InstanceRows.Id)
+                new GpuConstants(view.Constants.Id, ModeCount, cull.ImpostorDraws.Id, cull.InstanceRows.Id),
+                RenderStage.Geometry
             )
             .Reads(view.Constants, view.Instances, resources.ClusterPool, resources.ClusterModels, view.Hzb)
             .Writes(cull.Counts, cull.InstanceRows)
             .Dispatch(across, down);
-        view.Graph.Compute("Fit clusters", _cullShader, new GpuConstants(view.Constants.Id, ModeFit))
+        view.Graph.Compute(
+                "Fit clusters",
+                _cullShader,
+                new GpuConstants(view.Constants.Id, ModeFit),
+                RenderStage.Geometry
+            )
             .Reads(view.Constants)
             .Writes(cull.Counts)
             .Dispatch(1, 1);
         view.Graph.Compute(
                 "Place clusters",
                 _cullShader,
-                new GpuConstants(view.Constants.Id, ModePlace, cull.ImpostorDraws.Id, cull.InstanceRows.Id)
+                new GpuConstants(view.Constants.Id, ModePlace, cull.ImpostorDraws.Id, cull.InstanceRows.Id),
+                RenderStage.Geometry
             )
             .Reads(
                 view.Constants,
@@ -296,7 +309,8 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
         view.Graph.Compute(
                 "Retest clusters",
                 _cullShader,
-                new GpuConstants(view.Constants.Id, ModeRetest, cull.ImpostorDraws.Id)
+                new GpuConstants(view.Constants.Id, ModeRetest, cull.ImpostorDraws.Id),
+                RenderStage.Geometry
             )
             .Reads(
                 view.Constants,
@@ -392,7 +406,8 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
             .Graph.Compute(
                 "Resolve materials",
                 _resolveShaders[shader],
-                new GpuConstants(view.Constants.Id, resources.ImpostorTable.Id, (uint)shader)
+                new GpuConstants(view.Constants.Id, resources.ImpostorTable.Id, (uint)shader),
+                RenderStage.Geometry
             )
             .Reads(
                 view.Constants,
@@ -427,7 +442,7 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
         params ReadOnlySpan<GpuResource> reads
     ) =>
         view
-            .Graph.Draw(name, shaders, targets, new GpuConstants(view.Constants.Id))
+            .Graph.Draw(name, shaders, targets, new GpuConstants(view.Constants.Id), RenderStage.Geometry)
             .Reads(
                 view.Constants,
                 view.Instances,
@@ -468,7 +483,8 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
                     Colors = [new GpuTarget { Texture = view.Visibility, Load = TargetLoad.Keep }],
                     Depth = new GpuTarget { Texture = view.Depth, Load = TargetLoad.Keep },
                 },
-                new GpuConstants(view.Constants.Id, 0, resources.ImpostorTable.Id)
+                new GpuConstants(view.Constants.Id, 0, resources.ImpostorTable.Id),
+                RenderStage.Geometry
             )
             .Reads(view.Constants, view.Instances, resources.ImpostorTable, resources.ClusterModels)
             .Reads(heapTextures.AsSpan())
@@ -493,7 +509,8 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
                 .Graph.Compute(
                     $"Build depth pyramid {level}",
                     _buildHzbShader,
-                    new GpuConstants(view.Constants.Id, (uint)level)
+                    new GpuConstants(view.Constants.Id, (uint)level),
+                    RenderStage.Geometry
                 )
                 .Reads(view.Constants);
             if (level == 0)

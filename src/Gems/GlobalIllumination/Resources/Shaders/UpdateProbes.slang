@@ -2,7 +2,8 @@
 // Ray-Traced Irradiance Fields", 2019): each probe is given rays as its light still changes, each ray is traced into the
 // world and lit where it lands by one light picked at random and by the probes themselves, and each probe blends its
 // rays into its light's harmonics and its map of distances, moving away from a surface it is near. The pass header's x
-// is the frame's buffer, which holds the lights and the grid's constants.
+// is the frame's buffer, which holds the lights and names IndirectLight, which holds the grid; its y is the GI buffer
+// and its z IndirectLight as the gem asked for it.
 module "UpdateProbes";
 
 import Core.Heap;
@@ -12,9 +13,9 @@ import Core.Math;
 import Core.Pack;
 import Core.Random;
 import Core.Sampling;
-import Scene.Culling;
 import Scene.Lights;
-import Scene.Probes;
+import Light.Probes;
+import Light.Indirect;
 import Sky.ISky;
 import Trace.HitSurface;
 import Trace.HitLight;
@@ -32,6 +33,48 @@ static const float DepthBlend = 0.02;
 static const float OffsetBlend = 0.01;
 
 static const float WeightEpsilon = 0.0001;
+
+// The metres the grid reaches past the traced world's box on every side, and how far towards it the grid moves a
+// frame once the probes hold light, so it doesn't shake their light as instances come and go.
+static const float BoxMargin = 1.0;
+static const float BoxBlend = 0.01;
+
+// The grid placed over the traced world's box with a margin: at once the first time after the probes start afresh,
+// so the passes after start afresh with it, else a little nearer each frame. A start the gem asks for holds until a
+// frame places the grid. Where no instance is traced, the indirect light is for no frame: the passes after trace
+// nothing, and shading takes the sky's light.
+[shader("compute")]
+[numthreads(1, 1, 1)]
+void PlaceProbes()
+{
+    BufferRef buffer = { GetPassHeader().z };
+    IndirectLight indirect = buffer.Load<IndirectLight>(0u);
+    if (indirect.grid.hasHistory == 0u)
+        indirect.grid.placed = 0u;
+
+    FrameConstants frame = GetFrame();
+    if (!IsWrittenFor(GetPassHeader().z, frame) || GetModels().acceleration == 0u)
+    {
+        indirect.frameNumber = 0u;
+        indirect.grid.placed = 0u;
+        buffer.Store<IndirectLight>(0u, indirect);
+        return;
+    }
+
+    Models models = GetModels();
+    ProbeGridConstants grid = indirect.grid;
+    float3 cells = float3(grid.dimensions - 1u);
+    bool isFresh = grid.placed == 0u;
+    float blend = isFresh ? 1.0 : BoxBlend;
+    float3 boxMin = lerp(grid.origin, models.boxMin - BoxMargin, blend);
+    float3 boxMax = lerp(grid.origin + grid.cellSize * cells, models.boxMax + BoxMargin, blend);
+    indirect.grid.origin = boxMin;
+    indirect.grid.cellSize = (boxMax - boxMin) / cells;
+    indirect.grid.maxDistance = Max3(indirect.grid.cellSize) * 1.5;
+    indirect.grid.hasHistory = isFresh ? 0u : 1u;
+    indirect.grid.placed = 1u;
+    buffer.Store<IndirectLight>(0u, indirect);
+}
 
 // A ray as the trace leaves it for the blends: its direction, the distance to what it hit, -1 where it hit nothing,
 // and the light it brought back. Packed as 16-bit floats into a uint4, light past what they hold kept at the most.
@@ -132,6 +175,9 @@ groupshared uint groupRayStart;
 [numthreads(32, 1, 1)]
 void AllocateProbeRays(uint3 group : SV_GroupID, uint index : SV_GroupIndex)
 {
+    if (!IsWrittenFor(GetPassHeader().z, GetFrame()))
+        return;
+
     FrameConstants frame = GetFrame();
     ProbeGridConstants grid = GetProbeGrid();
     uint probe = group.x;
@@ -180,6 +226,9 @@ void AllocateProbeRays(uint3 group : SV_GroupID, uint index : SV_GroupIndex)
 [numthreads(1, 1, 1)]
 void PrepareProbeRays()
 {
+    if (!IsWrittenFor(GetPassHeader().z, GetFrame()))
+        return;
+
     ProbeGridConstants grid = GetProbeGrid();
     BufferRef counts = { grid.rayCounts };
     BufferRef arguments = { grid.rayArguments };
@@ -222,6 +271,9 @@ float3x3 GetRandomRotation(uint frameIndex)
 [numthreads(TraceGroupSize, 1, 1)]
 void TraceProbes<S : ISky>(uint3 thread : SV_DispatchThreadID)
 {
+    if (!IsWrittenFor(GetPassHeader().z, GetFrame()))
+        return;
+
     FrameConstants frame = GetFrame();
     Lights lights = GetLights();
     ProbeGridConstants grid = GetProbeGrid();
@@ -275,6 +327,9 @@ groupshared float2 groupMoments[DepthTexelCount];
 [numthreads(IrradianceTexels, IrradianceTexels, 1)]
 void BlendProbeIrradiance(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID, uint index : SV_GroupIndex)
 {
+    if (!IsWrittenFor(GetPassHeader().z, GetFrame()))
+        return;
+
     ProbeGridConstants grid = GetProbeGrid();
     uint probe = group.x;
     float3 texelDirection = DecodeOctahedral((float2(local.xy) + 0.5) / float(IrradianceTexels) * 2.0 - 1.0);
@@ -378,6 +433,9 @@ static const uint4 DepthBorder[68] = {
 [numthreads(DepthTexels, DepthTexels, 1)]
 void BlendProbeDepth(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID, uint index : SV_GroupIndex)
 {
+    if (!IsWrittenFor(GetPassHeader().z, GetFrame()))
+        return;
+
     ProbeGridConstants grid = GetProbeGrid();
     uint probe = group.x;
     uint3 coord = GetProbeCoord(grid, probe);

@@ -13,8 +13,7 @@ import Core.Math;
 import Core.Pack;
 import Scene.Lights;
 import Scene.Shadows;
-import Scene.TracedDiffuse;
-import Scene.TracedReflections;
+import Light.Indirect;
 import Light.Lights;
 import Sky.ISky;
 import Surface.Brdf;
@@ -37,10 +36,11 @@ float3 GetIndirectLight<S : ISky>(
     float3 view
 )
 {
-    bool isTraced = GetTracedDiffuse().light != 0u;
+    IndirectLight indirect = GetIndirectLight(frame);
+    bool isTraced = indirect.diffuse != 0u;
     float3 diffuse;
     if (isTraced)
-        diffuse = SampleTracedDiffuse(frame, GetTracedDiffuse(), pixel, relative, normal);
+        diffuse = SampleIndirectDiffuse(frame, indirect.diffuse, pixel, relative, normal);
     else if (lights.hasSky != 0u)
         diffuse = S.GetAmbient(CreateSkyInputs(lights, normal, false), normal) * InvPi;
     else
@@ -53,10 +53,9 @@ float3 GetIndirectLight<S : ISky>(
         specular = lerp(reflected, diffuse, saturate(roughness));
     }
 
-    uint reflections = GetTracedReflections().light;
-    if (reflections != 0u && roughness <= TracedRoughness)
+    if (indirect.reflections != 0u && roughness <= TracedRoughness)
     {
-        float4 traced = SampleTracedReflections(frame, reflections, pixel, relative, normal, roughness);
+        float4 traced = SampleIndirectReflections(frame, indirect.reflections, pixel, relative, normal, roughness);
         specular = lerp(specular, traced.rgb, traced.a);
     }
 

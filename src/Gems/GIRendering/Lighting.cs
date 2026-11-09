@@ -11,7 +11,7 @@ namespace Magic.GIRendering;
 /// <summary>
 /// The view's surfaces lit into the HDR picture, and the sky drawn where nothing was: the frame's lights and shadows,
 /// naming the sky's tables, the light table and the shadow mask, uploaded before the view is drawn, and the shading
-/// after them, lit indirectly by the traced diffuse light where there is any; then the nearest translucent surface
+/// after them, lit indirectly by the frame's indirect light where there is any; then the nearest translucent surface
 /// shaded over it.
 /// </summary>
 internal sealed class Lighting(AssetManager assets, GpuResources resources)
@@ -83,9 +83,46 @@ internal sealed class Lighting(AssetManager assets, GpuResources resources)
     }
 
     /// <summary>
+    /// The frame's indirect light, its buffer and, on a GPU that traces rays, what it can name, asked for by Core's
+    /// descriptions at the view's size, so shading reads them after whatever traced them wrote them; they hold nothing
+    /// it reads while nothing traces them.
+    /// </summary>
+    public static Result<ImmutableArray<GpuResource>> GetIndirect(in RenderView view)
+    {
+        RenderGraph graph = view.Graph;
+        if (!graph.Features.HasRayQuery)
+            return Result.Success<ImmutableArray<GpuResource>>([view.IndirectLight]);
+
+        (int width, int height) = (Math.Max(view.Width / 2, 1), Math.Max(view.Height / 2, 1));
+        ImmutableArray<GpuResource>.Builder indirect = ImmutableArray.CreateBuilder<GpuResource>();
+        indirect.Add(view.IndirectLight);
+        foreach (
+            TextureDescription light in (ReadOnlySpan<TextureDescription>)
+                [.. SharedResources.IndirectDiffuse, .. SharedResources.IndirectSpecular]
+        )
+        {
+            Result<GpuTexture> texture = graph.Texture(light with { Width = width, Height = height });
+            if (!texture.Ok)
+                return Result.Failure(texture.Error);
+
+            indirect.Add(texture.Value);
+        }
+
+        Result<GpuBuffer> probes = graph.Buffer(SharedResources.Probes);
+        Result<GpuTexture> probeDepth = graph.Texture(SharedResources.ProbeDepth);
+        if (!probes.Ok || !probeDepth.Ok)
+            return Result.Failure(probes.Ok ? probeDepth.Error : probes.Error);
+
+        indirect.Add(probes.Value);
+        indirect.Add(probeDepth.Value);
+
+        return Result.Success(indirect.ToImmutable());
+    }
+
+    /// <summary>
     /// Every pixel's surface shaded from the sky's tables, its tile's lights and, on a GPU that traces rays, its
-    /// shadows, its traced diffuse light and what it reflects, and the sky where there is none; then the nearest glass
-    /// over it, lit by the light around it from <paramref name="probes"/> where there are any, and its rays through
+    /// shadows, and from <paramref name="indirect"/>, or the sky where it was not written for the frame; then the
+    /// nearest glass over it, lit by the light around it from the probes where there are any, and its rays through
     /// <paramref name="world"/> on a GPU that traces them.
     /// </summary>
     public void Record(
@@ -94,14 +131,12 @@ internal sealed class Lighting(AssetManager assets, GpuResources resources)
         in SkyTables sky,
         in LightBuffers lights,
         ShadowBuffers? shadows,
-        TracedDiffuseBuffers? diffuse,
-        TracedReflectionBuffers? reflections,
-        ProbeBuffers? probes,
+        ImmutableArray<GpuResource> indirect,
         TracedWorld? world
     )
     {
         ComputePass shade = view
-            .Graph.Compute("Shade surfaces", _shadeShader, header)
+            .Graph.Compute("Shade surfaces", _shadeShader, header, RenderStage.Shade)
             .Reads(
                 view.Constants,
                 sky.Transmittance,
@@ -118,17 +153,13 @@ internal sealed class Lighting(AssetManager assets, GpuResources resources)
         if (shadows is { } shadowed)
             shade.Reads(shadowed.Mask, shadowed.SunTint);
 
-        if (diffuse is { } traced)
-            shade.Reads(traced.Light);
-
-        if (reflections is { } reflected)
-            shade.Reads(reflected.Light);
+        shade.Reads(indirect.AsSpan());
 
         shade.Writes(view.Hdr).DispatchOver(view.Width, view.Height);
 
         // The nearest pane over the shaded picture, from what the resolve left in the glass targets.
         ComputePass translucent = view
-            .Graph.Compute("Shade translucent", _translucentShader, header)
+            .Graph.Compute("Shade translucent", _translucentShader, header, RenderStage.Shade)
             .Reads(
                 view.Constants,
                 sky.Transmittance,
@@ -140,8 +171,7 @@ internal sealed class Lighting(AssetManager assets, GpuResources resources)
                 view.GlassSurface,
                 view.Depth
             );
-        if (probes is { } probed)
-            translucent.Reads(probed.Probes, probed.Depth);
+        translucent.Reads(indirect.AsSpan());
 
         if (world is { } rays)
             translucent.Reads(rays.HitMaterials, resources.Meshes, view.Instances);

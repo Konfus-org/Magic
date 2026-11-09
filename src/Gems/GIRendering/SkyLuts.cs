@@ -27,9 +27,9 @@ internal sealed class SkyLuts(AssetManager assets)
     /// </summary>
     public static Result<SkyTables> Prepare(RenderGraph graph)
     {
-        Result<GpuTexture> transmittance = graph.Texture(GetTable("Sky transmittance", 256, 64));
-        Result<GpuTexture> multiScattering = graph.Texture(GetTable("Sky multi-scattering", 32, 32));
-        Result<GpuTexture> view = graph.Texture(GetTable("Sky view", 192, 108));
+        Result<GpuTexture> transmittance = graph.Texture(SharedResources.SkyTransmittance);
+        Result<GpuTexture> multiScattering = graph.Texture(SharedResources.SkyMultiScattering);
+        Result<GpuTexture> view = graph.Texture(SharedResources.SkyView);
         foreach (Result<GpuTexture> texture in (ReadOnlySpan<Result<GpuTexture>>)[transmittance, multiScattering, view])
         {
             if (!texture.Ok)
@@ -42,22 +42,19 @@ internal sealed class SkyLuts(AssetManager assets)
     public void Record(RenderGraph graph, in GpuConstants header, GpuBuffer frameConstants, in SkyTables tables)
     {
         graph
-            .Compute("Sky: transmittance", _transmittanceShader, header)
+            .Compute("Sky: transmittance", _transmittanceShader, header, RenderStage.Prepare)
             .Reads(frameConstants)
             .Writes(tables.Transmittance)
             .DispatchOver(256, 64);
         graph
-            .Compute("Sky: multi-scattering", _multiScatteringShader, header)
+            .Compute("Sky: multi-scattering", _multiScatteringShader, header, RenderStage.Prepare)
             .Reads(frameConstants, tables.Transmittance)
             .Writes(tables.MultiScattering)
             .DispatchOver(32, 32);
         graph
-            .Compute("Sky: view", _viewShader, header)
+            .Compute("Sky: view", _viewShader, header, RenderStage.Prepare)
             .Reads(frameConstants, tables.Transmittance, tables.MultiScattering)
             .Writes(tables.View)
             .DispatchOver(192, 108);
     }
-
-    private static TextureDescription GetTable(string name, int width, int height) =>
-        GpuDescriptions.GetTexture(name, width, height, GpuFormat.R16G16B16A16Sfloat);
 }

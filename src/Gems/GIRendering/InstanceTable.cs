@@ -20,7 +20,7 @@ namespace Magic.GIRendering;
 /// </summary>
 internal sealed class InstanceTable(AssetManager assets, GpuResources resources, MaterialInstance failure)
 {
-    public const int Capacity = 1 << 18;
+    public static readonly int Capacity = (int)(SharedResources.Instances.Bytes / GpuInstance.Bytes);
 
     /// <summary>
     /// How many rows are marked changed and uploaded together.
@@ -138,9 +138,7 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
     /// </summary>
     public Result<(GpuBuffer Rows, GpuBuffer Materials)> Upload(RenderGraph graph)
     {
-        Result<GpuBuffer> rows = graph.Buffer(
-            GpuDescriptions.GetBuffer("Instance table", (long)Capacity * GpuInstance.Bytes)
-        );
+        Result<GpuBuffer> rows = graph.Buffer(SharedResources.Instances);
         if (!rows.Ok)
             return Result.Failure(rows.Error);
 

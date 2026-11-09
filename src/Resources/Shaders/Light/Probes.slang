@@ -1,14 +1,12 @@
 // The probe grid of diffuse light (Majercik et al., "Dynamic Diffuse Global Illumination with Ray-Traced Irradiance
 // Fields", 2019): probes in a box over the world, each holding the light that reaches it as L1 spherical harmonics and
 // the distance to what it sees as an octahedral map of means and squared means, and what a point's light from them is.
-// C#'s ProbeGridConstants is in the frame's buffer after the shadows, the GI constants' first part.
-module "Scene/Probes";
+// The grid is IndirectLight's; its placement is the GPU's, worked out each frame from the traced world's box.
+module "Light/Probes";
 
 import Core.Heap;
-import Core.Pass;
 import Core.Math;
 import Core.Pack;
-import Scene.Shadows;
 
 // The most rays a probe traces in a frame, C#'s Probes.MaxRays, and the step its count of rays moves in.
 public static const uint MaxProbeRays = 256u;
@@ -29,13 +27,7 @@ public struct ProbeGridConstants
 {
     // Probes along each axis.
     public uint3 dimensions;
-    // How far a probe's depth reaches: one and a half cells.
-    public float maxDistance;
-    // Where the first probe rests in the world.
-    public float3 origin;
     public uint probes;
-    // The metres between neighbouring probes.
-    public float3 cellSize;
     public uint depth;
     public uint depthSampler;
     public uint rays;
@@ -45,18 +37,13 @@ public struct ProbeGridConstants
     public uint variance;
     // 0 while the probes hold nothing: this update starts them afresh.
     public uint hasHistory;
-    public uint padding0;
-}
-
-// Where the probe grid's constants are in the frame's buffer, after the shadows, as the GI constants' first part, and
-// their bytes: C#'s GIConstants.
-public static const uint ProbeGridOffset = ShadowsOffset + ShadowsBytes;
-public static const uint ProbeGridBytes = 80u;
-
-public ProbeGridConstants GetProbeGrid()
-{
-    BufferRef frame = { GetPassHeader().x };
-    return frame.Load<ProbeGridConstants>(ProbeGridOffset);
+    // Where the first probe rests in the world, how far a probe's depth reaches, one and a half cells, and the
+    // metres between neighbouring probes.
+    public float3 origin;
+    public float maxDistance;
+    public float3 cellSize;
+    // 1 once the grid was placed over a traced world since the probes last started afresh.
+    public uint placed;
 }
 
 // The ray counts buffer's words: the rays the probes were given this frame in all at 0, then each probe's.

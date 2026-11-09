@@ -38,24 +38,9 @@ texture reader.
   where a tile's lights change.
 - Each frame draws a different point of each pixel and blends with the frames before it where they saw the same
   surface, so edges come out smooth and hold still. A debug view of the GBuffer shows one frame, so its edges crawl.
-- On a GPU that traces rays, a grid of probes over the bounds of what is drawn gathers the light that bounces: each
-  frame its probes trace rays, more of them where their light still changes and in view, each lit where it lands by
-  one light picked at random, the sun among them, by the sky where it hits nothing, and by the probes themselves. Each
-  probe blends them into the light it holds from each direction and how far it sees, and moves away from a surface
-  it is too near. The `probes` debug view draws each probe as a sphere of its light. A ray reads the
-  material it lands on averaged over its whole texture, with no specular of its own, so a metal reflects black.
-- On a GPU that traces rays, a surface's diffuse light from around it is traced, in place of the open sky's: each frame
-  two rays from one pixel of each 2 by 2, reaching 10 m, each lit where it lands by one light picked at random and by
-  the probes, and the probes' light near the pixel that see it where it lands on nothing. It is smoothed over neighbours
-  and over frames, then blurred across the surface where it is still grainy. So shadowed places get the light that
-  bounces into them, a closed room none of the sky's, the base of what stands on the ground darkens and a lit wall
-  tints what is near it. The `tracedDiffuse` debug view shows the light it gives a white surface.
-- On a GPU that traces rays, a surface with a roughness of 0.6 or less reflects what its rays find: one ray from a
-  pixel of each 2 by 2 a frame, along a direction its roughness spreads, lit where it lands by one light picked at
-  random and by the probes, or the sky where it lands nowhere. A frame's rays are resolved over their neighbours and
-  blended with the frames before where the surface, or what it reflects, was, so a mirror is sharp and a rough surface
-  blurred. A rougher surface reflects its traced diffuse light, so a closed room reflects none of the sky. The
-  `reflections` debug view shows what is traced.
+- A surface takes the light that reaches it indirectly from the frame's indirect light, where a gem that traces it
+  wrote it for the frame, and from the sky everywhere else. A surface with a roughness of 0.6 or less reflects what
+  it holds of the reflections; a rougher one its diffuse light, so a closed room reflects none of the sky.
 - The first `Weather`'s effects, such as the fog, and then the first `PostProcessing`'s run over the lit picture in
   order, and finish it for the screen: each is a material whose shader implements the pixel effect contract, with
   params of its own as a surface material's are. With no `PostProcessing`, the picture gets the engine's
@@ -73,8 +58,8 @@ texture reader.
 - The `Exposure` effect meters the picture each frame from its average log luminance, as the effects before it leave
   it, and adapts to a change over about a second, as an eye does; a new domain or window size takes its first reading
   at once. Its `compensation` param adds stops to it. The `Agx` effect is the AgX tonemap.
-- The `tracedDiffuse`, `reflections` and `probes` debug views put their light into the picture before the post
-  effects, so the effects expose and tonemap it.
+- The `indirectDiffuse` and `reflections` debug views put the indirect light into the picture before the post
+  effects, so the effects expose and tonemap it; black where nothing traced it.
 - A translucent material, such as the engine's `Glass`, draws over the lit picture instead of with the opaque
   surfaces, so it hides nothing behind it from the depth pyramid or the lighting. The nearest pane in front of each
   pixel's opaque surface lets what is behind through its colour and its clarity, and through any pane between on a
@@ -126,14 +111,6 @@ in turn and exits, so a release ships with the caches full.
     cull's tests.
   - `Scene/Clusters` is also what the cluster passes read beyond the library's frame: the cull's limits and buffers,
     the depth pyramid, the visibility ids and the impostor handoff, in the frame's buffer after the library's models,
-    lights and shadows and the GI constants.
-  - `Scene/Probes`, `Scene/TracedDiffuse` and `Scene/TracedReflections` read their constants from the GI constants, one
-    row of the frame's buffer after the shadows, each part's ids 0 where it isn't drawn.
-  - `Scene/Probes` is the probe grid: where each probe is, what it holds, and the light a point gets from it.
-  - `Scene/Traced` is what the light traced at half the picture's size shares: which pixel traces, its history and how
-    the picture reads it back. `Scene/TracedDiffuse` and `Scene/TracedReflections` are the traced diffuse light's and
-    the traced reflections' textures.
-  - `Light/` is what a local light gives a point: a point, spot or rect light's direction and irradiance there.
-  - `Trace/HitLight` is the light a ray brings back from what it lands on.
-- Parts of the lighting and the traced reflections are adapted from another engine under the MIT licence;
+    lights and shadows.
+- Parts of the lighting are adapted from another engine under the MIT licence;
   `THIRD-PARTY-NOTICES.md` holds it.

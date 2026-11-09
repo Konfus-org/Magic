@@ -175,7 +175,8 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
                     .Compute(
                         "Fill effect level",
                         running.Level,
-                        new GpuConstants(view.Constants.Id, passTable.Value.Id, (uint)pass)
+                        new GpuConstants(view.Constants.Id, passTable.Value.Id, (uint)pass),
+                        RenderStage.Post
                     )
                     .Reads(surface)
                     .Reads(rays)
@@ -193,7 +194,8 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
                 .Compute(
                     "Apply effect",
                     running.Apply,
-                    new GpuConstants(view.Constants.Id, passTable.Value.Id, (uint)pass)
+                    new GpuConstants(view.Constants.Id, passTable.Value.Id, (uint)pass),
+                    RenderStage.Post
                 )
                 .Reads(surface)
                 .Reads(rays)
@@ -207,7 +209,7 @@ internal sealed class PixelEffects(AssetManager assets, GpuResources resources)
         }
 
         if (picture != view.Hdr)
-            graph.Blit(picture, view.Hdr);
+            graph.Blit(picture, view.Hdr, RenderStage.Post);
     }
 
     /// <summary>

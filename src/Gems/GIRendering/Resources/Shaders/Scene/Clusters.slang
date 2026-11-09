@@ -6,13 +6,13 @@ module "Scene/Clusters";
 import Core.Heap;
 import Core.Pack;
 import Core.Pass;
-import Scene.TracedReflections;
+import Scene.Shadows;
 
 public static const uint MaxClusterTriangles = 128u;
 
 // Where the cluster constants are in the buffer every pass header's x names: after the frame, the models, the lights,
 // the shadows and the GI constants.
-public static const uint ClusterConstantsOffset = TracedReflectionsOffset + TracedReflectionsBytes;
+public static const uint ClusterConstantsOffset = ShadowsOffset + ShadowsBytes;
 
 // What the cluster passes read beyond the frame, C#'s ClusterConstants, written once a frame after the GI constants;
 // the cluster budget sets the handoff and the error threshold at the start of the frame.

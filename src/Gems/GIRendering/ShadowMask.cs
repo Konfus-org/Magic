@@ -175,7 +175,7 @@ internal sealed class ShadowMask(AssetManager assets, GpuResources resources)
         GpuBuffer hitMaterials
     )
     {
-        view.Graph.Compute("Trace shadows", _traceShader, header)
+        view.Graph.Compute("Trace shadows", _traceShader, header, RenderStage.Light)
             .Reads(
                 view.Constants,
                 lights.Table,
@@ -195,7 +195,7 @@ internal sealed class ShadowMask(AssetManager assets, GpuResources resources)
         {
             Y = shadows.Constants.Id,
         };
-        view.Graph.Compute("Classify shadows", _classifyShader, denoise)
+        view.Graph.Compute("Classify shadows", _classifyShader, denoise, RenderStage.Light)
             .Reads(
                 view.Constants,
                 shadows.Constants,
@@ -218,13 +218,21 @@ internal sealed class ShadowMask(AssetManager assets, GpuResources resources)
                 1 => (shadows.SunHistory, shadows.SunBlend),
                 _ => (shadows.SunBlend, shadows.SunDenoised),
             };
-            view.Graph.Compute(_filterPassNames[pass], _filterShader, denoise with { W = (uint)pass })
+            view.Graph.Compute(
+                    _filterPassNames[pass],
+                    _filterShader,
+                    denoise with
+                    {
+                        W = (uint)pass,
+                    },
+                    RenderStage.Light
+                )
                 .Reads(view.Constants, shadows.Constants, shadows.TileStates, view.Depth, view.GBufferNormal, input)
                 .Writes(output)
                 .DispatchOver(view.Width, view.Height);
         }
 
-        view.Graph.Compute("Blend shadows", _blendShader, denoise)
+        view.Graph.Compute("Blend shadows", _blendShader, denoise, RenderStage.Light)
             .Reads(
                 view.Constants,
                 shadows.Constants,

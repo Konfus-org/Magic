@@ -8,7 +8,7 @@ import Core.Pass;
 import Core.Math;
 
 // The frame's bytes, C#'s FrameConstants.Bytes: where the rows after it in its buffer start.
-public static const uint FrameBytes = 528u;
+public static const uint FrameBytes = 532u;
 
 public struct FrameConstants
 {
@@ -66,9 +66,26 @@ public struct FrameConstants
     public uint glassBase;
     public uint glassNormal;
     public uint glassSurface;
+    // The library's IndirectLight, written for a frame by whatever traces it.
+    public uint indirectLight;
 }
 
 public FrameConstants GetFrame() { return LoadConstants<FrameConstants>(); }
+
+// Whether a sphere in the camera-relative world is at least partly inside the frustum.
+public bool IsSphereInFrustum(FrameConstants frame, float3 center, float radius)
+{
+    [unroll]
+    for (uint i = 0u; i < 6u; i++)
+    {
+        float4 plane = frame.frustumPlanes[i];
+        if (dot(plane.xyz, center) + plane.w < -radius)
+            return false;
+    }
+
+    return true;
+}
+
 
 // The most a pixel's point rises off its flat triangle, in widths of the pixel at its distance, as the GBuffer
 // surface's w holds it: square-rooted, so a small rise keeps its precision in 8 bits.

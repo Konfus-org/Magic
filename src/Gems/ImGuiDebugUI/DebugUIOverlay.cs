@@ -225,7 +225,7 @@ internal sealed class DebugUIOverlay
                 _shaders,
                 new GpuRenderTargets { Colors = [new GpuTarget { Texture = target }] },
                 new GpuConstants(constants.Id),
-                RenderLayer.Overlay
+                RenderStage.Overlay
             )
             .Reads(constants, vertices);
         foreach ((TextureDescription _, GpuTexture texture) in _textures.Values)

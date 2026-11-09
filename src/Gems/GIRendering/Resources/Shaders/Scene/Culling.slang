@@ -9,19 +9,6 @@ import Core.Frame;
 import Core.Math;
 import Scene.Clusters;
 
-public bool IsSphereInFrustum(FrameConstants frame, float3 center, float radius)
-{
-    [unroll]
-    for (uint i = 0u; i < 6u; i++)
-    {
-        float4 plane = frame.frustumPlanes[i];
-        if (dot(plane.xyz, center) + plane.w < -radius)
-            return false;
-    }
-
-    return true;
-}
-
 // The pixel radius under which an instance's sphere is less than five pixels across on screen, too small to notice,
 // and draws nothing.
 public static const float MinPixelRadius = 2.5;

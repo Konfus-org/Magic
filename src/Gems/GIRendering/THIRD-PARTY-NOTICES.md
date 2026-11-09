@@ -1,6 +1,6 @@
 # Third-party notices
 
-Parts of this gem's lighting and its traced reflections are adapted from Wicked Engine
+Parts of this gem's lighting are adapted from Wicked Engine
 (https://github.com/turanszkij/WickedEngine), under this licence:
 
 ```

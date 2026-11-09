@@ -102,10 +102,10 @@ public sealed class GpuChecksGem : IGem, IDisposable
         }
 
         graph
-            .Compute("Fill gradient", fill, new GpuConstants(gradient.Value.Id, Size, Size))
+            .Compute("Fill gradient", fill, new GpuConstants(gradient.Value.Id, Size, Size), RenderStage.Post)
             .Writes(gradient.Value)
             .DispatchOver(Size, Size);
-        graph.ReadBack(gradient.Value, readback.Value);
+        graph.ReadBack(gradient.Value, readback.Value, RenderStage.Post);
         _recorded.SetResult(readback);
     }
 

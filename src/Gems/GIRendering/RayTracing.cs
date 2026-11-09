@@ -15,11 +15,6 @@ namespace Magic.GIRendering;
 internal sealed class RayTracing(AssetManager assets, GpuResources resources)
 {
     /// <summary>
-    /// The twin of <c>Trace/HitSurface.slang</c>'s <c>GpuHitMaterial</c>, which only the GPU writes.
-    /// </summary>
-    private const int HitMaterialBytes = 32;
-
-    /// <summary>
     /// The twin of <c>AverageMaterials.slang</c>'s group size, a material row each thread.
     /// </summary>
     private const int AverageGroupSize = 64;
@@ -43,9 +38,7 @@ internal sealed class RayTracing(AssetManager assets, GpuResources resources)
     /// </summary>
     public static Result<TracedWorld> Prepare(RenderGraph graph)
     {
-        Result<GpuBuffer> hitMaterials = graph.Buffer(
-            GpuDescriptions.GetBuffer("Hit materials", (long)InstanceTable.Capacity * HitMaterialBytes)
-        );
+        Result<GpuBuffer> hitMaterials = graph.Buffer(SharedResources.HitMaterials);
         if (!hitMaterials.Ok)
             return Result.Failure(hitMaterials.Error);
 
@@ -112,6 +105,21 @@ internal sealed class RayTracing(AssetManager assets, GpuResources resources)
     }
 
     /// <summary>
+    /// The box over the world boxes of the instances that have an acceleration structure; min over max where none do.
+    /// </summary>
+    public static (Vector3 Min, Vector3 Max) GetBox(ReadOnlySpan<InstanceExtra> extras)
+    {
+        (Vector3 Min, Vector3 Max) box = (new Vector3(float.MaxValue), new Vector3(float.MinValue));
+        foreach (InstanceExtra extra in extras)
+        {
+            if (extra.Acceleration != 0)
+                box = (Vector3.Min(box.Min, extra.Box.Min), Vector3.Max(box.Max, extra.Box.Max));
+        }
+
+        return box;
+    }
+
+    /// <summary>
     /// Each of the view's <paramref name="materialCount"/> material rows averaged into <paramref name="hitMaterials"/>,
     /// a pass for each material shader, which fills the rows it draws.
     /// </summary>
@@ -129,7 +137,8 @@ internal sealed class RayTracing(AssetManager assets, GpuResources resources)
             view.Graph.Compute(
                     "Average materials",
                     _averageShaders[shader],
-                    new GpuConstants(view.Constants.Id, hitMaterials.Id, (uint)shader, (uint)materialCount)
+                    new GpuConstants(view.Constants.Id, hitMaterials.Id, (uint)shader, (uint)materialCount),
+                    RenderStage.Prepare
                 )
                 .Reads(view.Constants, view.Materials)
                 .Reads(heapTextures.AsSpan())
@@ -146,6 +155,6 @@ internal readonly record struct TracedWorld(GpuBuffer Instances, GpuAcceleration
 
 /// <summary>
 /// What the CPU keeps beside an instance's row: its model's acceleration structure's address, 0 when it has none,
-/// where its meshes start in the mesh table, and the box around it in the world, which the probe grid covers.
+/// where its meshes start in the mesh table, and the box around it in the world.
 /// </summary>
 internal readonly record struct InstanceExtra(ulong Acceleration, uint MeshOffset, (Vector3 Min, Vector3 Max) Box);

@@ -47,7 +47,7 @@ public readonly record struct GpuPass
 
     public required GpuPassKind Kind { get; init; }
 
-    public RenderLayer Layer { get; init; }
+    public RenderStage Stage { get; init; }
 
     public ImmutableArray<GpuUse> Uses { get; init; } = [];
 
@@ -71,15 +71,36 @@ public readonly record struct GpuPass
 }
 
 /// <summary>
-/// Where a pass falls in the frame: every pass of a layer runs after every pass of the layer before, whichever gem
-/// recorded it first.
+/// The frame's stages: every pass of a stage runs after every pass of the stage before, whichever gem recorded it
+/// first, and within a stage in the order they were recorded.
 /// </summary>
-public enum RenderLayer : byte
+public enum RenderStage : byte
 {
     /// <summary>
-    /// The picture the world is drawn into.
+    /// What the frame's CPU data goes up as: uploads, clears and acceleration structures, and what is worked out from
+    /// them before anything draws, such as the sky's tables.
     /// </summary>
-    Picture,
+    Prepare,
+
+    /// <summary>
+    /// What the view sees: depth, the GBuffer and the glass targets.
+    /// </summary>
+    Geometry,
+
+    /// <summary>
+    /// What lights the view's surfaces: each tile's lights, shadows and indirect light.
+    /// </summary>
+    Light,
+
+    /// <summary>
+    /// The view's surfaces shaded into the picture.
+    /// </summary>
+    Shade,
+
+    /// <summary>
+    /// What finishes the picture, and its copy to the window or a screenshot.
+    /// </summary>
+    Post,
 
     /// <summary>
     /// What draws over the finished picture, as a debug UI does.

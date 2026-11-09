@@ -12,7 +12,7 @@ namespace Magic.GIRendering;
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct FrameConstants
 {
-    public const int Bytes = 528;
+    public const int Bytes = 532;
 
     public Matrix4x4 View;
 
@@ -77,37 +77,22 @@ internal record struct FrameConstants
     public uint GlassNormal;
 
     public uint GlassSurface;
-}
 
-/// <summary>
-/// What the GI passes read beyond the frame, written once a frame into the frame's buffer after
-/// <see cref="GpuShadows"/>: the probe grid's, the traced diffuse light's and the traced reflections' constants,
-/// each left empty, its ids 0, where it isn't drawn; the twins of <c>Scene/Probes.slang</c>'s,
-/// <c>Scene/TracedDiffuse.slang</c>'s and <c>Scene/TracedReflections.slang</c>'s, which read each at its offset.
-/// </summary>
-[StructLayout(LayoutKind.Sequential, Pack = 4)]
-internal record struct GIConstants
-{
-    public const int Offset = GpuShadows.Offset + GpuShadows.Bytes;
-
-    public const int Bytes = ProbeGridConstants.Bytes + TracedDiffuseConstants.Bytes + TracedReflectionConstants.Bytes;
-
-    public ProbeGridConstants Grid;
-
-    public TracedDiffuseConstants Diffuse;
-
-    public TracedReflectionConstants Reflections;
+    /// <summary>
+    /// The library's <c>Light/Indirect.slang</c> IndirectLight, written for a frame by whatever traces it.
+    /// </summary>
+    public uint IndirectLight;
 }
 
 /// <summary>
 /// What the cluster passes read beyond the frame, the twin of <c>Scene/Clusters.slang</c>'s: the cull's limits and
 /// buffers, the depth pyramid, the visibility ids and the impostor handoff, written once a frame into the constants
-/// buffer after <see cref="GIConstants"/>.
+/// buffer after <see cref="GpuShadows"/>.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct ClusterConstants
 {
-    public const int Offset = GIConstants.Offset + GIConstants.Bytes;
+    public const int Offset = GpuShadows.Offset + GpuShadows.Bytes;
 
     public const int Bytes = 64;
 
@@ -296,14 +281,14 @@ internal record struct GpuLight
 /// <summary>
 /// The frame's models, the twin of the library's <c>Scene/Models.slang</c>: the instance table and its count, the
 /// pools and tables the instances are drawn from, and on a GPU that traces rays the world's acceleration structure, the
-/// hit materials and the mesh table, written once a frame into the frame's buffer after <see cref="FrameConstants"/>.
+/// hit materials, the mesh table and the box over what rays see, written once a frame into the frame's buffer after <see cref="FrameConstants"/>.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct GpuModels
 {
     public const int Offset = FrameConstants.Bytes;
 
-    public const int Bytes = 32;
+    public const int Bytes = 56;
 
     public uint Instances;
 
@@ -320,6 +305,13 @@ internal record struct GpuModels
     public uint HitMaterials;
 
     public uint Meshes;
+
+    /// <summary>
+    /// The box over the world boxes of the instances rays see; min over max where none do.
+    /// </summary>
+    public Vector3 BoxMin;
+
+    public Vector3 BoxMax;
 }
 
 /// <summary>
@@ -399,42 +391,6 @@ internal record struct GpuShadows
 }
 
 /// <summary>
-/// The heap ids of the traced reflections' textures and sampler, the twin of <c>Scene/TracedReflections.slang</c>'s.
-/// </summary>
-[StructLayout(LayoutKind.Sequential, Pack = 4)]
-internal record struct TracedReflectionConstants
-{
-    public const int Bytes = 48;
-
-    public uint Traced;
-
-    public uint Rays;
-
-    public uint Resolved;
-
-    public uint Distance;
-
-    public uint Light;
-
-    public uint Depth;
-
-    public uint LightHistory;
-
-    public uint DepthHistory;
-
-    public uint Sampler;
-
-    /// <summary>
-    /// 0 while the history holds nothing of the view: this frame starts it afresh.
-    /// </summary>
-    public uint HasHistory;
-
-    public uint Padding0;
-
-    public uint Padding1;
-}
-
-/// <summary>
 /// The heap ids of the shadow denoiser's targets, the twin of <c>DenoiseShadows.slang</c>'s.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
@@ -458,87 +414,6 @@ internal record struct ShadowDenoiseConstants
 
     /// <summary>
     /// 0 on the first frame at a size, when last frame's targets hold nothing to blend with.
-    /// </summary>
-    public uint HasHistory;
-}
-
-/// <summary>
-/// The probe grid's place and the heap ids of its buffers, the twin of <c>Scene/Probes.slang</c>'s.
-/// </summary>
-[StructLayout(LayoutKind.Sequential, Pack = 4)]
-internal record struct ProbeGridConstants
-{
-    public const int Bytes = 80;
-
-    /// <summary>
-    /// Probes along x; with the two after, the twin of <c>dimensions</c>.
-    /// </summary>
-    public uint DimensionX;
-
-    public uint DimensionY;
-
-    public uint DimensionZ;
-
-    /// <summary>
-    /// How far a probe's depth reaches: one and a half cells.
-    /// </summary>
-    public float MaxDistance;
-
-    /// <summary>
-    /// Where the first probe rests in the world.
-    /// </summary>
-    public Vector3 Origin;
-
-    public uint Probes;
-
-    public Vector3 CellSize;
-
-    public uint Depth;
-
-    public uint DepthSampler;
-
-    public uint Rays;
-
-    public uint RayList;
-
-    public uint RayArguments;
-
-    public uint RayCounts;
-
-    public uint Variance;
-
-    /// <summary>
-    /// 0 while the probes hold nothing: this update starts them afresh.
-    /// </summary>
-    public uint HasHistory;
-
-    public uint Padding0;
-}
-
-/// <summary>
-/// The heap ids of the traced diffuse light's textures and sampler, the twin of <c>Scene/TracedDiffuse.slang</c>'s.
-/// </summary>
-[StructLayout(LayoutKind.Sequential, Pack = 4)]
-internal record struct TracedDiffuseConstants
-{
-    public const int Bytes = 32;
-
-    public uint Traced;
-
-    public uint Filtered;
-
-    public uint Light;
-
-    public uint Depth;
-
-    public uint LightHistory;
-
-    public uint DepthHistory;
-
-    public uint Sampler;
-
-    /// <summary>
-    /// 0 while the history holds nothing of the view: this frame starts it afresh.
     /// </summary>
     public uint HasHistory;
 }

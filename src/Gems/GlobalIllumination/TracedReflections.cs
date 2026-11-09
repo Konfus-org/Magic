@@ -3,7 +3,7 @@ using Magic.Assets;
 using Magic.Rendering;
 using Magic.Utils;
 
-namespace Magic.GIRendering;
+namespace Magic.GlobalIllumination;
 
 /// <summary>
 /// A frame's traced reflections, at half the view's size: the rays' light and their directions, resolved over the
@@ -29,14 +29,8 @@ internal readonly record struct TracedReflectionBuffers(
 /// frame's light and depths, so it keeps two of each and swaps them every frame, and with none while the view has no
 /// history.
 /// </summary>
-internal sealed class TracedReflections(AssetManager assets, GpuResources resources)
+internal sealed class TracedReflections(AssetManager assets)
 {
-    /// <summary>
-    /// The twin of <c>Scene/Traced.slang</c>'s.
-    /// </summary>
-    private const int TracedScale = 2;
-
-    private static readonly string[] _lightNames = ["Reflection light 0", "Reflection light 1"];
     private static readonly string[] _depthNames = ["Reflection depth 0", "Reflection depth 1"];
 
     private readonly ShaderEntry _traceShader = PassShaders.GetEntry(
@@ -58,22 +52,21 @@ internal sealed class TracedReflections(AssetManager assets, GpuResources resour
 
     /// <summary>
     /// The targets asked for at half the view's size, the even frames writing the first light and depth and the odd
-    /// the second, the other being the history, and the constants that name them.
+    /// the second, the other being the history, and the constants that name them; the light is the indirect specular
+    /// light shading reads.
     /// </summary>
-    public static Result<TracedReflectionBuffers> Prepare(in RenderView view, uint frameIndex)
+    public static Result<TracedReflectionBuffers> Prepare(in GIView view, uint frameIndex)
     {
         RenderGraph graph = view.Graph;
-        (int width, int height) = GetSize(view);
+        (int width, int height) = view.TracedSize;
         int written = (int)(frameIndex % 2);
         Result<GpuTexture> traced = graph.Texture(GetTarget("Traced reflections", GpuFormat.R16G16B16A16Sfloat));
         Result<GpuTexture> rays = graph.Texture(GetTarget("Reflection rays", GpuFormat.R16G16B16A16Sfloat));
         Result<GpuTexture> resolved = graph.Texture(GetTarget("Resolved reflections", GpuFormat.R16G16B16A16Sfloat));
         Result<GpuTexture> distance = graph.Texture(GetTarget("Reflection distance", GpuFormat.R32Sfloat));
-        Result<GpuTexture> light = graph.Texture(GetTarget(_lightNames[written], GpuFormat.R16G16B16A16Sfloat));
+        Result<GpuTexture> light = graph.Texture(GetLight(written));
         Result<GpuTexture> depth = graph.Texture(GetTarget(_depthNames[written], GpuFormat.R32Sfloat));
-        Result<GpuTexture> lightHistory = graph.Texture(
-            GetTarget(_lightNames[1 - written], GpuFormat.R16G16B16A16Sfloat)
-        );
+        Result<GpuTexture> lightHistory = graph.Texture(GetLight(1 - written));
         Result<GpuTexture> depthHistory = graph.Texture(GetTarget(_depthNames[1 - written], GpuFormat.R32Sfloat));
         Result<GpuSampler> sampler = graph.Sampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
@@ -116,49 +109,37 @@ internal sealed class TracedReflections(AssetManager assets, GpuResources resour
 
         TextureDescription GetTarget(string name, GpuFormat format) =>
             GpuDescriptions.GetTexture(name, width, height, format);
+
+        TextureDescription GetLight(int frame) =>
+            SharedResources.IndirectSpecular[frame] with
+            {
+                Width = width,
+                Height = height,
+            };
     }
 
     /// <summary>
     /// The rays traced from the view's smooth surfaces through the world, lit by the lights, the sky and the probes,
     /// then resolved and blended with the history.
     /// </summary>
-    public void Record(
-        in RenderView view,
-        GpuBuffer hitMaterials,
-        in SkyTables sky,
-        in LightBuffers lights,
-        in ProbeBuffers probes,
-        in TracedReflectionBuffers reflections
-    )
+    public void Record(in GIView view, in ProbeBuffers probes, in TracedReflectionBuffers reflections)
     {
         RenderGraph graph = view.Graph;
-        (int width, int height) = GetSize(view);
-        GpuConstants header = new(view.Constants.Id);
+        (int width, int height) = view.TracedSize;
+        GpuConstants header = view.Header;
         graph
-            .Compute("Trace reflections", _traceShader, header)
-            .Reads(
-                view.Constants,
-                view.Depth,
-                view.GBufferNormal,
-                view.GBufferSurface,
-                sky.Transmittance,
-                sky.MultiScattering,
-                sky.View,
-                lights.Table,
-                view.Instances,
-                resources.VertexPool,
-                resources.IndexPool,
-                resources.Meshes,
-                hitMaterials,
-                probes.Probes,
-                probes.Depth
-            )
+            .Compute("Trace reflections", _traceShader, header, RenderStage.Light)
+            .Reads(view.World.AsSpan())
+            .Reads(view.Frame, view.Constants, view.IndirectLight, view.Depth, view.GBufferNormal, view.GBufferSurface)
+            .Reads(probes.Probes, probes.Depth)
             .Writes(reflections.Traced, reflections.Rays)
             .DispatchOver(width, height);
         graph
-            .Compute("Resolve reflections", _resolveShader, header)
+            .Compute("Resolve reflections", _resolveShader, header, RenderStage.Light)
             .Reads(
+                view.Frame,
                 view.Constants,
+                view.IndirectLight,
                 view.Depth,
                 view.GBufferNormal,
                 view.GBufferSurface,
@@ -168,9 +149,11 @@ internal sealed class TracedReflections(AssetManager assets, GpuResources resour
             .Writes(reflections.Resolved, reflections.Distance)
             .DispatchOver(width, height);
         graph
-            .Compute("Blend reflections", _blendShader, header)
+            .Compute("Blend reflections", _blendShader, header, RenderStage.Light)
             .Reads(
+                view.Frame,
                 view.Constants,
+                view.IndirectLight,
                 view.Depth,
                 view.GBufferNormal,
                 view.GBufferSurface,
@@ -183,7 +166,4 @@ internal sealed class TracedReflections(AssetManager assets, GpuResources resour
             .Writes(reflections.Light, reflections.Depth)
             .DispatchOver(width, height);
     }
-
-    private static (int Width, int Height) GetSize(in RenderView view) =>
-        (Math.Max(view.Width / TracedScale, 1), Math.Max(view.Height / TracedScale, 1));
 }

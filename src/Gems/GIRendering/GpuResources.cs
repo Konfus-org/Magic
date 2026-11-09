@@ -44,9 +44,9 @@ internal sealed class GpuResources(
     Threads threads
 )
 {
-    private const int VertexCapacity = 1 << 22;
+    private static readonly int VertexCapacity = (int)(SharedResources.Vertices.Bytes / GpuVertex.Bytes);
 
-    private const int IndexCapacity = 1 << 24;
+    private static readonly int IndexCapacity = (int)(SharedResources.Indices.Bytes / sizeof(uint));
 
     private const int ClusterCapacity = 1 << 17;
 
@@ -54,7 +54,7 @@ internal sealed class GpuResources(
 
     private const int ModelCapacity = 4096;
 
-    private const int MeshCapacity = 1 << 16;
+    private static readonly int MeshCapacity = (int)(SharedResources.Meshes.Bytes / GpuMesh.Bytes);
 
     private const string FailureShader = "Shaders/Material/Failure.slang";
 
@@ -184,16 +184,12 @@ internal sealed class GpuResources(
     /// </summary>
     public Result Prepare(RenderGraph graph)
     {
-        Result<GpuBuffer> vertices = graph.Buffer(
-            GpuDescriptions.GetBuffer("Vertex pool", (long)VertexCapacity * GpuVertex.Bytes)
-        );
+        Result<GpuBuffer> vertices = graph.Buffer(SharedResources.Vertices);
         if (!vertices.Ok)
             return Result.Failure(vertices.Error);
 
         VertexPool = vertices.Value;
-        Result<GpuBuffer> indices = graph.Buffer(
-            GpuDescriptions.GetBuffer("Index pool", (long)IndexCapacity * sizeof(uint))
-        );
+        Result<GpuBuffer> indices = graph.Buffer(SharedResources.Indices);
         if (!indices.Ok)
             return Result.Failure(indices.Error);
 
@@ -222,9 +218,7 @@ internal sealed class GpuResources(
         if (!graph.Features.HasRayQuery)
             return Result.Success();
 
-        Result<GpuBuffer> meshes = graph.Buffer(
-            GpuDescriptions.GetBuffer("Mesh table", (long)MeshCapacity * GpuMesh.Bytes)
-        );
+        Result<GpuBuffer> meshes = graph.Buffer(SharedResources.Meshes);
         if (!meshes.Ok)
             return Result.Failure(meshes.Error);
 
@@ -896,7 +890,7 @@ internal sealed class GpuResources(
                     VertexPool,
                     0,
                     GpuVertex.Bytes,
-                    VertexCapacity,
+                    (uint)VertexCapacity,
                     IndexPool,
                     (ulong)mesh.IndexOffset * sizeof(uint),
                     triangles

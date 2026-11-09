@@ -12,9 +12,7 @@ import Core.Frame;
 import Core.Math;
 import Core.Color;
 import Core.Pack;
-import Scene.TracedDiffuse;
-import Scene.TracedReflections;
-import Scene.Traced;
+import Light.Indirect;
 import Scene.Clusters;
 
 // C#'s DebugView.
@@ -28,8 +26,7 @@ enum SurfaceView : uint
     Metalness,
     Occlusion,
     Velocity,
-    Probes,
-    TracedDiffuse,
+    IndirectDiffuse,
     Reflections,
 }
 
@@ -71,21 +68,21 @@ float3 GetSurfaceView(FrameConstants frame, SurfaceView view, uint2 pixel)
     }
 }
 
-// The light the traced diffuse or the traced reflections view shows at the pixel, black where none was traced.
+// The light the indirect diffuse or the reflections view shows at the pixel, black where none was traced.
 float3 GetLightView(FrameConstants frame, SurfaceView view, uint2 pixel)
 {
-    PassHeader header = GetPassHeader();
     UintTextureRef visibility = { GetClusters().visibility };
     if (visibility.Load(pixel, 0u) == 0u)
         return float3(0.0);
 
     if (view == SurfaceView.Reflections)
     {
-        TextureRef reflections = { GetTracedReflections().light };
+        TextureRef reflections = { GetIndirectLight(frame).reflections };
         return reflections.id == 0u ? float3(0.0) : reflections.Load(pixel / TracedScale, 0u).rgb;
     }
 
-    if (GetTracedDiffuse().light == 0u)
+    uint diffuse = GetIndirectLight(frame).diffuse;
+    if (diffuse == 0u)
         return float3(0.0);
 
     TextureRef depthTexture = { frame.depth };
@@ -93,7 +90,7 @@ float3 GetLightView(FrameConstants frame, SurfaceView view, uint2 pixel)
     float2 uv = GetTexelCenterUv(pixel, uint2(frame.width, frame.height));
     float3 relative = ReconstructRelative(frame, uv, depthTexture.Load(pixel, 0u).x);
     float3 normal = DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0);
-    return SampleTracedDiffuse(frame, GetTracedDiffuse(), pixel, relative, normal);
+    return SampleIndirectDiffuse(frame, diffuse, pixel, relative, normal);
 }
 
 [shader("compute")]
@@ -118,8 +115,7 @@ void ShowSurface(uint3 thread : SV_DispatchThreadID)
 
     PassHeader header = GetPassHeader();
     SurfaceView view = (SurfaceView)header.y;
-    bool isPicture = view == SurfaceView.Final || view == SurfaceView.Probes || view == SurfaceView.TracedDiffuse
-        || view == SurfaceView.Reflections;
+    bool isPicture = view == SurfaceView.Final || view == SurfaceView.IndirectDiffuse || view == SurfaceView.Reflections;
     TextureRef picture = { frame.hdr };
     float3 color = isPicture ? ToSrgb(picture.Load(thread.xy, 0u).rgb) : GetSurfaceView(frame, view, thread.xy);
     StorageRef output = { frame.output, 0u };

@@ -44,8 +44,4 @@ internal sealed class RenderInputs
     /// The distance in metres to an instance past which it hands off to its impostor; 0 hands off by size alone.
     /// </summary>
     public float ImpostorDistance { get; set; }
-
-    public int Width { get; set; }
-
-    public int Height { get; set; }
 }

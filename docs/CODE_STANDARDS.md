@@ -49,7 +49,7 @@ Write the engine as data flowing through functions, not objects calling each oth
   that order over the gems. `Render` runs on the render thread, which owns the GPU, and the others on the game thread.
   The platform thread, the process's first, pumps the OS's window and events through the gem that implements
   `IPlatform`, which hands the game thread the input they make as data.
-  `Render` records into the frame's `RenderGraph`, each pass in its `RenderLayer`, and Core hands it to the GPU provider
+  `Render` records into the frame's `RenderGraph`, each pass in its `RenderStage`, and Core hands it to the GPU provider
   once every gem has.
   `LateUpdate` hands `Render` what it draws as data, the newest through a `Mailbox<T>` and what must not be lost
   through a `Channel<T>`. A gem implements the ones it needs. One that throws in a hook is logged

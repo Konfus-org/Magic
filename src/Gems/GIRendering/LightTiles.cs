@@ -23,14 +23,14 @@ internal sealed class LightTiles(AssetManager assets)
     /// <summary>
     /// The twin of <c>Scene/Lights.slang</c>'s.
     /// </summary>
-    public const int MaxLights = 1024;
+    public static readonly int MaxLights = (int)(SharedResources.Lights.Bytes / GpuLight.Bytes);
 
     /// <summary>
     /// The twin of <c>Scene/Lights.slang</c>'s.
     /// </summary>
     public const int TileSize = 32;
 
-    private const int Buckets = MaxLights / 32;
+    private static readonly int Buckets = MaxLights / 32;
 
     /// <summary>
     /// The frame's lights as the table holds them, written from the snapshots before they upload.
@@ -54,9 +54,7 @@ internal sealed class LightTiles(AssetManager assets)
         EcsSnapshot<Transform, RectLight> rects
     )
     {
-        Result<GpuBuffer> table = view.Graph.Buffer(
-            GpuDescriptions.GetBuffer("Light table", (long)MaxLights * GpuLight.Bytes)
-        );
+        Result<GpuBuffer> table = view.Graph.Buffer(SharedResources.Lights);
         if (!table.Ok)
             return Result.Failure(table.Error);
 
@@ -106,7 +104,7 @@ internal sealed class LightTiles(AssetManager assets)
     /// </summary>
     public void Record(in RenderView view, in GpuConstants header, in LightBuffers lights)
     {
-        view.Graph.Compute("Cull lights", _cullShader, header)
+        view.Graph.Compute("Cull lights", _cullShader, header, RenderStage.Light)
             .Reads(view.Constants, lights.Table, view.Depth)
             .Writes(lights.Tiles)
             .Dispatch((uint)GetTiles(view.Width), (uint)GetTiles(view.Height));

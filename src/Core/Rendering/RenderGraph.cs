@@ -16,7 +16,7 @@ namespace Magic.Rendering;
 /// </summary>
 public sealed class RenderGraph
 {
-    private static readonly RenderLayer[] _layers = Enum.GetValues<RenderLayer>();
+    private static readonly RenderStage[] _stages = Enum.GetValues<RenderStage>();
 
     private readonly List<GpuPass> _passes = [];
 
@@ -100,13 +100,14 @@ public sealed class RenderGraph
     /// it reads and writes on what this returns, then dispatch, which ends it. The GPU provider leaves the pass out of a
     /// frame while the shader is not built.
     /// </summary>
-    public ComputePass Compute(string name, in ShaderEntry shader, in GpuConstants constants)
+    public ComputePass Compute(string name, in ShaderEntry shader, in GpuConstants constants, RenderStage stage)
     {
         Begin(
             new()
             {
                 Name = name,
                 Kind = GpuPassKind.Compute,
+                Stage = stage,
                 Shader = shader,
             }
         );
@@ -116,7 +117,7 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// Begins a draw pass in <paramref name="layer"/> with <paramref name="shaders"/> into <paramref name="targets"/>,
+    /// Begins a draw pass in <paramref name="stage"/> with <paramref name="shaders"/> into <paramref name="targets"/>,
     /// with <paramref name="constants"/> pushed to it: say what it reads on what this returns, then draw, which ends it.
     /// The GPU provider leaves the pass out of a frame while the shaders are not built.
     /// </summary>
@@ -125,7 +126,7 @@ public sealed class RenderGraph
         in DrawShaders shaders,
         in GpuRenderTargets targets,
         in GpuConstants constants,
-        RenderLayer layer = RenderLayer.Picture
+        RenderStage stage
     )
     {
         BeginDraw(
@@ -133,7 +134,7 @@ public sealed class RenderGraph
             {
                 Name = name,
                 Kind = GpuPassKind.Draw,
-                Layer = layer,
+                Stage = stage,
                 Targets = targets,
                 DrawShaders = shaders,
             }
@@ -144,18 +145,18 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// The frame's passes, layer by layer and in the order they were recorded within one, and the graph empty for the
+    /// The frame's passes, stage by stage and in the order they were recorded within one, and the graph empty for the
     /// next frame. The transfers still open end their pass; a compute or draw pass never ended is left out.
     /// </summary>
     public GpuCommands Finish()
     {
         EndOpenPass();
         ImmutableArray<GpuPass>.Builder ordered = ImmutableArray.CreateBuilder<GpuPass>(_passes.Count);
-        foreach (RenderLayer layer in _layers)
+        foreach (RenderStage stage in _stages)
         {
             foreach (GpuPass pass in _passes)
             {
-                if (pass.Layer == layer)
+                if (pass.Stage == stage)
                     ordered.Add(pass);
             }
         }
@@ -179,7 +180,7 @@ public sealed class RenderGraph
     public Span<T> Upload<T>(GpuBuffer to, int rows, ulong offset = 0)
         where T : unmanaged
     {
-        UseInTransfer(GetUse(to, GpuAccess.CopyDestination));
+        UseInTransfer(GetUse(to, GpuAccess.CopyDestination), RenderStage.Prepare);
         int bytes = rows * Unsafe.SizeOf<T>();
         GpuUpload upload = BeginUpload(bytes);
         CopyBuffer(upload.Buffer, upload.Offset, to, offset, (ulong)bytes);
@@ -194,7 +195,7 @@ public sealed class RenderGraph
     /// </summary>
     public void Upload(GpuTexture to, ReadOnlySpan<byte> pixels, int level = 0)
     {
-        UseInTransfer(GetUse(to, GpuAccess.CopyDestination, level));
+        UseInTransfer(GetUse(to, GpuAccess.CopyDestination, level), RenderStage.Prepare);
         GpuUpload upload = BeginUpload(pixels.Length);
         pixels.CopyTo(upload.Bytes);
         CopyBufferToTexture(upload.Buffer, upload.Offset, to, level);
@@ -209,18 +210,18 @@ public sealed class RenderGraph
         if (_pass is { Kind: GpuPassKind.Transfer } && IsHeld(buffer))
             EndPass();
 
-        UseInTransfer(GetUse(buffer, GpuAccess.CopyDestination));
+        UseInTransfer(GetUse(buffer, GpuAccess.CopyDestination), RenderStage.Prepare);
         Add(new() { Kind = GpuCommandKind.FillBuffer, Id = buffer.Id });
     }
 
     /// <summary>
     /// Level 0 of <paramref name="from"/> stretched over level 0 of <paramref name="to"/>, filtered linearly; the formats
-    /// may differ.
+    /// may differ, in <paramref name="stage"/>.
     /// </summary>
-    public void Blit(GpuTexture from, GpuTexture to)
+    public void Blit(GpuTexture from, GpuTexture to, RenderStage stage)
     {
-        UseInTransfer(GetUse(from, GpuAccess.CopySource));
-        UseInTransfer(GetUse(to, GpuAccess.CopyDestination));
+        UseInTransfer(GetUse(from, GpuAccess.CopySource), stage);
+        UseInTransfer(GetUse(to, GpuAccess.CopyDestination), stage);
         Add(
             new()
             {
@@ -233,12 +234,13 @@ public sealed class RenderGraph
 
     /// <summary>
     /// Level 0 of the first layer of <paramref name="from"/> copied, tightly packed, into <paramref name="into"/>, a
-    /// <see cref="BufferUsages.Readback"/> buffer the host may read once the frame has finished on the GPU.
+    /// <see cref="BufferUsages.Readback"/> buffer the host may read once the frame has finished on the GPU, in
+    /// <paramref name="stage"/>.
     /// </summary>
-    public void ReadBack(GpuTexture from, GpuBuffer into)
+    public void ReadBack(GpuTexture from, GpuBuffer into, RenderStage stage)
     {
-        UseInTransfer(GetUse(from, GpuAccess.CopySource));
-        UseInTransfer(GetUse(into, GpuAccess.CopyDestination));
+        UseInTransfer(GetUse(from, GpuAccess.CopySource), stage);
+        UseInTransfer(GetUse(into, GpuAccess.CopyDestination), stage);
         Add(
             new()
             {
@@ -247,7 +249,7 @@ public sealed class RenderGraph
                 Id2 = into.Id,
             }
         );
-        UseInTransfer(GetUse(into, GpuAccess.HostRead));
+        UseInTransfer(GetUse(into, GpuAccess.HostRead), stage);
     }
 
     /// <summary>
@@ -257,7 +259,7 @@ public sealed class RenderGraph
     /// </summary>
     public void BuildAcceleration(GpuAcceleration acceleration, uint instanceCount = 0)
     {
-        BeginTransfer();
+        BeginTransfer(RenderStage.Prepare);
         Add(
             new()
             {
@@ -494,25 +496,32 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// A transfer pass open for the next transfer: the one open, or a new one.
+    /// A transfer pass of <paramref name="stage"/> open for the next transfer: the one open, or a new one.
     /// </summary>
-    private void BeginTransfer()
+    private void BeginTransfer(RenderStage stage)
     {
-        if (_pass is not { Kind: GpuPassKind.Transfer })
-            Begin(new() { Name = "Transfers", Kind = GpuPassKind.Transfer });
+        if (_pass is not { Kind: GpuPassKind.Transfer } open || open.Stage != stage)
+            Begin(
+                new()
+                {
+                    Name = "Transfers",
+                    Kind = GpuPassKind.Transfer,
+                    Stage = stage,
+                }
+            );
     }
 
     /// <summary>
-    /// Adds <paramref name="use"/> to a transfer pass: the open one, or a new one when the open one uses the same
+    /// Adds <paramref name="use"/> to a transfer pass of <paramref name="stage"/>: the open one, or a new one when the open one uses the same
     /// resource another way, has written the same texture level or has cleared the buffer, as a pass's barriers all
     /// come before its commands. Uploads into one buffer share a pass, as each writes its own range.
     /// </summary>
-    private void UseInTransfer(in GpuUse use)
+    private void UseInTransfer(in GpuUse use, RenderStage stage)
     {
         if (_pass is { Kind: GpuPassKind.Transfer } && IsUsedOtherwise(use))
             EndPass();
 
-        BeginTransfer();
+        BeginTransfer(stage);
         AddUse(use);
     }
 

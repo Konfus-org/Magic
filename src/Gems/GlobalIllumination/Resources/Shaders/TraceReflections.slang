@@ -16,7 +16,8 @@ import Core.Color;
 import Core.Random;
 import Core.Sampling;
 import Scene.Lights;
-import Scene.Probes;
+import Light.Probes;
+import Light.Indirect;
 import Scene.Traced;
 import Scene.TracedReflections;
 import Sky.ISky;
@@ -67,6 +68,9 @@ bool LoadReflectingSurface(FrameConstants frame, uint2 pixel, out ReflectingSurf
 [numthreads(8, 8, 1)]
 void TraceReflections<S : ISky>(uint3 thread : SV_DispatchThreadID)
 {
+    if (!IsWrittenFor(GetPassHeader().z, GetFrame()))
+        return;
+
     FrameConstants frame = GetFrame();
     TracedReflectionConstants reflections = GetTracedReflections();
     if (any(thread.xy >= GetTracedSize(frame)))
@@ -121,6 +125,9 @@ float GetRayWeight(ReflectingSurface surface, float4 ray)
 [numthreads(8, 8, 1)]
 void ResolveReflections(uint3 thread : SV_DispatchThreadID)
 {
+    if (!IsWrittenFor(GetPassHeader().z, GetFrame()))
+        return;
+
     FrameConstants frame = GetFrame();
     TracedReflectionConstants reflections = GetTracedReflections();
     uint2 size = GetTracedSize(frame);
@@ -200,6 +207,9 @@ float2 GetReflectedHistoryUv(FrameConstants frame, ReflectingSurface surface, fl
 [numthreads(8, 8, 1)]
 void BlendReflections(uint3 thread : SV_DispatchThreadID)
 {
+    if (!IsWrittenFor(GetPassHeader().z, GetFrame()))
+        return;
+
     FrameConstants frame = GetFrame();
     TracedReflectionConstants reflections = GetTracedReflections();
     uint2 size = GetTracedSize(frame);

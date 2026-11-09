@@ -172,15 +172,20 @@ internal static class GemRegistry
         if (constructors != 1)
             return Result.Failure($"Gem {name}: {gem.Name} must have one public constructor; it has {constructors}.");
 
-        // What the host takes itself isn't provided, so any number of gems can be sinks, the assets say which gem reads
-        // or writes a type.
+        // What the host takes itself isn't provided, so any number of gems can be sinks or hook into domain loading, and
+        // the assets say which gem reads or writes a type.
         List<Type> provides = [];
         foreach (Type contract in gem.GetInterfaces())
         {
             if (contract.IsGenericType && IsHostContract(contract.GetGenericTypeDefinition()))
                 continue;
 
-            if (contract != typeof(IGem) && contract != typeof(IDisposable) && contract != typeof(ILogSink))
+            bool isHostTaken =
+                contract == typeof(IGem)
+                || contract == typeof(IDisposable)
+                || contract == typeof(ILogSink)
+                || contract == typeof(IHookIntoDomainLoading);
+            if (!isHostTaken)
                 provides.Add(contract);
         }
 

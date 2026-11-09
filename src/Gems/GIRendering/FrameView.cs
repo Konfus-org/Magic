@@ -57,6 +57,7 @@ internal sealed class FrameView(GpuResources resources)
         in CullBuffers cull,
         GpuAcceleration acceleration,
         GpuBuffer hitMaterials,
+        (Vector3 Min, Vector3 Max) tracedBox,
         float impostorPixels,
         float impostorDistance
     )
@@ -97,6 +98,7 @@ internal sealed class FrameView(GpuResources resources)
             GlassBase = targets.GlassBase.Id,
             GlassNormal = targets.GlassNormal.Id,
             GlassSurface = targets.GlassSurface.Id,
+            IndirectLight = targets.IndirectLight.Id,
             PixelsPerRadian = height / (2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360)),
             FrameIndex = frame.Index,
             Jitter = jitter,
@@ -111,6 +113,8 @@ internal sealed class FrameView(GpuResources resources)
             Acceleration = acceleration.Id,
             HitMaterials = hitMaterials.Id,
             Meshes = resources.Meshes.Id,
+            BoxMin = tracedBox.Min,
+            BoxMax = tracedBox.Max,
         };
         ClusterConstants clusters = new()
         {
@@ -217,9 +221,8 @@ internal sealed class FrameView(GpuResources resources)
         in CullBuffers cull
     )
     {
-        Result<GpuBuffer> constants = graph.Buffer(
-            GpuDescriptions.GetBuffer("Frame constants", ClusterConstants.Offset + ClusterConstants.Bytes)
-        );
+        Result<GpuBuffer> constants = graph.Buffer(SharedResources.Frame);
+        Result<GpuBuffer> indirectLight = graph.Buffer(SharedResources.IndirectLight);
         Result<GpuTexture> visibilityBuffer = graph.Texture(
             GpuDescriptions.GetTexture(
                 "Visibility",
@@ -229,15 +232,7 @@ internal sealed class FrameView(GpuResources resources)
                 TextureUsages.ColorTarget | TextureUsages.Sampled
             )
         );
-        Result<GpuTexture> depth = graph.Texture(
-            GpuDescriptions.GetTexture(
-                "Depth",
-                width,
-                height,
-                GpuFormat.D32Sfloat,
-                TextureUsages.DepthTarget | TextureUsages.Sampled
-            )
-        );
+        Result<GpuTexture> depth = graph.Texture(GetShared(SharedResources.Depth));
         Result<GpuTexture> glassVisibility = graph.Texture(
             GpuDescriptions.GetTexture(
                 "Glass visibility",
@@ -268,10 +263,10 @@ internal sealed class FrameView(GpuResources resources)
                 levels: TextureDescription.GetFullLevels(width, height)
             )
         );
-        Result<GpuTexture> normal = graph.Texture(GetTarget("GBuffer normal", GpuFormat.R16G16Unorm));
+        Result<GpuTexture> normal = graph.Texture(GetShared(SharedResources.GBufferNormal));
         Result<GpuTexture> baseColor = graph.Texture(GetTarget("GBuffer base", GpuFormat.R8G8B8A8Unorm));
-        Result<GpuTexture> surface = graph.Texture(GetTarget("GBuffer surface", GpuFormat.R8G8B8A8Unorm));
-        Result<GpuTexture> velocity = graph.Texture(GetTarget("Velocity", GpuFormat.R16G16B16A16Sfloat));
+        Result<GpuTexture> surface = graph.Texture(GetShared(SharedResources.GBufferSurface));
+        Result<GpuTexture> velocity = graph.Texture(GetShared(SharedResources.Velocity));
         Result<GpuTexture> hdr = graph.Texture(
             GpuDescriptions.GetTexture(
                 "HDR",
@@ -297,6 +292,7 @@ internal sealed class FrameView(GpuResources resources)
             Result asked in (ReadOnlySpan<Result>)
                 [
                     constants,
+                    indirectLight,
                     visibilityBuffer,
                     depth,
                     glassVisibility,
@@ -321,6 +317,7 @@ internal sealed class FrameView(GpuResources resources)
         return Result.Success(
             new RenderView(
                 constants.Value,
+                indirectLight.Value,
                 instances,
                 materials,
                 instanceCount,
@@ -348,5 +345,7 @@ internal sealed class FrameView(GpuResources resources)
 
         TextureDescription GetTarget(string name, GpuFormat format) =>
             GpuDescriptions.GetTexture(name, width, height, format);
+
+        TextureDescription GetShared(in TextureDescription shared) => shared with { Width = width, Height = height };
     }
 }

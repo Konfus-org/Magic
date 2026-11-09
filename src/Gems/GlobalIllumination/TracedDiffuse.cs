@@ -3,7 +3,7 @@ using Magic.Assets;
 using Magic.Rendering;
 using Magic.Utils;
 
-namespace Magic.GIRendering;
+namespace Magic.GlobalIllumination;
 
 /// <summary>
 /// A frame's traced diffuse light, at half the view's size: the rays' light, filtered, and blended with the history,
@@ -25,14 +25,8 @@ internal readonly record struct TracedDiffuseBuffers(
 /// range; filtered over neighbours and blended over frames, into the light shading reads. It blends with last frame's
 /// light and depths, so it keeps two of each and swaps them every frame, and with none while the view has no history.
 /// </summary>
-internal sealed class TracedDiffuse(AssetManager assets, GpuResources resources)
+internal sealed class TracedDiffuse(AssetManager assets)
 {
-    /// <summary>
-    /// The twin of <c>Scene/Traced.slang</c>'s.
-    /// </summary>
-    private const int TracedScale = 2;
-
-    private static readonly string[] _lightNames = ["Diffuse light 0", "Diffuse light 1"];
     private static readonly string[] _depthNames = ["Diffuse depth 0", "Diffuse depth 1"];
 
     private readonly ShaderEntry _traceShader = PassShaders.GetEntry(assets, "TraceDiffuse", "TraceDiffuse") with
@@ -46,20 +40,19 @@ internal sealed class TracedDiffuse(AssetManager assets, GpuResources resources)
 
     /// <summary>
     /// The targets asked for at half the view's size, the even frames writing the first light and depth and the odd
-    /// the second, the other being the history, and the constants that name them.
+    /// the second, the other being the history, and the constants that name them; the light is the indirect diffuse
+    /// light shading reads.
     /// </summary>
-    public static Result<TracedDiffuseBuffers> Prepare(in RenderView view, uint frameIndex)
+    public static Result<TracedDiffuseBuffers> Prepare(in GIView view, uint frameIndex)
     {
         RenderGraph graph = view.Graph;
-        (int width, int height) = GetSize(view);
+        (int width, int height) = view.TracedSize;
         int written = (int)(frameIndex % 2);
         Result<GpuTexture> traced = graph.Texture(GetTarget("Traced diffuse", GpuFormat.R16G16B16A16Sfloat));
         Result<GpuTexture> filtered = graph.Texture(GetTarget("Filtered diffuse", GpuFormat.R16G16B16A16Sfloat));
-        Result<GpuTexture> light = graph.Texture(GetTarget(_lightNames[written], GpuFormat.R16G16B16A16Sfloat));
+        Result<GpuTexture> light = graph.Texture(GetLight(written));
         Result<GpuTexture> depth = graph.Texture(GetTarget(_depthNames[written], GpuFormat.R32Sfloat));
-        Result<GpuTexture> lightHistory = graph.Texture(
-            GetTarget(_lightNames[1 - written], GpuFormat.R16G16B16A16Sfloat)
-        );
+        Result<GpuTexture> lightHistory = graph.Texture(GetLight(1 - written));
         Result<GpuTexture> depthHistory = graph.Texture(GetTarget(_depthNames[1 - written], GpuFormat.R32Sfloat));
         Result<GpuSampler> sampler = graph.Sampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
@@ -97,53 +90,42 @@ internal sealed class TracedDiffuse(AssetManager assets, GpuResources resources)
 
         TextureDescription GetTarget(string name, GpuFormat format) =>
             GpuDescriptions.GetTexture(name, width, height, format);
+
+        TextureDescription GetLight(int frame) =>
+            SharedResources.IndirectDiffuse[frame] with
+            {
+                Width = width,
+                Height = height,
+            };
     }
 
     /// <summary>
     /// The rays traced from the view's surfaces through the world, lit by the lights, the sky and the probes, then
     /// filtered and blended with the history.
     /// </summary>
-    public void Record(
-        in RenderView view,
-        GpuBuffer hitMaterials,
-        in SkyTables sky,
-        in LightBuffers lights,
-        in ProbeBuffers probes,
-        in TracedDiffuseBuffers diffuse
-    )
+    public void Record(in GIView view, in ProbeBuffers probes, in TracedDiffuseBuffers diffuse)
     {
         RenderGraph graph = view.Graph;
-        (int width, int height) = GetSize(view);
-        GpuConstants header = new(view.Constants.Id);
+        (int width, int height) = view.TracedSize;
+        GpuConstants header = view.Header;
         graph
-            .Compute("Trace diffuse", _traceShader, header)
-            .Reads(
-                view.Constants,
-                view.Depth,
-                view.GBufferNormal,
-                sky.Transmittance,
-                sky.MultiScattering,
-                sky.View,
-                lights.Table,
-                view.Instances,
-                resources.VertexPool,
-                resources.IndexPool,
-                resources.Meshes,
-                hitMaterials,
-                probes.Probes,
-                probes.Depth
-            )
+            .Compute("Trace diffuse", _traceShader, header, RenderStage.Light)
+            .Reads(view.World.AsSpan())
+            .Reads(view.Frame, view.Constants, view.IndirectLight, view.Depth, view.GBufferNormal)
+            .Reads(probes.Probes, probes.Depth)
             .Writes(diffuse.Traced)
             .DispatchOver(width, height);
         graph
-            .Compute("Filter diffuse", _filterShader, header)
-            .Reads(view.Constants, view.Depth, diffuse.Traced)
+            .Compute("Filter diffuse", _filterShader, header, RenderStage.Light)
+            .Reads(view.Frame, view.Constants, view.IndirectLight, view.Depth, diffuse.Traced)
             .Writes(diffuse.Filtered)
             .DispatchOver(width, height);
         graph
-            .Compute("Blend diffuse", _blendShader, header)
+            .Compute("Blend diffuse", _blendShader, header, RenderStage.Light)
             .Reads(
+                view.Frame,
                 view.Constants,
+                view.IndirectLight,
                 view.Depth,
                 view.Velocity,
                 diffuse.Filtered,
@@ -153,7 +135,4 @@ internal sealed class TracedDiffuse(AssetManager assets, GpuResources resources)
             .Writes(diffuse.Light, diffuse.Depth)
             .DispatchOver(width, height);
     }
-
-    private static (int Width, int Height) GetSize(in RenderView view) =>
-        (Math.Max(view.Width / TracedScale, 1), Math.Max(view.Height / TracedScale, 1));
 }

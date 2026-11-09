@@ -10,7 +10,7 @@ import Core.Frame;
 
 // Where the models are in the frame's buffer, and their bytes: C#'s GpuModels.
 public static const uint ModelsOffset = FrameBytes;
-public static const uint ModelsBytes = 32u;
+public static const uint ModelsBytes = 56u;
 
 public struct Models
 {
@@ -26,6 +26,9 @@ public struct Models
     public uint acceleration;
     public uint hitMaterials;
     public uint meshes;
+    // The box over the world boxes of the instances rays see; min over max where none do.
+    public float3 boxMin;
+    public float3 boxMax;
 }
 
 // A mesh as a ray sees it, C#'s GpuMesh: where its triangles start in the index pool and its material slot.

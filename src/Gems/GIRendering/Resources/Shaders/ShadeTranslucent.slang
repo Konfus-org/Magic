@@ -12,7 +12,8 @@ import Core.Frame;
 import Core.Math;
 import Core.Pack;
 import Scene.Lights;
-import Scene.Probes;
+import Light.Probes;
+import Light.Indirect;
 import Surface.Brdf;
 import Sky.ISky;
 import Trace.HitSurface;
@@ -25,8 +26,9 @@ static const float PaneReflectance = 0.04;
 // The light reaching a point from a direction: the probes' where there are any, else the sky's.
 float3 GetSurroundings<S : ISky>(Lights lights, float3 world, float3 direction)
 {
-    if (GetProbeGrid().probes != 0u)
-        return GetProbeIrradiance(GetProbeGrid(), world, direction);
+    ProbeGridConstants grid = GetProbeGrid();
+    if (grid.probes != 0u)
+        return GetProbeIrradiance(grid, world, direction);
 
     return GetSkyRadiance<S>(lights, direction);
 }
