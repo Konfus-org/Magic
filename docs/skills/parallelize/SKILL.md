@@ -1,11 +1,11 @@
 ---
 name: parallelize
-description: Runs a large effort as a swarm, one agent per slice, each through the normal slice and finish flow. Use it on your own, without being asked, when the user hands over a list of several separate tasks, asks for something too big for a few slices (such as "make a game"), or a kickoff's slice list has two or more slices that don't depend on each other.
+description: Runs a large effort as a swarm of workers that each build one slice at a time through the normal slice and finish flow. Use it on your own, without being asked, when the user hands over a list of several separate tasks, asks for something too big for a few slices (such as "make a game"), or a kickoff's slice list has two or more slices that don't depend on each other.
 ---
 
 # Parallelize
 
-You coordinate: you plan the slices, start a worker for each, keep the user up to date and bring the whole in. You
+You coordinate: you plan the slices, give each slice to a worker, keep the user up to date and bring the whole in. You
 don't build.
 
 1. **Ask the overarching questions,** one at a time, skipping what the conversation already answers:
@@ -25,12 +25,12 @@ don't build.
      target, and is named beside it as `<type>/<effort>-<slice>`, never under it: git can't hold both
      `feature/new-sample` and `feature/new-sample/terrain`.
    - **Separate tasks:** no root. Each merges into the merge target.
-4. **Write the plan** to `agent-swarm/<effort>.md` in the repository's git folder (`git rev-parse --git-common-dir`),
-   which every worktree can read and nothing commits. It holds the goal in three lines, the decisions, the root
-   branch if there is one, the review count, and a table of each slice's branch, mode, check, scope, what it waits on,
-   and its state from its worker: merged, answered, with the answer, or blocked, with the question. Follow-ups go at
-   the end. Only you write it; rewrite it whenever something changes. Present it in the chat. A yes approves every
-   slice in it, and the close of each worker. Wait for it.
+4. **Write the swarm plan** to `agent-swarm/<effort>.md` in the repository's git folder
+   (`git rev-parse --git-common-dir`), which every worktree can read and nothing commits. It holds the goal in three
+   lines, the decisions, the root branch if there is one, the review count, and a table of each slice's branch, mode,
+   check, scope, what it waits on, and its state from its worker: merged, answered, with the answer, or blocked, with
+   the question. Follow-ups go at the end. Only you write it; rewrite it whenever something changes. Present it in the
+   chat. A yes approves every slice in it, and the close of each worker. Wait for it.
 5. **Start every slice that is ready** as a worker, up to the review count. A slice is ready once each slice it waits
    on has merged, or for a spike, answered, and no running slice changes the same files or the same gem. Start with
    the riskiest spike alone, unless the user says the risk is known. Each worker runs in its own session: a side
@@ -57,8 +57,9 @@ don't build.
 7. **Watch the workers.** Examine each worker when it sends a message, and at least every 10 minutes while workers
    run. If the tool can schedule a check, schedule one.
    - If a building worker has no new commit, claim or message since your last two checks, ask it for its status.
-   - If a worker ends without a `SLICE:` line, read its last message. Start a new worker on the same branch and
-     worktree, and give it that message.
+   - If a worker ends without a `SLICE:` line, read its slice's state from git and plannotator (step 6). If the slice
+     has not merged, close the worker. Start a new worker on the same branch and worktree, and give it the last
+     message of the old worker.
 8. **Keep the user up to date.** Post one update when a review starts waiting on them, a slice merges or answers, a
    worker is blocked, or the plan changes, and none in between, always in this shape:
 
@@ -79,14 +80,13 @@ don't build.
    2. Give the finished worker the next ready slice, or close the worker:
       - If a ready slice is in the same area as the worker's last slice, give it to the worker with a new brief
         (step 5). Do this only while the worker has built fewer than three slices and its context is less than half
-        full.
+        full. If the worker gave no `CONTEXT`, do not give it another slice.
       - If a ready slice does not agree with these conditions, close the worker and start a new one for the slice.
       - If no slice is ready, close the worker.
    3. Start the other slices that are now ready (step 5).
    4. Do steps 6 to 9 again until each slice has merged or answered.
 
-   To close a worker, end its session and delete it. The user's yes to the plan covers the workers that you close,
-   so do not ask again.
+   To close a worker, end its session and delete it.
 10. **When every slice has merged or answered:**
    1. With a root: in its worktree, rebase onto the merge target and run `tools/Scripts/AgentTaskComplete.ps1` at
       the highest level any slice used, looking at any screenshots. Have the root reviewed in a fresh context as one

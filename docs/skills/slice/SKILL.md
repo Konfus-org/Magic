@@ -15,8 +15,8 @@ description: Starts a slice. Use it on your own, without being asked, whenever t
    - Compare it with the goal and the decisions that you agreed with the user. If it does not serve them, tell the
      user.
    - If a current .NET or C# feature does the job better than the method in the request, tell the user.
-   - Before you add a component, dependency, file format or tool, find a well-maintained one that exists. Use it,
-     also when the request names a different method.
+   - Before you add a component, dependency, file format or tool, look for a well-maintained one that exists. If you
+     find one, prefer it, also when the request names a different method.
    - A change to a public API, a file format, a dependency, a gem or the architecture is a decision. Get the user's
      yes for it.
 4. Read only the code that the slice needs. Then write this brief:
@@ -38,12 +38,13 @@ description: Starts a slice. Use it on your own, without being asked, whenever t
    the slice-reviewer returning VERDICT: PASS - <what must not change> - or stop after <n> turns
    ```
 
-   Add the `/goal` line only when the slice needs many turns to reach an end state that the transcript can show. Give
-   the reason in one sentence. The user types the line; you cannot set it.
+   Add the `/goal` line only for a slice that needs many turns to reach an end state in the transcript. Do not add it
+   when the slice needs the user's decisions. Give the reason in one sentence. The user types the line; you cannot set
+   it.
 5. If the request is clear and the slice needs no hard-to-reverse decision:
    1. Write the brief in the chat. Do not wait for approval. The request, or the user's yes to the slice list, is the
       approval.
-   2. Make the worktree and claim the scope of the brief ([AGENTS.md](../../../AGENTS.md#worktrees)).
+   2. Make the worktree. Then claim the scope of the brief ([AGENTS.md](../../../AGENTS.md#worktrees)).
    3. If the claim reports an overlap, stop and ask the user.
    4. Build the slice.
 6. If not, write a proposal that starts with the brief. Do not edit until the user approves, trims or splits it. The

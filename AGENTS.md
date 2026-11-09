@@ -36,8 +36,8 @@ The scripts run under `pwsh` and Windows PowerShell ([Tools](tools/README.md)).
   path. Use `-Domains`, `-Project` and `-Commands` to reach what the samples don't show.
 - **Claim:** `tools/Scripts/Claim.ps1 -Slice <title> -Scope <paths>` tells every other session what the slice will
   change, and prints any overlap with theirs ([Worktrees](#worktrees)).
-- **Review:** `plannotator review` opens the change as a diff in the user's browser and returns when they comment or
-  approve (the finish skill).
+- **The user's review:** `plannotator review` opens the change as a diff in the user's browser and returns when
+  they comment or approve (the finish skill).
 
 Validation means running what the change can affect. Pick the lowest level that covers it, or the higher one when
 unsure:
@@ -78,12 +78,12 @@ In Claude Code, the agent hooks in `.claude/settings.json` hold the workflow wit
 | --- | --- |
 | [README](README.md) | Once per session |
 | [Code Standards](docs/CODE_STANDARDS.md) | Before editing any `.cs` file |
-| [Shader Standards](docs/SHADER_STANDARDS.md) | Before editing any `.slang` file |
+| [Shader Standards](docs/SHADER_STANDARDS.md) | Before editing any `.slang` file, or a C# struct that a shader shares |
 | [Tests](tests/README.md) | Before running or touching tests |
 | [Tools](tools/README.md) | Before running a tool script |
 
 Before changing an area, read every `README.md` from that area's root folder down to the folder you are editing.
-Read a long plan or review by the part you need: its index first, then only that part.
+Read a long review file by the part you need: its index first, then only that part.
 
 ## Workflow
 
@@ -95,8 +95,8 @@ Read a long plan or review by the part you need: its index first, then only that
 
 ### Slices
 
-Work moves one slice at a time, or one slice per worker in a swarm (the parallelize skill). The conversation holds
-the plan; no file does, except a swarm's plan in the git folder (the parallelize skill).
+Work moves one slice at a time, or one slice at a time per worker in a swarm (the parallelize skill). The
+conversation holds the plan; no file does, except a swarm's plan in the git folder (the parallelize skill).
 
 - **A request is a slice, or gets split into slices.** A sweeping change becomes a list of slices you propose in the
   chat, and is never done as one task.
@@ -112,14 +112,14 @@ the plan; no file does, except a swarm's plan in the git folder (the parallelize
 - **Stop after each slice.** Once it merges, propose the next slice and wait. Never start it on your own. A swarm
   the user approved is the exception: its coordinator starts each slice once the ones it waits on have merged or, for a
   spike, answered (the parallelize skill).
-- **One slice per session** (the finish skill). When compacting, keep the slice list, the current slice, its
-  worktree path, the files it changed and its `-Change` level.
+- **One slice per session**, or one slice at a time per worker in a swarm (the finish skill). When compacting, keep the
+  slice list, the current slice, its worktree path, the files it changed and its `-Change` level.
 
 ### Kickoff
 
 A request that starts a new effort too big for one slice begins with an interview, then a list of slices, riskiest
 first (the kickoff skill). A list of separate tasks, or an effort whose slices don't all depend on each other, runs
-as a swarm: one worker per slice, each through the normal flow (the parallelize skill).
+as a swarm: workers that each build one slice at a time through the normal flow (the parallelize skill).
 
 ### Modes
 
@@ -246,7 +246,7 @@ Technical English.
 
 When you reply to the user:
 
-- Write a plan as numbered steps, with one action in each step.
+- Write a plan of actions in a reply as numbered steps, with one action in each step.
 - Write a status update or a summary with the rules above.
 - To tell the reason for a decision, use short sentences in the active voice. The other rules can relax there.
 
@@ -264,12 +264,15 @@ When you reply to the user:
 | review | The check of a slice by a reviewer in a fresh context (the review-slice skill). |
 | the user's review | The check of a slice by the user, in plannotator or in the chat. |
 | swarm | Workers that build slices at the same time for one coordinator (the parallelize skill). |
-| coordinator | The session that plans a swarm, gives slices to its workers and merges its work. |
+| coordinator | The session that plans a swarm, gives slices to its workers and merges the root branch. |
 | worker | A session that builds one slice of a swarm at a time. |
+| swarm plan | The file that holds a swarm's slices and their states (the parallelize skill). |
+| review count | How many of the user's reviews can wait at the same time in a swarm. |
 | root branch | The branch that the slices of one feature merge into before it merges into the merge target. |
 | gem | A plugin: a part of the engine that a project adds or replaces. |
 | hook | A method that the engine calls on a gem each frame (Code Standards). |
 | agent hook | A check that Claude Code runs on its own (`.claude/settings.json`). |
+| git hook | A check that git runs on a commit (`.githooks/`). |
 
 ## Git
 
@@ -280,9 +283,9 @@ Every task runs in its own worktree. Never edit or commit in the main checkout.
 - **Name:** `<type>/<feature>` in kebab-case, for example `fix/material-cache-leak`. Types: `feature`, `fix`,
   `refactor`, `docs`, `test`, `build`, `ci`. The worktree folder has the branch's name.
 - **Start:** start the session from the repository's root, never from a folder in it. Branch from the branch
-  checked out in the main checkout. That branch is the merge target. Title the
-  session with the branch's name, as `fix/material-cache-leak`. A worker in a swarm branches from the swarm's root
-  branch instead, with `--track`, which makes the root its merge target (the parallelize skill).
+  checked out in the main checkout. That branch is the merge target. Title the session with the branch's name, as
+  `fix/material-cache-leak`. A worker in a swarm branches from the swarm's root branch instead, with `--track`, which
+  makes the root its merge target (the parallelize skill).
 - **Claim:** right after making the worktree, claim the files and folders the slice will change:
   `tools/Scripts/Claim.ps1 -Slice <title> -Scope <paths>`. Include any file every slice touches that you need:
   `src/Magic.slnx`, `Directory.Packages.props`, `Directory.Build.props`, `Directory.Build.targets`, `AGENTS.md` and
@@ -303,12 +306,12 @@ tidy-worktrees skill). A coordinator closes its own workers without a new approv
 
 ### Commits
 
-- The subject starts with `type: `, as in `fix: `, which the repository's hook writes from the branch's type and
-  the files staged ([Git hooks](.githooks/README.md)): `feature/` gives `feat`, every other branch type its own word,
-  and a commit of Markdown alone `docs`. Write the subject alone, never a scope or area prefix such as
-  `fix(core): ` or `Core, Gems:`. The `commit-msg` hook refuses a commit whose subject lacks the type or has a scope,
-  and the Commits check a push.
-- Commit only after the user approves the review.
+- The subject starts with `type: `, as in `fix: `, which the repository's git hook writes from the branch's type and the
+  files staged ([Git hooks](.githooks/README.md)): `feature/` gives `feat`, every other branch type its own word, and a
+  commit of Markdown alone `docs`. Write the subject alone, never a scope or area prefix such as `fix(core): ` or
+  `Core, Gems:`. The `commit-msg` git hook refuses a commit whose subject lacks the type or has a scope, and the
+  Commits check a push.
+- Commit only after the user approves the change in the user's review.
 - Never push.
 - No co-author lines, and nothing in code, comments, commit messages or branch names that hints the work was
   generated.

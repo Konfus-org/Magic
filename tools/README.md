@@ -48,7 +48,7 @@ and a state already stamped returns at once. It also points git at the repositor
 
 Claims the files and folders a slice will change, in the repository's git folder, which every worktree shares, and
 prints any other claim or worktree that touches them; it exits `1` when one does. `-Release` takes the claim back.
-The SessionStart hook lists the claims, and the edit hook refuses an edit inside another session's claim
+The SessionStart agent hook lists the claims, and the edit agent hook refuses an edit inside another session's claim
 ([AGENTS.md](../AGENTS.md#worktrees)).
 
 ## Templates

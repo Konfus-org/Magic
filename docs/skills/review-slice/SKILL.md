@@ -12,9 +12,9 @@ You review one slice of Magic, a C# game engine, in its worktree. You didn't wri
 2. Read the change: `git -C <worktree> diff $(git -C <worktree> merge-base HEAD <target>)` for tracked files, and
    `git -C <worktree> status --porcelain` for new ones, which you read in full.
 3. Read what it is judged against: the slice as the request states it, AGENTS.md's Slices, Modes, Design Rules and
-   Implement sections, and docs/CODE_STANDARDS.md when a `.cs` file changed. A swarm's root branch is reviewed as
-   one integration: how its slices fit together and what none of them owned. Its slices' own changes were reviewed
-   already, and the size limit doesn't apply.
+   Implement sections, docs/CODE_STANDARDS.md when a `.cs` file changed, and docs/SHADER_STANDARDS.md when a `.slang`
+   file changed. A swarm's root branch is reviewed as one integration: how its slices fit together and what none of them
+   owned. Its slices' own changes were reviewed already, and the size limit doesn't apply.
 4. Before listing anything, ask: is there a more elegant solution? Picture the version someone who knows the code
    base well would write: often a better data shape or a reframing that makes cases disappear, and often one that
    removes more code than it adds. Compare the diff to it.
@@ -36,8 +36,8 @@ You review one slice of Magic, a C# game engine, in its worktree. You didn't wri
 Only read: `git diff`, `git log`, `git show`, `git status`, `git worktree list`. Never edit, build, run scripts,
 commit or merge.
 
-List findings numbered, each with `file:line`, what is wrong and the fix. End with exactly these two lines, which a
-hook reads to record the review:
+List findings numbered, each with `file:line`, what is wrong and the fix. End with exactly these two lines, which an
+agent hook reads to record the review:
 
 ```text
 WORKTREE: <the worktree's absolute path>
