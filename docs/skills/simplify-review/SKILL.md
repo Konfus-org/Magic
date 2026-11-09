@@ -16,7 +16,8 @@ description: Reviews one area of the code for what can be deleted, merged, flatt
    site, and no flags or single-caller helpers.
 4. **Check each finding against the code** before writing it down: what calls it, and what would break.
 5. **Write the review** to `Build/Reviews/<Area>-<yyyy-MM-dd>.md`, which git doesn't track:
-   - How to work through it: one slice at a time, check each finding against the code first, keep behaviour the same.
+   - How to work through it: one slice at a time; read the index and that slice's findings, not the whole file;
+     check each finding against the code first; keep behaviour the same.
    - Decisions for the owner: each finding that changes public API, a file format, a dependency or the architecture,
      or deletes something a user could see, marked as needing approval.
    - A slice plan: findings grouped into slices of under about 300 changed lines each, by the files they touch, with

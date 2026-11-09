@@ -8,18 +8,18 @@ code and docs follow.
 A skill is a step-by-step procedure in [`docs/skills/`](docs/skills). Any agent uses one on its own, without being
 asked, when its trigger fits: read its `SKILL.md` and follow it. Claude Code also finds them through `.claude/`.
 
-| Skill                                                   | Use it                                                                  |
-| ------------------------------------------------------- | ----------------------------------------------------------------------- |
-| [kickoff](docs/skills/kickoff/SKILL.md)                 | A request starts something too big for one slice                        |
-| [parallelize](docs/skills/parallelize/SKILL.md)         | A list of separate tasks, or an effort too big for a few slices         |
-| [slice](docs/skills/slice/SKILL.md)                     | Any change to code, docs or tools, and the next agreed slice            |
-| [finish](docs/skills/finish/SKILL.md)                   | A slice's code is written, or the user's review comments are addressed  |
-| [review-slice](docs/skills/review-slice/SKILL.md)       | Reviewing a validated slice from a context that didn't write it         |
-| [tidy-worktrees](docs/skills/tidy-worktrees/SKILL.md)   | The start of every session                                              |
-| [investigate](docs/skills/investigate/SKILL.md)         | Something is broken, logs an error or draws wrong                       |
-| [new-gem](docs/skills/new-gem/SKILL.md)                 | A slice needs a new gem                                                 |
-| [simplify-review](docs/skills/simplify-review/SKILL.md) | The user asks to simplify or review an area                             |
-| [retro](docs/skills/retro/SKILL.md)                     | A swarm finishes, a slice went badly, or the user corrects the workflow |
+| Skill | Use it |
+| --- | --- |
+| [kickoff](docs/skills/kickoff/SKILL.md) | A request starts something too big for one slice |
+| [parallelize](docs/skills/parallelize/SKILL.md) | A list of separate tasks, or an effort too big for a few slices |
+| [slice](docs/skills/slice/SKILL.md) | Any change to code, docs or tools, and the next agreed slice |
+| [finish](docs/skills/finish/SKILL.md) | A slice's code is written, or the user's review comments are addressed |
+| [review-slice](docs/skills/review-slice/SKILL.md) | Reviewing a validated slice from a context that didn't write it |
+| [tidy-worktrees](docs/skills/tidy-worktrees/SKILL.md) | The start of every session |
+| [investigate](docs/skills/investigate/SKILL.md) | Something is broken, logs an error or draws wrong |
+| [new-gem](docs/skills/new-gem/SKILL.md) | A slice needs a new gem |
+| [simplify-review](docs/skills/simplify-review/SKILL.md) | The user asks to simplify or review an area |
+| [retro](docs/skills/retro/SKILL.md) | A swarm finishes, a slice went badly, or the user corrects the workflow |
 
 ## Commands
 
@@ -42,24 +42,16 @@ The scripts run under `pwsh` and Windows PowerShell ([Tools](tools/README.md)).
 Validation means running what the change can affect. Pick the lowest level that covers it, or the higher one when
 unsure:
 
-| `-Change` | For                                                                               | Runs                                                                 |
-| --------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `Docs`    | Markdown, comments, docstrings                                                    | The build                                                            |
-| `Code`    | Anything that runs differently but draws the same, refactors and renames included | The build, the tests, every sample project headless                  |
-| `Visual`  | Anything that can change what is drawn                                            | The build, the tests, a screenshot of every sample project to look at |
+| `-Change` | For | Runs |
+| --- | --- | --- |
+| `Docs` | Markdown, comments, docstrings | The build |
+| `Code` | Anything that runs differently but draws the same, refactors and renames included | The build, the tests, every sample project headless |
+| `Visual` | Anything that can change what is drawn | The build, the tests, a screenshot of every sample project to look at |
 
 Commit or merge only once `tools/Scripts/AgentTaskComplete.ps1` has stamped that exact state.
 
-To run one step of Validate on its own:
-
-```powershell
-dotnet build src/Magic.slnx
-dotnet test --solution src/Magic.slnx
-'wait loaded', 'wait 10s', 'exit' | Build/bin/Debug/Magic open samples/HelloWorld/HelloWorld.magic --headless --fail-on-error
-tools/Scripts/Screenshot.ps1 -Project samples/Forest/Forest.magic
-```
-
-`--fail-on-error` exits with `2` if anything was logged as an error.
+To run one step on its own, use `tools/Scripts/Validate.ps1 -Only Build`, `Test`, `Headless` or `Screenshot`, with
+`-Project` for one sample ([Tools](tools/README.md#validateps1)).
 
 - The build must have no errors, and no warnings but unused or unreachable code's (`Directory.Build.props`). Fix a
   warning at its cause. If a warning doesn't apply, say so in your summary instead of suppressing it.
@@ -82,23 +74,24 @@ In Claude Code, the agent hooks in `.claude/settings.json` hold the workflow wit
 
 ## Before You Edit
 
-| Document                                 | Read                                  |
-| ---------------------------------------- | ------------------------------------- |
-| [README](README.md)                      | Once per session                      |
-| [Code Standards](docs/CODE_STANDARDS.md) | Before editing any `.cs` file         |
-| [Contributing](docs/CONTRIBUTING.md)     | Before presenting a change for review |
-| [Tests](tests/README.md)                 | Before running or touching tests      |
-| [Tools](tools/README.md)                 | Before running a tool script          |
+| Document | Read |
+| --- | --- |
+| [README](README.md) | Once per session |
+| [Code Standards](docs/CODE_STANDARDS.md) | Before editing any `.cs` file |
+| [Shader Standards](docs/SHADER_STANDARDS.md) | Before editing any `.slang` file |
+| [Tests](tests/README.md) | Before running or touching tests |
+| [Tools](tools/README.md) | Before running a tool script |
 
 Before changing an area, read every `README.md` from that area's root folder down to the folder you are editing.
+Read a long plan or review by the part you need: its index first, then only that part.
 
 ## Workflow
 
-| Size     | What counts                                                                | Process                                                        |
-| -------- | -------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| Small    | One file, about 20 lines or fewer, no public API change, no new dependency | In a worktree: change, validate, open the review               |
-| Normal   | Anything larger                                                            | A clear slice starts after its brief; anything else, proposal  |
-| Sweeping | Multi-file architectural or data-flow changes                              | Proposal with before/after snippets and a data-flow diagram    |
+| Size | What counts | Process |
+| --- | --- | --- |
+| Small | One file, about 20 lines or fewer, no public API change, no new dependency | In a worktree: change, validate, open the review |
+| Normal | Anything larger | A clear slice starts after its brief; anything else, proposal |
+| Sweeping | Multi-file architectural or data-flow changes | Proposal with before/after snippets and a data-flow diagram |
 
 ### Slices
 
@@ -108,9 +101,7 @@ the plan; no file does, except a swarm's plan in the git folder (the parallelize
 - **A request is a slice, or gets split into slices.** A sweeping change becomes a list of slices you propose in the
   chat, and is never done as one task.
 - **One slice is one task:** one worktree, one review, one merge.
-- **Approved once.** The user's request, or their yes to a list of slices, is the approval. A clear slice starts as
-  soon as you state its brief in a few lines (the slice skill). A proposal in plan mode is only for a vague request,
-  or a slice that needs a hard-to-reverse decision.
+- **Approved once.** The user's request, or their yes to a list of slices, is the approval (the slice skill).
 - **Iterate on the narrowest check.** While building, run one step of Validate, one test project or one sample.
   Run `tools/Scripts/AgentTaskComplete.ps1` once, when the slice is done.
 - **Size:** reviewable in about 15 minutes, under about 300 changed lines, one area or one seam between two, and
@@ -121,14 +112,7 @@ the plan; no file does, except a swarm's plan in the git folder (the parallelize
 - **Stop after each slice.** Once it merges, propose the next slice and wait. Never start it on your own. A swarm
   the user approved is the exception: its coordinator starts each slice once the ones it waits on have merged or, for a
   spike, answered (the parallelize skill).
-- **Suggest `/goal` when it fits.** When a slice will take many turns toward an end state its own output can show,
-  such as a migration until every call site compiles and the tests pass, offer a ready-to-paste `/goal` line in the
-  brief. Write it with one end state, how you'll show it (`tools/Scripts/AgentTaskComplete.ps1 -Change <level>`
-  stamps the state and the `slice-reviewer` returns `VERDICT: PASS`), what must not change, and a bound such as `or
-  stop after 20 turns`. Don't offer one for a slice a single turn finishes, or one that needs the user's decisions.
-  You can't set it yourself; the user types it.
-- **One slice per session.** After a merge, suggest the user start the next slice fresh with `/clear`, and give them
-  the next slice's brief in one or two lines to paste. When compacting, keep the slice list, the current slice, its
+- **One slice per session** (the finish skill). When compacting, keep the slice list, the current slice, its
   worktree path, the files it changed and its `-Change` level.
 
 ### Kickoff
@@ -141,11 +125,11 @@ as a swarm: one worker per slice, each through the normal flow (the parallelize 
 
 Every slice names its mode.
 
-| Mode         | For                                      | Allowed                                                | Not allowed                                              |
-| ------------ | ---------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------- |
-| `spike`      | Answering one question                   | Hard-coded values, copy-paste, no tests, no cleanup    | Merging: the answer goes in the summary                  |
-| `prototype`  | Proving a feature works end to end       | Hard-coded values behind one member, marked `// PROTO` | New abstractions, generic systems, work for later needs  |
-| `production` | Code a second feature already depends on | Everything these docs ask for                          | Anything hacky the summary doesn't name                  |
+| Mode | For | Allowed | Not allowed |
+| --- | --- | --- | --- |
+| `spike` | Answering one question | Hard-coded values, copy-paste, no tests, no cleanup | Merging: the answer goes in the summary |
+| `prototype` | Proving a feature works end to end | Hard-coded values behind one member, marked `// PROTO` | New abstractions, generic systems, work for later needs |
+| `production` | Code a second feature already depends on | Everything these docs ask for | Anything hacky the summary doesn't name |
 
 `prototype` is the default. A prototype becomes `production` only when a second feature depends on it, in a slice of
 its own. In a `spike`, skip [Leave it cleaner](#implement). In a `prototype`, it covers only the lines the slice
@@ -163,7 +147,8 @@ architecture. State the decision and the alternative, and put the decision and i
 ### Implement
 
 Make your worktree before the first edit ([Worktrees](#worktrees)), even if the task started as a question. State
-assumptions and decisions a reviewer would question as you make them.
+assumptions and decisions a reviewer would question as you make them. For a search across many files, use a search
+subagent and keep only its answer.
 
 - **Fix the siblings.** Fix the same bug in its copies (overloads, the same pattern elsewhere, the same step in
   another gem) in the same change.
@@ -294,7 +279,8 @@ Every task runs in its own worktree. Never edit or commit in the main checkout.
 
 - **Name:** `<type>/<feature>` in kebab-case, for example `fix/material-cache-leak`. Types: `feature`, `fix`,
   `refactor`, `docs`, `test`, `build`, `ci`. The worktree folder has the branch's name.
-- **Start:** branch from the branch checked out in the main checkout. That branch is the merge target. Title the
+- **Start:** start the session from the repository's root, never from a folder in it. Branch from the branch
+  checked out in the main checkout. That branch is the merge target. Title the
   session with the branch's name, as `fix/material-cache-leak`. A worker in a swarm branches from the swarm's root
   branch instead, with `--track`, which makes the root its merge target (the parallelize skill).
 - **Claim:** right after making the worktree, claim the files and folders the slice will change:
