@@ -5,19 +5,21 @@ description: Starts a slice. Use it on your own, without being asked, whenever t
 
 # Slice
 
-1. Take the slice the user asked for, or the next one from a list they agreed to earlier in the conversation. If the
-   request starts an effort too big for one slice, use the [kickoff skill](../kickoff/SKILL.md) instead.
-2. Check the size against [AGENTS.md](../../../AGENTS.md#slices). If it's too big, say so plainly, propose two to
-   four smaller slices and stop until the user picks one.
-3. Check the request:
-   - Its premises against the code and docs. If it's the wrong direction, say so with evidence before doing
-     anything.
-   - Against the goal and decisions agreed in the conversation. Flag drift.
-   - If a current .NET or C# feature does the job better than what the request names, say so.
-   - Before adding a component, dependency, file format or tool, look for an existing, well-maintained one and
-     prefer it, even when the request names an approach.
-   - Flag any public API, file format, dependency, gem or architecture change as a decision that needs a yes.
-4. Read only the code the slice needs, then write this brief:
+1. Take the slice that the user asks for, or the next slice in a list that the user agreed to. If the request is too
+   big for one slice, use the [kickoff skill](../kickoff/SKILL.md) instead.
+2. Compare the size of the slice with the limit in [AGENTS.md](../../../AGENTS.md#slices). If the slice is too big,
+   tell the user. Propose two to four smaller slices, and stop until the user selects one.
+3. Examine the request:
+   - Compare its premises with the code and the docs. If the direction is wrong, show the user the evidence before
+     you do other work.
+   - Compare it with the goal and the decisions that you agreed with the user. If it does not serve them, tell the
+     user.
+   - If a current .NET or C# feature does the job better than the method in the request, tell the user.
+   - Before you add a component, dependency, file format or tool, find a well-maintained one that exists. Use it,
+     also when the request names a different method.
+   - A change to a public API, a file format, a dependency, a gem or the architecture is a decision. Get the user's
+     yes for it.
+4. Read only the code that the slice needs. Then write this brief:
 
    ```markdown
    ## Slice: <verb + what the user can see or run>
@@ -36,20 +38,22 @@ description: Starts a slice. Use it on your own, without being asked, whenever t
    the slice-reviewer returning VERDICT: PASS - <what must not change> - or stop after <n> turns
    ```
 
-   Include the `/goal` line only when the slice will take many turns toward an end state the transcript can show
-   ([AGENTS.md](../../../AGENTS.md#slices)). Say in one sentence why it fits.
-
-5. If the request is clear and the slice needs no hard-to-reverse decision, state the brief in the chat, make the
-   worktree ([AGENTS.md](../../../AGENTS.md#worktrees)) and start building. Don't wait for approval: the request, or
-   the user's yes to the slice list, is the approval. Claim the brief's scope as soon as the worktree exists
-   ([AGENTS.md](../../../AGENTS.md#worktrees)); if the claim reports an overlap, stop and ask before building.
-6. Otherwise, present a proposal led by the brief, and make no edits until the user approves, trims or splits it:
+   Add the `/goal` line only when the slice needs many turns to reach an end state that the transcript can show. Give
+   the reason in one sentence. The user types the line; you cannot set it.
+5. If the request is clear and the slice needs no hard-to-reverse decision:
+   1. Write the brief in the chat. Do not wait for approval. The request, or the user's yes to the slice list, is the
+      approval.
+   2. Make the worktree and claim the scope of the brief ([AGENTS.md](../../../AGENTS.md#worktrees)).
+   3. If the claim reports an overlap, stop and ask the user.
+   4. Build the slice.
+6. If not, write a proposal that starts with the brief. Do not edit until the user approves, trims or splits it. The
+   proposal gives:
    1. The approach.
-   2. The smallest version that could work, the alternatives you considered, and why the chosen one is the
-      simplest.
-   3. For anything new, the existing libraries or tools you looked at.
-   4. The riskiest assumption, what you haven't verified, and what would change your recommendation.
-   5. For a sweeping change, before/after snippets and a data-flow diagram.
+   2. The smallest version that can work, the alternatives, and why the selected one is the simplest.
+   3. For a new thing, the existing libraries and tools that you examined.
+   4. The riskiest assumption, what you did not verify, and what can change your recommendation.
+   5. For a sweeping change, snippets before and after the change, and a data-flow diagram.
 
-   In Claude Code, present it in plan mode so it opens in plannotator. Elsewhere, present it in the chat and wait.
+   In Claude Code, write the proposal in plan mode, which opens it in plannotator. In other tools, write it in the chat
+   and wait.
 7. When the slice is built, use the [finish skill](../finish/SKILL.md).

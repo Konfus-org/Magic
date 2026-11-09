@@ -66,7 +66,7 @@ tools/Scripts/Screenshot.ps1 -Project samples/Forest/Forest.magic
 
 ### What Runs on Its Own
 
-In Claude Code, the hooks in `.claude/settings.json` hold the workflow without anyone typing a command:
+In Claude Code, the agent hooks in `.claude/settings.json` hold the workflow without anyone typing a command:
 
 - Each session, and each `/clear` or compaction, starts with the checkout and its merge target in context.
 - An edit to a file in the main checkout is refused. Starting Claude Code with `MAGIC_ALLOW_MAIN_EDITS=1` allows it
@@ -245,6 +245,46 @@ Agents tend to over-build. Less is more: the best change often removes more code
 - No copies of code: no member, option or default lists; point to the code, `--help` or the settings class.
 - Outside configuration files, name another gem by its role ("the GPU provider"), never by its name.
 - Docs change in the same change as the code.
+
+## Writing
+
+Write docs, skills, plans, summaries and replies to the user with these rules, a short form of ASD-STE100 Simplified
+Technical English.
+
+- Write one instruction in one sentence. Write a step as a command: "Run the tests."
+- Put the condition before the instruction: "If the build fails, stop."
+- Keep a sentence to 20 words in a procedure and to 25 words in a description.
+- Use the active voice. Name who or what does the action.
+- Use "must", "do not" and "can" for a rule. Do not use "should", "may" or "might" in a rule.
+- Use one word for one meaning, and the words in the glossary only with their meanings there.
+- Keep a paragraph to one topic and six sentences. Write steps as a numbered list.
+
+When you reply to the user:
+
+- Write a plan as numbered steps, with one action in each step.
+- Write a status update or a summary with the rules above.
+- To tell the reason for a decision, use short sentences in the active voice. The other rules can relax there.
+
+### Glossary
+
+| Term | Meaning |
+| --- | --- |
+| slice | One task: one worktree, one review, one merge (the slice skill). |
+| brief | The short statement of a slice: its goal, mode, scope, check and `-Change` level. |
+| main checkout | The first checkout of the repository. Agents do not edit in it. |
+| worktree | The git worktree that one branch is built in, under `Magic-worktrees/`. |
+| merge target | The branch that a slice merges into: the branch of the main checkout, or a root branch. |
+| claim | The record of the paths that a slice changes (`tools/Scripts/Claim.ps1`). |
+| stamp | The record that `tools/Scripts/AgentTaskComplete.ps1` validated an exact state. |
+| review | The check of a slice by a reviewer in a fresh context (the review-slice skill). |
+| the user's review | The check of a slice by the user, in plannotator or in the chat. |
+| swarm | Workers that build slices at the same time for one coordinator (the parallelize skill). |
+| coordinator | The session that plans a swarm, gives slices to its workers and merges its work. |
+| worker | A session that builds one slice of a swarm at a time. |
+| root branch | The branch that the slices of one feature merge into before it merges into the merge target. |
+| gem | A plugin: a part of the engine that a project adds or replaces. |
+| hook | A method that the engine calls on a gem each frame (Code Standards). |
+| agent hook | A check that Claude Code runs on its own (`.claude/settings.json`). |
 
 ## Git
 
