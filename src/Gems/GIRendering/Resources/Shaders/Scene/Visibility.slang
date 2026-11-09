@@ -136,11 +136,12 @@ public struct PixelTriangle
 // [-1, 1] with y up.
 public PixelTriangle LoadPixelTriangle(FrameConstants frame, uint visibleIndex, uint triangle, float2 pixelNdc)
 {
-    ArrayRef<VisibleCluster> visible = { frame.visibleClusters };
+    ClusterConstants clusters = GetClusters();
+    ArrayRef<VisibleCluster> visible = { clusters.visibleClusters };
     VisibleCluster entry = visible[visibleIndex];
     PixelTriangle result;
     result.instance = LoadInstance(frame.instances, entry.instance);
-    result.cluster = LoadCluster(frame.clusters, entry.cluster);
+    result.cluster = LoadCluster(clusters.clusters, entry.cluster);
 
     uint first = result.cluster.indexOffset + triangle * 3u;
     result.v0 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first));

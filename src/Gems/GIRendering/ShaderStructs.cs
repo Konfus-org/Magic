@@ -6,13 +6,13 @@ using Magic.Ecs.Components;
 namespace Magic.GIRendering;
 
 /// <summary>
-/// What every pass of a frame reads, the twin of <c>Core/Frame.slang</c>'s: the view, the sun, the output's size and
-/// the heap ids of the frame's tables and textures, written once a frame into the constants buffer.
+/// What every pass of a frame reads, the twin of the library's <c>Core/Frame.slang</c>: the view, the sun, the output's
+/// size and the heap ids of the frame's tables and textures, written once a frame at the start of the constants buffer.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct FrameConstants
 {
-    public const int Bytes = 660;
+    public const int Bytes = 588;
 
     public Matrix4x4 View;
 
@@ -50,50 +50,21 @@ internal record struct FrameConstants
 
     public uint Height;
 
-    public uint HzbLevels;
-
-    public uint HasHzb;
-
     public float Near;
 
     public float PixelsPerRadian;
 
-    public float ErrorThreshold;
-
-    /// <summary>
-    /// The pixel radius on screen under which an instance hands off to its impostor; 0 hands off by distance alone.
-    /// </summary>
-    public float ImpostorPixels;
-
     public uint InstanceCount;
-
-    public uint MaxVisibleClusters;
 
     public uint FrameIndex;
 
     public uint Instances;
-
-    public uint Clusters;
 
     public uint Vertices;
 
     public uint Indices;
 
     public uint Materials;
-
-    public uint VisibleClusters;
-
-    public uint DrawArguments;
-
-    public uint Counts;
-
-    public uint RetestList;
-
-    public uint RetestArguments;
-
-    public uint Hzb;
-
-    public uint Visibility;
 
     public uint Depth;
 
@@ -109,15 +80,7 @@ internal record struct FrameConstants
 
     public uint Acceleration;
 
-    public uint LeafClusters;
-
     public uint Velocity;
-
-    /// <summary>
-    /// The distance in metres to an instance's sphere past which it hands off to its impostor; 0 hands off by size
-    /// alone.
-    /// </summary>
-    public float ImpostorDistance;
 
     public uint Hdr;
 
@@ -126,6 +89,47 @@ internal record struct FrameConstants
     public float DeltaSec;
 
     public uint HitMaterials;
+}
+
+/// <summary>
+/// What the cluster passes read beyond the frame, the twin of <c>Scene/Clusters.slang</c>'s: the cull's limits and
+/// buffers, the depth pyramid, the visibility ids and the impostor handoff, written once a frame into the constants
+/// buffer right after <see cref="FrameConstants"/>.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal record struct ClusterConstants
+{
+    public const int Bytes = 64;
+
+    public uint HzbLevels;
+
+    public uint HasHzb;
+
+    public float ErrorThreshold;
+
+    public float ImpostorPixels;
+
+    public float ImpostorDistance;
+
+    public uint MaxVisibleClusters;
+
+    public uint Clusters;
+
+    public uint LeafClusters;
+
+    public uint VisibleClusters;
+
+    public uint DrawArguments;
+
+    public uint Counts;
+
+    public uint RetestList;
+
+    public uint RetestArguments;
+
+    public uint Hzb;
+
+    public uint Visibility;
 
     public uint GlassVisibility;
 }

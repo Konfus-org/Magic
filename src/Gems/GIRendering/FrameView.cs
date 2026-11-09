@@ -85,24 +85,13 @@ internal sealed class FrameView(GpuResources resources)
             CameraPosition = new Vector4(camera.Transform.Position, 0),
             Width = (uint)width,
             Height = (uint)height,
-            HzbLevels = (uint)targets.HzbLevels,
             Near = camera.Near,
             InstanceCount = (uint)instanceCount,
-            MaxVisibleClusters = Visibility.MaxVisibleClusters,
             Instances = instances.Id,
-            Clusters = resources.ClusterPool.Id,
             Vertices = resources.VertexPool.Id,
             Indices = resources.IndexPool.Id,
             Materials = materials.Id,
-            VisibleClusters = cull.VisibleClusters.Id,
-            DrawArguments = cull.DrawArguments.Id,
-            Counts = cull.Counts.Id,
-            RetestList = cull.RetestList.Id,
-            RetestArguments = cull.RetestArguments.Id,
-            Hzb = targets.Hzb.Id,
-            Visibility = targets.Visibility.Id,
             Depth = targets.Depth.Id,
-            GlassVisibility = targets.GlassVisibility.Id,
             GBufferNormal = targets.GBufferNormal.Id,
             GBufferBase = targets.GBufferBase.Id,
             GBufferSurface = targets.GBufferSurface.Id,
@@ -115,15 +104,29 @@ internal sealed class FrameView(GpuResources resources)
             SunDirection = new Vector4(sun.Direction, 0),
             SunRadiance = new Vector4(sun.Radiance, 0),
             SkyRadiance = new Vector4(SkyBrightness * 0.8f, SkyBrightness * 0.9f, SkyBrightness, 0),
-            HasHzb = targets.HasHistory ? 1u : 0u,
             PixelsPerRadian = height / (2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360)),
-            ErrorThreshold = ErrorThresholdPixels,
-            ImpostorPixels = impostorPixels,
-            ImpostorDistance = impostorDistance,
             FrameIndex = frame.Index,
             Jitter = jitter,
             Acceleration = acceleration.Id,
+        };
+        ClusterConstants clusters = new()
+        {
+            HzbLevels = (uint)targets.HzbLevels,
+            HasHzb = targets.HasHistory ? 1u : 0u,
+            ErrorThreshold = ErrorThresholdPixels,
+            ImpostorPixels = impostorPixels,
+            ImpostorDistance = impostorDistance,
+            MaxVisibleClusters = Visibility.MaxVisibleClusters,
+            Clusters = resources.ClusterPool.Id,
             LeafClusters = resources.LeafClusters.Id,
+            VisibleClusters = cull.VisibleClusters.Id,
+            DrawArguments = cull.DrawArguments.Id,
+            Counts = cull.Counts.Id,
+            RetestList = cull.RetestList.Id,
+            RetestArguments = cull.RetestArguments.Id,
+            Hzb = targets.Hzb.Id,
+            Visibility = targets.Visibility.Id,
+            GlassVisibility = targets.GlassVisibility.Id,
         };
 
         // The frustum's planes from the view-projection, for row vectors: each a column added to or taken from the
@@ -148,6 +151,7 @@ internal sealed class FrameView(GpuResources resources)
                 : (unjittered, constants.CameraPosition);
         _previous = (unjittered, constants.CameraPosition, width, height);
         graph.Upload(targets.Constants, [constants]);
+        graph.Upload(targets.Constants, [clusters], FrameConstants.Bytes);
 
         return made;
     }
@@ -209,7 +213,9 @@ internal sealed class FrameView(GpuResources resources)
         in CullBuffers cull
     )
     {
-        Result<GpuBuffer> constants = graph.Buffer(GpuDescriptions.GetBuffer("Frame constants", FrameConstants.Bytes));
+        Result<GpuBuffer> constants = graph.Buffer(
+            GpuDescriptions.GetBuffer("Frame constants", FrameConstants.Bytes + ClusterConstants.Bytes)
+        );
         Result<GpuTexture> visibilityBuffer = graph.Texture(
             GpuDescriptions.GetTexture(
                 "Visibility",

@@ -6,14 +6,16 @@ module "BuildHzb";
 import Core.Heap;
 import Core.Pass;
 import Core.Frame;
+import Scene.Clusters;
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void BuildHzb(uint3 thread : SV_DispatchThreadID)
 {
+    ClusterConstants clusters = GetClusters();
     FrameConstants frame = GetFrame();
     uint level = GetPassHeader().y;
-    StorageRef target = { frame.hzb, level };
+    StorageRef target = { clusters.hzb, level };
     uint2 size = target.GetSize();
     if (any(thread.xy >= size))
         return;
@@ -25,7 +27,7 @@ void BuildHzb(uint3 thread : SV_DispatchThreadID)
         return;
     }
 
-    TextureRef source = { frame.hzb };
+    TextureRef source = { clusters.hzb };
     uint2 sourceSize = source.GetSize(level - 1u);
     uint2 first = thread.xy * 2u;
     uint2 count = uint2(2u, 2u);

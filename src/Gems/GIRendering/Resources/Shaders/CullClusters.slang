@@ -56,7 +56,7 @@ void CullClusters(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
     if (header.y == ModeFit)
     {
         if (local.x == 0u)
-            Fit(frame);
+            Fit();
 
         return;
     }
@@ -117,21 +117,22 @@ void Count(FrameConstants frame, ArrayRef<uint> instanceRows, uint instanceIndex
         return;
 
     instanceRows[instanceIndex] = passedCount;
-    BufferRef counts = { frame.counts };
+    BufferRef counts = { GetClusters().counts };
     counts.InterlockedAdd(DemandBinsOffset + bin * 4u, passedCount);
 }
 
 // From the nearest bin out, the first whose rows no longer fit the list after the bins before it; and every row asked
 // for, which the cluster budget reads.
-void Fit(FrameConstants frame)
+void Fit()
 {
-    BufferRef counts = { frame.counts };
+    ClusterConstants clusters = GetClusters();
+    BufferRef counts = { clusters.counts };
     uint wanted = 0u;
     uint fitBins = DemandBins;
     for (uint bin = 0u; bin < DemandBins; bin++)
     {
         uint rows = counts.Load<uint>(DemandBinsOffset + bin * 4u);
-        if (fitBins == DemandBins && wanted + rows > frame.maxVisibleClusters)
+        if (fitBins == DemandBins && wanted + rows > clusters.maxVisibleClusters)
             fitBins = bin;
 
         wanted += rows;
@@ -154,7 +155,8 @@ void Place(
     uint thread
 )
 {
-    BufferRef counts = { frame.counts };
+    ClusterConstants clusters = GetClusters();
+    BufferRef counts = { clusters.counts };
     bool fits = bin < counts.Load<uint>(CountFitBins);
     if (thread == 0u && (fade > 0.0 || !fits) && instance.impostor != 0u)
         TestImpostor(frame, impostorDraws, instanceIndex, instance, !fits, false);
@@ -181,10 +183,10 @@ void Place(
         uint taken = 0u;
         InterlockedAdd(takenRows, 1u, taken);
         uint row = firstRow + taken;
-        ArrayRef<VisibleCluster> visible = { frame.visibleClusters };
+        ArrayRef<VisibleCluster> visible = { clusters.visibleClusters };
         VisibleCluster entry = { instanceIndex, clusterIndex };
         visible[row] = entry;
-        if (outcome == Outcome.Shown || !TryAddRetest(frame, row, clusterIndex))
+        if (outcome == Outcome.Shown || !TryAddRetest(row, clusterIndex))
             AddDraw(frame, instance, clusterIndex, row, isFading, false);
     }
 }
@@ -193,11 +195,12 @@ void Place(
 // as its first test would have.
 void Retest(FrameConstants frame, uint impostorDraws, uint index)
 {
-    BufferRef counts = { frame.counts };
-    if (index >= min(counts.Load<uint>(CountRetest), frame.maxVisibleClusters))
+    ClusterConstants clusters = GetClusters();
+    BufferRef counts = { clusters.counts };
+    if (index >= min(counts.Load<uint>(CountRetest), clusters.maxVisibleClusters))
         return;
 
-    ArrayRef<RetestEntry> retest = { frame.retestList };
+    ArrayRef<RetestEntry> retest = { clusters.retestList };
     RetestEntry entry = retest[index];
     if (entry.cluster == RetestImpostor || entry.cluster == RetestWholeImpostor)
     {
@@ -206,7 +209,7 @@ void Retest(FrameConstants frame, uint impostorDraws, uint index)
         return;
     }
 
-    ArrayRef<VisibleCluster> visible = { frame.visibleClusters };
+    ArrayRef<VisibleCluster> visible = { clusters.visibleClusters };
     VisibleCluster cluster = visible[entry.index];
     GpuInstance instance = LoadInstance(frame.instances, cluster.instance);
     if (Test(frame, instance, cluster.cluster, true) == Outcome.Shown)
@@ -217,7 +220,8 @@ void Retest(FrameConstants frame, uint impostorDraws, uint index)
 // this frame's on the retest.
 Outcome Test(FrameConstants frame, GpuInstance instance, uint clusterIndex, bool isRetest)
 {
-    GpuCluster cluster = LoadCluster(frame.clusters, clusterIndex);
+    ClusterConstants clusters = GetClusters();
+    GpuCluster cluster = LoadCluster(clusters.clusters, clusterIndex);
     float scale = GetMaxScale(instance.world);
     float3 center = Relative(frame, ToWorld(instance.world, cluster.center));
     float radius = cluster.radius * scale;
@@ -230,7 +234,7 @@ Outcome Test(FrameConstants frame, GpuInstance instance, uint clusterIndex, bool
     float parentError = ProjectError(frame, parentCenter, cluster.parentRadius * scale, cluster.parentError * scale);
     float3 detailCenter = Relative(frame, ToWorld(instance.world, cluster.detailCenter));
     float error = ProjectError(frame, detailCenter, cluster.detailRadius * scale, cluster.error * scale);
-    if (!(parentError > frame.errorThreshold && error <= frame.errorThreshold))
+    if (!(parentError > clusters.errorThreshold && error <= clusters.errorThreshold))
         return Outcome.Culled;
 
     // The cone: culled when the camera is behind every triangle's plane, the sphere widening the cone to be sure.
@@ -243,24 +247,25 @@ Outcome Test(FrameConstants frame, GpuInstance instance, uint clusterIndex, bool
             return Outcome.Culled;
     }
 
-    if ((frame.hasHzb != 0u || isRetest) && IsOccluded(frame, center, radius))
+    if ((clusters.hasHzb != 0u || isRetest) && IsOccluded(frame, center, radius))
         return isRetest ? Outcome.Culled : Outcome.Hidden;
 
     return Outcome.Shown;
 }
 
 // Puts the cluster at row on the retest list, or says the list is full, when it draws now untested instead.
-bool TryAddRetest(FrameConstants frame, uint row, uint clusterIndex)
+bool TryAddRetest(uint row, uint clusterIndex)
 {
-    BufferRef counts = { frame.counts };
+    ClusterConstants clusters = GetClusters();
+    BufferRef counts = { clusters.counts };
     uint retestIndex = counts.InterlockedAdd(CountRetest, 1u);
-    if (retestIndex >= frame.maxVisibleClusters)
+    if (retestIndex >= clusters.maxVisibleClusters)
         return false;
 
-    ArrayRef<RetestEntry> retest = { frame.retestList };
+    ArrayRef<RetestEntry> retest = { clusters.retestList };
     RetestEntry entry = { row, clusterIndex };
     retest[retestIndex] = entry;
-    BufferRef retestArguments = { frame.retestArguments };
+    BufferRef retestArguments = { clusters.retestArguments };
     retestArguments.InterlockedMax(RetestGroups, (retestIndex / RetestThreads) + 1u);
     return true;
 }
@@ -270,46 +275,48 @@ bool TryAddRetest(FrameConstants frame, uint row, uint clusterIndex)
 // once, so no region outgrows the visible list.
 void AddDraw(FrameConstants frame, GpuInstance instance, uint clusterIndex, uint row, bool isFading, bool isRetest)
 {
+    ClusterConstants clusters = GetClusters();
     static const uint countOffsets[5] = {
         CountVisibleDraws, CountRetestDraws, CountFadingDraws, CountRetestFadingDraws, CountGlassDraws
     };
-    GpuCluster cluster = LoadCluster(frame.clusters, clusterIndex);
+    GpuCluster cluster = LoadCluster(clusters.clusters, clusterIndex);
     bool isGlass = IsTranslucent(frame.materials, GetMaterial(instance, cluster.materialSlot));
     uint region = isGlass ? GlassRegion : (isRetest ? 1u : 0u) + (isFading ? 2u : 0u);
-    BufferRef counts = { frame.counts };
+    BufferRef counts = { clusters.counts };
     uint drawIndex = counts.InterlockedAdd(countOffsets[region], 1u);
-    ArrayRef<DrawArguments> draws = { frame.drawArguments };
+    ArrayRef<DrawArguments> draws = { clusters.drawArguments };
     DrawArguments arguments = { cluster.triangleCount * 3u, 1u, 0u, row };
-    draws[region * frame.maxVisibleClusters + drawIndex] = arguments;
+    draws[region * clusters.maxVisibleClusters + drawIndex] = arguments;
 }
 
 // Appends the instance's impostor to the draws, the retested ones after the first's, whole or with its share of the
 // handoff's dither, or, when the old depth pyramid hides it, to the retest list; with no room there it draws now.
 void TestImpostor(FrameConstants frame, uint draws, uint instanceIndex, GpuInstance instance, bool isWhole, bool isRetest)
 {
-    BufferRef counts = { frame.counts };
-    if ((frame.hasHzb != 0u || isRetest) && IsOccluded(frame, Relative(frame, instance.boundsCenter), instance.boundsRadius))
+    ClusterConstants clusters = GetClusters();
+    BufferRef counts = { clusters.counts };
+    if ((clusters.hasHzb != 0u || isRetest) && IsOccluded(frame, Relative(frame, instance.boundsCenter), instance.boundsRadius))
     {
         if (isRetest)
             return;
 
         uint retestIndex = counts.InterlockedAdd(CountRetest, 1u);
-        if (retestIndex < frame.maxVisibleClusters)
+        if (retestIndex < clusters.maxVisibleClusters)
         {
-            ArrayRef<RetestEntry> retest = { frame.retestList };
+            ArrayRef<RetestEntry> retest = { clusters.retestList };
             RetestEntry entry = { instanceIndex, isWhole ? RetestWholeImpostor : RetestImpostor };
             retest[retestIndex] = entry;
-            BufferRef retestArguments = { frame.retestArguments };
+            BufferRef retestArguments = { clusters.retestArguments };
             retestArguments.InterlockedMax(RetestGroups, (retestIndex / RetestThreads) + 1u);
             return;
         }
     }
 
     uint drawIndex = counts.InterlockedAdd(isRetest ? CountRetestImpostorDraws : CountImpostorDraws, 1u);
-    if (drawIndex >= frame.maxVisibleClusters)
+    if (drawIndex >= clusters.maxVisibleClusters)
         return;
 
     ArrayRef<DrawArguments> impostorDraws = { draws };
     DrawArguments arguments = { 6u, 1u, 0u, instanceIndex | (isWhole ? ImpostorWhole : 0u) };
-    impostorDraws[(isRetest ? frame.maxVisibleClusters : 0u) + drawIndex] = arguments;
+    impostorDraws[(isRetest ? clusters.maxVisibleClusters : 0u) + drawIndex] = arguments;
 }

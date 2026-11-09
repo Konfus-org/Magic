@@ -21,6 +21,7 @@ import Scene.Lights;
 import Scene.Shadows;
 import Light.Lights;
 import Trace.HitSurface;
+import Scene.Clusters;
 
 // The sun's bits of the group's two tiles, the upper and the lower 8 by 4 pixels.
 groupshared uint groupSunTiles[2];
@@ -51,7 +52,7 @@ uint4 Trace(FrameConstants frame, LightingConstants lighting, uint2 pixel, out f
 {
     sunTint = float3(1.0);
     uint2 size = uint2(frame.width, frame.height);
-    UintTextureRef visibility = { frame.visibility };
+    UintTextureRef visibility = { GetClusters().visibility };
     uint id = visibility.Load(pixel, 0u);
     if (id == 0u || frame.acceleration == 0u)
         return uint4(0xFFFFFFFFu);

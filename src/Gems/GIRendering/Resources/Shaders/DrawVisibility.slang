@@ -27,11 +27,12 @@ struct Varyings
 [shader("vertex")]
 Varyings DrawVisibilityVertex(uint vertexIndex : SV_VertexID, uint instanceIndex : SV_StartInstanceLocation)
 {
+    ClusterConstants clusters = GetClusters();
     FrameConstants frame = GetFrame();
-    ArrayRef<VisibleCluster> visible = { frame.visibleClusters };
+    ArrayRef<VisibleCluster> visible = { clusters.visibleClusters };
     VisibleCluster entry = visible[instanceIndex];
     GpuInstance instance = LoadInstance(frame.instances, entry.instance);
-    GpuCluster cluster = LoadCluster(frame.clusters, entry.cluster);
+    GpuCluster cluster = LoadCluster(clusters.clusters, entry.cluster);
 
     Varyings output;
     output.id = EncodeVisibilityId(instanceIndex, vertexIndex / 3u);

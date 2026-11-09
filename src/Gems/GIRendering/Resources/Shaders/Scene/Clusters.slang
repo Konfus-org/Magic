@@ -5,8 +5,49 @@ module "Scene/Clusters";
 
 import Core.Heap;
 import Core.Pack;
+import Core.Pass;
 
 public static const uint MaxClusterTriangles = 128u;
+
+// Where the frame's constants end in the buffer every pass header's x names: C#'s FrameConstants.Bytes.
+public static const uint ClusterConstantsOffset = 588u;
+
+// What the cluster passes read beyond the frame, C#'s ClusterConstants, written once a frame right after the frame's
+// constants; the cluster budget sets the handoff and the error threshold at the start of the frame.
+public struct ClusterConstants
+{
+    public uint hzbLevels;
+    // Whether the depth pyramid holds last frame, so a cluster may be tested against it.
+    public uint hasHzb;
+    // Pixels of projected error a drawn cluster may have, as the cluster budget raises it.
+    public float errorThreshold;
+    // The pixel radius on screen under which an instance hands off to its impostor, as the cluster budget raises it;
+    // 0 hands off by distance alone.
+    public float impostorPixels;
+    // The distance in metres to an instance's sphere past which it hands off to its impostor; 0 hands off by size
+    // alone.
+    public float impostorDistance;
+    public uint maxVisibleClusters;
+    // The heap ids of the cluster pool, of the table of leaf clusters the acceleration structure's geometries name,
+    // and of what the cull leaves for the draw and the resolve.
+    public uint clusters;
+    public uint leafClusters;
+    public uint visibleClusters;
+    public uint drawArguments;
+    public uint counts;
+    public uint retestList;
+    public uint retestArguments;
+    public uint hzb;
+    public uint visibility;
+    // The nearest translucent surface in front of the opaque ones: its visibility id, 0 where there is none.
+    public uint glassVisibility;
+}
+
+public ClusterConstants GetClusters()
+{
+    BufferRef constants = { GetPassHeader().x };
+    return constants.Load<ClusterConstants>(ClusterConstantsOffset);
+}
 
 public struct GpuCluster
 {

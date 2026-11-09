@@ -52,6 +52,7 @@ public float GetRayOffset(FrameConstants frame, float3 relative)
 public float3 GetTransmittance(
     FrameConstants frame, RaytracingAccelerationStructure world, float3 origin, float3 direction, float distance)
 {
+    ClusterConstants clusters = GetClusters();
     RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> query;
     RayDesc ray;
     ray.Origin = origin;
@@ -59,14 +60,14 @@ public float3 GetTransmittance(
     ray.TMin = 0.0;
     ray.TMax = distance;
     query.TraceRayInline(world, RAY_FLAG_NONE, 0xFFu, ray);
-    ArrayRef<uint> leaves = { frame.leafClusters };
+    ArrayRef<uint> leaves = { clusters.leafClusters };
     ArrayRef<GpuHitMaterial> materials = { frame.hitMaterials };
     float3 through = float3(1.0);
     while (query.Proceed())
     {
         GpuInstance instance = LoadInstance(frame.instances, query.CandidateInstanceID());
         uint leaf = query.CandidateInstanceContributionToHitGroupIndex() + query.CandidateGeometryIndex();
-        GpuCluster cluster = LoadCluster(frame.clusters, leaves[leaf]);
+        GpuCluster cluster = LoadCluster(clusters.clusters, leaves[leaf]);
         through *= UnpackUnorm4x8(materials[GetMaterial(instance, cluster.materialSlot)].transmission).rgb;
         if (Max3(through) <= 0.0)
             query.CommitNonOpaqueTriangleHit();
@@ -116,9 +117,10 @@ public RayHit GetClosestHit(
 // The surface at a hit of a ray from origin along direction.
 public HitSurface LoadHitSurface(FrameConstants frame, RayHit hit, float3 origin, float3 direction)
 {
-    ArrayRef<uint> leaves = { frame.leafClusters };
+    ClusterConstants clusters = GetClusters();
+    ArrayRef<uint> leaves = { clusters.leafClusters };
     GpuInstance instance = LoadInstance(frame.instances, hit.instance);
-    GpuCluster cluster = LoadCluster(frame.clusters, leaves[hit.leaf]);
+    GpuCluster cluster = LoadCluster(clusters.clusters, leaves[hit.leaf]);
     uint first = cluster.indexOffset + hit.triangle * 3u;
     float3 n0 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first)).normal;
     float3 n1 = LoadVertex(frame.vertices, LoadIndex(frame.indices, first + 1u)).normal;

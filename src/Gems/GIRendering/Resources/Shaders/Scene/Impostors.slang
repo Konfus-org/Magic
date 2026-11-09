@@ -9,6 +9,7 @@ import Core.Pack;
 import Core.Frame;
 import Scene.Instances;
 import Scene.Culling;
+import Scene.Clusters;
 
 public static const uint ImpostorViews = 12u;
 public static const uint ImpostorTile = 64u;
@@ -66,13 +67,15 @@ public float GetImpostorFade(FrameConstants frame, GpuInstance instance)
     if (instance.impostor == 0u)
         return 0.0;
 
+    ClusterConstants clusters = GetClusters();
+
     float3 center = Relative(frame, instance.boundsCenter);
     float fade = 0.0;
-    float start = frame.impostorPixels;
+    float start = clusters.impostorPixels;
     if (start > 0.0)
         fade = saturate((start - GetPixelRadius(frame, center, instance.boundsRadius)) / (start * ImpostorBand));
 
-    float far = frame.impostorDistance;
+    float far = clusters.impostorDistance;
     if (far > 0.0)
     {
         float distance = max(length(center) - instance.boundsRadius, 0.0);

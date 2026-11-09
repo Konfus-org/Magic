@@ -18,6 +18,7 @@ import Scene.TracedReflections;
 import Light.Lights;
 import Sky.ISky;
 import Surface.Brdf;
+import Scene.Clusters;
 
 // The light a surface at a pixel reflects of what reaches it indirectly. The diffuse is what a white diffuse surface
 // reflects, its irradiance over pi: the traced light where it was traced, which sees what shades and bounces the light
@@ -79,7 +80,7 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
     float3 view = NormalizeSafe(-relative, float3(0.0, 0.0, -1.0));
     StorageRef hdr = { lighting.hdr, 0u };
 
-    UintTextureRef visibility = { frame.visibility };
+    UintTextureRef visibility = { GetClusters().visibility };
     if (visibility.Load(thread.xy, 0u) == 0u)
     {
         float3 sky = lighting.hasSky != 0u

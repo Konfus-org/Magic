@@ -13,6 +13,7 @@ import Core.Pack;
 import Scene.Materials;
 import Post.IPixelEffect;
 import Trace.HitSurface;
+import Scene.Clusters;
 
 // The reversed depth a pixel where nothing was drawn is put at: far along its ray, short of infinity.
 static const float FarDepth = 1e-6;
@@ -90,7 +91,7 @@ PixelEffectInputs CreateInputs(FrameConstants frame, GpuEffectPass pass, uint2 p
     float depth = inputs.depth.Load(texel, 0u).x;
     inputs.position = ReconstructRelative(frame, inputs.uv, max(depth, FarDepth));
     inputs.viewDepth = depth > 0.0 ? ToViewDepth(depth, frame.near) : 0.0;
-    UintTextureRef visibility = { frame.visibility };
+    UintTextureRef visibility = { GetClusters().visibility };
     TextureRef normals = { frame.gbufferNormal };
     TextureRef bases = { frame.gbufferBase };
     TextureRef surfaces = { frame.gbufferSurface };

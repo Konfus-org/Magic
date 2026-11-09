@@ -21,6 +21,7 @@ import Material.IMaterial;
 import Sky.ISky;
 import Trace.HitSurface;
 import Trace.HitLight;
+import Scene.Clusters;
 
 // How much of the light glass reflects straight on: an index of refraction of 1.5.
 static const float GlassReflectance = 0.04;
@@ -43,7 +44,7 @@ void ShadeGlass<M : IMaterial, S : ISky>(uint3 thread : SV_DispatchThreadID)
     if (any(thread.xy >= size))
         return;
 
-    UintTextureRef glass = { frame.glassVisibility };
+    UintTextureRef glass = { GetClusters().glassVisibility };
     uint visibleIndex;
     uint triangle;
     if (!DecodeVisibilityId(glass.Load(thread.xy, 0u), visibleIndex, triangle))

@@ -15,6 +15,7 @@ import Core.Color;
 import Core.Pack;
 import Scene.TracedDiffuse;
 import Scene.Traced;
+import Scene.Clusters;
 
 // C#'s DebugView.
 enum SurfaceView : uint
@@ -43,7 +44,7 @@ float3 GetSurfaceView(FrameConstants frame, SurfaceView view, uint2 pixel)
         return float3(abs(velocityTexture.Load(pixel, 0u).xy) * 10.0, 0.0);
     }
 
-    UintTextureRef visibility = { frame.visibility };
+    UintTextureRef visibility = { GetClusters().visibility };
     if (visibility.Load(pixel, 0u) == 0u)
         return float3(0.0);
 
@@ -74,7 +75,7 @@ float3 GetSurfaceView(FrameConstants frame, SurfaceView view, uint2 pixel)
 float3 GetLightView(FrameConstants frame, SurfaceView view, uint2 pixel)
 {
     PassHeader header = GetPassHeader();
-    UintTextureRef visibility = { frame.visibility };
+    UintTextureRef visibility = { GetClusters().visibility };
     if (visibility.Load(pixel, 0u) == 0u)
         return float3(0.0);
 

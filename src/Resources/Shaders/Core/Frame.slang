@@ -1,5 +1,6 @@
 // What every pass of a frame reads: the view, the sun, the picture's size and the heap ids of the frame's tables and
-// textures, C#'s FrameConstants, written once a frame into the buffer whose heap id is every pass header's x.
+// textures, C#'s FrameConstants, written once a frame at the start of the buffer whose heap id is every pass header's
+// x. A renderer's own constants may follow it in that buffer.
 module "Core/Frame";
 
 import Core.Heap;
@@ -33,38 +34,21 @@ public struct FrameConstants
 
     public uint width;
     public uint height;
-    public uint hzbLevels;
-    // Whether the depth pyramid holds last frame, so a cluster may be tested against it.
-    public uint hasHzb;
 
     // Metres to the near plane.
     public float near;
     // Pixels a metre covers at a metre's distance: the output's height over twice the tangent of half the field of
     // view.
     public float pixelsPerRadian;
-    // Pixels of projected error a drawn cluster may have, as the cluster budget raises it.
-    public float errorThreshold;
-    // The pixel radius on screen under which an instance hands off to its impostor, as the cluster budget raises it;
-    // 0 hands off by distance alone.
-    public float impostorPixels;
 
     public uint instanceCount;
-    public uint maxVisibleClusters;
     public uint frameIndex;
 
     // The heap ids of the tables and textures.
     public uint instances;
-    public uint clusters;
     public uint vertices;
     public uint indices;
     public uint materials;
-    public uint visibleClusters;
-    public uint drawArguments;
-    public uint counts;
-    public uint retestList;
-    public uint retestArguments;
-    public uint hzb;
-    public uint visibility;
     public uint depth;
     public uint gbufferNormal;
     public uint gbufferBase;
@@ -74,17 +58,12 @@ public struct FrameConstants
     // Pixels the projection is shifted by this frame, for the resolve to take off.
     public float2 jitter;
 
-    // On a GPU that traces rays: the top-level acceleration structure over the instances, 0 when none, and the
-    // table of leaf clusters its instances' geometries name.
+    // On a GPU that traces rays: the top-level acceleration structure over the instances, 0 when none.
     public uint acceleration;
-    public uint leafClusters;
 
     // Where each pixel's surface was on last frame's screen: the move to there from its place now, in texture
     // coordinates, in xy, and its view depth then in z.
     public uint velocity;
-    // The distance in metres to an instance's sphere past which it hands off to its impostor; 0 hands off by size
-    // alone.
-    public float impostorDistance;
     // The heap id of the picture: the lit picture in linear light, until the post effects finish it for the screen.
     public uint hdr;
     // The seconds the run has taken, and since the frame before.
@@ -92,8 +71,6 @@ public struct FrameConstants
     public float deltaSec;
     // On a GPU that traces rays: each material row as a ray hit reads it, Trace/HitSurface's GpuHitMaterial.
     public uint hitMaterials;
-    // The nearest translucent surface in front of the opaque ones: its visibility id, 0 where there is none.
-    public uint glassVisibility;
 }
 
 public FrameConstants GetFrame() { return LoadConstants<FrameConstants>(); }

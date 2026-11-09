@@ -17,6 +17,7 @@ import Scene.Visibility;
 import Scene.Impostors;
 import Surface.Surface;
 import Material.IMaterial;
+import Scene.Clusters;
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
@@ -27,7 +28,7 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
     if (any(thread.xy >= size))
         return;
 
-    UintTextureRef visibility = { frame.visibility };
+    UintTextureRef visibility = { GetClusters().visibility };
     uint visibleIndex = 0u;
     uint triangle = 0u;
     // The pixel's centre is where the jittered view saw its surface, which is unjittered where the camera saw it.

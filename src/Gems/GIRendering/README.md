@@ -118,9 +118,10 @@ in turn and exits, so a release ships with the caches full.
   empty.
 - The shaders are the `Shaders/` modules in this gem's `Resources`, built on the shader library
   ([Shaders](../../Resources/Shaders/README.md)). The passes are at the folder's root, and what they share is under it:
-  - `Core/Frame` is what every pass of a frame reads.
   - `Scene/` is the GPU tables and how to read them: the instance table, the pools of vertices, indices and clusters,
     what the cull leaves for the draw and the resolve, the triangle a pixel shows, and the cull's tests.
+  - `Scene/Clusters` is also what the cluster passes read beyond the library's frame: the cull's limits and buffers,
+    the depth pyramid, the visibility ids and the impostor handoff, in the frame's buffer after the frame.
   - `Scene/Lighting` is what the lighting passes share beyond the frame: the sun, the sky's tables and the HDR picture.
   - `Scene/Lights` is the light table and the bits of each tile of the screen that say which lights reach it.
   - `Scene/Shadows` is the shadow mask: how much of the sun and of each of its tile's first lights reaches a pixel,

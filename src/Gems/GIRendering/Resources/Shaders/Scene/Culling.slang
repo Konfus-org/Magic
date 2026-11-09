@@ -7,6 +7,7 @@ module "Scene/Culling";
 import Core.Heap;
 import Core.Frame;
 import Core.Math;
+import Scene.Clusters;
 
 public bool IsSphereInFrustum(FrameConstants frame, float3 center, float radius)
 {
@@ -73,11 +74,13 @@ public bool IsOccluded(FrameConstants frame, float3 center, float radius)
     if (!ProjectSphere(viewCenter, radius, frame.near, frame.projection[0][0], frame.projection[1][1], rectangle))
         return false;
 
+    ClusterConstants clusters = GetClusters();
+
     float2 uvMin = saturate(ToUv(rectangle.xw));
     float2 uvMax = saturate(ToUv(rectangle.zy));
     float2 pixels = (uvMax - uvMin) * float2(frame.width, frame.height);
-    float level = clamp(ceil(log2(max(max(pixels.x, pixels.y), 1.0))), 0.0, float(frame.hzbLevels - 1u));
-    TextureRef hzb = { frame.hzb };
+    float level = clamp(ceil(log2(max(max(pixels.x, pixels.y), 1.0))), 0.0, float(clusters.hzbLevels - 1u));
+    TextureRef hzb = { clusters.hzb };
     uint2 size = hzb.GetSize(uint(level));
     uint2 t0 = min(uint2(uvMin * float2(size)), size - 1u);
     uint2 t1 = min(uint2(uvMax * float2(size)), size - 1u);

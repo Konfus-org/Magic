@@ -137,7 +137,7 @@ internal sealed class Visibility(AssetManager assets, GpuResources resources)
         ];
 
     /// <summary>
-    /// The cull's buffers asked for, which the frame's constants name, then the retest dispatch at no groups, in a
+    /// The cull's buffers asked for, which the cluster constants name, then the retest dispatch at no groups, in a
     /// transfer pass. The budget pass zeroes the counts once it has read last frame's.
     /// </summary>
     public static Result<CullBuffers> Prepare(RenderGraph graph)

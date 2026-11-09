@@ -5,7 +5,7 @@ The shader library every renderer and every game shader builds on, in Slang. A m
 compiler loads a module and its imports from the assets, so a game's `Shaders/` folder extends the library as it is.
 
 - `Core/` is what every module needs: the heap every resource is read through (`Heap`), what a pass is handed
-  (`Pass`), numbers, colour, packing, sampling and hashing.
+  (`Pass`), what every pass of a frame reads (`Frame`), numbers, colour, packing, sampling and hashing.
 - `Scene/Materials` is the material table's row: which material shader draws it, then that shader's struct.
 - `Surface/` is what a material is handed for a pixel and what it gives back.
 - `Material/` is the material contract, `IMaterial`, and the materials every project has: the standard one, the one
