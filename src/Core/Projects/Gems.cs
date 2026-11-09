@@ -396,20 +396,18 @@ internal sealed class Gems : IDisposable
             if (made is IHookIntoDomainLoading hooks)
                 loaded.Ends.Add(_world.Register(hooks));
 
-            loaded.Ends.Add(_rendering.Register(made));
+            // A gem that makes what another makes, or closes a cycle, renders nothing; the others go on.
+            try
+            {
+                loaded.Ends.Add(_rendering.Register(made));
+            }
+            catch (InvalidOperationException ex)
+            {
+                Log.Error($"Gem {gem.Name} renders nothing: {ex.Message}");
+            }
 
             string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
             Log.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");
-        }
-
-        // A gem whose input no listed gem makes, two gems that make one type or a cycle leaves the frame undrawn.
-        try
-        {
-            _rendering.Order();
-        }
-        catch (InvalidOperationException ex)
-        {
-            Log.Error($"The gems render nothing: {ex.Message}");
         }
     }
 

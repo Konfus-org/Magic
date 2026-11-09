@@ -16,8 +16,9 @@
     <Project Path="Gems/VulkanGraphics/VulkanGraphics.csproj" />
     <Project Path="Gems/ImGuiDebugUI/ImGuiDebugUI.csproj" />
     <Project Path="Gems/DebugTools/DebugTools.csproj" />
-    <Project Path="Gems/GIRendering/GIRendering.csproj" />
-    <Project Path="Gems/GlobalIllumination/GlobalIllumination.csproj" />
+    <Project Path="Gems/Rendering/Deferred/Deferred.csproj" />
+    <Project Path="Gems/Rendering/GlobalIllumination/GlobalIllumination.csproj" />
+    <Project Path="Gems/Rendering/GpuWorld/GpuWorld.csproj" />
   </Folder>
   <Folder Name="/Docs/">
     <File Path="../AGENTS.md" />
@@ -26,7 +27,7 @@
     <File Path="../docs/CONTRIBUTING.md" />
   </Folder>
   <Folder Name="/Tests/">
-    <Project Path="../tests/GIRendering.Tests/GIRendering.Tests.csproj" />
+    <Project Path="../tests/GpuWorld.Tests/GpuWorld.Tests.csproj" />
     <Project Path="../tests/Magic.Core.Tests/Magic.Core.Tests.csproj" />
   </Folder>
   <Folder Name="/Samples/">

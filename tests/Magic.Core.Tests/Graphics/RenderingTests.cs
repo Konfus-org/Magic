@@ -5,8 +5,8 @@ using Xunit;
 namespace Magic.Tests.Graphics;
 
 /// <summary>
-/// The gems that render: ordered from what each takes and makes, refused when an input can't be made, and pumped so
-/// each takes what the gems before it made this frame.
+/// The gems that render: ordered as they register from what each takes and makes, refused when two make one type or
+/// they form a cycle, and pumped so each takes what the gems before it made this frame.
 /// </summary>
 public sealed class RenderingTests
 {
@@ -20,7 +20,7 @@ public sealed class RenderingTests
     };
 
     [Fact]
-    public void OrderPutsEachMakerBeforeItsTakers()
+    public void RegisterPutsEachMakerBeforeItsTakers()
     {
         List<string> calls = [];
         Pump(new Shade(calls), new Trace(calls), new World(calls, new View(1)));
@@ -38,26 +38,27 @@ public sealed class RenderingTests
     }
 
     [Fact]
-    public void OrderThrowsWhenNoGemMakesARequiredInput()
+    public void PumpDropsAGemWhoseRequiredInputNoGemMakes()
     {
-        InvalidOperationException error = Assert.Throws<InvalidOperationException>(() => Order(new Trace([])));
+        List<string> calls = [];
+        Pump(new Lost(calls), new World(calls, new View(1)));
 
-        Assert.Contains(nameof(View), error.Message, StringComparison.Ordinal);
+        Assert.Equal(["World"], calls);
     }
 
     [Fact]
-    public void OrderThrowsWhenTwoGemsMakeOneType()
+    public void RegisterThrowsWhenTwoGemsMakeOneType()
     {
         InvalidOperationException error = Assert.Throws<InvalidOperationException>(() =>
-            Order(new World([], new View(1)), new World([], new View(2)))
+            Register(new World([], new View(1)), new World([], new View(2)))
         );
 
         Assert.Contains(nameof(View), error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void OrderThrowsWhenInputsFormACycle() =>
-        Assert.Throws<InvalidOperationException>(() => Order(new Egg(), new Hen()));
+    public void RegisterThrowsWhenInputsFormACycle() =>
+        Assert.Throws<InvalidOperationException>(() => Register(new Egg(), new Hen()));
 
     [Fact]
     public void PumpHandsEachOutputToItsTakers()
@@ -86,7 +87,7 @@ public sealed class RenderingTests
         Assert.Null(shade.Taken);
     }
 
-    private static Rendering Order(params IGem[] gems)
+    private static Rendering Register(params IGem[] gems)
     {
         Rendering rendering = new();
         foreach (IGem gem in gems)
@@ -94,12 +95,10 @@ public sealed class RenderingTests
             rendering.Register(gem);
         }
 
-        rendering.Order();
-
         return rendering;
     }
 
-    private static void Pump(params IGem[] gems) => Order(gems).Pump(_frame, new RenderGraph());
+    private static void Pump(params IGem[] gems) => Register(gems).Pump(_frame, new RenderGraph());
 
     private readonly record struct View(int Id);
 
@@ -143,6 +142,16 @@ public sealed class RenderingTests
         {
             calls.Add(nameof(Shade));
             Taken = input;
+
+            return default(Nothing);
+        }
+    }
+
+    private sealed class Lost(List<string> calls) : IGem, IRender<EggInput, Nothing>
+    {
+        public Nothing? Render(in Frame frame, RenderGraph graph, in EggInput input)
+        {
+            calls.Add(nameof(Lost));
 
             return default(Nothing);
         }

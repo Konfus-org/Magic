@@ -10,8 +10,8 @@ using Magic.Utils;
 namespace Magic.Graphics;
 
 /// <summary>
-/// The gems that render, each after every gem whose output it takes: register each as it is made, order them once all
-/// are, then pump them once a frame on the render thread. A gem is named in what is logged and timed by its assembly,
+/// The gems that render, each after every gem whose output it takes: register each as it is made, then pump them once
+/// a frame on the render thread. A gem is named in what is logged and timed by its assembly,
 /// as the project lists it.
 /// </summary>
 internal sealed class Rendering
@@ -22,6 +22,8 @@ internal sealed class Rendering
 
     /// <summary>
     /// <paramref name="gem"/>'s part of the frame while it renders, until the subscription ends; nothing when it doesn't.
+    /// Throws, naming the gems and the type, when it makes what another gem makes, or when it and others take what the
+    /// others make round a cycle; the gems registered before go on as they were.
     /// </summary>
     public Subscription Register(IGem gem)
     {
@@ -34,64 +36,9 @@ internal sealed class Rendering
 
         Type type = typeof(Step<,>).MakeGenericType(contract.GenericTypeArguments);
         Step step = (Step)(Activator.CreateInstance(type, gem) ?? throw new InvalidOperationException(type.Name));
-        _steps.Add(step);
+        Order([.. _steps, step]);
 
-        return new Subscription(() => _steps.Remove(step));
-    }
-
-    /// <summary>
-    /// Puts each gem after every gem that makes what it takes, in the order they were registered otherwise, and binds
-    /// each to its makers. Throws, naming the gems and the type, when a gem takes what no gem makes and must, when two
-    /// make one type, or when some take what others among them make round a cycle.
-    /// </summary>
-    public void Order()
-    {
-        // Nothing renders until every check passes.
-        List<Step> waiting = [.. _steps];
-        _steps.Clear();
-        Dictionary<Type, Step> makers = [];
-        foreach (Step step in waiting.Where(static step => step.Output != typeof(Nothing)))
-        {
-            if (makers.TryGetValue(step.Output, out Step? other))
-                throw new InvalidOperationException($"Gems {other.Gem} and {step.Gem} both make {step.Output.Name}.");
-
-            makers[step.Output] = step;
-        }
-
-        foreach (Step step in waiting)
-        {
-            foreach ((Type type, bool isRequired) in step.Inputs)
-            {
-                if (isRequired && !makers.ContainsKey(type))
-                    throw new InvalidOperationException(
-                        $"Gem {step.Gem} takes {type.Name}, which no listed gem makes."
-                    );
-            }
-        }
-
-        // The first waiting gem whose makers are all placed goes next, so gems keep their order where it is free.
-        List<Step> ordered = new(waiting.Count);
-        while (waiting.Count > 0)
-        {
-            int next = waiting.FindIndex(step =>
-                step.Inputs.All(input => !makers.TryGetValue(input.Type, out Step? maker) || ordered.Contains(maker))
-            );
-            if (next < 0)
-            {
-                string gems = string.Join(", ", waiting.Select(static step => step.Gem));
-                throw new InvalidOperationException($"Gems {gems} each take what another of them makes.");
-            }
-
-            ordered.Add(waiting[next]);
-            waiting.RemoveAt(next);
-        }
-
-        foreach (Step step in ordered)
-        {
-            step.Bind(makers);
-        }
-
-        _steps.AddRange(ordered);
+        return new Subscription(() => Order([.. _steps.Where(other => other != step)]));
     }
 
     /// <summary>
@@ -108,6 +55,13 @@ internal sealed class Rendering
         for (int i = 0; i < _steps.Count; i++)
         {
             Step step = _steps[i];
+            if (step.Missing is { } missing)
+            {
+                Log.Error($"Gem {step.Gem} takes {missing.Name}, which no listed gem makes, so it renders nothing.");
+                _steps.RemoveAt(i--);
+                continue;
+            }
+
             long start = Metrics.HookDurations.Start();
             try
             {
@@ -128,6 +82,48 @@ internal sealed class Rendering
     }
 
     /// <summary>
+    /// <paramref name="steps"/> in place of the gems before, each after every gem that makes what it takes, in their own
+    /// order otherwise, and each bound to its makers. Throws before changing anything when two make one type, or when
+    /// some take what others among them make round a cycle.
+    /// </summary>
+    private void Order(List<Step> steps)
+    {
+        Dictionary<Type, Step> makers = [];
+        foreach (Step step in steps.Where(static step => step.Output != typeof(Nothing)))
+        {
+            if (makers.TryGetValue(step.Output, out Step? other))
+                throw new InvalidOperationException($"Gems {other.Gem} and {step.Gem} both make {step.Output.Name}.");
+
+            makers[step.Output] = step;
+        }
+
+        // The first waiting gem whose makers are all placed goes next, so gems keep their order where it is free.
+        List<Step> ordered = new(steps.Count);
+        while (steps.Count > 0)
+        {
+            int next = steps.FindIndex(step =>
+                step.Inputs.All(input => !makers.TryGetValue(input.Type, out Step? maker) || ordered.Contains(maker))
+            );
+            if (next < 0)
+            {
+                string gems = string.Join(", ", steps.Select(static step => step.Gem));
+                throw new InvalidOperationException($"Gems {gems} each take what another of them makes.");
+            }
+
+            ordered.Add(steps[next]);
+            steps.RemoveAt(next);
+        }
+
+        foreach (Step step in ordered)
+        {
+            step.Bind(makers);
+        }
+
+        _steps.Clear();
+        _steps.AddRange(ordered);
+    }
+
+    /// <summary>
     /// A gem's <see cref="IRender{TInput, TOutput}"/>: what it takes, what it makes, and what it made at its last run,
     /// which the gems after it take.
     /// </summary>
@@ -144,6 +140,11 @@ internal sealed class Rendering
         /// Each type it takes, and whether a gem must make it.
         /// </summary>
         public abstract ImmutableArray<(Type Type, bool IsRequired)> Inputs { get; }
+
+        /// <summary>
+        /// A type it must take that no gem makes, once bound; it can never render.
+        /// </summary>
+        public Type? Missing { get; protected set; }
 
         /// <summary>
         /// Records the gem's passes, when every input it must take was made this frame, and keeps what it made.
@@ -207,6 +208,7 @@ internal sealed class Rendering
         /// </summary>
         public override void Bind(IReadOnlyDictionary<Type, Step> makers)
         {
+            Missing = null;
             if (_constructor is null)
                 return;
 
@@ -217,6 +219,7 @@ internal sealed class Rendering
                 Type type = Nullable.GetUnderlyingType(parameter.ParameterType) ?? parameter.ParameterType;
                 if (!makers.TryGetValue(type, out Step? maker))
                 {
+                    Missing ??= parameter.ParameterType == type ? type : null;
                     arguments.Add(Expression.Default(parameter.ParameterType));
                     continue;
                 }

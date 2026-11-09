@@ -1,0 +1,273 @@
+using System.Numerics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using Magic.Ecs.Components;
+
+namespace Magic.GpuWorld;
+
+/// <summary>
+/// An instance as the GPU reads it from the instance table, 256 bytes: the twin of <c>Scene/Instances.slang</c>'s,
+/// in the world; the GPU takes the camera's position off a position once transformed.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal record struct GpuInstance
+{
+    public const int Bytes = 248;
+
+    /// <summary>
+    /// The model's frame to the world, row-major, as <see cref="Matrix4x4"/> is.
+    /// </summary>
+    public Matrix4x4 World;
+
+    /// <summary>
+    /// The world to the model's frame.
+    /// </summary>
+    public Matrix4x4 InverseWorld;
+
+    /// <summary>
+    /// <see cref="World"/> before it last changed, for motion in the frame <see cref="MovedFrame"/>.
+    /// </summary>
+    public Matrix4x4 PreviousWorld;
+
+    /// <summary>
+    /// The sphere around the instance in the world.
+    /// </summary>
+    public Vector3 BoundsCenter;
+
+    public float BoundsRadius;
+
+    /// <summary>
+    /// The model's index, 0 for none: its row of any table a renderer keeps a row a model in.
+    /// </summary>
+    public uint Model;
+
+    /// <summary>
+    /// The frame <see cref="World"/> last changed in: in any other, the instance stood still.
+    /// </summary>
+    public uint MovedFrame;
+
+    /// <summary>
+    /// The material table's row for each of the instance's slots.
+    /// </summary>
+    public GpuMaterialRows Materials;
+}
+
+/// <summary>
+/// A material table row for each of a renderer's <see cref="MaterialSlots"/>, inline so the instance stays one block of
+/// bytes.
+/// </summary>
+[InlineArray(MaterialSlots.Capacity)]
+internal struct GpuMaterialRows
+{
+    private uint _first;
+}
+
+/// <summary>
+/// A light as the GPU reads it from the light table, 64 bytes: the twin of <c>Scene/Lights.slang</c>'s.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal record struct GpuLight
+{
+    public const int Bytes = 64;
+
+    public const uint Point = 0;
+
+    public const uint Spot = 1;
+
+    public const uint Rect = 2;
+
+    public Vector3 Position;
+
+    public float Range;
+
+    public Vector3 Direction;
+
+    public float Radius;
+
+    public Vector3 Radiance;
+
+    public uint Type;
+
+    public float CosOuter;
+
+    public float CosInner;
+
+    public float Width;
+
+    public float Height;
+}
+
+/// <summary>
+/// A mesh as a ray sees it, the twin of <c>Scene/Models.slang</c>'s: where its triangles start in the index pool and
+/// its material slot, the row of the mesh table an acceleration structure's geometry names.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal readonly record struct GpuMesh(uint IndexOffset, uint MaterialSlot)
+{
+    public const int Bytes = 8;
+}
+
+/// <summary>
+/// A model's clusters in the cluster pool and its row of the impostor table, 0 for none, the twin of
+/// <c>Scene/Clusters.slang</c>'s: the row of the cluster model table an instance's model index names.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal readonly record struct GpuClusterModel(uint ClusterOffset, uint ClusterCount, uint Impostor)
+{
+    public const int Bytes = 12;
+}
+
+/// <summary>
+/// A vertex as the GPU reads it from the vertex pool, 32 bytes: the twin of <c>Scene/Vertices.slang</c>'s. Normals and
+/// tangents are octahedral, packed as <c>Core/Pack.slang</c> packs them.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public record struct GpuVertex
+{
+    public const int Bytes = 32;
+
+    public Vector3 Position;
+
+    /// <summary>
+    /// The unit normal, octahedral at 16 bits an axis.
+    /// </summary>
+    public uint Normal;
+
+    /// <summary>
+    /// The unit tangent, octahedral at 16 bits an axis.
+    /// </summary>
+    public uint Tangent;
+
+    /// <summary>
+    /// 1 or -1: what turns the cross of the normal and the tangent into the bitangent.
+    /// </summary>
+    public float TangentSign;
+
+    public Vector2 Uv;
+}
+
+/// <summary>
+/// One cluster of a model's hierarchy as the GPU reads it from the cluster pool, 80 bytes: the twin of
+/// <c>Scene/Clusters.slang</c>'s. Its triangles are a run of the index pool; its vertices are wherever those indices
+/// point in the vertex pool. The cut through the hierarchy is decided per cluster, with no walk: a cluster is drawn
+/// when its parent's error projects above the threshold and its own at or below it. A leaf's error is 0 and a
+/// root's parent error is the model's diameter, so some level draws until the whole model is under the threshold.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public record struct GpuCluster
+{
+    public const int Bytes = 80;
+
+    /// <summary>
+    /// The most triangles a cluster holds, and the most vertices.
+    /// </summary>
+    public const int MaxTriangles = 128;
+
+    /// <summary>
+    /// The sphere around the cluster's triangles, in the model's frame.
+    /// </summary>
+    public Vector3 Center;
+
+    public float Radius;
+
+    /// <summary>
+    /// The sphere around the group whose simplification replaces the cluster and its siblings, which holds
+    /// <see cref="DetailCenter"/>'s sphere, so the parent's error projects no smaller than the cluster's.
+    /// </summary>
+    public Vector3 ParentCenter;
+
+    public float ParentRadius;
+
+    /// <summary>
+    /// The sphere around the group the cluster was simplified from, the cluster's own for a leaf: what
+    /// <see cref="Error"/> is projected over, the same sphere the group's children project it over as their parent's.
+    /// </summary>
+    public Vector3 DetailCenter;
+
+    public float DetailRadius;
+
+    /// <summary>
+    /// How far, in metres, the cluster's surface may be from the original's: 0 for a leaf.
+    /// </summary>
+    public float Error;
+
+    /// <summary>
+    /// The error of the group that replaces the cluster and its siblings; the model's diameter for a root.
+    /// </summary>
+    public float ParentError;
+
+    /// <summary>
+    /// The first of the cluster's indices in the index pool.
+    /// </summary>
+    public uint IndexOffset;
+
+    public uint TriangleCount;
+
+    /// <summary>
+    /// The normal cone's axis, octahedral at 16 bits an axis, in the model's frame.
+    /// </summary>
+    public uint ConeAxis;
+
+    /// <summary>
+    /// The cosine of the cone's half angle, as a signed 16-bit fraction in the low half; a cluster facing every way
+    /// has a cutoff of 1, which the test never rejects.
+    /// </summary>
+    public uint ConeCutoff;
+
+    /// <summary>
+    /// Which of the instance's material slots the cluster is drawn with.
+    /// </summary>
+    public uint MaterialSlot;
+
+    public uint Padding;
+}
+
+/// <summary>
+/// One model's impostor, 32 bytes: the twin of <c>Scene/Impostors.slang</c>'s: the box around the model in its
+/// frame, and the heap id of its atlas.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal record struct GpuImpostor
+{
+    public const int Bytes = 32;
+
+    public Vector3 BoundsMin;
+
+    public uint Atlas;
+
+    public Vector3 BoundsMax;
+
+    /// <summary>
+    /// The heap id of the atlas of the texture coordinates its surface texels show.
+    /// </summary>
+    public uint UvAtlas;
+}
+
+/// <summary>
+/// A material slot as the GPU reads it from the material table, 64 bytes, the twin of <c>Scene/Materials.slang</c>'s:
+/// which of <see cref="GpuResources.MaterialShaders"/> draws it, with <see cref="TranslucentBit"/> where that shader is
+/// translucent, then that shader's struct, its params as the shader's reflection lays them out.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal struct GpuMaterial
+{
+    public const int Bytes = 64;
+
+    /// <summary>
+    /// The bit of <see cref="Shader"/> set for a translucent shader's row, which draws over the lit picture.
+    /// </summary>
+    public const uint TranslucentBit = 0x80000000;
+
+    public uint Shader;
+
+    public GpuMaterialParams Params;
+}
+
+/// <summary>
+/// A <see cref="GpuMaterial"/>'s params, inline: the bytes the material shader's struct reads.
+/// </summary>
+[InlineArray((GpuMaterial.Bytes / 4) - 1)]
+internal struct GpuMaterialParams
+{
+    private uint _first;
+}
