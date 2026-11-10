@@ -1,12 +1,12 @@
 using System.Collections.Immutable;
-using System.Globalization;
+using System.Drawing;
 using System.Linq;
 using System.Numerics;
 using Magic.Assets;
+using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Events;
 using Magic.Files;
 using Magic.Graphics;
 using Magic.Projects;
@@ -17,6 +17,11 @@ using Magic.Worlds;
 namespace Magic.GpuWorld;
 
 /// <summary>
+/// What the world's gem takes each frame: the upscaling, where a gem makes it.
+/// </summary>
+public readonly record struct GpuWorldInput(Upscaling? Upscaling);
+
+/// <summary>
 /// Keeps the world on the GPU for the gems that draw it. <c>LateUpdate</c> copies what the frame draws out of the
 /// entities and publishes it; <c>Render</c>, on the render thread, takes the newest published, puts the models,
 /// materials, textures, instances, lights and sky's tables on the GPU, uploads the frame's rows, and makes the frame's
@@ -24,20 +29,25 @@ namespace Magic.GpuWorld;
 /// history and holds the loading screen until what comes is on the GPU. It is public because nothing in its assembly
 /// makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class GpuWorldGem : IGem, IRenderInto<(GpuView, GpuInstances)>, IHookIntoDomainLoading, IDisposable
+public sealed class GpuWorldGem
+    : IGem,
+        IHasSettings<GpuWorldSettings>,
+        IRender<GpuWorldInput, (GpuView, GpuInstances)>,
+        IHookIntoDomainLoading,
+        IDisposable
 {
     private const int DefaultWidth = 1280;
+
     private const int DefaultHeight = 720;
 
-    /// <summary>
-    /// <c>set GpuWorld.resolution=&lt;width&gt;x&lt;height&gt;</c> draws the picture at that many pixels at most.
-    /// </summary>
-    private const string ResolutionSetting = "GpuWorld.resolution";
-
     private readonly IEcs _ecs;
+
     private readonly Threads _threads;
+
     private readonly Mailbox<RenderInputs> _inputs = new();
+
     private readonly GpuResources _resources;
+
     private readonly InstanceTable _instances;
 
     /// <summary>
@@ -50,15 +60,20 @@ public sealed class GpuWorldGem : IGem, IRenderInto<(GpuView, GpuInstances)>, IH
     /// exposure and the AgX tonemap.
     /// </summary>
     private readonly PostProcessing _defaultPost;
+
     private readonly FrameView _frameView;
+
     private readonly SkyLuts _sky;
+
     private readonly LightTiles _lightTiles;
+
     private readonly Effects _effects;
 
     /// <summary>
     /// Every shader the gem's passes run, which the GPU provider builds before the frame is made.
     /// </summary>
     private readonly ImmutableArray<ShaderEntry> _shaders;
+
     private readonly Subscription _preprocessing;
 
     /// <summary>
@@ -66,11 +81,6 @@ public sealed class GpuWorldGem : IGem, IRenderInto<(GpuView, GpuInstances)>, IH
     /// replaces it, so <see cref="Render"/> forgets the view's history at the first frame of what comes. Game thread.
     /// </summary>
     private int _worldNumber;
-
-    /// <summary>
-    /// The most pixels across and down the picture is drawn at, set by <see cref="ResolutionSetting"/>. Game thread.
-    /// </summary>
-    private (int Width, int Height) _resolution = (1920, 1080);
 
     /// <summary>
     /// The inputs <see cref="Render"/> uploads, taken from <see cref="_inputs"/>, until newer are. Render thread.
@@ -94,8 +104,16 @@ public sealed class GpuWorldGem : IGem, IRenderInto<(GpuView, GpuInstances)>, IH
     /// </summary>
     private int _preparedDomains;
 
-    public GpuWorldGem(IShaderCompiler shaders, AssetManager assets, Caches caches, IEcs ecs, Threads threads)
+    public GpuWorldGem(
+        GpuWorldSettings settings,
+        IShaderCompiler shaders,
+        AssetManager assets,
+        Caches caches,
+        IEcs ecs,
+        Threads threads
+    )
     {
+        Settings = settings;
         _ecs = ecs;
         _threads = threads;
         ModelPreprocessor models = new();
@@ -116,34 +134,16 @@ public sealed class GpuWorldGem : IGem, IRenderInto<(GpuView, GpuInstances)>, IH
         _shaders = [.. _sky.Shaders, .. _lightTiles.Shaders];
     }
 
+    /// <summary>
+    /// The settings the world is drawn by, which <see cref="LateUpdate"/> hands each frame to <see cref="Render"/>. Game
+    /// thread.
+    /// </summary>
+    public GpuWorldSettings Settings { get; set; }
+
     public void Dispose()
     {
         _preprocessing.Dispose();
         EndPreparing();
-    }
-
-    /// <summary>
-    /// Applies the resolution set.
-    /// </summary>
-    public void Update(in Frame frame)
-    {
-        foreach (SetCliCommand setting in frame.Events.Get<SetCliCommand>())
-        {
-            if (setting.Key != ResolutionSetting)
-                continue;
-
-            string[] sides = setting.Value.Split('x');
-            if (
-                sides.Length == 2
-                && int.TryParse(sides[0], CultureInfo.InvariantCulture, out int width)
-                && int.TryParse(sides[1], CultureInfo.InvariantCulture, out int height)
-                && width > 0
-                && height > 0
-            )
-                _resolution = (width, height);
-            else
-                Log.Error($"{setting.Key} takes <width>x<height>, such as 1920x1080, not '{setting.Value}'.");
-        }
     }
 
     /// <summary>
@@ -152,7 +152,7 @@ public sealed class GpuWorldGem : IGem, IRenderInto<(GpuView, GpuInstances)>, IH
     public void LateUpdate(in Frame frame)
     {
         RenderInputs back = _inputs.Back;
-        back.Resolution = _resolution;
+        back.Settings = Settings;
         _ecs.Snapshot(back.Renderers);
         _ecs.Snapshot(back.Cameras);
         _ecs.Snapshot(back.DirectionalLights);
@@ -170,7 +170,7 @@ public sealed class GpuWorldGem : IGem, IRenderInto<(GpuView, GpuInstances)>, IH
     /// The newest inputs published, or the last again when none are newer, on the GPU, and the frame's view of them and
     /// its instances; none while the shaders build, the pools are not made, or nothing was published yet.
     /// </summary>
-    public (GpuView, GpuInstances)? Render(in Frame frame, RenderGraph graph)
+    public (GpuView, GpuInstances)? Render(in Frame frame, RenderGraph graph, in GpuWorldInput input)
     {
         if (!_started.Ok)
             return null;
@@ -230,7 +230,7 @@ public sealed class GpuWorldGem : IGem, IRenderInto<(GpuView, GpuInstances)>, IH
         _resources.Upload(graph);
 
         // The air's effects before the picture's, so a post effect works on the fogged picture; the camera jitters while
-        // one of them asks for it.
+        // one of them asks for it, or while a gem upscales.
         MaterialSlots air = inputs.Weather.Count > 0 ? inputs.Weather.First[0].Effects : default;
         PostProcessing post = inputs.PostProcessing.Count > 0 ? inputs.PostProcessing.First[0] : _defaultPost;
         Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> effects = _effects.Resolve(
@@ -244,7 +244,8 @@ public sealed class GpuWorldGem : IGem, IRenderInto<(GpuView, GpuInstances)>, IH
             return null;
         }
 
-        Vector2 jitter = HasJitter(effects.Value.Effects.Span) ? FrameView.GetJitter(frame.Index) : Vector2.Zero;
+        bool isJittered = input.Upscaling is not null || HasJitter(effects.Value.Effects.Span);
+        Vector2 jitter = isJittered ? FrameView.GetJitter(frame.Index) : Vector2.Zero;
 
         Result<GpuView> view = UploadFrame(graph, inputs, frame, jitter, instanceCount, effects.Value);
         if (!view.Ok)
@@ -487,18 +488,17 @@ public sealed class GpuWorldGem : IGem, IRenderInto<(GpuView, GpuInstances)>, IH
             return Result.Failure(tables.Error);
 
         // The picture in the window's shape, scaled down to fit the resolution but never up, which the window stretches
-        // it over; 1280 by 720 headless.
+        // it over or a gem upscales it to; at the window's size when the resolution has no side, and 1280 by 720
+        // headless.
         TextureDescription window = graph.WindowTarget.IsNone ? default : graph.GetDescription(graph.WindowTarget);
         (int width, int height) = (DefaultWidth, DefaultHeight);
         if (window.Width > 0)
         {
-            float scale = MathF.Min(
-                1,
-                MathF.Min(
-                    (float)inputs.Resolution.Width / window.Width,
-                    (float)inputs.Resolution.Height / window.Height
-                )
-            );
+            Size box = inputs.Settings.Resolution;
+            float scale =
+                box.Width <= 0 || box.Height <= 0
+                    ? 1
+                    : MathF.Min(1, MathF.Min((float)box.Width / window.Width, (float)box.Height / window.Height));
             (width, height) = ((int)MathF.Round(window.Width * scale), (int)MathF.Round(window.Height * scale));
         }
 

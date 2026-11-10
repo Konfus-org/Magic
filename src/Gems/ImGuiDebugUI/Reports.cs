@@ -65,10 +65,11 @@ internal sealed class Reports
     /// <summary>
     /// Adds what shows at <paramref name="nowSec"/> to <paramref name="world"/>, what has a position, and to
     /// <paramref name="lines"/>, what has none: first what is reported every frame, in the order it was last reported, then
-    /// the rest, in the order it was first reported. What has had its time, and was not reported again since the last take,
-    /// is gone after it. Game thread.
+    /// the rest, in the order it was first reported. The rest, the lines logged, is left out unless
+    /// <paramref name="isLogShown"/>, but its time still runs. What has had its time, and was not reported again since the
+    /// last take, is gone after it. Game thread.
     /// </summary>
-    internal void Take(double nowSec, List<ShownReport> world, List<ShownReport> lines)
+    internal void Take(double nowSec, bool isLogShown, List<ShownReport> world, List<ShownReport> lines)
     {
         // What arrived keeps what shows the same up for its seconds from now, or starts showing.
         while (_arrived.Reader.TryRead(out Report report))
@@ -117,6 +118,9 @@ internal sealed class Reports
 
             // Plain text, reported every frame, comes before the rest, in the order of this frame's reports.
             showing.IsFresh = false;
+            if (showing.Kind != ReportKind.Plain && !isLogShown)
+                continue;
+
             ShownReport shown = new(
                 showing.Label,
                 showing.Color,

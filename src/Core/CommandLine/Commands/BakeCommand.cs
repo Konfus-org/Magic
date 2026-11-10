@@ -50,7 +50,9 @@ internal static class BakeCommand
 
         async Task BakeAssetsAsync()
         {
-            Result<ImmutableArray<ulong>> baked = await assets.BakeAsync(null, app.Lifetime).ConfigureAwait(false);
+            Result<ImmutableArray<ulong>> baked = await assets
+                .BakeAsync(Terminal.Progress, app.Lifetime)
+                .ConfigureAwait(false);
             if (baked.Ok)
                 Log.Info($"Baked {baked.Value.Length} assets.");
             else

@@ -183,11 +183,6 @@ public static class Log
             _sinks.Remove(sink);
     }
 
-    [SuppressMessage(
-        "ApiDesign",
-        "RS0030:Do not use banned APIs",
-        Justification = "We always write to the console as our default log sink."
-    )]
     private static void Write(LoggingLevel level, string message, string member, string file, int line, bool onScreen)
     {
         Line logged = new(
@@ -213,12 +208,7 @@ public static class Log
             }
         }
 
-        // Log always writes to console
-        string text = logged.ToString();
-        if (level >= LoggingLevel.Error)
-            Console.Error.WriteLine(Console.IsErrorRedirected ? text : Colorize(level, text));
-        else
-            Console.WriteLine(Console.IsOutputRedirected ? text : Colorize(level, text));
+        Terminal.Write(logged);
     }
 
     [SuppressMessage(
@@ -241,17 +231,6 @@ public static class Log
             return false;
         }
     }
-
-    private static string Colorize(LoggingLevel level, string text) =>
-        level switch
-        {
-            LoggingLevel.Verbose => $"\e[90m{text}\e[0m", // gray
-            LoggingLevel.Info => text, // default
-            LoggingLevel.Warn => $"\e[33m{text}\e[0m", // yellow
-            LoggingLevel.Error => $"\e[31m{text}\e[0m", // red
-            LoggingLevel.Critical => $"\e[1;97;41m{text}\e[0m", // bold white on red
-            _ => text,
-        };
 
     public enum VerbosityLevel
     {

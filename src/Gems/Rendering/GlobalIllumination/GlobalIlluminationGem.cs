@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
@@ -71,7 +72,9 @@ public sealed class GlobalIlluminationGem : IGem, IRender<TracedInput, IndirectL
         }
 
         GpuView gpu = input.View;
-        Result<GpuBuffer> constants = graph.Buffer(GpuDescriptions.GetBuffer("GI constants", GIConstants.Bytes));
+        Result<GpuBuffer> constants = graph.Buffer(
+            GpuDescriptions.GetBuffer("GI constants", Unsafe.SizeOf<GIConstants>())
+        );
         if (!constants.Ok)
         {
             Log.Error($"The indirect light is not traced: {constants.Error}");
@@ -105,7 +108,10 @@ public sealed class GlobalIlluminationGem : IGem, IRender<TracedInput, IndirectL
         Result<ProbeBuffers> probes = _probes.Prepare(graph, _traced is not null, input.Traced.Box);
         Result<TracedDiffuseBuffers> diffuse = TracedDiffuse.Prepare(view, frame.Index);
         Result<TracedReflectionBuffers> reflections = TracedReflections.Prepare(view, frame.Index);
-        foreach (Result made in (ReadOnlySpan<Result>)[probes, diffuse, reflections])
+        Result<GpuSampler> sampler = graph.Sampler(
+            new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
+        );
+        foreach (Result made in (ReadOnlySpan<Result>)[probes, diffuse, reflections, sampler])
         {
             if (!made.Ok)
             {
@@ -117,12 +123,22 @@ public sealed class GlobalIlluminationGem : IGem, IRender<TracedInput, IndirectL
 
         graph.Upload(
             view.Constants,
-            [new GIConstants { Diffuse = diffuse.Value.Constants, Reflections = reflections.Value.Constants }]
+            [
+                new GIConstants
+                {
+                    Diffuse = diffuse.Value.Constants,
+                    Reflections = reflections.Value.Constants,
+                    Sampler = sampler.Value.Id,
+                    HasHistory = view.HasHistory ? 1u : 0u,
+                },
+            ]
         );
+        GpuTexture diffuseLight = diffuse.Value.Blend.Light;
+        GpuTexture reflectionLight = reflections.Value.Blend.Light;
         GpuIndirectLight row = new()
         {
-            Diffuse = diffuse.Value.Light.Id,
-            Reflections = reflections.Value.Light.Id,
+            Diffuse = diffuseLight.Id,
+            Reflections = reflectionLight.Id,
             Grid = probes.Value.Constants,
         };
         graph.Upload(gpu.Frame, [row], GpuIndirectLight.Offset);
@@ -131,7 +147,7 @@ public sealed class GlobalIlluminationGem : IGem, IRender<TracedInput, IndirectL
         _reflections.Record(view, probes.Value, reflections.Value);
         _traced = (gpu.Width, gpu.Height);
 
-        return new IndirectLight(diffuse.Value.Light, reflections.Value.Light, probes.Value.Probes, probes.Value.Depth);
+        return new IndirectLight(diffuseLight, reflectionLight, probes.Value.Probes, probes.Value.Depth);
     }
 
     /// <summary>

@@ -1921,7 +1921,7 @@ It prints `Now listening on: http://localhost:5211`. Open that in a browser.
    Wizard shows the whole log.
 4. Type `help` in the command box and press Enter: the engine's commands are listed.
 5. Type `nope`: a yellow line says there is no such command.
-6. Type `screenshot`: a `Screenshot: …png` line names the file under `Build/bin/Debug/Screenshots/`.
+6. Type `screenshot`: the path of a file under `Build/bin/Debug/Screenshots/` is printed as the command's result.
 7. Press **Stop**: the engine window closes and the status reads `Stopped`.
 
 **Browse…** does nothing in a browser tab; it needs the shell from Part 4.

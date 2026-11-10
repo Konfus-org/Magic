@@ -1,7 +1,9 @@
 using System.CommandLine;
+using System.IO;
 using System.Linq;
 using Magic.Assets;
 using Magic.CommandLine.Commands;
+using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Events;
 using Magic.Files;
@@ -20,10 +22,10 @@ internal sealed class Cli
 
     private readonly RootCommand _cliCommands;
 
-    public Cli(App app, IFileSystem files, EventCoordinator events, AssetManager assets, World world)
+    public Cli(App app, Settings settings, IFileSystem files, EventCoordinator events, AssetManager assets, World world)
     {
         _queue = new CommandQueue(events);
-        _cliCommands = CreateCliCommands(app, files, events, assets, world, _queue);
+        _cliCommands = CreateCliCommands(app, settings, files, events, assets, world, _queue);
     }
 
     /// <summary>
@@ -72,12 +74,22 @@ internal sealed class Cli
             Log.Error($"Couldn't run '{line}': {ran.Error}");
     }
 
+    /// <summary>
+    /// Runs <paramref name="parsed"/>, or says why it doesn't. What it prints, such as help, goes through the terminal,
+    /// so the prompt comes back under it; what it throws is logged.
+    /// </summary>
     private static Result Invoke(ParseResult parsed)
     {
         if (parsed.Errors.Count > 0)
             return Result.Failure(string.Join("; ", parsed.Errors.Select(error => error.Message)));
 
-        parsed.Invoke();
+        using StringWriter output = new();
+        using StringWriter errors = new();
+        parsed.Invoke(new InvocationConfiguration { Output = output, Error = errors });
+        if (output.GetStringBuilder().Length > 0)
+            Terminal.Write(output.ToString().TrimEnd());
+        if (errors.GetStringBuilder().Length > 0)
+            Log.Error(errors.ToString().TrimEnd());
 
         return Result.Success();
     }
@@ -88,6 +100,7 @@ internal sealed class Cli
     /// </summary>
     private static RootCommand CreateCliCommands(
         App app,
+        Settings settings,
         IFileSystem files,
         EventCoordinator events,
         AssetManager assets,
@@ -103,11 +116,11 @@ internal sealed class Cli
                 NewCommand.Create(),
                 ScreenshotCommand.Create(app, files, events),
                 StatsCommand.Create(),
-                SaveCommand.Create(app, world, queue),
+                SaveCommand.Create(app, settings, world, queue),
                 LoadCommand.Create(app, world, queue),
                 BakeCommand.Create(app, assets, queue),
-                SetCommand.Create(app, events, world),
-                GetCommand.Create(app, world),
+                SetCommand.Create(app, settings, world),
+                GetCommand.Create(app, settings, world),
                 TeleportCommand.Create(app, world, assets, queue),
                 SpawnCommand.Create(app, world, assets, queue),
                 WaitCommand.Create(queue, world),
@@ -128,6 +141,11 @@ internal sealed class Cli
                     "Exit with code 2 as soon as an error is logged",
                     value => app.ShouldExitOnError = value
                 ),
+                CreateOption<string[]>(
+                    "--configure",
+                    "Set settings as their gems are made, as --configure Window.Mode=windowed Rendering.Resolution=\"1280 720\"",
+                    settings.Configure
+                ),
             },
         };
 
@@ -136,12 +154,17 @@ internal sealed class Cli
 
         return commands;
 
-        // Every option is recursive, and its action applies its value before the command runs.
+        // Every option is recursive, and its action applies its value before the command runs. A list option takes each
+        // value after it, up to the next option or command.
         static Option<T> CreateOption<T>(string name, string description, Action<T> apply, params string[] aliases)
-            where T : struct
         {
-            Option<T> option = new(name, aliases) { Description = description, Recursive = true };
-            option.Action = new OptionAction(parsed => apply(parsed.GetValue(option)));
+            Option<T> option = new(name, aliases)
+            {
+                Description = description,
+                Recursive = true,
+                AllowMultipleArgumentsPerToken = true,
+            };
+            option.Action = new OptionAction(parsed => apply(parsed.GetRequiredValue(option)));
 
             return option;
         }

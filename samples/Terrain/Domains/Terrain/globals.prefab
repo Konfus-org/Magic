@@ -52,6 +52,21 @@
                     "intensity": 3
                 }
             }
+        },
+        {
+            "name": "PostProcessing",
+            "components": {
+                "PostProcessing": {
+                    "effects": [
+                        {
+                            "id": 6176367544898210812
+                        },
+                        {
+                            "id": 5350400469144486248
+                        }
+                    ]
+                }
+            }
         }
     ]
 }

@@ -43,7 +43,7 @@ public readonly record struct GpuView
     public required GpuTexture GlassSurface { get; init; }
 
     /// <summary>
-    /// The lit picture, and the output the window and screenshots take.
+    /// The lit picture, and the output the window and screenshots take, or a gem upscales for them.
     /// </summary>
     public required GpuTexture Hdr { get; init; }
 

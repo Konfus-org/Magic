@@ -21,18 +21,18 @@ texture reader, with a gem that draws its view.
   frame is drawn whole, its effects included. Nothing drawn before carries into the frames after.
 - The effects the frame runs are the first weather's, then the first post processing's, or the engine's
   `TemporalAntiAliasing`, `Exposure` and `Agx` when nothing has one; the view names each with its material's row and
-  its passes. The camera jitters while one of them asks for it.
-- The picture is drawn in the window's shape, at most as many pixels across and down as the `resolution` setting,
-  and stretched over the window. A smaller window draws at its own size, and a run with no window at 1280 by 720.
+  its passes. The camera jitters while one of them asks for it, or while a gem upscales the picture.
+- The picture is drawn in the window's shape, at most as many pixels across and down as `Rendering.Resolution`,
+  and stretched over the window, or upscaled to it by a gem that upscales. A smaller window draws at its own size, and so does every window when it is `0 0`; a run with no window draws at 1280
+  by 720.
 
 `bake` in the console loads every asset, which makes what every gem makes of every model, then opens every domain under `Domains/`
 in turn and exits, so a release ships with the caches full.
 
 ## Settings
 
-Set these in the console with `set GpuWorld.<name>=<value>`. A wrong value logs what it takes.
-
-- `resolution` is the most pixels across and down the picture is drawn at, as `<width>x<height>`.
+The gem's settings are `GpuWorldSettings`, under `Rendering`. `get Rendering` lists them in the console, and
+`set Rendering.Resolution 2560 1440` sets one; a wrong value logs what it takes.
 
 ## Changing it
 

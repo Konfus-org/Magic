@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Threading.Channels;
 using Magic.Debugging;
 using Magic.Events;
 
@@ -11,11 +10,6 @@ namespace Magic.CommandLine;
 /// </summary>
 internal sealed class CommandQueue(EventCoordinator events)
 {
-    /// <summary>
-    /// The lines typed into the terminal, read by one thread for the whole process.
-    /// </summary>
-    private static readonly ChannelReader<string> _typed = StartReadingTerminal();
-
     private readonly Queue<string> _queued = new();
 
     /// <summary>
@@ -70,27 +64,6 @@ internal sealed class CommandQueue(EventCoordinator events)
 
         _hold = null;
 
-        return _queued.TryDequeue(out line) || _typed.TryRead(out line);
-    }
-
-    [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "Must read console for CLI")]
-    private static ChannelReader<string> StartReadingTerminal()
-    {
-        Channel<string> lines = Channel.CreateUnbounded<string>(new() { SingleReader = true, SingleWriter = true });
-        Thread reader = new(() =>
-        {
-            // Text piped in can start with a byte order mark.
-            while (Console.ReadLine() is { } line)
-                lines.Writer.TryWrite(line.TrimStart('\uFEFF'));
-            lines.Writer.Complete();
-        })
-        {
-            IsBackground = true,
-            Name = "CLI Reader",
-        };
-        reader.Start();
-        Log.Info("Welcome to the magic CLI, type 'help' for commands.");
-
-        return lines.Reader;
+        return _queued.TryDequeue(out line) || Terminal.Typed.TryRead(out line);
     }
 }

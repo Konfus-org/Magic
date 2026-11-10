@@ -4,7 +4,7 @@ using Magic.Input;
 namespace Magic.Deferred;
 
 /// <summary>
-/// The renderer's debug window, drawn with the debug UI's widgets: it takes the view chosen now and hands back the one
+/// The renderer's debug window, drawn with the debug UI's widgets: it takes the settings now and hands back the ones
 /// chosen next. F2 opens it, F5 and F6 step through the views, and a line on screen names any view but the finished frame.
 /// </summary>
 internal sealed class RendererDebugWindow(IDebugUI ui, IInput? input)
@@ -16,21 +16,17 @@ internal sealed class RendererDebugWindow(IDebugUI ui, IInput? input)
     /// </summary>
     private static readonly string[] _viewLines = Array.ConvertAll(_viewNames, name => $"View: {name}");
 
-    private bool _isOpen;
-
-    public bool IsOpen
+    /// <summary>
+    /// <paramref name="current"/>, or a copy with the view and whether the window is open as chosen this frame.
+    /// </summary>
+    public DeferredSettings Update(DeferredSettings current)
     {
-        get => _isOpen;
-        set => _isOpen = value;
-    }
-
-    public DebugView Update(DebugView current)
-    {
-        DebugView view = current;
+        DebugView view = current.RenderView;
+        bool isOpen = current.IsRenderWindowOpen;
         if (input is not null)
         {
             if (input[Control.KeyF2].WasPressed)
-                _isOpen = !_isOpen;
+                isOpen = !isOpen;
 
             if (input[Control.KeyF5].WasPressed)
                 view = Step(view, -1);
@@ -39,21 +35,28 @@ internal sealed class RendererDebugWindow(IDebugUI ui, IInput? input)
                 view = Step(view, 1);
         }
 
-        if (_isOpen)
-            view = Draw(view);
+        if (isOpen)
+            view = Draw(view, ref isOpen);
 
         if (view != DebugView.Final)
             ui.Text(_viewLines[(int)view]);
 
-        return view;
+        if (view == current.RenderView && isOpen == current.IsRenderWindowOpen)
+            return current;
+
+        return current with
+        {
+            RenderView = view,
+            IsRenderWindowOpen = isOpen,
+        };
     }
 
     private static DebugView Step(DebugView view, int by) =>
         (DebugView)(((int)view + by + _viewNames.Length) % _viewNames.Length);
 
-    private DebugView Draw(DebugView current)
+    private DebugView Draw(DebugView current, ref bool isOpen)
     {
-        ui.Begin("Rendering", ref _isOpen);
+        ui.Begin("Rendering", ref isOpen);
         int viewIndex = (int)current;
         ui.Choice("View", ref viewIndex, _viewNames);
         ui.End();

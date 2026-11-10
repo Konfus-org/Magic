@@ -53,7 +53,6 @@ internal sealed class Probes(AssetManager assets)
     private const float BoxBlend = 0.01f;
 
     private readonly ShaderEntry _allocateShader = PassShaders.GetEntry(assets, "UpdateProbes", "AllocateProbeRays");
-    private readonly ShaderEntry _prepareShader = PassShaders.GetEntry(assets, "UpdateProbes", "PrepareProbeRays");
     private readonly ShaderEntry _traceShader = PassShaders.GetEntry(assets, "UpdateProbes", "TraceProbes") with
     {
         TypeArguments = [PassShaders.GetAtmosphere(assets)],
@@ -70,13 +69,12 @@ internal sealed class Probes(AssetManager assets)
     /// </summary>
     private (Vector3 Min, Vector3 Max) _box;
 
-    public ImmutableArray<ShaderEntry> Shaders =>
-        [_allocateShader, _prepareShader, _traceShader, _irradianceShader, _depthShader];
+    public ImmutableArray<ShaderEntry> Shaders => [_allocateShader, _traceShader, _irradianceShader, _depthShader];
 
     /// <summary>
-    /// The grid's buffers and depth texture asked for, the constants that name them, and the counts cleared, and the
-    /// probes too while they hold nothing. The grid is placed over <paramref name="box"/> with a margin: at once when
-    /// the probes start afresh, else a little nearer each frame.
+    /// The grid's buffers and depth texture asked for, the constants that name them, and the counts and the trace's
+    /// groups started at none, and the probes too while they hold nothing. The grid is placed over
+    /// <paramref name="box"/> with a margin: at once when the probes start afresh, else a little nearer each frame.
     /// </summary>
     public Result<ProbeBuffers> Prepare(RenderGraph graph, bool hasHistory, (Vector3 Min, Vector3 Max) box)
     {
@@ -142,8 +140,9 @@ internal sealed class Probes(AssetManager assets)
             depth.Value
         );
 
-        // The counts start each frame at none, and the probes at none on the first update.
+        // The counts and the trace's groups start each frame at none, and the probes at none on the first update.
         graph.Clear(buffers.RayCounts);
+        graph.Upload(buffers.RayArguments, [0u, 1u, 1u]);
         if (!hasHistory)
             graph.Clear(buffers.Probes);
 
@@ -151,8 +150,8 @@ internal sealed class Probes(AssetManager assets)
     }
 
     /// <summary>
-    /// The probes' rays allocated, traced through the world, lit by the lights and the sky, and blended into the
-    /// probes.
+    /// The probes' rays allocated with the trace's groups, traced through the world, lit by the lights and the sky,
+    /// and blended into the probes.
     /// </summary>
     public void Record(in GIView view, in ProbeBuffers probes)
     {
@@ -161,13 +160,8 @@ internal sealed class Probes(AssetManager assets)
         graph
             .Compute("Allocate probe rays", _allocateShader, header, RenderStage.Light)
             .Reads(view.Frame, probes.Probes, probes.Variance)
-            .Writes(probes.RayCounts, probes.RayList)
+            .Writes(probes.RayCounts, probes.RayList, probes.RayArguments)
             .Dispatch(ProbeCount);
-        graph
-            .Compute("Prepare probe rays", _prepareShader, header, RenderStage.Light)
-            .Reads(view.Frame, probes.RayCounts)
-            .Writes(probes.RayArguments)
-            .Dispatch(1);
         graph
             .Compute("Trace probes", _traceShader, header, RenderStage.Light)
             .Reads(view.World.AsSpan())

@@ -9,11 +9,12 @@ using Magic.Threading;
 namespace Magic.Debugging;
 
 /// <summary>
-/// Logs what the <c>Magic.*</c> meters and .NET's <c>System.Runtime</c> measure, every so many seconds, over what they
-/// measured in that time: each instrument with the category as a part of its name, such as gpu in
+/// Sums up what the <c>Magic.*</c> meters and .NET's <c>System.Runtime</c> measure over a stretch of time, once or
+/// logged every so many seconds: each instrument with the category as a part of its name, such as gpu in
 /// <c>magic.gems.vulkan_graphics.gpu.pass.duration</c>, or every one for all, a line for each of its sets of tags. A
 /// histogram shows its mean, how many a second and its most, a counter how much it rose and how much a second, and
-/// anything else its latest value; seconds show as milliseconds and bytes as megabytes. It listens only while it logs.
+/// anything else its latest value; seconds show as milliseconds and bytes as megabytes. It listens only while it
+/// measures.
 /// </summary>
 internal static class MetricsLog
 {
@@ -38,68 +39,26 @@ internal static class MetricsLog
     }
 
     /// <summary>
-    /// One log until it is cancelled: the threads that record hand each measurement over through a channel, and each
-    /// tick sums up what came since the last and logs it.
+    /// What <paramref name="category"/> measures over the next <paramref name="over"/>, as the lines a log prints.
+    /// </summary>
+    public static async Task<string> SampleAsync(string category, TimeSpan over, CancellationToken cancel)
+    {
+        using Sampler sampler = new(category);
+        await Task.Delay(over, cancel).ConfigureAwait(false);
+
+        return sampler.Summarize();
+    }
+
+    /// <summary>
+    /// One log until it is cancelled: each tick sums up what came since the last and logs it.
     /// </summary>
     private static async Task LogAsync(string category, TimeSpan every, CancellationToken cancel)
     {
-        Channel<Measured> measured = Channel.CreateUnbounded<Measured>(
-            new UnboundedChannelOptions { SingleReader = true }
-        );
-        using MeterListener listener = new()
-        {
-            InstrumentPublished = (instrument, listening) =>
-            {
-                if (IsLogged(instrument, category))
-                    listening.EnableMeasurementEvents(instrument);
-            },
-        };
-        listener.SetMeasurementEventCallback<double>(Record);
-        listener.SetMeasurementEventCallback<float>(Record);
-        listener.SetMeasurementEventCallback<long>(Record);
-        listener.SetMeasurementEventCallback<int>(Record);
-        listener.Start();
-
-        Dictionary<string, Sum> sums = [];
-        long sinceTimestamp = Stopwatch.GetTimestamp();
+        using Sampler sampler = new(category);
         using PeriodicTimer timer = new(every);
         while (await timer.WaitForNextTickAsync(cancel).ConfigureAwait(false))
         {
-            listener.RecordObservableInstruments();
-            while (measured.Reader.TryRead(out Measured measurement))
-            {
-                Sum sum = sums.GetValueOrDefault(
-                    measurement.Key,
-                    new Sum(measurement.Instrument, 0, 0, double.MinValue, 0)
-                );
-                sums[measurement.Key] = sum with
-                {
-                    Count = sum.Count + 1,
-                    Total = sum.Total + measurement.Value,
-                    Max = Math.Max(sum.Max, measurement.Value),
-                    Latest = measurement.Value,
-                };
-            }
-
-            double seconds = Math.Max(Stopwatch.GetElapsedTime(sinceTimestamp).TotalSeconds, 1e-6);
-            sinceTimestamp = Stopwatch.GetTimestamp();
-            string described = string.Join(
-                '\n',
-                sums.OrderBy(pair => pair.Key, StringComparer.Ordinal)
-                    .Select(pair => Describe(pair.Key, pair.Value, seconds))
-            );
-            sums.Clear();
-            Log.Info(
-                string.Create(CultureInfo.InvariantCulture, $"Stats, {category}, over {seconds:0.#} s:\n{described}")
-            );
-        }
-
-        void Record<T>(Instrument instrument, T value, ReadOnlySpan<KeyValuePair<string, object?>> tags, object? state)
-            where T : struct, INumberBase<T>
-        {
-            string tagText = string.Join(' ', tags.ToArray().Select(tag => tag.Value));
-            string key = tagText.Length == 0 ? instrument.Name : $"{instrument.Name} {tagText}";
-            measured.Writer.TryWrite(new Measured(instrument, key, double.CreateTruncating(value)));
+            Log.Info(sampler.Summarize());
         }
     }
 
@@ -144,7 +103,92 @@ internal static class MetricsLog
     private readonly record struct Measured(Instrument Instrument, string Key, double Value);
 
     /// <summary>
-    /// What one instrument measured under one set of tags since the last log.
+    /// What one instrument measured under one set of tags since the last summary.
     /// </summary>
     private readonly record struct Sum(Instrument Instrument, int Count, double Total, double Max, double Latest);
+
+    /// <summary>
+    /// Listens to one category's instruments from when it is made until it is disposed: the threads that record hand
+    /// each measurement over through a channel, and each summary sums up what came since the last.
+    /// </summary>
+    private sealed class Sampler : IDisposable
+    {
+        private readonly string _category;
+        private readonly MeterListener _listener;
+        private readonly Channel<Measured> _measured = Channel.CreateUnbounded<Measured>(
+            new UnboundedChannelOptions { SingleReader = true }
+        );
+        private readonly Dictionary<string, Sum> _sums = [];
+        private long _sinceTimestamp = Stopwatch.GetTimestamp();
+
+        public Sampler(string category)
+        {
+            _category = category;
+            _listener = new MeterListener
+            {
+                InstrumentPublished = (instrument, listening) =>
+                {
+                    if (IsLogged(instrument, category))
+                        listening.EnableMeasurementEvents(instrument);
+                },
+            };
+            _listener.SetMeasurementEventCallback<double>(Record);
+            _listener.SetMeasurementEventCallback<float>(Record);
+            _listener.SetMeasurementEventCallback<long>(Record);
+            _listener.SetMeasurementEventCallback<int>(Record);
+            _listener.Start();
+        }
+
+        public void Dispose() => _listener.Dispose();
+
+        /// <summary>
+        /// What was measured since the last summary, or since the start, a line per instrument and set of tags.
+        /// </summary>
+        public string Summarize()
+        {
+            _listener.RecordObservableInstruments();
+            while (_measured.Reader.TryRead(out Measured measurement))
+            {
+                Sum sum = _sums.GetValueOrDefault(
+                    measurement.Key,
+                    new Sum(measurement.Instrument, 0, 0, double.MinValue, 0)
+                );
+                _sums[measurement.Key] = sum with
+                {
+                    Count = sum.Count + 1,
+                    Total = sum.Total + measurement.Value,
+                    Max = Math.Max(sum.Max, measurement.Value),
+                    Latest = measurement.Value,
+                };
+            }
+
+            double seconds = Math.Max(Stopwatch.GetElapsedTime(_sinceTimestamp).TotalSeconds, 1e-6);
+            _sinceTimestamp = Stopwatch.GetTimestamp();
+            string described = string.Join(
+                '\n',
+                _sums
+                    .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                    .Select(pair => Describe(pair.Key, pair.Value, seconds))
+            );
+            _sums.Clear();
+
+            return string.Create(
+                CultureInfo.InvariantCulture,
+                $"Stats, {_category}, over {seconds:0.#} s:\n{described}"
+            );
+        }
+
+        private void Record<T>(
+            Instrument instrument,
+            T value,
+            ReadOnlySpan<KeyValuePair<string, object?>> tags,
+            object? state
+        )
+            where T : struct, INumberBase<T>
+        {
+            string tagText = string.Join(' ', tags.ToArray().Select(tag => tag.Value));
+            string key = tagText.Length == 0 ? instrument.Name : $"{instrument.Name} {tagText}";
+            _measured.Writer.TryWrite(new Measured(instrument, key, double.CreateTruncating(value)));
+        }
+    }
 }
