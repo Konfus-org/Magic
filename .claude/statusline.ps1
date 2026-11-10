@@ -1,5 +1,5 @@
 # Status line: the checkout, the slice's size against the merge target, the model and how full the context is.
-# Three git calls at most, since it runs often.
+# Four git calls at most, since it runs often.
 $ErrorActionPreference = 'SilentlyContinue'
 $data = [Console]::In.ReadToEnd() | ConvertFrom-Json
 $esc = [char]27
@@ -12,9 +12,15 @@ if ($info.Count -ge 3) {
     $branch = $info[2]
     if ($info[0] -ne $info[1]) {
         $parts.Add("$esc[36m$branch$esc[0m")
+        # The merge target: the branch's upstream when that is a local branch, as a swarm worker's root is, otherwise
+        # the branch checked out in the main checkout.
+        $target = $null
+        $upstream = [string](& git -C $dir rev-parse --symbolic-full-name '@{upstream}' 2>$null)
         $ref = Get-Content -LiteralPath (Join-Path $info[1] 'HEAD') -TotalCount 1
-        if ($ref -match '^ref: refs/heads/(.+)$') {
-            $base = & git -C $dir merge-base HEAD $Matches[1] 2>$null
+        if ($upstream -match '^refs/heads/(.+)$') { $target = $Matches[1] }
+        elseif ($ref -match '^ref: refs/heads/(.+)$') { $target = $Matches[1] }
+        if ($target) {
+            $base = & git -C $dir merge-base HEAD $target 2>$null
             if ($base) {
                 $lines = 0
                 $stat = [string](& git -C $dir diff --shortstat $base 2>$null)

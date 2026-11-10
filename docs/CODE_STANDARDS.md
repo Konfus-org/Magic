@@ -1,8 +1,8 @@
 # Code Standards
 
-The rules for C#, Slang and build files in Magic. `.editorconfig` and `BannedSymbols.txt` enforce what a tool can
-check; this page covers the rest. Every warning except a TODO comment's fails the build. New code follows these rules,
-and old code catches up when you touch it.
+The rules for C# and build files in Magic; [Shader Standards](SHADER_STANDARDS.md) has Slang's. `.editorconfig` and
+`BannedSymbols.txt` enforce what a tool can check; this page covers the rest. Every warning except a TODO comment's
+fails the build. New code follows these rules, and old code catches up when you touch it.
 
 ## How we write code
 
@@ -202,6 +202,29 @@ built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
   and every loop have braces; each branch decides for itself. A blank line goes before `return`, `continue`, `break`
   or `throw` unless it opens its block.
 
+### API shape
+
+Write plain statements first. Use one of these shapes where it makes the call site shorter and plainer, picked by
+what the caller does:
+
+| The caller | Shape | How |
+| --- | --- | --- |
+| Describes what should exist: settings, a description, an asset | Declarative | Plain data set in an object initializer, `required { get; init; }` for what must be given and `with` for a changed copy. The default. |
+| Changes a value in a known order | Steps | Named methods that take a value and return one, called in order and assigned. |
+| Says what it wants in one sentence, such as a query or a chain of setup | Fluent | Each method returns its receiver, or a struct's new value, so the chain reads as `subject.Verb(x).Verb(y)`. |
+| Builds what is valid only once complete, over many calls or across members | Builder | Calls collect into the builder, and `Build()` checks them and returns the finished, immutable value. Only where an initializer with `required` can't express it. |
+
+- No `Pipe`, `Cascade`, `Then` or other method that only calls the function it is given. Assign each step, and set
+  members in an initializer or as statements:
+
+  ```csharp
+  state = Integrate(state, stepSec);
+  state = ResolveContacts(state);
+  ```
+
+- In the frame loop, work over many values is a system that changes chunks in place through spans, never a chain
+  that returns new copies ([Performance](#performance)).
+
 ### Naming
 
 - A name reads well as `Class.Member(arguments)`: `AssetManager.Find<Texture>(path)`, `App.Exit()`. Action first,
@@ -221,7 +244,7 @@ built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
 - No single-letter names except loop counters, `x`/`y`/`z` and formula coefficients. `ctx`, `sb`, `dt` and `ex` are
   fine. A local keeps one meaning and never shadows a type.
 - A reusable buffer has one purpose and is named for it.
-- Keep .NET's idioms: static factories (`Result.Success`), fluent builders.
+- Keep .NET's idioms: static factories (`Result.Success`) and the shapes in [API shape](#api-shape).
 - Test methods read as the sentence they check.
 
 ### Comments
@@ -231,40 +254,6 @@ built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
 - Put a `//` comment above a block whose purpose isn't obvious at a glance (a loop doing two things, a calculation, an
   order that matters, a workaround). It covers the block down to the next blank line. Never restate the line.
 - No divider comments and no `#region`.
-
-## Shaders
-
-- Slang 2026, warnings as errors. One module a file, named by its path (`module "Core/Heap";`). The gem that provides
-  `IShaderCompiler` compiles shaders and loads their imports from the assets.
-- Read every resource through the heap's references in `Core/Heap.slang`; never declare one.
-- Name a pass for its job, a verb and what it acts on (`CullClusters`, `ShadeLighting`), in its feature's module. Its
-  constants are uniform parameters: the pass header, then one struct.
-- Names follow [Naming](#naming):
-  - A function returning a value starts with `Get` (`GetLuminance`), or `Load`/`Sample` for memory reads, `To` for
-    conversions, `Encode`/`Decode` for packing and `Create` for a struct it builds. A contract's work is `Evaluate`,
-    `Shade` or `Apply`. `Pow2`, `Max3` and the like read as the intrinsics beside them.
-  - A bool starts with `Is`, `Has` or `Can` (`IsHidden`, a field's in camel case: `isMirrored`).
-  - A contract is `I` plus a noun (`IMaterial`), and what it's handed is the noun plus `Inputs` (`SurfaceInputs`). A
-    struct shared with C# ends in `Constants`, or starts with `Gpu` for a table's row. A heap reference ends in `Ref`,
-    stage-to-stage data in `Varyings`, a draw's outputs in `Targets`. A set of codes is an `enum`.
-- Put what a struct does on it as extensions (`instance.ToCameraRelative(position)`), so a struct shared with C# keeps
-  only its fields. Return a struct rather than `out` parameters.
-- A struct C# reads or writes holds only 32-bit scalars, their vectors, row-major matrices, heap references and such
-  structs. Its C# twin is sequential with `Pack = 4` and names the Slang module in its summary. Nothing checks that the
-  two match, so change them together.
-- A contract between shaders is an interface (`IMaterial`, `ISky`, `IPixelEffect`), and a pass that works with any is
-  generic over it.
-- Totals across a dispatch run in its last group (`IsLastGroup`), not in a one-group pass after it.
-- Use wave intrinsics only where the result can't depend on wave size (32 or 64) or the order is already arbitrary. No
-  16-bit types, and no runtime-indexed resource arrays but the heap's.
-- Guard values where they go wrong: clamp roughness with the library's helper, keep n·v above 0, normalise with the
-  helper that allows zero, and use `SampleGrad` or `SampleLevel` inside a branch.
-- A compute pass has no implicit derivatives. Code it may run takes them as inputs, as `SurfaceInputs` and
-  `SkyInputs` do.
-- Few variants: a generic for what changes the pipeline, a `[branch]` on a draw-wide value for the rest.
-- The BRDF, the material contract and the shading models live once in the shared shader library in
-  `src/Resources/Shaders/`. Every renderer shades with them. A renderer's own tables and techniques go in its gem.
-- Write a technique from its paper and name the paper in a comment. No third-party shader code.
 
 ## Cross platform
 
