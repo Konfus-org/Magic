@@ -12,8 +12,9 @@ namespace Magic.TaaUpscaling;
 /// <see cref="Upscaling"/>, so the camera jitters, and the renderer has it record one pass once the view's output is
 /// drawn. The pass builds each window pixel from the output's jittered texels around it and blends it with last
 /// frame's resolved picture where its surface was, so the gem keeps two resolved pictures and swaps them every frame,
-/// with no history on the first frame at a size or of a world. It makes nothing headless or while its shader builds. It
-/// is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
+/// with no history on the first frame at a size or of a world; the newer is what the window shows. It makes nothing
+/// headless or while its shader builds. It is public because nothing in its assembly makes it: Magic does, by
+/// reflection, when a project lists the gem.
 /// </summary>
 public sealed class TaaUpscalingGem : IGem, IRenderInto<Upscaling>
 {
@@ -47,11 +48,17 @@ public sealed class TaaUpscalingGem : IGem, IRenderInto<Upscaling>
         graph.WindowTarget.IsNone || graph.GetState(_shader) != GpuState.Ready ? null : _upscaling;
 
     private static TextureDescription GetResolved(string name, int width, int height) =>
-        GpuDescriptions.GetTexture(name, width, height, GpuFormat.R16G16B16A16Sfloat);
+        GpuDescriptions.GetTexture(
+            name,
+            width,
+            height,
+            GpuFormat.R16G16B16A16Sfloat,
+            TextureUsages.Storage | TextureUsages.Sampled | TextureUsages.CopySource
+        );
 
     /// <summary>
-    /// The pass that resolves the view's output at the window's size, and the output it makes; none when its pictures
-    /// were not made.
+    /// The pass that resolves the view's output at the window's size, and the picture it resolves; none when its
+    /// pictures were not made.
     /// </summary>
     private GpuTexture Record(RenderGraph graph, GpuView view)
     {
@@ -59,16 +66,7 @@ public sealed class TaaUpscalingGem : IGem, IRenderInto<Upscaling>
         (int width, int height) = (window.Width, window.Height);
         Result<GpuTexture> first = graph.Texture(GetResolved("Resolved picture", width, height));
         Result<GpuTexture> second = graph.Texture(GetResolved("Other resolved picture", width, height));
-        Result<GpuTexture> output = graph.Texture(
-            GpuDescriptions.GetTexture(
-                "Upscaled output",
-                width,
-                height,
-                GpuFormat.R8G8B8A8Unorm,
-                TextureUsages.Storage | TextureUsages.CopySource
-            )
-        );
-        foreach (Result made in (ReadOnlySpan<Result>)[first, second, output])
+        foreach (Result made in (ReadOnlySpan<Result>)[first, second])
         {
             if (!made.Ok)
             {
@@ -88,15 +86,15 @@ public sealed class TaaUpscalingGem : IGem, IRenderInto<Upscaling>
             .Compute(
                 "Upscale picture",
                 _shader,
-                new GpuConstants(view.Frame.Id, hasHistory ? history.Id : resolved.Id, resolved.Id, output.Value.Id),
+                new GpuConstants(view.Frame.Id, hasHistory ? history.Id : resolved.Id, resolved.Id),
                 RenderStage.Post
             )
             .Reads(view.Frame, view.Output, view.Depth, view.Velocity);
         if (hasHistory)
             pass.Reads(history);
 
-        pass.Writes(resolved, output.Value).DispatchOver(width, height);
+        pass.Writes(resolved).DispatchOver(width, height);
 
-        return output.Value;
+        return resolved;
     }
 }

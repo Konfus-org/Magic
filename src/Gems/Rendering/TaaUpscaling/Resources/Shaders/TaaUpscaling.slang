@@ -6,16 +6,15 @@
 // frame saw another surface there or the surface was off the screen. Adapted from Wicked Engine's temporal
 // anti-aliasing, with the weights from Karis, "High Quality Temporal Supersampling" (SIGGRAPH 2014).
 //
-// The pass header's y names the history, last frame's resolved picture, or its z where there is none; z the picture
-// this frame resolves, the window's size, linear, with each pixel's view depth in alpha for the next frame's test; w
-// the output, the resolved picture encoded for the screen.
+// It works in the output's encoding for the screen, so the picture it resolves is the one the window shows. The pass
+// header's y names the history, last frame's resolved picture, or its z where there is none; z the picture this frame
+// resolves, the window's size, with each pixel's view depth in alpha for the next frame's test.
 module "TaaUpscaling";
 
 import Core.Heap;
 import Core.Pass;
 import Core.Frame;
 import Core.Math;
-import Core.Color;
 
 // How fast a sample's weight falls with its distance from the pixel, in pixels: a Gaussian close to the
 // Blackman-Harris window over a pixel, from Karis.
@@ -37,8 +36,7 @@ void UpscalePicture(uint3 thread : SV_DispatchThreadID)
 {
     PassHeader header = GetPassHeader();
     StorageRef resolved = { header.z, 0u };
-    StorageRef output = { header.w, 0u };
-    uint2 size = output.GetSize();
+    uint2 size = resolved.GetSize();
     if (any(thread.xy >= size))
         return;
 
@@ -70,7 +68,7 @@ void UpscalePicture(uint3 thread : SV_DispatchThreadID)
         for (int x = -1; x <= 1; x++)
         {
             uint2 neighbour = uint2(clamp(int2(texel) + int2(x, y), int2(0), int2(pictureSize) - 1));
-            float3 color = ToLinear(picture.Load(neighbour, 0u).rgb);
+            float3 color = picture.Load(neighbour, 0u).rgb;
             float2 apart = float2(neighbour) + 0.5 - place;
             float spread = exp(-SampleFalloff * dot(apart, apart));
             weighted += color * spread;
@@ -91,7 +89,7 @@ void UpscalePicture(uint3 thread : SV_DispatchThreadID)
     float viewDepth = depth > 0.0 ? min(ToViewDepth(depth, frame.near), HalfMax) : 0.0;
     if (header.y == header.z)
     {
-        Store(resolved, output, thread.xy, current, viewDepth);
+        resolved.Store(thread.xy, float4(current, viewDepth));
         return;
     }
 
@@ -106,7 +104,7 @@ void UpscalePicture(uint3 thread : SV_DispatchThreadID)
     float previousDepth = velocities.Load(texel, 0u).z;
     if (length(velocity) > MovingDistance && abs(previousDepth - historyDepth) > SurfaceGapMetres)
     {
-        Store(resolved, output, thread.xy, current, viewDepth);
+        resolved.Store(thread.xy, float4(current, viewDepth));
         return;
     }
 
@@ -115,14 +113,7 @@ void UpscalePicture(uint3 thread : SV_DispatchThreadID)
     float3 before = clamp(LoadBilinear(history, historyUv, size).rgb, low, high);
     float2 moved = abs(velocity) * float2(size);
     float blend = isOnScreen ? lerp(0.05, 0.8, frac(max(moved.x, moved.y)) * 0.5) * weight : 1.0;
-    Store(resolved, output, thread.xy, lerp(before, current, blend), viewDepth);
-}
-
-// The pixel resolved, kept with its view depth for the next frame and shown encoded for the screen.
-void Store(StorageRef resolved, StorageRef output, uint2 pixel, float3 color, float viewDepth)
-{
-    resolved.Store(pixel, float4(color, viewDepth));
-    output.Store(pixel, float4(ToSrgb(color), 1.0));
+    resolved.Store(thread.xy, float4(lerp(before, current, blend), viewDepth));
 }
 
 // The texture at uv, filtered linearly between its four nearest texels of level 0, the texture's size.

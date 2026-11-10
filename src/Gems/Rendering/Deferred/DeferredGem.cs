@@ -273,7 +273,8 @@ public sealed class DeferredGem
     }
 
     /// <summary>
-    /// The picture the window shows read back, and written to <paramref name="path"/> once the GPU is done with it.
+    /// The picture the window shows read back, through a copy of 8 bits a channel where it has more, and written to
+    /// <paramref name="path"/> once the GPU is done with it.
     /// </summary>
     private void SaveScreenshot(RenderGraph graph, GpuTexture shown, string path)
     {
@@ -281,14 +282,29 @@ public sealed class DeferredGem
         Result<GpuBuffer> readback = graph.Buffer(
             GpuDescriptions.GetBuffer("Output readback", (long)size.Width * size.Height * 4, BufferUsages.Readback)
         );
-        if (!readback.Ok)
+        Result<GpuTexture> read =
+            size.Format == GpuFormat.R8G8B8A8Unorm
+                ? Result.Success(shown)
+                : graph.Texture(
+                    GpuDescriptions.GetTexture(
+                        "Screenshot copy",
+                        size.Width,
+                        size.Height,
+                        GpuFormat.R8G8B8A8Unorm,
+                        TextureUsages.CopyDestination | TextureUsages.CopySource
+                    )
+                );
+        if (!readback.Ok || !read.Ok)
         {
-            Log.Error($"The screenshot was not taken: {readback.Error}");
+            Log.Error($"The screenshot was not taken: {(readback.Ok ? read.Error : readback.Error)}");
 
             return;
         }
 
-        graph.ReadBack(shown, readback.Value, RenderStage.Post);
+        if (read.Value != shown)
+            graph.Blit(shown, read.Value, RenderStage.Post);
+
+        graph.ReadBack(read.Value, readback.Value, RenderStage.Post);
         Screenshot.SaveAsync(_gpu, _assets, readback.Value, path, size.Width, size.Height).FireAndForget();
     }
 }

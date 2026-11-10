@@ -6,7 +6,7 @@ using Magic.Utils;
 namespace Magic.Deferred;
 
 /// <summary>
-/// The output read back and saved: what a screenshot asked for is.
+/// The output read back and saved, opaque as the window shows it: what a screenshot asked for is.
 /// </summary>
 internal static class Screenshot
 {
@@ -37,13 +37,20 @@ internal static class Screenshot
             return;
         }
 
+        // The window shows no alpha, which a picture may use for its own data.
+        byte[] opaque = pixels.Value.ToArray();
+        for (int alpha = 3; alpha < opaque.Length; alpha += 4)
+        {
+            opaque[alpha] = byte.MaxValue;
+        }
+
         Texture shot = new()
         {
             Width = width,
             Height = height,
             Format = TextureFormat.Rgba8Srgb,
-            Pixels = pixels.Value,
-            Levels = [new TextureLevel(width, height, 0, pixels.Value.Length)],
+            Pixels = opaque,
+            Levels = [new TextureLevel(width, height, 0, opaque.Length)],
             HasMipmaps = false,
             IsCompressed = false,
         };
