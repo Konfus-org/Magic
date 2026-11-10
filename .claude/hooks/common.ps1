@@ -55,11 +55,10 @@ function Get-Checkout([string] $path) {
     }
 }
 
-# Whether a checkout belongs to the repository this session was started in.
+# Whether a checkout belongs to the repository that this file is in.
 function Test-ThisRepository($checkout) {
-    if (-not $checkout -or -not $env:CLAUDE_PROJECT_DIR) { return $false }
-    $project = Invoke-Git $env:CLAUDE_PROJECT_DIR @('rev-parse', '--path-format=absolute', '--git-common-dir')
-    return [bool]$project -and (ConvertTo-Key ([string]$project)) -eq (ConvertTo-Key $checkout.Common)
+    $project = [string](Invoke-Git $PSScriptRoot @('rev-parse', '--path-format=absolute', '--git-common-dir'))
+    return (ConvertTo-Key $project) -eq (ConvertTo-Key $checkout.Common)
 }
 
 # The checkout's state as tools/Scripts/AgentTaskComplete.ps1 stamps it: the git tree of every file, tracked or new,
