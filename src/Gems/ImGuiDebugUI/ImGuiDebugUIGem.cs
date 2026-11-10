@@ -91,7 +91,8 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDispos
     private const uint Plate = 0xC0000000;
 
     /// <summary>
-    /// Whether what is reported shows whatever windows are open, as in a Debug build, or only while one is.
+    /// Whether the lines logged to show on screen show whatever windows are open, as in a Debug build, or only while one
+    /// is.
     /// </summary>
 #if DEBUG
     private const bool IsAlwaysShowing = true;
@@ -180,7 +181,6 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDispos
     private float _nextWindowX = FontSize * 2;
     private int _depth;
     private bool _isWindowDrawn;
-    private volatile bool _isShowing;
 
     /// <summary>
     /// Whether ImGui shows the table open; rows go nowhere while it does not.
@@ -219,10 +219,9 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDispos
         platform->Platform_ClipboardUserData = (void*)GCHandle<ImGuiDebugUIGem>.ToIntPtr(_self);
         platform->Platform_SetClipboardTextFn = &SetClipboard;
         platform->Platform_GetClipboardTextFn = &GetClipboard;
-        _isShowing = IsAlwaysShowing;
     }
 
-    public bool IsEnabled => _isShowing;
+    public bool IsEnabled => true;
 
     public unsafe void Dispose()
     {
@@ -262,14 +261,12 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDispos
             End();
         }
 
-        // What is reported shows while a debug window is drawn, or always in a Debug build; it is taken either way, so
-        // what has had its time goes.
-        _isShowing = IsAlwaysShowing || _isWindowDrawn;
+        // What gems ask to show always shows; the lines logged to show on screen only while a debug window is drawn, or
+        // always in a Debug build. Everything is taken either way, so what has had its time goes.
         _worldTexts.Clear();
         _screenLines.Clear();
-        _reports.Take(frame.AppSec, _worldTexts, _screenLines);
-        if (_isShowing)
-            DrawReports();
+        _reports.Take(frame.AppSec, IsAlwaysShowing || _isWindowDrawn, _worldTexts, _screenLines);
+        DrawReports();
 
         // Ended whether or not anything draws it. Its textures get their ids before the copy, which reads them.
         ImGui_Render();
