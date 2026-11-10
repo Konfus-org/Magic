@@ -4,7 +4,7 @@ Runs a project with a window until its world has loaded, takes a screenshot thro
 path; with -Domains, then opens each of them in turn and takes one of each.
 
 .DESCRIPTION
-Magic runs with --fail-on-error and these console lines piped in: wait loaded and wait drawn, which hold until the world has loaded and its
+Magic runs with --fail-on-error and these console lines piped in: name with -Name, wait loaded and wait drawn, which hold until the world has loaded and its
 first frame is drawn, however long its shaders take to compile, a wait for what fades in to settle, any -Commands, a short wait for them, then
 screenshot; then, for each of -Domains, open, which holds until that domain has replaced the world, the same wait, and
 screenshot; then exit. The log is shown as it comes; the script's only output is the PNGs' paths, one a line in the
@@ -34,6 +34,10 @@ setting. `help` in a run lists them.
 .PARAMETER Domains
 Domains to open after the first screenshot, each by its asset path, a screenshot taken of each once it has settled.
 
+.PARAMETER Name
+The name the window shows in its title bar, so a person can tell whose run it is: the branch checked out where the
+script is, which is the agent session's name. Empty sends no name.
+
 .EXAMPLE
 tools/Scripts/Screenshot.ps1
 
@@ -53,7 +57,8 @@ param(
     [int] $Seconds = 600,
     [string] $Project = 'samples/HelloWorld/HelloWorld.magic',
     [string[]] $Commands = @(),
-    [string[]] $Domains = @()
+    [string[]] $Domains = @(),
+    [string] $Name
 )
 
 Set-StrictMode -Version Latest
@@ -62,6 +67,7 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+if (-not $PSBoundParameters.ContainsKey('Name')) { $Name = git -C $root branch --show-current }
 $magic = Join-Path (Join-Path (Join-Path (Join-Path $root 'Build') 'bin') $Configuration) 'Magic'
 if (Test-Path "$magic.exe") { $magic = "$magic.exe" }
 if (-not (Test-Path $magic)) {
@@ -70,8 +76,9 @@ if (-not (Test-Path $magic)) {
 }
 $projectPath = if ([System.IO.Path]::IsPathRooted($Project)) { $Project } else { Join-Path $root $Project }
 
-# The screenshot is written by a worker, so the run goes on a few frames before it quits.
-$lines = @('wait loaded', 'wait drawn', "wait ${Settle}s") + $Commands + @('wait 60', 'screenshot')
+# The window shows whose run it is from the start. The screenshot is written by a worker, so the run goes on a few
+# frames before it quits.
+$lines = @(if ($Name) { "name `"$Name`"" }) + @('wait loaded', 'wait drawn', "wait ${Settle}s") + $Commands + @('wait 60', 'screenshot')
 foreach ($domain in $Domains) {
     $lines += @("open $domain", "wait ${Settle}s", 'screenshot')
 }

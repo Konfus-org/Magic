@@ -34,6 +34,8 @@ The scripts run under `pwsh` and Windows PowerShell ([Tools](tools/README.md)).
   screenshots each and prints the paths.
 - **Screenshot:** `tools/Scripts/Screenshot.ps1` runs a project until its world loads and prints the screenshot's
   path. Use `-Domains`, `-Project` and `-Commands` to reach what the samples don't show.
+- **Window name:** the scripts title each window they open with the worktree's branch, the session's name. Start a
+  windowed run of your own with the console line `name <branch>`.
 - **Claim:** `tools/Scripts/Claim.ps1 -Slice <title> -Scope <paths>` tells every other session what the slice will
   change, and prints any overlap with theirs ([Worktrees](#worktrees)).
 - **The user's review:** `plannotator review` opens the change as a diff in the user's browser and returns when

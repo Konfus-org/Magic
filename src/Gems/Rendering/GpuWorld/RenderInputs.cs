@@ -32,4 +32,9 @@ internal sealed class RenderInputs
     /// the first frame of another world.
     /// </summary>
     public int WorldNumber { get; set; }
+
+    /// <summary>
+    /// The most pixels across and down the picture is drawn at, in the window's shape.
+    /// </summary>
+    public (int Width, int Height) Resolution { get; set; }
 }

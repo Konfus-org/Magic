@@ -1,10 +1,12 @@
 using System.Collections.Immutable;
+using System.Globalization;
 using System.Linq;
 using System.Numerics;
 using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
+using Magic.Events;
 using Magic.Files;
 using Magic.Graphics;
 using Magic.Projects;
@@ -26,6 +28,11 @@ public sealed class GpuWorldGem : IGem, IRenderInto<(GpuView, GpuInstances)>, IH
 {
     private const int DefaultWidth = 1280;
     private const int DefaultHeight = 720;
+
+    /// <summary>
+    /// <c>set GpuWorld.resolution=&lt;width&gt;x&lt;height&gt;</c> draws the picture at that many pixels at most.
+    /// </summary>
+    private const string ResolutionSetting = "GpuWorld.resolution";
 
     private readonly IEcs _ecs;
     private readonly Threads _threads;
@@ -59,6 +66,11 @@ public sealed class GpuWorldGem : IGem, IRenderInto<(GpuView, GpuInstances)>, IH
     /// replaces it, so <see cref="Render"/> forgets the view's history at the first frame of what comes. Game thread.
     /// </summary>
     private int _worldNumber;
+
+    /// <summary>
+    /// The most pixels across and down the picture is drawn at, set by <see cref="ResolutionSetting"/>. Game thread.
+    /// </summary>
+    private (int Width, int Height) _resolution = (1920, 1080);
 
     /// <summary>
     /// The inputs <see cref="Render"/> uploads, taken from <see cref="_inputs"/>, until newer are. Render thread.
@@ -111,11 +123,36 @@ public sealed class GpuWorldGem : IGem, IRenderInto<(GpuView, GpuInstances)>, IH
     }
 
     /// <summary>
+    /// Applies the resolution set.
+    /// </summary>
+    public void Update(in Frame frame)
+    {
+        foreach (SetCliCommand setting in frame.Events.Get<SetCliCommand>())
+        {
+            if (setting.Key != ResolutionSetting)
+                continue;
+
+            string[] sides = setting.Value.Split('x');
+            if (
+                sides.Length == 2
+                && int.TryParse(sides[0], CultureInfo.InvariantCulture, out int width)
+                && int.TryParse(sides[1], CultureInfo.InvariantCulture, out int height)
+                && width > 0
+                && height > 0
+            )
+                _resolution = (width, height);
+            else
+                Log.Error($"{setting.Key} takes <width>x<height>, such as 1920x1080, not '{setting.Value}'.");
+        }
+    }
+
+    /// <summary>
     /// Copies what the frame draws out of the entities and publishes it for <see cref="Render"/>.
     /// </summary>
     public void LateUpdate(in Frame frame)
     {
         RenderInputs back = _inputs.Back;
+        back.Resolution = _resolution;
         _ecs.Snapshot(back.Renderers);
         _ecs.Snapshot(back.Cameras);
         _ecs.Snapshot(back.DirectionalLights);
@@ -449,9 +486,22 @@ public sealed class GpuWorldGem : IGem, IRenderInto<(GpuView, GpuInstances)>, IH
         if (!tables.Ok)
             return Result.Failure(tables.Error);
 
-        // The picture at the window's size, else 1280 by 720 headless.
+        // The picture in the window's shape, scaled down to fit the resolution but never up, which the window stretches
+        // it over; 1280 by 720 headless.
         TextureDescription window = graph.WindowTarget.IsNone ? default : graph.GetDescription(graph.WindowTarget);
-        (int width, int height) = window.Width > 0 ? (window.Width, window.Height) : (DefaultWidth, DefaultHeight);
+        (int width, int height) = (DefaultWidth, DefaultHeight);
+        if (window.Width > 0)
+        {
+            float scale = MathF.Min(
+                1,
+                MathF.Min(
+                    (float)inputs.Resolution.Width / window.Width,
+                    (float)inputs.Resolution.Height / window.Height
+                )
+            );
+            (width, height) = ((int)MathF.Round(window.Width * scale), (int)MathF.Round(window.Height * scale));
+        }
+
         RenderCamera camera = GetCamera(inputs.Cameras);
         Result<FrameTargets> targets = _frameView.Upload(
             graph,

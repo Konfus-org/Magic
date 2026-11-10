@@ -9,6 +9,8 @@ To use it, list `SdlPlatform` in a project's `.magic` file.
 - Keys are physical keys (SDL scancodes), the same on every layout. Typed text follows the layout.
 - Mouse position and motion are in window pixels. The wheel is in notches.
 - Gamepads use SDL's standard layout. Sticks go from -1 to 1 with up positive. Triggers go from 0 to 1.
+- The window opens fullscreen without a border in a Release build, and maximized in any other build.
+  `set SdlPlatform.windowMode=fullscreen|maximized|windowed` changes it while it runs.
 - The window's title is the project's name, and its icon the default one until `Icon` is set. Closing the window ends the run.
 - The window and clipboard's members are the game thread's, and throw on any other; what is set reaches the OS on the
   platform thread's next pump. The window's size is read from any.

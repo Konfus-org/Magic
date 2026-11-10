@@ -1,4 +1,4 @@
-// A pixel effect's passes: each level of its target filled, then the effect applied over every pixel of the picture.
+// A pixel effect's passes: each level of its target filled, then the effect applied over every pixel of what it writes.
 // A pass reads its GpuEffectPass from the table whose heap id is the pass header's y, at the row its z names, and the
 // effect's struct from its row of the params table that names. The effect is handed each pixel as the effects before
 // it left it, with where its surface and the nearest pane of glass in front of it are; what it gives back is written
@@ -98,16 +98,18 @@ void FillEffectLevel<E : IPixelEffect>(uint3 thread : SV_DispatchThreadID)
 [numthreads(8, 8, 1)]
 void ApplyPixelEffect<E : IPixelEffect>(uint3 thread : SV_DispatchThreadID)
 {
-    FrameConstants frame = GetFrame();
-    uint2 size = uint2(frame.width, frame.height);
+    GpuEffectPass pass = LoadPass();
+    StorageRef output = { pass.output, 0u };
+    uint2 size = output.GetSize();
     if (any(thread.xy >= size))
         return;
 
-    GpuEffectPass pass = LoadPass();
     E effect = LoadMaterialParams<E>(pass.rows, pass.row);
-    PixelEffectInputs inputs = CreateInputs(frame, pass, thread.xy, size);
-    float4 before = inputs.picture.Load(thread.xy, 0u);
+    PixelEffectInputs inputs = CreateInputs(GetFrame(), pass, thread.xy, size);
+
+    // The picture's texel under the pixel: the pixel itself where the picture is the size of what the pass writes.
+    uint2 pictureSize = inputs.picture.GetSize(0u);
+    float4 before = inputs.picture.Load(min(uint2(inputs.uv * float2(pictureSize)), pictureSize - 1u), 0u);
     float3 after = effect.Apply(before.rgb, inputs);
-    StorageRef output = { pass.output, 0u };
     output.Store(thread.xy, float4(after, before.a));
 }
