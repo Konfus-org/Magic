@@ -64,7 +64,7 @@ Write the engine as data flowing through functions, not objects calling each oth
   dropping what went, as the renderer does. One that must also drop what it built up when the world is replaced, or ready
   what comes before it shows, implements `IHookIntoDomainLoading`; the world awaits it while the loading screen shows.
 - `Program` sets a run up and owns its loop, calling each service's `Pump` in turn. `App` lasts the whole process; what a
-  run makes is new for it, and a restart keeps only the world, as JSON. A service starts in its constructor
+  run makes is new for it, and a restart keeps only the world, as JSON, and the gems' settings. A service starts in its constructor
   and ends in `Dispose`, not with paired start and stop calls. A step is a method. A class of its own is for a substantial piece of work.
 - A change is a call on `World`.
 - A method that needs the game thread after an await of its own steps onto it with
@@ -75,6 +75,10 @@ Write the engine as data flowing through functions, not objects calling each oth
   needs slow setup starts it in its constructor and reads what came of it in a hook.
 - `Dispose` frees what the gem started, once none of its work still runs on a worker.
 - A gem's csproj states its `Description`, `Version` and `Authors`. Nothing else does.
+- A value a player, game or developer would tune is a member of its gem's settings record, never a const, a
+  `#if DEBUG` choice, a key-only toggle or a console string. The gem implements `IHasSettings<TSettings>`, and the
+  record is a `sealed record` of init properties with a `[Category]`, each with its default and a doc comment.
+  Game code reads and sets it through `Settings` by type; the console and tools by key, as `Rendering.Resolution`.
 - Gems may depend on each other and reference one another. A gem throws when a dependency it needs isn't there.
 - A component is an unmanaged struct with public fields that implements `IComponent`, and members for what follows from
   those fields.

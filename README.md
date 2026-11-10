@@ -24,7 +24,9 @@ the run. Building a gem the project lists restarts it too, with the new build an
 
 `set` and `get` reach an entity's values by path, at any depth: the entity is a tag or an id, and each part after it a
 name or its initials, as in `set player.camera.fov 100`, `set player.transform.position 0 2 -4` or
-`get player.transform`. `set Key=value` instead hands the key and value to the gem the key names. `teleport x y z` moves
+`get player.transform`. A gem's settings go by `Category.Member`: `get` lists every setting, `get Rendering` one
+category's, and `set Rendering.Resolution 2560 1440` sets one. `set Key=value` instead hands the key and value to the
+gem the key names. `teleport x y z` moves
 the player, and `teleport <domain> [x y z]` opens a domain, by its path or name, with the player at its spawn or at that
 place. `spawn <prefab> [x y z]` puts a prefab, by its path or name, there or a few metres in front of the player.
 

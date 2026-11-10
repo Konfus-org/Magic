@@ -2,6 +2,7 @@ using System.Diagnostics.Metrics;
 using System.Runtime;
 using Magic.Assets;
 using Magic.CommandLine;
+using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Events;
 using Magic.Files;
@@ -48,8 +49,10 @@ internal static class Program
     {
         Log.Verbose($"Command line args: {string.Join(", ", commandLine)}");
 
-        // What outlasts a run: the app, which the commands set, and the world as the last run saved it.
+        // What outlasts a run: the app, which the commands set, the gems' settings, and the world as the last run saved
+        // it.
         using App app = new();
+        Settings settings = new(app, new FileSystem());
         Task<Result<byte[]>>? worldRestorePoint = null;
         bool isLaunching = true;
 
@@ -63,7 +66,7 @@ internal static class Program
             Caches caches = new(files, app);
             using AssetManager assets = new(files, caches, events, app);
             using World world = new(assets, files, events, threads, app);
-            Cli cli = new(app, files, events, assets, world);
+            Cli cli = new(app, settings, files, events, assets, world);
 
             if (isLaunching)
             {
@@ -90,6 +93,7 @@ internal static class Program
             // The services, then the gems the project lists, which join them.
             ServiceCollection services = [];
             services.AddSingleton(app);
+            services.AddSingleton(settings);
             services.AddSingleton<IFileSystem>(files);
             services.AddSingleton(events);
             services.AddSingleton(threads);
@@ -105,7 +109,7 @@ internal static class Program
             Log.Info($"Running {project.Name} in {(app.IsHeadless ? "headless" : "GUI")} mode.");
 
             app.StartRun();
-            using Gems gems = new(registered, provider, app, files, assets, world, events, threads);
+            using Gems gems = new(registered, provider, app, settings, files, assets, world, events, threads);
             world.StartAsync(worldRestorePoint?.WaitAsync(app.Lifetime), app.Lifetime).FireAndForget();
 
             // If we don't have a window and aren't headless something is wrong, early out.

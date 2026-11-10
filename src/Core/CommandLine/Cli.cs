@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.Linq;
 using Magic.Assets;
 using Magic.CommandLine.Commands;
+using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Events;
 using Magic.Files;
@@ -20,10 +21,10 @@ internal sealed class Cli
 
     private readonly RootCommand _cliCommands;
 
-    public Cli(App app, IFileSystem files, EventCoordinator events, AssetManager assets, World world)
+    public Cli(App app, Settings settings, IFileSystem files, EventCoordinator events, AssetManager assets, World world)
     {
         _queue = new CommandQueue(events);
-        _cliCommands = CreateCliCommands(app, files, events, assets, world, _queue);
+        _cliCommands = CreateCliCommands(app, settings, files, events, assets, world, _queue);
     }
 
     /// <summary>
@@ -88,6 +89,7 @@ internal sealed class Cli
     /// </summary>
     private static RootCommand CreateCliCommands(
         App app,
+        Settings settings,
         IFileSystem files,
         EventCoordinator events,
         AssetManager assets,
@@ -106,8 +108,8 @@ internal sealed class Cli
                 SaveCommand.Create(app, world, queue),
                 LoadCommand.Create(app, world, queue),
                 BakeCommand.Create(app, assets, queue),
-                SetCommand.Create(app, events, world),
-                GetCommand.Create(app, world),
+                SetCommand.Create(app, settings, events, world),
+                GetCommand.Create(app, settings, world),
                 TeleportCommand.Create(app, world, assets, queue),
                 SpawnCommand.Create(app, world, assets, queue),
                 WaitCommand.Create(queue, world),

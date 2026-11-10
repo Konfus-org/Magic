@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using Magic.Assets;
+using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Events;
@@ -63,6 +64,8 @@ internal sealed class Gems : IDisposable
     private readonly IServiceProvider _provider;
 
     private readonly App _app;
+
+    private readonly Settings _settings;
 
     private readonly IFileSystem _files;
 
@@ -138,6 +141,7 @@ internal sealed class Gems : IDisposable
         List<GemInfo> registered,
         IServiceProvider provider,
         App app,
+        Settings settings,
         IFileSystem files,
         AssetManager assets,
         World world,
@@ -147,6 +151,7 @@ internal sealed class Gems : IDisposable
     {
         _provider = provider;
         _app = app;
+        _settings = settings;
         _files = files;
         _assets = assets;
         _world = world;
@@ -325,7 +330,7 @@ internal sealed class Gems : IDisposable
     /// <summary>
     /// Makes each gem, after registering what it brings so its constructor can find it: its folder of assets, its asset
     /// types and its code, which goes when it does. Then it sets the gem up: the app's window for as long as it lasts when it provides one, the world's ECS, its
-    /// place on the log when it is a sink, the asset types it reads and writes, and its part of the frame; and, once every
+    /// settings, its place on the log when it is a sink, the asset types it reads and writes, and its part of the frame; and, once every
     /// gem is made, its hooks into domain loading, unless it can never render.
     /// </summary>
     [SuppressMessage(
@@ -386,6 +391,16 @@ internal sealed class Gems : IDisposable
             {
                 _app.Platform = platform;
                 loaded.Ends.Add(new Subscription(() => _app.Platform = null));
+            }
+
+            // A gem whose settings can't be listed still runs by them; only the console and tools can't reach them.
+            try
+            {
+                loaded.Ends.Add(_settings.Register(made));
+            }
+            catch (InvalidOperationException ex)
+            {
+                Log.Error($"Gem {gem.Name}'s settings can't be reached: {ex.Message}");
             }
 
             if (made is ILogSink sink)
