@@ -26,11 +26,6 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
     : IGem,
         IRender<AccelerationStructuresInput, TracedWorld>
 {
-    /// <summary>
-    /// The twin of <c>AverageMaterials.slang</c>'s group size, a material row each thread.
-    /// </summary>
-    private const int AverageGroupSize = 64;
-
     private readonly ShaderEntry _averageShader = new()
     {
         Module = assets.Find<Shader>("Shaders/AverageMaterials.slang"),
@@ -42,16 +37,6 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
     /// The average entry for each material shader the world's gem has numbered, in their order.
     /// </summary>
     private readonly List<ShaderEntry> _averageShaders = [];
-
-    /// <summary>
-    /// The structure the last build left, what the frame traces through; none while it holds no instance.
-    /// </summary>
-    private GpuAcceleration _acceleration;
-
-    /// <summary>
-    /// The instance rows of the last build, as many as the world had instances at most.
-    /// </summary>
-    private GpuAccelerationInstance[] _rows = [];
 
     /// <summary>
     /// The instance table's version the last build was of.
@@ -80,19 +65,34 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
             return null;
         }
 
+        // How many instances rays see, those whose model has its triangles' structure, and the box over their world
+        // boxes; min over max where none do.
+        ReadOnlySpan<InstanceExtra> extras = world.Extras.Span;
+        int count = 0;
+        (Vector3 Min, Vector3 Max) box = (new Vector3(float.MaxValue), new Vector3(float.MinValue));
+        foreach (InstanceExtra extra in extras)
+        {
+            if (extra.Acceleration == 0)
+                continue;
+
+            count++;
+            box = (Vector3.Min(box.Min, extra.Box.Min), Vector3.Max(box.Max, extra.Box.Max));
+        }
+
         // Built again whenever the rows changed since the last build; a model's arrival builds every row again.
         (GpuBuffer instances, GpuAcceleration structure, GpuBuffer hitMaterials) = made.Value;
         if (world.Version != _builtVersion)
         {
-            Build(graph, instances, structure, world.Rows.Span, world.Extras.Span);
+            Build(graph, instances, structure, world.Rows.Span, extras, count);
             _builtVersion = world.Version;
         }
 
         RecordHitMaterials(graph, view, hitMaterials, world.MaterialCount);
-        GpuTracedWorld traced = new() { Acceleration = _acceleration.Id, HitMaterials = hitMaterials.Id };
+        GpuAcceleration acceleration = count == 0 ? GpuAcceleration.None : structure;
+        GpuTracedWorld traced = new() { Acceleration = acceleration.Id, HitMaterials = hitMaterials.Id };
         graph.Upload(view.Frame, [traced], GpuTracedWorld.Offset);
 
-        return new TracedWorld(_acceleration, hitMaterials, GetBox(world.Extras.Span));
+        return new TracedWorld(acceleration, hitMaterials, box);
     }
 
     /// <summary>
@@ -129,45 +129,32 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
     }
 
     /// <summary>
-    /// The box over the world boxes of the instances that have an acceleration structure; min over max where none do.
+    /// The structure built again over the <paramref name="count"/> instances whose model has its triangles' structure,
+    /// their rows written straight into the frame's upload ring, in the frame's transfers, after the world's gem
+    /// uploaded the models' structures. None is built for no instance.
     /// </summary>
-    private static (Vector3 Min, Vector3 Max) GetBox(ReadOnlySpan<InstanceExtra> extras)
-    {
-        (Vector3 Min, Vector3 Max) box = (new Vector3(float.MaxValue), new Vector3(float.MinValue));
-        foreach (InstanceExtra extra in extras)
-        {
-            if (extra.Acceleration != 0)
-                box = (Vector3.Min(box.Min, extra.Box.Min), Vector3.Max(box.Max, extra.Box.Max));
-        }
-
-        return box;
-    }
-
-    /// <summary>
-    /// The structure built again over the instances, in the frame's transfers, after the world's gem uploaded the
-    /// models' structures.
-    /// </summary>
-    private void Build(
+    private static void Build(
         RenderGraph graph,
         GpuBuffer instances,
         GpuAcceleration structure,
         ReadOnlySpan<GpuInstance> rows,
-        ReadOnlySpan<InstanceExtra> extras
+        ReadOnlySpan<InstanceExtra> extras,
+        int count
     )
     {
-        if (_rows.Length < rows.Length)
-            _rows = new GpuAccelerationInstance[rows.Length];
+        if (count == 0)
+            return;
 
-        int count = 0;
+        Span<GpuAccelerationInstance> written = graph.Upload<GpuAccelerationInstance>(instances, count);
+        int next = 0;
         for (int i = 0; i < rows.Length; i++)
         {
-            GpuInstance row = rows[i];
             InstanceExtra extra = extras[i];
-            if (row.Model == 0 || extra.Acceleration == 0)
+            if (extra.Acceleration == 0)
                 continue;
 
-            Matrix4x4 world = row.World;
-            _rows[count++] = new GpuAccelerationInstance
+            Matrix4x4 world = rows[i].World;
+            written[next++] = new GpuAccelerationInstance
             {
                 Row0 = new(world.M11, world.M21, world.M31, world.M41),
                 Row1 = new(world.M12, world.M22, world.M32, world.M42),
@@ -178,11 +165,6 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
             };
         }
 
-        _acceleration = count == 0 ? GpuAcceleration.None : structure;
-        if (count == 0)
-            return;
-
-        graph.Upload(instances, _rows.AsSpan(0, count));
         graph.BuildAcceleration(structure, (uint)count);
     }
 
@@ -197,7 +179,6 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
             _averageShaders.Add(_averageShader with { TypeArguments = [view.MaterialShaders[shader]] });
         }
 
-        uint groups = (uint)((materialCount + AverageGroupSize - 1) / AverageGroupSize);
         for (int shader = 0; shader < _averageShaders.Count; shader++)
         {
             graph
@@ -210,7 +191,7 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
                 .Reads(view.Frame, view.Materials)
                 .Reads(view.HeapTextures.AsSpan())
                 .Writes(hitMaterials)
-                .Dispatch(groups);
+                .DispatchOver(materialCount, 1);
         }
     }
 }
