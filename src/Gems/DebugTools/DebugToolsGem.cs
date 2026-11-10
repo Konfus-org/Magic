@@ -8,13 +8,13 @@ namespace Magic.DebugTools;
 
 /// <summary>
 /// The debug UI's lines and windows over what the meters measure, each shown by its setting (<see cref="Settings"/>),
-/// which its key also turns on and off: the frame rate and memory line (F1), on from the start in a Debug build, and the
-/// stats window (F3). It listens to the meters only while one shows, and collects what they measured twice a second.
-/// They are drawn with <see cref="IDebugUI"/> in Update, so the gem takes the UI and is made after it. Without a gem
-/// that provides input no key works. It is public because nothing in its assembly makes it: Magic does, by reflection,
-/// when a project lists the gem.
+/// which its key also turns on and off: the frame rate and memory line (F1), on from the start in a Debug build, the
+/// stats window (F3) and the window of every gem's settings (F4). It listens to the meters only while the counter or the
+/// stats window shows, and collects what they measured twice a second. They are drawn with <see cref="IDebugUI"/> in
+/// Update, so the gem takes the UI and is made after it. Without a gem that provides input no key works. It is public
+/// because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class DebugToolsGem(DebugToolsSettings settings, IDebugUI ui, IInput? input = null)
+public sealed class DebugToolsGem(DebugToolsSettings settings, Settings allSettings, IDebugUI ui, IInput? input = null)
     : IGem,
         IHasSettings<DebugToolsSettings>,
         IDisposable
@@ -25,13 +25,15 @@ public sealed class DebugToolsGem(DebugToolsSettings settings, IDebugUI ui, IInp
 
     private readonly StatsWindow _stats = new(ui);
 
+    private readonly SettingsWindow _settingsWindow = new(ui, allSettings);
+
     /// <summary>
     /// When the meters were last collected, 0 before the first time.
     /// </summary>
     private long _collectedTimestamp;
 
     /// <summary>
-    /// Which lines and windows show, which the keys and the stats window's close button also set. Game thread.
+    /// Which lines and windows show, which the keys and the windows' close buttons also set. Game thread.
     /// </summary>
     public DebugToolsSettings Settings { get; set; } = settings;
 
@@ -44,6 +46,9 @@ public sealed class DebugToolsGem(DebugToolsSettings settings, IDebugUI ui, IInp
 
         if (input is not null && input[Control.KeyF3].WasPressed)
             Settings = Settings with { IsStatsOpen = !Settings.IsStatsOpen };
+
+        if (input is not null && input[Control.KeyF4].WasPressed)
+            Settings = Settings with { IsSettingsOpen = !Settings.IsSettingsOpen };
 
         // Collect what the meters measured twice a second, while anything shows.
         bool isListening = Settings.IsCounterShown || Settings.IsStatsOpen;
@@ -61,5 +66,12 @@ public sealed class DebugToolsGem(DebugToolsSettings settings, IDebugUI ui, IInp
         _stats.Update(ref isStatsOpen);
         if (isStatsOpen != Settings.IsStatsOpen)
             Settings = Settings with { IsStatsOpen = isStatsOpen };
+
+        // Last, as a row may set this gem's own settings; only the close button is taken back from it.
+        bool wasSettingsOpen = Settings.IsSettingsOpen;
+        bool isSettingsOpen = wasSettingsOpen;
+        _settingsWindow.Update(ref isSettingsOpen);
+        if (isSettingsOpen != wasSettingsOpen)
+            Settings = Settings with { IsSettingsOpen = isSettingsOpen };
     }
 }

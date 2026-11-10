@@ -3,7 +3,7 @@ using System.ComponentModel;
 namespace Magic.DebugTools;
 
 /// <summary>
-/// Which of the debug lines and windows over the meters show.
+/// Which of the debug lines and windows show.
 /// </summary>
 [Category("Debug")]
 public sealed record DebugToolsSettings
@@ -22,4 +22,9 @@ public sealed record DebugToolsSettings
     /// Whether the stats window, every instrument of the meters, is open. F3 opens and closes it.
     /// </summary>
     public bool IsStatsOpen { get; init; }
+
+    /// <summary>
+    /// Whether the window of every gem's settings is open, where each is changed and saved. F4 opens and closes it.
+    /// </summary>
+    public bool IsSettingsOpen { get; init; }
 }
