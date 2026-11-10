@@ -1,0 +1,99 @@
+---
+name: parallelize
+description: Runs a large effort as a swarm of workers that each build one slice at a time through the normal slice and finish flow. Use it on your own, without being asked, when the user hands over a list of several separate tasks, asks for something too big for a few slices (such as "make a game"), or a kickoff's slice list has two or more slices that don't depend on each other.
+---
+
+# Parallelize
+
+You coordinate: you plan the slices, give each slice to a worker, keep the user up to date and bring the whole in. You
+don't build.
+
+1. **Ask the overarching questions,** one at a time, skipping what the conversation already answers:
+   - The kickoff questions ([kickoff skill](../kickoff/SKILL.md)): what it's for, the one outcome it drives, what
+     "it works" looks like, the riskiest unknown, what is out of scope.
+   - The decisions every slice will lean on: public API, file formats, new dependencies or gems, architecture. Get a
+     yes on each now, so no worker has to stop for one.
+   - How many reviews the user can take at once. Default 3.
+2. **Split it into slices,** each within the size in [AGENTS.md](../../../AGENTS.md#slices), with its mode, its
+   `-Change` level, its runnable check, the files and folders it changes as its worker will claim them, and the
+   slices it waits on. A list of tasks the user gave keeps their tasks; split or merge one only to fit the size, and
+   say so.
+3. **Choose where the slices merge.**
+   - **One feature,** such as a new sample: a root branch, `feature/<effort>`, made from the merge target in a
+     worktree of its own (`git worktree add ../Magic-worktrees/feature/<effort> -b feature/<effort>`) and claimed for
+     every slice's scope together. Each worker branches from the root with `--track`, which makes the root its merge
+     target, and is named beside it as `<type>/<effort>-<slice>`, never under it: git can't hold both
+     `feature/new-sample` and `feature/new-sample/terrain`.
+   - **Separate tasks:** no root. Each merges into the merge target.
+4. **Write the swarm plan** to `agent-swarm/<effort>.md` in the repository's git folder
+   (`git rev-parse --git-common-dir`), which every worktree can read and nothing commits. It holds the goal in three
+   lines, the decisions, the root branch if there is one, the review count, and a table of each slice's branch, mode,
+   check, scope, what it waits on, and its state from its worker: merged, answered, with the answer, or blocked, with
+   the question. Follow-ups go at the end. Only you write it; rewrite it whenever something changes. Present it in the
+   chat. A yes approves every slice in it, and the close of each worker. Wait for it.
+5. **Start every slice that is ready** as a worker, up to the review count. A slice is ready once each slice it waits
+   on has merged, or for a spike, answered, and no running slice changes the same files or the same gem. Start with
+   the riskiest spike alone, unless the user says the risk is known. Each worker runs in its own session: a side
+   session in Claude Code, or whatever separate session or background agent the tool has. Give it the slice's brief
+   in the slice skill's format, its branch, the branch it starts from, the decisions from step 1, and the other
+   running slices with their scopes, and tell it to:
+   - Make its worktree, with a root as `git worktree add --track -b <branch> ../Magic-worktrees/<branch> <root>`,
+     and claim its scope ([AGENTS.md](../../../AGENTS.md#worktrees)).
+   - Follow the [slice skill](../slice/SKILL.md) from step 3, then the [finish skill](../finish/SKILL.md) through
+     step 7: validation, a review in a fresh context, its summary, the user's review, and the merge once they
+     approve. A spike releases its claim (`tools/Scripts/Claim.ps1 -Release`) and ends after its summary, with its
+     answer.
+   - Merge one at a time: if the fast-forward fails because another worker merged first, rebase and run finish
+     step 7 again.
+   - Build only its slice, touch no other worker's worktree, and stop and report when blocked
+     ([AGENTS.md](../../../AGENTS.md#when-blocked)).
+   - End its last message with one line, and give its context use if it can see it:
+     `SLICE: <branch>  STATE: merged | answered | blocked  CONTEXT: <percent>  NOTE: <what it did, its answer or its
+     question>`.
+6. **Read each slice's state from the plan, git and plannotator, not from memory.** Merged, answered and blocked come
+   from its worker's `SLICE:` line, which you copy into the plan, since a merged branch is deleted. A slice waits on
+   the user's review when `plannotator sessions --json` lists its worktree, and is being built while it has a claim.
+   After a restart or a compaction, rebuild the picture from these.
+7. **Watch the workers.** Examine each worker when it sends a message, and at least every 10 minutes while workers
+   run. If the tool can schedule a check, schedule one.
+   - If a building worker has no new commit, claim or message since your last two checks, ask it for its status.
+   - If a worker ends without a `SLICE:` line, read its slice's state from git and plannotator (step 6). If the slice
+     has not merged, close the worker. Start a new worker on the same branch and worktree, and give it the last
+     message of the old worker.
+8. **Keep the user up to date.** Post one update when a review starts waiting on them, a slice merges or answers, a
+   worker is blocked, or the plan changes, and none in between, always in this shape:
+
+   ```text
+   Waiting on you (2): terrain review <url> · water asks: screen-space or planar reflections?
+   In flight (2): foliage (building), sky (in review)
+   Done (3/9): heightmap import, sample project, player spawn
+   Next: wind, once foliage merges
+   ```
+
+   Put first the review that unblocks the most slices. Pass on a blocked worker's question as it is; never answer a
+   design question for the user. Where the tool can send a notification, send one each time something new waits on
+   the user.
+9. **When a slice merges or answers:**
+   1. Check the plan against what came of it, and add the worker's follow-ups to it. Reorder, or split a slice that
+      grew too big, and report it in the next update. Adding or dropping a slice, or changing a decision from step 1,
+      needs the user's yes. Start no worker until the user gives it.
+   2. Give the finished worker the next ready slice, or close the worker:
+      - If a ready slice is in the same area as the worker's last slice, give it to the worker with a new brief
+        (step 5). Do this only while the worker has built fewer than three slices and its context is less than half
+        full. If the worker gave no `CONTEXT`, do not give it another slice.
+      - If a ready slice does not agree with these conditions, close the worker and start a new one for the slice.
+      - If no slice is ready, close the worker.
+   3. Start the other slices that are now ready (step 5).
+   4. Do steps 6 to 9 again until each slice has merged or answered.
+
+   To close a worker, end its session and delete it.
+10. **When every slice has merged or answered:**
+   1. With a root: in its worktree, rebase onto the merge target and run `tools/Scripts/AgentTaskComplete.ps1` at
+      the highest level any slice used, looking at any screenshots. Have the root reviewed in a fresh context as one
+      integration ([review-slice skill](../review-slice/SKILL.md)), and fix its findings as a slice of their own.
+      Then fast-forward the merge target to the root, release the root's claim, and remove its worktree and branch as
+      in finish step 7. Each slice was already approved, so this needs no review by the user, unless the rebase
+      needed conflicts resolved: then show those and wait for their yes.
+   2. Close each worker that is still open. Run the [tidy-worktrees skill](../tidy-worktrees/SKILL.md), and delete the
+      plan.
+   3. Sum up what landed, what was dropped, the follow-ups, and the next effort you propose.

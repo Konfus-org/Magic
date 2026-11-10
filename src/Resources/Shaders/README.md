@@ -29,4 +29,4 @@ compiler loads a module and its imports from the assets, so a game's `Shaders/` 
 
 A renderer's own tables and techniques are in its gem's `Resources/Shaders/`.
 
-[Code Standards](../../../docs/CODE_STANDARDS.md#shaders) has the rules.
+[Shader Standards](../../../docs/SHADER_STANDARDS.md) has the rules.

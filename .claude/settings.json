@@ -58,6 +58,20 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "SubagentHandback",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/RecordReview.ps1\"",
+            "timeout": 60,
+            "statusMessage": "Recording the slice review"
+          }
+        ]
+      }
+    ],
     "SubagentStop": [
       {
         "matcher": "slice-reviewer",

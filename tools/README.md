@@ -1,7 +1,7 @@
 # Tools
 
 The scripts that build and check Magic are in `Scripts/`, and the analyzer that checks the house rules is in
-[`Analyzers/`](Analyzers/Magic.Analyzers/README.md). Nothing here ships.
+[`Analyzers/`](Analyzers/README.md). Nothing here ships.
 
 Each script is one PowerShell file that runs under both `pwsh` and Windows PowerShell 5.1, so don't use what 5.1
 lacks (`&&`, `?:`, `??`). A script runs from any folder and exits `0` when it passes. Its help comment lists its
@@ -43,6 +43,13 @@ Runs a project with a window until its world has loaded, takes a screenshot and 
 Runs `Format.ps1`, then the steps of `Validate.ps1` that `-Change` needs: `Docs` builds, `Code` adds Test and
 Headless, and `Visual` adds Test and Screenshot. If they pass, it stamps the checkout's exact files with the level,
 and a state already stamped returns at once. It also points git at the repository's [hooks](../.githooks/README.md).
+
+## Claim.ps1
+
+Claims the files and folders a slice will change, in the repository's git folder, which every worktree shares, and
+prints any other claim or worktree that touches them; it exits `1` when one does. `-Release` takes the claim back.
+The SessionStart agent hook lists the claims, and the edit agent hook refuses an edit inside another session's claim
+([AGENTS.md](../AGENTS.md#worktrees)).
 
 ## Templates
 

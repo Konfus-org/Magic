@@ -1,4 +1,4 @@
-# Shared by the hooks in this folder. Runs under Windows PowerShell 5.1 and pwsh.
+# Shared by the hooks in this folder and tools/Scripts/Claim.ps1. Runs under Windows PowerShell 5.1 and pwsh.
 # Every hook fails open: an error in a hook lets the action through rather than blocking work.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -28,7 +28,8 @@ function ConvertTo-Key([string] $path) { return $path.Replace('\', '/').TrimEnd(
 function Write-HookJson($value) { [Console]::Out.Write(($value | ConvertTo-Json -Compress -Depth 6)) }
 
 # The checkout a path is in: its top folder, whether it is a linked worktree, the repository's shared git folder,
-# and the merge target, which is the branch checked out in the main checkout. One git call.
+# and the merge target: the branch's upstream when that is a local branch, as a swarm worker's root is, otherwise the
+# branch checked out in the main checkout. Two git calls.
 function Get-Checkout([string] $path) {
     if (-not $path) { return $null }
     $folder = $path
@@ -38,8 +39,11 @@ function Get-Checkout([string] $path) {
     if ($lines.Count -lt 3) { return $null }
     $common = [string]$lines[2]
     $target = $null
+    $upstream = [string](Invoke-Git $folder @('rev-parse', '--symbolic-full-name', '@{upstream}'))
     $head = Join-Path $common 'HEAD'
-    if (Test-Path -LiteralPath $head) {
+    if ($upstream -match '^refs/heads/(.+)$') {
+        $target = $Matches[1]
+    } elseif (Test-Path -LiteralPath $head) {
         $ref = [string](Get-Content -LiteralPath $head -TotalCount 1)
         if ($ref -match '^ref: refs/heads/(.+)$') { $target = $Matches[1].Trim() }
     }
@@ -51,11 +55,10 @@ function Get-Checkout([string] $path) {
     }
 }
 
-# Whether a checkout belongs to the repository this session was started in.
+# Whether a checkout belongs to the repository that this file is in.
 function Test-ThisRepository($checkout) {
-    if (-not $checkout -or -not $env:CLAUDE_PROJECT_DIR) { return $false }
-    $project = Invoke-Git $env:CLAUDE_PROJECT_DIR @('rev-parse', '--path-format=absolute', '--git-common-dir')
-    return [bool]$project -and (ConvertTo-Key ([string]$project)) -eq (ConvertTo-Key $checkout.Common)
+    $project = [string](Invoke-Git $PSScriptRoot @('rev-parse', '--path-format=absolute', '--git-common-dir'))
+    return (ConvertTo-Key $project) -eq (ConvertTo-Key $checkout.Common)
 }
 
 # The checkout's state as tools/Scripts/AgentTaskComplete.ps1 stamps it: the git tree of every file, tracked or new,
@@ -93,7 +96,24 @@ function Get-ValidationStamp($checkout, [string] $tree) {
     return Join-Path (Join-Path $checkout.Common 'agent-task-complete') $tree
 }
 
+# A branch's name as one file name, for the stamps and claims kept per branch.
+function ConvertTo-BranchFileName([string] $branch) { return $branch -replace '[\\/:]', '__' }
+
 # A slice is reviewed once per branch. The stamp's first line is the slice's changed lines when it was reviewed.
 function Get-ReviewStamp($checkout, [string] $branch) {
-    return Join-Path (Join-Path $checkout.Common 'agent-review') ($branch -replace '[\\/:]', '__')
+    return Join-Path (Join-Path $checkout.Common 'agent-review') (ConvertTo-BranchFileName $branch)
 }
+
+# A claim tools/Scripts/Claim.ps1 wrote: its branch, worktree, slice and scope, one key a line.
+function Read-Claim([string] $path) {
+    $claim = @{ branch = ''; worktree = ''; slice = ''; scope = '' }
+    foreach ($line in [System.IO.File]::ReadAllLines($path)) {
+        if ($line -match '^(\w+):\s*(.*)$') { $claim[$Matches[1]] = $Matches[2] }
+    }
+    $claim.scope = @(([string]$claim.scope) -split ',\s*' | Where-Object { $_ })
+
+    return [pscustomobject]$claim
+}
+
+# Whether a claim's worktree still exists. One whose worktree is gone is stale, and the tidy-worktrees skill removes it.
+function Test-ClaimLive($claim) { return [bool]$claim.worktree -and (Test-Path -LiteralPath $claim.worktree) }
