@@ -146,9 +146,10 @@ public PixelTriangle LoadPixelTriangle(FrameConstants frame, uint visibleIndex, 
     result.cluster = LoadCluster(clusters.clusters, entry.cluster);
 
     uint first = result.cluster.indexOffset + triangle * 3u;
-    result.v0 = LoadVertex(result.cluster.vertices, LoadIndex(clusters.indices, first));
-    result.v1 = LoadVertex(result.cluster.vertices, LoadIndex(clusters.indices, first + 1u));
-    result.v2 = LoadVertex(result.cluster.vertices, LoadIndex(clusters.indices, first + 2u));
+    uint vertices = GetVertexPool(result.cluster, clusters, models.vertices);
+    result.v0 = LoadVertex(vertices, LoadIndex(clusters.indices, first));
+    result.v1 = LoadVertex(vertices, LoadIndex(clusters.indices, first + 1u));
+    result.v2 = LoadVertex(vertices, LoadIndex(clusters.indices, first + 2u));
     result.p0 = Relative(frame, ToWorld(result.instance.world, result.v0.position));
     result.p1 = Relative(frame, ToWorld(result.instance.world, result.v1.position));
     result.p2 = Relative(frame, ToWorld(result.instance.world, result.v2.position));

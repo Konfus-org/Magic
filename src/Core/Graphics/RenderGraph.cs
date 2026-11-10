@@ -60,7 +60,9 @@ public sealed class RenderGraph
         Gpu?.GetTexture(description) ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
 
     /// <summary>
-    /// The buffer under the description's name, kept and freed as <see cref="Texture"/> keeps and frees a texture.
+    /// The buffer under the description's name, kept and freed as <see cref="Texture"/> keeps and frees a texture. Asked
+    /// for at another size alone, it keeps what it holds, as much as fits, copied before the frame's passes. Ask for it at
+    /// its new size before any transfer into it in that frame, as a transfer recorded into the old buffer is lost.
     /// </summary>
     public Result<GpuBuffer> Buffer(in BufferDescription description) =>
         Gpu?.GetBuffer(description) ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");

@@ -30,10 +30,11 @@ public struct ClusterConstants
     // alone.
     public float impostorDistance;
     public uint maxVisibleClusters;
-    // The heap ids of the cluster pool and its index pool, of each model's row of clusters and impostor, by the
-    // instances' model index, and of what the cull leaves for the draw and the resolve.
+    // The heap ids of the cluster pool, its index pool and its vertex copies, of each model's row of clusters and
+    // impostor, by the instances' model index, and of what the cull leaves for the draw and the resolve.
     public uint clusters;
     public uint indices;
+    public uint vertices;
     public uint models;
     public uint visibleClusters;
     public uint drawArguments;
@@ -90,8 +91,16 @@ public struct GpuCluster
     public uint coneAxis;
     public uint coneCutoff;
     public uint materialSlot;
-    // The heap id of the vertex pool its indices point into: the models' for a leaf, the cluster copies' above.
-    public uint vertices;
+    // 1 when its indices point into the cluster vertex copies, a level above the leaves; 0 for a leaf, whose indices
+    // point into the models' vertex pool.
+    public uint isCopy;
+}
+
+// The heap id of the vertex pool the cluster's indices point into: the cluster copies' above the leaves, the
+// models' for a leaf.
+public uint GetVertexPool(GpuCluster cluster, ClusterConstants clusters, uint modelVertices)
+{
+    return cluster.isCopy != 0u ? clusters.vertices : modelVertices;
 }
 
 public GpuCluster LoadCluster(uint pool, uint index)

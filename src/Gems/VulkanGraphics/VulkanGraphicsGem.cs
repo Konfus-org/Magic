@@ -115,8 +115,20 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
             static (gem, texture) => gem.Destroy(texture)
         );
 
-    public Result<GpuBuffer> GetBuffer(in BufferDescription description) =>
-        GetNamed(
+    public Result<GpuBuffer> GetBuffer(in BufferDescription description)
+    {
+        ref Named<BufferDescription, GpuBuffer> old = ref CollectionsMarshal.GetValueRefOrNullRef(
+            _namedBuffers,
+            description.Name
+        );
+        bool isResized =
+            !Unsafe.IsNullRef(ref old)
+            && old.Description.Bytes != description.Bytes
+            && old.Description with { Bytes = description.Bytes } == description;
+        if (isResized)
+            return Resize(ref old, description);
+
+        return GetNamed(
             _namedBuffers,
             description.Name,
             description,
@@ -124,6 +136,7 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
             static (gem, made) => gem._resources.CreateBuffer(made),
             static (gem, buffer) => gem.Destroy(buffer)
         );
+    }
 
     public Result<GpuAcceleration> GetAcceleration(in BottomLevelDescription description) =>
         GetNamed(
@@ -296,6 +309,30 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
         }
 
         _frames.Compactable.Clear();
+    }
+
+    /// <summary>
+    /// The buffer under the description's name moved into one of its new size, as much of what it held as fits copied
+    /// across at the start of this frame's commands, before any pass; the name takes the new one, and the old one dies
+    /// once this frame has run.
+    /// </summary>
+    private Result<GpuBuffer> Resize(ref Named<BufferDescription, GpuBuffer> named, in BufferDescription description)
+    {
+        ThrowIfNotOnRender();
+        Result<GpuBuffer> created = _resources.CreateBuffer(description);
+        if (!created.Ok)
+            return Result.Failure($"the {description.Name} was not made: {created.Error}");
+
+        if (_resources.Buffers[named.Made.Id] is { } from && _resources.Buffers[created.Value.Id] is { } to)
+        {
+            ulong bytes = (ulong)Math.Min(named.Description.Bytes, description.Bytes);
+            _recorder.CopyBuffer(_frames.Current.CommandBuffer, from, to, bytes);
+        }
+
+        Destroy(named.Made);
+        named = new Named<BufferDescription, GpuBuffer>(description, created.Value, _frames.Current.Serial);
+
+        return created;
     }
 
     /// <summary>
