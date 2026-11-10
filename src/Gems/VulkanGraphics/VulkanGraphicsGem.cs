@@ -1,6 +1,7 @@
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Graphics;
 using Magic.Platform;
@@ -18,7 +19,7 @@ namespace Magic.VulkanGraphics;
 /// leaves the staging ring empty for what records next.
 /// It is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
+public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IHasSettings<VulkanGraphicsSettings>, IDisposable
 {
     /// <summary>
     /// How many frames in a row a named resource may go unasked for before it is destroyed.
@@ -47,8 +48,15 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     private readonly Dictionary<string, Named<TopLevelDescription, GpuAcceleration>> _namedTopLevels = [];
     private readonly Dictionary<SamplerDescription, Named<SamplerDescription, GpuSampler>> _samplers = [];
 
-    public VulkanGraphicsGem(App app, Threads threads, IShaderCompiler compiler, IWindow? window = null)
+    public VulkanGraphicsGem(
+        VulkanGraphicsSettings settings,
+        App app,
+        Threads threads,
+        IShaderCompiler compiler,
+        IWindow? window = null
+    )
     {
+        Settings = settings;
         _threads = threads;
         IWindow? drawn = app.IsHeadless ? null : window;
         _device = new VulkanDevice(drawn, wantsValidation: IsDebugBuild);
@@ -79,6 +87,11 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     public GpuFeatures Features => _device.Features;
 
     public GpuTexture WindowTarget { get; private set; }
+
+    /// <summary>
+    /// How frames reach the window, which the render thread reads whole as each frame begins. Game thread.
+    /// </summary>
+    public VulkanGraphicsSettings Settings { get; set; }
 
     /// <summary>
     /// Whether this is a Debug build, which turns the validation layer on when the Vulkan SDK provides it.
@@ -276,7 +289,7 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     {
         _frames.Begin();
         Compact();
-        WindowTarget = _swapchain?.Acquire(_frames.Current.Acquired) ?? GpuTexture.None;
+        WindowTarget = _swapchain?.Acquire(_frames.Current.Acquired, Settings.IsVSyncOn) ?? GpuTexture.None;
     }
 
     /// <summary>

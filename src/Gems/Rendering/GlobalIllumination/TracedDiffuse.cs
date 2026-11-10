@@ -6,7 +6,7 @@ using Magic.Utils;
 namespace Magic.GlobalIllumination;
 
 /// <summary>
-/// A frame's traced diffuse light, at half the view's size: the rays' light, filtered, and blended with the history.
+/// A frame's traced diffuse light, at the traced size: the rays' light, filtered, and blended with the history.
 /// </summary>
 internal readonly record struct TracedDiffuseBuffers(GpuTexture Traced, GpuTexture Filtered, TracedBlend Blend)
 {
@@ -21,8 +21,8 @@ internal readonly record struct TracedDiffuseBuffers(GpuTexture Traced, GpuTextu
 
 /// <summary>
 /// On a GPU that traces rays, the light that reaches each surface indirectly, traced near it: two rays from a pixel of
-/// each 2 by 2, lit where they land by the lights and the probes, and the probes' light where they reach nothing within
-/// range; filtered over neighbours and blended over frames, into the light shading reads.
+/// each traced pixel's footprint, lit where they land by the lights and the probes, and the probes' light where they
+/// reach nothing within range; filtered over neighbours and blended over frames, into the light shading reads.
 /// </summary>
 internal sealed class TracedDiffuse(AssetManager assets)
 {
@@ -44,7 +44,7 @@ internal sealed class TracedDiffuse(AssetManager assets)
     public ImmutableArray<ShaderEntry> Shaders => [_traceShader, _filterShader, _blendShader];
 
     /// <summary>
-    /// The textures asked for at half the view's size; the blended light is the indirect diffuse light shading reads.
+    /// The textures asked for at the traced size; the blended light is the indirect diffuse light shading reads.
     /// </summary>
     public static Result<TracedDiffuseBuffers> Prepare(in GIView view, uint frameIndex)
     {

@@ -23,9 +23,10 @@ compiler.
   build has run, the next frame copies it into one of the size it compacts to, which its name then gives with a new
   id and address, and frees the built one with its scratch.
 - It draws into the window through a surface it makes from the window's OS handles, on Windows, X11, Wayland and macOS.
-  The window sets the render thread's frame rate: a release waits for the display, and a Debug build shows each frame
-  as soon as it is drawn, so its frame rate is what the frame costs. The window has as few images as its surface
-  takes, and two at least, with one more in mailbox mode, which a Debug build picks when the surface has it.
+  With `Window.IsVSyncOn` set, the window waits for the display, which caps the frame rate at the display's. It is
+  off by default: each frame shows as soon as it is drawn, so the frame rate is what the frame costs, in mailbox mode
+  where the surface has it and torn otherwise. Setting it remakes the window's images. The window has as few images
+  as its surface takes, and two at least, with one more in mailbox mode.
 - Its resources and frames are the render thread's, and its members throw on any other.
 - It publishes each pass's and each frame's time on the GPU, and the device memory it holds and has, on its
   `Magic.Gems.VulkanGraphics` meter, whose tags name the Vulkan version, the GPU, its kind and its driver.

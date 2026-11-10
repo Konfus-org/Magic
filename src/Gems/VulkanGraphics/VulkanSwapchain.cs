@@ -7,28 +7,25 @@ using Vortice.Vulkan;
 namespace Magic.VulkanGraphics;
 
 /// <summary>
-/// The window's images: made for the window's size, each a texture of the heap while it lasts, remade when the window
-/// changes size or the surface says they are out of date. A frame takes one with <see cref="Acquire"/> and gives it
-/// back with <see cref="Present"/>.
+/// The window's images: made for the window's size and whether frames wait for the display, each a texture of the heap
+/// while it lasts, remade when either changes or the surface says they are out of date. A frame takes one with
+/// <see cref="Acquire"/> and gives it back with <see cref="Present"/>.
 /// </summary>
 internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResources resources, IWindow window)
     : IDisposable
 {
     /// <summary>
-    /// How frames reach the window, most wanted first. A Debug build shows them as fast as they are drawn, so its frame
-    /// times are what the frame costs: mailbox, which never tears, else immediate. A release waits for the display.
+    /// How frames reach the window without waiting for the display, most wanted first: mailbox, which never tears, else
+    /// immediate.
     /// </summary>
-#if DEBUG
-    private static readonly VkPresentModeKHR[] _presentModes = [VkPresentModeKHR.Mailbox, VkPresentModeKHR.Immediate];
-#else
-    private static readonly VkPresentModeKHR[] _presentModes = [VkPresentModeKHR.Fifo];
-#endif
+    private static readonly VkPresentModeKHR[] _unsyncedModes = [VkPresentModeKHR.Mailbox, VkPresentModeKHR.Immediate];
 
     private VkSwapchainKHR _swapchain = VkSwapchainKHR.Null;
     private GpuTexture[] _textures = [];
     private VkSemaphore[] _rendered = [];
     private int _width;
     private int _height;
+    private bool _isVSyncOn;
     private int _acquired = -1;
 
     /// <summary>
@@ -39,14 +36,17 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
     public void Dispose() => Destroy();
 
     /// <summary>
-    /// Takes the next image for a frame, remaking the images first when the window changed; none when the window is
-    /// too small to draw into, or the surface gave none.
+    /// Takes the next image for a frame, remaking the images first when the window or <paramref name="isVSyncOn"/>
+    /// changed; none when the window is too small to draw into, or the surface gave none.
     /// </summary>
-    public GpuTexture Acquire(VkSemaphore acquired)
+    public GpuTexture Acquire(VkSemaphore acquired, bool isVSyncOn)
     {
         _acquired = -1;
-        if (window.Width != _width || window.Height != _height || _swapchain.IsNull)
+        if (window.Width != _width || window.Height != _height || isVSyncOn != _isVSyncOn || _swapchain.IsNull)
+        {
+            _isVSyncOn = isVSyncOn;
             Recreate();
+        }
 
         if (_swapchain.IsNull)
             return GpuTexture.None;
@@ -235,14 +235,18 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
     }
 
     /// <summary>
-    /// The first of <see cref="_presentModes"/> the surface has, else FIFO, which every surface has.
+    /// FIFO, which waits for the display and every surface has, while vsync is on; else the first of
+    /// <see cref="_unsyncedModes"/> the surface has, else FIFO.
     /// </summary>
     private VkPresentModeKHR PickPresentMode(VkSurfaceKHR surface)
     {
+        if (_isVSyncOn)
+            return VkPresentModeKHR.Fifo;
+
         device.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(device.PhysicalDevice, surface, out uint count);
         Span<VkPresentModeKHR> modes = new VkPresentModeKHR[count];
         device.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(device.PhysicalDevice, surface, modes);
-        foreach (VkPresentModeKHR mode in _presentModes)
+        foreach (VkPresentModeKHR mode in _unsyncedModes)
         {
             if (modes.Contains(mode))
                 return mode;

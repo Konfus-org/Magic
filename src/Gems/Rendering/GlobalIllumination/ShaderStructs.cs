@@ -19,6 +19,13 @@ internal record struct GIConstants
     /// 0 while the history holds nothing of the view: this frame starts it afresh.
     /// </summary>
     public uint HasHistory;
+
+    /// <summary>
+    /// The traced textures' size.
+    /// </summary>
+    public uint TracedWidth;
+
+    public uint TracedHeight;
 }
 
 /// <summary>

@@ -50,8 +50,8 @@ public enum DebugView : uint
     IndirectDiffuse,
 
     /// <summary>
-    /// What smooth surfaces reflect, where something traces it at half the size, finished by the post
-    /// effects; black where nothing is traced.
+    /// What smooth surfaces reflect, where something traces it at a part of the size, finished by the post effects;
+    /// black where nothing is traced.
     /// </summary>
     Reflections,
 }

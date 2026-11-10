@@ -4,8 +4,9 @@
 // neighbours, keeping a running mean and variance of it; FilterShadows then blurs that three times, 1, 2 and 4 pixels
 // apart, by how alike neighbours' depths, normals and shadows are. A tile light's slot may hold another light in the
 // next tile or the next frame, so BlendShadows only blends those with last frame, and writes the sun's into the mask.
-// The pass header's x is the frame's buffer, which holds the shadows, y the denoiser's constants and w the filter's
-// pass.
+// All of it runs at the traced size, each traced pixel reading the picture's pixel at its footprint's corner; then
+// UpsampleShadows brings the mask and the sun's tint to the picture's size, which shading reads. The pass header's x is
+// the frame's buffer, which holds the shadows, y the denoiser's constants and w the filter's pass.
 module "DenoiseShadows";
 
 import Core.Heap;
@@ -15,32 +16,38 @@ import Core.Math;
 import Core.Pack;
 import Scene.Lights;
 import Scene.Shadows;
+import Light.Indirect;
 
-// C#'s ShadowDenoiseConstants: the heap ids of the denoiser's targets.
-struct ShadowDenoiseConstants
+// C#'s ShadowDenoiseConstants: the heap ids of the denoiser's targets and the traced size.
+public struct ShadowDenoiseConstants
 {
     // A word each 8 by 8 pixels: whether ClassifyShadows skipped them, and whether as all lit.
-    uint tileStates;
+    public uint tileStates;
     // The sun's shadow and its variance: ClassifyShadows' blend, then the second filter pass's.
-    uint sunBlend;
+    public uint sunBlend;
     // The first filter pass's, which the next frame blends with.
-    uint sunHistory;
+    public uint sunHistory;
     // The last filter pass's: the denoised sun.
-    uint sunDenoised;
+    public uint sunDenoised;
     // The sun's mean, its sum of squared differences and how many frames they hold, and the pixel's view depth: this
     // frame's and last frame's.
-    uint moments;
-    uint previousMoments;
-    // Last frame's mask shading read.
-    uint previousMask;
+    public uint moments;
+    public uint previousMoments;
+    // The traced mask, as the rays left it and then denoised in place, and last frame's.
+    public uint mask;
+    public uint previousMask;
+    // The sun's tint as traced.
+    public uint sunTint;
     // Whether last frame's targets hold a frame of this size.
-    uint hasHistory;
+    public uint hasHistory;
+    public uint width;
+    public uint height;
 }
 
 static const uint TileSkipped = 1u;
 static const uint TileLit = 2u;
 
-ShadowDenoiseConstants GetDenoise() { return LoadConstants<ShadowDenoiseConstants>(GetPassHeader().y); }
+public ShadowDenoiseConstants GetDenoise() { return LoadConstants<ShadowDenoiseConstants>(GetPassHeader().y); }
 
 uint GetTileStateIndex(uint2 group, uint width) { return group.y * ((width + 7u) / 8u) + group.x; }
 
@@ -145,7 +152,7 @@ float2 GetNearestVelocity(FrameConstants frame, uint2 pixel, uint2 size)
     float2 velocity = float2(0.0);
     for (uint i = 0u; i < 4u; i++)
     {
-        uint2 texel = min(quad + uint2(i % 2u, i / 2u), size - 1u);
+        uint2 texel = GetPicturePixel(frame, min(quad + uint2(i % 2u, i / 2u), size - 1u), size, float2(0.0));
         float depth = depthTexture.Load(texel, 0u).x;
         if (depth > nearest)
         {
@@ -178,11 +185,12 @@ void ClassifyShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupT
     FrameConstants frame = GetFrame();
     Shadows shadows = GetShadows();
     ShadowDenoiseConstants denoise = GetDenoise();
-    uint2 size = uint2(frame.width, frame.height);
+    uint2 size = uint2(denoise.width, denoise.height);
     bool isInside = all(thread.xy < size);
     uint2 pixel = min(thread.xy, size - 1u);
+    uint2 picturePixel = GetPicturePixel(frame, pixel, size, float2(0.0));
     TextureRef depthTexture = { frame.depth };
-    float depth = depthTexture.Load(pixel, 0u).x;
+    float depth = depthTexture.Load(picturePixel, 0u).x;
     bool isReceiver = isInside && depth > 0.0;
     float viewDepth = isReceiver ? ToViewDepth(depth, frame.near) : 0.0;
     ArrayRef<uint> tileStates = { denoise.tileStates };
@@ -236,9 +244,9 @@ void ClassifyShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupT
     // The running mean and variance of the sun's rays here, restarted where last frame saw something else.
     TextureRef normalTexture = { frame.gbufferNormal };
     TextureRef velocityTexture = { frame.velocity };
-    float3 normal = DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0);
+    float3 normal = DecodeOctahedral(normalTexture.Load(picturePixel, 0u).xy * 2.0 - 1.0);
     float3 toEye = -normalize(ReconstructRelative(frame, uv, depth));
-    float viewDepthThen = velocityTexture.Load(pixel, 0u).z;
+    float viewDepthThen = velocityTexture.Load(picturePixel, 0u).z;
     bool hasHistory = denoise.hasHistory != 0u;
     float3 previous = float3(0.0);
     if (hasHistory && !IsDisoccluded(denoise, historyUv, size, normal, toEye, viewDepthThen))
@@ -294,10 +302,11 @@ float2 Filter(FrameConstants frame, uint input, int2 pixel, int2 local, int step
     {
         int2 offset = int2(int(i % 2u), int(i / 2u)) * 8;
         uint2 source = uint2(clamp(pixel - 4 + offset, int2(0), int2(size) - 1));
+        uint2 picturePixel = GetPicturePixel(frame, source, size, float2(0.0));
         int2 slot = local + offset;
         groupShadows[slot.y][slot.x] = inputTexture.Load(source, 0u).xy;
-        groupDepths[slot.y][slot.x] = depthTexture.Load(source, 0u).x;
-        groupNormals[slot.y][slot.x] = PackUnorm2x16(normalTexture.Load(source, 0u).xy);
+        groupDepths[slot.y][slot.x] = depthTexture.Load(picturePixel, 0u).x;
+        groupNormals[slot.y][slot.x] = PackUnorm2x16(normalTexture.Load(picturePixel, 0u).xy);
     }
 
     GroupMemoryBarrierWithGroupSync();
@@ -353,7 +362,7 @@ void FilterShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupThr
     FrameConstants frame = GetFrame();
     ShadowDenoiseConstants denoise = GetDenoise();
     uint pass = GetPassHeader().w;
-    uint2 size = uint2(frame.width, frame.height);
+    uint2 size = uint2(denoise.width, denoise.height);
     bool isInside = all(thread.xy < size);
     ArrayRef<uint> tileStates = { denoise.tileStates };
     uint state = tileStates[GetTileStateIndex(group.xy, size.x)];
@@ -403,19 +412,20 @@ void BlendShadows(uint3 thread : SV_DispatchThreadID)
     FrameConstants frame = GetFrame();
     Shadows shadows = GetShadows();
     ShadowDenoiseConstants denoise = GetDenoise();
-    uint2 size = uint2(frame.width, frame.height);
+    uint2 size = uint2(denoise.width, denoise.height);
     if (any(thread.xy >= size))
         return;
 
     // The sky, which the rays left all lit.
+    uint2 picturePixel = GetPicturePixel(frame, thread.xy, size, float2(0.0));
     TextureRef depthTexture = { frame.depth };
-    if (depthTexture.Load(thread.xy, 0u).x <= 0.0)
+    if (depthTexture.Load(picturePixel, 0u).x <= 0.0)
         return;
 
     TextureRef denoised = { denoise.sunDenoised };
     TextureRef velocityTexture = { frame.velocity };
-    uint4 traced = LoadShadowMask(shadows.mask, thread.xy, size.x);
-    float4 velocity = velocityTexture.Load(thread.xy, 0u);
+    uint4 traced = LoadShadowMask(denoise.mask, thread.xy, size.x);
+    float4 velocity = velocityTexture.Load(picturePixel, 0u);
     float2 historyUv = GetTexelCenterUv(thread.xy, size) + velocity.xy;
     bool isReprojected = denoise.hasHistory != 0u && all(saturate(historyUv) == historyUv);
     uint2 historyPixel = min(uint2(historyUv * float2(size)), size - 1u);
@@ -443,5 +453,70 @@ void BlendShadows(uint3 thread : SV_DispatchThreadID)
         }
     }
 
-    StoreShadowMask(shadows.mask, thread.xy, size.x, EncodeShadow(words, 0u, denoised.Load(thread.xy, 0u).x));
+    StoreShadowMask(denoise.mask, thread.xy, size.x, EncodeShadow(words, 0u, denoised.Load(thread.xy, 0u).x));
+}
+
+// A pixel of the picture's mask and the sun's tint, read from the four traced pixels around it on its surface: the
+// sun's slot and tint from each, and a tile light's slot only from those in the pixel's own tile of lights, as a slot
+// holds the light its tile lists there; from the traced pixel that holds it where none counts. The sky is all lit.
+[shader("compute")]
+[numthreads(8, 8, 1)]
+void UpsampleShadows(uint3 thread : SV_DispatchThreadID)
+{
+    FrameConstants frame = GetFrame();
+    Shadows shadows = GetShadows();
+    ShadowDenoiseConstants denoise = GetDenoise();
+    uint2 size = uint2(frame.width, frame.height);
+    if (any(thread.xy >= size))
+        return;
+
+    uint2 tracedSize = uint2(denoise.width, denoise.height);
+    StorageRef tints = { shadows.sunTint, 0u };
+    TextureRef tracedTints = { denoise.sunTint };
+    TextureRef depthTexture = { frame.depth };
+    float depth = depthTexture.Load(thread.xy, 0u).x;
+    if (depth == 0.0)
+    {
+        StoreShadowMask(shadows.mask, thread.xy, size.x, uint4(0xFFFFFFFFu));
+        tints.Store(thread.xy, float4(1.0));
+        return;
+    }
+
+    TextureRef normalTexture = { frame.gbufferNormal };
+    float3 relative = ReconstructRelative(frame, GetTexelCenterUv(thread.xy, size), depth);
+    float3 normal = DecodeOctahedral(normalTexture.Load(thread.xy, 0u).xy * 2.0 - 1.0);
+    float viewDepth = ToViewDepth(depth, frame.near);
+    TracedTaps taps = GetTracedTaps(frame, tracedSize, float2(0.0), thread.xy, relative, normal, viewDepth, 1.0);
+    uint2 tile = thread.xy / LightTileSize;
+    uint4 words[4];
+    float4 tileWeights = float4(0.0);
+    float3 tint = float3(0.0);
+    [ForceUnroll]
+    for (uint i = 0u; i < 4u; i++)
+    {
+        uint2 texel = taps.GetTexel(i);
+        words[i] = LoadShadowMask(denoise.mask, texel, tracedSize.x);
+        tint += tracedTints.Load(texel, 0u).rgb * taps.weights[i];
+        bool isSameTile = all(GetPicturePixel(frame, texel, tracedSize, float2(0.0)) / LightTileSize == tile);
+        tileWeights[i] = isSameTile ? taps.weights[i] : 0.0;
+    }
+
+    float sunSum = dot(taps.weights, float4(1.0));
+    float tileSum = dot(tileWeights, float4(1.0));
+    uint2 nearest = GetTracedTexel(frame, thread.xy, tracedSize);
+    uint4 nearestWords = LoadShadowMask(denoise.mask, nearest, tracedSize.x);
+    uint4 result = uint4(0u);
+    [ForceUnroll]
+    for (uint slot = 0u; slot < ShadowSlots; slot++)
+    {
+        float4 weights = slot == 0u ? taps.weights : tileWeights;
+        float sum = slot == 0u ? sunSum : tileSum;
+        float4 values = float4(
+            GetShadow(words[0], slot), GetShadow(words[1], slot), GetShadow(words[2], slot), GetShadow(words[3], slot));
+        float value = sum > 0.0 ? dot(values, weights) / sum : GetShadow(nearestWords, slot);
+        result = EncodeShadow(result, slot, value);
+    }
+
+    StoreShadowMask(shadows.mask, thread.xy, size.x, result);
+    tints.Store(thread.xy, float4(sunSum > 0.0 ? tint / sunSum : tracedTints.Load(nearest, 0u).rgb, 1.0));
 }

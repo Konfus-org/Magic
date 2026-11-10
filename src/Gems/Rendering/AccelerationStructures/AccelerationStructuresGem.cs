@@ -39,9 +39,10 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
     private readonly List<ShaderEntry> _averageShaders = [];
 
     /// <summary>
-    /// The instance table's version the last build was of.
+    /// The instance table's version the last build was of, how many instances rays see in it, those whose model has its
+    /// triangles' structure, and the box over their world boxes, min over max where none do.
     /// </summary>
-    private long _builtVersion;
+    private (long Version, int Count, (Vector3 Min, Vector3 Max) Box) _built;
 
     /// <summary>
     /// The world as rays see it this frame, built again when the instances changed, written into the frame's buffer;
@@ -65,9 +66,30 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
             return null;
         }
 
-        // How many instances rays see, those whose model has its triangles' structure, and the box over their world
-        // boxes; min over max where none do.
-        ReadOnlySpan<InstanceExtra> extras = world.Extras.Span;
+        // Built again whenever the rows changed since the last build; a model's arrival builds every row again.
+        (GpuBuffer instances, GpuAcceleration structure, GpuBuffer hitMaterials) = made.Value;
+        if (world.Version != _built.Version)
+        {
+            ReadOnlySpan<InstanceExtra> extras = world.Extras.Span;
+            (int count, (Vector3 Min, Vector3 Max) box) = Measure(extras);
+            Build(graph, instances, structure, world.Rows.Span, extras, count);
+            _built = (world.Version, count, box);
+        }
+
+        RecordHitMaterials(graph, view, hitMaterials, world.MaterialCount);
+        GpuAcceleration acceleration = _built.Count == 0 ? GpuAcceleration.None : structure;
+        GpuTracedWorld traced = new() { Acceleration = acceleration.Id, HitMaterials = hitMaterials.Id };
+        graph.Upload(view.Frame, [traced], GpuTracedWorld.Offset);
+
+        return new TracedWorld(acceleration, hitMaterials, _built.Box);
+    }
+
+    /// <summary>
+    /// How many instances rays see, those whose model has its triangles' structure, and the box over their world boxes;
+    /// min over max where none do.
+    /// </summary>
+    private static (int Count, (Vector3 Min, Vector3 Max) Box) Measure(ReadOnlySpan<InstanceExtra> extras)
+    {
         int count = 0;
         (Vector3 Min, Vector3 Max) box = (new Vector3(float.MaxValue), new Vector3(float.MinValue));
         foreach (InstanceExtra extra in extras)
@@ -79,20 +101,7 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
             box = (Vector3.Min(box.Min, extra.Box.Min), Vector3.Max(box.Max, extra.Box.Max));
         }
 
-        // Built again whenever the rows changed since the last build; a model's arrival builds every row again.
-        (GpuBuffer instances, GpuAcceleration structure, GpuBuffer hitMaterials) = made.Value;
-        if (world.Version != _builtVersion)
-        {
-            Build(graph, instances, structure, world.Rows.Span, extras, count);
-            _builtVersion = world.Version;
-        }
-
-        RecordHitMaterials(graph, view, hitMaterials, world.MaterialCount);
-        GpuAcceleration acceleration = count == 0 ? GpuAcceleration.None : structure;
-        GpuTracedWorld traced = new() { Acceleration = acceleration.Id, HitMaterials = hitMaterials.Id };
-        graph.Upload(view.Frame, [traced], GpuTracedWorld.Offset);
-
-        return new TracedWorld(acceleration, hitMaterials, box);
+        return (count, box);
     }
 
     /// <summary>

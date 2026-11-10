@@ -1,6 +1,6 @@
-// What the light traced at half the picture's size shares, the diffuse and the reflections alike: the GI buffer, which
-// pixel of each 2 by 2 traces this frame, how a pass averages its neighbours' light, and its history found where the
-// surface was last frame. C#'s GIConstants is the GI buffer, the pass header's y.
+// What the light traced at a part of the picture's size shares, the diffuse and the reflections alike: the GI buffer,
+// which pixel of each traced pixel's footprint traces this frame, how a pass averages its neighbours' light, and its
+// history found where the surface was last frame. C#'s GIConstants is the GI buffer, the pass header's y.
 module "Scene/Traced";
 
 import Core.Heap;
@@ -53,6 +53,8 @@ public struct GIConstants
     public uint sampler;
     // 0 while the history holds nothing of the view: this frame starts it afresh.
     public uint hasHistory;
+    // The traced textures' size.
+    public uint2 tracedSize;
 }
 
 public GIConstants GetGIConstants()
@@ -61,12 +63,12 @@ public GIConstants GetGIConstants()
     return gi.Load<GIConstants>(0u);
 }
 
-// The picture's pixel a traced pixel traces from: another of its 2 by 2 each frame, the same in all of them, so the
+// The picture's pixel a traced pixel traces from: another of its footprint each frame, the same in all of them, so the
 // blend over frames sees every one.
 public uint2 GetTracedPixel(FrameConstants frame, uint2 traced)
 {
-    uint2 shift = uint2(GetRandom(uint2(0u), frame.frameIndex, 0u).xy * float(TracedScale));
-    return min(traced * TracedScale + shift, uint2(frame.width, frame.height) - 1u);
+    float2 shift = GetRandom(uint2(0u), frame.frameIndex, 0u).xy;
+    return GetPicturePixel(frame, traced, GetGIConstants().tracedSize, shift);
 }
 
 // The traced pixel a pass averages as sample i of count around a traced pixel: a Hammersley set shifted at random per

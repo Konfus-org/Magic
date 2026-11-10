@@ -15,17 +15,19 @@ To use it, list `GlobalIllumination` in a project's `.magic` file with a gem tha
   probe blends them into the light it holds from each direction and how far it sees, and moves away from a surface it
   is too near. A ray reads the material it lands on averaged over its whole texture, with no specular of its own, so a
   metal reflects black.
-- A surface's diffuse light from around it is traced, in place of the open sky's: each frame two rays from one pixel
-  of each 2 by 2, reaching 10 m, each lit where it lands by one light picked at random and by the probes, and the
-  probes' light near the pixel that see it where it lands on nothing. It is smoothed over neighbours and over frames,
-  then blurred across the surface where it is still grainy. So shadowed places get the light that bounces into them, a
-  closed room none of the sky's, the base of what stands on the ground darkens and a lit wall tints what is near it.
-  The renderer's `indirectDiffuse` debug view shows the light it gives a white surface.
-- A surface with a roughness of 0.6 or less reflects what its rays find: one ray from a pixel of each 2 by 2 a frame,
-  along a direction its roughness spreads, lit where it lands by one light picked at random and by the probes, or the
-  sky where it lands nowhere. A frame's rays are resolved over their neighbours and blended with the frames before
-  where the surface, or what it reflects, was, so a mirror is sharp and a rough surface blurred. The renderer's
-  `reflections` debug view shows what is traced.
+- A surface's diffuse light from around it is traced, in place of the open sky's: each frame two rays from one pixel of
+  each traced pixel's footprint, reaching 10 m, each lit where it lands by one light picked at random and by the probes,
+  and the probes' light near the pixel that see it where it lands on nothing. It is smoothed over neighbours and over
+  frames, then blurred across the surface where it is still grainy. So shadowed places get the light that bounces into
+  them, a closed room none of the sky's, the base of what stands on the ground darkens and a lit wall tints what is near
+  it. The renderer's `indirectDiffuse` debug view shows the light it gives a white surface.
+- A surface with a roughness of 0.6 or less reflects what its rays find: one ray from a pixel of each traced pixel's
+  footprint a frame, along a direction its roughness spreads, lit where it lands by one light picked at random and by
+  the probes, or the sky where it lands nowhere. A frame's rays are resolved over their neighbours and blended with the
+  frames before where the surface, or what it reflects, was, so a mirror is sharp and a rough surface blurred. The
+  renderer's `reflections` debug view shows what is traced.
+- The diffuse light and the reflections are traced at `Rendering.IndirectScale` of the picture's size along each
+  side, and read back at the picture's size along its surfaces. `set Rendering.IndirectScale 0.5` sets it live.
 - A domain loading waits for the passes to be built, and what was traced of the world before is forgotten.
 
 ## How it works
@@ -37,7 +39,7 @@ To use it, list `GlobalIllumination` in a project's `.magic` file with a gem tha
   ([Shaders](../../../Resources/Shaders/README.md)). Each pass reads the frame's buffer, which holds the indirect light,
   as its header's x, and the gem's own constants as its y.
   - `UpdateProbes` brings the probes' light up to date.
-  - `Scene/Traced` is what the light traced at half the picture's size shares: the gem's constants, which pixel
+  - `Scene/Traced` is what the light traced at a part of the picture's size shares: the gem's constants, which pixel
     traces, how a pass averages its neighbours, and its history.
 - Parts of the traced diffuse light and the traced reflections are adapted from another engine under the MIT
   licence; `THIRD-PARTY-NOTICES.md` holds it.

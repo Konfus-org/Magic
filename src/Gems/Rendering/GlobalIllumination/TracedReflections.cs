@@ -6,7 +6,7 @@ using Magic.Utils;
 namespace Magic.GlobalIllumination;
 
 /// <summary>
-/// A frame's traced reflections, at half the view's size: the rays' light and their directions, resolved over the
+/// A frame's traced reflections, at the traced size: the rays' light and their directions, resolved over the
 /// neighbours with the farthest ray that counts, and blended with the history.
 /// </summary>
 internal readonly record struct TracedReflectionBuffers(
@@ -29,9 +29,9 @@ internal readonly record struct TracedReflectionBuffers(
 }
 
 /// <summary>
-/// On a GPU that traces rays, what each smooth surface reflects: a ray from a pixel of each 2 by 2 along a direction
-/// its specular reflects the view into, lit where it lands by a light and the probes, or the sky where it lands
-/// nowhere; resolved over neighbours and blended over frames, into the light shading reads.
+/// On a GPU that traces rays, what each smooth surface reflects: a ray from a pixel of each traced pixel's footprint
+/// along a direction its specular reflects the view into, lit where it lands by a light and the probes, or the sky
+/// where it lands nowhere; resolved over neighbours and blended over frames, into the light shading reads.
 /// </summary>
 internal sealed class TracedReflections(AssetManager assets)
 {
@@ -61,7 +61,7 @@ internal sealed class TracedReflections(AssetManager assets)
     public ImmutableArray<ShaderEntry> Shaders => [_traceShader, _resolveShader, _blendShader];
 
     /// <summary>
-    /// The textures asked for at half the view's size; the blended light is the indirect specular light shading reads.
+    /// The textures asked for at the traced size; the blended light is the indirect specular light shading reads.
     /// </summary>
     public static Result<TracedReflectionBuffers> Prepare(in GIView view, uint frameIndex)
     {
