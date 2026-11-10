@@ -34,6 +34,8 @@ The scripts run under `pwsh` and Windows PowerShell ([Tools](tools/README.md)).
   screenshots each and prints the paths.
 - **Screenshot:** `tools/Scripts/Screenshot.ps1` runs a project until its world loads and prints the screenshot's
   path. Use `-Domains`, `-Project` and `-Commands` to reach what the samples don't show.
+- **Window name:** the scripts title each window they open with the worktree's branch, the session's name. Start a
+  windowed run of your own with the console line `name <branch>`.
 - **Claim:** `tools/Scripts/Claim.ps1 -Slice <title> -Scope <paths>` tells every other session what the slice will
   change, and prints any overlap with theirs ([Worktrees](#worktrees)).
 - **The user's review:** `plannotator review` opens the change as a diff in the user's browser and returns when
@@ -215,8 +217,8 @@ Agents tend to over-build. Less is more: the best change often removes more code
 
 - **Prefer removing code to adding it.** Match the surrounding style. No abstraction before a second real use.
 - **Project conventions first, then .NET's** (the Framework Design Guidelines).
-- **One responsibility each.** Split interfaces by what their user needs. Gems depend on Core's interfaces, never on
-  each other.
+- **One responsibility each.** Split interfaces by what their user needs. Gems may depend on each other and reference one
+  another; a gem throws when a dependency it needs isn't there.
 - **Stateless where possible.** State that must exist follows [Code Standards](docs/CODE_STANDARDS.md#how-we-write-code).
 - **Data-oriented, explicit data flow.** Only the inheritance, interfaces and indirection the problem needs.
 - **Dependencies come from NuGet.** Never vendor or copy external code.

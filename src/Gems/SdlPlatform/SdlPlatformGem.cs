@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Magic.Assets;
 using Magic.Debugging;
+using Magic.Events;
 using Magic.Input;
 using Magic.Platform;
 using Magic.Projects;
@@ -32,9 +33,26 @@ namespace Magic.SdlPlatform;
 /// </summary>
 public sealed class SdlPlatformGem : IGem, IPlatform, IWindow, IClipboard, IInput, IDisposable
 {
-    private const int InitialWidth = 1280;
+    /// <summary>
+    /// The window's size out of fullscreen or maximized until it is first resized.
+    /// </summary>
+    private const int WindowedWidth = 1280;
 
-    private const int InitialHeight = 720;
+    private const int WindowedHeight = 720;
+
+    /// <summary>
+    /// How the window opens: a release fills the display without a border, any other build is a maximized window.
+    /// </summary>
+#if DEBUG
+    private const ulong StartMode = SDL_WINDOW_MAXIMIZED;
+#else
+    private const ulong StartMode = SDL_WINDOW_FULLSCREEN;
+#endif
+
+    /// <summary>
+    /// <c>set SdlPlatform.windowMode=fullscreen|maximized|windowed</c> shows the window that way.
+    /// </summary>
+    private const string WindowModeSetting = "SdlPlatform.windowMode";
 
     /// <summary>
     /// The longest a pump waits for the OS's next event, so what was handed to the platform thread is never kept longer.
@@ -136,10 +154,13 @@ public sealed class SdlPlatformGem : IGem, IPlatform, IWindow, IClipboard, IInpu
 
         // macOS draws through a Metal layer, which the window must be opened for; elsewhere the OS's window is enough.
         ulong flags =
-            SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | (OperatingSystem.IsMacOS() ? SDL_WINDOW_METAL : 0);
+            StartMode
+            | SDL_WINDOW_RESIZABLE
+            | SDL_WINDOW_HIGH_PIXEL_DENSITY
+            | (OperatingSystem.IsMacOS() ? SDL_WINDOW_METAL : 0);
         fixed (byte* title = CString.ToBytes(_title))
         {
-            _window = SDL_CreateWindow(title, InitialWidth, InitialHeight, flags);
+            _window = SDL_CreateWindow(title, WindowedWidth, WindowedHeight, flags);
         }
 
         if (_window == null)
@@ -296,10 +317,21 @@ public sealed class SdlPlatformGem : IGem, IPlatform, IWindow, IClipboard, IInpu
 
     /// <summary>
     /// Makes input this frame's: what happened last frame is over, SDL's events since are applied, and sticks and
-    /// triggers are read as they stand now.
+    /// triggers are read as they stand now. A window mode set is handed to the platform thread.
     /// </summary>
     public unsafe void Update(in Frame frame)
     {
+        foreach (SetCliCommand setting in frame.Events.Get<SetCliCommand>())
+        {
+            if (setting.Key != WindowModeSetting)
+                continue;
+
+            if (setting.Value is not ("fullscreen" or "maximized" or "windowed"))
+                Log.Error($"{setting.Key} takes fullscreen, maximized or windowed, not '{setting.Value}'.");
+            else if (!_app.IsHeadless)
+                ShowModeAsync(setting.Value).FireAndForget();
+        }
+
         // What happened last frame is over: pressed and released clear, and a mouse's motion and wheel go back to 0.
         for (int i = 0; i < _devices.Count; i++)
         {
@@ -685,6 +717,30 @@ public sealed class SdlPlatformGem : IGem, IPlatform, IWindow, IClipboard, IInpu
 
             SDL_DestroySurface(surface);
         }
+    }
+
+    /// <summary>
+    /// Shows the window as <paramref name="mode"/> says on the platform thread, unless the run ended meanwhile.
+    /// </summary>
+    private async Task ShowModeAsync(string mode)
+    {
+        CancellationToken lifetime = _app.Lifetime;
+        await _threads.Enter(EngineThread.Platform);
+        if (!lifetime.IsCancellationRequested)
+            SetMode(mode);
+    }
+
+    /// <summary>
+    /// Fullscreen fills the display without a border; maximized and windowed leave fullscreen first, as a fullscreen
+    /// window neither maximizes nor restores. Windowed returns the window to its last size.
+    /// </summary>
+    private unsafe void SetMode(string mode)
+    {
+        SDL_SetWindowFullscreen(_window, mode == "fullscreen");
+        if (mode == "maximized")
+            SDL_MaximizeWindow(_window);
+        else if (mode == "windowed")
+            SDL_RestoreWindow(_window);
     }
 
     /// <summary>

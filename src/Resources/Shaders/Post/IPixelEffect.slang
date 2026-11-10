@@ -6,46 +6,41 @@
 // before the exposure, exposed after it, and ready for the screen after the tonemap.
 //
 // An effect that needs more than the picture keeps a target of its own: the struct declares how many levels it has,
-// as `static const uint Levels = 2;` does, each half the size of the one before, the first the picture's. Before
-// Apply, Level runs over every texel of each level in turn, the first first; Apply then reads them. The target lasts
-// from frame to frame, two of them swapping, so last frame's is the effect's history.
+// as `static const uint Levels = 2;` does, each half the size of the one before, the first the size the effect works
+// at. Before Apply, Level runs over every texel of each level in turn, the first first; Apply then reads them. The
+// target lasts from frame to frame, two of them swapping, so last frame's is the effect's history.
 //
 // An effect that blends frames declares `static const uint Jitters = 1;`: while it runs, the camera draws each frame
-// through a different point in each pixel.
+// through a different point in each pixel. It also upscales: it works at the output's size, the window's, which the
+// picture may be smaller than, and so does every effect after it. The depth and the velocity stay the size the view is
+// drawn at, so an effect finds their texel under a pixel from uv. One that keeps the picture's size declares
+// `static const uint NoUpscaling = 1;`.
 //
-// An effect that asks what lies along a ray through the world, such as whether a point in the air sees the sun, asks
-// WorldRays, which the renderer the effects run in supplies, and declares `static const uint Rays = 1;`: on a GPU that
-// doesn't trace rays, it doesn't run.
+// An effect reads the frame, such as its time and the camera, with Core/Frame's GetFrame, and the sun and the sky
+// with Scene/Lights' GetLights. One that asks what lies along a ray through the world, such as whether a point in
+// the air sees the sun, asks Scene/Shadows' GetTransmittance, and declares `static const uint Rays = 1;`: on a GPU
+// that doesn't trace rays, it doesn't run.
 module "Post/IPixelEffect";
 
 import Core.Heap;
 
 public struct PixelEffectInputs
 {
-    // The pixel's place in what the pass writes, 0 to 1 from the top left, and in texels: the picture, or the level of
-    // the effect's target that Level fills.
+    // The pixel's place in what the pass writes, 0 to 1 from the top left, and in texels: the picture at the size the
+    // effect works at, or the level of the effect's target that Level fills.
     public float2 uv;
     public uint2 pixel;
     public uint2 size;
     public uint level;
-    // Seconds the run has taken, for an effect that moves, and since the frame before, for one that changes over time.
-    public float time;
-    public float deltaSec;
-    // The pixel's surface relative to the camera, in metres, or far along its ray where nothing was drawn, its depth
-    // along the camera's view, 0 where nothing was drawn, and where the camera is in the world.
+    // The pixel's opaque surface relative to the camera, in metres, or far along its ray where nothing was drawn, its
+    // depth along the camera's view, 0 where nothing was drawn.
     public float3 position;
     public float viewDepth;
-    public float3 cameraPosition;
-    // Towards the sun, unit, and the sun's and the sky's light, before the exposure.
-    public float3 sunDirection;
-    public float3 sunRadiance;
-    public float3 skyRadiance;
-    // Where the sun is in the picture, 0 to 1 from the top left and past that off its edges, and the cosine between the
-    // camera's view and the sun: 1 straight ahead, 0 or less beside or behind the camera, where sunUv means nothing.
-    public float2 sunUv;
-    public float sunFacing;
-    // The pixel's surface: its unit normal in the world, its base colour, its roughness and its metalness, all 0 where
-    // nothing was drawn.
+    // The nearest surface along the pixel's ray relative to the camera, in metres: the nearest pane of glass in front
+    // of position where there is one, else position.
+    public float3 nearestPosition;
+    // The pixel's opaque surface: its unit normal in the world, its base colour, its roughness and its metalness, all 0
+    // where nothing was drawn.
     public float3 normal;
     public float3 baseColor;
     public float roughness;
@@ -63,17 +58,6 @@ public struct PixelEffectInputs
     public TextureRef velocity;
     public SamplerRef sampler;
 }
-
-// What a ray through the world finds, as the renderer sees the world.
-public interface IWorldRays
-{
-    // How much of the light along a ray from origin, in the world, up to a distance gets through, by colour: all where
-    // nothing is in the way, none past what is opaque, and through glass what its clarity and colour let through.
-    static float3 GetTransmittance(float3 origin, float3 direction, float distance);
-}
-
-// The renderer's world as rays see it, which its effect pass names with `export struct WorldRays : IWorldRays = ...;`.
-public extern struct WorldRays : IWorldRays;
 
 public interface IPixelEffect
 {

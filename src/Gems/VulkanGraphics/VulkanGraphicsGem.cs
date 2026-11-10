@@ -2,9 +2,9 @@ using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Debugging;
+using Magic.Graphics;
 using Magic.Platform;
 using Magic.Projects;
-using Magic.Rendering;
 using Magic.Threading;
 using Magic.Utils;
 using Vortice.Vulkan;
@@ -115,8 +115,20 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
             static (gem, texture) => gem.Destroy(texture)
         );
 
-    public Result<GpuBuffer> GetBuffer(in BufferDescription description) =>
-        GetNamed(
+    public Result<GpuBuffer> GetBuffer(in BufferDescription description)
+    {
+        ref Named<BufferDescription, GpuBuffer> old = ref CollectionsMarshal.GetValueRefOrNullRef(
+            _namedBuffers,
+            description.Name
+        );
+        bool isResized =
+            !Unsafe.IsNullRef(ref old)
+            && old.Description.Bytes != description.Bytes
+            && old.Description with { Bytes = description.Bytes } == description;
+        if (isResized)
+            return Resize(ref old, description);
+
+        return GetNamed(
             _namedBuffers,
             description.Name,
             description,
@@ -124,6 +136,7 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
             static (gem, made) => gem._resources.CreateBuffer(made),
             static (gem, buffer) => gem.Destroy(buffer)
         );
+    }
 
     public Result<GpuAcceleration> GetAcceleration(in BottomLevelDescription description) =>
         GetNamed(
@@ -262,7 +275,64 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     private void BeginFrame()
     {
         _frames.Begin();
+        Compact();
         WindowTarget = _swapchain?.Acquire(_frames.Current.Acquired) ?? GpuTexture.None;
+    }
+
+    /// <summary>
+    /// Each bottom-level structure a finished frame built, copied into one of the size it compacts to at the start of
+    /// this frame's commands. Its name takes the copy, and the built one dies with its scratch once this frame has run.
+    /// The gem that asks for it gets the copy's address this frame and builds the instances over it again, before
+    /// anything traces the copy.
+    /// </summary>
+    private void Compact()
+    {
+        foreach ((VulkanAcceleration built, ulong bytes) in _frames.Compactable)
+        {
+            // Destroyed, or made again, since it was built.
+            ref Named<BottomLevelDescription, GpuAcceleration> named = ref CollectionsMarshal.GetValueRefOrNullRef(
+                _namedBottomLevels,
+                built.Name
+            );
+            if (Unsafe.IsNullRef(ref named) || !ReferenceEquals(_resources.Accelerations[named.Made.Id], built))
+                continue;
+
+            Result<GpuAcceleration> compacted = _resources.Compact(_frames.Current.CommandBuffer, built, bytes);
+            if (!compacted.Ok)
+            {
+                Log.Warn($"{built.Name} keeps its build's size: {compacted.Error}");
+                continue;
+            }
+
+            Destroy(named.Made);
+            named.Made = compacted.Value;
+        }
+
+        _frames.Compactable.Clear();
+    }
+
+    /// <summary>
+    /// The buffer under the description's name moved into one of its new size, as much of what it held as fits copied
+    /// across at the start of this frame's commands, before any pass; the name takes the new one, and the old one dies
+    /// once this frame has run.
+    /// </summary>
+    private Result<GpuBuffer> Resize(ref Named<BufferDescription, GpuBuffer> named, in BufferDescription description)
+    {
+        ThrowIfNotOnRender();
+        Result<GpuBuffer> created = _resources.CreateBuffer(description);
+        if (!created.Ok)
+            return Result.Failure($"the {description.Name} was not made: {created.Error}");
+
+        if (_resources.Buffers[named.Made.Id] is { } from && _resources.Buffers[created.Value.Id] is { } to)
+        {
+            ulong bytes = (ulong)Math.Min(named.Description.Bytes, description.Bytes);
+            _recorder.CopyBuffer(_frames.Current.CommandBuffer, from, to, bytes);
+        }
+
+        Destroy(named.Made);
+        named = new Named<BufferDescription, GpuBuffer>(description, created.Value, _frames.Current.Serial);
+
+        return created;
     }
 
     /// <summary>

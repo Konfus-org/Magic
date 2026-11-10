@@ -1,0 +1,65 @@
+using System.Collections.Immutable;
+using System.Numerics;
+using Magic.Assets;
+using Magic.GpuWorld;
+
+namespace Magic.ClusteredGeometry;
+
+/// <summary>
+/// What the cluster renderer draws a <see cref="Model"/> as, made from it once and cached under its version: its
+/// cluster hierarchy, the indices of every cluster's triangles, the vertices the levels above the leaves draw, and the
+/// model's impostor. An index under <see cref="ModelVertexCount"/> is a vertex of the model's own, as the world's gem
+/// holds them; one at or over it is <see cref="Vertices"/>' at the index less that count. A cluster's
+/// <see cref="GpuCluster.IndexOffset"/> is into <see cref="Indices"/>; the renderer adds where it put them in the pools.
+/// </summary>
+internal sealed class ModelClusters
+{
+    /// <summary>
+    /// Views across and down an impostor atlas, on an octahedral grid over the whole sphere.
+    /// </summary>
+    public const int ImpostorViews = 12;
+
+    /// <summary>
+    /// Texels a side of one view of an impostor atlas.
+    /// </summary>
+    public const int ImpostorTile = 64;
+
+    public const int ImpostorSize = ImpostorViews * ImpostorTile;
+
+    /// <summary>
+    /// How many vertices the model has of its own, every mesh's one after another: what a leaf draws.
+    /// </summary>
+    public required int ModelVertexCount { get; init; }
+
+    /// <summary>
+    /// The copies of the model's vertices that each level above the leaves draws, with normals of its own triangles.
+    /// </summary>
+    public required ImmutableArray<GpuVertex> Vertices { get; init; }
+
+    public required ImmutableArray<uint> Indices { get; init; }
+
+    /// <summary>
+    /// Every cluster of every level, each mesh's leaves first.
+    /// </summary>
+    public required ImmutableArray<GpuCluster> Clusters { get; init; }
+
+    /// <summary>
+    /// The model's octahedral impostor atlas, <see cref="ImpostorViews"/> by <see cref="ImpostorViews"/> views of
+    /// <see cref="ImpostorTile"/> texels a side, row by row as RGBA16F: each texel the octahedral normal, the depth from
+    /// the view's front plane over the sphere's diameter, and the material slot plus one, 0 where the view sees nothing.
+    /// </summary>
+    public required ImmutableArray<Half> Impostor { get; init; }
+
+    /// <summary>
+    /// The texture coordinates of the surface each texel of <see cref="Impostor"/> shows, at the same texels, as
+    /// RG16F; empty with it.
+    /// </summary>
+    public required ImmutableArray<Half> ImpostorUv { get; init; }
+
+    /// <summary>
+    /// The box around the whole model, in its frame: what an impostor's quad is fitted to.
+    /// </summary>
+    public required Vector3 BoundsMin { get; init; }
+
+    public required Vector3 BoundsMax { get; init; }
+}

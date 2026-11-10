@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A gem: Magic loads it from Gems/ClusteredGeometry/ClusteredGeometry.dll when a project lists ClusteredGeometry. -->
+  <PropertyGroup>
+    <!-- Shown beside the gem as Magic starts it. -->
+    <Description>Draws every model as a hierarchy of clusters, GPU-driven, and as an impostor far away: culled, drawn into a visibility buffer and resolved by material into the view's GBuffer and glass.</Description>
+    <Version>1.0.0</Version>
+    <Authors>Konfus</Authors>
+    <!-- Copies the gem's own NuGet dependencies next to it, where its load context finds them. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <!-- meshoptimizer is a C API over arrays. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The tests drive the cluster builder directly. -->
+    <InternalsVisibleTo Include="ClusteredGeometry.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <NativeLibrary
+      Include="meshoptimizer"
+      Repository="https://github.com/zeux/meshoptimizer"
+      Tag="v1.3"
+      CMakeOptions="-DMESHOPT_BUILD_SHARED_LIBS=ON;-DMESHOPT_INSTALL=ON"
+      Headers="src/meshoptimizer.h"
+      IncludePath="src"
+    />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its interfaces, and
+         the world's gem a project lists beside it, whose models it clusters and draws. -->
+    <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" Private="false" />
+    <ProjectReference Include="../GpuWorld/GpuWorld.csproj" Private="false" />
+  </ItemGroup>
+</Project>

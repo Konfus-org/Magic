@@ -23,6 +23,8 @@ Core and the gems publish what they measure on their own `System.Diagnostics.Met
 gem on `Magic.Gems.<Gem>`, its instruments named `magic.gems.<gem_snake_case>.*`, time in seconds and memory in bytes.
 A gem's meter is made with it and disposed with it. Record a gauge each frame rather than make an observable one,
 and time work into a histogram of seconds with its `Start` and `RecordSince`, which do nothing while nothing listens.
+Core's console command `stats [category] <seconds>` also logs them, as text, every so many seconds, with or without
+this gem: `stats gpu 30` logs those with gpu in their name.
 
 - Core times each gem's hooks and its own steps; a gem needs nothing more to show under CPU.
 - An instrument named `gpu.*` shows under GPU, with its tags' values as rows of a fold of its own, and the meter's tags

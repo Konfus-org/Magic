@@ -12,6 +12,10 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
+    <!-- The tests drive the render steps' order directly. -->
+    <InternalsVisibleTo Include="Magic.Core.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- Magic's own: no gem compiles against them or inherits them. -->
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" PrivateAssets="all" />
     <PackageReference Include="System.CommandLine" PrivateAssets="all" />

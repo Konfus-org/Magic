@@ -60,6 +60,12 @@ internal sealed record AssetType(Type Type, AssetImportRun Import, AssetBuiltInR
 internal readonly record struct Made(Result<object> Value, ulong Version, ImmutableArray<ulong> Handles = default);
 
 /// <summary>
+/// What a load of an asset made, held only as long as something else holds it, so the GC frees it once nothing does; and,
+/// as <see cref="Made"/> has them, its version and the ids of the handles it holds.
+/// </summary>
+internal sealed record KeptAsset(WeakReference<object> Value, ulong Version, ImmutableArray<ulong> Handles);
+
+/// <summary>
 /// One asset asked for, and where it is in being loaded.
 /// </summary>
 internal sealed record AssetEntry
@@ -74,12 +80,13 @@ internal sealed record AssetEntry
     public required AssetStage Stage { get; init; }
 
     /// <summary>
-    /// What it made last, of those that worked: what every caller gets, a failed reload included.
+    /// What it made last, of those that worked: what every caller gets, a failed reload included, while something holds
+    /// it.
     /// </summary>
-    public Made? Current { get; init; }
+    public KeptAsset? Current { get; init; }
 
     /// <summary>
-    /// Why it failed, when it has never loaded; kept until its file changes.
+    /// Why it failed, when nothing it made before is held; kept until its file changes.
     /// </summary>
     public string Error { get; init; } = string.Empty;
 
@@ -111,9 +118,23 @@ internal sealed record AssetEntry
     public ImmutableArray<TaskCompletionSource<Made>> Waiting { get; init; } = [];
 
     /// <summary>
-    /// What a caller gets once it has loaded.
+    /// What it made last, while something holds it; null when it failed, or what it made was let go.
     /// </summary>
-    public Made Outcome => Current ?? new Made(Result.Failure(Error), 0);
+    public object? GetValue() => Current is { } kept && kept.Value.TryGetTarget(out object? value) ? value : null;
+
+    /// <summary>
+    /// What a caller gets once it has loaded: what it made, or why it failed; null when what it made was let go, so it is
+    /// read again.
+    /// </summary>
+    public Made? GetOutcome()
+    {
+        if (Current is null)
+            return new Made(Result.Failure(Error), 0);
+
+        return GetValue() is { } value
+            ? new Made(Result.Success<object>(value), Current.Version, Current.Handles)
+            : null;
+    }
 }
 
 /// <summary>

@@ -41,4 +41,7 @@ public static class Metrics
     public const string StepTag = "magic.core.step";
 
     internal static Meter Meter { get; } = new("Magic.Core");
+
+    internal static Histogram<double> HookDurations { get; } =
+        Meter.CreateHistogram<double>(HookDuration, "s", "One gem's hook.");
 }

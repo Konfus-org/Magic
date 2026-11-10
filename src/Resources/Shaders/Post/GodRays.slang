@@ -5,7 +5,9 @@
 // technique from Mitchell, "Volumetric Light Scattering as a Post-Process", GPU Gems 3, 2007.
 module "Post/GodRays";
 
+import Core.Frame;
 import Post.IPixelEffect;
+import Scene.Lights;
 
 // The most reads along a ray, which keeps the blur's pass short.
 static const float MostSamples = 64.0;
@@ -26,18 +28,20 @@ public struct GodRays : IPixelEffect
 
     public override float4 Level(PixelEffectInputs inputs)
     {
-        if (inputs.sunFacing <= 0.0)
+        Lights lights = GetLights();
+        float3 sun = GetSunOnScreen(GetFrame(), lights);
+        if (sun.z <= 0.0)
             return float4(0.0);
 
         if (inputs.level == 0u)
         {
             bool isSky = inputs.viewDepth == 0.0;
-            float cosine = saturate(dot(normalize(inputs.position), inputs.sunDirection));
-            return float4(isSky ? inputs.sunRadiance * pow(cosine, Glow) : float3(0.0), 1.0);
+            float cosine = saturate(dot(normalize(inputs.position), lights.sunDirection.xyz));
+            return float4(isSky ? lights.sunIlluminance.rgb * pow(cosine, Glow) : float3(0.0), 1.0);
         }
 
         float count = clamp(round(samples), 1.0, MostSamples);
-        float2 step = (inputs.sunUv - inputs.uv) / count;
+        float2 step = (sun.xy - inputs.uv) / count;
         float2 uv = inputs.uv;
         float weight = 1.0;
         float3 sum = float3(0.0);
@@ -53,10 +57,11 @@ public struct GodRays : IPixelEffect
 
     public float3 Apply(float3 color, PixelEffectInputs inputs)
     {
-        if (inputs.sunFacing <= 0.0)
+        float3 sun = GetSunOnScreen(GetFrame(), GetLights());
+        if (sun.z <= 0.0)
             return color;
 
-        float2 offPicture = max(max(-inputs.sunUv, inputs.sunUv - 1.0), 0.0);
+        float2 offPicture = max(max(-sun.xy, sun.xy - 1.0), 0.0);
         float fade = saturate(1.0 - max(offPicture.x, offPicture.y) / OffPictureFade);
         return color + intensity * fade * inputs.target.SampleLevel(inputs.sampler, inputs.uv, 1.0).rgb;
     }

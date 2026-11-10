@@ -1,7 +1,7 @@
 using Magic.Assets;
 using Magic.Debugging;
+using Magic.Graphics;
 using Magic.Projects;
-using Magic.Rendering;
 using Magic.Threading;
 using Magic.Utils;
 
@@ -15,7 +15,7 @@ namespace Magic.GpuChecks;
 /// frame while the check runs and records the dispatch once the entry is built. It is public because nothing in its
 /// assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class GpuChecksGem : IGem, IDisposable
+public sealed class GpuChecksGem : IGem, IRender, IDisposable
 {
     private const int Size = 256;
     private const int Bytes = Size * Size * 4;
@@ -102,10 +102,10 @@ public sealed class GpuChecksGem : IGem, IDisposable
         }
 
         graph
-            .Compute("Fill gradient", fill, new GpuConstants(gradient.Value.Id, Size, Size))
+            .Compute("Fill gradient", fill, new GpuConstants(gradient.Value.Id, Size, Size), RenderStage.Post)
             .Writes(gradient.Value)
             .DispatchOver(Size, Size);
-        graph.ReadBack(gradient.Value, readback.Value);
+        graph.ReadBack(gradient.Value, readback.Value, RenderStage.Post);
         _recorded.SetResult(readback);
     }
 

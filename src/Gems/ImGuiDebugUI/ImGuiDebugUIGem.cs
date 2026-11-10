@@ -8,10 +8,10 @@ using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
+using Magic.Graphics;
 using Magic.Input;
 using Magic.Platform;
 using Magic.Projects;
-using Magic.Rendering;
 using Magic.Threading;
 using Magic.Utils;
 using static Magic.ImGuiDebugUI.ImDrawFlags_;
@@ -48,7 +48,7 @@ namespace Magic.ImGuiDebugUI;
 /// nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </para>
 /// </summary>
-public sealed class ImGuiDebugUIGem : IGem, IDebugUI, ILogSink, IDisposable
+public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDisposable
 {
     private const int InputBytes = 256;
 

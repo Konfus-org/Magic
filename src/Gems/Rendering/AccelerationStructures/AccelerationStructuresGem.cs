@@ -1,0 +1,197 @@
+using System.Numerics;
+using Magic.Assets;
+using Magic.Debugging;
+using Magic.GpuWorld;
+using Magic.Graphics;
+using Magic.Projects;
+using Magic.Utils;
+
+namespace Magic.AccelerationStructures;
+
+/// <summary>
+/// What the acceleration structures take each frame: the world as the GPU holds it, and its instances as the CPU does.
+/// </summary>
+public readonly record struct AccelerationStructuresInput(GpuView View, GpuInstances Instances);
+
+/// <summary>
+/// The world as rays see it, on a GPU that traces rays: the top-level acceleration structure over the instances, an
+/// instance row for every instance whose model has its triangles' structure, built again when the instances change,
+/// what a ray query traces through; and the hit materials table, each material row averaged by a pass of its material
+/// shader each frame, what a ray hit reads its surface from. Each frame it writes them into the frame's buffer and makes
+/// the frame's <see cref="TracedWorld"/>; on a GPU that doesn't trace rays it makes none. The instances, their models'
+/// structures and the material rows are the world's gem's, taken as its <see cref="GpuInstances"/>. It is public
+/// because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
+/// </summary>
+public sealed class AccelerationStructuresGem(AssetManager assets)
+    : IGem,
+        IRender<AccelerationStructuresInput, TracedWorld>
+{
+    private readonly ShaderEntry _averageShader = new()
+    {
+        Module = assets.Find<Shader>("Shaders/AverageMaterials.slang"),
+        Name = "AverageMaterials",
+        Stage = ShaderStage.Compute,
+    };
+
+    /// <summary>
+    /// The average entry for each material shader the world's gem has numbered, in their order.
+    /// </summary>
+    private readonly List<ShaderEntry> _averageShaders = [];
+
+    /// <summary>
+    /// The instance table's version the last build was of.
+    /// </summary>
+    private long _builtVersion;
+
+    /// <summary>
+    /// The world as rays see it this frame, built again when the instances changed, written into the frame's buffer;
+    /// none on a GPU that doesn't trace rays, or while what it is built into is not made.
+    /// </summary>
+    public TracedWorld? Render(in Frame frame, RenderGraph graph, in AccelerationStructuresInput input)
+    {
+        if (!graph.Features.HasRayQuery)
+            return null;
+
+        GpuView view = input.View;
+        GpuInstances world = input.Instances;
+        Result<(GpuBuffer Instances, GpuAcceleration Structure, GpuBuffer HitMaterials)> made = Prepare(
+            graph,
+            view.InstanceCapacity
+        );
+        if (!made.Ok)
+        {
+            Log.Error($"The world's acceleration structure is not made: {made.Error}");
+
+            return null;
+        }
+
+        // How many instances rays see, those whose model has its triangles' structure, and the box over their world
+        // boxes; min over max where none do.
+        ReadOnlySpan<InstanceExtra> extras = world.Extras.Span;
+        int count = 0;
+        (Vector3 Min, Vector3 Max) box = (new Vector3(float.MaxValue), new Vector3(float.MinValue));
+        foreach (InstanceExtra extra in extras)
+        {
+            if (extra.Acceleration == 0)
+                continue;
+
+            count++;
+            box = (Vector3.Min(box.Min, extra.Box.Min), Vector3.Max(box.Max, extra.Box.Max));
+        }
+
+        // Built again whenever the rows changed since the last build; a model's arrival builds every row again.
+        (GpuBuffer instances, GpuAcceleration structure, GpuBuffer hitMaterials) = made.Value;
+        if (world.Version != _builtVersion)
+        {
+            Build(graph, instances, structure, world.Rows.Span, extras, count);
+            _builtVersion = world.Version;
+        }
+
+        RecordHitMaterials(graph, view, hitMaterials, world.MaterialCount);
+        GpuAcceleration acceleration = count == 0 ? GpuAcceleration.None : structure;
+        GpuTracedWorld traced = new() { Acceleration = acceleration.Id, HitMaterials = hitMaterials.Id };
+        graph.Upload(view.Frame, [traced], GpuTracedWorld.Offset);
+
+        return new TracedWorld(acceleration, hitMaterials, box);
+    }
+
+    /// <summary>
+    /// The structure over at most <paramref name="capacity"/> instances and its instances asked for, every frame, so the
+    /// structure built last stays, and the hit materials table.
+    /// </summary>
+    private static Result<(GpuBuffer Instances, GpuAcceleration Structure, GpuBuffer HitMaterials)> Prepare(
+        RenderGraph graph,
+        int capacity
+    )
+    {
+        Result<GpuBuffer> hitMaterials = graph.Buffer(SharedResources.HitMaterials);
+        if (!hitMaterials.Ok)
+            return Result.Failure(hitMaterials.Error);
+
+        Result<GpuBuffer> instances = graph.Buffer(
+            GpuDescriptions.GetBuffer("Acceleration instances", (long)capacity * GpuAccelerationInstance.Bytes)
+        );
+        if (!instances.Ok)
+            return Result.Failure(instances.Error);
+
+        Result<GpuAcceleration> acceleration = graph.Acceleration(
+            new TopLevelDescription
+            {
+                MaxInstances = capacity,
+                Instances = instances.Value,
+                Name = "World acceleration",
+            }
+        );
+        if (!acceleration.Ok)
+            return Result.Failure(acceleration.Error);
+
+        return Result.Success((instances.Value, acceleration.Value, hitMaterials.Value));
+    }
+
+    /// <summary>
+    /// The structure built again over the <paramref name="count"/> instances whose model has its triangles' structure,
+    /// their rows written straight into the frame's upload ring, in the frame's transfers, after the world's gem
+    /// uploaded the models' structures. None is built for no instance.
+    /// </summary>
+    private static void Build(
+        RenderGraph graph,
+        GpuBuffer instances,
+        GpuAcceleration structure,
+        ReadOnlySpan<GpuInstance> rows,
+        ReadOnlySpan<InstanceExtra> extras,
+        int count
+    )
+    {
+        if (count == 0)
+            return;
+
+        Span<GpuAccelerationInstance> written = graph.Upload<GpuAccelerationInstance>(instances, count);
+        int next = 0;
+        for (int i = 0; i < rows.Length; i++)
+        {
+            InstanceExtra extra = extras[i];
+            if (extra.Acceleration == 0)
+                continue;
+
+            Matrix4x4 world = rows[i].World;
+            written[next++] = new GpuAccelerationInstance
+            {
+                Row0 = new(world.M11, world.M21, world.M31, world.M41),
+                Row1 = new(world.M12, world.M22, world.M32, world.M42),
+                Row2 = new(world.M13, world.M23, world.M33, world.M43),
+                CustomIndexAndMask = (uint)i | (0xFFu << 24),
+                OffsetAndFlags = extra.MeshOffset | (GpuAccelerationInstance.FlagNoOpaque << 24),
+                Reference = extra.Acceleration,
+            };
+        }
+
+        graph.BuildAcceleration(structure, (uint)count);
+    }
+
+    /// <summary>
+    /// Each of the view's <paramref name="materialCount"/> material rows averaged into <paramref name="hitMaterials"/>,
+    /// a pass for each material shader, which fills the rows it draws.
+    /// </summary>
+    private void RecordHitMaterials(RenderGraph graph, in GpuView view, GpuBuffer hitMaterials, int materialCount)
+    {
+        for (int shader = _averageShaders.Count; shader < view.MaterialShaders.Count; shader++)
+        {
+            _averageShaders.Add(_averageShader with { TypeArguments = [view.MaterialShaders[shader]] });
+        }
+
+        for (int shader = 0; shader < _averageShaders.Count; shader++)
+        {
+            graph
+                .Compute(
+                    "Average materials",
+                    _averageShaders[shader],
+                    new GpuConstants(view.Frame.Id, hitMaterials.Id, (uint)shader, (uint)materialCount),
+                    RenderStage.Prepare
+                )
+                .Reads(view.Frame, view.Materials)
+                .Reads(view.HeapTextures.AsSpan())
+                .Writes(hitMaterials)
+                .DispatchOver(materialCount, 1);
+        }
+    }
+}

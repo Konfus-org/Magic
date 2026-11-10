@@ -27,9 +27,9 @@ internal readonly record struct DomainPlace(Handle<Prefab> Prefab, Transform At)
 internal readonly record struct PlacedPrefab(DomainPlace Place, Prefab Prefab);
 
 /// <summary>
-/// A domain and the prefabs it places, as they were read.
+/// A domain, as it was read, and the prefabs it places.
 /// </summary>
-internal readonly record struct DomainRead(Handle<Domain> Domain, ImmutableArray<PlacedPrefab> Prefabs);
+internal readonly record struct DomainRead(Handle<Domain> Domain, Domain Asset, ImmutableArray<PlacedPrefab> Prefabs);
 
 /// <summary>
 /// The game world: what is in it, the one place to load content into it, and the way to its entities. Every entity call
@@ -56,10 +56,10 @@ public sealed class World : IEcs, IDisposable
     private readonly SemaphoreSlim _turn = new(1, 1);
 
     /// <summary>
-    /// The prefabs each open domain placed, as they were read: what its entities are compared with, by a save and as the
-    /// domain opens again. Game thread.
+    /// Each open domain and the prefabs it placed, as they were read: what its entities are compared with, by a save and as
+    /// the domain opens again; held, so the assets read them again when their files change. Game thread.
     /// </summary>
-    private readonly Dictionary<Handle<Domain>, ImmutableArray<PlacedPrefab>> _read = [];
+    private readonly Dictionary<Handle<Domain>, DomainRead> _read = [];
 
     /// <summary>
     /// The ECS a gem provides, from when it is made until it goes; null while none does.
@@ -646,7 +646,7 @@ public sealed class World : IEcs, IDisposable
     private void Add(DomainRead domain)
     {
         ImmutableArray<Entity> coming = CreateEntities(GetEntities(domain));
-        _read[domain.Domain] = domain.Prefabs;
+        _read[domain.Domain] = domain;
         Domains = Domains.Add(domain.Domain);
         Log.Info($"Opened {GetName(domain.Domain)}: {coming.Length} entities.");
     }
@@ -737,8 +737,7 @@ public sealed class World : IEcs, IDisposable
     /// <summary>
     /// The domains open, with the prefabs each placed as they were read. Game thread.
     /// </summary>
-    private ImmutableArray<DomainRead> GetOpenDomains() =>
-        [.. Domains.Select(domain => new DomainRead(domain, _read.GetValueOrDefault(domain, [])))];
+    private ImmutableArray<DomainRead> GetOpenDomains() => [.. Domains.Select(domain => _read[domain])];
 
     private string GetName(Handle<Domain> domain) => _assets.GetPath(domain) ?? "a domain";
 
@@ -755,12 +754,11 @@ public sealed class World : IEcs, IDisposable
         if (!HasEcs)
             return Result.Failure("no gem the project lists provides the ECS.");
 
-        Result<ImmutableArray<PlacedPrefab>> read = await ReadDomainAsync(domain, progress, cancel)
-            .ConfigureAwait(false);
+        Result<DomainRead> read = await ReadDomainAsync(domain, progress, cancel).ConfigureAwait(false);
         if (!read.Ok)
             return Result.Failure(read.Error);
 
-        DomainRead opened = new(domain, read.Value);
+        DomainRead opened = read.Value;
         ImmutableArray<ImmutableArray<IComponent>> placed = GetEntities(opened);
         ImmutableArray<ImmutableArray<IComponent>> player = await ReadPlayerAsync(domain, placed, progress, cancel)
             .ConfigureAwait(false);
@@ -803,10 +801,9 @@ public sealed class World : IEcs, IDisposable
         ImmutableArray<ImmutableArray<IComponent>> screen = [];
         if (screenDomain != Handle<Domain>.None)
         {
-            Result<ImmutableArray<PlacedPrefab>> read = await ReadDomainAsync(screenDomain, null, cancel)
-                .ConfigureAwait(false);
+            Result<DomainRead> read = await ReadDomainAsync(screenDomain, null, cancel).ConfigureAwait(false);
             if (read.Ok)
-                screen = GetEntities(new DomainRead(screenDomain, read.Value));
+                screen = GetEntities(read.Value);
             else
                 Log.Warn($"No loading screen is shown: {read.Error}");
         }
@@ -853,7 +850,10 @@ public sealed class World : IEcs, IDisposable
         DestroyEntities(loading);
         await RunHooksAsync(hooks => hooks.OnDomainUnloadedAsync(cancel), "cleaning up").ConfigureAwait(false);
 
+        // The low-latency GC Program asks for seldom collects gen 2, so what the load and the unloads threw away would
+        // stay committed: one collection that compacts and decommits gives it back, before anything of the world shows.
         await _threads.Enter(EngineThread.Game);
+        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
         arrive();
         IsShowingLoadingScreen = false;
 
@@ -912,12 +912,11 @@ public sealed class World : IEcs, IDisposable
         ImmutableArray<DomainRead>.Builder reading = ImmutableArray.CreateBuilder<DomainRead>(saved.Domains.Length);
         foreach (Handle<Domain> domain in saved.Domains)
         {
-            Result<ImmutableArray<PlacedPrefab>> read = await ReadDomainAsync(domain, null, cancel)
-                .ConfigureAwait(false);
+            Result<DomainRead> read = await ReadDomainAsync(domain, null, cancel).ConfigureAwait(false);
             if (!read.Ok)
                 return Result.Failure($"{GetName(domain)} does not open: {read.Error}");
 
-            reading.Add(new DomainRead(domain, read.Value));
+            reading.Add(read.Value);
         }
 
         ImmutableArray<DomainRead> domains = reading.MoveToImmutable();
@@ -934,7 +933,7 @@ public sealed class World : IEcs, IDisposable
                 {
                     foreach (DomainRead domain in domains)
                     {
-                        _read[domain.Domain] = domain.Prefabs;
+                        _read[domain.Domain] = domain;
                         Domains = Domains.Add(domain.Domain);
                     }
 
@@ -987,7 +986,7 @@ public sealed class World : IEcs, IDisposable
     /// </summary>
     private async Task ReopenAsync(Handle<Domain> domain, CancellationToken cancel)
     {
-        Result<ImmutableArray<PlacedPrefab>> read = await ReadDomainAsync(domain, null, cancel).ConfigureAwait(false);
+        Result<DomainRead> read = await ReadDomainAsync(domain, null, cancel).ConfigureAwait(false);
         await _threads.Enter(EngineThread.Game);
         if (!read.Ok)
         {
@@ -1012,11 +1011,11 @@ public sealed class World : IEcs, IDisposable
         }
 
         Result<JsonNode?> changes = Diff(
-            GetBaseState([new DomainRead(domain, _read.GetValueOrDefault(domain, []))]),
+            GetBaseState([_read[domain]]),
             new WorldState(now, [], IsPaused: false, TimeScale: 1)
         );
         Result<WorldState> kept = changes.Ok
-            ? Patch(GetBaseState([new DomainRead(domain, read.Value)]), changes.Value)
+            ? Patch(GetBaseState([read.Value]), changes.Value)
             : Result.Failure(changes.Error);
         if (!kept.Ok)
         {
@@ -1032,10 +1031,10 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// The prefabs <paramref name="handle"/> places, loaded, and where. A prefab that doesn't load is an error, and it is left
-    /// out; why not, when the domain doesn't load or no gem reads prefabs.
+    /// <paramref name="handle"/>, loaded, with the prefabs it places, loaded, and where. A prefab that doesn't load is an
+    /// error, and it is left out; why not, when the domain doesn't load or no gem reads prefabs.
     /// </summary>
-    private async Task<Result<ImmutableArray<PlacedPrefab>>> ReadDomainAsync(
+    private async Task<Result<DomainRead>> ReadDomainAsync(
         Handle<Domain> handle,
         IProgress<LoadProgress>? progress,
         CancellationToken cancel
@@ -1069,7 +1068,7 @@ public sealed class World : IEcs, IDisposable
                 Log.Error($"{GetName(handle)} goes without a prefab: {prefabs[i].Error}");
         }
 
-        return Result.Success(read.ToImmutable());
+        return Result.Success(new DomainRead(handle, domain.Value, read.ToImmutable()));
 
         async Task<Result<Prefab>> LoadOneAsync(Handle<Prefab> prefab)
         {

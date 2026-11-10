@@ -1,5 +1,5 @@
 using Magic.Debugging;
-using Magic.Rendering;
+using Magic.Graphics;
 using Vortice.Vulkan;
 
 namespace Magic.VulkanGraphics;
@@ -69,6 +69,21 @@ internal sealed unsafe class VulkanRecorder(
         _imageBarriers.Clear();
         AddImageBarrier(texture, -1, access);
         Flush(cmd);
+    }
+
+    /// <summary>
+    /// The first <paramref name="bytes"/> of <paramref name="from"/> copied into <paramref name="to"/>, once what used
+    /// <paramref name="from"/> before is done with it, as a buffer asked for at a new size keeps what it holds.
+    /// </summary>
+    public void CopyBuffer(VkCommandBuffer cmd, VulkanBuffer from, VulkanBuffer to, ulong bytes)
+    {
+        _bufferBarriers.Clear();
+        _imageBarriers.Clear();
+        AddBufferBarrier(from, GpuAccess.CopySource);
+        AddBufferBarrier(to, GpuAccess.CopyDestination);
+        Flush(cmd);
+        VkBufferCopy region = new() { size = bytes };
+        device.Api.vkCmdCopyBuffer(cmd, from.Buffer, to.Buffer, 1, &region);
     }
 
     // A write after a write still needs a barrier, so the second sees the first; a read after the same read does not.
@@ -493,7 +508,7 @@ internal sealed unsafe class VulkanRecorder(
                 break;
             case GpuCommandKind.BuildAcceleration:
                 if (resources.Accelerations[command.Id] is { } acceleration)
-                    Build(cmd, acceleration, command.X);
+                    Build(frame, acceleration, command.X);
                 else
                     Log.Warn($"Acceleration structure {command.Id} is gone and is not built.");
 
@@ -505,10 +520,16 @@ internal sealed unsafe class VulkanRecorder(
 
     /// <summary>
     /// Builds an acceleration structure between two barriers over everything: the copies that filled what it is
-    /// built over land first, and whatever traces through it afterwards waits for it.
+    /// built over land first, and whatever traces through it afterwards waits for it. A bottom-level one then has the
+    /// size it compacts to queried, for a later frame to compact it.
     /// </summary>
-    private void Build(VkCommandBuffer cmd, VulkanAcceleration acceleration, uint instanceCount)
+    private void Build(VulkanFrames.Frame frame, VulkanAcceleration acceleration, uint instanceCount)
     {
+        // A compacted copy is built already, over the same triangles, and has no scratch to build again with.
+        if (acceleration.Scratch is not { } scratch)
+            return;
+
+        VkCommandBuffer cmd = frame.CommandBuffer;
         VkMemoryBarrier2 before = new()
         {
             srcStageMask = VkPipelineStageFlags2.AllCommands,
@@ -539,12 +560,12 @@ internal sealed unsafe class VulkanRecorder(
             VkAccelerationStructureBuildGeometryInfoKHR info = new()
             {
                 type = acceleration.Type,
-                flags = VkBuildAccelerationStructureFlagsKHR.PreferFastTrace,
+                flags = VulkanAcceleration.GetBuildFlags(acceleration.Type),
                 mode = VkBuildAccelerationStructureModeKHR.Build,
                 dstAccelerationStructure = acceleration.Handle,
                 geometryCount = (uint)count,
                 pGeometries = geometries,
-                scratchData = new VkDeviceOrHostAddressKHR { deviceAddress = acceleration.Scratch.Address },
+                scratchData = new VkDeviceOrHostAddressKHR { deviceAddress = scratch.Address },
             };
             VkAccelerationStructureBuildRangeInfoKHR* rangesList = rangesPointer;
             device.Api.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &info, &rangesList);
@@ -559,5 +580,7 @@ internal sealed unsafe class VulkanRecorder(
         };
         VkDependencyInfo afterInfo = new() { memoryBarrierCount = 1, pMemoryBarriers = &after };
         device.Api.vkCmdPipelineBarrier2(cmd, &afterInfo);
+        if (acceleration.Type == VkAccelerationStructureTypeKHR.BottomLevel)
+            frame.WriteCompactedSize(acceleration);
     }
 }

@@ -76,7 +76,37 @@
       SkipGetTargetFrameworkProperties="true"
     />
     <ProjectReference
-      Include="$(MagicRoot)src/Gems/GIRendering/GIRendering.csproj"
+      Include="$(MagicRoot)src/Gems/Rendering/GpuWorld/GpuWorld.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      SkipGetTargetFrameworkProperties="true"
+    />
+    <ProjectReference
+      Include="$(MagicRoot)src/Gems/Rendering/ClusteredGeometry/ClusteredGeometry.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      SkipGetTargetFrameworkProperties="true"
+    />
+    <ProjectReference
+      Include="$(MagicRoot)src/Gems/Rendering/AccelerationStructures/AccelerationStructures.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      SkipGetTargetFrameworkProperties="true"
+    />
+    <ProjectReference
+      Include="$(MagicRoot)src/Gems/Rendering/TracedShadows/TracedShadows.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      SkipGetTargetFrameworkProperties="true"
+    />
+    <ProjectReference
+      Include="$(MagicRoot)src/Gems/Rendering/Deferred/Deferred.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      SkipGetTargetFrameworkProperties="true"
+    />
+    <ProjectReference
+      Include="$(MagicRoot)src/Gems/Rendering/GlobalIllumination/GlobalIllumination.csproj"
       ReferenceOutputAssembly="false"
       Private="false"
       SkipGetTargetFrameworkProperties="true"

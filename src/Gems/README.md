@@ -3,6 +3,12 @@
 The plugins that come with Magic. A project runs one by listing its name in its `.magic` file. To add one, see
 [Templates](../../tools/README.md#templates).
 
+## Gems that use other gems
+
+A gem can use another gem's types. Reference its project with `Private="false"`, as with Core, so its assembly isn't
+copied beside yours, and list both gems in the project. Magic loads the referenced gem first and gives your gem its one
+copy, and refuses your gem, naming the other, when the project doesn't list it.
+
 ## Native libraries
 
 A gem can call a C library. Declare it as a `NativeLibrary` item in the gem's project. The build fetches it, builds

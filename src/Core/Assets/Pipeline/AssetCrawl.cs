@@ -147,10 +147,10 @@ internal static class AssetCrawl
                 $"{file.Path} is a {file.Type}, which neither Magic nor a gem the project lists holds."
             );
 
-        // Loaded, what it holds is there: one a gem added.
+        // Loaded and still held, what it holds is there: one a gem added.
         LoadedAssets loaded = assets.Loaded;
-        if (loaded.Entries.TryGetValue(id, out AssetEntry? entry) && entry.Current is { Value: { Ok: true } current })
-            return Result.Success(AssetScan.FindHandles(current.Value));
+        if (loaded.Entries.TryGetValue(id, out AssetEntry? entry) && entry.GetValue() is { } current)
+            return Result.Success(AssetScan.FindHandles(current));
 
         if (type.Type.GetCustomAttribute<AssetFormatAttribute>() is not null)
         {

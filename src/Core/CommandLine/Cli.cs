@@ -102,6 +102,7 @@ internal sealed class Cli
                 OpenCommand.Create(app, files, assets, world, queue),
                 NewCommand.Create(),
                 ScreenshotCommand.Create(app, files, events),
+                StatsCommand.Create(),
                 SaveCommand.Create(app, world, queue),
                 LoadCommand.Create(app, world, queue),
                 BakeCommand.Create(app, assets, queue),
@@ -110,6 +111,7 @@ internal sealed class Cli
                 TeleportCommand.Create(app, world, assets, queue),
                 SpawnCommand.Create(app, world, assets, queue),
                 WaitCommand.Create(queue, world),
+                NameCommand.Create(app),
                 ExitCommand.Create(app),
             },
             Options =

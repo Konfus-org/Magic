@@ -17,9 +17,10 @@
   <PropertyGroup>
     <ClangSharpPInvokeGeneratorVersion>21.1.8.4</ClangSharpPInvokeGeneratorVersion>
   </PropertyGroup>
-  <!-- The analyzer project (tools/Analyzers), compiled against a Roslyn no newer than the SDK's or Visual Studio's, which
-       load it. -->
+  <!-- Roslyn: the analyzer project (tools/Analyzers) is compiled against one no newer than the SDK's or Visual Studio's, which
+       load it, and Core's tests compile gems with it. -->
   <ItemGroup>
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.6.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.6.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.9.0" />
   </ItemGroup>

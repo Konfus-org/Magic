@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A gem: Magic loads it from Gems/TracedShadows/TracedShadows.dll when a project lists TracedShadows. -->
+  <PropertyGroup>
+    <!-- Shown beside the gem as Magic starts it. -->
+    <Description>Traces each pixel's shadows through the world as rays see it, and takes the noise out.</Description>
+    <Version>1.0.0</Version>
+    <Authors>Konfus</Authors>
+    <!-- Copies the gem's own NuGet dependencies next to it, where its load context finds them. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its interfaces. -->
+    <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" Private="false" />
+  </ItemGroup>
+</Project>
