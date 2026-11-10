@@ -34,6 +34,13 @@ Runs the checks a change must pass, in order, and stops at the first failure:
 
 `-Only` runs some steps, and `-Project` runs another project.
 
+## Run.ps1
+
+Runs a project for an agent, the way an agent starts Magic itself; Screenshot.ps1 and Validate.ps1 run it in their own
+way. It names the window with the branch checked out where the script is, or `-Name`, sends `-Commands` as console
+lines, and kills a run still going after `-Seconds`. End `-Commands` with `exit` to end the run sooner. `-Headless` runs
+without a window and ends at the first error logged. It prints what Magic prints, and doesn't build.
+
 ## Screenshot.ps1
 
 Runs a project with a window until its world has loaded, takes a screenshot and prints its path. It doesn't build.

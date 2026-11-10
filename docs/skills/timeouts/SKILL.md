@@ -19,7 +19,7 @@ A command must not run without a time limit. A command that runs forever blocks 
    | `dotnet build src/Magic.slnx` | 10 minutes |
    | One test project | 5 minutes |
    | All tests | 15 minutes |
-   | A headless run of Magic | Two times the `-Seconds` of `Validate.ps1`, or 10 minutes |
+   | `tools/Scripts/Run.ps1` | Its `-Seconds` and one minute more, or 11 minutes |
    | `tools/Scripts/Screenshot.ps1` | Two times its `-Seconds`, or 20 minutes |
    | `tools/Scripts/AgentTaskComplete.ps1` or `tools/Scripts/Validate.ps1` | 60 minutes |
    | `plannotator review` | 4 hours |

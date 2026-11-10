@@ -35,8 +35,10 @@ The scripts run under `pwsh` and Windows PowerShell ([Tools](tools/README.md)).
   screenshots each and prints the paths.
 - **Screenshot:** `tools/Scripts/Screenshot.ps1` runs a project until its world loads and prints the screenshot's
   path. Use `-Domains`, `-Project` and `-Commands` to reach what the samples don't show.
-- **Window name:** the scripts title each window they open with the worktree's branch, the session's name. Start a
-  windowed run of your own with the console line `name <branch>`.
+- **Run Magic:** start Magic only with `tools/Scripts/Run.ps1`, or with `Screenshot.ps1` and `Validate.ps1`, which run
+  it themselves. They name its window with the worktree's branch, the session's name, and end the run at a time limit.
+  Do not start `Magic`, `Magic.exe` or `dotnet run` on the engine or a sample in another way. `Magic new` and
+  `Magic --help` open nothing, so they are allowed.
 - **Claim:** `tools/Scripts/Claim.ps1 -Slice <title> -Scope <paths>` tells every other session what the slice will
   change, and prints any overlap with theirs ([Worktrees](#worktrees)).
 - **Configuration:** build and run `Debug`. To measure or profile performance, use `Optimize`. Use `Release` only when
@@ -69,6 +71,7 @@ In Claude Code, the agent hooks in `.claude/settings.json` hold the workflow wit
 - Each session, and each `/clear` or compaction, starts with the checkout and its merge target in context.
 - An edit to a file in the main checkout is refused. Starting Claude Code with `MAGIC_ALLOW_MAIN_EDITS=1` allows it
   for that session; only the user sets it.
+- A command that starts Magic other than through the scripts in [Run Magic](#commands) is refused.
 - An edit inside another session's claim is refused unless this worktree's own claim covers it too
   ([Worktrees](#worktrees)).
 - The status line shows the slice's size against its limit of 300 lines, and how full the context is.
