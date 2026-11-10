@@ -8,15 +8,14 @@ using Magic.Utils;
 namespace Magic.TracedShadows;
 
 /// <summary>
-/// A frame's shadow mask and the denoiser's buffers and targets. <paramref name="Mask"/> is the denoised mask shading
-/// reads, <paramref name="Traced"/> the mask as the rays left it, <paramref name="SunTiles"/> a bit for each pixel its
-/// sun ray reached the sun from, a word for each 8 by 4 pixels, and <paramref name="SunTint"/> the colour the sun's
-/// light takes on through glass; the previous ones are what the last frame wrote.
+/// A frame's shadow mask and the denoiser's buffers and targets. <paramref name="Mask"/> is the mask as the rays left
+/// it, then denoised in place into the mask shading reads, <paramref name="SunTiles"/> a bit for each pixel its sun ray
+/// reached the sun from, a word for each 8 by 4 pixels, and <paramref name="SunTint"/> the colour the sun's light takes
+/// on through glass; the previous ones are what the last frame wrote.
 /// </summary>
 internal readonly record struct ShadowBuffers(
     GpuBuffer Constants,
     GpuBuffer TileStates,
-    GpuBuffer Traced,
     GpuBuffer SunTiles,
     GpuTexture SunTint,
     GpuBuffer Mask,
@@ -30,13 +29,13 @@ internal readonly record struct ShadowBuffers(
 
 /// <summary>
 /// How much of each light reaches each pixel, traced through the world as rays see it: a pass that traces a ray a pixel
-/// towards the sun and each of the first lights its tile lists, into a buffer of 16 bytes a pixel, the layout
-/// <c>Scene/Shadows.slang</c> reads, and the sun's tiles beside it; then the noise taken out, into the mask shading
-/// reads: the sun's slot in time and then in space, the tile lights' slots in time alone, since a slot may hold another
-/// light in the next tile or frame. It blends with last frame's mask and moments, so it keeps two of each and swaps
-/// them every frame, and with none while the view has no history. Each frame it writes the masks' ids into the frame's
-/// buffer and makes the frame's <see cref="ShadowMask"/>. It is public because nothing in its assembly makes it: Magic
-/// does, by reflection, when a project lists the gem.
+/// towards the sun and each of the first lights its tile lists, into the mask of 16 bytes a pixel, the layout
+/// <c>Scene/Shadows.slang</c> reads, and the sun's tiles beside it; then the noise taken out of the mask in place: the
+/// sun's slot in time and then in space, the tile lights' slots in time alone, since a slot may hold another light in
+/// the next tile or frame. It blends with last frame's mask and moments, so it keeps two of each and swaps them every
+/// frame, and with none while the view has no history. Each frame it writes the ids of the mask, the sun's tiles and
+/// its tint into the frame's buffer and makes the frame's <see cref="ShadowMask"/>. It is public because nothing in its
+/// assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
 public sealed class TracedShadowsGem(AssetManager assets) : IGem, IRender<TracedInput, ShadowMask>
 {
@@ -93,7 +92,6 @@ public sealed class TracedShadowsGem(AssetManager assets) : IGem, IRender<Traced
         GpuShadows row = new()
         {
             Mask = shadows.Mask.Id,
-            Traced = shadows.Traced.Id,
             SunTiles = shadows.SunTiles.Id,
             SunTint = shadows.SunTint.Id,
         };
@@ -124,7 +122,6 @@ public sealed class TracedShadowsGem(AssetManager assets) : IGem, IRender<Traced
         long groups =
             (long)((width + DenoiseGroupSize - 1) / DenoiseGroupSize)
             * ((height + DenoiseGroupSize - 1) / DenoiseGroupSize);
-        Result<GpuBuffer> traced = graph.Buffer(GpuDescriptions.GetBuffer("Traced shadows", maskBytes));
         Result<GpuBuffer> sunTiles = graph.Buffer(GpuDescriptions.GetBuffer("Sun shadow tiles", tiles * sizeof(uint)));
         Result<GpuTexture> sunTint = graph.Texture(
             GpuDescriptions.GetTexture("Sun tint", width, height, GpuFormat.R16G16B16A16Sfloat)
@@ -155,7 +152,6 @@ public sealed class TracedShadowsGem(AssetManager assets) : IGem, IRender<Traced
         foreach (
             Result made in (ReadOnlySpan<Result>)
                 [
-                    traced,
                     sunTiles,
                     sunTint,
                     constants,
@@ -182,7 +178,6 @@ public sealed class TracedShadowsGem(AssetManager assets) : IGem, IRender<Traced
         ShadowBuffers shadows = new(
             constants.Value,
             tileStates.Value,
-            traced.Value,
             sunTiles.Value,
             sunTint.Value,
             _mask,
@@ -229,7 +224,7 @@ public sealed class TracedShadowsGem(AssetManager assets) : IGem, IRender<Traced
                 view.Meshes,
                 input.Traced.HitMaterials
             )
-            .Writes(shadows.Traced, shadows.SunTiles, shadows.SunTint)
+            .Writes(shadows.Mask, shadows.SunTiles, shadows.SunTint)
             .DispatchOver(view.Width, view.Height);
 
         // Denoise: classify the sun's tiles, filter three times, blend with last frame.
@@ -268,12 +263,12 @@ public sealed class TracedShadowsGem(AssetManager assets) : IGem, IRender<Traced
                 .DispatchOver(view.Width, view.Height);
         }
 
+        // The tile lights' slots blend with last frame's, and the sun's takes the filter's, in the mask the rays wrote.
         graph
             .Compute("Blend shadows", _blendShader, denoise, RenderStage.Light)
             .Reads(
                 view.Frame,
                 shadows.Constants,
-                shadows.Traced,
                 view.Depth,
                 view.Velocity,
                 shadows.SunDenoised,

@@ -1,9 +1,9 @@
-// Each pixel's traced shadow mask: a ray from its surface towards the sun, and one towards each of the first lights its
-// tile lists, each aimed at a random point of the light so that a wider light casts a softer shadow; how much of the
-// light gets through, 1 where nothing is in the way and 0 past something opaque. The sun's rays also go into its tiles,
-// for the denoiser, one bit a pixel: lit at random as often as the light gets through; and the colour its light takes
-// on through glass into the sun's tint. The pass header's x is the frame's buffer, which holds the lights and the
-// shadows.
+// Each pixel's shadow mask as the rays leave it, which the denoiser then blends in place: a ray from its surface
+// towards the sun, and one towards each of the first lights its tile lists, each aimed at a random point of the light
+// so that a wider light casts a softer shadow; how much of the light gets through, 1 where nothing is in the way and 0
+// past something opaque. The sun's rays also go into its tiles, for the denoiser, one bit a pixel: lit at random as
+// often as the light gets through; and the colour its light takes on through glass into the sun's tint. The pass
+// header's x is the frame's buffer, which holds the lights and the shadows.
 module "TraceShadows";
 
 import Core.Heap;
@@ -111,7 +111,7 @@ void TraceShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupThre
     {
         float3 sunTint;
         uint4 words = Trace(frame, lights, thread.xy, sunTint);
-        StoreShadowMask(shadows.traced, thread.xy, size.x, words);
+        StoreShadowMask(shadows.mask, thread.xy, size.x, words);
         StorageRef tints = { shadows.sunTint, 0u };
         tints.Store(thread.xy, float4(sunTint, 1.0));
         if (GetShadow(words, 0u) > 0.5)

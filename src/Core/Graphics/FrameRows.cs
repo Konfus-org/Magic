@@ -168,7 +168,7 @@ public record struct GpuLights
 }
 
 /// <summary>
-/// The frame's shadows, the twin of the library's <c>Scene/Shadows.slang</c>: the masks, the sun's tiles and its tint,
+/// The frame's shadows, the twin of the library's <c>Scene/Shadows.slang</c>: the mask, the sun's tiles and its tint,
 /// written once a frame into the frame's buffer after <see cref="GpuLights"/> by what traces them, and all 0 where nothing
 /// does.
 /// </summary>
@@ -177,11 +177,9 @@ public record struct GpuShadows
 {
     public const int Offset = GpuLights.Offset + GpuLights.Bytes;
 
-    public const int Bytes = 16;
+    public const int Bytes = 12;
 
     public uint Mask;
-
-    public uint Traced;
 
     public uint SunTiles;
 

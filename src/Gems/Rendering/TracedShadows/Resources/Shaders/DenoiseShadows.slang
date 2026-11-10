@@ -1,10 +1,11 @@
-// The traced shadow mask's noise taken out, into the mask shading reads. The sun's slot, the same light at every pixel,
-// is denoised in time, then in space: ClassifyShadows skips each 8 by 8 pixels whose neighbourhood the sun's rays found
-// all lit or all dark, and blends every other pixel with where it was last frame, clamped to its neighbours, keeping a
-// running mean and variance of it; FilterShadows then blurs that three times, 1, 2 and 4 pixels apart, by how alike
-// neighbours' depths, normals and shadows are. A tile light's slot may hold another light in the next tile or the next
-// frame, so BlendShadows only blends those with last frame, and writes the mask. The pass header's x is the frame's
-// buffer, which holds the shadows, y the denoiser's constants and w the filter's pass.
+// The traced shadow mask's noise taken out in place, into the mask shading reads. The sun's slot, the same light at
+// every pixel, is denoised in time, then in space: ClassifyShadows skips each 8 by 8 pixels whose neighbourhood the
+// sun's rays found all lit or all dark, and blends every other pixel with where it was last frame, clamped to its
+// neighbours, keeping a running mean and variance of it; FilterShadows then blurs that three times, 1, 2 and 4 pixels
+// apart, by how alike neighbours' depths, normals and shadows are. A tile light's slot may hold another light in the
+// next tile or the next frame, so BlendShadows only blends those with last frame, and writes the sun's into the mask.
+// The pass header's x is the frame's buffer, which holds the shadows, y the denoiser's constants and w the filter's
+// pass.
 module "DenoiseShadows";
 
 import Core.Heap;
@@ -406,16 +407,14 @@ void BlendShadows(uint3 thread : SV_DispatchThreadID)
     if (any(thread.xy >= size))
         return;
 
+    // The sky, which the rays left all lit.
     TextureRef depthTexture = { frame.depth };
     if (depthTexture.Load(thread.xy, 0u).x <= 0.0)
-    {
-        StoreShadowMask(shadows.mask, thread.xy, size.x, uint4(0xFFFFFFFFu));
         return;
-    }
 
     TextureRef denoised = { denoise.sunDenoised };
     TextureRef velocityTexture = { frame.velocity };
-    uint4 traced = LoadShadowMask(shadows.traced, thread.xy, size.x);
+    uint4 traced = LoadShadowMask(shadows.mask, thread.xy, size.x);
     float4 velocity = velocityTexture.Load(thread.xy, 0u);
     float2 historyUv = GetTexelCenterUv(thread.xy, size) + velocity.xy;
     bool isReprojected = denoise.hasHistory != 0u && all(saturate(historyUv) == historyUv);

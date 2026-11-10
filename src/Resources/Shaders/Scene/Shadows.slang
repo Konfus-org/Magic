@@ -13,14 +13,13 @@ import Trace.HitSurface;
 
 // Where the shadows are in the frame's buffer, right after the lights, and their bytes: C#'s GpuShadows.
 public static const uint ShadowsOffset = LightsOffset + LightsBytes;
-public static const uint ShadowsBytes = 16u;
+public static const uint ShadowsBytes = 12u;
 
 public struct Shadows
 {
-    // The denoised mask shading reads, 0 on a GPU that traces no rays, where nothing is shadowed; the mask as the rays
-    // left it, and the sun's tiles, for the denoiser; and the sun's tint.
+    // The denoised mask shading reads, 0 on a GPU that traces no rays, where nothing is shadowed; the sun's tiles, for
+    // the denoiser; and the sun's tint.
     public uint mask;
-    public uint traced;
     public uint sunTiles;
     public uint sunTint;
 }
