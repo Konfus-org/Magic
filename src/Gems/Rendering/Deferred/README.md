@@ -28,11 +28,10 @@ that draws its geometry.
   included, so another tonemap is another material in the tonemap's place. Each reads the picture the ones before it
   left and writes another; one that declares levels first fills each level of a target of its own, which it keeps from
   frame to frame as its history. While an effect that declares jitter runs, as the temporal anti-aliasing does, the
-  camera draws each frame through a different point in each pixel, and that effect upscales: it resolves the picture
-  to the window's size, and the effects after it work at that size, unless it declares `NoUpscaling`. An effect shows
-  once its material and its passes are built, and not while one loads or when one failed. An effect that asks what
-  lies along a ray, as the volumetric light does, is answered through the world as rays see it, which lets all the
-  light through where no gem builds it, and doesn't run on a GPU that doesn't trace rays.
+  camera draws each frame through a different point in each pixel. An effect shows once its material and its passes
+  are built, and not while one loads or when one failed. An effect that asks what lies along a ray, as the volumetric
+  light does, is answered through the world as rays see it, which lets all the light through where no gem builds it,
+  and doesn't run on a GPU that doesn't trace rays.
   The fog thickens with the air, and the volumetric light gathers its shafts, up to the nearest surface, a pane of glass
   included, so a pane keeps its colour, and what is seen through a pane is fogged only as far as the pane. The fog is lit by the sun and the sky alone,
   unshadowed; with the fog's `sun` param at 0 and `VolumetricLight` listed, the sun's light in the fog comes only where
@@ -46,8 +45,8 @@ that draws its geometry.
   surfaces, so it hides nothing behind it from the depth pyramid or the lighting. The nearest pane in front of each
   pixel's opaque surface lets what is behind through its colour and its clarity, and through any pane between where a
   gem builds the world as rays see it; it reflects the light around it, more at a grazing angle, and the sun lights it.
-- The finished picture is copied to the window where an effect upscaled it, and stretched over it, filtered, where
-  none did.
+- The finished picture is stretched over the window, filtered; where a gem upscales it, that gem's picture is copied
+  to the window instead. A screenshot is of what the window shows.
 
 ## Settings
 

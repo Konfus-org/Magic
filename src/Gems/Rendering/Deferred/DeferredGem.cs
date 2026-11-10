@@ -5,6 +5,7 @@ using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Events;
+using Magic.GpuWorld;
 using Magic.Graphics;
 using Magic.Input;
 using Magic.Projects;
@@ -16,13 +17,14 @@ namespace Magic.Deferred;
 
 /// <summary>
 /// What the deferred renderer takes each frame: the world as the GPU holds it, and, where a gem makes them, the world
-/// as rays see it, each pixel's shadows and the light that reaches the surfaces indirectly.
+/// as rays see it, each pixel's shadows, the light that reaches the surfaces indirectly and the output's upscaling.
 /// </summary>
 public readonly record struct DeferredInput(
     GpuView View,
     TracedWorld? Traced,
     ShadowMask? Shadows,
-    IndirectLight? Light
+    IndirectLight? Light,
+    Upscaling? Upscaling
 );
 
 /// <summary>
@@ -191,21 +193,16 @@ public sealed class DeferredGem
 
         // A debug view of light draws it into the picture, so the effects finish it as they do the picture.
         _surfaceView.RecordLight(view, inputs.Settings.RenderView, indirect);
-        GpuTexture picture = _pixelEffects.Record(view, input.Traced, frame.Index);
-        Result<GpuTexture> output = GetOutput(graph, gpu, picture);
-        if (!output.Ok)
-        {
-            Log.Error($"The frame is not shown: {output.Error}");
+        _pixelEffects.Record(view, input.Traced, frame.Index);
+        _surfaceView.Record(view, inputs.Settings.RenderView);
 
-            return;
-        }
-
-        _surfaceView.Record(view, inputs.Settings.RenderView, picture, output.Value);
-
-        // The output into the window, by a linear blit: stretched where it is the view's size, copied where upscaled.
+        // What the window and a screenshot show: the output as a gem upscaled it to the window's size, copied, or the
+        // output itself, stretched over the window, filtered.
+        GpuTexture upscaled = input.Upscaling is { } upscaling ? upscaling.Record(graph, gpu) : GpuTexture.None;
+        GpuTexture shown = upscaled.IsNone ? gpu.Output : upscaled;
         GpuTexture target = graph.WindowTarget;
         if (!target.IsNone)
-            graph.Blit(output.Value, target, RenderStage.Post);
+            graph.Blit(shown, target, RenderStage.Post);
 
         // One readback buffer, so one screenshot a frame: the last asked for.
         ScreenshotRequested? shot = null;
@@ -215,7 +212,7 @@ public sealed class DeferredGem
         }
 
         if (shot is { } saved)
-            SaveScreenshot(graph, output.Value, saved.Path);
+            SaveScreenshot(graph, shown, saved.Path);
 
         if (!_hasDrawn)
         {
@@ -265,25 +262,6 @@ public sealed class DeferredGem
     }
 
     /// <summary>
-    /// What the output is drawn into: the view's output, or one of the picture's size where an effect upscaled it.
-    /// </summary>
-    private static Result<GpuTexture> GetOutput(RenderGraph graph, in GpuView view, GpuTexture picture)
-    {
-        if (picture == view.Hdr)
-            return Result.Success(view.Output);
-
-        TextureDescription upscaled = graph.GetDescription(picture);
-        return graph.Texture(
-            graph.GetDescription(view.Output) with
-            {
-                Name = "Upscaled output",
-                Width = upscaled.Width,
-                Height = upscaled.Height,
-            }
-        );
-    }
-
-    /// <summary>
     /// Ends the start as failed: the renderer draws nothing, and holds no domain back.
     /// </summary>
     private void FailStart(string error)
@@ -295,22 +273,38 @@ public sealed class DeferredGem
     }
 
     /// <summary>
-    /// The output read back, and written to <paramref name="path"/> once the GPU is done with it.
+    /// The picture the window shows read back, through a copy of 8 bits a channel where it has more, and written to
+    /// <paramref name="path"/> once the GPU is done with it.
     /// </summary>
-    private void SaveScreenshot(RenderGraph graph, GpuTexture output, string path)
+    private void SaveScreenshot(RenderGraph graph, GpuTexture shown, string path)
     {
-        TextureDescription size = graph.GetDescription(output);
+        TextureDescription size = graph.GetDescription(shown);
         Result<GpuBuffer> readback = graph.Buffer(
             GpuDescriptions.GetBuffer("Output readback", (long)size.Width * size.Height * 4, BufferUsages.Readback)
         );
-        if (!readback.Ok)
+        Result<GpuTexture> read =
+            size.Format == GpuFormat.R8G8B8A8Unorm
+                ? Result.Success(shown)
+                : graph.Texture(
+                    GpuDescriptions.GetTexture(
+                        "Screenshot copy",
+                        size.Width,
+                        size.Height,
+                        GpuFormat.R8G8B8A8Unorm,
+                        TextureUsages.CopyDestination | TextureUsages.CopySource
+                    )
+                );
+        if (!readback.Ok || !read.Ok)
         {
-            Log.Error($"The screenshot was not taken: {readback.Error}");
+            Log.Error($"The screenshot was not taken: {(readback.Ok ? read.Error : readback.Error)}");
 
             return;
         }
 
-        graph.ReadBack(output, readback.Value, RenderStage.Post);
+        if (read.Value != shown)
+            graph.Blit(shown, read.Value, RenderStage.Post);
+
+        graph.ReadBack(read.Value, readback.Value, RenderStage.Post);
         Screenshot.SaveAsync(_gpu, _assets, readback.Value, path, size.Width, size.Height).FireAndForget();
     }
 }

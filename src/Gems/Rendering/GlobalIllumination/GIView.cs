@@ -29,6 +29,12 @@ internal readonly record struct GIView(
     /// The traced textures' size: half the picture's, at least 1, the twin of <c>Light/Indirect.slang</c>'s.
     /// </summary>
     public (int Width, int Height) TracedSize => (Math.Max(Width / 2, 1), Math.Max(Height / 2, 1));
+
+    /// <summary>
+    /// The description of a texture of the traced textures' size.
+    /// </summary>
+    public TextureDescription GetTraced(string name, GpuFormat format) =>
+        GpuDescriptions.GetTexture(name, TracedSize.Width, TracedSize.Height, format);
 }
 
 /// <summary>
