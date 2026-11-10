@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.IO;
 using System.Linq;
 using Magic.Assets;
 using Magic.CommandLine.Commands;
@@ -73,12 +74,22 @@ internal sealed class Cli
             Log.Error($"Couldn't run '{line}': {ran.Error}");
     }
 
+    /// <summary>
+    /// Runs <paramref name="parsed"/>, or says why it doesn't. What it prints, such as help, goes through the terminal,
+    /// so the prompt comes back under it; what it throws is logged.
+    /// </summary>
     private static Result Invoke(ParseResult parsed)
     {
         if (parsed.Errors.Count > 0)
             return Result.Failure(string.Join("; ", parsed.Errors.Select(error => error.Message)));
 
-        parsed.Invoke();
+        using StringWriter output = new();
+        using StringWriter errors = new();
+        parsed.Invoke(new InvocationConfiguration { Output = output, Error = errors });
+        if (output.GetStringBuilder().Length > 0)
+            Terminal.Write(output.ToString().TrimEnd());
+        if (errors.GetStringBuilder().Length > 0)
+            Log.Error(errors.ToString().TrimEnd());
 
         return Result.Success();
     }
