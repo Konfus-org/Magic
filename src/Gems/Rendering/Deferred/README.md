@@ -37,7 +37,7 @@ that draws its geometry.
   unshadowed; with the fog's `sun` param at 0 and `VolumetricLight` listed, the sun's light in the fog comes only where
   the air sees the sun, in shafts.
 - The `Exposure` effect meters the picture each frame from its average log luminance, as the effects before it leave
-  it, and adapts to a change over about a second, as an eye does; a new domain or window size takes its first reading
+  it, and adapts to a change over about a second, as an eye does; a new domain or picture size takes its first reading
   at once. Its `compensation` param adds stops to it. The `Agx` effect is the AgX tonemap.
 - The `indirectDiffuse` and `reflections` debug views put the indirect light into the picture before the post
   effects, so the effects expose and tonemap it; black where nothing traced it.
@@ -45,6 +45,7 @@ that draws its geometry.
   surfaces, so it hides nothing behind it from the depth pyramid or the lighting. The nearest pane in front of each
   pixel's opaque surface lets what is behind through its colour and its clarity, and through any pane between where a
   gem builds the world as rays see it; it reflects the light around it, more at a grazing angle, and the sun lights it.
+- The finished picture is stretched over the window, filtered.
 
 ## Settings
 
@@ -70,7 +71,7 @@ waits for the gem's passes.
 - Each frame, an area's `Prepare` asks the graph for its own textures and buffers by description, uploads what
   goes in them in the frame's upload pass, and returns their handles. Its `Record` takes what its passes read and
   write as arguments, and `Render` hands the handles on from one area to the next. The same description under a name
-  is the same resource, holding what the last frame left in it; another one, as at a new window size, makes it again,
+  is the same resource, holding what the last frame left in it; another one, as at a new picture size, makes it again,
   empty.
 - The shaders are the `Shaders/` modules in this gem's `Resources`, built on the shader library
   ([Shaders](../../../Resources/Shaders/README.md)).
