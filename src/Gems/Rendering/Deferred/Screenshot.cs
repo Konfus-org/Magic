@@ -56,7 +56,7 @@ internal static class Screenshot
         };
         Result written = await assets.ExportAsync(shot, path, null, CancellationToken.None).ConfigureAwait(false);
         if (written.Ok)
-            Log.Info($"Screenshot: {path}");
+            Terminal.Write(path);
         else
             Log.Error($"The screenshot could not be written: {written.Error}");
     }

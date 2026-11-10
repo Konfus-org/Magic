@@ -84,25 +84,25 @@ foreach ($domain in $Domains) {
 }
 $lines += @('wait 10s', 'exit')
 
-# Magic runs with its console lines and its log in files, so a run still going after its ceiling can be killed. The log
-# is shown as it comes.
+# Magic runs with its console lines, its results and its log in files, so a run still going after its ceiling can be
+# killed. The log is shown as it comes; the results, one screenshot's path per line, are read once it ends.
 $work = Join-Path ([System.IO.Path]::GetTempPath()) ("Screenshot-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $work | Out-Null
 $input_ = Join-Path $work 'lines.txt'
-$output = Join-Path $work 'out.txt'
-$errors = Join-Path $work 'err.txt'
+$results = Join-Path $work 'results.txt'
+$log = Join-Path $work 'log.txt'
 [System.IO.File]::WriteAllLines($input_, [string[]]$lines)
 try {
     $process = Start-Process -FilePath $magic -ArgumentList @('open', "`"$projectPath`"", '--fail-on-error') -NoNewWindow -PassThru `
-        -RedirectStandardInput $input_ -RedirectStandardOutput $output -RedirectStandardError $errors
+        -RedirectStandardInput $input_ -RedirectStandardOutput $results -RedirectStandardError $log
     # Holding the handle is what keeps the exit code readable once the process has ended.
     $null = $process.Handle
     $ceiling = [System.Diagnostics.Stopwatch]::StartNew()
     $shown = 0
     do {
         $hasEnded = $process.WaitForExit(1000)
-        if (Test-Path $output) {
-            $text = @(Get-Content $output -ErrorAction SilentlyContinue)
+        if (Test-Path $log) {
+            $text = @(Get-Content $log -ErrorAction SilentlyContinue)
             for (; $shown -lt $text.Count; $shown++) { Write-Host $text[$shown] }
         }
         if (-not $hasEnded -and $ceiling.Elapsed.TotalSeconds -gt $Seconds * (1 + $Domains.Count)) {
@@ -112,14 +112,13 @@ try {
         }
     } until ($hasEnded)
     $code = $process.ExitCode
-    $log = @(Get-Content $output -ErrorAction SilentlyContinue)
-    foreach ($line in @(Get-Content $errors -ErrorAction SilentlyContinue)) { Write-Host $line }
+    $text = @(Get-Content $log -ErrorAction SilentlyContinue)
+    for (; $shown -lt $text.Count; $shown++) { Write-Host $text[$shown] }
+    $found = @(Get-Content $results -ErrorAction SilentlyContinue)
 } finally {
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 }
 
-# A line reads "[12:34:56.789] [Info] [thread 2] Screenshot: <path> (File.cs:60 in Member)".
-$found = @($log | Select-String -Pattern 'Screenshot: (.+\.png) \(' | ForEach-Object { $_.Matches[0].Groups[1].Value })
 if ($code -ne 0) {
     Write-Host "FAILED: Magic exited $code"
     exit $code
@@ -130,7 +129,7 @@ if ($found.Count -lt 1 + $Domains.Count) {
 }
 foreach ($path in $found) {
     if (-not (Test-Path $path)) {
-        Write-Host "FAILED: the log names $path but there is no such file."
+        Write-Host "FAILED: the results name $path but there is no such file."
         exit 1
     }
 }

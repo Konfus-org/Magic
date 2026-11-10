@@ -111,7 +111,9 @@ internal static class Program
             app.StartRun();
             using Gems gems = new(registered, provider, app, settings, files, assets, world, events, threads);
             settings.ReportUnknownKeys();
-            world.StartAsync(worldRestorePoint?.WaitAsync(app.Lifetime), app.Lifetime).FireAndForget();
+            world
+                .StartAsync(worldRestorePoint?.WaitAsync(app.Lifetime), Terminal.Progress, app.Lifetime)
+                .FireAndForget();
 
             // If we don't have a window and aren't headless something is wrong, early out.
             if (!app.IsHeadless && app.Window is null)

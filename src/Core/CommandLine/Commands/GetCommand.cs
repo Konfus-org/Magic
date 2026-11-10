@@ -9,7 +9,7 @@ using Magic.Worlds;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>get</c>: logs every gem's settings, a category's or one key's; or an entity's value, named by a path as
+/// <c>get</c>: prints every gem's settings, a category's or one key's; or an entity's value, named by a path as
 /// <see cref="EntityPaths"/> reads it, on each entity the path names.
 /// </summary>
 internal static class GetCommand
@@ -24,7 +24,7 @@ internal static class GetCommand
         };
         Command get = new(
             "get",
-            "Logs the settings, a category's or one; or an entity's value, named as entity.component.member and on to any depth"
+            "Prints the settings, a category's or one; or an entity's value, named as entity.component.member and on to any depth"
         )
         {
             path,
@@ -41,25 +41,25 @@ internal static class GetCommand
                 .. settings.Options.Where(row => what is null || row.Key == what || row.Category == what),
             ];
             if (what is not null && rows.Length == 0)
-                LogEntityValue(what);
+                PrintEntityValue(what);
             else if (rows.Length == 0)
                 Log.Info("No gem has settings.");
             else
-                LogSettings(rows);
+                PrintSettings(rows);
         }
 
-        static void LogSettings(Setting[] rows)
+        static void PrintSettings(Setting[] rows)
         {
             foreach (Setting row in rows)
             {
                 string restarts = row.RequiresRestart ? " Changing it restarts the run." : string.Empty;
                 string value = row.Value is { } set ? ValueText.Format(set) : "null";
-                Log.Info($"{row.Key} {value}: {row.Summary}{restarts}");
+                Terminal.Write($"{row.Key} {value}: {row.Summary}{restarts}");
             }
         }
 
-        // Logs the value at the path on each entity it names, or why there is none.
-        void LogEntityValue(string entityPath)
+        // Prints the value at the path on each entity it names, or why there is none.
+        void PrintEntityValue(string entityPath)
         {
             if (!CommandLookups.IsProjectOpen(app, $"get {entityPath} in"))
                 return;
@@ -74,7 +74,7 @@ internal static class GetCommand
 
             foreach (string line in read.Value)
             {
-                Log.Info($"{entityPath} of {line}");
+                Terminal.Write($"{entityPath} of {line}");
             }
         }
     }

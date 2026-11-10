@@ -36,6 +36,8 @@ few metres in front of the player.
 `Magic new <template> <name>` makes `<name>` with `dotnet new magic-<template>`, passing on any option Magic doesn't
 know, such as `-o <folder>`. Install Magic's templates first with `tools/VS Templates/InstallTemplates.ps1`.
 
+- Standard output holds only a command's result, such as `get`'s values or a screenshot's path; the log, the
+  progress bars and the prompt go to standard error.
 - Exit codes: `0` clean, `1` a bad command line, a command that failed or a project that won't open, `2` at the first
   error logged under `--fail-on-error`.
 - A crash writes `Logs/<time>.crash` next to Magic.

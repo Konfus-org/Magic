@@ -372,7 +372,11 @@ public sealed class World : IEcs, IDisposable
     /// project's, or the default one when it names none or that doesn't open. With no ECS, nothing opens, which is warned
     /// about.
     /// </summary>
-    internal async Task StartAsync(Task<Result<byte[]>>? restorePoint, CancellationToken cancel)
+    internal async Task StartAsync(
+        Task<Result<byte[]>>? restorePoint,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
     {
         if (restorePoint is not null)
         {
@@ -397,7 +401,7 @@ public sealed class World : IEcs, IDisposable
         Handle<Domain> fallback = _assets.GetDefault<Domain>();
         Handle<Domain> entry = _app.Project?.EntryPoint ?? Handle<Domain>.None;
         Handle<Domain> first = entry == Handle<Domain>.None ? fallback : entry;
-        Result opened = await OpenAsync(first, null, cancel).ConfigureAwait(false);
+        Result opened = await OpenAsync(first, progress, cancel).ConfigureAwait(false);
         if (opened.Ok)
             return;
 
@@ -405,7 +409,7 @@ public sealed class World : IEcs, IDisposable
         if (first == fallback)
             return;
 
-        Result second = await OpenAsync(fallback, null, cancel).ConfigureAwait(false);
+        Result second = await OpenAsync(fallback, progress, cancel).ConfigureAwait(false);
         if (!second.Ok)
             Log.Error($"The default domain does not open either: {second.Error}");
     }
