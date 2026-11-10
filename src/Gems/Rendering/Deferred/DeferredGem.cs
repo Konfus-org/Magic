@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Threading.Channels;
 using Magic.Assets;
+using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Events;
@@ -37,7 +38,11 @@ internal readonly record struct RenderView(GpuView Gpu, RenderGraph Graph);
 /// As a domain loads, it holds the loading screen until its passes are built. It is public because nothing in its
 /// assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDomainLoading
+public sealed class DeferredGem
+    : IGem,
+        IHasSettings<DeferredSettings>,
+        IRenderFrom<DeferredInput>,
+        IHookIntoDomainLoading
 {
     private readonly IGraphicsApi _gpu;
     private readonly AssetManager _assets;
@@ -56,8 +61,6 @@ public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDom
     /// Every shader the passes run, which the GPU provider builds before the frame is drawn.
     /// </summary>
     private readonly ImmutableArray<ShaderEntry> _shaders;
-
-    private DebugView _debugView;
 
     /// <summary>
     /// The settings <see cref="Render"/> draws with, taken from <see cref="_inputs"/>, until newer are. Render thread.
@@ -78,6 +81,7 @@ public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDom
     private TaskCompletionSource? _loading;
 
     public DeferredGem(
+        DeferredSettings settings,
         IGraphicsApi gpu,
         AssetManager assets,
         Threads threads,
@@ -86,6 +90,7 @@ public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDom
         IInput? input = null
     )
     {
+        Settings = settings;
         _debugWindow = debugUI is null ? null : new RendererDebugWindow(debugUI, input);
         _gpu = gpu;
         _assets = assets;
@@ -97,17 +102,18 @@ public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDom
     }
 
     /// <summary>
-    /// Applies the settings, and the debug window's.
+    /// What the renderer shows, which <see cref="LateUpdate"/> hands each frame to <see cref="Render"/>, and the debug
+    /// window also sets. Game thread.
+    /// </summary>
+    public DeferredSettings Settings { get; set; }
+
+    /// <summary>
+    /// Draws the debug window, which sets the settings.
     /// </summary>
     public void Update(in Frame frame)
     {
-        foreach (SetCliCommand setting in frame.Events.Get<SetCliCommand>())
-        {
-            ApplySetting(setting);
-        }
-
         if (_debugWindow is not null)
-            _debugView = _debugWindow.Update(_debugView);
+            Settings = _debugWindow.Update(Settings);
     }
 
     /// <summary>
@@ -116,7 +122,7 @@ public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDom
     public void LateUpdate(in Frame frame)
     {
         RenderInputs back = _inputs.Back;
-        back.DebugView = _debugView;
+        back.Settings = Settings;
         foreach (ScreenshotRequested asked in frame.Events.Get<ScreenshotRequested>())
         {
             _screenshots.Writer.TryWrite(asked);
@@ -184,7 +190,7 @@ public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDom
         _lighting.Record(view, header, input.Shadows, input.Traced, indirect);
 
         // A debug view of light draws it into the picture, so the effects finish it as they do the picture.
-        _surfaceView.RecordLight(view, inputs.DebugView, indirect);
+        _surfaceView.RecordLight(view, inputs.Settings.RenderView, indirect);
         GpuTexture picture = _pixelEffects.Record(view, input.Traced, frame.Index);
         Result<GpuTexture> output = GetOutput(graph, gpu, picture);
         if (!output.Ok)
@@ -194,7 +200,7 @@ public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDom
             return;
         }
 
-        _surfaceView.Record(view, inputs.DebugView, picture, output.Value);
+        _surfaceView.Record(view, inputs.Settings.RenderView, picture, output.Value);
 
         // The output into the window, by a linear blit: stretched where it is the view's size, copied where upscaled.
         GpuTexture target = graph.WindowTarget;
@@ -306,27 +312,5 @@ public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDom
 
         graph.ReadBack(output, readback.Value, RenderStage.Post);
         Screenshot.SaveAsync(_gpu, _assets, readback.Value, path, size.Width, size.Height).FireAndForget();
-    }
-
-    private void ApplySetting(in SetCliCommand setting)
-    {
-        if (setting.Key == "Deferred.window")
-        {
-            if (_debugWindow is not null && bool.TryParse(setting.Value, out bool isOpen))
-                _debugWindow.IsOpen = isOpen;
-            else
-                Log.Error($"{setting.Key} takes true or false, with a debug UI to draw it, not '{setting.Value}'.");
-
-            return;
-        }
-
-        if (setting.Key != "Deferred.debug")
-            return;
-
-        // A number parses as any value of the enum, named or not.
-        if (Enum.TryParse(setting.Value, ignoreCase: true, out DebugView view) && Enum.IsDefined(view))
-            _debugView = view;
-        else
-            Log.Error($"{setting.Key} takes {string.Join(", ", Enum.GetNames<DebugView>())}, not '{setting.Value}'.");
     }
 }

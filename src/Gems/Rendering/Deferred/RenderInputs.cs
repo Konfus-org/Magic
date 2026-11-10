@@ -6,5 +6,8 @@ namespace Magic.Deferred;
 /// </summary>
 internal sealed class RenderInputs
 {
-    public DebugView DebugView { get; set; }
+    /// <summary>
+    /// The settings the frame is drawn by.
+    /// </summary>
+    public DeferredSettings Settings { get; set; } = new();
 }

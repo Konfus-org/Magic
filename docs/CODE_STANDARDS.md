@@ -64,7 +64,7 @@ Write the engine as data flowing through functions, not objects calling each oth
   dropping what went, as the renderer does. One that must also drop what it built up when the world is replaced, or ready
   what comes before it shows, implements `IHookIntoDomainLoading`; the world awaits it while the loading screen shows.
 - `Program` sets a run up and owns its loop, calling each service's `Pump` in turn. `App` lasts the whole process; what a
-  run makes is new for it, and a restart keeps only the world, as JSON. A service starts in its constructor
+  run makes is new for it, and a restart keeps only the world, as JSON, and the gems' settings. A service starts in its constructor
   and ends in `Dispose`, not with paired start and stop calls. A step is a method. A class of its own is for a substantial piece of work.
 - A change is a call on `World`.
 - A method that needs the game thread after an await of its own steps onto it with
@@ -75,6 +75,10 @@ Write the engine as data flowing through functions, not objects calling each oth
   needs slow setup starts it in its constructor and reads what came of it in a hook.
 - `Dispose` frees what the gem started, once none of its work still runs on a worker.
 - A gem's csproj states its `Description`, `Version` and `Authors`. Nothing else does.
+- A value a player, game or developer would tune is a member of its gem's settings record, never a const, a
+  `#if DEBUG` choice, a key-only toggle or a console string. The gem implements `IHasSettings<TSettings>`, and the
+  record is a `sealed record` of init properties with a `[Category]`, each with its default and a doc comment.
+  Game code reads and sets it through `Settings` by type; the console and tools by key, as `Rendering.Resolution`.
 - Gems may depend on each other and reference one another. A gem throws when a dependency it needs isn't there.
 - A component is an unmanaged struct with public fields that implements `IComponent`, and members for what follows from
   those fields.
@@ -269,9 +273,9 @@ All code runs on Windows, Linux and macOS.
 - **Case.** File names in code, assets, `#include`s, csproj and `.meta` files match the disk exactly. Two files never
   differ only by case.
 - **Disk.** All disk access goes through `IFileSystem`, never `File` or `Directory`; only `Debugging` is exempt. Engine
-  output goes next to Magic in a folder per kind (`Logs`, `Screenshots`), never a temp, home or AppData path. The cache
-  is the one exception. Treat a file watch event as "something changed
-  here": collect them in one place and check what exists.
+  output goes next to Magic in a folder per kind (`Logs`, `Screenshots`), never a temp, home or AppData path. The cache,
+  and each project's settings and saves under `Magic/<project>` in the user's local application data, are the
+  exceptions. Treat a file watch event as "something changed here": collect them in one place and check what exists.
 - **Text.** Write files and generated shader source with `\n`, never `Environment.NewLine`, as UTF-8 without a BOM.
   Accept `\r\n` and a BOM when reading. Parse and format numbers and dates culture-invariantly.
 - **Platform code.** No OS APIs in Core: no P/Invoke, registry, `.exe`/`.so`/`.dylib` names or `OperatingSystem.Is*`.

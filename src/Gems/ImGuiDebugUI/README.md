@@ -10,7 +10,8 @@ gem that takes `IDebugUI` is made after it.
 
 - The UI draws itself over the window's image, in the overlay layer, so it shows over whatever drew the world. It is
   not in screenshots, and a headless run, which has no window, draws none.
-- Reports always show in a Debug build. In other builds they show only while a debug window is open.
+- Lines and text that gems ask for always show. Lines logged with `onScreen` always show in a Debug build; in other
+  builds they show only while a debug window is open.
 - Without a gem that provides `IInput`, nothing can be clicked or typed. Without one that provides `IClipboard`, nothing
   can be copied or pasted.
 - Nothing is drawn until the UI's shaders compile.

@@ -7,7 +7,7 @@ namespace Magic.Deferred;
 /// <summary>
 /// What the output shows of a frame's surfaces, the twin of <c>ShowSurface.slang</c>'s.
 /// </summary>
-internal enum DebugView : uint
+public enum DebugView : uint
 {
     /// <summary>
     /// The finished frame.

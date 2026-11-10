@@ -221,8 +221,8 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Saves the game as <c>Saves/<paramref name="name"/>.save</c> beside Magic, as <see cref="SaveAsync()"/> holds it, once
-    /// no other work on the world runs. Why not, when that has none or it can't be written.
+    /// Saves the game as <c>Magic/&lt;project&gt;/Saves/<paramref name="name"/>.save</c> under the user's local
+    /// application data, as <see cref="SaveAsync()"/> holds it, once no other work on the world runs. Why not, when that has none or it can't be written.
     /// </summary>
     public async Task<Result> SaveAsync(string name, CancellationToken cancel)
     {
@@ -236,17 +236,17 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Puts the game back as <c>Saves/<paramref name="name"/>.save</c> holds it, in place of everything in the world,
+    /// Puts the game back as the save <paramref name="name"/> holds it, in place of everything in the world,
     /// globals too: its domains as their files make them, with its changes made on them. Why not, when there is no such save, it
     /// doesn't read, or one of its domains doesn't open, which leaves the world as it was.
     /// </summary>
-    public async Task<Result> RestoreAsync(string name, CancellationToken cancel)
+    public async Task<Result> RestoreAsync(string name, IProgress<LoadProgress>? progress, CancellationToken cancel)
     {
         Result<byte[]> bytes = await _files.ReadBytesAsync(GetSavePath(name), cancel).ConfigureAwait(false);
         if (!bytes.Ok)
             return Result.Failure(bytes.Error);
 
-        return await RestoreAsync(bytes.Value, cancel).ConfigureAwait(false);
+        return await RestoreAsync(bytes.Value, progress, cancel).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
@@ -372,12 +372,18 @@ public sealed class World : IEcs, IDisposable
     /// project's, or the default one when it names none or that doesn't open. With no ECS, nothing opens, which is warned
     /// about.
     /// </summary>
-    internal async Task StartAsync(Task<Result<byte[]>>? restorePoint, CancellationToken cancel)
+    internal async Task StartAsync(
+        Task<Result<byte[]>>? restorePoint,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
     {
         if (restorePoint is not null)
         {
             Result<byte[]> saved = await restorePoint.ConfigureAwait(false);
-            Result restored = saved.Ok ? await RestoreAsync(saved.Value, cancel).ConfigureAwait(false) : saved;
+            Result restored = saved.Ok
+                ? await RestoreAsync(saved.Value, progress, cancel).ConfigureAwait(false)
+                : saved;
             if (restored.Ok)
                 return;
 
@@ -397,7 +403,7 @@ public sealed class World : IEcs, IDisposable
         Handle<Domain> fallback = _assets.GetDefault<Domain>();
         Handle<Domain> entry = _app.Project?.EntryPoint ?? Handle<Domain>.None;
         Handle<Domain> first = entry == Handle<Domain>.None ? fallback : entry;
-        Result opened = await OpenAsync(first, null, cancel).ConfigureAwait(false);
+        Result opened = await OpenAsync(first, progress, cancel).ConfigureAwait(false);
         if (opened.Ok)
             return;
 
@@ -405,7 +411,7 @@ public sealed class World : IEcs, IDisposable
         if (first == fallback)
             return;
 
-        Result second = await OpenAsync(fallback, null, cancel).ConfigureAwait(false);
+        Result second = await OpenAsync(fallback, progress, cancel).ConfigureAwait(false);
         if (!second.Ok)
             Log.Error($"The default domain does not open either: {second.Error}");
     }
@@ -701,13 +707,13 @@ public sealed class World : IEcs, IDisposable
     /// Puts the world back as the JSON <paramref name="bytes"/> hold it, in place of everything in the world. Why not,
     /// when it doesn't read or one of its domains doesn't open, which leaves the world as it was.
     /// </summary>
-    private async Task<Result> RestoreAsync(byte[] bytes, CancellationToken cancel)
+    private async Task<Result> RestoreAsync(byte[] bytes, IProgress<LoadProgress>? progress, CancellationToken cancel)
     {
         Result<SaveFile> saved = Json.Read<SaveFile>(bytes);
         if (!saved.Ok)
             return Result.Failure(saved.Error);
 
-        return await RunLoadingAsync(() => OpenSaveAsync(saved.Value, cancel), cancel).ConfigureAwait(false);
+        return await RunLoadingAsync(() => OpenSaveAsync(saved.Value, progress, cancel), cancel).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -904,7 +910,11 @@ public sealed class World : IEcs, IDisposable
     /// Everything leaves, globals too, and <paramref name="saved"/> comes: its domains as their files make them, read
     /// first on workers, so one that doesn't open leaves the world as it was, with its changes made on them.
     /// </summary>
-    private async Task<Result> OpenSaveAsync(SaveFile saved, CancellationToken cancel)
+    private async Task<Result> OpenSaveAsync(
+        SaveFile saved,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
     {
         if (!HasEcs)
             return Result.Failure("no gem the project lists provides the ECS.");
@@ -912,7 +922,7 @@ public sealed class World : IEcs, IDisposable
         ImmutableArray<DomainRead>.Builder reading = ImmutableArray.CreateBuilder<DomainRead>(saved.Domains.Length);
         foreach (Handle<Domain> domain in saved.Domains)
         {
-            Result<DomainRead> read = await ReadDomainAsync(domain, null, cancel).ConfigureAwait(false);
+            Result<DomainRead> read = await ReadDomainAsync(domain, progress, cancel).ConfigureAwait(false);
             if (!read.Ok)
                 return Result.Failure($"{GetName(domain)} does not open: {read.Error}");
 
@@ -949,7 +959,15 @@ public sealed class World : IEcs, IDisposable
         return Result.Success();
     }
 
-    private string GetSavePath(string name) => _files.Combine(AppContext.BaseDirectory, "Saves", name + ".save");
+    private string GetSavePath(string name) =>
+        _files.Combine(
+            UserFolders.GetProjectFolder(
+                _files,
+                _app.Project ?? throw new InvalidOperationException("Nothing is saved until a project is open.")
+            ),
+            "Saves",
+            name + ".save"
+        );
 
     /// <summary>
     /// Each open domain that is or places one of <paramref name="changed"/> makes its entities again as its files now say,

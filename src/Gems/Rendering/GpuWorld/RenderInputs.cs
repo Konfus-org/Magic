@@ -34,7 +34,7 @@ internal sealed class RenderInputs
     public int WorldNumber { get; set; }
 
     /// <summary>
-    /// The most pixels across and down the picture is drawn at, in the window's shape.
+    /// The settings the frame is drawn by.
     /// </summary>
-    public (int Width, int Height) Resolution { get; set; }
+    public GpuWorldSettings Settings { get; set; } = new();
 }

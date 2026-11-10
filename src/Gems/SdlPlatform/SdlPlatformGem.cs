@@ -2,8 +2,8 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Magic.Assets;
+using Magic.Configuration;
 using Magic.Debugging;
-using Magic.Events;
 using Magic.Input;
 using Magic.Platform;
 using Magic.Projects;
@@ -31,38 +31,19 @@ namespace Magic.SdlPlatform;
 /// the gem.
 /// </para>
 /// </summary>
-public sealed class SdlPlatformGem : IGem, IPlatform, IWindow, IClipboard, IInput, IDisposable
+public sealed class SdlPlatformGem
+    : IGem,
+        IHasSettings<SdlPlatformSettings>,
+        IPlatform,
+        IWindow,
+        IClipboard,
+        IInput,
+        IDisposable
 {
-    /// <summary>
-    /// The window's size out of fullscreen or maximized until it is first resized.
-    /// </summary>
-    private const int WindowedWidth = 1280;
-
-    private const int WindowedHeight = 720;
-
-    /// <summary>
-    /// How the window opens: a release fills the display without a border, any other build is a maximized window.
-    /// </summary>
-#if DEBUG
-    private const ulong StartMode = SDL_WINDOW_MAXIMIZED;
-#else
-    private const ulong StartMode = SDL_WINDOW_FULLSCREEN;
-#endif
-
-    /// <summary>
-    /// <c>set SdlPlatform.windowMode=fullscreen|maximized|windowed</c> shows the window that way.
-    /// </summary>
-    private const string WindowModeSetting = "SdlPlatform.windowMode";
-
     /// <summary>
     /// The longest a pump waits for the OS's next event, so what was handed to the platform thread is never kept longer.
     /// </summary>
     private const int PumpWaitMs = 10;
-
-    /// <summary>
-    /// How far a stick moves from its centre before it counts, as a part of its full deflection.
-    /// </summary>
-    private const float StickDeadZone = 0.15f;
 
     /// <summary>
     /// Each stick and trigger: the control it sets, SDL's axis it is read from, and the sign the value takes. SDL's stick
@@ -119,6 +100,8 @@ public sealed class SdlPlatformGem : IGem, IPlatform, IWindow, IClipboard, IInpu
 
     private string? _clipboardToSet;
 
+    private SdlPlatformSettings _settings;
+
     /// <summary>
     /// Window pixels to SDL's points, written whole by each pump for the game thread's mouse motion.
     /// </summary>
@@ -138,8 +121,9 @@ public sealed class SdlPlatformGem : IGem, IPlatform, IWindow, IClipboard, IInpu
 
     private string _text = string.Empty;
 
-    public unsafe SdlPlatformGem(App app, Threads threads, AssetManager assets)
+    public unsafe SdlPlatformGem(SdlPlatformSettings settings, App app, Threads threads, AssetManager assets)
     {
+        _settings = settings;
         _app = app;
         _threads = threads;
         _assets = assets;
@@ -152,15 +136,27 @@ public sealed class SdlPlatformGem : IGem, IPlatform, IWindow, IClipboard, IInpu
         if (app.IsHeadless)
             return;
 
+        ulong mode = settings.Mode switch
+        {
+            WindowMode.Fullscreen => SDL_WINDOW_FULLSCREEN,
+            WindowMode.Maximized => SDL_WINDOW_MAXIMIZED,
+            WindowMode.Windowed => 0,
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(settings),
+                settings.Mode,
+                "There is no such window mode."
+            ),
+        };
+
         // macOS draws through a Metal layer, which the window must be opened for; elsewhere the OS's window is enough.
         ulong flags =
-            StartMode
+            mode
             | SDL_WINDOW_RESIZABLE
             | SDL_WINDOW_HIGH_PIXEL_DENSITY
             | (OperatingSystem.IsMacOS() ? SDL_WINDOW_METAL : 0);
         fixed (byte* title = CString.ToBytes(_title))
         {
-            _window = SDL_CreateWindow(title, WindowedWidth, WindowedHeight, flags);
+            _window = SDL_CreateWindow(title, settings.WindowedSize.Width, settings.WindowedSize.Height, flags);
         }
 
         if (_window == null)
@@ -246,6 +242,21 @@ public sealed class SdlPlatformGem : IGem, IPlatform, IWindow, IClipboard, IInpu
     public ReadOnlySpan<InputDevice> Devices => CollectionsMarshal.AsSpan(_devices);
 
     /// <summary>
+    /// The window's and input's settings. A new window mode is shown on the platform thread. Game thread.
+    /// </summary>
+    public SdlPlatformSettings Settings
+    {
+        get => _settings;
+        set
+        {
+            if (value.Mode != _settings.Mode && !_app.IsHeadless)
+                ShowModeAsync(value.Mode).FireAndForget();
+
+            _settings = value;
+        }
+    }
+
+    /// <summary>
     /// What the window's clipboard holds, as its last event said; headless, only what was set here.
     /// </summary>
     unsafe string IClipboard.Text
@@ -317,21 +328,10 @@ public sealed class SdlPlatformGem : IGem, IPlatform, IWindow, IClipboard, IInpu
 
     /// <summary>
     /// Makes input this frame's: what happened last frame is over, SDL's events since are applied, and sticks and
-    /// triggers are read as they stand now. A window mode set is handed to the platform thread.
+    /// triggers are read as they stand now.
     /// </summary>
     public unsafe void Update(in Frame frame)
     {
-        foreach (SetCliCommand setting in frame.Events.Get<SetCliCommand>())
-        {
-            if (setting.Key != WindowModeSetting)
-                continue;
-
-            if (setting.Value is not ("fullscreen" or "maximized" or "windowed"))
-                Log.Error($"{setting.Key} takes fullscreen, maximized or windowed, not '{setting.Value}'.");
-            else if (!_app.IsHeadless)
-                ShowModeAsync(setting.Value).FireAndForget();
-        }
-
         // What happened last frame is over: pressed and released clear, and a mouse's motion and wheel go back to 0.
         for (int i = 0; i < _devices.Count; i++)
         {
@@ -414,22 +414,6 @@ public sealed class SdlPlatformGem : IGem, IPlatform, IWindow, IClipboard, IInpu
     }
 
     /// <summary>
-    /// Gives a control a new value, and with it whether it went down or came up. Pressed and released only ever turn on
-    /// within a frame, so a tap between two frames shows as both.
-    /// </summary>
-    private static void SetState(ControlState[] states, Control control, float value)
-    {
-        ref ControlState state = ref states[control.Index];
-        bool isDown = MathF.Abs(value) >= 0.5f;
-        state = new ControlState(
-            value,
-            isDown,
-            state.WasPressed || (isDown && !state.IsDown),
-            state.WasReleased || (!isDown && state.IsDown)
-        );
-    }
-
-    /// <summary>
     /// The clipboard's text, which SDL hands out as a copy that is freed once read.
     /// </summary>
     private static unsafe string ReadClipboard()
@@ -442,18 +426,6 @@ public sealed class SdlPlatformGem : IGem, IPlatform, IWindow, IClipboard, IInpu
     }
 
     /// <summary>
-    /// An SDL axis, -32768 to 32767, as -1 to 1: 0 inside the dead zone, and past it growing from 0 to 1 at full
-    /// deflection, so the zone's edge is no step. Triggers only reach the positive half.
-    /// </summary>
-    private static float ToStick(short value)
-    {
-        float raw = Math.Max(value / 32767f, -1f);
-        float past = MathF.Abs(raw) - StickDeadZone;
-
-        return past <= 0 ? 0 : MathF.CopySign(past / (1 - StickDeadZone), raw);
-    }
-
-    /// <summary>
     /// The named pointer in a window's <paramref name="properties"/>; 0 when it has none.
     /// </summary>
     private static unsafe nint GetPointer(uint properties, ReadOnlySpan<byte> name)
@@ -462,6 +434,35 @@ public sealed class SdlPlatformGem : IGem, IPlatform, IWindow, IClipboard, IInpu
         {
             return (nint)SDL_GetPointerProperty(properties, key, null);
         }
+    }
+
+    /// <summary>
+    /// Gives a control a new value, and with it whether it went down or came up. Pressed and released only ever turn on
+    /// within a frame, so a tap between two frames shows as both.
+    /// </summary>
+    private void SetState(ControlState[] states, Control control, float value)
+    {
+        ref ControlState state = ref states[control.Index];
+        bool isDown = MathF.Abs(value) >= _settings.PressThreshold;
+        state = new ControlState(
+            value,
+            isDown,
+            state.WasPressed || (isDown && !state.IsDown),
+            state.WasReleased || (!isDown && state.IsDown)
+        );
+    }
+
+    /// <summary>
+    /// An SDL axis, -32768 to 32767, as -1 to 1: 0 inside the dead zone, and past it growing from 0 to 1 at full
+    /// deflection, so the zone's edge is no step. Triggers only reach the positive half.
+    /// </summary>
+    private float ToStick(short value)
+    {
+        float deadZone = _settings.StickDeadZone;
+        float raw = Math.Max(value / 32767f, -1f);
+        float past = MathF.Abs(raw) - deadZone;
+
+        return past <= 0 ? 0 : MathF.CopySign(past / (1 - deadZone), raw);
     }
 
     /// <summary>
@@ -722,7 +723,7 @@ public sealed class SdlPlatformGem : IGem, IPlatform, IWindow, IClipboard, IInpu
     /// <summary>
     /// Shows the window as <paramref name="mode"/> says on the platform thread, unless the run ended meanwhile.
     /// </summary>
-    private async Task ShowModeAsync(string mode)
+    private async Task ShowModeAsync(WindowMode mode)
     {
         CancellationToken lifetime = _app.Lifetime;
         await _threads.Enter(EngineThread.Platform);
@@ -734,12 +735,12 @@ public sealed class SdlPlatformGem : IGem, IPlatform, IWindow, IClipboard, IInpu
     /// Fullscreen fills the display without a border; maximized and windowed leave fullscreen first, as a fullscreen
     /// window neither maximizes nor restores. Windowed returns the window to its last size.
     /// </summary>
-    private unsafe void SetMode(string mode)
+    private unsafe void SetMode(WindowMode mode)
     {
-        SDL_SetWindowFullscreen(_window, mode == "fullscreen");
-        if (mode == "maximized")
+        SDL_SetWindowFullscreen(_window, mode == WindowMode.Fullscreen);
+        if (mode == WindowMode.Maximized)
             SDL_MaximizeWindow(_window);
-        else if (mode == "windowed")
+        else if (mode == WindowMode.Windowed)
             SDL_RestoreWindow(_window);
     }
 

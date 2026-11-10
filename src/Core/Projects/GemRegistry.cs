@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using Magic.Assets;
 using Magic.Assets.Pipeline;
+using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Files;
@@ -105,6 +106,11 @@ internal static class GemRegistry
                 }
             );
             providers[gem.Type] = gem;
+
+            // A gem's settings are what was set before over their defaults, for its constructor.
+            if (Settings.GetSettingsContract(gem.Type)?.GetGenericArguments()[0] is { } settings)
+                services.AddTransient(settings, provider => provider.GetRequiredService<Settings>().Get(settings));
+
             foreach (Type contract in gem.Provides)
             {
                 services.AddSingleton(contract, provider => provider.GetRequiredService(gem.Type));
@@ -169,6 +175,12 @@ internal static class GemRegistry
             return true;
         }
     }
+
+    /// <summary>
+    /// Where the gem <paramref name="name"/> is: <c>Gems/&lt;name&gt;/&lt;name&gt;.dll</c> beside Magic.
+    /// </summary>
+    internal static string GetPath(IFileSystem files, string name) =>
+        files.Combine(AppContext.BaseDirectory, "Gems", name, name + ".dll");
 
     /// <summary>
     /// The listed gem <paramref name="name"/>, loaded into its context of <paramref name="contexts"/>, or why it can't be
@@ -258,16 +270,11 @@ internal static class GemRegistry
     }
 
     /// <summary>
-    /// Where the gem <paramref name="name"/> is: <c>Gems/&lt;name&gt;/&lt;name&gt;.dll</c> beside Magic.
-    /// </summary>
-    private static string GetPath(IFileSystem files, string name) =>
-        files.Combine(AppContext.BaseDirectory, "Gems", name, name + ".dll");
-
-    /// <summary>
     /// Whether a gem implementing <paramref name="contract"/> hands it to the host, rather than provide it to other gems.
     /// </summary>
     private static bool IsHostContract(Type contract) =>
         contract == typeof(IAssetImporter<>)
+        || contract == typeof(IHasSettings<>)
         || contract == typeof(IAssetExporter<>)
         || contract == typeof(IRender<,>)
         || contract == typeof(IRenderFrom<>)

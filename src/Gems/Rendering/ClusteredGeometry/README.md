@@ -28,11 +28,9 @@ view it draws, with a gem that lights the GBuffer.
 
 ## Settings
 
-Set these in the console with `set ClusteredGeometry.<name>=<value>`. A wrong value logs what it takes.
+`Rendering.ImpostorPixels` and `Rendering.ImpostorDistance`, which `get Rendering` lists with what each does, choose
+when a model draws as its impostor.
 
-- `impostorPixels` is the radius on screen, in pixels, under which a model draws as its impostor. 0 turns that test
-  off.
-- `impostorDistance` is the distance in metres past which a model draws as its impostor. 0 turns that test off.
 - When the frame's clusters near the gem's limit, it raises both tests on its own, then lets cluster detail coarsen,
   until they fit.
 
