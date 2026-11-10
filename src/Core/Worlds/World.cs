@@ -240,13 +240,13 @@ public sealed class World : IEcs, IDisposable
     /// globals too: its domains as their files make them, with its changes made on them. Why not, when there is no such save, it
     /// doesn't read, or one of its domains doesn't open, which leaves the world as it was.
     /// </summary>
-    public async Task<Result> RestoreAsync(string name, CancellationToken cancel)
+    public async Task<Result> RestoreAsync(string name, IProgress<LoadProgress>? progress, CancellationToken cancel)
     {
         Result<byte[]> bytes = await _files.ReadBytesAsync(GetSavePath(name), cancel).ConfigureAwait(false);
         if (!bytes.Ok)
             return Result.Failure(bytes.Error);
 
-        return await RestoreAsync(bytes.Value, cancel).ConfigureAwait(false);
+        return await RestoreAsync(bytes.Value, progress, cancel).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
@@ -385,7 +385,9 @@ public sealed class World : IEcs, IDisposable
         if (restorePoint is not null)
         {
             Result<byte[]> saved = await restorePoint.ConfigureAwait(false);
-            Result restored = saved.Ok ? await RestoreAsync(saved.Value, cancel).ConfigureAwait(false) : saved;
+            Result restored = saved.Ok
+                ? await RestoreAsync(saved.Value, progress, cancel).ConfigureAwait(false)
+                : saved;
             if (restored.Ok)
                 return;
 
@@ -709,13 +711,13 @@ public sealed class World : IEcs, IDisposable
     /// Puts the world back as the JSON <paramref name="bytes"/> hold it, in place of everything in the world. Why not,
     /// when it doesn't read or one of its domains doesn't open, which leaves the world as it was.
     /// </summary>
-    private async Task<Result> RestoreAsync(byte[] bytes, CancellationToken cancel)
+    private async Task<Result> RestoreAsync(byte[] bytes, IProgress<LoadProgress>? progress, CancellationToken cancel)
     {
         Result<SaveFile> saved = Json.Read<SaveFile>(bytes);
         if (!saved.Ok)
             return Result.Failure(saved.Error);
 
-        return await RunLoadingAsync(() => OpenSaveAsync(saved.Value, cancel), cancel).ConfigureAwait(false);
+        return await RunLoadingAsync(() => OpenSaveAsync(saved.Value, progress, cancel), cancel).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -915,7 +917,11 @@ public sealed class World : IEcs, IDisposable
     /// Everything leaves, globals too, and <paramref name="saved"/> comes: its domains as their files make them, read
     /// first on workers, so one that doesn't open leaves the world as it was, with its changes made on them.
     /// </summary>
-    private async Task<Result> OpenSaveAsync(SaveFile saved, CancellationToken cancel)
+    private async Task<Result> OpenSaveAsync(
+        SaveFile saved,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
     {
         if (!HasEcs)
             return Result.Failure("no gem the project lists provides the ECS.");
@@ -923,7 +929,7 @@ public sealed class World : IEcs, IDisposable
         ImmutableArray<DomainRead>.Builder reading = ImmutableArray.CreateBuilder<DomainRead>(saved.Domains.Length);
         foreach (Handle<Domain> domain in saved.Domains)
         {
-            Result<DomainRead> read = await ReadDomainAsync(domain, null, cancel).ConfigureAwait(false);
+            Result<DomainRead> read = await ReadDomainAsync(domain, progress, cancel).ConfigureAwait(false);
             if (!read.Ok)
                 return Result.Failure($"{GetName(domain)} does not open: {read.Error}");
 

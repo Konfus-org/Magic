@@ -25,7 +25,7 @@ internal static class LoadCommand
                 return;
 
             Result loaded = await queue
-                .ChangeWorldAsync(() => world.RestoreAsync(saveName, CancellationToken.None))
+                .ChangeWorldAsync(() => world.RestoreAsync(saveName, Terminal.Progress, CancellationToken.None))
                 .ConfigureAwait(false);
             if (!loaded.Ok)
                 Log.Error($"The save {saveName} was not loaded: {loaded.Error}");
