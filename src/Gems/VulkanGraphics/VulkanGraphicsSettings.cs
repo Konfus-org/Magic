@@ -10,7 +10,7 @@ public sealed record VulkanGraphicsSettings
 {
     /// <summary>
     /// Whether a frame waits for the display to show it, which caps the frame rate at the display's and never tears.
-    /// Off, frames show as fast as they are drawn: without tearing where the display allows it, else torn.
+    /// Off, frames show as fast as they are drawn, and can tear.
     /// </summary>
     public bool IsVSyncOn { get; init; }
 }

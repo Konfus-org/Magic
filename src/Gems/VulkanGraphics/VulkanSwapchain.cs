@@ -15,10 +15,11 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
     : IDisposable
 {
     /// <summary>
-    /// How frames reach the window without waiting for the display, most wanted first: mailbox, which never tears, else
-    /// immediate.
+    /// How frames reach the window without waiting for the display, most wanted first: immediate, which can tear, else
+    /// mailbox, which never tears but which some drivers hold to the display's rate, as NVIDIA's does on a laptop panel
+    /// another GPU drives.
     /// </summary>
-    private static readonly VkPresentModeKHR[] _unsyncedModes = [VkPresentModeKHR.Mailbox, VkPresentModeKHR.Immediate];
+    private static readonly VkPresentModeKHR[] _unsyncedModes = [VkPresentModeKHR.Immediate, VkPresentModeKHR.Mailbox];
 
     private VkSwapchainKHR _swapchain = VkSwapchainKHR.Null;
     private GpuTexture[] _textures = [];
@@ -145,9 +146,16 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
             return;
 
         VkSurfaceFormatKHR format = PickFormat(surface);
+        device.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(
+            device.PhysicalDevice,
+            surface,
+            out uint modeCount
+        );
+        VkPresentModeKHR[] modes = new VkPresentModeKHR[modeCount];
+        device.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(device.PhysicalDevice, surface, modes);
         // Each image is as big as the window, so there are as few as the surface takes: two at least, one drawn while
         // the other is shown, and one more for mailbox to queue a drawn image while one is shown.
-        VkPresentModeKHR presentMode = PickPresentMode(surface);
+        VkPresentModeKHR presentMode = PickPresentMode(modes);
         uint queued = presentMode == VkPresentModeKHR.Mailbox ? 1u : 0u;
         uint count = Math.Max(capabilities.minImageCount + queued, 2);
         if (capabilities.maxImageCount > 0)
@@ -179,6 +187,7 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
 
         _swapchain = swapchain;
         device.Api.vkGetSwapchainImagesKHR(_swapchain, out uint imageCount);
+        Log.Info($"Window images: {imageCount} of {width}x{height}, {presentMode} of {string.Join(", ", modes)}.");
         VkImage[] images = new VkImage[imageCount];
         device.Api.vkGetSwapchainImagesKHR(_swapchain, images);
         _textures = new GpuTexture[imageCount];
@@ -236,16 +245,13 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
 
     /// <summary>
     /// FIFO, which waits for the display and every surface has, while vsync is on; else the first of
-    /// <see cref="_unsyncedModes"/> the surface has, else FIFO.
+    /// <see cref="_unsyncedModes"/> in <paramref name="modes"/>, the surface's, else FIFO.
     /// </summary>
-    private VkPresentModeKHR PickPresentMode(VkSurfaceKHR surface)
+    private VkPresentModeKHR PickPresentMode(VkPresentModeKHR[] modes)
     {
         if (_isVSyncOn)
             return VkPresentModeKHR.Fifo;
 
-        device.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(device.PhysicalDevice, surface, out uint count);
-        Span<VkPresentModeKHR> modes = new VkPresentModeKHR[count];
-        device.InstanceApi.vkGetPhysicalDeviceSurfacePresentModesKHR(device.PhysicalDevice, surface, modes);
         foreach (VkPresentModeKHR mode in _unsyncedModes)
         {
             if (modes.Contains(mode))
