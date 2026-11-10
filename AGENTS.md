@@ -39,6 +39,8 @@ The scripts run under `pwsh` and Windows PowerShell ([Tools](tools/README.md)).
   windowed run of your own with the console line `name <branch>`.
 - **Claim:** `tools/Scripts/Claim.ps1 -Slice <title> -Scope <paths>` tells every other session what the slice will
   change, and prints any overlap with theirs ([Worktrees](#worktrees)).
+- **Configuration:** build and run `Debug`. To measure or profile performance, use `Optimize`. Use `Release` only when
+  the user asks for it.
 - **Time limit:** give every command you start a time limit. Never let a command run forever (the timeouts skill).
 - **The user's review:** `plannotator review` opens the change as a diff in the user's browser and returns when
   they comment or approve (the finish skill).
