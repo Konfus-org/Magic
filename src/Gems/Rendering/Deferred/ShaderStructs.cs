@@ -6,12 +6,12 @@ namespace Magic.Deferred;
 /// <summary>
 /// What the cluster passes read beyond the frame, the twin of <c>Scene/Clusters.slang</c>'s: the cull's limits and
 /// buffers, the depth pyramid, the visibility ids and the impostor handoff, written once a frame into the constants
-/// buffer after <see cref="GpuShadows"/>.
+/// buffer after <see cref="GpuIndirectLight"/>.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct ClusterConstants
 {
-    public const int Offset = GpuShadows.Offset + GpuShadows.Bytes;
+    public const int Offset = GpuIndirectLight.Offset + GpuIndirectLight.Bytes;
 
     public const int Bytes = 64;
 

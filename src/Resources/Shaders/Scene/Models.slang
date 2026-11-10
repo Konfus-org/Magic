@@ -27,17 +27,14 @@ public struct Models
 
 // Where the world as rays see it is in the frame's buffer, right after the models, and its bytes: C#'s GpuTracedWorld.
 public static const uint TracedWorldOffset = ModelsOffset + ModelsBytes;
-public static const uint TracedWorldBytes = 32u;
+public static const uint TracedWorldBytes = 8u;
 
 // The world as rays see it, all 0 where nothing builds it: the top-level acceleration structure over the instances,
-// 0 when none, each material row as a ray hit reads it, and the box over the world boxes of the instances rays see,
-// min over max where none do.
+// 0 when none, and each material row as a ray hit reads it.
 public struct TracedWorld
 {
     public uint acceleration;
     public uint hitMaterials;
-    public float3 boxMin;
-    public float3 boxMax;
 }
 
 // A mesh as a ray sees it, C#'s GpuMesh: where its triangles start in the index pool and its material slot.

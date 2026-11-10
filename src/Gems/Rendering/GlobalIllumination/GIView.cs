@@ -5,15 +5,14 @@ using Magic.Graphics;
 namespace Magic.GlobalIllumination;
 
 /// <summary>
-/// What a frame's passes read and write beyond the gem's own: the frame's buffer, the gem's constants and the indirect
-/// light, the pass header's x, y and z; the view's depth and GBuffer at the picture's size, and whether the gem's history
-/// holds the view at that size; and what a ray reads of the world: the sky's tables, the lights and the models.
+/// What a frame's passes read and write beyond the gem's own: the frame's buffer, which holds the indirect light, and the
+/// gem's constants, the pass header's x and y; the view's depth and GBuffer at the picture's size, and whether the gem's
+/// history holds the view at that size; and what a ray reads of the world: the sky's tables, the lights and the models.
 /// </summary>
 internal readonly record struct GIView(
     RenderGraph Graph,
     GpuBuffer Frame,
     GpuBuffer Constants,
-    GpuBuffer IndirectLight,
     int Width,
     int Height,
     bool HasHistory,
@@ -24,7 +23,7 @@ internal readonly record struct GIView(
     ImmutableArray<GpuResource> World
 )
 {
-    public GpuConstants Header => new(Frame.Id, Constants.Id, IndirectLight.Id);
+    public GpuConstants Header => new(Frame.Id, Constants.Id);
 
     /// <summary>
     /// The traced textures' size: half the picture's, at least 1, the twin of <c>Light/Indirect.slang</c>'s.

@@ -16,9 +16,14 @@ namespace Magic.Deferred;
 
 /// <summary>
 /// What the deferred renderer takes each frame: the world as the GPU holds it, and, where a gem makes them, the world
-/// as rays see it and each pixel's shadows.
+/// as rays see it, each pixel's shadows and the light that reaches the surfaces indirectly.
 /// </summary>
-public readonly record struct DeferredInput(GpuView View, TracedWorld? Traced, ShadowMask? Shadows);
+public readonly record struct DeferredInput(
+    GpuView View,
+    TracedWorld? Traced,
+    ShadowMask? Shadows,
+    IndirectLight? Light
+);
 
 /// <summary>
 /// Draws the world the GPU holds, deferred: each frame, from the view the world's gem made, the clusters culled, drawn
@@ -181,30 +186,31 @@ public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDom
         }
 
         RenderView view = made.Value;
-        Result<ImmutableArray<GpuResource>> indirect = Lighting.GetIndirect(view);
-        if (!indirect.Ok)
-        {
-            Log.Error($"The frame is not drawn: {indirect.Error}");
 
-            return;
-        }
-
-        // The rows of what no gem made this frame are 0, so the shaders that read them trace and shadow nothing.
+        // The rows of what no gem made this frame are 0, so the shaders that read them trace, shadow and light nothing
+        // indirectly, and the sky lights the surfaces.
         if (input.Traced is null)
             graph.Upload(gpu.Frame, [default(GpuTracedWorld)], GpuTracedWorld.Offset);
 
         if (input.Shadows is null)
             graph.Upload(gpu.Frame, [default(GpuShadows)], GpuShadows.Offset);
 
+        if (input.Light is null)
+            graph.Upload(gpu.Frame, [default(GpuIndirectLight)], GpuIndirectLight.Offset);
+
+        ReadOnlySpan<GpuResource> indirect = input.Light is { } light
+            ? [light.Diffuse, light.Reflections, light.Probes, light.ProbeDepth]
+            : [];
+
         // The passes, each in its stage, each reading what the ones before it wrote: what the view sees, the shading,
-        // lit by the indirect light whatever traces it wrote for the frame, a debug view's light in its place, the
+        // lit by the frame's indirect light where something traced it, a debug view's light in its place, the
         // effects, which finish the picture, and the output.
         GpuConstants header = new(gpu.Frame.Id);
         _visibility.Record(view);
-        _lighting.Record(view, header, input.Shadows, input.Traced, indirect.Value);
+        _lighting.Record(view, header, input.Shadows, input.Traced, indirect);
 
         // A debug view of light draws it into the picture, so the effects finish it as they do the picture.
-        _surfaceView.RecordLight(view, inputs.DebugView, indirect.Value);
+        _surfaceView.RecordLight(view, inputs.DebugView, indirect);
         _pixelEffects.Record(view, input.Traced, frame.Index);
         _surfaceView.Record(view, inputs.DebugView);
 

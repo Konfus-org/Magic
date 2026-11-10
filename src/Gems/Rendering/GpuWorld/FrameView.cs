@@ -89,7 +89,6 @@ internal sealed class FrameView(GpuResources resources)
             GlassBase = targets.GlassBase.Id,
             GlassNormal = targets.GlassNormal.Id,
             GlassSurface = targets.GlassSurface.Id,
-            IndirectLight = targets.IndirectLight.Id,
             PixelsPerRadian = height / (2 * MathF.Tan(camera.FieldOfView * MathF.PI / 360)),
             FrameIndex = frame.Index,
             Jitter = jitter,
@@ -181,7 +180,6 @@ internal sealed class FrameView(GpuResources resources)
     private Result<FrameTargets> TryGetTargets(RenderGraph graph, int width, int height)
     {
         Result<GpuBuffer> constants = graph.Buffer(SharedResources.Frame);
-        Result<GpuBuffer> indirectLight = graph.Buffer(SharedResources.IndirectLight);
         Result<GpuTexture> depth = graph.Texture(GetShared(SharedResources.Depth));
         Result<GpuTexture> glassDepth = graph.Texture(
             GpuDescriptions.GetTexture(
@@ -224,7 +222,6 @@ internal sealed class FrameView(GpuResources resources)
             Result asked in (ReadOnlySpan<Result>)
                 [
                     constants,
-                    indirectLight,
                     depth,
                     glassDepth,
                     glassBase,
@@ -246,7 +243,6 @@ internal sealed class FrameView(GpuResources resources)
         return Result.Success(
             new FrameTargets(
                 constants.Value,
-                indirectLight.Value,
                 width,
                 height,
                 HasHistory: _previous is { } last && last.Width == width && last.Height == height,
@@ -276,7 +272,6 @@ internal sealed class FrameView(GpuResources resources)
 /// </summary>
 internal readonly record struct FrameTargets(
     GpuBuffer Constants,
-    GpuBuffer IndirectLight,
     int Width,
     int Height,
     bool HasHistory,

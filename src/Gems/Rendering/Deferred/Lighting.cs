@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using Magic.Assets;
 using Magic.Graphics;
-using Magic.Utils;
 
 namespace Magic.Deferred;
 
@@ -29,45 +28,8 @@ internal sealed class Lighting(AssetManager assets)
     public ImmutableArray<ShaderEntry> Shaders => [_shadeShader, _translucentShader];
 
     /// <summary>
-    /// The frame's indirect light, its buffer and, on a GPU that traces rays, what it can name, asked for by Core's
-    /// descriptions at the view's size, so shading reads them after whatever traced them wrote them; they hold nothing
-    /// it reads while nothing traces them.
-    /// </summary>
-    public static Result<ImmutableArray<GpuResource>> GetIndirect(in RenderView view)
-    {
-        RenderGraph graph = view.Graph;
-        if (!graph.Features.HasRayQuery)
-            return Result.Success<ImmutableArray<GpuResource>>([view.Gpu.IndirectLight]);
-
-        (int width, int height) = (Math.Max(view.Gpu.Width / 2, 1), Math.Max(view.Gpu.Height / 2, 1));
-        ImmutableArray<GpuResource>.Builder indirect = ImmutableArray.CreateBuilder<GpuResource>();
-        indirect.Add(view.Gpu.IndirectLight);
-        foreach (
-            TextureDescription light in (ReadOnlySpan<TextureDescription>)
-                [.. SharedResources.IndirectDiffuse, .. SharedResources.IndirectSpecular]
-        )
-        {
-            Result<GpuTexture> texture = graph.Texture(light with { Width = width, Height = height });
-            if (!texture.Ok)
-                return Result.Failure(texture.Error);
-
-            indirect.Add(texture.Value);
-        }
-
-        Result<GpuBuffer> probes = graph.Buffer(SharedResources.Probes);
-        Result<GpuTexture> probeDepth = graph.Texture(SharedResources.ProbeDepth);
-        if (!probes.Ok || !probeDepth.Ok)
-            return Result.Failure(probes.Ok ? probeDepth.Error : probes.Error);
-
-        indirect.Add(probes.Value);
-        indirect.Add(probeDepth.Value);
-
-        return Result.Success(indirect.ToImmutable());
-    }
-
-    /// <summary>
     /// Every pixel's surface shaded from the sky's tables, its tile's lights and <paramref name="shadows"/> where there
-    /// are any, and from <paramref name="indirect"/>, or the sky where it was not written for the frame; then the
+    /// are any, and from <paramref name="indirect"/>, or the sky where nothing traced it this frame; then the
     /// nearest glass over it, lit by the light around it from the probes where there are any, and its rays through
     /// <paramref name="traced"/> where there is one.
     /// </summary>
@@ -76,7 +38,7 @@ internal sealed class Lighting(AssetManager assets)
         in GpuConstants header,
         ShadowMask? shadows,
         TracedWorld? traced,
-        ImmutableArray<GpuResource> indirect
+        ReadOnlySpan<GpuResource> indirect
     )
     {
         ComputePass shade = view
@@ -97,7 +59,7 @@ internal sealed class Lighting(AssetManager assets)
         if (shadows is { } shadowed)
             shade.Reads(shadowed.Mask, shadowed.SunTint);
 
-        shade.Reads(indirect.AsSpan());
+        shade.Reads(indirect);
 
         shade.Writes(view.Gpu.Hdr).DispatchOver(view.Gpu.Width, view.Gpu.Height);
 
@@ -115,7 +77,7 @@ internal sealed class Lighting(AssetManager assets)
                 view.Gpu.GlassSurface,
                 view.Gpu.Depth
             );
-        translucent.Reads(indirect.AsSpan());
+        translucent.Reads(indirect);
 
         if (traced is { } world)
             translucent.Reads(world.HitMaterials, view.Gpu.Meshes, view.Gpu.Instances);

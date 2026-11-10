@@ -27,6 +27,7 @@ internal readonly record struct TracedDiffuseBuffers(
 /// </summary>
 internal sealed class TracedDiffuse(AssetManager assets)
 {
+    private static readonly string[] _lightNames = ["Diffuse light 0", "Diffuse light 1"];
     private static readonly string[] _depthNames = ["Diffuse depth 0", "Diffuse depth 1"];
 
     private readonly ShaderEntry _traceShader = PassShaders.GetEntry(assets, "TraceDiffuse", "TraceDiffuse") with
@@ -91,12 +92,7 @@ internal sealed class TracedDiffuse(AssetManager assets)
         TextureDescription GetTarget(string name, GpuFormat format) =>
             GpuDescriptions.GetTexture(name, width, height, format);
 
-        TextureDescription GetLight(int frame) =>
-            SharedResources.IndirectDiffuse[frame] with
-            {
-                Width = width,
-                Height = height,
-            };
+        TextureDescription GetLight(int frame) => GetTarget(_lightNames[frame], GpuFormat.R16G16B16A16Sfloat);
     }
 
     /// <summary>
@@ -111,13 +107,13 @@ internal sealed class TracedDiffuse(AssetManager assets)
         graph
             .Compute("Trace diffuse", _traceShader, header, RenderStage.Light)
             .Reads(view.World.AsSpan())
-            .Reads(view.Frame, view.Constants, view.IndirectLight, view.Depth, view.GBufferNormal)
+            .Reads(view.Frame, view.Constants, view.Depth, view.GBufferNormal)
             .Reads(probes.Probes, probes.Depth)
             .Writes(diffuse.Traced)
             .DispatchOver(width, height);
         graph
             .Compute("Filter diffuse", _filterShader, header, RenderStage.Light)
-            .Reads(view.Frame, view.Constants, view.IndirectLight, view.Depth, diffuse.Traced)
+            .Reads(view.Frame, view.Constants, view.Depth, diffuse.Traced)
             .Writes(diffuse.Filtered)
             .DispatchOver(width, height);
         graph
@@ -125,7 +121,6 @@ internal sealed class TracedDiffuse(AssetManager assets)
             .Reads(
                 view.Frame,
                 view.Constants,
-                view.IndirectLight,
                 view.Depth,
                 view.Velocity,
                 diffuse.Filtered,

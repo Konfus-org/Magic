@@ -325,7 +325,8 @@ internal sealed class Gems : IDisposable
     /// <summary>
     /// Makes each gem, after registering what it brings so its constructor can find it: its folder of assets, its asset
     /// types and its code, which goes when it does. Then it sets the gem up: the app's window for as long as it lasts when it provides one, the world's ECS, its
-    /// place on the log when it is a sink, its hooks into domain loading, and the asset types it reads and writes.
+    /// place on the log when it is a sink, the asset types it reads and writes, and its part of the frame; and, once every
+    /// gem is made, its hooks into domain loading, unless it can never render.
     /// </summary>
     [SuppressMessage(
         "Design",
@@ -393,9 +394,6 @@ internal sealed class Gems : IDisposable
             if (made is IEcs ecs)
                 loaded.Ends.Add(_world.Register(ecs));
 
-            if (made is IHookIntoDomainLoading hooks)
-                loaded.Ends.Add(_world.Register(hooks));
-
             // A gem that makes what another makes, or closes a cycle, renders nothing; the others go on.
             try
             {
@@ -408,6 +406,14 @@ internal sealed class Gems : IDisposable
 
             string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
             Log.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");
+        }
+
+        // Once every gem renders, a gem that must take what no listed gem makes never renders, so it holds no domain's
+        // loading back either.
+        foreach (LoadedGem loaded in _loaded)
+        {
+            if (loaded.Instance is IHookIntoDomainLoading hooks && !_rendering.HasMissingInput(loaded.Instance))
+                loaded.Ends.Add(_world.Register(hooks));
         }
     }
 

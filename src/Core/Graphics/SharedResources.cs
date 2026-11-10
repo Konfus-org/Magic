@@ -1,5 +1,3 @@
-using System.Collections.Immutable;
-
 namespace Magic.Graphics;
 
 /// <summary>
@@ -68,40 +66,6 @@ public static class SharedResources
     );
 
     public static readonly TextureDescription Velocity = GetTexture("Velocity", 0, 0);
-
-    /// <summary>
-    /// The library's <c>IndirectLight</c>: what lights the view's surfaces indirectly, written for a frame by whatever
-    /// traces it.
-    /// </summary>
-    public static readonly BufferDescription IndirectLight = GetBuffer("Indirect light", 96);
-
-    /// <summary>
-    /// The indirect diffuse and specular light at half the picture's size: the even frames write the first and the odd
-    /// the second.
-    /// </summary>
-    public static readonly ImmutableArray<TextureDescription> IndirectDiffuse =
-    [
-        GetTexture("Diffuse light 0", 0, 0),
-        GetTexture("Diffuse light 1", 0, 0),
-    ];
-
-    public static readonly ImmutableArray<TextureDescription> IndirectSpecular =
-    [
-        GetTexture("Reflection light 0", 0, 0),
-        GetTexture("Reflection light 1", 0, 0),
-    ];
-
-    /// <summary>
-    /// The probe grid's probes, 32 by 8 by 32 of 80 bytes, and their distances.
-    /// </summary>
-    public static readonly BufferDescription Probes = GetBuffer("Probes", 32 * 8 * 32 * 80);
-
-    public static readonly TextureDescription ProbeDepth = GetTexture(
-        "Probe depth",
-        18 * 32 * 8,
-        18 * 32,
-        GpuFormat.R16G16Sfloat
-    );
 
     private static BufferDescription GetBuffer(string name, long bytes) =>
         new()

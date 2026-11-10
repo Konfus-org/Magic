@@ -1,7 +1,7 @@
 // The probe grid of diffuse light (Majercik et al., "Dynamic Diffuse Global Illumination with Ray-Traced Irradiance
 // Fields", 2019): probes in a box over the world, each holding the light that reaches it as L1 spherical harmonics and
 // the distance to what it sees as an octahedral map of means and squared means, and what a point's light from them is.
-// The grid is IndirectLight's; its placement is the GPU's, worked out each frame from the traced world's box.
+// The grid is IndirectLight's, placed each frame over the traced world's box by what traces it.
 module "Light/Probes";
 
 import Core.Heap;
@@ -42,8 +42,6 @@ public struct ProbeGridConstants
     public float3 origin;
     public float maxDistance;
     public float3 cellSize;
-    // 1 once the grid was placed over a traced world since the probes last started afresh.
-    public uint placed;
 }
 
 // The ray counts buffer's words: the rays the probes were given this frame in all at 0, then each probe's.

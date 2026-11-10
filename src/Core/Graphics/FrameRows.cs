@@ -10,7 +10,7 @@ namespace Magic.Graphics;
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public record struct FrameConstants
 {
-    public const int Bytes = 532;
+    public const int Bytes = 528;
 
     public Matrix4x4 View;
 
@@ -75,11 +75,6 @@ public record struct FrameConstants
     public uint GlassNormal;
 
     public uint GlassSurface;
-
-    /// <summary>
-    /// The library's <c>Light/Indirect.slang</c> IndirectLight, written for a frame by whatever traces it.
-    /// </summary>
-    public uint IndirectLight;
 }
 
 /// <summary>
@@ -109,26 +104,19 @@ public record struct GpuModels
 
 /// <summary>
 /// The world as rays see it, the twin of the library's <c>Scene/Models.slang</c> TracedWorld: the acceleration structure
-/// over the instances, the hit materials and the box over what rays see, written once a frame into the frame's buffer
-/// after <see cref="GpuModels"/> by what builds the structure, and all 0 where nothing does.
+/// over the instances and the hit materials, written once a frame into the frame's buffer after <see cref="GpuModels"/>
+/// by what builds the structure, and all 0 where nothing does.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public record struct GpuTracedWorld
 {
     public const int Offset = GpuModels.Offset + GpuModels.Bytes;
 
-    public const int Bytes = 32;
+    public const int Bytes = 8;
 
     public uint Acceleration;
 
     public uint HitMaterials;
-
-    /// <summary>
-    /// The box over the world boxes of the instances rays see; min over max where none do.
-    /// </summary>
-    public Vector3 BoxMin;
-
-    public Vector3 BoxMax;
 }
 
 /// <summary>
@@ -184,4 +172,71 @@ public record struct GpuShadows
     public uint SunTiles;
 
     public uint SunTint;
+}
+
+/// <summary>
+/// The light that reaches the view's surfaces indirectly, the twin of the library's <c>Light/Indirect.slang</c>
+/// IndirectLight: the traced diffuse light and reflections and the probe grid around them, written once a frame into the
+/// frame's buffer after <see cref="GpuShadows"/> by what traces them, and all 0 where nothing does.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public record struct GpuIndirectLight
+{
+    public const int Offset = GpuShadows.Offset + GpuShadows.Bytes;
+
+    public const int Bytes = 84;
+
+    public uint Diffuse;
+
+    public uint Reflections;
+
+    public ProbeGridConstants Grid;
+}
+
+/// <summary>
+/// The probe grid: its size, the heap ids of its buffers and where it lies in the world, the twin of the library's
+/// <c>Light/Probes.slang</c> ProbeGridConstants.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public record struct ProbeGridConstants
+{
+    /// <summary>
+    /// Probes along x; with the two after, the twin of <c>dimensions</c>.
+    /// </summary>
+    public uint DimensionX;
+
+    public uint DimensionY;
+
+    public uint DimensionZ;
+
+    public uint Probes;
+
+    public uint Depth;
+
+    public uint DepthSampler;
+
+    public uint Rays;
+
+    public uint RayList;
+
+    public uint RayArguments;
+
+    public uint RayCounts;
+
+    public uint Variance;
+
+    /// <summary>
+    /// 0 while the probes hold nothing: this frame's update starts them afresh.
+    /// </summary>
+    public uint HasHistory;
+
+    /// <summary>
+    /// Where the first probe rests in the world, how far a probe's depth reaches, and the metres between neighbouring
+    /// probes.
+    /// </summary>
+    public Vector3 Origin;
+
+    public float MaxDistance;
+
+    public Vector3 CellSize;
 }

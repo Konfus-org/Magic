@@ -4,7 +4,7 @@ Lights the view's surfaces with the light that bounces, on a GPU that traces ray
 traced near each surface and the reflections of smooth ones. It writes them as the frame's indirect light, which the
 renderer's shading reads; without it, or on a GPU that doesn't trace rays, the sky lights the surfaces instead.
 
-To use it, list `GlobalIllumination` in a project's `.magic` file after the renderer.
+To use it, list `GlobalIllumination` in a project's `.magic` file with a gem that builds the world as rays see it.
 
 ## What it draws
 
@@ -30,12 +30,13 @@ To use it, list `GlobalIllumination` in a project's `.magic` file after the rend
 
 ## How it works
 
-- It records in its `Render`, in the frame's light stage, and reads the frame, the view's depth and GBuffer and the
-  world as the renderer leaves them, asked for by Core's shared descriptions.
+- Its `Render` takes the view and the world as rays see it, places the grid, records its passes in the frame's light
+  stage, writes the indirect light into the frame's buffer as the library's `Light/Indirect`, and hands the frame's
+  `IndirectLight` to the gems that take it. A frame whose world rays see no instance of makes none.
 - The shaders are the `Shaders/` modules in this gem's `Resources`, built on the shader library
-  ([Shaders](../../../Resources/Shaders/README.md)). Each pass reads the frame's buffer as its header's x, the gem's own
-  constants as its y and the indirect light as its z, and does nothing in a frame the renderer didn't write.
-  - `UpdateProbes` places the grid and brings its light up to date.
+  ([Shaders](../../../Resources/Shaders/README.md)). Each pass reads the frame's buffer, which holds the indirect light,
+  as its header's x, and the gem's own constants as its y.
+  - `UpdateProbes` brings the probes' light up to date.
   - `Scene/Traced` is what the light traced at half the picture's size shares: which pixel traces and its history.
     `Scene/TracedDiffuse` and `Scene/TracedReflections` are the traced diffuse light's and the traced reflections'
     textures.

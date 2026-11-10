@@ -4,17 +4,12 @@ namespace Magic.Graphics;
 
 /// <summary>
 /// The world as the GPU holds it this frame, and the view it is seen through: what the gem that keeps the world on the
-/// GPU makes each frame for the gems that draw it. The frame's buffer holds the library's <c>Core/Frame</c>, then its
-/// models', lights' and shadows' rows; every target is at the picture's size.
+/// GPU makes each frame for the gems that draw it. The frame's buffer holds the library's <c>Core/Frame</c>, then the
+/// rows of <c>FrameRows.cs</c>; every target is at the picture's size.
 /// </summary>
 public readonly record struct GpuView
 {
     public required GpuBuffer Frame { get; init; }
-
-    /// <summary>
-    /// The library's <c>Light/Indirect</c>, which whatever traces the indirect light writes for a frame.
-    /// </summary>
-    public required GpuBuffer IndirectLight { get; init; }
 
     public required int Width { get; init; }
 

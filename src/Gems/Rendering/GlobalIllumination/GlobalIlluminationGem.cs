@@ -11,16 +11,13 @@ using Magic.Worlds;
 namespace Magic.GlobalIllumination;
 
 /// <summary>
-/// On a GPU that traces rays, lights the view's surfaces indirectly: the probe grid, the traced diffuse light and the
-/// traced reflections, recorded in the light stage and named by the frame's indirect light, which shading reads. It
-/// reads the frame, the view's GBuffer and the world as the renderer shares them, by <see cref="SharedResources"/>. It is
-/// public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
+/// Lights the view's surfaces indirectly, through the world as rays see it: the probe grid, the traced diffuse light and
+/// the traced reflections, recorded in the light stage, written into the frame's buffer and made as the frame's
+/// <see cref="IndirectLight"/>, which shading takes. It is public because nothing in its assembly makes it: Magic does,
+/// by reflection, when a project lists the gem.
 /// </summary>
-public sealed class GlobalIlluminationGem : IGem, IRender, IHookIntoDomainLoading
+public sealed class GlobalIlluminationGem : IGem, IRender<TracedInput, IndirectLight>, IHookIntoDomainLoading
 {
-    private const int HeadlessWidth = 1280;
-    private const int HeadlessHeight = 720;
-
     private readonly Threads _threads;
     private readonly Probes _probes;
     private readonly TracedDiffuse _diffuse;
@@ -38,76 +35,103 @@ public sealed class GlobalIlluminationGem : IGem, IRender, IHookIntoDomainLoadin
     /// </summary>
     private (int Width, int Height)? _traced;
 
-    public GlobalIlluminationGem(AssetManager assets, Threads threads)
+    public GlobalIlluminationGem(AssetManager assets, Threads threads, IGraphicsApi gpu)
     {
         _threads = threads;
         _probes = new Probes(assets);
         _diffuse = new TracedDiffuse(assets);
         _reflections = new TracedReflections(assets);
         _shaders = [.. _probes.Shaders, .. _diffuse.Shaders, .. _reflections.Shaders];
+
+        // Without rays nothing is traced and the gem is never called, so it holds no domain back.
+        if (!gpu.Features.HasRayQuery)
+            _built.TrySetResult();
     }
 
     /// <summary>
-    /// The frame's indirect light, while the passes' shaders are built and what they read and write is made.
+    /// The frame's indirect light, while the passes' shaders are built, what they read and write is made, and rays see
+    /// an instance; none otherwise, and the surfaces take the sky's light.
     /// </summary>
-    public void Render(in Frame frame, RenderGraph graph)
+    public IndirectLight? Render(in Frame frame, RenderGraph graph, in TracedInput input)
     {
-        if (!graph.Features.HasRayQuery)
-        {
-            _built.TrySetResult();
-
-            return;
-        }
-
         // The shaders are the GPU provider's to build, the first ask starting each; one that fails holds no domain back.
         GpuState shaders = GetState(graph, _shaders.AsSpan());
         if (shaders != GpuState.Loading)
             _built.TrySetResult();
 
         if (shaders != GpuState.Ready)
-            return;
+            return null;
 
-        Result<GIView> view = GetView(graph, _traced);
-        if (!view.Ok)
+        // Where rays see no instance, the probes start afresh once they do.
+        if (input.Traced.Structure.IsNone)
         {
-            Log.Error($"The indirect light is not traced: {view.Error}");
+            _traced = null;
 
-            return;
+            return null;
         }
 
-        Result<ProbeBuffers> probes = Probes.Prepare(graph, _traced is not null);
-        Result<TracedDiffuseBuffers> diffuse = TracedDiffuse.Prepare(view.Value, frame.Index);
-        Result<TracedReflectionBuffers> reflections = TracedReflections.Prepare(view.Value, frame.Index);
+        GpuView gpu = input.View;
+        Result<GpuBuffer> constants = graph.Buffer(GpuDescriptions.GetBuffer("GI constants", GIConstants.Bytes));
+        if (!constants.Ok)
+        {
+            Log.Error($"The indirect light is not traced: {constants.Error}");
+
+            return null;
+        }
+
+        GIView view = new(
+            graph,
+            gpu.Frame,
+            constants.Value,
+            gpu.Width,
+            gpu.Height,
+            HasHistory: _traced == (gpu.Width, gpu.Height),
+            gpu.Depth,
+            gpu.GBufferNormal,
+            gpu.GBufferSurface,
+            gpu.Velocity,
+            [
+                gpu.SkyTransmittance,
+                gpu.SkyMultiScattering,
+                gpu.SkyView,
+                gpu.LightTable,
+                gpu.Instances,
+                gpu.Vertices,
+                gpu.Indices,
+                gpu.Meshes,
+                input.Traced.HitMaterials,
+            ]
+        );
+        Result<ProbeBuffers> probes = _probes.Prepare(graph, _traced is not null, input.Traced.Box);
+        Result<TracedDiffuseBuffers> diffuse = TracedDiffuse.Prepare(view, frame.Index);
+        Result<TracedReflectionBuffers> reflections = TracedReflections.Prepare(view, frame.Index);
         foreach (Result made in (ReadOnlySpan<Result>)[probes, diffuse, reflections])
         {
             if (!made.Ok)
             {
                 Log.Error($"The indirect light is not traced: {made.Error}");
 
-                return;
+                return null;
             }
         }
 
         graph.Upload(
-            view.Value.Constants,
+            view.Constants,
             [new GIConstants { Diffuse = diffuse.Value.Constants, Reflections = reflections.Value.Constants }]
         );
-        graph.Upload(
-            view.Value.IndirectLight,
-            [
-                new IndirectLight
-                {
-                    FrameNumber = frame.Index + 1,
-                    Diffuse = diffuse.Value.Light.Id,
-                    Reflections = reflections.Value.Light.Id,
-                    Grid = probes.Value.Constants,
-                },
-            ]
-        );
-        _probes.Record(view.Value, probes.Value);
-        _diffuse.Record(view.Value, probes.Value, diffuse.Value);
-        _reflections.Record(view.Value, probes.Value, reflections.Value);
-        _traced = (view.Value.Width, view.Value.Height);
+        GpuIndirectLight row = new()
+        {
+            Diffuse = diffuse.Value.Light.Id,
+            Reflections = reflections.Value.Light.Id,
+            Grid = probes.Value.Constants,
+        };
+        graph.Upload(gpu.Frame, [row], GpuIndirectLight.Offset);
+        _probes.Record(view, probes.Value);
+        _diffuse.Record(view, probes.Value, diffuse.Value);
+        _reflections.Record(view, probes.Value, reflections.Value);
+        _traced = (gpu.Width, gpu.Height);
+
+        return new IndirectLight(diffuse.Value.Light, reflections.Value.Light, probes.Value.Probes, probes.Value.Depth);
     }
 
     /// <summary>
@@ -140,85 +164,5 @@ public sealed class GlobalIlluminationGem : IGem, IRender, IHookIntoDomainLoadin
         }
 
         return all;
-    }
-
-    /// <summary>
-    /// What the passes read and write beyond their own, each asked for, at the picture's size: the window's, else
-    /// 1280 by 720 headless, as the renderer picks it.
-    /// </summary>
-    private static Result<GIView> GetView(RenderGraph graph, (int Width, int Height)? traced)
-    {
-        TextureDescription window = graph.WindowTarget.IsNone ? default : graph.GetDescription(graph.WindowTarget);
-        (int width, int height) = window.Width > 0 ? (window.Width, window.Height) : (HeadlessWidth, HeadlessHeight);
-        Result<GpuBuffer> frame = graph.Buffer(SharedResources.Frame);
-        Result<GpuBuffer> constants = graph.Buffer(GpuDescriptions.GetBuffer("GI constants", GIConstants.Bytes));
-        Result<GpuBuffer> indirect = graph.Buffer(SharedResources.IndirectLight);
-        Result<GpuTexture> depth = graph.Texture(GetTarget(SharedResources.Depth));
-        Result<GpuTexture> normal = graph.Texture(GetTarget(SharedResources.GBufferNormal));
-        Result<GpuTexture> surface = graph.Texture(GetTarget(SharedResources.GBufferSurface));
-        Result<GpuTexture> velocity = graph.Texture(GetTarget(SharedResources.Velocity));
-        Result<GpuTexture> transmittance = graph.Texture(SharedResources.SkyTransmittance);
-        Result<GpuTexture> multiScattering = graph.Texture(SharedResources.SkyMultiScattering);
-        Result<GpuTexture> sky = graph.Texture(SharedResources.SkyView);
-        Result<GpuBuffer> lights = graph.Buffer(SharedResources.Lights);
-        Result<GpuBuffer> instances = graph.Buffer(SharedResources.Instances);
-        Result<GpuBuffer> vertices = graph.Buffer(SharedResources.Vertices);
-        Result<GpuBuffer> indices = graph.Buffer(SharedResources.Indices);
-        Result<GpuBuffer> meshes = graph.Buffer(SharedResources.Meshes);
-        Result<GpuBuffer> hitMaterials = graph.Buffer(SharedResources.HitMaterials);
-        foreach (
-            Result asked in (ReadOnlySpan<Result>)
-                [
-                    frame,
-                    constants,
-                    indirect,
-                    depth,
-                    normal,
-                    surface,
-                    velocity,
-                    transmittance,
-                    multiScattering,
-                    sky,
-                    lights,
-                    instances,
-                    vertices,
-                    indices,
-                    meshes,
-                    hitMaterials,
-                ]
-        )
-        {
-            if (!asked.Ok)
-                return Result.Failure(asked.Error);
-        }
-
-        return Result.Success(
-            new GIView(
-                graph,
-                frame.Value,
-                constants.Value,
-                indirect.Value,
-                width,
-                height,
-                HasHistory: traced == (width, height),
-                depth.Value,
-                normal.Value,
-                surface.Value,
-                velocity.Value,
-                [
-                    transmittance.Value,
-                    multiScattering.Value,
-                    sky.Value,
-                    lights.Value,
-                    instances.Value,
-                    vertices.Value,
-                    indices.Value,
-                    meshes.Value,
-                    hitMaterials.Value,
-                ]
-            )
-        );
-
-        TextureDescription GetTarget(in TextureDescription shared) => shared with { Width = width, Height = height };
     }
 }

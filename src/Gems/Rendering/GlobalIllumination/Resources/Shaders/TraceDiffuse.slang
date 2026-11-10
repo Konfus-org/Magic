@@ -42,9 +42,6 @@ static const float VarianceBlend = 0.6;
 [numthreads(8, 8, 1)]
 void TraceDiffuse<S : ISky>(uint3 thread : SV_DispatchThreadID)
 {
-    if (!IsWrittenFor(GetPassHeader().z, GetFrame()))
-        return;
-
     FrameConstants frame = GetFrame();
     TracedDiffuseConstants diffuse = GetTracedDiffuse();
     if (any(thread.xy >= GetTracedSize(frame)))
@@ -98,9 +95,6 @@ void TraceDiffuse<S : ISky>(uint3 thread : SV_DispatchThreadID)
 [numthreads(8, 8, 1)]
 void FilterDiffuse(uint3 thread : SV_DispatchThreadID)
 {
-    if (!IsWrittenFor(GetPassHeader().z, GetFrame()))
-        return;
-
     FrameConstants frame = GetFrame();
     TracedDiffuseConstants diffuse = GetTracedDiffuse();
     uint2 size = GetTracedSize(frame);
@@ -165,9 +159,6 @@ void FilterDiffuse(uint3 thread : SV_DispatchThreadID)
 [numthreads(8, 8, 1)]
 void BlendDiffuse(uint3 thread : SV_DispatchThreadID)
 {
-    if (!IsWrittenFor(GetPassHeader().z, GetFrame()))
-        return;
-
     FrameConstants frame = GetFrame();
     TracedDiffuseConstants diffuse = GetTracedDiffuse();
     uint2 size = GetTracedSize(frame);

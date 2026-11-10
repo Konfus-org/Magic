@@ -36,7 +36,7 @@ float3 GetIndirectLight<S : ISky>(
     float3 view
 )
 {
-    IndirectLight indirect = GetIndirectLight(frame);
+    IndirectLight indirect = GetIndirectLight();
     bool isTraced = indirect.diffuse != 0u;
     float3 diffuse;
     if (isTraced)

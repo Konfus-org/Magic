@@ -8,7 +8,7 @@ import Core.Pass;
 import Core.Math;
 
 // The frame's bytes, C#'s FrameConstants.Bytes: where the rows after it in its buffer start.
-public static const uint FrameBytes = 532u;
+public static const uint FrameBytes = 528u;
 
 public struct FrameConstants
 {
@@ -66,8 +66,6 @@ public struct FrameConstants
     public uint glassBase;
     public uint glassNormal;
     public uint glassSurface;
-    // The library's IndirectLight, written for a frame by whatever traces it.
-    public uint indirectLight;
 }
 
 public FrameConstants GetFrame() { return LoadConstants<FrameConstants>(); }

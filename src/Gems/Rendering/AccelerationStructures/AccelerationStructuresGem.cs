@@ -89,17 +89,10 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
         }
 
         RecordHitMaterials(graph, view, hitMaterials, world.MaterialCount);
-        (Vector3 boxMin, Vector3 boxMax) = GetBox(world.Extras.Span);
-        GpuTracedWorld traced = new()
-        {
-            Acceleration = _acceleration.Id,
-            HitMaterials = hitMaterials.Id,
-            BoxMin = boxMin,
-            BoxMax = boxMax,
-        };
+        GpuTracedWorld traced = new() { Acceleration = _acceleration.Id, HitMaterials = hitMaterials.Id };
         graph.Upload(view.Frame, [traced], GpuTracedWorld.Offset);
 
-        return new TracedWorld(_acceleration, hitMaterials);
+        return new TracedWorld(_acceleration, hitMaterials, GetBox(world.Extras.Span));
     }
 
     /// <summary>

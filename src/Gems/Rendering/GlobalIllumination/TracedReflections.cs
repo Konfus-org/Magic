@@ -31,6 +31,7 @@ internal readonly record struct TracedReflectionBuffers(
 /// </summary>
 internal sealed class TracedReflections(AssetManager assets)
 {
+    private static readonly string[] _lightNames = ["Reflection light 0", "Reflection light 1"];
     private static readonly string[] _depthNames = ["Reflection depth 0", "Reflection depth 1"];
 
     private readonly ShaderEntry _traceShader = PassShaders.GetEntry(
@@ -110,12 +111,7 @@ internal sealed class TracedReflections(AssetManager assets)
         TextureDescription GetTarget(string name, GpuFormat format) =>
             GpuDescriptions.GetTexture(name, width, height, format);
 
-        TextureDescription GetLight(int frame) =>
-            SharedResources.IndirectSpecular[frame] with
-            {
-                Width = width,
-                Height = height,
-            };
+        TextureDescription GetLight(int frame) => GetTarget(_lightNames[frame], GpuFormat.R16G16B16A16Sfloat);
     }
 
     /// <summary>
@@ -130,7 +126,7 @@ internal sealed class TracedReflections(AssetManager assets)
         graph
             .Compute("Trace reflections", _traceShader, header, RenderStage.Light)
             .Reads(view.World.AsSpan())
-            .Reads(view.Frame, view.Constants, view.IndirectLight, view.Depth, view.GBufferNormal, view.GBufferSurface)
+            .Reads(view.Frame, view.Constants, view.Depth, view.GBufferNormal, view.GBufferSurface)
             .Reads(probes.Probes, probes.Depth)
             .Writes(reflections.Traced, reflections.Rays)
             .DispatchOver(width, height);
@@ -139,7 +135,6 @@ internal sealed class TracedReflections(AssetManager assets)
             .Reads(
                 view.Frame,
                 view.Constants,
-                view.IndirectLight,
                 view.Depth,
                 view.GBufferNormal,
                 view.GBufferSurface,
@@ -153,7 +148,6 @@ internal sealed class TracedReflections(AssetManager assets)
             .Reads(
                 view.Frame,
                 view.Constants,
-                view.IndirectLight,
                 view.Depth,
                 view.GBufferNormal,
                 view.GBufferSurface,

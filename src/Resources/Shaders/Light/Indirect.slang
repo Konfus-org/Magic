@@ -1,47 +1,37 @@
 // The light that reaches the view's surfaces indirectly, as whatever traces it leaves it for a frame: the diffuse light
 // and the reflections at half the picture's size, and the probe grid around them; and how the picture reads them back
-// at its own size, blurred where they are still noisy. A frame none was written for reads none, and lights its surfaces
-// with the sky. C#'s IndirectLight is the GPU provider's buffer the frame names.
+// at its own size, blurred where they are still noisy. It is a row of the frame's buffer, C#'s GpuIndirectLight, every
+// id 0 where nothing traced it this frame, and the surfaces are lit with the sky.
 module "Light/Indirect";
 
 import Core.Heap;
+import Core.Pass;
 import Core.Frame;
 import Core.Math;
 import Core.Pack;
 import Light.Probes;
+import Scene.Shadows;
+
+// Where the indirect light is in the frame's buffer, right after the shadows, and its bytes: C#'s GpuIndirectLight.
+public static const uint IndirectLightOffset = ShadowsOffset + ShadowsBytes;
+public static const uint IndirectLightBytes = 84u;
 
 public struct IndirectLight
 {
-    // The frame these are for, counted from 1, so a buffer never written is for none.
-    public uint frameNumber;
     // The diffuse light, with its variance in alpha, and the reflections' light, at half the picture's size.
     public uint diffuse;
     public uint reflections;
-    public uint padding0;
     public ProbeGridConstants grid;
 }
 
-// Whether the indirect light in a buffer was written for the frame: not where the frame's buffer holds another frame,
-// or nothing yet.
-public bool IsWrittenFor(uint indirectLight, FrameConstants frame)
+// The frame's indirect light; every id 0 where nothing traced it.
+public IndirectLight GetIndirectLight()
 {
-    BufferRef buffer = { indirectLight };
-    return buffer.Load<uint>(0u) == frame.frameIndex + 1u;
+    BufferRef frame = { GetPassHeader().x };
+    return frame.Load<IndirectLight>(IndirectLightOffset);
 }
 
-// The indirect light written for this frame; every id 0 where none was.
-public IndirectLight GetIndirectLight(FrameConstants frame)
-{
-    BufferRef buffer = { frame.indirectLight };
-    IndirectLight indirect = buffer.Load<IndirectLight>(0u);
-    if (IsWrittenFor(frame.indirectLight, frame))
-        return indirect;
-
-    IndirectLight none = {};
-    return none;
-}
-
-public ProbeGridConstants GetProbeGrid() { return GetIndirectLight(GetFrame()).grid; }
+public ProbeGridConstants GetProbeGrid() { return GetIndirectLight().grid; }
 
 // How many of the picture's pixels a traced pixel stands for along each side.
 public static const uint TracedScale = 2u;

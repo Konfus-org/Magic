@@ -499,7 +499,6 @@ public sealed class GpuWorldGem : IGem, IRenderInto<(GpuView, GpuInstances)>, IH
             new GpuView
             {
                 Frame = view.Constants,
-                IndirectLight = view.IndirectLight,
                 Width = view.Width,
                 Height = view.Height,
                 HasHistory = view.HasHistory,

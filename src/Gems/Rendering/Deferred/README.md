@@ -19,8 +19,8 @@ To use it, list `Deferred` in a project's `.magic` file beside the gem that keep
   unshadowed everywhere else.
 - Each frame draws a different point of each pixel and blends with the frames before it where they saw the same
   surface, so edges come out smooth and hold still. A debug view of the GBuffer shows one frame, so its edges crawl.
-- A surface takes the light that reaches it indirectly from the frame's indirect light, where a gem that traces it
-  wrote it for the frame, and from the sky everywhere else. A surface with a roughness of 0.6 or less reflects what
+- A surface takes the light that reaches it indirectly from the frame's indirect light, where a gem traced it for the
+  frame, and from the sky everywhere else. A surface with a roughness of 0.6 or less reflects what
   it holds of the reflections; a rougher one its diffuse light, so a closed room reflects none of the sky.
 - The first `Weather`'s effects, such as the fog, and then the first `PostProcessing`'s run over the lit picture in
   order, and finish it for the screen: each is a material whose shader implements the pixel effect contract, with

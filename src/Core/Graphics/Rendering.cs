@@ -39,6 +39,11 @@ internal sealed class Rendering
     }
 
     /// <summary>
+    /// Whether <paramref name="gem"/> must take what no gem registered makes, so it can never render.
+    /// </summary>
+    public bool HasMissingInput(IGem gem) => _steps.Exists(step => step.Instance == gem && step.Missing is not null);
+
+    /// <summary>
     /// Every gem's part of the frame, in order, each timed; a gem that throws is logged and renders no more, and what
     /// it would have made stays unmade, so every gem that must take it renders no more either.
     /// </summary>
@@ -172,6 +177,8 @@ internal sealed class Rendering
     /// </summary>
     private abstract class Step(IGem gem)
     {
+        public IGem Instance { get; } = gem;
+
         public string Gem { get; } = gem.GetType().Assembly.GetName().Name ?? gem.GetType().Name;
 
         /// <summary>

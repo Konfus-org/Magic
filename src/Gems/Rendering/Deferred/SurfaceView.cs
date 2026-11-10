@@ -72,7 +72,7 @@ internal sealed class SurfaceView(AssetManager assets)
     /// The indirect diffuse light or the reflections' light written into the picture in place of the lit one, when
     /// the debug view shows one, black where none was traced.
     /// </summary>
-    public void RecordLight(in RenderView view, DebugView debugView, ImmutableArray<GpuResource> indirect)
+    public void RecordLight(in RenderView view, DebugView debugView, ReadOnlySpan<GpuResource> indirect)
     {
         if (debugView is not (DebugView.IndirectDiffuse or DebugView.Reflections))
             return;
@@ -85,7 +85,7 @@ internal sealed class SurfaceView(AssetManager assets)
                 RenderStage.Shade
             )
             .Reads(view.Gpu.Frame, view.Visibility, view.Gpu.Depth, view.Gpu.GBufferNormal)
-            .Reads(indirect.AsSpan());
+            .Reads(indirect);
         show.Writes(view.Gpu.Hdr).DispatchOver(view.Gpu.Width, view.Gpu.Height);
     }
 

@@ -77,11 +77,11 @@ float3 GetLightView(FrameConstants frame, SurfaceView view, uint2 pixel)
 
     if (view == SurfaceView.Reflections)
     {
-        TextureRef reflections = { GetIndirectLight(frame).reflections };
+        TextureRef reflections = { GetIndirectLight().reflections };
         return reflections.id == 0u ? float3(0.0) : reflections.Load(pixel / TracedScale, 0u).rgb;
     }
 
-    uint diffuse = GetIndirectLight(frame).diffuse;
+    uint diffuse = GetIndirectLight().diffuse;
     if (diffuse == 0u)
         return float3(0.0);
 
