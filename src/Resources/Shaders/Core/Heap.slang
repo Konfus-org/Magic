@@ -289,6 +289,13 @@ public struct StorageVolumeRef
     {
         heapStorage3D[NonUniformResourceIndex(ClampStorageSlot(id, level))][texel] = value;
     }
+
+    public uint3 GetSize()
+    {
+        uint3 size;
+        heapStorage3D[NonUniformResourceIndex(ClampStorageSlot(id, level))].GetDimensions(size.x, size.y, size.z);
+        return size;
+    }
 }
 
 // An acceleration structure of the heap, traced through by a ray query.

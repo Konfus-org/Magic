@@ -22,6 +22,8 @@ compiler loads a module and its imports from the assets, so a game's `Shaders/` 
 - `Light/Indirect` is the frame's indirect light, in the frame's buffer after the shadows: the diffuse light and the
   reflections at a part of the picture's size and the probe grid, all 0 where nothing traced them this frame, and how
   the picture reads them back along its surfaces, which any light traced at a part of the picture's size can use.
+  `Light/Air`, after it, is the air between the camera and what it sees: a volume of the light it scatters and lets
+  through, all 0 where nothing filled it this frame, and `ApplyAir`, which sees a colour at a point through it.
   `Light/Probes` is the probe grid: where each probe is, what it holds, and the light a point gets from it.
   `Light/Lights` is what a local light gives a point. `Trace/HitLight` is the light a ray brings back from what it lands
   on.

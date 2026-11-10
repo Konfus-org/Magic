@@ -1,0 +1,27 @@
+# Volumetrics
+
+Fills the air between the camera and what it sees with the world's haze, lit by the sky and by the sun where the sun
+reaches. On a GPU that traces rays, the sunlight falls in shafts through the gaps in whatever blocks it. The
+renderer's shading reads it as the frame's air; without the gem, the air changes nothing.
+
+To use it, list `Volumetrics` in a project's `.magic` file, and give the world's `Weather` a `FogDensity` above 0.
+A gem that builds the world as rays see it shadows the haze; without one, the sun lights all of it.
+
+## What it draws
+
+- The world's `Weather` sets how the haze looks: how thick it is at a height, how fast it thins above that, its colour,
+  and how much it scatters towards the sun. A script can change it while the world runs; clear air costs nothing.
+- The volume reaches `Rendering.VolumetricsDistance` metres from the camera. `Rendering.VolumetricsScale` sets its
+  cells across and down as a part of the picture's size. Past the volume's reach the haze looks the same, without
+  shadows.
+- Each cell is lit at a point that moves within it each frame and blended with the frames before, so the shafts are
+  smooth, and soft at the cells' size.
+
+## How it works
+
+- Its `Render` takes the view and, where a gem makes it, the world as rays see it. It records its passes in the
+  frame's light stage, writes the air into the frame's buffer as the library's `Light/Air`, and hands the frame's
+  `Air` to the gems that take it, which read it through `ApplyAir`.
+- The shader is the `Shaders/FillAir` module in this gem's `Resources`, built on the shader library
+  ([Shaders](../../../Resources/Shaders/README.md)). `ScatterAir` lights each cell and blends it with its history.
+  `IntegrateAir` sums each column away from the camera.

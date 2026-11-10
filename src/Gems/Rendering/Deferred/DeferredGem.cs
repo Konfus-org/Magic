@@ -17,13 +17,15 @@ namespace Magic.Deferred;
 
 /// <summary>
 /// What the deferred renderer takes each frame: the world as the GPU holds it, and, where a gem makes them, the world
-/// as rays see it, each pixel's shadows, the light that reaches the surfaces indirectly and the output's upscaling.
+/// as rays see it, each pixel's shadows, the light that reaches the surfaces indirectly, the air between the camera and
+/// them, and the output's upscaling.
 /// </summary>
 public readonly record struct DeferredInput(
     GpuView View,
     TracedWorld? Traced,
     ShadowMask? Shadows,
     IndirectLight? Light,
+    Air? Air,
     Upscaling? Upscaling
 );
 
@@ -36,7 +38,8 @@ internal readonly record struct RenderView(GpuView Gpu, RenderGraph Graph);
 /// Lights the world the GPU holds, deferred: each frame, from the view the world's gem made and the GBuffer a geometry
 /// gem drew into it, the shading, shadowed by the frame's shadow mask where there is one, the nearest glass over it, the
 /// effects, a debug view where one is asked for, and the output into the window and any screenshot asked for. Where
-/// nothing made the world as rays see it, the shadows or the indirect light, their rows of the frame's buffer are 0.
+/// nothing made the world as rays see it, the shadows, the indirect light or the air, their rows of the frame's buffer
+/// are 0.
 /// As a domain loads, it holds the loading screen until its passes are built. It is public because nothing in its
 /// assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
@@ -171,7 +174,7 @@ public sealed class DeferredGem
         RenderView view = new(gpu, graph);
 
         // The rows of what no gem made this frame are 0, so the shaders that read them trace, shadow and light nothing
-        // indirectly, and the sky lights the surfaces.
+        // indirectly, the sky lights the surfaces, and the air changes nothing.
         if (input.Traced is null)
             graph.Upload(gpu.Frame, [default(GpuTracedWorld)], GpuTracedWorld.Offset);
 
@@ -181,6 +184,9 @@ public sealed class DeferredGem
         if (input.Light is null)
             graph.Upload(gpu.Frame, [default(GpuIndirectLight)], GpuIndirectLight.Offset);
 
+        if (input.Air is null)
+            graph.Upload(gpu.Frame, [default(GpuAir)], GpuAir.Offset);
+
         ReadOnlySpan<GpuResource> indirect = input.Light is { } light
             ? [light.Diffuse, light.Reflections, light.Probes, light.ProbeDepth]
             : [];
@@ -189,7 +195,7 @@ public sealed class DeferredGem
         // indirect light where something traced it, a debug view's light in its place, the effects, which finish the
         // picture, and the output.
         GpuConstants header = new(gpu.Frame.Id);
-        _lighting.Record(view, header, input.Shadows, input.Traced, indirect);
+        _lighting.Record(view, header, input.Shadows, input.Traced, input.Air, indirect);
 
         // A debug view of light draws it into the picture, so the effects finish it as they do the picture.
         _surfaceView.RecordLight(view, inputs.Settings.RenderView, indirect);
