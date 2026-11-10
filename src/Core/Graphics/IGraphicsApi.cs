@@ -31,7 +31,9 @@ public interface IGraphicsApi
     Result<GpuTexture> GetTexture(in TextureDescription description);
 
     /// <summary>
-    /// The buffer under the description's name, kept as <see cref="GetTexture"/> keeps a texture.
+    /// The buffer under the description's name, kept as <see cref="GetTexture"/> keeps a texture, except that one asked
+    /// for at another size alone keeps what it holds, as much as fits, copied into the new one before the frame's
+    /// passes.
     /// <see cref="RenderGraph.Buffer"/> asks for it.
     /// </summary>
     Result<GpuBuffer> GetBuffer(in BufferDescription description);

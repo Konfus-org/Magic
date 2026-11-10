@@ -38,7 +38,8 @@ Varyings DrawVisibilityVertex(uint vertexIndex : SV_VertexID, uint instanceIndex
 
     Varyings output;
     output.id = EncodeVisibilityId(instanceIndex, vertexIndex / 3u);
-    Vertex vertex = LoadVertex(cluster.vertices, LoadIndex(clusters.indices, cluster.indexOffset + vertexIndex));
+    uint vertices = GetVertexPool(cluster, clusters, models.vertices);
+    Vertex vertex = LoadVertex(vertices, LoadIndex(clusters.indices, cluster.indexOffset + vertexIndex));
     float3 relative = Relative(frame, ToWorld(instance.world, vertex.position));
     output.position = mul(float4(relative, 1.0), frame.viewProjection);
     output.fade = GetImpostorFade(frame, instance);

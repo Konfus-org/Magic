@@ -71,6 +71,21 @@ internal sealed unsafe class VulkanRecorder(
         Flush(cmd);
     }
 
+    /// <summary>
+    /// The first <paramref name="bytes"/> of <paramref name="from"/> copied into <paramref name="to"/>, once what used
+    /// <paramref name="from"/> before is done with it, as a buffer asked for at a new size keeps what it holds.
+    /// </summary>
+    public void CopyBuffer(VkCommandBuffer cmd, VulkanBuffer from, VulkanBuffer to, ulong bytes)
+    {
+        _bufferBarriers.Clear();
+        _imageBarriers.Clear();
+        AddBufferBarrier(from, GpuAccess.CopySource);
+        AddBufferBarrier(to, GpuAccess.CopyDestination);
+        Flush(cmd);
+        VkBufferCopy region = new() { size = bytes };
+        device.Api.vkCmdCopyBuffer(cmd, from.Buffer, to.Buffer, 1, &region);
+    }
+
     // A write after a write still needs a barrier, so the second sees the first; a read after the same read does not.
     private static bool IsSameRead(GpuAccess before, GpuAccess access) =>
         before == access

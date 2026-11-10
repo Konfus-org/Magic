@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.IO.Hashing;
 using System.Linq;
 using System.Text;
@@ -19,16 +20,33 @@ namespace Magic.SlangShaderCompiler;
 internal readonly record struct SlangModule(string Name, string Path, string Source);
 
 /// <summary>
+/// What reflecting a struct found: its fields, or the integer constant asked of it, null when it declares none. Cached as
+/// a compiled shader is, so a run whose shaders are all cached never starts the compiler.
+/// </summary>
+internal readonly record struct Reflection(ImmutableArray<ShaderField> Fields, long? Constant);
+
+/// <summary>
 /// Compiles Slang entries to SPIR-V: the entry's module and every module it imports, found as <see cref="Shader"/>
 /// assets, go into a session in dependency order, and the entry comes out compiled and cached under a hash of the
 /// sources, so an unchanged entry never compiles twice. It is public because nothing in its assembly makes it: Magic
 /// does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICache<CompiledShader>, IDisposable
+public sealed partial class SlangShaderCompilerGem
+    : IGem,
+        IShaderCompiler,
+        ICache<CompiledShader>,
+        ICache<Reflection>,
+        IDisposable
 {
     private const string ShadersFolder = "Shaders";
 
     private const string Extension = ".slang";
+
+    /// <summary>
+    /// How long the compiler stays started once nothing asks it for anything: long enough to bridge the gaps between a
+    /// cold load's compiles.
+    /// </summary>
+    private const int IdleMs = 10_000;
 
     private readonly AssetManager _assets;
 
@@ -45,16 +63,29 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
     /// </summary>
     private readonly CancellationToken _lifetime;
 
-    private readonly unsafe void* _globalSession;
+    /// <summary>
+    /// Releases the global session <see cref="IdleMs"/> after the last compile, each compile setting it off again: a
+    /// debounce.
+    /// </summary>
+    [SuppressMessage(
+        "Usage",
+        "CA2213:Disposable fields should be disposed",
+        Justification = "Dispose disposes it through Dispose(WaitHandle), which waits out a release still running."
+    )]
+    private readonly Timer _idle;
 
-    public unsafe SlangShaderCompilerGem(App app, AssetManager assets, Caches caches)
+    /// <summary>
+    /// The compiler, a few hundred megabytes: null until a compile needs it, and again once it has been idle. Read and
+    /// written only while holding <see cref="_compiling"/>.
+    /// </summary>
+    private unsafe void* _globalSession;
+
+    public SlangShaderCompilerGem(App app, AssetManager assets, Caches caches)
     {
         _assets = assets;
         _caches = caches;
         _lifetime = app.Lifetime;
-        _globalSession = Slang.CreateGlobalSession();
-        if (_globalSession == null)
-            throw new InvalidOperationException("The Slang compiler could not start.");
+        _idle = new Timer(_ => ReleaseWhenIdle());
     }
 
     /// <summary>
@@ -62,13 +93,18 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
     /// </summary>
     public int Version => 4;
 
-    public unsafe void Dispose()
+    public void Dispose()
     {
-        // The compile already running finishes before the session it uses is freed. Waiting for it is safe: the frame loop
-        // has ended, and a compile needs no engine thread.
+        // The compile already running finishes, then the timer stops, a release it began finishing, before the session is
+        // freed. Waiting for them is safe: the frame loop has ended, and neither needs an engine thread.
         _compiling.Wait();
-        Slang.Release(_globalSession);
-        Slang.slang_shutdown();
+        using (ManualResetEvent stopped = new(false))
+        {
+            _idle.Dispose(stopped);
+            stopped.WaitOne();
+        }
+
+        ReleaseGlobalSession();
         _compiling.Dispose();
     }
 
@@ -96,7 +132,9 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
 
         ulong key = GetKey(entryPath, entry, typeArguments);
         ulong version = GetVersion(modules.Value);
-        Result<CompiledShader> cached = await _caches.ReadAsync(key, version, this, cancel).ConfigureAwait(false);
+        Result<CompiledShader> cached = await _caches
+            .ReadAsync<CompiledShader>(key, version, this, cancel)
+            .ConfigureAwait(false);
         if (cached.Ok)
             return cached;
 
@@ -114,18 +152,38 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
     }
 
     /// <summary>
-    /// The fields of the struct <paramref name="type"/> names, as a buffer lays them out; or why not. Not cached: a
-    /// renderer asks once for each material shader it draws with.
+    /// The fields of the struct <paramref name="type"/> names, as a buffer lays them out; or why not.
     /// </summary>
-    public Task<Result<ImmutableArray<ShaderField>>> ReflectAsync(ShaderTypeArgument type, CancellationToken cancel) =>
-        ReflectAsync(type, ReadFields, cancel);
+    public async Task<Result<ImmutableArray<ShaderField>>> ReflectAsync(
+        ShaderTypeArgument type,
+        CancellationToken cancel
+    )
+    {
+        Result<Reflection> reflected = await ReflectAsync(type, string.Empty, ReadFields, cancel).ConfigureAwait(false);
+
+        return reflected.Ok ? Result.Success(reflected.Value.Fields) : Result.Failure(reflected.Error);
+    }
 
     /// <summary>
     /// The integer constant the struct <paramref name="type"/> names declares under <paramref name="name"/>; or why
-    /// not. Not cached, as <see cref="ReflectAsync(ShaderTypeArgument, CancellationToken)"/> isn't.
+    /// not.
     /// </summary>
-    public Task<Result<long>> ReflectConstantAsync(ShaderTypeArgument type, string name, CancellationToken cancel) =>
-        ReflectAsync(type, (layout, found) => ReadConstant(layout, found, name), cancel);
+    public async Task<Result<long>> ReflectConstantAsync(ShaderTypeArgument type, string name, CancellationToken cancel)
+    {
+        Result<Reflection> reflected = await ReflectAsync(
+                type,
+                name,
+                (layout, found) => ReadConstant(layout, found, name),
+                cancel
+            )
+            .ConfigureAwait(false);
+        if (!reflected.Ok)
+            return Result.Failure(reflected.Error);
+
+        return reflected.Value.Constant is { } value
+            ? Result.Success(value)
+            : Result.Failure($"{type.Type} declares no integer constant {name}.");
+    }
 
     public void Write(CompiledShader value, IBufferWriter<byte> bytes)
     {
@@ -174,6 +232,29 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
 
     [GeneratedRegex(@"^\s*(?:__exported\s+)?import\s+([A-Za-z_][\w.]*)\s*;", RegexOptions.Multiline)]
     private static partial Regex ImportLine();
+
+    /// <summary>
+    /// <paramref name="text"/> as its length in bytes, then its UTF-8.
+    /// </summary>
+    private static void WriteText(IBufferWriter<byte> bytes, string text)
+    {
+        byte[] utf8 = Encoding.UTF8.GetBytes(text);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.GetSpan(4), utf8.Length);
+        bytes.Advance(4);
+        bytes.Write(utf8);
+    }
+
+    /// <summary>
+    /// What <see cref="WriteText"/> wrote at the start of <paramref name="bytes"/>, which moves past it.
+    /// </summary>
+    private static string ReadText(ref ReadOnlySpan<byte> bytes)
+    {
+        int length = BinaryPrimitives.ReadInt32LittleEndian(bytes);
+        string text = Encoding.UTF8.GetString(bytes.Slice(4, length));
+        bytes = bytes[(4 + length)..];
+
+        return text;
+    }
 
     private static ulong GetKey(string entryPath, in ShaderEntry entry, List<(string Path, string Type)> typeArguments)
     {
@@ -234,7 +315,7 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
     /// The fields of the struct <paramref name="type"/> in <paramref name="layout"/>, as a buffer lays them out: each
     /// one's name, offset and size, and a struct field's type's name.
     /// </summary>
-    private static unsafe Result<ImmutableArray<ShaderField>> ReadFields(nint layout, nint type)
+    private static unsafe Reflection ReadFields(nint layout, nint type)
     {
         // Slang's SlangTypeKind of a struct, and its SlangParameterCategory of a field's bytes.
         const int Struct = 1;
@@ -260,14 +341,14 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
             );
         }
 
-        return Result.Success(fields.MoveToImmutable());
+        return new Reflection(fields.MoveToImmutable(), null);
     }
 
     /// <summary>
     /// The value of the integer constant <paramref name="name"/> the struct <paramref name="type"/> declares, a
-    /// <c>static const</c> whose initialiser is a literal.
+    /// <c>static const</c> whose initialiser is a literal; null when it declares none.
     /// </summary>
-    private static unsafe Result<long> ReadConstant(nint layout, nint type, string name)
+    private static unsafe Reflection ReadConstant(nint layout, nint type, string name)
     {
         void* variable;
         fixed (byte* named = CString.ToBytes(name))
@@ -277,9 +358,48 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
 
         long value;
 
-        return variable != null && Slang.spReflectionVariable_GetDefaultValueInt(variable, &value) >= 0
-            ? Result.Success(value)
-            : Result.Failure($"declares no integer constant {name}.");
+        return new Reflection(
+            [],
+            variable != null && Slang.spReflectionVariable_GetDefaultValueInt(variable, &value) >= 0 ? value : null
+        );
+    }
+
+    void ICache<Reflection>.Write(Reflection value, IBufferWriter<byte> bytes)
+    {
+        // Whether the constant is declared and its value, the number of fields, then each field.
+        Span<byte> header = bytes.GetSpan(13);
+        header[0] = value.Constant is null ? (byte)0 : (byte)1;
+        BinaryPrimitives.WriteInt64LittleEndian(header[1..], value.Constant ?? 0);
+        BinaryPrimitives.WriteInt32LittleEndian(header[9..], value.Fields.Length);
+        bytes.Advance(13);
+        foreach (ShaderField field in value.Fields)
+        {
+            Span<byte> sizes = bytes.GetSpan(8);
+            BinaryPrimitives.WriteUInt32LittleEndian(sizes, field.Offset);
+            BinaryPrimitives.WriteUInt32LittleEndian(sizes[4..], field.Size);
+            bytes.Advance(8);
+            WriteText(bytes, field.Name);
+            WriteText(bytes, field.Struct);
+        }
+    }
+
+    Result<Reflection> ICache<Reflection>.Read(ReadOnlySpan<byte> bytes)
+    {
+        // Bytes cut short throw from a slice, which the caches take as a dirty entry.
+        long? constant = bytes[0] == 0 ? null : BinaryPrimitives.ReadInt64LittleEndian(bytes[1..]);
+        int count = BinaryPrimitives.ReadInt32LittleEndian(bytes[9..]);
+        bytes = bytes[13..];
+        ImmutableArray<ShaderField>.Builder fields = ImmutableArray.CreateBuilder<ShaderField>(count);
+        for (int i = 0; i < count; i++)
+        {
+            uint offset = BinaryPrimitives.ReadUInt32LittleEndian(bytes);
+            uint size = BinaryPrimitives.ReadUInt32LittleEndian(bytes[4..]);
+            bytes = bytes[8..];
+            string name = ReadText(ref bytes);
+            fields.Add(new ShaderField(name, offset, size, ReadText(ref bytes)));
+        }
+
+        return Result.Success(new Reflection(fields.MoveToImmutable(), constant));
     }
 
     /// <summary>
@@ -458,6 +578,7 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
                 }
                 finally
                 {
+                    _idle.Change(IdleMs, Timeout.Infinite);
                     _compiling.Release();
                 }
             },
@@ -466,10 +587,15 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
 
     /// <summary>
     /// The session: SPIR-V 1.6, row-major, entry names kept, warnings as errors, and buffers laid out scalar, as C# packs
-    /// a struct and the heap reads one. A change here raises Version.
+    /// a struct and the heap reads one. A change here raises Version. It starts the compiler when it isn't running.
     /// </summary>
     private unsafe Result<nint> CreateSession()
     {
+        if (_globalSession == null)
+            _globalSession = Slang.CreateGlobalSession();
+        if (_globalSession == null)
+            return Result.Failure("the Slang compiler could not start.");
+
         int result;
         void* session;
         fixed (byte* profileName = "spirv_1_6\0"u8)
@@ -558,11 +684,13 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
 
     /// <summary>
     /// What <paramref name="read"/> reads of the struct <paramref name="type"/> names, in a session of its module and
-    /// what it imports; or why not.
+    /// what it imports, cached under the struct and the <paramref name="constant"/> asked of it, empty for its fields;
+    /// or why not.
     /// </summary>
-    private async Task<Result<T>> ReflectAsync<T>(
+    private async Task<Result<Reflection>> ReflectAsync(
         ShaderTypeArgument type,
-        Func<nint, nint, Result<T>> read,
+        string constant,
+        Func<nint, nint, Reflection> read,
         CancellationToken cancel
     )
     {
@@ -573,18 +701,31 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
         if (!modules.Ok)
             return Result.Failure(modules.Error);
 
-        return await RunAsync(() => Reflect(modules.Value, path, type.Type, read), cancel).ConfigureAwait(false);
+        ulong key = XxHash64.HashToUInt64(Encoding.UTF8.GetBytes($"{path}\n{type.Type}\n{constant}"));
+        ulong version = GetVersion(modules.Value);
+        Result<Reflection> cached = await _caches
+            .ReadAsync<Reflection>(key, version, this, cancel)
+            .ConfigureAwait(false);
+        if (cached.Ok)
+            return cached;
+
+        Result<Reflection> reflected = await RunAsync(() => Reflect(modules.Value, path, type.Type, read), cancel)
+            .ConfigureAwait(false);
+        if (reflected.Ok)
+            await _caches.WriteAsync(key, version, reflected.Value, this, cancel).ConfigureAwait(false);
+
+        return reflected;
     }
 
     /// <summary>
     /// What <paramref name="read"/> reads of <paramref name="typeName"/> in the module at <paramref name="typePath"/>,
     /// handed the session's layout and the type, both alive until it returns.
     /// </summary>
-    private unsafe Result<T> Reflect<T>(
+    private unsafe Result<Reflection> Reflect(
         ImmutableArray<SlangModule> modules,
         string typePath,
         string typeName,
-        Func<nint, nint, Result<T>> read
+        Func<nint, nint, Reflection> read
     )
     {
         Result<nint> made = CreateSession();
@@ -610,14 +751,38 @@ public sealed partial class SlangShaderCompilerGem : IGem, IShaderCompiler, ICac
             if (type == null)
                 return Result.Failure($"{typePath} declares no type {typeName}.");
 
-            Result<T> value = read((nint)layout, (nint)type);
-
-            return value.Ok ? value : Result.Failure($"{typePath}'s {typeName} {value.Error}");
+            return Result.Success(read((nint)layout, (nint)type));
         }
         finally
         {
             Slang.Release(session);
         }
+    }
+
+    /// <summary>
+    /// <see cref="_idle"/>'s work: the global session released, unless a compile holds it, which sets the timer off
+    /// again as it ends.
+    /// </summary>
+    private void ReleaseWhenIdle()
+    {
+        if (!_compiling.Wait(0))
+            return;
+
+        ReleaseGlobalSession();
+        _compiling.Release();
+    }
+
+    /// <summary>
+    /// The compiler stopped, its memory given back, for the next compile to start again; called holding
+    /// <see cref="_compiling"/>.
+    /// </summary>
+    private unsafe void ReleaseGlobalSession()
+    {
+        if (_globalSession == null)
+            return;
+
+        Slang.Release(_globalSession);
+        _globalSession = null;
     }
 
     /// <summary>

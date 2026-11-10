@@ -14,7 +14,7 @@ internal record struct ClusterConstants
 {
     public const int Offset = GpuIndirectLight.Offset + GpuIndirectLight.Bytes;
 
-    public const int Bytes = 68;
+    public const int Bytes = 72;
 
     public uint HzbLevels;
 
@@ -31,6 +31,11 @@ internal record struct ClusterConstants
     public uint Clusters;
 
     public uint Indices;
+
+    /// <summary>
+    /// The heap id of the cluster vertex pool, which holds the copies the levels above the leaves draw.
+    /// </summary>
+    public uint Vertices;
 
     public uint Models;
 
@@ -64,9 +69,10 @@ internal readonly record struct GpuClusterModel(uint ClusterOffset, uint Cluster
 /// <summary>
 /// One cluster of a model's hierarchy as the GPU reads it from the cluster pool, 80 bytes: the twin of
 /// <c>Scene/Clusters.slang</c>'s. Its triangles are a run of the cluster index pool; its vertices are wherever those
-/// indices point in <see cref="Vertices"/>. The cut through the hierarchy is decided per cluster, with no walk: a cluster is drawn
-/// when its parent's error projects above the threshold and its own at or below it. A leaf's error is 0 and a
-/// root's parent error is the model's diameter, so some level draws until the whole model is under the threshold.
+/// indices point in the vertex pool <see cref="IsCopy"/> names. The cut through the hierarchy is decided per cluster,
+/// with no walk: a cluster is drawn when its parent's error projects above the threshold and its own at or below it. A
+/// leaf's error is 0 and a root's parent error is the model's diameter, so some level draws until the whole model is
+/// under the threshold.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct GpuCluster
@@ -135,12 +141,12 @@ internal record struct GpuCluster
     public uint MaterialSlot;
 
     /// <summary>
-    /// The heap id of the pool the cluster's indices point into: the models' vertex pool for a leaf, which draws the
-    /// model's own vertices, and the cluster vertex pool above, which holds each level's copies. Written as the model
-    /// is copied up; the cache holds the cluster's indices into <see cref="ModelClusters.Vertices"/> with the model's
-    /// own vertices before them.
+    /// 1 when the cluster's indices point into the cluster vertex pool, which holds each level's copies above the
+    /// leaves; 0 for a leaf, whose indices point into the models' vertex pool, as it draws the model's own vertices.
+    /// Written as the model is copied up; the cache holds the cluster's indices into
+    /// <see cref="ModelClusters.Vertices"/> with the model's own vertices before them.
     /// </summary>
-    public uint Vertices;
+    public uint IsCopy;
 }
 
 /// <summary>

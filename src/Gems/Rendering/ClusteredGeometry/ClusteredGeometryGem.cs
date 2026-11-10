@@ -133,7 +133,7 @@ public sealed class ClusteredGeometryGem
             return;
 
         GpuView gpu = input.View;
-        Result<ClusterPools> pools = _resources.Prepare(graph, gpu.Vertices, gpu.Models.Span);
+        Result<ClusterPools> pools = _resources.Prepare(graph, gpu.Models.Span);
         if (!pools.Ok)
         {
             FailStart(pools.Error);

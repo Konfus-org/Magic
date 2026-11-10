@@ -145,7 +145,11 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
             return;
 
         VkSurfaceFormatKHR format = PickFormat(surface);
-        uint count = Math.Max(capabilities.minImageCount + 1, 3);
+        // Each image is as big as the window, so there are as few as the surface takes: two at least, one drawn while
+        // the other is shown, and one more for mailbox to queue a drawn image while one is shown.
+        VkPresentModeKHR presentMode = PickPresentMode(surface);
+        uint queued = presentMode == VkPresentModeKHR.Mailbox ? 1u : 0u;
+        uint count = Math.Max(capabilities.minImageCount + queued, 2);
         if (capabilities.maxImageCount > 0)
             count = Math.Min(count, capabilities.maxImageCount);
 
@@ -162,7 +166,7 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
             imageSharingMode = VkSharingMode.Exclusive,
             preTransform = capabilities.currentTransform,
             compositeAlpha = VkCompositeAlphaFlagsKHR.Opaque,
-            presentMode = PickPresentMode(surface),
+            presentMode = presentMode,
             clipped = true,
         };
         VkResult result = device.Api.vkCreateSwapchainKHR(&createInfo, out VkSwapchainKHR swapchain);

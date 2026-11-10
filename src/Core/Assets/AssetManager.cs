@@ -29,11 +29,12 @@ namespace Magic.Assets;
 /// <para>
 /// Each file is imported on a worker by <see cref="RunImportAsync{T}"/>: read it, read its <c>.meta</c>, look in the
 /// cache, make it, keep it in the cache. It is made by the <see cref="IAssetImporter{T}"/> a gem provides for its type,
-/// else by Core itself for a type marked <see cref="AssetFormatAttribute"/>. What loaded is kept for the run.
+/// else by Core itself for a type marked <see cref="AssetFormatAttribute"/>. What loaded is kept while something holds it:
+/// once nothing does, the GC frees it, and the next load reads it again.
 /// </para>
 /// <para>
 /// The asset directories are watched from when they are registered until the assets are disposed. Once their changes settle, they are
-/// indexed again, and every asset loaded whose file changed, or that was made from one that did, is made again, each after
+/// indexed again, and every asset loaded and still held whose file changed, or that was made from one that did, is made again, each after
 /// what it was made from: <see cref="GetVersion{T}"/> then says so, a load gets the new one, and the next frame hears
 /// an <see cref="AssetReloaded"/>. One that fails to load again keeps what loaded before.
 /// </para>
@@ -247,8 +248,8 @@ public sealed class AssetManager : IDisposable
     public ulong GetVersion<T>(Handle<T> asset)
         where T : IAsset<T>
     {
-        if (Loaded.Entries.TryGetValue(asset.Id, out AssetEntry? entry) && entry.Current is { } made)
-            return made.Version;
+        if (Loaded.Entries.TryGetValue(asset.Id, out AssetEntry? entry) && entry.Current is { } kept)
+            return kept.Version;
 
         if (!Database.Index.ById.TryGetValue(asset.Id, out IndexedFile? file))
             return 0;
@@ -276,8 +277,9 @@ public sealed class AssetManager : IDisposable
 
     /// <summary>
     /// The asset, or why it could not be loaded. It is read on a worker, from now, or once the gem that reads its type
-    /// registers when it is not made yet, and kept, so every caller gets the same object; one asking while it is made again waits for what it is made into. A load that
-    /// fails is remembered until its file changes. <paramref name="cancel"/> only stops this caller's wait.
+    /// registers when it is not made yet, and kept while any caller holds it, so each gets the same object; once none does,
+    /// the next load reads it again. One asking while it is made again waits for what it is made into. A load that fails is
+    /// remembered until its file changes. <paramref name="cancel"/> only stops this caller's wait.
     /// </summary>
     public Task<Result<T>> LoadAsync<T>(Handle<T> asset, IProgress<LoadProgress>? progress, CancellationToken cancel)
         where T : IAsset<T> =>
@@ -631,11 +633,12 @@ public sealed class AssetManager : IDisposable
 
     /// <summary>
     /// Takes in the asset directories as the watches had them read again, <paramref name="now"/>, after they saw
-    /// <paramref name="touched"/>, paths from their asset directories: each asset loaded whose file changed, is another
-    /// file now, lists a folder that changed, or was made from one of those, and so on out, is read again, each after
-    /// what it was made from, as a load waits for those on their way; one whose file is gone is let go, and its waiters
-    /// told. Refused, false, when the asset directories are no longer <paramref name="directories"/>, the ones read: a
-    /// directory was added meanwhile. Any thread.
+    /// <paramref name="touched"/>, paths from their asset directories: each asset loaded and still held whose file
+    /// changed, is another file now, lists a folder that changed, or was made from one of those, and so on out, is read
+    /// again, each after what it was made from, as a load waits for those on their way; one nothing holds, or that
+    /// failed, is forgotten, so the next load reads it; one whose file is gone is let go, and its waiters told. Refused,
+    /// false, when the asset directories are no longer <paramref name="directories"/>, the ones read: a directory was
+    /// added meanwhile. Any thread.
     /// </summary>
     internal bool Reindex(ImmutableArray<string> directories, AssetIndex now, ImmutableHashSet<string> touched)
     {
@@ -674,6 +677,15 @@ public sealed class AssetManager : IDisposable
                 // One not read yet reads the file as it is now; one being read is read again as that lands.
                 if (entry.Stage == AssetStage.Wanted)
                     continue;
+
+                // One loaded that nothing holds, or that failed, is let go rather than read again: the next ask reads the
+                // file as it is.
+                if (entry.Stage == AssetStage.Loaded && entry.GetValue() is null)
+                {
+                    loaded = loaded with { Entries = loaded.Entries.Remove(id) };
+
+                    continue;
+                }
 
                 reloading++;
                 loaded =
@@ -1101,9 +1113,9 @@ public sealed class AssetManager : IDisposable
     /// <summary>
     /// What an ask for asset <paramref name="id"/> as <paramref name="type"/> gets, and <paramref name="loaded"/> with
     /// what it asked: a failure when no file has the id, when it is another type, or, asked for by asset
-    /// <paramref name="dependent"/>'s importer, when it depends on what asks for it; what loaded; a wait with the others
-    /// for a load on its way; else a new entry, read now, or once the gem expected to read its type registers, as the one
-    /// asking may be made before it. Cancelled once the run has ended, as nothing reads it then. Under
+    /// <paramref name="dependent"/>'s importer, when it depends on what asks for it; what loaded, while something holds
+    /// it; a wait with the others for a load on its way; else a new entry, read now, or once the gem expected to read its
+    /// type registers, as the one asking may be made before it. Cancelled once the run has ended, as nothing reads it then. Under
     /// <see cref="_gate"/>.
     /// </summary>
     private (LoadedAssets, Task<Made>) Request(
@@ -1155,7 +1167,13 @@ public sealed class AssetManager : IDisposable
             );
 
         if (entry is { Stage: AssetStage.Loaded })
-            return (loaded, Task.FromResult(entry.Outcome));
+        {
+            if (entry.GetOutcome() is { } outcome)
+                return (loaded, Task.FromResult(outcome));
+
+            // What it made was let go: it is read again, as one never asked for is.
+            entry = null;
+        }
 
         TaskCompletionSource<Made> waiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
         if (entry is not null)
@@ -1262,14 +1280,15 @@ public sealed class AssetManager : IDisposable
     /// <summary>
     /// Takes in what a worker's read of asset <paramref name="id"/> made: it is loaded, its waiters are told, what it
     /// depends on goes in the database and, for a type a gem reads, the cache, by its file's version, so finding that
-    /// later doesn't load it; and one that had loaded is published as <see cref="AssetReloaded"/>. One that failed while
-    /// what it made before is kept leaves that in use, and says so. One whose file changed meanwhile is read again
-    /// instead; one gone meanwhile was told as it went, and one landing after the run is dropped.
+    /// later doesn't load it; and one that had loaded and is still held is published as <see cref="AssetReloaded"/>. One
+    /// that failed while what it made before is still held leaves that in use, and says so. One whose file changed
+    /// meanwhile is read again instead; one gone meanwhile was told as it went, and one landing after the run is dropped.
     /// </summary>
     private void Land(ulong id, Made made)
     {
         AssetEntry? entry;
         AssetEntry done;
+        object? before;
         ImmutableArray<ulong> dependencies = default;
         lock (_gate)
         {
@@ -1283,12 +1302,16 @@ public sealed class AssetManager : IDisposable
                 return;
             }
 
+            before = entry.GetValue();
             if (made.Value.Ok)
-                done = entry with { Current = made, Error = string.Empty };
-            else if (entry.Current is not null)
+            {
+                KeptAsset kept = new(new WeakReference<object>(made.Value.Value), made.Version, made.Handles);
+                done = entry with { Current = kept, Error = string.Empty };
+            }
+            else if (before is not null)
                 done = entry;
             else
-                done = entry with { Error = made.Value.Error };
+                done = entry with { Current = null, Error = made.Value.Error };
 
             done = done with { Stage = AssetStage.Loaded, Waiting = [] };
             LoadedAssets loaded = Loaded with { Entries = Loaded.Entries.SetItem(id, done) };
@@ -1303,15 +1326,18 @@ public sealed class AssetManager : IDisposable
             Loaded = loaded;
         }
 
-        if (!made.Value.Ok && entry.Current is not null)
+        if (!made.Value.Ok && before is not null)
             Log.Error($"{made.Value.Error} What loaded before stays in use.");
 
+        // The waiters get what was made, held here, as the entry holds it only weakly; or what loaded before, a failed
+        // reload's.
+        Made outcome = made.Value.Ok ? made : done.GetOutcome() ?? made;
         foreach (TaskCompletionSource<Made> waiter in entry.Waiting)
         {
-            waiter.TrySetResult(done.Outcome);
+            waiter.TrySetResult(outcome);
         }
 
-        if (entry.Current is not null && made.Value is { Ok: true, Value: { } asset })
+        if (before is not null && made.Value is { Ok: true, Value: { } asset })
             _events.Publish(new AssetReloaded(id, asset));
 
         // What a gem-read asset depends on is kept by its file's version, so finding that later doesn't load it.

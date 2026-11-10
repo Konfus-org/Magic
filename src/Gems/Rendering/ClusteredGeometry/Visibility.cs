@@ -249,6 +249,7 @@ internal sealed class Visibility(AssetManager assets)
             MaxVisibleClusters = MaxVisibleClusters,
             Clusters = pools.Clusters.Id,
             Indices = pools.Indices.Id,
+            Vertices = pools.Vertices.Id,
             Models = pools.Models.Id,
             VisibleClusters = cull.VisibleClusters.Id,
             DrawArguments = cull.DrawArguments.Id,
