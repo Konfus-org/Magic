@@ -2,8 +2,7 @@
 // Ray-Traced Irradiance Fields", 2019): each probe is given rays as its light still changes, each ray is traced into the
 // world and lit where it lands by one light picked at random and by the probes themselves, and each probe blends its
 // rays into its light's harmonics and its map of distances, moving away from a surface it is near. The pass header's x
-// is the frame's buffer, which holds the lights and names IndirectLight, which holds the grid; its y is the GI buffer
-// and its z IndirectLight as the gem asked for it.
+// is the frame's buffer, which holds the lights and IndirectLight, which holds the grid.
 module "UpdateProbes";
 
 import Core.Heap;
@@ -128,7 +127,8 @@ groupshared uint groupRayCount;
 groupshared uint groupRayStart;
 
 // A group a probe: as many rays as its light still changes, up to the most, a tenth of that out of view and all of them
-// on the first update; their count, and an entry each in the ray list, the probe in the low 20 bits and the ray above.
+// on the first update; their count, an entry each in the ray list, the probe in the low 20 bits and the ray above, and
+// the trace's groups raised to reach them.
 [shader("compute")]
 [numthreads(32, 1, 1)]
 void AllocateProbeRays(uint3 group : SV_GroupID, uint index : SV_GroupIndex)
@@ -166,6 +166,8 @@ void AllocateProbeRays(uint3 group : SV_GroupID, uint index : SV_GroupIndex)
         counts.Store(GetProbeRayCountOffset(probe), rayCount);
         groupRayCount = rayCount;
         groupRayStart = counts.InterlockedAdd(0u, rayCount);
+        BufferRef arguments = { grid.rayArguments };
+        arguments.InterlockedMax(0u, (groupRayStart + rayCount + TraceGroupSize - 1u) / TraceGroupSize);
     }
 
     GroupMemoryBarrierWithGroupSync();
@@ -174,19 +176,6 @@ void AllocateProbeRays(uint3 group : SV_GroupID, uint index : SV_GroupIndex)
     {
         list[groupRayStart + ray] = probe | (ray << 20u);
     }
-}
-
-// The trace's groups for the rays the probes were given.
-[shader("compute")]
-[numthreads(1, 1, 1)]
-void PrepareProbeRays()
-{
-    ProbeGridConstants grid = GetProbeGrid();
-    BufferRef counts = { grid.rayCounts };
-    BufferRef arguments = { grid.rayArguments };
-    arguments.Store(0u, (counts.Load<uint>(0u) + TraceGroupSize - 1u) / TraceGroupSize);
-    arguments.Store(4u, 1u);
-    arguments.Store(8u, 1u);
 }
 
 // Ray i of n spread evenly over the sphere (Keinert et al., "Spherical Fibonacci Mapping", 2015).
