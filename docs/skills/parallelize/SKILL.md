@@ -6,7 +6,9 @@ description: Runs a large effort as a swarm of workers that each build one slice
 # Parallelize
 
 You coordinate: you plan the slices, give each slice to a worker, keep the user up to date and bring the whole in. You
-don't build.
+don't build. After the user approves the plan, act like `/goal`: keep starting workers until the goal is met. Do not ask
+the user whether to continue, except in step 9. The workers still plan with the user when a slice needs a decision
+(slice step 6), and the user still reviews each change (finish step 5).
 
 1. **Ask the overarching questions,** one at a time, skipping what the conversation already answers:
    - The kickoff questions ([kickoff skill](../kickoff/SKILL.md)): what it's for, the one outcome it drives, what
@@ -30,7 +32,8 @@ don't build.
    lines, the decisions, the root branch if there is one, the review count, and a table of each slice's branch, mode,
    check, scope, what it waits on, and its state from its worker: merged, answered, with the answer, or blocked, with
    the question. Follow-ups go at the end. Only you write it; rewrite it whenever something changes. Present it in the
-   chat. A yes approves every slice in it, and the close of each worker. Wait for it.
+   chat. A yes approves every slice in it, each follow-up that serves the goal (step 9), and the close of each worker.
+   Wait for it.
 5. **Start every slice that is ready** as a worker, up to the review count. A slice is ready once each slice it waits
    on has merged, or for a spike, answered, and no running slice changes the same files or the same gem. Start with
    the riskiest spike alone, unless the user says the risk is known. Each worker runs in its own session: a side
@@ -47,7 +50,8 @@ don't build.
      step 7 again.
    - Build only its slice, touch no other worker's worktree, and stop and report when blocked
      ([AGENTS.md](../../../AGENTS.md#when-blocked)).
-   - End its last message with one line, and give its context use if it can see it:
+   - List its follow-ups in its last message, then end the message with one line. Give its context use if it can see
+     it:
      `SLICE: <branch>  STATE: merged | answered | blocked  CONTEXT: <percent>  NOTE: <what it did, its answer or its
      question>`.
 6. **Read each slice's state from the plan, git and plannotator, not from memory.** Merged, answered and blocked come
@@ -57,6 +61,10 @@ don't build.
 7. **Watch the workers.** Examine each worker when it sends a message, and at least every 10 minutes while workers
    run. If the tool can schedule a check, schedule one.
    - If a building worker has no new commit, claim or message since your last two checks, ask it for its status.
+   - If a worker runs past the time-box of its slice, and its slice does not wait on the user's review (step 6), ask
+     it for its status.
+   - If it does not answer, close it, and mark its slice blocked in the plan. In the next update, ask the user under
+     "Waiting on you" whether to continue, split or drop the slice.
    - If a worker ends without a `SLICE:` line, read its slice's state from git and plannotator (step 6). If the slice
      has not merged, close the worker. Start a new worker on the same branch and worktree, and give it the last
      message of the old worker.
@@ -74,17 +82,26 @@ don't build.
    design question for the user. Where the tool can send a notification, send one each time something new waits on
    the user.
 9. **When a slice merges or answers:**
-   1. Check the plan against what came of it, and add the worker's follow-ups to it. Reorder, or split a slice that
-      grew too big, and report it in the next update. Adding or dropping a slice, or changing a decision from step 1,
-      needs the user's yes. Start no worker until the user gives it.
-   2. Give the finished worker the next ready slice, or close the worker:
+   1. Check the plan against what came of it.
+   2. If the plan has more than two times the number of slices that the user approved, add no more slices. Ask the
+      user whether to add more.
+   3. Read the worker's follow-ups. Add each follow-up that serves the goal as a slice. Put the others in the
+      follow-up list of the plan:
+      - polish of `spike` or `prototype` code that nothing depends on yet ([Modes](../../../AGENTS.md#modes));
+      - work that is out of scope.
+   4. Reorder or split slices, and report it in the next update. Do not ask the user first.
+   5. Ask the user before you do one of these. Keep the other workers busy until the user answers.
+      - Drop a slice.
+      - Change a decision from step 1.
+      - Add a follow-up that needs a hard-to-reverse decision.
+   6. Give the finished worker the next ready slice, or close the worker:
       - If a ready slice is in the same area as the worker's last slice, give it to the worker with a new brief
         (step 5). Do this only while the worker has built fewer than three slices and its context is less than half
         full. If the worker gave no `CONTEXT`, do not give it another slice.
       - If a ready slice does not agree with these conditions, close the worker and start a new one for the slice.
       - If no slice is ready, close the worker.
-   3. Start the other slices that are now ready (step 5).
-   4. Do steps 6 to 9 again until each slice has merged or answered.
+   7. Start the other slices that are now ready (step 5).
+   8. Do steps 6 to 9 again until each slice has merged or answered.
 
    To close a worker, end its session and delete it.
 10. **When every slice has merged or answered:**
@@ -96,4 +113,4 @@ don't build.
       needed conflicts resolved: then show those and wait for their yes.
    2. Close each worker that is still open. Run the [tidy-worktrees skill](../tidy-worktrees/SKILL.md), and delete the
       plan.
-   3. Sum up what landed, what was dropped, the follow-ups, and the next effort you propose.
+   3. Sum up what landed, what was dropped, and each follow-up that you did not do, with the reason.

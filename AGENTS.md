@@ -19,6 +19,7 @@ asked, when its trigger fits: read its `SKILL.md` and follow it. Claude Code als
 | [investigate](docs/skills/investigate/SKILL.md) | Something is broken, logs an error or draws wrong |
 | [new-gem](docs/skills/new-gem/SKILL.md) | A slice needs a new gem |
 | [simplify-review](docs/skills/simplify-review/SKILL.md) | The user asks to simplify or review an area |
+| [timeouts](docs/skills/timeouts/SKILL.md) | Starting a build, a test run, a validation, a run of Magic, a wait or any background command |
 | [retro](docs/skills/retro/SKILL.md) | A swarm finishes, a slice went badly, or the user corrects the workflow |
 
 ## Commands
@@ -38,6 +39,7 @@ The scripts run under `pwsh` and Windows PowerShell ([Tools](tools/README.md)).
   windowed run of your own with the console line `name <branch>`.
 - **Claim:** `tools/Scripts/Claim.ps1 -Slice <title> -Scope <paths>` tells every other session what the slice will
   change, and prints any overlap with theirs ([Worktrees](#worktrees)).
+- **Time limit:** give every command you start a time limit. Never let a command run forever (the timeouts skill).
 - **The user's review:** `plannotator review` opens the change as a diff in the user's browser and returns when
   they comment or approve (the finish skill).
 
@@ -113,7 +115,7 @@ conversation holds the plan; no file does, except a swarm's plan in the git fold
   if it doesn't serve them.
 - **Stop after each slice.** Once it merges, propose the next slice and wait. Never start it on your own. A swarm
   the user approved is the exception: its coordinator starts each slice once the ones it waits on have merged or, for a
-  spike, answered (the parallelize skill).
+  spike, answered. It also adds the follow-ups that serve its goal (the parallelize skill).
 - **One slice per session**, or one slice at a time per worker in a swarm (the finish skill). When compacting, keep the
   slice list, the current slice, its worktree path, the files it changed and its `-Change` level.
 

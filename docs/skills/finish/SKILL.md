@@ -26,7 +26,7 @@ description: Validates, reviews, presents and merges a built slice. Use it on yo
    - The next slice that you propose, in one line.
 5. Start the user's review. From the worktree, run `plannotator review --base <merge target>` in the background. Wait
    for it.
-   - If it stops before the user decides, run it again. The user's comments stay.
+   - If it ends before the user decides, run it again. The user's comments stay.
    - The page shows the branch of the worktree, which is the title of the session. `plannotator sessions --json`
      lists the URL and the worktree of each open review.
    - If plannotator is not available, show `git diff --stat` and the important hunks in the chat, and wait.
@@ -49,6 +49,6 @@ description: Validates, reviews, presents and merges a built slice. Use it on yo
    7. Delete the side sessions that you started and that are done ([tidy-worktrees skill](../tidy-worktrees/SKILL.md)).
 8. Stop.
    - A worker in a swarm ends with its `SLICE:` line ([parallelize skill](../parallelize/SKILL.md)). The coordinator
-     proposes the next work.
+     starts the next work.
    - In other cases, propose the next slice. Suggest that the user starts it with a clear context (`/clear`). Give its
      brief in one or two lines to paste. Do not start it yourself.
