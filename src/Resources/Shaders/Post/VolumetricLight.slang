@@ -30,6 +30,7 @@ static const float DepthTolerance = 0.1;
 public struct VolumetricLight : IPixelEffect
 {
     public static const uint Levels = 3;
+    public static const uint History = 1;
     public static const uint Rays = 1;
 
     public float intensity;

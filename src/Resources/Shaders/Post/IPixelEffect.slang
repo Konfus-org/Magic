@@ -7,8 +7,9 @@
 //
 // An effect that needs more than the picture keeps a target of its own: the struct declares how many levels it has,
 // as `static const uint Levels = 2;` does, each half the size of the one before, the first the picture's. Before
-// Apply, Level runs over every texel of each level in turn, the first first; Apply then reads them. The target lasts
-// from frame to frame, two of them swapping, so last frame's is the effect's history.
+// Apply, Level runs over every texel of each level in turn, the first first; Apply then reads them. An effect that reads
+// last frame's target declares `static const uint History = 1;`: its target lasts from frame to frame, two of them
+// swapping, so last frame's is the effect's history. One that doesn't declare it has no history.
 //
 // An effect that blends frames declares `static const uint Jitters = 1;`: while it runs, the camera draws each frame
 // through a different point in each pixel.
@@ -44,9 +45,9 @@ public struct PixelEffectInputs
     public float metalness;
     // The picture as the effects before this one left it, the effect's target as this frame has filled it so far, and
     // as last frame left it, and the picture's reversed depth and velocity, each read at any texel, and a sampler that
-    // filters between texels and clamps at the edges. The history holds nothing at a new view or size, or on the
-    // effect's first frame. A velocity's xy is the step in texture coordinates to where the pixel's surface was last
-    // frame, its z the surface's depth along last frame's view.
+    // filters between texels and clamps at the edges. The history holds nothing at a new view or size, on the effect's
+    // first frame, or for an effect that declares none. A velocity's xy is the step in texture coordinates to where the
+    // pixel's surface was last frame, its z the surface's depth along last frame's view.
     public TextureRef picture;
     public TextureRef target;
     public TextureRef history;
