@@ -2,9 +2,9 @@ using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Debugging;
+using Magic.Graphics;
 using Magic.Platform;
 using Magic.Projects;
-using Magic.Rendering;
 using Magic.Threading;
 using Magic.Utils;
 using Vortice.Vulkan;
@@ -262,7 +262,40 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     private void BeginFrame()
     {
         _frames.Begin();
+        Compact();
         WindowTarget = _swapchain?.Acquire(_frames.Current.Acquired) ?? GpuTexture.None;
+    }
+
+    /// <summary>
+    /// Each bottom-level structure a finished frame built, copied into one of the size it compacts to at the start of
+    /// this frame's commands. Its name takes the copy, and the built one dies with its scratch once this frame has run.
+    /// The gem that asks for it gets the copy's address this frame and builds the instances over it again, before
+    /// anything traces the copy.
+    /// </summary>
+    private void Compact()
+    {
+        foreach ((VulkanAcceleration built, ulong bytes) in _frames.Compactable)
+        {
+            // Destroyed, or made again, since it was built.
+            ref Named<BottomLevelDescription, GpuAcceleration> named = ref CollectionsMarshal.GetValueRefOrNullRef(
+                _namedBottomLevels,
+                built.Name
+            );
+            if (Unsafe.IsNullRef(ref named) || !ReferenceEquals(_resources.Accelerations[named.Made.Id], built))
+                continue;
+
+            Result<GpuAcceleration> compacted = _resources.Compact(_frames.Current.CommandBuffer, built, bytes);
+            if (!compacted.Ok)
+            {
+                Log.Warn($"{built.Name} keeps its build's size: {compacted.Error}");
+                continue;
+            }
+
+            Destroy(named.Made);
+            named.Made = compacted.Value;
+        }
+
+        _frames.Compactable.Clear();
     }
 
     /// <summary>

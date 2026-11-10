@@ -7,8 +7,8 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Magic.Assets;
 using Magic.Files;
+using Magic.Graphics;
 using Magic.Projects;
-using Magic.Rendering;
 using Magic.Utils;
 
 namespace Magic.SlangShaderCompiler;

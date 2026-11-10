@@ -1,0 +1,116 @@
+using Magic.Assets;
+using Magic.Ecs.Components;
+using Magic.Graphics;
+using Magic.Utils;
+
+namespace Magic.GpuWorld;
+
+/// <summary>
+/// The effects a frame runs over the lit picture, the air's and then the picture's, each resolved at its place: its
+/// material's row, packed as a surface material's is, the entries of its passes specialised to its shader, and what
+/// it declares it needs. An effect is ready once its material, its textures and its passes are, and failed when one
+/// of them failed or it asks for rays on a GPU that doesn't trace them.
+/// </summary>
+internal sealed class Effects(AssetManager assets, GpuResources resources)
+{
+    /// <summary>
+    /// The places in the lists a frame runs, the weather's and the post processing's.
+    /// </summary>
+    public const int Places = 2 * MaterialSlots.Capacity;
+
+    private readonly ShaderEntry _applyShader = PassShaders.GetEntry(assets, "ApplyPixelEffect", "ApplyPixelEffect");
+
+    private readonly ShaderEntry _levelShader = PassShaders.GetEntry(assets, "ApplyPixelEffect", "FillEffectLevel");
+
+    /// <summary>
+    /// Each entry specialised to each effect shader, kept, so a frame makes none.
+    /// </summary>
+    private readonly Dictionary<(ShaderEntry Entry, ShaderTypeArgument Shader), ShaderEntry> _specialised = [];
+
+    /// <summary>
+    /// The frame's effects and their material rows, by place, written again each frame.
+    /// </summary>
+    private readonly GpuEffect[] _resolved = new GpuEffect[Places];
+    private readonly GpuMaterial[] _rows = new GpuMaterial[Places];
+
+    /// <summary>
+    /// Each place of <paramref name="lists"/> resolved, the first list's places first, and their rows uploaded.
+    /// </summary>
+    public Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> Resolve(
+        RenderGraph graph,
+        ReadOnlySpan<MaterialSlots> lists
+    )
+    {
+        Result<GpuBuffer> rows = graph.Buffer(GpuDescriptions.GetBuffer("Effect rows", Places * GpuMaterial.Bytes));
+        if (!rows.Ok)
+            return Result.Failure(rows.Error);
+
+        for (int place = 0; place < Places; place++)
+        {
+            MaterialInstance slot = lists[place / MaterialSlots.Capacity][place % MaterialSlots.Capacity];
+            (_resolved[place], _rows[place]) = Resolve(graph, slot);
+        }
+
+        graph.Upload(rows.Value, _rows.AsSpan());
+
+        return Result.Success<(ReadOnlyMemory<GpuEffect>, GpuBuffer)>((_resolved, rows.Value));
+    }
+
+    /// <summary>
+    /// Whether any of <paramref name="lists"/>' effects is still loading, its material, its textures or its passes.
+    /// </summary>
+    public bool IsLoading(RenderGraph graph, ReadOnlySpan<MaterialSlots> lists)
+    {
+        bool isLoading = false;
+        foreach (MaterialSlots list in lists)
+        {
+            foreach (MaterialInstance slot in list)
+            {
+                isLoading |= Resolve(graph, slot).Effect.State == GpuState.Loading;
+            }
+        }
+
+        return isLoading;
+    }
+
+    private (GpuEffect Effect, GpuMaterial Row) Resolve(RenderGraph graph, in MaterialInstance slot)
+    {
+        if (slot.Handle == Handle<Material>.None)
+            return (new GpuEffect(0, GpuState.Failed, default, default, default), default);
+
+        ResourceState material = resources.GetEffect(
+            slot,
+            out GpuMaterial row,
+            out ShaderTypeArgument shader,
+            out EffectNeeds needs
+        );
+        if (material != ResourceState.Ready)
+        {
+            GpuState state = material == ResourceState.Loading ? GpuState.Loading : GpuState.Failed;
+
+            return (new GpuEffect(slot.Handle.Id, state, default, default, needs), row);
+        }
+
+        // An effect that asks for rays fails at once on a GPU that doesn't trace them, before its passes are built.
+        if (needs.HasRays && !graph.Features.HasRayQuery)
+            return (new GpuEffect(slot.Handle.Id, GpuState.Failed, default, default, needs), row);
+
+        ShaderEntry apply = GetSpecialised(_applyShader, shader);
+        ShaderEntry level = GetSpecialised(_levelShader, shader);
+        GpuState applied = graph.GetState(apply);
+        GpuState levels = needs.Levels == 0 ? GpuState.Ready : graph.GetState(level);
+
+        return (new GpuEffect(slot.Handle.Id, applied == GpuState.Ready ? levels : applied, apply, level, needs), row);
+    }
+
+    private ShaderEntry GetSpecialised(ShaderEntry entry, ShaderTypeArgument shader)
+    {
+        if (!_specialised.TryGetValue((entry, shader), out ShaderEntry specialised))
+        {
+            specialised = entry with { TypeArguments = [shader] };
+            _specialised[(entry, shader)] = specialised;
+        }
+
+        return specialised;
+    }
+}
