@@ -175,11 +175,15 @@ public sealed class RenderGraph
 
     /// <summary>
     /// <paramref name="rows"/> rows of the frame's upload ring to write into, copied into <paramref name="to"/> from
-    /// <paramref name="offset"/> bytes on in a transfer pass: write them before the frame is presented.
+    /// <paramref name="offset"/> bytes on in a transfer pass: write them before the frame is presented. No rows record
+    /// nothing.
     /// </summary>
     public Span<T> Upload<T>(GpuBuffer to, int rows, ulong offset = 0)
         where T : unmanaged
     {
+        if (rows == 0)
+            return [];
+
         UseInTransfer(GetUse(to, GpuAccess.CopyDestination), RenderStage.Prepare);
         int bytes = rows * Unsafe.SizeOf<T>();
         GpuUpload upload = BeginUpload(bytes);
