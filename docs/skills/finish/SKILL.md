@@ -24,8 +24,9 @@ description: Validates, reviews, presents and merges a built slice. Use it on yo
    - Each type, member, field and parameter that you added, and the caller in this slice that needs it. Remove each
      one that has no caller ([Simplest First](../../../AGENTS.md#simplest-first)).
    - The next slice that you propose, in one line.
-5. Start the user's review. From the worktree, run `plannotator review --base <merge target>` in the background. Wait
-   for it.
+5. Start the user's review. A worker in a swarm skips steps 5 and 6: it ends with `STATE: ready-for-review`, and the
+   coordinator starts the user's review ([parallelize skill](../parallelize/SKILL.md)). From the worktree, run
+   `plannotator review --base <merge target>` in the background. Wait for it.
    - If it ends before the user decides, run it again. The user's comments stay.
    - The page shows the branch of the worktree, which is the title of the session. `plannotator sessions --json`
      lists the URL and the worktree of each open review.

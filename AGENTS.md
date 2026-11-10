@@ -115,7 +115,8 @@ conversation holds the plan; no file does, except a swarm's plan in the git fold
   Run `tools/Scripts/AgentTaskComplete.ps1` once, when the slice is done.
 - **Size:** reviewable in about 15 minutes, under about 300 changed lines, one area or one seam between two, and
   one runnable check that shows it works. A request that needs "and" more than once, or a design doc first, is too
-  big: say so plainly and propose the split.
+  big: say so plainly and propose the split. A slice for a worker of a swarm also fits in one hour of the worker's
+  time (the parallelize skill).
 - **Check for drift.** Before each slice, check it against the goal and decisions agreed in the conversation. Say so
   if it doesn't serve them.
 - **Stop after each slice.** Once it merges, propose the next slice and wait. Never start it on your own. A swarm
@@ -182,7 +183,8 @@ validated and reviewed as a whole (the parallelize skill).
 - A build or test failure outside your files: stop and report it. Don't fix other agents' work.
 - An ambiguity that changes the design: ask. Otherwise pick the reasonable reading and say which.
 - The slice grows past about 300 lines, needs files outside its scope, or runs past its time-box: stop and report
-  what exists. The user decides to continue, split or drop it.
+  what exists. The user decides to continue, split or drop it. In a swarm, the coordinator splits the slice instead
+  (the parallelize skill).
 - The same fix has failed twice: stop and report instead of trying a third time.
 
 ## Design Rules
@@ -276,7 +278,8 @@ When you reply to the user:
 | coordinator | The session that plans a swarm, gives slices to its workers and merges the root branch. |
 | worker | A session that builds one slice of a swarm at a time. |
 | swarm plan | The file that holds a swarm's slices and their states (the parallelize skill). |
-| review count | How many of the user's reviews can wait at the same time in a swarm. |
+| worker limit | How many workers of a swarm run at the same time. |
+| profiling turn | A time in which one worker alone profiles or measures CPU, RAM or GPU use, or runs anything that other runs of Magic can change. The coordinator gives it. |
 | root branch | The branch that the slices of one feature merge into before it merges into the merge target. |
 | gem | A plugin: a part of the engine that a project adds or replaces. |
 | hook | A method that the engine calls on a gem each frame (Code Standards). |

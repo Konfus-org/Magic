@@ -23,6 +23,7 @@ A command must not run without a time limit. A command that runs forever blocks 
    | `tools/Scripts/Screenshot.ps1` | Two times its `-Seconds`, or 20 minutes |
    | `tools/Scripts/AgentTaskComplete.ps1` or `tools/Scripts/Validate.ps1` | 60 minutes |
    | `plannotator review` | 4 hours |
+   | One run of a worker of a swarm (`claude -p`) | 1 hour |
    | Other commands | 10 minutes |
 
 3. If the tool has no limit and the command has no option for one, wrap the command.
@@ -38,7 +39,8 @@ A command must not run without a time limit. A command that runs forever blocks 
 
 4. If a command that waits for the user reaches its limit, start it again with the same limit. An example is
    `plannotator review` ([finish skill](../finish/SKILL.md) step 5). Do not do step 5.
-5. If another command reaches its limit:
+5. If another command reaches its limit, do the steps below. A run of a worker of a swarm is different: the coordinator
+   splits its slice ([parallelize skill](../parallelize/SKILL.md) step 7).
    1. Kill the command and each process that it started, for example a Magic that is still open.
    2. Tell the user what ran, for how long, and its last output.
    3. If its output shows progress, run it again one time, with a limit two times larger.
