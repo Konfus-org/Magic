@@ -12,10 +12,12 @@ namespace Magic.Deferred;
 /// The effects run over the lit picture before the output, the air's and then the picture's, in order: each a material
 /// whose shader implements the pixel effect contract, its row packed as a surface material's is, and passes of the
 /// entries specialised to its shader: one for each level of its own target it declares, then its apply, which reads the
-/// picture the effects before it left and writes the other of two, the last copied back into the HDR picture. An
-/// effect with levels has two targets by its place in the lists, which swap each frame, so the one it filled last frame
-/// is its history, and one that declares jitter has the camera jittered while it runs. An effect is left out while its
-/// material, its textures or its passes load, and when one of them failed.
+/// picture the effects before it left and writes the other of two. An effect with levels has two targets by its place
+/// in the lists, which swap each frame, so the one it filled last frame is its history, and one that declares jitter
+/// has the camera jittered while it runs. One that upscales resolves the picture to the output's size, the window's,
+/// and the effects after it work at that size, so the output draws from the last of them; with none, the last picture
+/// is copied back into the HDR picture. An effect is left out while its material, its textures or its passes load, and
+/// when one of them failed.
 /// </summary>
 internal sealed class PixelEffects
 {
@@ -40,36 +42,58 @@ internal sealed class PixelEffects
     private readonly List<RunningEffect> _running = [];
 
     /// <summary>
-    /// The material the effect at each place was last frame, 0 where none ran: whether its history is its own.
+    /// The material the effect at each place was last frame and the size it worked at, none where none ran: whether its
+    /// history is its own.
     /// </summary>
-    private readonly ulong[] _lastFrame = new ulong[Places];
+    private readonly (ulong Material, (int Width, int Height) Size)[] _lastFrame = new (ulong, (int, int))[Places];
 
     /// <summary>
     /// Runs the view's effects that are ready, in order, on frame <paramref name="frameIndex"/>, their rays through
-    /// <paramref name="traced"/> where there is one.
+    /// <paramref name="traced"/> where there is one, and gives the picture they finished: the HDR picture, or one of the
+    /// output's size where an effect upscaled it.
     /// </summary>
-    public void Record(in RenderView view, TracedWorld? traced, uint frameIndex)
+    public GpuTexture Record(in RenderView view, TracedWorld? traced, uint frameIndex)
     {
         RenderGraph graph = view.Graph;
 
-        // The entries and targets of the effects ready to run, in order.
+        // What an effect that upscales resolves the picture to: the window's size, which the view never exceeds, or the
+        // view's where there is no window.
+        (int Width, int Height) pictureSize = (view.Gpu.Width, view.Gpu.Height);
+        (int Width, int Height) output = pictureSize;
+        if (!graph.WindowTarget.IsNone)
+        {
+            TextureDescription window = graph.GetDescription(graph.WindowTarget);
+            output = (window.Width, window.Height);
+        }
+
+        // The entries and targets of the effects ready to run, in order, each at the size it works at: the output's
+        // from the effect that upscales on. An effect's history is its own where it ran last frame at that size.
         _running.Clear();
         int passCount = 0;
+        int upscaledCount = 0;
+        (int Width, int Height) size = pictureSize;
         ReadOnlySpan<GpuEffect> effects = view.Gpu.Effects.Span;
         for (int place = 0; place < effects.Length; place++)
         {
             (ulong material, GpuState state, ShaderEntry apply, ShaderEntry level, EffectNeeds needs) = effects[place];
-            bool ranLastFrame = _lastFrame[place] == material;
-            _lastFrame[place] = 0;
+            (ulong Material, (int Width, int Height) Size) lastFrame = _lastFrame[place];
+            _lastFrame[place] = default;
             if (state != GpuState.Ready)
                 continue;
 
+            (int Width, int Height) effectSize = needs.Upscales ? output : size;
             int levels = Math.Min(
                 needs.Levels,
-                Math.Min(MostLevels, TextureDescription.GetFullLevels(view.Gpu.Width, view.Gpu.Height))
+                Math.Min(MostLevels, TextureDescription.GetFullLevels(effectSize.Width, effectSize.Height))
             );
 
-            Result<(GpuTexture Target, GpuTexture History)> targets = GetTargets(view, place, frameIndex, levels);
+            Result<(GpuTexture Target, GpuTexture History)> targets = GetTargets(
+                view,
+                place,
+                frameIndex,
+                levels,
+                effectSize
+            );
             if (!targets.Ok)
             {
                 Log.Error($"The effect at {place} in the lists is not drawn: {targets.Error}");
@@ -78,39 +102,36 @@ internal sealed class PixelEffects
             }
 
             (GpuTexture target, GpuTexture history) = targets.Value;
-            _running.Add(
-                new RunningEffect(place, apply, level, levels, target, history, view.Gpu.HasHistory && ranLastFrame)
-            );
-            _lastFrame[place] = material;
+            bool hasHistory = view.Gpu.HasHistory && lastFrame == (material, effectSize);
+            _running.Add(new RunningEffect(place, apply, level, levels, effectSize, target, history, hasHistory));
+            _lastFrame[place] = (material, effectSize);
             passCount += levels + 1;
+            size = effectSize;
+            if (effectSize != pictureSize)
+                upscaledCount++;
         }
 
         int count = _running.Count;
         if (count == 0)
-            return;
+            return view.Gpu.Hdr;
 
+        // Two pictures at each size the effects work at, the HDR picture one of the picture's, asked for while used.
         Result<GpuBuffer> passTable = graph.Buffer(
             GpuDescriptions.GetBuffer("Effect passes", Places * (MostLevels + 1) * Unsafe.SizeOf<GpuEffectPass>())
         );
-        Result<GpuTexture> otherPicture = graph.Texture(
-            GpuDescriptions.GetTexture(
-                "Effect picture",
-                view.Gpu.Width,
-                view.Gpu.Height,
-                GpuFormat.R16G16B16A16Sfloat,
-                TextureUsages.Storage | TextureUsages.Sampled | TextureUsages.CopySource
-            )
-        );
+        Result<GpuTexture> otherPicture = GetPicture(graph, "Effect picture", pictureSize, count > upscaledCount);
+        Result<GpuTexture> upscaled = GetPicture(graph, "Upscaled picture", output, upscaledCount > 0);
+        Result<GpuTexture> upscaledOther = GetPicture(graph, "Other upscaled picture", output, upscaledCount > 1);
         Result<GpuSampler> sampler = graph.Sampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
-        foreach (Result made in (ReadOnlySpan<Result>)[passTable, otherPicture, sampler])
+        foreach (Result made in (ReadOnlySpan<Result>)[passTable, otherPicture, upscaled, upscaledOther, sampler])
         {
             if (!made.Ok)
             {
                 Log.Error($"The picture's effects are not drawn: {made.Error}");
 
-                return;
+                return view.Gpu.Hdr;
             }
         }
 
@@ -135,10 +156,16 @@ internal sealed class PixelEffects
             ? [world.HitMaterials, view.Gpu.Meshes, view.Gpu.Instances]
             : [];
         (GpuTexture picture, GpuTexture other) = (view.Gpu.Hdr, otherPicture.Value);
+        size = pictureSize;
         int pass = 0;
         for (int effect = 0; effect < count; effect++)
         {
+            // The effect that upscales writes the first picture of the output's size, the one after it the other.
             RunningEffect running = _running[effect];
+            bool isUpscaling = running.Size != size;
+            if (isUpscaling)
+                other = upscaled.Value;
+
             GpuEffectPass shared = new()
             {
                 Rows = view.Gpu.EffectRows.Id,
@@ -166,7 +193,7 @@ internal sealed class PixelEffects
                     fill.Reads(running.Target, level - 1);
 
                 fill.Writes(running.Target, level)
-                    .DispatchOver(Math.Max(view.Gpu.Width >> level, 1), Math.Max(view.Gpu.Height >> level, 1));
+                    .DispatchOver(Math.Max(running.Size.Width >> level, 1), Math.Max(running.Size.Height >> level, 1));
                 pass++;
             }
 
@@ -184,57 +211,87 @@ internal sealed class PixelEffects
             if (running.Levels > 0)
                 applied.Reads(running.Target, running.History);
 
-            applied.Writes(other).DispatchOver(view.Gpu.Width, view.Gpu.Height);
+            applied.Writes(other).DispatchOver(running.Size.Width, running.Size.Height);
             pass++;
-            (picture, other) = (other, picture);
+            (picture, other) = (other, isUpscaling ? upscaledOther.Value : picture);
+            size = running.Size;
         }
+
+        if (size != pictureSize)
+            return picture;
 
         if (picture != view.Gpu.Hdr)
             graph.Blit(picture, view.Gpu.Hdr, RenderStage.Post);
+
+        return view.Gpu.Hdr;
     }
 
     /// <summary>
-    /// The two targets of the effect at <paramref name="place"/> with <paramref name="levels"/>: the one frame
-    /// <paramref name="frameIndex"/> fills, by its parity, and the one the frame before filled; none without levels.
+    /// The picture under <paramref name="name"/> at <paramref name="size"/> where it is needed, else none.
+    /// </summary>
+    private static Result<GpuTexture> GetPicture(
+        RenderGraph graph,
+        string name,
+        (int Width, int Height) size,
+        bool isNeeded
+    ) =>
+        isNeeded
+            ? graph.Texture(
+                GpuDescriptions.GetTexture(
+                    name,
+                    size.Width,
+                    size.Height,
+                    GpuFormat.R16G16B16A16Sfloat,
+                    TextureUsages.Storage | TextureUsages.Sampled | TextureUsages.CopySource
+                )
+            )
+            : Result.Success(GpuTexture.None);
+
+    /// <summary>
+    /// The two targets of the effect at <paramref name="place"/> with <paramref name="levels"/>, the first at
+    /// <paramref name="size"/>: the one frame <paramref name="frameIndex"/> fills, by its parity, and the one the frame
+    /// before filled; none without levels.
     /// </summary>
     private static Result<(GpuTexture Target, GpuTexture History)> GetTargets(
         in RenderView view,
         int place,
         uint frameIndex,
-        int levels
+        int levels,
+        (int Width, int Height) size
     )
     {
         if (levels == 0)
             return Result.Success((GpuTexture.None, GpuTexture.None));
 
         int filled = (2 * place) + (int)(frameIndex % 2);
-        Result<GpuTexture> target = view.Graph.Texture(GetTarget(_targetNames[filled], view, levels));
-        Result<GpuTexture> history = view.Graph.Texture(GetTarget(_targetNames[filled ^ 1], view, levels));
+        Result<GpuTexture> target = view.Graph.Texture(GetTarget(_targetNames[filled], size, levels));
+        Result<GpuTexture> history = view.Graph.Texture(GetTarget(_targetNames[filled ^ 1], size, levels));
         if (!target.Ok || !history.Ok)
             return Result.Failure(target.Ok ? history.Error : target.Error);
 
         return Result.Success((target.Value, history.Value));
     }
 
-    private static TextureDescription GetTarget(string name, in RenderView view, int levels) =>
+    private static TextureDescription GetTarget(string name, (int Width, int Height) size, int levels) =>
         GpuDescriptions.GetTexture(
             name,
-            view.Gpu.Width,
-            view.Gpu.Height,
+            size.Width,
+            size.Height,
             GpuFormat.R16G16B16A16Sfloat,
             TextureUsages.Storage | TextureUsages.Sampled,
             levels
         );
 
     /// <summary>
-    /// An effect a frame runs: its entries, the levels of its target, its target and its history, none without levels,
-    /// and whether the history holds what it filled last frame.
+    /// An effect a frame runs: its entries, the levels of its target, the size it works at, its target and its history,
+    /// none without levels, and whether the history holds what it filled last frame.
     /// </summary>
     private readonly record struct RunningEffect(
         int Place,
         ShaderEntry Apply,
         ShaderEntry Level,
         int Levels,
+        (int Width, int Height) Size,
         GpuTexture Target,
         GpuTexture History,
         bool HasHistory

@@ -1,9 +1,10 @@
-// What the output shows, as the view the pass header's y names asks: the picture as its effects finished it, encoded for
-// the screen, or each pixel's GBuffer, so a roughness of a half reads as a half and an albedo as the colour it is. A
-// GBuffer view is black where nothing was drawn, but for the velocity, which the sky has too. A view of light alone
-// first writes it into the picture in place of the lit one, so the effects finish it as they would the picture: the
-// traced diffuse light as shading reads it, which a white diffuse surface would reflect, or the traced reflections'
-// light, which it reads from the frame's GI constants, whose light ids are 0 where nothing is traced.
+// What the output, the pass header's w, shows as the view its y names asks: the picture its z names as the effects
+// finished it, the output's size, encoded for the screen, or each pixel's GBuffer, so a roughness of a half reads as a
+// half and an albedo as the colour it is. A GBuffer view is black where nothing was drawn, but for the velocity, which
+// the sky has too. A view of light alone first writes it into the picture in place of the lit one, so the effects
+// finish it as they would the picture: the traced diffuse light as shading reads it, which a white diffuse surface
+// would reflect, or the traced reflections' light, which it reads from the frame's GI constants, whose light ids are 0
+// where nothing is traced.
 module "ShowSurface";
 
 import Core.Heap;
@@ -106,15 +107,19 @@ void ShowLight(uint3 thread : SV_DispatchThreadID)
 [numthreads(8, 8, 1)]
 void ShowSurface(uint3 thread : SV_DispatchThreadID)
 {
-    FrameConstants frame = GetFrame();
-    if (any(thread.xy >= uint2(frame.width, frame.height)))
+    PassHeader header = GetPassHeader();
+    StorageRef output = { header.w, 0u };
+    uint2 size = output.GetSize();
+    if (any(thread.xy >= size))
         return;
 
-    PassHeader header = GetPassHeader();
+    // The GBuffer's texel under the pixel, where the output is larger than the view.
+    FrameConstants frame = GetFrame();
+    uint2 viewSize = uint2(frame.width, frame.height);
+    uint2 texel = min(uint2(GetTexelCenterUv(thread.xy, size) * float2(viewSize)), viewSize - 1u);
     SurfaceView view = (SurfaceView)header.y;
     bool isPicture = view == SurfaceView.Final || view == SurfaceView.IndirectDiffuse || view == SurfaceView.Reflections;
-    TextureRef picture = { frame.hdr };
-    float3 color = isPicture ? ToSrgb(picture.Load(thread.xy, 0u).rgb) : GetSurfaceView(frame, view, thread.xy);
-    StorageRef output = { frame.output, 0u };
+    TextureRef picture = { header.z };
+    float3 color = isPicture ? ToSrgb(picture.Load(thread.xy, 0u).rgb) : GetSurfaceView(frame, view, texel);
     output.Store(thread.xy, float4(color, 1.0));
 }
