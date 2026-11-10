@@ -90,15 +90,14 @@ internal sealed class SurfaceView(AssetManager assets)
     }
 
     /// <summary>
-    /// The output drawn from <paramref name="picture"/>, which is its size, as the debug view asks.
+    /// The output drawn as the debug view asks.
     /// </summary>
-    public void Record(in RenderView view, DebugView debugView, GpuTexture picture, GpuTexture output)
-    {
-        TextureDescription size = view.Graph.GetDescription(output);
-        view.Graph.Compute(
+    public void Record(in RenderView view, DebugView debugView) =>
+        view
+            .Graph.Compute(
                 "Show surface",
                 _showShader,
-                new GpuConstants(view.Gpu.Frame.Id, (uint)debugView, picture.Id, output.Id),
+                new GpuConstants(view.Gpu.Frame.Id, (uint)debugView),
                 RenderStage.Post
             )
             .Reads(
@@ -108,9 +107,8 @@ internal sealed class SurfaceView(AssetManager assets)
                 view.Gpu.GBufferBase,
                 view.Gpu.GBufferSurface,
                 view.Gpu.Velocity,
-                picture
+                view.Gpu.Hdr
             )
-            .Writes(output)
-            .DispatchOver(size.Width, size.Height);
-    }
+            .Writes(view.Gpu.Output)
+            .DispatchOver(view.Gpu.Width, view.Gpu.Height);
 }

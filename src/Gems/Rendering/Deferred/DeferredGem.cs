@@ -191,21 +191,12 @@ public sealed class DeferredGem
 
         // A debug view of light draws it into the picture, so the effects finish it as they do the picture.
         _surfaceView.RecordLight(view, inputs.Settings.RenderView, indirect);
-        GpuTexture picture = _pixelEffects.Record(view, input.Traced, frame.Index);
-        Result<GpuTexture> output = GetOutput(graph, gpu, picture);
-        if (!output.Ok)
-        {
-            Log.Error($"The frame is not shown: {output.Error}");
+        _pixelEffects.Record(view, input.Traced, frame.Index);
+        _surfaceView.Record(view, inputs.Settings.RenderView);
 
-            return;
-        }
-
-        _surfaceView.Record(view, inputs.Settings.RenderView, picture, output.Value);
-
-        // The output into the window, by a linear blit: stretched where it is the view's size, copied where upscaled.
         GpuTexture target = graph.WindowTarget;
         if (!target.IsNone)
-            graph.Blit(output.Value, target, RenderStage.Post);
+            graph.Blit(gpu.Output, target, RenderStage.Post);
 
         // One readback buffer, so one screenshot a frame: the last asked for.
         ScreenshotRequested? shot = null;
@@ -215,7 +206,7 @@ public sealed class DeferredGem
         }
 
         if (shot is { } saved)
-            SaveScreenshot(graph, output.Value, saved.Path);
+            SaveScreenshot(graph, gpu, saved.Path);
 
         if (!_hasDrawn)
         {
@@ -265,25 +256,6 @@ public sealed class DeferredGem
     }
 
     /// <summary>
-    /// What the output is drawn into: the view's output, or one of the picture's size where an effect upscaled it.
-    /// </summary>
-    private static Result<GpuTexture> GetOutput(RenderGraph graph, in GpuView view, GpuTexture picture)
-    {
-        if (picture == view.Hdr)
-            return Result.Success(view.Output);
-
-        TextureDescription upscaled = graph.GetDescription(picture);
-        return graph.Texture(
-            graph.GetDescription(view.Output) with
-            {
-                Name = "Upscaled output",
-                Width = upscaled.Width,
-                Height = upscaled.Height,
-            }
-        );
-    }
-
-    /// <summary>
     /// Ends the start as failed: the renderer draws nothing, and holds no domain back.
     /// </summary>
     private void FailStart(string error)
@@ -295,13 +267,12 @@ public sealed class DeferredGem
     }
 
     /// <summary>
-    /// The output read back, and written to <paramref name="path"/> once the GPU is done with it.
+    /// The view's output read back, and written to <paramref name="path"/> once the GPU is done with it.
     /// </summary>
-    private void SaveScreenshot(RenderGraph graph, GpuTexture output, string path)
+    private void SaveScreenshot(RenderGraph graph, in GpuView view, string path)
     {
-        TextureDescription size = graph.GetDescription(output);
         Result<GpuBuffer> readback = graph.Buffer(
-            GpuDescriptions.GetBuffer("Output readback", (long)size.Width * size.Height * 4, BufferUsages.Readback)
+            GpuDescriptions.GetBuffer("Output readback", (long)view.Width * view.Height * 4, BufferUsages.Readback)
         );
         if (!readback.Ok)
         {
@@ -310,7 +281,7 @@ public sealed class DeferredGem
             return;
         }
 
-        graph.ReadBack(output, readback.Value, RenderStage.Post);
-        Screenshot.SaveAsync(_gpu, _assets, readback.Value, path, size.Width, size.Height).FireAndForget();
+        graph.ReadBack(view.Output, readback.Value, RenderStage.Post);
+        Screenshot.SaveAsync(_gpu, _assets, readback.Value, path, view.Width, view.Height).FireAndForget();
     }
 }

@@ -6,15 +6,12 @@
 // before the exposure, exposed after it, and ready for the screen after the tonemap.
 //
 // An effect that needs more than the picture keeps a target of its own: the struct declares how many levels it has,
-// as `static const uint Levels = 2;` does, each half the size of the one before, the first the size the effect works
-// at. Before Apply, Level runs over every texel of each level in turn, the first first; Apply then reads them. The
-// target lasts from frame to frame, two of them swapping, so last frame's is the effect's history.
+// as `static const uint Levels = 2;` does, each half the size of the one before, the first the picture's. Before
+// Apply, Level runs over every texel of each level in turn, the first first; Apply then reads them. The target lasts
+// from frame to frame, two of them swapping, so last frame's is the effect's history.
 //
 // An effect that blends frames declares `static const uint Jitters = 1;`: while it runs, the camera draws each frame
-// through a different point in each pixel. It also upscales: it works at the output's size, the window's, which the
-// picture may be smaller than, and so does every effect after it. The depth and the velocity stay the size the view is
-// drawn at, so an effect finds their texel under a pixel from uv. One that keeps the picture's size declares
-// `static const uint NoUpscaling = 1;`.
+// through a different point in each pixel.
 //
 // An effect reads the frame, such as its time and the camera, with Core/Frame's GetFrame, and the sun and the sky
 // with Scene/Lights' GetLights. One that asks what lies along a ray through the world, such as whether a point in
@@ -26,8 +23,8 @@ import Core.Heap;
 
 public struct PixelEffectInputs
 {
-    // The pixel's place in what the pass writes, 0 to 1 from the top left, and in texels: the picture at the size the
-    // effect works at, or the level of the effect's target that Level fills.
+    // The pixel's place in what the pass writes, 0 to 1 from the top left, and in texels: the picture, or the level of
+    // the effect's target that Level fills.
     public float2 uv;
     public uint2 pixel;
     public uint2 size;
