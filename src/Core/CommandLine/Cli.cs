@@ -108,7 +108,7 @@ internal sealed class Cli
                 SaveCommand.Create(app, world, queue),
                 LoadCommand.Create(app, world, queue),
                 BakeCommand.Create(app, assets, queue),
-                SetCommand.Create(app, settings, events, world),
+                SetCommand.Create(app, settings, world),
                 GetCommand.Create(app, settings, world),
                 TeleportCommand.Create(app, world, assets, queue),
                 SpawnCommand.Create(app, world, assets, queue),

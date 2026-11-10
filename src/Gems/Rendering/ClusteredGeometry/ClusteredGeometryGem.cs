@@ -1,9 +1,8 @@
 using System.Collections.Immutable;
-using System.Globalization;
 using Magic.Assets;
+using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Ecs;
-using Magic.Events;
 using Magic.Files;
 using Magic.Graphics;
 using Magic.Projects;
@@ -28,6 +27,7 @@ public readonly record struct ClusteredGeometryInput(GpuView View);
 /// </summary>
 public sealed class ClusteredGeometryGem
     : IGem,
+        IHasSettings<ClusteredGeometrySettings>,
         IRenderFrom<ClusteredGeometryInput>,
         IHookIntoDomainLoading,
         IDisposable
@@ -37,18 +37,6 @@ public sealed class ClusteredGeometryGem
     private readonly Subscription _preprocessing;
     private readonly ClusterResources _resources;
     private readonly Visibility _visibility;
-
-    /// <summary>
-    /// The pixel radius on screen under which an instance hands off to its impostor: half an atlas view of 64 texels,
-    /// so an impostor is never magnified. Set with ClusteredGeometry.impostorPixels; 0 hands off by distance alone.
-    /// </summary>
-    private float _impostorPixels = 32;
-
-    /// <summary>
-    /// The distance in metres to an instance past which it hands off to its impostor, however large on screen. Set with
-    /// ClusteredGeometry.impostorDistance; 0 hands off by size alone.
-    /// </summary>
-    private float _impostorDistance = 1000;
 
     /// <summary>
     /// The settings <see cref="Render"/> draws with, taken from <see cref="_inputs"/>, until newer are. Render thread.
@@ -67,14 +55,21 @@ public sealed class ClusteredGeometryGem
     private int _domainsLoaded;
     private TaskCompletionSource? _loading;
 
-    public ClusteredGeometryGem(AssetManager assets, Caches caches, Threads threads)
+    public ClusteredGeometryGem(ClusteredGeometrySettings settings, AssetManager assets, Caches caches, Threads threads)
     {
+        Settings = settings;
         _threads = threads;
         ClusterPreprocessor clusters = new();
         _preprocessing = assets.Register(clusters);
         _resources = new ClusterResources(clusters, caches, assets, threads);
         _visibility = new Visibility(assets);
     }
+
+    /// <summary>
+    /// When a model draws as its impostor, which <see cref="LateUpdate"/> hands each frame to <see cref="Render"/>. Game
+    /// thread.
+    /// </summary>
+    public ClusteredGeometrySettings Settings { get; set; }
 
     public void Dispose()
     {
@@ -84,24 +79,12 @@ public sealed class ClusteredGeometryGem
     }
 
     /// <summary>
-    /// Applies the settings.
-    /// </summary>
-    public void Update(in Frame frame)
-    {
-        foreach (SetCliCommand setting in frame.Events.Get<SetCliCommand>())
-        {
-            ApplySetting(setting);
-        }
-    }
-
-    /// <summary>
     /// Publishes the settings for <see cref="Render"/>.
     /// </summary>
     public void LateUpdate(in Frame frame)
     {
         RenderInputs back = _inputs.Back;
-        back.ImpostorPixels = _impostorPixels;
-        back.ImpostorDistance = _impostorDistance;
+        back.Settings = Settings;
         _inputs.Publish();
     }
 
@@ -158,8 +141,8 @@ public sealed class ClusteredGeometryGem
             graph,
             gpu,
             pools.Value,
-            inputs.ImpostorPixels,
-            inputs.ImpostorDistance
+            inputs.Settings.ImpostorPixels,
+            inputs.Settings.ImpostorDistance
         );
         if (!view.Ok)
         {
@@ -223,27 +206,6 @@ public sealed class ClusteredGeometryGem
         _started = Result.Failure(error);
     }
 
-    private void ApplySetting(in SetCliCommand setting)
-    {
-        if (setting.Key == "ClusteredGeometry.impostorPixels")
-        {
-            if (float.TryParse(setting.Value, CultureInfo.InvariantCulture, out float pixels) && pixels >= 0)
-                _impostorPixels = pixels;
-            else
-                Log.Error($"{setting.Key} takes a pixel radius of 0 or more, not '{setting.Value}'.");
-
-            return;
-        }
-
-        if (setting.Key != "ClusteredGeometry.impostorDistance")
-            return;
-
-        if (float.TryParse(setting.Value, CultureInfo.InvariantCulture, out float metres) && metres >= 0)
-            _impostorDistance = metres;
-        else
-            Log.Error($"{setting.Key} takes a distance in metres of 0 or more, not '{setting.Value}'.");
-    }
-
     /// <summary>
     /// What the game thread's settings ask of a frame, copied as its frame ends and published for the render thread,
     /// which reads nothing else of the game thread's.
@@ -251,13 +213,8 @@ public sealed class ClusteredGeometryGem
     private sealed class RenderInputs
     {
         /// <summary>
-        /// The pixel radius on screen under which an instance hands off to its impostor; 0 hands off by distance alone.
+        /// The settings the frame is drawn by.
         /// </summary>
-        public float ImpostorPixels { get; set; }
-
-        /// <summary>
-        /// The distance in metres to an instance past which it hands off to its impostor; 0 hands off by size alone.
-        /// </summary>
-        public float ImpostorDistance { get; set; }
+        public ClusteredGeometrySettings Settings { get; set; } = new();
     }
 }

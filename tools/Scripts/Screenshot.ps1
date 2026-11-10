@@ -42,7 +42,7 @@ script is, which is the agent session's name. Empty sends no name.
 tools/Scripts/Screenshot.ps1
 
 .EXAMPLE
-tools/Scripts/Screenshot.ps1 -Commands 'set Deferred.debug=normal'
+tools/Scripts/Screenshot.ps1 -Commands 'set Debug.RenderView Normal'
 
 .EXAMPLE
 tools/Scripts/Screenshot.ps1 -Project samples/Forest/Forest.magic

@@ -51,10 +51,9 @@ that draws its geometry.
 
 ## Settings
 
-Set these in the console with `set Deferred.<name>=<value>`. A wrong value logs what it takes.
-
-- `debug` shows one part of the GBuffer alone. `final` shows the finished frame again. The names are in `DebugView`.
-- `window` is `true` or `false`, and opens the Rendering window.
+`get Debug` lists the gem's settings, and `set Debug.RenderView Normal` sets one. `Debug.RenderView` shows one part of
+the GBuffer alone, and `Final` the finished frame again; the names are in `DebugView`. `Debug.IsRenderWindowOpen` opens
+the Rendering window.
 
 With a gem that provides the debug UI, F2 opens the Rendering window, which chooses the view. F5 and F6 step through the
 views, and a line on screen names any view but the finished frame. A screenshot is of the renderer's picture alone,

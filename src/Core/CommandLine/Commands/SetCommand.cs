@@ -5,25 +5,24 @@ using System.Reflection;
 using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Ecs;
-using Magic.Events;
 using Magic.Utils;
 using Magic.Worlds;
 
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>set</c>: a gem's setting, by its key, to a value as <see cref="ValueText"/> reads it; <c>Key=value</c> handed to the
-/// gem the key names; or an entity's value, named by a path as <see cref="EntityPaths"/> reads it, to a value as
-/// <see cref="ValueText"/> reads it (<c>1 2 3</c> for a position).
+/// <c>set</c>: a gem's setting, by its key, to a value as <see cref="ValueText"/> reads it; or an entity's value, named by
+/// a path as <see cref="EntityPaths"/> reads it, to a value as <see cref="ValueText"/> reads it (<c>1 2 3</c> for a
+/// position).
 /// </summary>
 internal static class SetCommand
 {
-    public static Command Create(App app, Settings settings, EventCoordinator events, World world)
+    public static Command Create(App app, Settings settings, World world)
     {
         Argument<string> setting = new("setting")
         {
             Description =
-                "A setting's key, as Rendering.Resolution; Key=value; or the path to an entity's value: the entity a tag or an id, each part its name or initials",
+                "A setting's key, as Rendering.Resolution; or the path to an entity's value: the entity a tag or an id, each part its name or initials",
         };
         Argument<string[]> value = new("value")
         {
@@ -32,7 +31,7 @@ internal static class SetCommand
         };
         Command set = new(
             "set",
-            "Sets a setting, as Rendering.Resolution 2560 1440; hands Key=value to the gem the key names; or sets an entity's value, as entity.component.member and on to any depth, then the value"
+            "Sets a setting, as Rendering.Resolution 2560 1440; or sets an entity's value, as entity.component.member and on to any depth, then the value"
         )
         {
             setting,
@@ -42,14 +41,11 @@ internal static class SetCommand
 
         return set;
 
-        // A setting for its key; a SetCliCommand for one Key=value word; an entity's value for a path and the values
-        // after it.
+        // A setting for its key; an entity's value for a path and the values after it.
         void Set(string what, string[] values)
         {
             if (settings.All.Any(row => row.Key == what))
                 SetSetting(what, string.Join(' ', values));
-            else if (values.Length == 0 && what.Contains('=', StringComparison.Ordinal))
-                PublishKeyValue(what);
             else
                 SetEntityValue(what, values);
         }
@@ -61,23 +57,6 @@ internal static class SetCommand
                 Log.Info($"Set {key} to {text}.");
             else
                 Log.Error($"{key} was not set: {set.Error}");
-        }
-
-        // Publishes Key=value as a SetCliCommand, for the gem its key names.
-        void PublishKeyValue(string keyValue)
-        {
-            int equals = keyValue.IndexOf('=', StringComparison.Ordinal);
-            if (equals <= 0)
-            {
-                Log.Error($"set takes Key=value, not '{keyValue}'.");
-
-                return;
-            }
-
-            if (!CommandLookups.IsProjectOpen(app, $"set {keyValue} in"))
-                return;
-
-            events.Publish(new SetCliCommand(keyValue[..equals].Trim(), keyValue[(equals + 1)..].Trim()));
         }
 
         // Sets the value at the path on each entity it names that has the component, logging how many it set or why
