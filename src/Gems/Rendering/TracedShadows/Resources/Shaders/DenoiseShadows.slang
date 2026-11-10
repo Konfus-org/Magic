@@ -1,9 +1,10 @@
 // The traced shadow mask's noise taken out in place, into the mask shading reads. The sun's slot, the same light at
 // every pixel, is denoised in time, then in space: ClassifyShadows skips each 8 by 8 pixels whose neighbourhood the
 // sun's rays found all lit or all dark, and blends every other pixel with where it was last frame, clamped to its
-// neighbours, keeping a running mean and variance of it; FilterShadows then blurs that three times, 1, 2 and 4 pixels
-// apart, by how alike neighbours' depths, normals and shadows are. A tile light's slot may hold another light in the
-// next tile or the next frame, so BlendShadows only blends those with last frame, and writes the sun's into the mask.
+// neighbours, keeping a running mean and variance of it; FilterShadows then blurs that twice, 1 and 2 pixels apart,
+// and BlendShadows a third time, 4 apart, by how alike neighbours' depths, normals and shadows are, into the mask. A
+// tile light's slot may hold another light in the next tile or the next frame, so BlendShadows only blends those with
+// last frame.
 // All of it runs at the traced size, each traced pixel reading the picture's pixel at its footprint's corner; then
 // UpsampleShadows brings the mask and the sun's tint to the picture's size, which shading reads. The pass header's x is
 // the frame's buffer, which holds the shadows, y the denoiser's constants and w the filter's pass.
@@ -27,8 +28,6 @@ public struct ShadowDenoiseConstants
     public uint sunBlend;
     // The first filter pass's, which the next frame blends with.
     public uint sunHistory;
-    // The last filter pass's: the denoised sun.
-    public uint sunDenoised;
     // The sun's mean, its sum of squared differences and how many frames they hold, and the pixel's view depth: this
     // frame's and last frame's.
     public uint moments;
@@ -164,16 +163,18 @@ float2 GetNearestVelocity(FrameConstants frame, uint2 pixel, uint2 size)
     return velocity;
 }
 
-// Whether last frame saw something else there: off its screen, or at a depth too far from where this surface was.
-bool IsDisoccluded(ShadowDenoiseConstants denoise, float2 historyUv, uint2 size, float3 normal, float3 toEye, float viewDepthThen)
+// The traced pixel at a point of last frame's screen.
+uint2 GetHistoryPixel(float2 historyUv, uint2 size) { return min(uint2(historyUv * float2(size)), size - 1u); }
+
+// Whether last frame saw something else there: off its screen, or at a view depth, before, too far from where this
+// surface was.
+bool IsDisoccluded(float2 historyUv, float before, float viewDepthThen, float3 normal, float3 toEye)
 {
     if (any(historyUv <= 0.0) || any(historyUv >= 1.0))
         return true;
 
     // A surface seen edge-on changes depth fast across a pixel, so it is allowed more.
     float edgeOn = pow(max(1.0 - dot(toEye, normal), 0.0), 8.0);
-    TextureRef previousMoments = { denoise.previousMoments };
-    float before = previousMoments.Load(min(uint2(historyUv * float2(size)), size - 1u), 0u).w;
     float difference = abs(before - viewDepthThen) / max(viewDepthThen, Epsilon);
     return difference >= lerp(1e-2, 1e-1, edgeOn);
 }
@@ -249,10 +250,12 @@ void ClassifyShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupT
     float viewDepthThen = velocityTexture.Load(picturePixel, 0u).z;
     bool hasHistory = denoise.hasHistory != 0u;
     float3 previous = float3(0.0);
-    if (hasHistory && !IsDisoccluded(denoise, historyUv, size, normal, toEye, viewDepthThen))
+    if (hasHistory)
     {
         TextureRef previousMoments = { denoise.previousMoments };
-        previous = previousMoments.Load(min(uint2(historyUv * float2(size)), size - 1u), 0u).xyz;
+        float4 before = previousMoments.Load(GetHistoryPixel(historyUv, size), 0u);
+        if (!IsDisoccluded(historyUv, before.w, viewDepthThen, normal, toEye))
+            previous = before.xyz;
     }
 
     float count = previous.z + 1.0;
@@ -355,46 +358,44 @@ float2 Filter(FrameConstants frame, uint input, int2 pixel, int2 local, int step
     return float2(shadowSum.x / weightSum, shadowSum.y / (weightSum * weightSum));
 }
 
+// The group's tile state: whether ClassifyShadows skipped it, and whether as all lit.
+uint LoadTileState(ShadowDenoiseConstants denoise, uint2 group)
+{
+    ArrayRef<uint> tileStates = { denoise.tileStates };
+    return tileStates[GetTileStateIndex(group, denoise.width)];
+}
+
+// A filter pass's shadow and variance at a pixel: a skipped group's all lit or all dark, with none.
+float2 GetFiltered(FrameConstants frame, uint state, uint input, uint2 thread, uint2 local, int step, uint2 size)
+{
+    if ((state & TileSkipped) != 0u)
+        return float2((state & TileLit) != 0u ? 1.0 : 0.0, 0.0);
+
+    return Filter(frame, input, int2(thread), int2(local), step, size);
+}
+
+// The first pass, from ClassifyShadows' blend into what the next frame blends with, and the second, back.
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void FilterShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupThreadID, uint3 group : SV_GroupID)
 {
     FrameConstants frame = GetFrame();
     ShadowDenoiseConstants denoise = GetDenoise();
-    uint pass = GetPassHeader().w;
+    bool isFirst = GetPassHeader().w == 0u;
     uint2 size = uint2(denoise.width, denoise.height);
-    bool isInside = all(thread.xy < size);
-    ArrayRef<uint> tileStates = { denoise.tileStates };
-    uint state = tileStates[GetTileStateIndex(group.xy, size.x)];
-    uint input = pass == 1u ? denoise.sunHistory : denoise.sunBlend;
-    uint output = pass == 0u ? denoise.sunHistory : (pass == 1u ? denoise.sunBlend : denoise.sunDenoised);
+    uint state = LoadTileState(denoise, group.xy);
 
-    // A skipped group is all lit or all dark, which the second pass leaves as ClassifyShadows wrote it.
-    float2 result;
-    if ((state & TileSkipped) != 0u)
-    {
-        if (pass == 1u || !isInside)
-            return;
-
-        result = float2((state & TileLit) != 0u ? 1.0 : 0.0, 0.0);
-    }
-    else
-    {
-        result = Filter(frame, input, int2(thread.xy), int2(local.xy), 1 << int(pass), size);
-        if (!isInside)
-            return;
-    }
-
-    StorageRef target = { output, 0u };
-    if (pass < 2u)
-    {
-        target.Store(thread.xy, float4(result, 0.0, 0.0));
+    // The second pass leaves a skipped group as ClassifyShadows wrote it.
+    if (!isFirst && (state & TileSkipped) != 0u)
         return;
-    }
 
-    // Some of the contrast the blur took, given back where the variance is low.
-    float contrast = max(1.2 - result.y, 1.0);
-    target.Store(thread.xy, float4(saturate(pow(abs(result.x), contrast)), 0.0, 0.0, 0.0));
+    uint input = isFirst ? denoise.sunBlend : denoise.sunHistory;
+    float2 result = GetFiltered(frame, state, input, thread.xy, local.xy, isFirst ? 1 : 2, size);
+    if (any(thread.xy >= size))
+        return;
+
+    StorageRef target = { isFirst ? denoise.sunHistory : denoise.sunBlend, 0u };
+    target.Store(thread.xy, float4(result, 0.0, 0.0));
 }
 
 // A blended slot as the 8 bits the mask holds, rounded towards the rays' value, so a pixel that stays still keeps
@@ -405,14 +406,17 @@ float GetStepTowards(float value, float target)
     return (target > value ? ceil(steps) : floor(steps)) / 255.0;
 }
 
+// The third filter pass, from the second's, its sun given back some of the contrast the blur took where the variance
+// is low, into the mask.
 [shader("compute")]
 [numthreads(8, 8, 1)]
-void BlendShadows(uint3 thread : SV_DispatchThreadID)
+void BlendShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupThreadID, uint3 group : SV_GroupID)
 {
     FrameConstants frame = GetFrame();
-    Shadows shadows = GetShadows();
     ShadowDenoiseConstants denoise = GetDenoise();
     uint2 size = uint2(denoise.width, denoise.height);
+    uint state = LoadTileState(denoise, group.xy);
+    float2 sun = GetFiltered(frame, state, denoise.sunBlend, thread.xy, local.xy, 4, size);
     if (any(thread.xy >= size))
         return;
 
@@ -422,13 +426,13 @@ void BlendShadows(uint3 thread : SV_DispatchThreadID)
     if (depthTexture.Load(picturePixel, 0u).x <= 0.0)
         return;
 
-    TextureRef denoised = { denoise.sunDenoised };
+    float denoised = saturate(pow(abs(sun.x), max(1.2 - sun.y, 1.0)));
     TextureRef velocityTexture = { frame.velocity };
     uint4 traced = LoadShadowMask(denoise.mask, thread.xy, size.x);
     float4 velocity = velocityTexture.Load(picturePixel, 0u);
     float2 historyUv = GetTexelCenterUv(thread.xy, size) + velocity.xy;
     bool isReprojected = denoise.hasHistory != 0u && all(saturate(historyUv) == historyUv);
-    uint2 historyPixel = min(uint2(historyUv * float2(size)), size - 1u);
+    uint2 historyPixel = GetHistoryPixel(historyUv, size);
     if (isReprojected)
     {
         TextureRef previousMoments = { denoise.previousMoments };
@@ -453,7 +457,7 @@ void BlendShadows(uint3 thread : SV_DispatchThreadID)
         }
     }
 
-    StoreShadowMask(denoise.mask, thread.xy, size.x, EncodeShadow(words, 0u, denoised.Load(thread.xy, 0u).x));
+    StoreShadowMask(denoise.mask, thread.xy, size.x, EncodeShadow(words, 0u, denoised));
 }
 
 // A pixel of the picture's mask and the sun's tint, read from the four traced pixels around it on its surface: the
