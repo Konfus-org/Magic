@@ -37,6 +37,7 @@ Runs the checks a change must pass, in order, and stops at the first failure:
 ## Screenshot.ps1
 
 Runs a project with a window until its world has loaded, takes a screenshot and prints its path. It doesn't build.
+The window's title is the branch checked out where the script is, or `-Name`.
 
 ## AgentTaskComplete.ps1
 

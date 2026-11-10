@@ -111,6 +111,7 @@ internal sealed class Cli
                 TeleportCommand.Create(app, world, assets, queue),
                 SpawnCommand.Create(app, world, assets, queue),
                 WaitCommand.Create(queue, world),
+                NameCommand.Create(app),
                 ExitCommand.Create(app),
             },
             Options =
