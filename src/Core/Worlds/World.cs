@@ -221,8 +221,8 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Saves the game as <c>Saves/<paramref name="name"/>.save</c> beside Magic, as <see cref="SaveAsync()"/> holds it, once
-    /// no other work on the world runs. Why not, when that has none or it can't be written.
+    /// Saves the game as <c>Magic/&lt;project&gt;/Saves/<paramref name="name"/>.save</c> under the user's local
+    /// application data, as <see cref="SaveAsync()"/> holds it, once no other work on the world runs. Why not, when that has none or it can't be written.
     /// </summary>
     public async Task<Result> SaveAsync(string name, CancellationToken cancel)
     {
@@ -236,7 +236,7 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Puts the game back as <c>Saves/<paramref name="name"/>.save</c> holds it, in place of everything in the world,
+    /// Puts the game back as the save <paramref name="name"/> holds it, in place of everything in the world,
     /// globals too: its domains as their files make them, with its changes made on them. Why not, when there is no such save, it
     /// doesn't read, or one of its domains doesn't open, which leaves the world as it was.
     /// </summary>
@@ -949,7 +949,15 @@ public sealed class World : IEcs, IDisposable
         return Result.Success();
     }
 
-    private string GetSavePath(string name) => _files.Combine(AppContext.BaseDirectory, "Saves", name + ".save");
+    private string GetSavePath(string name) =>
+        _files.Combine(
+            UserFolders.GetProjectFolder(
+                _files,
+                _app.Project ?? throw new InvalidOperationException("Nothing is saved until a project is open.")
+            ),
+            "Saves",
+            name + ".save"
+        );
 
     /// <summary>
     /// Each open domain that is or places one of <paramref name="changed"/> makes its entities again as its files now say,

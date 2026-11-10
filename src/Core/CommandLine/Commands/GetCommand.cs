@@ -38,9 +38,7 @@ internal static class GetCommand
         {
             Setting[] rows =
             [
-                .. settings.All.Where(row =>
-                    what is null || row.Key == what || row.Key.StartsWith(what + ".", StringComparison.Ordinal)
-                ),
+                .. settings.Options.Where(row => what is null || row.Key == what || row.Category == what),
             ];
             if (what is not null && rows.Length == 0)
                 LogEntityValue(what);
@@ -55,7 +53,8 @@ internal static class GetCommand
             foreach (Setting row in rows)
             {
                 string restarts = row.RequiresRestart ? " Changing it restarts the run." : string.Empty;
-                Log.Info($"{row.Key} {row.Value}: {row.Summary}{restarts}");
+                string value = row.Value is { } set ? ValueText.Format(set) : "null";
+                Log.Info($"{row.Key} {value}: {row.Summary}{restarts}");
             }
         }
 

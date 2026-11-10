@@ -25,9 +25,13 @@ the run. Building a gem the project lists restarts it too, with the new build an
 `set` and `get` reach an entity's values by path, at any depth: the entity is a tag or an id, and each part after it a
 name or its initials, as in `set player.camera.fov 100`, `set player.transform.position 0 2 -4` or
 `get player.transform`. A gem's settings go by `Category.Member`: `get` lists every setting, `get Rendering` one
-category's, and `set Rendering.Resolution 2560 1440` sets one. `teleport x y z` moves the player, and
-`teleport <domain> [x y z]` opens a domain, by its path or name, with the player at its spawn or at that place.
-`spawn <prefab> [x y z]` puts a prefab, by its path or name, there or a few metres in front of the player.
+category's, and `set Rendering.Resolution 2560 1440` sets one. `save settings` keeps the ones that differ from their
+defaults for this user, in `Magic/<project>/Settings/` under the local application data, beside the saves in
+`Magic/<project>/Saves/`, and the project opens with them from then on;
+`--configure Window.Mode=windowed Rendering.Resolution="1280 720"` at launch sets them over the saved values.
+`teleport x y z` moves the player, and `teleport <domain> [x y z]` opens a domain, by its path or name,
+with the player at its spawn or at that place. `spawn <prefab> [x y z]` puts a prefab, by its path or name, there or a
+few metres in front of the player.
 
 `Magic new <template> <name>` makes `<name>` with `dotnet new magic-<template>`, passing on any option Magic doesn't
 know, such as `-o <folder>`. Install Magic's templates first with `tools/VS Templates/InstallTemplates.ps1`.

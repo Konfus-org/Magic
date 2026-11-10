@@ -1,4 +1,5 @@
 using System.CommandLine;
+using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Threading;
 using Magic.Utils;
@@ -7,14 +8,23 @@ using Magic.Worlds;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>save</c>: saves the game as <c>Saves/&lt;name&gt;.save</c> beside Magic, holding <c>wait loaded</c> meanwhile.
+/// <c>save</c>: saves the game as <c>Magic/&lt;project&gt;/Saves/&lt;name&gt;.save</c> under the user's local application
+/// data, holding <c>wait loaded</c> meanwhile;
+/// <c>save settings</c> saves the settings instead.
 /// </summary>
 internal static class SaveCommand
 {
-    public static Command Create(App app, World world, CommandQueue queue)
+    public static Command Create(App app, Settings settings, World world, CommandQueue queue)
     {
         Argument<string> name = new("name") { Description = "The save's name" };
-        Command save = new("save", "Saves the game as Saves/<name>.save beside Magic") { name };
+        Command save = new(
+            "save",
+            "Saves the game as Magic/<project>/Saves/<name>.save in the user's local application data"
+        )
+        {
+            name,
+            SaveSettingsCommand.Create(settings),
+        };
         save.SetAction(parsed => SaveGameAsync(parsed.GetRequiredValue(name)).FireAndForget());
 
         return save;

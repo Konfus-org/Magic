@@ -273,9 +273,9 @@ All code runs on Windows, Linux and macOS.
 - **Case.** File names in code, assets, `#include`s, csproj and `.meta` files match the disk exactly. Two files never
   differ only by case.
 - **Disk.** All disk access goes through `IFileSystem`, never `File` or `Directory`; only `Debugging` is exempt. Engine
-  output goes next to Magic in a folder per kind (`Logs`, `Screenshots`), never a temp, home or AppData path. The cache
-  is the one exception. Treat a file watch event as "something changed
-  here": collect them in one place and check what exists.
+  output goes next to Magic in a folder per kind (`Logs`, `Screenshots`), never a temp, home or AppData path. The cache,
+  and each project's settings and saves under `Magic/<project>` in the user's local application data, are the
+  exceptions. Treat a file watch event as "something changed here": collect them in one place and check what exists.
 - **Text.** Write files and generated shader source with `\n`, never `Environment.NewLine`, as UTF-8 without a BOM.
   Accept `\r\n` and a BOM when reading. Parse and format numbers and dates culture-invariantly.
 - **Platform code.** No OS APIs in Core: no P/Invoke, registry, `.exe`/`.so`/`.dylib` names or `OperatingSystem.Is*`.

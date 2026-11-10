@@ -44,19 +44,21 @@ internal static class SetCommand
         // A setting for its key; an entity's value for a path and the values after it.
         void Set(string what, string[] values)
         {
-            if (settings.All.Any(row => row.Key == what))
-                SetSetting(what, string.Join(' ', values));
+            if (settings.Options.FirstOrDefault(row => row.Key == what) is { Key: not null } option)
+                SetSetting(option, values);
             else
                 SetEntityValue(what, values);
         }
 
-        void SetSetting(string key, string text)
+        // The words read as the type the setting is declared as.
+        void SetSetting(Setting option, string[] values)
         {
-            Result set = settings.Set(key, text);
+            Result<object> parsed = ValueText.Parse(option.Type, values);
+            Result set = parsed.Ok ? settings.Set(option.Key, parsed.Value) : Result.Failure(parsed.Error);
             if (set.Ok)
-                Log.Info($"Set {key} to {text}.");
+                Log.Info($"Set {option.Key} to {string.Join(' ', values)}.");
             else
-                Log.Error($"{key} was not set: {set.Error}");
+                Log.Error($"{option.Key} was not set: {set.Error}");
         }
 
         // Sets the value at the path on each entity it names that has the component, logging how many it set or why

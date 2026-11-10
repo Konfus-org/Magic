@@ -105,7 +105,7 @@ internal sealed class Cli
                 NewCommand.Create(),
                 ScreenshotCommand.Create(app, files, events),
                 StatsCommand.Create(),
-                SaveCommand.Create(app, world, queue),
+                SaveCommand.Create(app, settings, world, queue),
                 LoadCommand.Create(app, world, queue),
                 BakeCommand.Create(app, assets, queue),
                 SetCommand.Create(app, settings, world),
@@ -130,6 +130,11 @@ internal sealed class Cli
                     "Exit with code 2 as soon as an error is logged",
                     value => app.ShouldExitOnError = value
                 ),
+                CreateOption<string[]>(
+                    "--configure",
+                    "Set settings as their gems are made, as --configure Window.Mode=windowed Rendering.Resolution=\"1280 720\"",
+                    settings.Configure
+                ),
             },
         };
 
@@ -138,12 +143,17 @@ internal sealed class Cli
 
         return commands;
 
-        // Every option is recursive, and its action applies its value before the command runs.
+        // Every option is recursive, and its action applies its value before the command runs. A list option takes each
+        // value after it, up to the next option or command.
         static Option<T> CreateOption<T>(string name, string description, Action<T> apply, params string[] aliases)
-            where T : struct
         {
-            Option<T> option = new(name, aliases) { Description = description, Recursive = true };
-            option.Action = new OptionAction(parsed => apply(parsed.GetValue(option)));
+            Option<T> option = new(name, aliases)
+            {
+                Description = description,
+                Recursive = true,
+                AllowMultipleArgumentsPerToken = true,
+            };
+            option.Action = new OptionAction(parsed => apply(parsed.GetRequiredValue(option)));
 
             return option;
         }
