@@ -18,7 +18,9 @@ compiler.
 - The GPU is the fastest one with Vulkan 1.3, bindless descriptors and dynamic rendering that can show the window;
   the log names it as the run starts. Mesh shaders, ray queries and 64-bit atomics are noted in `GpuFeatures` when
   the GPU has them. With ray queries, acceleration structures join the heap: a bottom-level one over triangles of its
-  buffers, a top-level one over instances of those, each built by a command of the frame.
+  buffers, a top-level one over instances of those, each built by a command of the frame. Once a bottom-level one's
+  build has run, the next frame copies it into one of the size it compacts to, which its name then gives with a new
+  id and address, and frees the built one with its scratch.
 - It draws into the window through a surface it makes from the window's OS handles, on Windows, X11, Wayland and macOS.
   The window sets the render thread's frame rate: a release waits for the display, and a Debug build shows each frame
   as soon as it is drawn, so its frame rate is what the frame costs.

@@ -117,7 +117,8 @@ internal sealed class GpuResources(
     private readonly FreeList _meshRanges = new(MeshCapacity);
 
     /// <summary>
-    /// How many models were made or failed, ever: when it changes, a renderer waiting for its model may draw now.
+    /// How many times models were made, failed or had their acceleration structure moved by the GPU provider, ever:
+    /// when it changes, a renderer waiting for its model may draw now, and every row is built again.
     /// </summary>
     public int SettledModels { get; private set; }
 
@@ -230,13 +231,22 @@ internal sealed class GpuResources(
     /// <summary>
     /// Every resident model's acceleration structure asked for, so the GPU provider keeps it, and the models made since
     /// the last frame settled into the pools, after the pools were asked for and before any renderer's row is built.
+    /// A structure the provider compacted comes back moved, and every row is built again to refer to it there.
     /// </summary>
     public void SettleModels(RenderGraph graph)
     {
-        foreach (ResidentModel resident in _residentModels.Values)
+        foreach (ulong model in _residentModels.Keys)
         {
-            if (resident.AccelerationDescription is { } acceleration)
-                _ = graph.Acceleration(acceleration);
+            ref ResidentModel resident = ref CollectionsMarshal.GetValueRefOrNullRef(_residentModels, model);
+            if (resident.AccelerationDescription is not { } description)
+                continue;
+
+            Result<GpuAcceleration> acceleration = graph.Acceleration(description);
+            if (!acceleration.Ok || acceleration.Value == resident.Acceleration)
+                continue;
+
+            resident = resident with { Acceleration = acceleration.Value };
+            SettledModels++;
         }
 
         foreach ((ulong model, string name, MeshDerived made) in _madeModels)
@@ -898,7 +908,12 @@ internal sealed class GpuResources(
             );
         }
 
-        BottomLevelDescription description = new() { Geometries = [.. geometries], Name = $"{name} acceleration" };
+        // The indices hold the vertex offset, so the name does too: one name and description are one set of triangles.
+        BottomLevelDescription description = new()
+        {
+            Geometries = [.. geometries],
+            Name = $"{name} acceleration {where.VertexOffset}",
+        };
         Result<GpuAcceleration> acceleration = graph.Acceleration(description);
         if (!acceleration.Ok)
         {

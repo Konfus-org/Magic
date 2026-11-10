@@ -44,9 +44,17 @@ internal sealed unsafe class VulkanAcceleration
 
     public required VulkanBuffer Buffer { get; init; }
 
-    public required VulkanBuffer Scratch { get; init; }
+    /// <summary>
+    /// None for a compacted copy, which is built already and is not built again.
+    /// </summary>
+    public required VulkanBuffer? Scratch { get; init; }
 
     public required VkAccelerationStructureTypeKHR Type { get; init; }
+
+    /// <summary>
+    /// The name it was asked for under, which its compacted copy takes.
+    /// </summary>
+    public required string Name { get; init; }
 
     /// <summary>
     /// The geometries built over: a bottom-level structure's triangles, or a top-level one's instances.
@@ -56,6 +64,16 @@ internal sealed unsafe class VulkanAcceleration
     public required uint[] PrimitiveCounts { get; init; }
 
     public required ulong Address { get; init; }
+
+    /// <summary>
+    /// How a structure of <paramref name="type"/> is sized and built: for fast tracing, and a bottom-level one so it
+    /// can be compacted once built.
+    /// </summary>
+    public static VkBuildAccelerationStructureFlagsKHR GetBuildFlags(VkAccelerationStructureTypeKHR type) =>
+        type == VkAccelerationStructureTypeKHR.BottomLevel
+            ? VkBuildAccelerationStructureFlagsKHR.PreferFastTrace
+                | VkBuildAccelerationStructureFlagsKHR.AllowCompaction
+            : VkBuildAccelerationStructureFlagsKHR.PreferFastTrace;
 }
 
 /// <summary>
@@ -594,6 +612,46 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
         return Result.Success(memory);
     }
 
+    /// <summary>
+    /// A copy of a built bottom-level structure in <paramref name="bytes"/>, the size it compacts to, recorded into
+    /// <paramref name="cmd"/> and put in the heap with no scratch. The build's barrier, in the frame that built it,
+    /// made the build visible to the copy; the next build that reads the copy waits for every command before it.
+    /// </summary>
+    public Result<GpuAcceleration> Compact(VkCommandBuffer cmd, VulkanAcceleration built, ulong bytes)
+    {
+        Result<VulkanBuffer> buffer = CreateVulkanBuffer(
+            new BufferDescription
+            {
+                Bytes = (long)bytes,
+                Usage = BufferUsages.Acceleration,
+                Name = built.Name,
+            }
+        );
+        if (!buffer.Ok)
+            return Result.Failure($"{built.Name} was not compacted: {buffer.Error}");
+
+        Result<GpuAcceleration> compacted = AddAcceleration(
+            built.Type,
+            buffer.Value,
+            null,
+            built.Geometries,
+            built.PrimitiveCounts,
+            built.Name
+        );
+        if (!compacted.Ok || Accelerations[compacted.Value.Id] is not { } into)
+            return compacted;
+
+        VkCopyAccelerationStructureInfoKHR copy = new()
+        {
+            src = built.Handle,
+            dst = into.Handle,
+            mode = VkCopyAccelerationStructureModeKHR.Compact,
+        };
+        device.Api.vkCmdCopyAccelerationStructureKHR(cmd, &copy);
+
+        return compacted;
+    }
+
     private Result<VulkanBuffer> CreateVulkanBuffer(in BufferDescription description)
     {
         VkBufferCreateInfo createInfo = new()
@@ -702,7 +760,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             VkAccelerationStructureBuildGeometryInfoKHR buildInfo = new()
             {
                 type = type,
-                flags = VkBuildAccelerationStructureFlagsKHR.PreferFastTrace,
+                flags = VulkanAcceleration.GetBuildFlags(type),
                 mode = VkBuildAccelerationStructureModeKHR.Build,
                 geometryCount = (uint)geometries.Length,
                 pGeometries = geometriesPointer,
@@ -743,19 +801,36 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             return Result.Failure($"{name} was not made: {buffer.Error}{scratch.Error}");
         }
 
+        return AddAcceleration(type, buffer.Value, scratch.Value, geometries, counts, name);
+    }
+
+    /// <summary>
+    /// A structure of <paramref name="type"/> made over its <paramref name="buffer"/> and put in the heap; its buffers
+    /// freed when it can't be.
+    /// </summary>
+    private Result<GpuAcceleration> AddAcceleration(
+        VkAccelerationStructureTypeKHR type,
+        VulkanBuffer buffer,
+        VulkanBuffer? scratch,
+        VkAccelerationStructureGeometryKHR[] geometries,
+        uint[] counts,
+        string name
+    )
+    {
         VkAccelerationStructureCreateInfoKHR createInfo = new()
         {
-            buffer = buffer.Value.Buffer,
+            buffer = buffer.Buffer,
             offset = 0,
-            size = sizes.accelerationStructureSize,
+            size = (ulong)buffer.Description.Bytes,
             type = type,
         };
         VkAccelerationStructureKHR handle;
         VkResult result = device.Api.vkCreateAccelerationStructureKHR(&createInfo, null, &handle);
         if (result != VkResult.Success)
         {
-            Free(buffer.Value);
-            Free(scratch.Value);
+            Free(buffer);
+            if (scratch is not null)
+                Free(scratch);
 
             return Result.Failure($"Vulkan could not make {name}: {result}.");
         }
@@ -764,9 +839,10 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
         VulkanAcceleration acceleration = new()
         {
             Handle = handle,
-            Buffer = buffer.Value,
-            Scratch = scratch.Value,
+            Buffer = buffer,
+            Scratch = scratch,
             Type = type,
+            Name = name,
             Geometries = geometries,
             PrimitiveCounts = counts,
             Address = device.Api.vkGetAccelerationStructureDeviceAddressKHR(&addressInfo),
@@ -791,7 +867,8 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     {
         device.Api.vkDestroyAccelerationStructureKHR(acceleration.Handle, null);
         Free(acceleration.Buffer);
-        Free(acceleration.Scratch);
+        if (acceleration.Scratch is { } scratch)
+            Free(scratch);
     }
 
     private void Free(VulkanTexture texture)

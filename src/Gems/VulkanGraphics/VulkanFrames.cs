@@ -68,6 +68,12 @@ internal sealed unsafe class VulkanFrames : IDisposable
 
     public Frame Current => _frames[_current];
 
+    /// <summary>
+    /// The bottom-level structures built in frames the GPU has finished, each with the size it compacts to, for the
+    /// next frame to compact.
+    /// </summary>
+    public List<(VulkanAcceleration Built, ulong Bytes)> Compactable { get; } = [];
+
     public void Dispose()
     {
         _device.Api.vkDeviceWaitIdle();
@@ -210,6 +216,7 @@ internal sealed unsafe class VulkanFrames : IDisposable
             _readbacks.RemoveAt(i);
         }
 
+        frame.ReadCompactedSizes(Compactable);
         foreach (Trash trash in frame.Trash)
         {
             _resources.Free(trash);
@@ -281,6 +288,19 @@ internal sealed unsafe class VulkanFrames : IDisposable
             };
             device.Api.vkCreateQueryPool(&queryInfo, out VkQueryPool queries).ThrowIfFailed("a frame's query pool");
             Queries = queries;
+            if (device.Features.HasRayQuery)
+            {
+                VkQueryPoolCreateInfo sizesInfo = new()
+                {
+                    queryType = VkQueryType.AccelerationStructureCompactedSizeKHR,
+                    queryCount = VulkanHeap.Accelerations,
+                };
+                device
+                    .Api.vkCreateQueryPool(&sizesInfo, out VkQueryPool sizes)
+                    .ThrowIfFailed("a frame's compacted size queries");
+                CompactedSizes = sizes;
+            }
+
             Restage(StagingBytes);
         }
 
@@ -298,6 +318,17 @@ internal sealed unsafe class VulkanFrames : IDisposable
         public VkSemaphore Acquired { get; }
 
         public VkQueryPool Queries { get; }
+
+        /// <summary>
+        /// The size each bottom-level structure the frame built compacts to, by its index in <see cref="Built"/>; none
+        /// on a GPU that traces no rays.
+        /// </summary>
+        public VkQueryPool CompactedSizes { get; }
+
+        /// <summary>
+        /// The bottom-level structures built in the frame, whose compacted sizes it queries.
+        /// </summary>
+        public List<VulkanAcceleration> Built { get; } = [];
 
         public VulkanBuffer Staging { get; private set; }
 
@@ -323,6 +354,7 @@ internal sealed unsafe class VulkanFrames : IDisposable
         public void Dispose()
         {
             _device.Api.vkDestroyQueryPool(Queries);
+            _device.Api.vkDestroyQueryPool(CompactedSizes);
             _device.Api.vkDestroySemaphore(Acquired);
             _device.Api.vkDestroyFence(Fence);
             _device.Api.vkDestroyCommandPool(Pool);
@@ -361,6 +393,66 @@ internal sealed unsafe class VulkanFrames : IDisposable
             uint query = (uint)Timestamps.Count;
             Timestamps.Add((name, pass));
             _device.Api.vkCmdWriteTimestamp2(CommandBuffer, VkPipelineStageFlags2.AllCommands, Queries, query);
+        }
+
+        /// <summary>
+        /// Queries the size a bottom-level structure just built compacts to, after its build's barrier; nothing when
+        /// the frame has no room for more, and the structure keeps its build's size.
+        /// </summary>
+        public void WriteCompactedSize(VulkanAcceleration built)
+        {
+            if (Built.Count >= VulkanHeap.Accelerations)
+                return;
+
+            uint query = (uint)Built.Count;
+            Built.Add(built);
+            VkAccelerationStructureKHR handle = built.Handle;
+            _device.Api.vkCmdResetQueryPool(CommandBuffer, CompactedSizes, query, 1);
+            _device.Api.vkCmdWriteAccelerationStructuresPropertiesKHR(
+                CommandBuffer,
+                1,
+                &handle,
+                VkQueryType.AccelerationStructureCompactedSizeKHR,
+                CompactedSizes,
+                query
+            );
+        }
+
+        /// <summary>
+        /// Adds each bottom-level structure the frame built, with the size it compacts to, to
+        /// <paramref name="compactable"/>, once the frame has run.
+        /// </summary>
+        public void ReadCompactedSizes(List<(VulkanAcceleration Built, ulong Bytes)> compactable)
+        {
+            int count = Built.Count;
+            if (count == 0)
+                return;
+
+            ulong* sizes = stackalloc ulong[count];
+            VkResult read = _device.Api.vkGetQueryPoolResults(
+                CompactedSizes,
+                0,
+                (uint)count,
+                (nuint)(count * sizeof(ulong)),
+                sizes,
+                sizeof(ulong),
+                VkQueryResultFlags.Bit64 | VkQueryResultFlags.Wait
+            );
+            if (read == VkResult.Success)
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    compactable.Add((Built[i], sizes[i]));
+                }
+            }
+            else
+            {
+                Log.Warn(
+                    $"{count} acceleration structures keep their build's size: their sizes were not read, {read}."
+                );
+            }
+
+            Built.Clear();
         }
 
         /// <summary>
