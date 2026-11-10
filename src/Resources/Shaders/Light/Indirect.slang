@@ -49,7 +49,11 @@ static const float BlurVariance = 0.015;
 // How fast a blur's weight falls with a neighbour's distance from the pixel's plane, as a part of its view depth.
 static const float PlaneSharpness = 10000.0;
 
-// The traced light at texture coordinates of the picture: its light and variance, and in coverage how much of the
+// The least a traced pixel off a pixel's surface weighs, so a pixel with none of its own surface around it still reads
+// its neighbours'.
+static const float OffSurfaceWeight = 1e-3;
+
+// The traced light at a pixel of the picture: its light and variance, and in coverage how much of the
 // weight was traced, from 0 to 1.
 struct TracedSample
 {
@@ -58,33 +62,52 @@ struct TracedSample
     float coverage;
 }
 
-// The four traced pixels around texture coordinates blended by hand, each by its bilinear weight where its own pixel
-// was traced, something drawn there no rougher than a roughness, and not at all where it wasn't, so a surface's edge
-// takes in none of what lies off it.
-TracedSample SampleCovered(FrameConstants frame, TextureRef light, float2 uv, float roughest)
+// How much a pixel of the picture at a depth lies on the surface at a camera-relative point facing a unit normal, seen
+// at a view depth: 1 on its plane and facing its way, less the further their planes are apart and their normals turn.
+float GetSurfaceWeight(FrameConstants frame, uint2 at, float depth, float3 relative, float3 normal, float viewDepth)
+{
+    TextureRef normalTexture = { frame.gbufferNormal };
+    float3 atNormal = DecodeOctahedral(normalTexture.Load(at, 0u).xy * 2.0 - 1.0);
+    float3 gap = relative - ReconstructRelative(frame, GetTexelCenterUv(at, uint2(frame.width, frame.height)), depth);
+    float planeError = max(abs(dot(gap, atNormal)), abs(dot(gap, normal))) / viewDepth;
+    return exp(-Pow2(planeError) * PlaneSharpness) * Pow4(saturate(dot(atNormal, normal)));
+}
+
+// The four traced pixels around a pixel of the picture, whose surface is at a camera-relative point facing a unit
+// normal at a view depth, blended by hand: each by its bilinear weight where its own pixel was traced, something drawn
+// there no rougher than a roughness, times how much it lies on the pixel's surface, so an edge takes in little of what
+// lies off it; and not at all where it wasn't traced.
+TracedSample SampleCovered(
+    FrameConstants frame, TextureRef light, uint2 pixel, float3 relative, float3 normal, float viewDepth, float roughest)
 {
     TextureRef depthTexture = { frame.depth };
     TextureRef surfaceTexture = { frame.gbufferSurface };
     uint2 size = GetTracedSize(frame);
-    float2 texel = uv * float2(size) - 0.5;
+    float2 texel = GetTexelCenterUv(pixel, uint2(frame.width, frame.height)) * float2(size) - 0.5;
     float2 f = frac(texel);
     int2 corner = int2(floor(texel));
     float4 weights = float4((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y);
     float4 sum = float4(0.0);
+    float weightSum = 0.0;
     float coverage = 0.0;
     for (uint i = 0u; i < 4u; i++)
     {
         uint2 at = uint2(clamp(corner + int2(i & 1u, i >> 1u), int2(0), int2(size) - 1));
-        uint2 pixel = at * TracedScale;
-        bool isTraced = depthTexture.Load(pixel, 0u).x > 0.0 && surfaceTexture.Load(pixel, 0u).x <= roughest;
-        float weight = isTraced ? weights[i] : 0.0;
+        uint2 traced = at * TracedScale;
+        float depth = depthTexture.Load(traced, 0u).x;
+        if (depth == 0.0 || surfaceTexture.Load(traced, 0u).x > roughest)
+            continue;
+
+        float onSurface = max(GetSurfaceWeight(frame, traced, depth, relative, normal, viewDepth), OffSurfaceWeight);
+        float weight = weights[i] * onSurface;
         sum += light.Load(at, 0u) * weight;
-        coverage += weight;
+        weightSum += weight;
+        coverage += weights[i];
     }
 
     TracedSample sample;
-    sample.light = coverage > 0.0 ? sum.rgb / coverage : float3(0.0);
-    sample.variance = coverage > 0.0 ? sum.a / coverage : 0.0;
+    sample.light = weightSum > 0.0 ? sum.rgb / weightSum : float3(0.0);
+    sample.variance = weightSum > 0.0 ? sum.a / weightSum : 0.0;
     sample.coverage = coverage;
     return sample;
 }
@@ -98,14 +121,13 @@ float4 SampleTraced(
     FrameConstants frame, TextureRef light, uint2 pixel, float3 relative, float3 normal, float radius, float roughest)
 {
     uint2 size = uint2(frame.width, frame.height);
-    TracedSample center = SampleCovered(frame, light, GetTexelCenterUv(pixel, size), roughest);
+    TextureRef depthTexture = { frame.depth };
+    TextureRef surfaceTexture = { frame.gbufferSurface };
+    float viewDepth = ToViewDepth(depthTexture.Load(pixel, 0u).x, frame.near);
+    TracedSample center = SampleCovered(frame, light, pixel, relative, normal, viewDepth, roughest);
     if (center.variance <= BlurVariance || radius < 1.0)
         return float4(center.light, center.coverage);
 
-    TextureRef depthTexture = { frame.depth };
-    TextureRef normalTexture = { frame.gbufferNormal };
-    TextureRef surfaceTexture = { frame.gbufferSurface };
-    float viewDepth = ToViewDepth(depthTexture.Load(pixel, 0u).x, frame.near);
     float sigma = radius * 0.9;
 
     // The pixel itself counts once along each axis.
@@ -124,13 +146,8 @@ float4 SampleTraced(
             if (depth == 0.0 || surfaceTexture.Load(at, 0u).x > roughest)
                 continue;
 
-            float2 uv = GetTexelCenterUv(at, size);
-            float3 atNormal = DecodeOctahedral(normalTexture.Load(at, 0u).xy * 2.0 - 1.0);
-            float3 gap = relative - ReconstructRelative(frame, uv, depth);
-            float planeError = max(abs(dot(gap, atNormal)), abs(dot(gap, normal))) / viewDepth;
             float weight = exp(-Pow2(float(r) / sigma))
-                * exp(-Pow2(planeError) * PlaneSharpness)
-                * Pow4(saturate(dot(atNormal, normal)));
+                * GetSurfaceWeight(frame, at, depth, relative, normal, viewDepth);
             sum += light.Load(at / TracedScale, 0u).rgb * weight;
             weightSum += weight;
         }
