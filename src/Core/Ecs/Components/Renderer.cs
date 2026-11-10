@@ -7,13 +7,14 @@ namespace Magic.Ecs.Components;
 
 /// <summary>
 /// Draws a model where its entity's <see cref="Transform"/> puts it, each of the model's meshes with the material in
-/// the slot the mesh names, with the params the slot sets over the material's.
+/// the slot the mesh names, with the params the slot sets over the material's. A few bytes, as a world holds a great
+/// many: the slots are a shared <see cref="MaterialSet"/>.
 /// </summary>
 public record struct Renderer : IComponent
 {
     public Handle<Model> Model;
 
-    public MaterialSlots Materials;
+    public MaterialSet Materials;
 
     /// <summary>
     /// It casts no shadow and hides nothing from the light around it, as a lamp's shade around its own light: it is
@@ -23,8 +24,8 @@ public record struct Renderer : IComponent
 }
 
 /// <summary>
-/// Materials by slot, as a component lists what it draws with: a <see cref="Renderer"/>'s by the slot a model's mesh
-/// names (<see cref="Mesh.MaterialSlot"/>), and the post and weather effects in the order they run.
+/// Materials by slot, inline in a component of which a world holds a few: the post and weather effects in the order
+/// they run, whose params a script may change each frame, <c>weather.Effects[0].Overrides["density"] = 0.03f</c>.
 /// <see cref="Capacity"/> of them, each a <see cref="MaterialInstance"/>, inline so the component stays plain unmanaged
 /// data, indexed, an empty slot's handle none. In a file, an array of them, the empty slots after the last left out.
 /// </summary>

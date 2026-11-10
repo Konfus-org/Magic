@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Numerics;
 using Magic.Assets;
 using Magic.Debugging;
@@ -20,26 +21,34 @@ namespace Magic.GpuWorld;
 /// </summary>
 internal sealed class InstanceTable(AssetManager assets, GpuResources resources, MaterialInstance failure)
 {
-    public static readonly int Capacity = (int)(SharedResources.Instances.Bytes / GpuInstance.Bytes);
+    /// <summary>
+    /// The most rows the table and the material table hold.
+    /// </summary>
+    public static readonly int MaxCapacity = (int)(SharedResources.Instances.Bytes / GpuInstance.Bytes);
 
     /// <summary>
     /// How many rows are marked changed and uploaded together.
     /// </summary>
     private const int BlockSize = 64;
 
-    private readonly GpuInstance[] _rows = new GpuInstance[Capacity];
+    /// <summary>
+    /// The fewest rows a table holds, before it grows by doubling to hold the world's.
+    /// </summary>
+    private const int MinCapacity = 16 * BlockSize;
 
-    private readonly InstanceExtra[] _extras = new InstanceExtra[Capacity];
+    private GpuInstance[] _rows = new GpuInstance[MinCapacity];
+
+    private InstanceExtra[] _extras = new InstanceExtra[MinCapacity];
 
     /// <summary>
     /// Whether each block of rows differs from what <see cref="Upload"/> last copied.
     /// </summary>
-    private readonly bool[] _isDirty = new bool[Capacity / BlockSize];
+    private bool[] _isDirty = new bool[MinCapacity / BlockSize];
 
     /// <summary>
     /// The entity each row was written from, by row: what a renderer that moved carries where it was from.
     /// </summary>
-    private readonly Entity[] _entities = new Entity[Capacity];
+    private Entity[] _entities = new Entity[MinCapacity];
 
     /// <summary>
     /// The chunks of the snapshot the last fill read, and the version it was filled at.
@@ -47,10 +56,10 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
     private readonly List<EcsSnapshotChunk> _filled = [];
 
     /// <summary>
-    /// The material rows, as many as there are instance rows, which holds every drawn slot of a world whose renderers
-    /// fill one each.
+    /// The material rows, a row for each distinct slot drawn, up to as many as there are instance rows at most, which
+    /// holds every drawn slot of a world whose renderers fill one each.
     /// </summary>
-    private readonly GpuMaterial[] _materialRows = new GpuMaterial[Capacity];
+    private GpuMaterial[] _materialRows = new GpuMaterial[MinCapacity];
 
     /// <summary>
     /// The slot each material row is made from, by row; row 0 the default material's.
@@ -76,9 +85,14 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
     private long _version;
 
     /// <summary>
-    /// How many rows the cull walks: the renderers of the last fill, up to <see cref="Capacity"/>.
+    /// How many rows the cull walks: the renderers of the last fill, up to <see cref="MaxCapacity"/>.
     /// </summary>
     public int Count { get; private set; }
+
+    /// <summary>
+    /// How many rows the table holds now: as many as the world's renderers fill, rounded up to a power of two.
+    /// </summary>
+    public int Capacity => _rows.Length;
 
     /// <summary>
     /// The frame's instances as the gems that build from them take them: the rows, what the CPU keeps beside each, how
@@ -99,16 +113,26 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
         if (renderers.Version == _filledAt && !isRebuild)
             return Count;
 
-        if (renderers.Count > Capacity && !_isFullLogged)
+        if (renderers.Count > MaxCapacity && !_isFullLogged)
         {
-            Log.Error($"Some renderers are not drawn: the instance table holds {Capacity}.");
+            Log.Error($"Some renderers are not drawn: the instance table holds {MaxCapacity}.");
             _isFullLogged = true;
         }
 
         int lastCount = Count;
-        Count = Math.Min(renderers.Count, Capacity);
+        Count = Math.Min(renderers.Count, MaxCapacity);
         if (Count != lastCount)
             _version++;
+
+        // The table grows as the world does, the rows it has kept as they are.
+        if (Count > _rows.Length)
+        {
+            int capacity = GetCapacity(Count);
+            Array.Resize(ref _rows, capacity);
+            Array.Resize(ref _extras, capacity);
+            Array.Resize(ref _entities, capacity);
+            Array.Resize(ref _isDirty, capacity / BlockSize);
+        }
 
         _settledModels = resources.SettledModels;
 
@@ -137,12 +161,21 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
     /// </summary>
     public Result<(GpuBuffer Rows, GpuBuffer Materials)> Upload(RenderGraph graph)
     {
-        Result<GpuBuffer> rows = graph.Buffer(SharedResources.Instances);
+        // A table asked for bigger than last frame keeps what it held.
+        Result<GpuBuffer> rows = graph.Buffer(
+            SharedResources.Instances with
+            {
+                Bytes = (long)_rows.Length * GpuInstance.Bytes,
+            }
+        );
         if (!rows.Ok)
             return Result.Failure(rows.Error);
 
+        if (_materialSlots.Count > _materialRows.Length)
+            Array.Resize(ref _materialRows, GetCapacity(_materialSlots.Count));
+
         Result<GpuBuffer> materials = graph.Buffer(
-            GpuDescriptions.GetBuffer("Material table", (long)Capacity * GpuMaterial.Bytes)
+            GpuDescriptions.GetBuffer("Material table", (long)_materialRows.Length * GpuMaterial.Bytes)
         );
         if (!materials.Ok)
             return Result.Failure(materials.Error);
@@ -183,6 +216,13 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
 
         return (center - reach, center + reach);
     }
+
+    /// <summary>
+    /// How many rows a table holds to hold <paramref name="rows"/>: the next power of two, from
+    /// <see cref="MinCapacity"/> up to <see cref="MaxCapacity"/>.
+    /// </summary>
+    private static int GetCapacity(int rows) =>
+        (int)Math.Min(BitOperations.RoundUpToPowerOf2((uint)Math.Max(rows, MinCapacity)), MaxCapacity);
 
     /// <summary>
     /// Copies the blocks of rows that changed into <paramref name="table"/>, each run of them in one copy.
@@ -279,9 +319,11 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
             BoundsRadius = resident.BoundsRadius * maxScale,
             Model = resident.ModelIndex,
         };
-        for (int slot = 0; slot < MaterialSlots.Capacity; slot++)
+        ImmutableArray<MaterialInstance> slots = renderer.Materials.All;
+        for (int slot = 0; slot < MaterialSet.Capacity; slot++)
         {
-            row.Materials[slot] = GetMaterialRow(resident.IsFailure ? failure : renderer.Materials[slot]);
+            MaterialInstance held = slot < slots.Length ? slots[slot] : default;
+            row.Materials[slot] = GetMaterialRow(resident.IsFailure ? failure : held);
         }
 
         return row;
@@ -299,7 +341,7 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
         if (_materialRowOf.TryGetValue(slot, out uint row))
             return row;
 
-        if (_materialSlots.Count >= Capacity)
+        if (_materialSlots.Count >= MaxCapacity)
         {
             Log.Error($"{assets.GetPath(slot.Handle)} is drawn as the default material: the material table is full.");
             _materialRowOf[slot] = 0;

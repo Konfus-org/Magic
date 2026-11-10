@@ -10,9 +10,9 @@ namespace Magic.Ecs.Components;
 
 /// <summary>
 /// The params a slot (<see cref="MaterialInstance"/>) sets in place of its material's, by the names of the shader's
-/// fields, <c>renderer.Materials[0].Overrides["color"] = new Color(1, 0, 0)</c>, which whatever draws it reads over the
-/// material's; one it doesn't set is the material's. Plain data inline in the component, so a change is drawn from the
-/// next frame and saved with the world as the component differs from its prefab's: up to
+/// fields, <c>slot.Overrides["color"] = new Color(1, 0, 0)</c>, which whatever draws it reads over the material's; one
+/// it doesn't set is the material's. Plain data in the slot, so a change is drawn from the next frame and saved with
+/// the world as the component differs from its prefab's: up to
 /// <see cref="Capacity"/> params, each named in up to <see cref="MaterialOverride.NameBytes"/> ASCII characters, a
 /// scalar, vector, colour or texture (a render texture or a curve is the material's alone). In a file, an object of
 /// params by name, <c>{ "color": { "r": 1, "a": 1 } }</c>.

@@ -13,7 +13,8 @@ public static class SharedResources
     public static readonly BufferDescription Frame = GetBuffer("Frame constants", 1024);
 
     /// <summary>
-    /// The models' instance rows, 248 bytes each.
+    /// The models' instance rows, 248 bytes each: at most as many as these bytes hold, asked for with fewer while the
+    /// world has fewer.
     /// </summary>
     public static readonly BufferDescription Instances = GetBuffer("Instance table", (1L << 18) * 248);
 

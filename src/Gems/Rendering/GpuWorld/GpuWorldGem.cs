@@ -565,7 +565,7 @@ public sealed class GpuWorldGem
                 Output = view.Output,
                 Instances = tables.Value.Rows,
                 InstanceCount = instanceCount,
-                InstanceCapacity = InstanceTable.Capacity,
+                InstanceCapacity = _instances.Capacity,
                 Materials = tables.Value.Materials,
                 Vertices = _resources.VertexPool,
                 Indices = _resources.IndexPool,
