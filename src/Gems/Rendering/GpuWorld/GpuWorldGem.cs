@@ -17,6 +17,11 @@ using Magic.Worlds;
 namespace Magic.GpuWorld;
 
 /// <summary>
+/// What the world's gem takes each frame: the upscaling, where a gem makes it.
+/// </summary>
+public readonly record struct GpuWorldInput(Upscaling? Upscaling);
+
+/// <summary>
 /// Keeps the world on the GPU for the gems that draw it. <c>LateUpdate</c> copies what the frame draws out of the
 /// entities and publishes it; <c>Render</c>, on the render thread, takes the newest published, puts the models,
 /// materials, textures, instances, lights and sky's tables on the GPU, uploads the frame's rows, and makes the frame's
@@ -27,7 +32,7 @@ namespace Magic.GpuWorld;
 public sealed class GpuWorldGem
     : IGem,
         IHasSettings<GpuWorldSettings>,
-        IRenderInto<(GpuView, GpuInstances)>,
+        IRender<GpuWorldInput, (GpuView, GpuInstances)>,
         IHookIntoDomainLoading,
         IDisposable
 {
@@ -165,7 +170,7 @@ public sealed class GpuWorldGem
     /// The newest inputs published, or the last again when none are newer, on the GPU, and the frame's view of them and
     /// its instances; none while the shaders build, the pools are not made, or nothing was published yet.
     /// </summary>
-    public (GpuView, GpuInstances)? Render(in Frame frame, RenderGraph graph)
+    public (GpuView, GpuInstances)? Render(in Frame frame, RenderGraph graph, in GpuWorldInput input)
     {
         if (!_started.Ok)
             return null;
@@ -225,7 +230,7 @@ public sealed class GpuWorldGem
         _resources.Upload(graph);
 
         // The air's effects before the picture's, so a post effect works on the fogged picture; the camera jitters while
-        // one of them asks for it.
+        // one of them asks for it, or while a gem upscales.
         MaterialSlots air = inputs.Weather.Count > 0 ? inputs.Weather.First[0].Effects : default;
         PostProcessing post = inputs.PostProcessing.Count > 0 ? inputs.PostProcessing.First[0] : _defaultPost;
         Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> effects = _effects.Resolve(
@@ -239,7 +244,8 @@ public sealed class GpuWorldGem
             return null;
         }
 
-        Vector2 jitter = HasJitter(effects.Value.Effects.Span) ? FrameView.GetJitter(frame.Index) : Vector2.Zero;
+        bool isJittered = input.Upscaling is not null || HasJitter(effects.Value.Effects.Span);
+        Vector2 jitter = isJittered ? FrameView.GetJitter(frame.Index) : Vector2.Zero;
 
         Result<GpuView> view = UploadFrame(graph, inputs, frame, jitter, instanceCount, effects.Value);
         if (!view.Ok)
@@ -482,7 +488,8 @@ public sealed class GpuWorldGem
             return Result.Failure(tables.Error);
 
         // The picture in the window's shape, scaled down to fit the resolution but never up, which the window stretches
-        // it over; at the window's size when the resolution has no side, and 1280 by 720 headless.
+        // it over or a gem upscales it to; at the window's size when the resolution has no side, and 1280 by 720
+        // headless.
         TextureDescription window = graph.WindowTarget.IsNone ? default : graph.GetDescription(graph.WindowTarget);
         (int width, int height) = (DefaultWidth, DefaultHeight);
         if (window.Width > 0)

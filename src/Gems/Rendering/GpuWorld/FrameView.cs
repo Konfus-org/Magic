@@ -6,7 +6,7 @@ using Magic.Utils;
 namespace Magic.GpuWorld;
 
 /// <summary>
-/// A view: its targets, all the window's size, and its constants, its matrices, its targets and the frame's tables,
+/// A view: its targets, all the picture's size, and its constants, its matrices, its targets and the frame's tables,
 /// remembering last frame's so a thing that moved carries where it was.
 /// </summary>
 internal sealed class FrameView(GpuResources resources)
@@ -215,7 +215,7 @@ internal sealed class FrameView(GpuResources resources)
                 width,
                 height,
                 GpuFormat.R8G8B8A8Unorm,
-                TextureUsages.Storage | TextureUsages.ColorTarget | TextureUsages.CopySource
+                TextureUsages.Storage | TextureUsages.ColorTarget | TextureUsages.Sampled | TextureUsages.CopySource
             )
         );
         foreach (

@@ -5,6 +5,7 @@ using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Events;
+using Magic.GpuWorld;
 using Magic.Graphics;
 using Magic.Input;
 using Magic.Projects;
@@ -16,13 +17,14 @@ namespace Magic.Deferred;
 
 /// <summary>
 /// What the deferred renderer takes each frame: the world as the GPU holds it, and, where a gem makes them, the world
-/// as rays see it, each pixel's shadows and the light that reaches the surfaces indirectly.
+/// as rays see it, each pixel's shadows, the light that reaches the surfaces indirectly and the output's upscaling.
 /// </summary>
 public readonly record struct DeferredInput(
     GpuView View,
     TracedWorld? Traced,
     ShadowMask? Shadows,
-    IndirectLight? Light
+    IndirectLight? Light,
+    Upscaling? Upscaling
 );
 
 /// <summary>
@@ -194,9 +196,13 @@ public sealed class DeferredGem
         _pixelEffects.Record(view, input.Traced, frame.Index);
         _surfaceView.Record(view, inputs.Settings.RenderView);
 
+        // What the window and a screenshot show: the output as a gem upscaled it to the window's size, copied, or the
+        // output itself, stretched over the window, filtered.
+        GpuTexture upscaled = input.Upscaling is { } upscaling ? upscaling.Record(graph, gpu) : GpuTexture.None;
+        GpuTexture shown = upscaled.IsNone ? gpu.Output : upscaled;
         GpuTexture target = graph.WindowTarget;
         if (!target.IsNone)
-            graph.Blit(gpu.Output, target, RenderStage.Post);
+            graph.Blit(shown, target, RenderStage.Post);
 
         // One readback buffer, so one screenshot a frame: the last asked for.
         ScreenshotRequested? shot = null;
@@ -206,7 +212,7 @@ public sealed class DeferredGem
         }
 
         if (shot is { } saved)
-            SaveScreenshot(graph, gpu, saved.Path);
+            SaveScreenshot(graph, shown, saved.Path);
 
         if (!_hasDrawn)
         {
@@ -267,12 +273,13 @@ public sealed class DeferredGem
     }
 
     /// <summary>
-    /// The view's output read back, and written to <paramref name="path"/> once the GPU is done with it.
+    /// The picture the window shows read back, and written to <paramref name="path"/> once the GPU is done with it.
     /// </summary>
-    private void SaveScreenshot(RenderGraph graph, in GpuView view, string path)
+    private void SaveScreenshot(RenderGraph graph, GpuTexture shown, string path)
     {
+        TextureDescription size = graph.GetDescription(shown);
         Result<GpuBuffer> readback = graph.Buffer(
-            GpuDescriptions.GetBuffer("Output readback", (long)view.Width * view.Height * 4, BufferUsages.Readback)
+            GpuDescriptions.GetBuffer("Output readback", (long)size.Width * size.Height * 4, BufferUsages.Readback)
         );
         if (!readback.Ok)
         {
@@ -281,7 +288,7 @@ public sealed class DeferredGem
             return;
         }
 
-        graph.ReadBack(view.Output, readback.Value, RenderStage.Post);
-        Screenshot.SaveAsync(_gpu, _assets, readback.Value, path, view.Width, view.Height).FireAndForget();
+        graph.ReadBack(shown, readback.Value, RenderStage.Post);
+        Screenshot.SaveAsync(_gpu, _assets, readback.Value, path, size.Width, size.Height).FireAndForget();
     }
 }

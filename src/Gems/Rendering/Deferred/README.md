@@ -45,7 +45,8 @@ that draws its geometry.
   surfaces, so it hides nothing behind it from the depth pyramid or the lighting. The nearest pane in front of each
   pixel's opaque surface lets what is behind through its colour and its clarity, and through any pane between where a
   gem builds the world as rays see it; it reflects the light around it, more at a grazing angle, and the sun lights it.
-- The finished picture is stretched over the window, filtered.
+- The finished picture is stretched over the window, filtered; where a gem upscales it, that gem's picture is copied
+  to the window instead. A screenshot is of what the window shows.
 
 ## Settings
 
