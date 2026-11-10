@@ -76,13 +76,13 @@ if (-not (Test-Path $magic)) {
 }
 $projectPath = if ([System.IO.Path]::IsPathRooted($Project)) { $Project } else { Join-Path $root $Project }
 
-# The window shows whose run it is from the start. The screenshot is written by a worker, so the run goes on a few
-# frames before it quits.
+# The window shows whose run it is from the start. The screenshot is written by a worker, which takes seconds for a
+# window-sized picture, so the run goes on for seconds before it quits, not for frames.
 $lines = @(if ($Name) { "name `"$Name`"" }) + @('wait loaded', 'wait drawn', "wait ${Settle}s") + $Commands + @('wait 60', 'screenshot')
 foreach ($domain in $Domains) {
     $lines += @("open $domain", "wait ${Settle}s", 'screenshot')
 }
-$lines += @('wait 60', 'exit')
+$lines += @('wait 10s', 'exit')
 
 # Magic runs with its console lines and its log in files, so a run still going after its ceiling can be killed. The log
 # is shown as it comes.
