@@ -10,18 +10,59 @@ using Magic.Utils;
 namespace Magic.GpuWorld;
 
 /// <summary>
-/// Makes what the renderer draws a model as, its cluster hierarchy and impostor, as the model loads, and says how
-/// the cache keeps it: <see cref="AssetManager"/> keeps it under the model's version, so a model is clustered once per
-/// change to its file.
+/// Makes what the GPU holds a model as, its vertices and triangles, as the model loads, and says how the cache keeps it:
+/// <see cref="AssetManager"/> keeps it under the model's version, so a model is made once per change to its file.
 /// </summary>
 internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
 {
     /// <summary>
-    /// Raised when the bytes written change shape, or the hierarchy is built otherwise.
+    /// Raised when the bytes written change shape, or what they hold is made otherwise.
     /// </summary>
-    public int Version => 16;
+    public int Version => 17;
 
-    public MeshDerived Preprocess(Model asset) => ClusterBuilder.Build(asset);
+    public MeshDerived Preprocess(Model asset)
+    {
+        ImmutableArray<GpuVertex>.Builder vertices = ImmutableArray.CreateBuilder<GpuVertex>();
+        ImmutableArray<uint>.Builder indices = ImmutableArray.CreateBuilder<uint>();
+        ImmutableArray<GpuMesh>.Builder meshes = ImmutableArray.CreateBuilder<GpuMesh>();
+        Vector3 boundsMin = new(float.MaxValue);
+        Vector3 boundsMax = new(float.MinValue);
+        foreach (Mesh mesh in asset.Meshes)
+        {
+            uint firstVertex = (uint)vertices.Count;
+            meshes.Add(new GpuMesh((uint)indices.Count, (uint)mesh.MaterialSlot));
+            foreach (Vertex vertex in mesh.Vertices.Span)
+            {
+                vertices.Add(Packing.EncodeVertex(vertex));
+                boundsMin = Vector3.Min(boundsMin, vertex.Position);
+                boundsMax = Vector3.Max(boundsMax, vertex.Position);
+            }
+
+            foreach (uint index in mesh.Indices.Span)
+            {
+                indices.Add(firstVertex + index);
+            }
+        }
+
+        // The sphere's centre is the box's middle, its radius the farthest vertex from there.
+        Vector3 center = vertices.Count == 0 ? Vector3.Zero : (boundsMin + boundsMax) * 0.5f;
+        float radius2 = 0;
+        foreach (GpuVertex vertex in vertices)
+        {
+            radius2 = Math.Max(radius2, Vector3.DistanceSquared(center, vertex.Position));
+        }
+
+        return new MeshDerived
+        {
+            Vertices = vertices.ToImmutable(),
+            Indices = indices.ToImmutable(),
+            Meshes = meshes.ToImmutable(),
+            BoundsCenter = center,
+            BoundsRadius = MathF.Sqrt(radius2),
+            BoundsMin = boundsMin,
+            BoundsMax = boundsMax,
+        };
+    }
 
     public void Write(MeshDerived value, IBufferWriter<byte> bytes)
     {
@@ -30,11 +71,9 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
             new Header(
                 value.Vertices.Length,
                 value.Indices.Length,
-                value.Clusters.Length,
+                value.Meshes.Length,
                 value.BoundsCenter,
                 value.BoundsRadius,
-                value.Impostor.Length,
-                value.ImpostorUv.Length,
                 value.BoundsMin,
                 value.BoundsMax
             )
@@ -42,9 +81,7 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
         bytes.Advance(Unsafe.SizeOf<Header>());
         bytes.Write(MemoryMarshal.AsBytes(value.Vertices.AsSpan()));
         bytes.Write(MemoryMarshal.AsBytes(value.Indices.AsSpan()));
-        bytes.Write(MemoryMarshal.AsBytes(value.Clusters.AsSpan()));
-        bytes.Write(MemoryMarshal.AsBytes(value.Impostor.AsSpan()));
-        bytes.Write(MemoryMarshal.AsBytes(value.ImpostorUv.AsSpan()));
+        bytes.Write(MemoryMarshal.AsBytes(value.Meshes.AsSpan()));
     }
 
     public Result<MeshDerived> Read(ReadOnlySpan<byte> bytes)
@@ -56,49 +93,22 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
         long needed =
             ((long)header.VertexCount * GpuVertex.Bytes)
             + ((long)header.IndexCount * sizeof(uint))
-            + ((long)header.ClusterCount * GpuCluster.Bytes)
-            + ((long)header.ImpostorHalves * sizeof(ushort))
-            + ((long)header.ImpostorUvHalves * sizeof(ushort));
-        if (
-            header.VertexCount < 0
-            || header.IndexCount < 0
-            || header.ClusterCount < 0
-            || header.ImpostorHalves < 0
-            || header.ImpostorUvHalves < 0
-            || bytes.Length < needed
-        )
+            + ((long)header.MeshCount * GpuMesh.Bytes);
+        if (header.VertexCount < 0 || header.IndexCount < 0 || header.MeshCount < 0 || bytes.Length < needed)
             return Result.Failure("the entry is cut short.");
-
-        ImmutableArray<GpuVertex> vertices = Take<GpuVertex>(ref bytes, header.VertexCount);
-        ImmutableArray<uint> indices = Take<uint>(ref bytes, header.IndexCount);
-        ImmutableArray<GpuCluster> clusters = Take<GpuCluster>(ref bytes, header.ClusterCount);
-        ImmutableArray<Half> impostor = Take<Half>(ref bytes, header.ImpostorHalves);
-        ImmutableArray<Half> impostorUv = Take<Half>(ref bytes, header.ImpostorUvHalves);
 
         return Result.Success(
             new MeshDerived
             {
-                Vertices = vertices,
-                Indices = indices,
-                Clusters = clusters,
+                Vertices = Packing.Read<GpuVertex>(ref bytes, header.VertexCount),
+                Indices = Packing.Read<uint>(ref bytes, header.IndexCount),
+                Meshes = Packing.Read<GpuMesh>(ref bytes, header.MeshCount),
                 BoundsCenter = header.BoundsCenter,
                 BoundsRadius = header.BoundsRadius,
-                Impostor = impostor,
-                ImpostorUv = impostorUv,
                 BoundsMin = header.BoundsMin,
                 BoundsMax = header.BoundsMax,
             }
         );
-
-        static ImmutableArray<T> Take<T>(ref ReadOnlySpan<byte> bytes, int count)
-            where T : struct
-        {
-            int length = count * Unsafe.SizeOf<T>();
-            ImmutableArray<T> items = [.. MemoryMarshal.Cast<byte, T>(bytes[..length])];
-            bytes = bytes[length..];
-
-            return items;
-        }
     }
 
     /// <summary>
@@ -108,11 +118,9 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
     private readonly record struct Header(
         int VertexCount,
         int IndexCount,
-        int ClusterCount,
+        int MeshCount,
         Vector3 BoundsCenter,
         float BoundsRadius,
-        int ImpostorHalves,
-        int ImpostorUvHalves,
         Vector3 BoundsMin,
         Vector3 BoundsMax
     );

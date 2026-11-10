@@ -13,7 +13,6 @@ import Core.Math;
 import Core.Color;
 import Core.Pack;
 import Light.Indirect;
-import Scene.Clusters;
 
 // C#'s DebugView.
 enum SurfaceView : uint
@@ -41,14 +40,13 @@ float3 GetSurfaceView(FrameConstants frame, SurfaceView view, uint2 pixel)
         return float3(abs(velocityTexture.Load(pixel, 0u).xy) * 10.0, 0.0);
     }
 
-    UintTextureRef visibility = { GetClusters().visibility };
-    if (visibility.Load(pixel, 0u) == 0u)
+    TextureRef depthTexture = { frame.depth };
+    if (depthTexture.Load(pixel, 0u).x == 0.0)
         return float3(0.0);
 
     TextureRef baseTexture = { frame.gbufferBase };
     TextureRef surfaceTexture = { frame.gbufferSurface };
     TextureRef normalTexture = { frame.gbufferNormal };
-    TextureRef depthTexture = { frame.depth };
     switch (view)
     {
     case SurfaceView.Normal:
@@ -71,8 +69,8 @@ float3 GetSurfaceView(FrameConstants frame, SurfaceView view, uint2 pixel)
 // The light the indirect diffuse or the reflections view shows at the pixel, black where none was traced.
 float3 GetLightView(FrameConstants frame, SurfaceView view, uint2 pixel)
 {
-    UintTextureRef visibility = { GetClusters().visibility };
-    if (visibility.Load(pixel, 0u) == 0u)
+    TextureRef depthTexture = { frame.depth };
+    if (depthTexture.Load(pixel, 0u).x == 0.0)
         return float3(0.0);
 
     if (view == SurfaceView.Reflections)
@@ -85,7 +83,6 @@ float3 GetLightView(FrameConstants frame, SurfaceView view, uint2 pixel)
     if (diffuse == 0u)
         return float3(0.0);
 
-    TextureRef depthTexture = { frame.depth };
     TextureRef normalTexture = { frame.gbufferNormal };
     float2 uv = GetTexelCenterUv(pixel, uint2(frame.width, frame.height));
     float3 relative = ReconstructRelative(frame, uv, depthTexture.Load(pixel, 0u).x);

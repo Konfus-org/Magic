@@ -1,12 +1,44 @@
+using System.Collections.Immutable;
 using System.Numerics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using Magic.Assets;
 
 namespace Magic.GpuWorld;
 
 /// <summary>
-/// Values packed as <c>Core/Pack.slang</c> unpacks them: the CPU side of the same bits.
+/// Values packed as <c>Core/Pack.slang</c> unpacks them, the CPU side of the same bits, and read back from the cache's
+/// bytes.
 /// </summary>
-internal static class Packing
+public static class Packing
 {
+    /// <summary>
+    /// A model's vertex as the GPU reads it.
+    /// </summary>
+    public static GpuVertex EncodeVertex(in Vertex vertex) =>
+        new()
+        {
+            Position = vertex.Position,
+            Normal = EncodeUnitVector(vertex.Normal),
+            Tangent = EncodeUnitVector(new Vector3(vertex.Tangent.X, vertex.Tangent.Y, vertex.Tangent.Z)),
+            TangentSign = vertex.Tangent.W < 0 ? -1 : 1,
+            Uv = vertex.Uv,
+        };
+
+    /// <summary>
+    /// The first <paramref name="count"/> values of <paramref name="bytes"/>, in native byte order, which then starts
+    /// after them.
+    /// </summary>
+    public static ImmutableArray<T> Read<T>(ref ReadOnlySpan<byte> bytes, int count)
+        where T : struct
+    {
+        int length = count * Unsafe.SizeOf<T>();
+        ImmutableArray<T> items = [.. MemoryMarshal.Cast<byte, T>(bytes[..length])];
+        bytes = bytes[length..];
+
+        return items;
+    }
+
     /// <summary>
     /// A unit vector as its octahedral point at 16 bits an axis (Cigolle et al., "A Survey of Efficient
     /// Representations for Independent Unit Vectors", 2014).

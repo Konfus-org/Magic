@@ -1,18 +1,19 @@
 using System.Numerics;
+using Magic.GpuWorld;
 
-namespace Magic.GpuWorld;
+namespace Magic.ClusteredGeometry;
 
 /// <summary>
-/// A model's octahedral impostor atlas, as <see cref="MeshDerived.Impostor"/> says, baked on the CPU from the
+/// A model's octahedral impostor atlas, as <see cref="ModelClusters.Impostor"/> says, baked on the CPU from the
 /// clusters the hierarchy draws at an atlas texel's error, so a model of any size bakes from about as many triangles as
 /// its atlas can show: each view rasterises them orthographically into its tile, the nearest kept. The renderer's
 /// Scene/Impostors.slang reads it with the same grid and view frames.
 /// </summary>
 internal static class ImpostorBuilder
 {
-    private const int Views = MeshDerived.ImpostorViews;
-    private const int Tile = MeshDerived.ImpostorTile;
-    private const int Size = MeshDerived.ImpostorSize;
+    private const int Views = ModelClusters.ImpostorViews;
+    private const int Tile = ModelClusters.ImpostorTile;
+    private const int Size = ModelClusters.ImpostorSize;
 
     /// <summary>
     /// The atlas as RGBA16F halves, and the texture coordinates of the same texels as RG16F halves, row by row, the views

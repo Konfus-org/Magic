@@ -23,14 +23,14 @@ internal sealed class LightTiles(AssetManager assets)
     /// <summary>
     /// The twin of <c>Scene/Lights.slang</c>'s.
     /// </summary>
-    public static readonly int MaxLights = (int)(SharedResources.Lights.Bytes / GpuLight.Bytes);
+    public const int TileSize = 32;
 
     /// <summary>
     /// The twin of <c>Scene/Lights.slang</c>'s.
     /// </summary>
-    public const int TileSize = 32;
+    public static readonly int MaxLights = (int)(SharedResources.Lights.Bytes / GpuLight.Bytes);
 
-    private static readonly int Buckets = MaxLights / 32;
+    private static readonly int _buckets = MaxLights / 32;
 
     /// <summary>
     /// The frame's lights as the table holds them, written from the snapshots before they upload.
@@ -62,7 +62,7 @@ internal sealed class LightTiles(AssetManager assets)
         Result<GpuBuffer> tiles = graph.Buffer(
             GpuDescriptions.GetBuffer(
                 "Light tiles",
-                (long)GetTiles(view.Width) * GetTiles(view.Height) * Buckets * sizeof(uint)
+                (long)GetTiles(view.Width) * GetTiles(view.Height) * _buckets * sizeof(uint)
             )
         );
         if (!tiles.Ok)

@@ -4,10 +4,9 @@ using Magic.Graphics;
 namespace Magic.GpuWorld;
 
 /// <summary>
-/// The entries the gem's passes run, in the modules of its <c>Shaders/</c> folder, and the library shaders an entry is
-/// specialised with.
+/// The entries a gem's passes run, in the modules of its <c>Shaders/</c> folder.
 /// </summary>
-internal static class PassShaders
+public static class PassShaders
 {
     public static ShaderEntry GetEntry(
         AssetManager assets,

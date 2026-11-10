@@ -17,6 +17,7 @@
     <Project Path="Gems/ImGuiDebugUI/ImGuiDebugUI.csproj" />
     <Project Path="Gems/DebugTools/DebugTools.csproj" />
     <Project Path="Gems/Rendering/AccelerationStructures/AccelerationStructures.csproj" />
+    <Project Path="Gems/Rendering/ClusteredGeometry/ClusteredGeometry.csproj" />
     <Project Path="Gems/Rendering/Deferred/Deferred.csproj" />
     <Project Path="Gems/Rendering/GlobalIllumination/GlobalIllumination.csproj" />
     <Project Path="Gems/Rendering/GpuWorld/GpuWorld.csproj" />
@@ -29,7 +30,7 @@
     <File Path="../docs/CONTRIBUTING.md" />
   </Folder>
   <Folder Name="/Tests/">
-    <Project Path="../tests/GpuWorld.Tests/GpuWorld.Tests.csproj" />
+    <Project Path="../tests/ClusteredGeometry.Tests/ClusteredGeometry.Tests.csproj" />
     <Project Path="../tests/Magic.Core.Tests/Magic.Core.Tests.csproj" />
   </Folder>
   <Folder Name="/Samples/">

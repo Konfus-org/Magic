@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Magic.Assets;
 
 namespace Magic.Graphics;
 
@@ -63,7 +64,7 @@ public readonly record struct GpuView
     public required GpuBuffer Materials { get; init; }
 
     /// <summary>
-    /// The pools the models are in: vertices, indices, the mesh table rays read, and each model's clusters and impostor.
+    /// The pools the models are in: vertices, indices and the mesh table rays read.
     /// </summary>
     public required GpuBuffer Vertices { get; init; }
 
@@ -71,11 +72,11 @@ public readonly record struct GpuView
 
     public required GpuBuffer Meshes { get; init; }
 
-    public required GpuBuffer ClusterPool { get; init; }
-
-    public required GpuBuffer ClusterModels { get; init; }
-
-    public required GpuBuffer ImpostorTable { get; init; }
+    /// <summary>
+    /// Each model on the GPU by its model index, the one its instances name, none where no model is: what a gem that
+    /// keeps a row for each model compares its own with each frame.
+    /// </summary>
+    public required ReadOnlyMemory<ModelPlace> Models { get; init; }
 
     /// <summary>
     /// Each material shader a surface is drawn with, by the number its material rows name it by, and every texture in
@@ -116,3 +117,8 @@ public readonly record struct GpuView
     /// </summary>
     public required int PreparedDomains { get; init; }
 }
+
+/// <summary>
+/// A model on the GPU: its asset, and where its vertices start in the vertex pool, which its indices add.
+/// </summary>
+public readonly record struct ModelPlace(Handle<Model> Model, uint VertexOffset);

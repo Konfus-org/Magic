@@ -2,7 +2,7 @@ using System.Numerics;
 using Magic.Assets;
 using Xunit;
 
-namespace Magic.GpuWorld.Tests;
+namespace Magic.ClusteredGeometry.Tests;
 
 /// <summary>
 /// The hierarchy of a sphere of a few thousand triangles: leaves of its own triangles, errors that never fall going
@@ -14,7 +14,7 @@ public sealed class ClusterBuilderTests
     public void LeavesHoldEveryTriangleAtNoError()
     {
         Model model = Sphere.Build(48, 24);
-        MeshDerived derived = ClusterBuilder.Build(model);
+        ModelClusters derived = ClusterBuilder.Build(model);
         int leafTriangles = 0;
         foreach (GpuCluster cluster in derived.Clusters)
         {
@@ -30,7 +30,7 @@ public sealed class ClusterBuilderTests
     [Fact]
     public void ErrorsNeverFallGoingUp()
     {
-        MeshDerived derived = ClusterBuilder.Build(Sphere.Build(48, 24));
+        ModelClusters derived = ClusterBuilder.Build(Sphere.Build(48, 24));
         foreach (GpuCluster cluster in derived.Clusters)
         {
             Assert.True(cluster.ParentError >= cluster.Error, "a parent's error is below its child's");
@@ -41,23 +41,25 @@ public sealed class ClusterBuilderTests
     [Fact]
     public void RootIsADozenTrianglesUnderTheDiameter()
     {
-        MeshDerived derived = ClusterBuilder.Build(Sphere.Build(48, 24));
+        ModelClusters derived = ClusterBuilder.Build(Sphere.Build(48, 24));
+
+        // The model's sphere is centred on its box, and a unit sphere's radius is 1.
+        Vector3 center = (derived.BoundsMin + derived.BoundsMax) * 0.5f;
         int rootTriangles = 0;
         int roots = 0;
         foreach (GpuCluster cluster in derived.Clusters)
         {
-            if (cluster.ParentCenter != derived.BoundsCenter || cluster.ParentError != 2 * cluster.ParentRadius)
+            if (cluster.ParentCenter != center || cluster.ParentError != 2 * cluster.ParentRadius)
                 continue;
 
             roots++;
             rootTriangles += (int)cluster.TriangleCount;
-            Assert.InRange(cluster.ParentRadius, derived.BoundsRadius, derived.BoundsRadius * 2);
+            Assert.InRange(cluster.ParentRadius, 0.99f, 2.02f);
             Assert.True(cluster.Error > 0, "the root is drawn as if it were exact");
         }
 
         Assert.Equal(1, roots);
         Assert.InRange(rootTriangles, 1, ClusterBuilder.RootTriangles);
-        Assert.InRange(derived.BoundsRadius, 0.99f, 1.01f);
     }
 
     /// <summary>

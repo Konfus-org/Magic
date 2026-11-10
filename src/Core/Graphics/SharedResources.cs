@@ -20,9 +20,9 @@ public static class SharedResources
     /// <summary>
     /// The vertex pool, 32 bytes a vertex, and the index pool.
     /// </summary>
-    public static readonly BufferDescription Vertices = GetBuffer("Vertex pool", (1L << 22) * 32);
+    public static readonly BufferDescription Vertices = GetBuffer("Vertex pool", (1L << 21) * 32);
 
-    public static readonly BufferDescription Indices = GetBuffer("Index pool", (1L << 24) * sizeof(uint));
+    public static readonly BufferDescription Indices = GetBuffer("Index pool", (1L << 23) * sizeof(uint));
 
     /// <summary>
     /// The mesh table a ray hit finds its triangles and material slot through, 8 bytes a mesh.

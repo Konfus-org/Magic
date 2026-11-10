@@ -9,15 +9,12 @@ texture reader, with a gem that draws its view.
 
 ## What it keeps
 
-- As a model loads, the gem makes what it draws it as, once per change to its file, and keeps it in the cache: its
-  vertices as the GPU reads them and a hierarchy of clusters of up to 128 triangles. Each level of the hierarchy
-  groups neighbouring clusters of the one below and simplifies them, so the GPU picks per cluster how much detail to
-  draw. meshoptimizer, which the kit builds from source, does the clustering and the simplifying.
+- As a model loads, the gem makes what the GPU holds it as, once per change to its file, and keeps it in the cache:
+  its vertices as the GPU reads them and each mesh's triangles, which rays and every renderer draw.
 - A model shows once it is on the GPU. One that doesn't load is drawn as the failure model, and a material or texture
   that doesn't load as the magenta failure material.
-- Every model also gets an octahedral impostor atlas: 12 by 12 views over the whole sphere, 64 texels a side each,
-  every texel the surface's normal, its depth, its material slot and its texture coordinates as the view sees it,
-  baked on the CPU from the clusters the hierarchy draws at an atlas texel's error.
+- The view names each model on the GPU by its model index, the one its instances name, so a renderer keeps a row of
+  its own for each.
 - A model nothing has drawn or waited for in a minute leaves the GPU, and loads again when it is next drawn.
 - As a domain replaces the world, the loading screen stays until the models, materials and textures of what comes,
   and the effects of its weather and its post processing with their passes, are on the GPU, or failed, so its first
@@ -26,7 +23,7 @@ texture reader, with a gem that draws its view.
   `TemporalAntiAliasing`, `Exposure` and `Agx` when nothing has one; the view names each with its material's row and
   its passes. The camera jitters while one of them asks for it.
 
-`bake` in the console loads every asset, which makes every model's clusters, then opens every domain under `Domains/`
+`bake` in the console loads every asset, which makes what every gem makes of every model, then opens every domain under `Domains/`
 in turn and exits, so a release ships with the caches full.
 
 ## Changing it
@@ -34,8 +31,7 @@ in turn and exits, so a release ships with the caches full.
 `GpuWorldGem.Render` is the frame's upload in order, top to bottom, ending in the view it hands on.
 
 - A texture, material or model asset comes from `GpuResources`, which reads it on the first ask. It asks the graph
-  for the model pools, each texture and its sampler, and each resident model's acceleration structure and impostor
-  atlases every frame, and evicts a model once nothing has asked for it in a while and no renderer drawn holds it. A
+  for the model pools, each texture and its sampler, and each resident model's acceleration structure every frame, and evicts a model once nothing has asked for it in a while and no renderer drawn holds it. A
   renderer's instance row is built again, asking for its model, when the renderer is written and when a model
   arrives; the material rows its slots are drawn with are made again each frame.
 - The shaders are the `Shaders/` modules in this gem's `Resources`, built on the shader library

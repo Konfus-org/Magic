@@ -4,9 +4,10 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.Debugging;
-using static Magic.GpuWorld.meshoptimizer;
+using Magic.GpuWorld;
+using static Magic.ClusteredGeometry.meshoptimizer;
 
-namespace Magic.GpuWorld;
+namespace Magic.ClusteredGeometry;
 
 /// <summary>
 /// Builds a model's cluster hierarchy, the DAG of Karis, "Nanite: A Deep Dive", 2021: the leaves are clusters of
@@ -45,20 +46,26 @@ internal static unsafe class ClusterBuilder
     /// </summary>
     private const float CreaseAngle = MathF.PI / 4;
 
-    public static MeshDerived Build(Model model)
+    public static ModelClusters Build(Model model)
     {
+        // The model's own vertices first, every mesh's, which the leaves draw, then each level's copies.
         ImmutableArray<GpuVertex>.Builder vertices = ImmutableArray.CreateBuilder<GpuVertex>();
-        List<uint> indices = [];
-        List<GpuCluster> clusters = [];
+        List<uint> firstVertices = [];
         foreach (Mesh mesh in model.Meshes)
         {
-            uint firstVertex = (uint)vertices.Count;
+            firstVertices.Add((uint)vertices.Count);
             foreach (Vertex vertex in mesh.Vertices.Span)
             {
-                vertices.Add(ToGpu(vertex));
+                vertices.Add(Packing.EncodeVertex(vertex));
             }
+        }
 
-            BuildMesh(mesh, firstVertex, vertices, indices, clusters);
+        int modelVertexCount = vertices.Count;
+        List<uint> indices = [];
+        List<GpuCluster> clusters = [];
+        for (int i = 0; i < model.Meshes.Length; i++)
+        {
+            BuildMesh(model.Meshes[i], firstVertices[i], vertices, indices, clusters);
         }
 
         (Vector3 center, float radius) = GetSphere(vertices);
@@ -76,13 +83,12 @@ internal static unsafe class ClusterBuilder
         // Every model stands far away as an impostor once it is a few pixels across.
         (Half[] Surface, Half[] Uv) impostor = ImpostorBuilder.Bake(vertices, indices, clusters, center, radius);
 
-        return new MeshDerived
+        return new ModelClusters
         {
-            Vertices = vertices.ToImmutable(),
+            ModelVertexCount = modelVertexCount,
+            Vertices = [.. vertices.Skip(modelVertexCount)],
             Indices = [.. indices],
             Clusters = [.. clusters],
-            BoundsCenter = center,
-            BoundsRadius = radius,
             Impostor = [.. impostor.Surface],
             ImpostorUv = [.. impostor.Uv],
             BoundsMin = boundsMin,
@@ -342,7 +348,7 @@ internal static unsafe class ClusterBuilder
                 (float*)p,
                 (nuint)positions.Length,
                 (nuint)sizeof(Vector3),
-                (nuint)GroupSize
+                GroupSize
             );
         }
 
@@ -399,7 +405,7 @@ internal static unsafe class ClusterBuilder
                     (nuint)sizeof(Vector3),
                     (nuint)targetIndices,
                     float.MaxValue,
-                    (uint)(meshopt_SimplifyLockBorder | meshopt_SimplifySparse),
+                    meshopt_SimplifyLockBorder | meshopt_SimplifySparse,
                     &error
                 );
         }
@@ -592,7 +598,7 @@ internal static unsafe class ClusterBuilder
                     vertex.Normal = Vector3.Normalize(sum);
 
                 pool = (uint)vertices.Count;
-                vertices.Add(ToGpu(vertex));
+                vertices.Add(Packing.EncodeVertex(vertex));
                 poolOf[key] = pool;
             }
 
@@ -679,16 +685,6 @@ internal static unsafe class ClusterBuilder
 
         return (center, MathF.Sqrt(radius2));
     }
-
-    private static GpuVertex ToGpu(in Vertex vertex) =>
-        new()
-        {
-            Position = vertex.Position,
-            Normal = Packing.EncodeUnitVector(vertex.Normal),
-            Tangent = Packing.EncodeUnitVector(new Vector3(vertex.Tangent.X, vertex.Tangent.Y, vertex.Tangent.Z)),
-            TangentSign = vertex.Tangent.W < 0 ? -1 : 1,
-            Uv = vertex.Uv,
-        };
 
     /// <summary>
     /// A group of a level's clusters simplified into their parent's triangles, with the error and the sphere every

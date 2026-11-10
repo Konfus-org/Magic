@@ -1,6 +1,6 @@
 // The cluster pool: every resident model's hierarchy in one buffer, C#'s GpuCluster, 80 bytes each. A cluster is up
-// to MaxClusterTriangles triangles, a run of the index pool, with the spheres and errors the cut through the
-// hierarchy is decided from and the cone its back faces are culled by.
+// to MaxClusterTriangles triangles, a run of the cluster index pool into the vertex pool it names, with the spheres
+// and errors the cut through the hierarchy is decided from and the cone its back faces are culled by.
 module "Scene/Clusters";
 
 import Core.Heap;
@@ -30,9 +30,10 @@ public struct ClusterConstants
     // alone.
     public float impostorDistance;
     public uint maxVisibleClusters;
-    // The heap ids of the cluster pool, of each model's row of clusters and impostor, by the instances' model index,
-    // and of what the cull leaves for the draw and the resolve.
+    // The heap ids of the cluster pool and its index pool, of each model's row of clusters and impostor, by the
+    // instances' model index, and of what the cull leaves for the draw and the resolve.
     public uint clusters;
+    public uint indices;
     public uint models;
     public uint visibleClusters;
     public uint drawArguments;
@@ -89,7 +90,8 @@ public struct GpuCluster
     public uint coneAxis;
     public uint coneCutoff;
     public uint materialSlot;
-    public uint padding;
+    // The heap id of the vertex pool its indices point into: the models' for a leaf, the cluster copies' above.
+    public uint vertices;
 }
 
 public GpuCluster LoadCluster(uint pool, uint index)

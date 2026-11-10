@@ -4,7 +4,7 @@ namespace Magic.GpuWorld;
 /// The free ranges of a pool of <c>capacity</c> elements: a free list, handing out ranges first fit and merging a range
 /// given back with the free ranges it touches.
 /// </summary>
-internal sealed class FreeList(int capacity)
+public sealed class FreeList(int capacity)
 {
     /// <summary>
     /// The free ranges, by start, none touching the next.

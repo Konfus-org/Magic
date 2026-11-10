@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Globalization;
 using System.Threading.Channels;
 using Magic.Assets;
 using Magic.Debugging;
@@ -26,12 +25,17 @@ public readonly record struct DeferredInput(
 );
 
 /// <summary>
-/// Draws the world the GPU holds, deferred: each frame, from the view the world's gem made, the clusters culled, drawn
-/// and resolved into the GBuffer, the shading, shadowed by the frame's shadow mask where there is one, the nearest
-/// glass over it, the effects, a debug view where one is asked for, and the output into the window and any screenshot
-/// asked for. Where nothing made the world as rays see it or the shadows, their rows of the frame's buffer are 0.
-/// As a domain loads, it holds the loading screen until its resolve passes are built. It is public because nothing in
-/// its assembly makes it: Magic does, by reflection, when a project lists the gem.
+/// The view as the world on the GPU posted it this frame, and the graph its passes record into.
+/// </summary>
+internal readonly record struct RenderView(GpuView Gpu, RenderGraph Graph);
+
+/// <summary>
+/// Lights the world the GPU holds, deferred: each frame, from the view the world's gem made and the GBuffer a geometry
+/// gem drew into it, the shading, shadowed by the frame's shadow mask where there is one, the nearest glass over it, the
+/// effects, a debug view where one is asked for, and the output into the window and any screenshot asked for. Where
+/// nothing made the world as rays see it, the shadows or the indirect light, their rows of the frame's buffer are 0.
+/// As a domain loads, it holds the loading screen until its passes are built. It is public because nothing in its
+/// assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
 public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDomainLoading
 {
@@ -43,7 +47,6 @@ public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDom
     private readonly Channel<ScreenshotRequested> _screenshots = Channel.CreateUnbounded<ScreenshotRequested>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
     );
-    private readonly Visibility _visibility;
     private readonly Lighting _lighting;
     private readonly PixelEffects _pixelEffects = new();
     private readonly SurfaceView _surfaceView;
@@ -57,18 +60,6 @@ public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDom
     private DebugView _debugView;
 
     /// <summary>
-    /// The pixel radius on screen under which an instance hands off to its impostor: half an atlas view of 64 texels,
-    /// so an impostor is never magnified. Set with Deferred.impostorPixels; 0 hands off by distance alone.
-    /// </summary>
-    private float _impostorPixels = 32;
-
-    /// <summary>
-    /// The distance in metres to an instance past which it hands off to its impostor, however large on screen. Set with
-    /// Deferred.impostorDistance; 0 hands off by size alone.
-    /// </summary>
-    private float _impostorDistance = 1000;
-
-    /// <summary>
     /// The settings <see cref="Render"/> draws with, taken from <see cref="_inputs"/>, until newer are. Render thread.
     /// </summary>
     private RenderInputs? _current;
@@ -80,7 +71,7 @@ public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDom
     private Result _started = Result.Success();
 
     /// <summary>
-    /// How many domains have loaded since the start, and what the newest waits on before it shows: its resolve passes
+    /// How many domains have loaded since the start, and what the newest waits on before it shows: the gem's passes
     /// built, once the view counts it prepared. Render thread.
     /// </summary>
     private int _domainsLoaded;
@@ -100,10 +91,9 @@ public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDom
         _assets = assets;
         _events = events;
         _threads = threads;
-        _visibility = new Visibility(assets);
         _lighting = new Lighting(assets);
         _surfaceView = new SurfaceView(assets);
-        _shaders = [.. _visibility.Shaders, .. _lighting.Shaders, .. _surfaceView.Shaders];
+        _shaders = [.. _lighting.Shaders, .. _surfaceView.Shaders];
     }
 
     /// <summary>
@@ -127,8 +117,6 @@ public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDom
     {
         RenderInputs back = _inputs.Back;
         back.DebugView = _debugView;
-        back.ImpostorPixels = _impostorPixels;
-        back.ImpostorDistance = _impostorDistance;
         foreach (ScreenshotRequested asked in frame.Events.Get<ScreenshotRequested>())
         {
             _screenshots.Writer.TryWrite(asked);
@@ -164,28 +152,15 @@ public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDom
         if (_current is not { } inputs)
             return;
 
-        // The loading domain shows once its models and materials are on the GPU and the resolve for each material shader
-        // is built.
+        // The loading domain shows once its models and materials are on the GPU, now the gem's passes are built.
         GpuView gpu = input.View;
-        if (
-            _loading is { } loading
-            && gpu.PreparedDomains >= _domainsLoaded
-            && GetState(graph, _visibility.GetResolveShaders(gpu.MaterialShaders)) != GpuState.Loading
-        )
+        if (_loading is { } loading && gpu.PreparedDomains >= _domainsLoaded)
         {
             loading.TrySetResult();
             _loading = null;
         }
 
-        Result<RenderView> made = Visibility.Prepare(graph, gpu, inputs.ImpostorPixels, inputs.ImpostorDistance);
-        if (!made.Ok)
-        {
-            Log.Error($"The frame is not drawn: {made.Error}");
-
-            return;
-        }
-
-        RenderView view = made.Value;
+        RenderView view = new(gpu, graph);
 
         // The rows of what no gem made this frame are 0, so the shaders that read them trace, shadow and light nothing
         // indirectly, and the sky lights the surfaces.
@@ -202,11 +177,10 @@ public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDom
             ? [light.Diffuse, light.Reflections, light.Probes, light.ProbeDepth]
             : [];
 
-        // The passes, each in its stage, each reading what the ones before it wrote: what the view sees, the shading,
-        // lit by the frame's indirect light where something traced it, a debug view's light in its place, the
-        // effects, which finish the picture, and the output.
+        // The passes, each in its stage, each reading what the ones before it wrote: the shading, lit by the frame's
+        // indirect light where something traced it, a debug view's light in its place, the effects, which finish the
+        // picture, and the output.
         GpuConstants header = new(gpu.Frame.Id);
-        _visibility.Record(view);
         _lighting.Record(view, header, input.Shadows, input.Traced, indirect);
 
         // A debug view of light draws it into the picture, so the effects finish it as they do the picture.
@@ -236,7 +210,7 @@ public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDom
     }
 
     /// <summary>
-    /// Holds the domain loading until its resolve passes are built, once the world's view counts what it draws on the
+    /// Holds the domain loading until the gem's passes are built, once the world's view counts what it draws on the
     /// GPU. One that comes while another waits ends that one. On the render thread, whose count this is.
     /// </summary>
     public async Task OnDomainLoadingAsync(
@@ -313,26 +287,6 @@ public sealed class DeferredGem : IGem, IRenderFrom<DeferredInput>, IHookIntoDom
                 _debugWindow.IsOpen = isOpen;
             else
                 Log.Error($"{setting.Key} takes true or false, with a debug UI to draw it, not '{setting.Value}'.");
-
-            return;
-        }
-
-        if (setting.Key == "Deferred.impostorPixels")
-        {
-            if (float.TryParse(setting.Value, CultureInfo.InvariantCulture, out float pixels) && pixels >= 0)
-                _impostorPixels = pixels;
-            else
-                Log.Error($"{setting.Key} takes a pixel radius of 0 or more, not '{setting.Value}'.");
-
-            return;
-        }
-
-        if (setting.Key == "Deferred.impostorDistance")
-        {
-            if (float.TryParse(setting.Value, CultureInfo.InvariantCulture, out float metres) && metres >= 0)
-                _impostorDistance = metres;
-            else
-                Log.Error($"{setting.Key} takes a distance in metres of 0 or more, not '{setting.Value}'.");
 
             return;
         }

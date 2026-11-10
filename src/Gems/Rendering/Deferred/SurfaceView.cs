@@ -84,7 +84,7 @@ internal sealed class SurfaceView(AssetManager assets)
                 new GpuConstants(view.Gpu.Frame.Id, (uint)debugView),
                 RenderStage.Shade
             )
-            .Reads(view.Gpu.Frame, view.Visibility, view.Gpu.Depth, view.Gpu.GBufferNormal)
+            .Reads(view.Gpu.Frame, view.Gpu.Depth, view.Gpu.GBufferNormal)
             .Reads(indirect);
         show.Writes(view.Gpu.Hdr).DispatchOver(view.Gpu.Width, view.Gpu.Height);
     }
@@ -102,7 +102,6 @@ internal sealed class SurfaceView(AssetManager assets)
             )
             .Reads(
                 view.Gpu.Frame,
-                view.Visibility,
                 view.Gpu.Depth,
                 view.Gpu.GBufferNormal,
                 view.Gpu.GBufferBase,

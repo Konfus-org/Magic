@@ -1,6 +1,6 @@
 // The visible clusters drawn into the visibility buffer: one indirect draw a cluster, its row of the visible list in
-// the draw's first instance, each vertex fetched from the pool by the index at its place in the cluster's run of the
-// index pool. The pixel is the row and the triangle, packed, with the hardware depth beside it. The translucent ones
+// the draw's first instance, each vertex fetched from the cluster's vertex pool by the index at its place in the
+// cluster's run of the cluster index pool. The pixel is the row and the triangle, packed, with the hardware depth beside it. The translucent ones
 // draw the same way into the glass's buffer and depth, behind none of the opaque.
 module "DrawVisibility";
 
@@ -38,7 +38,7 @@ Varyings DrawVisibilityVertex(uint vertexIndex : SV_VertexID, uint instanceIndex
 
     Varyings output;
     output.id = EncodeVisibilityId(instanceIndex, vertexIndex / 3u);
-    Vertex vertex = LoadVertex(models.vertices, LoadIndex(models.indices, cluster.indexOffset + vertexIndex));
+    Vertex vertex = LoadVertex(cluster.vertices, LoadIndex(clusters.indices, cluster.indexOffset + vertexIndex));
     float3 relative = Relative(frame, ToWorld(instance.world, vertex.position));
     output.position = mul(float4(relative, 1.0), frame.viewProjection);
     output.fade = GetImpostorFade(frame, instance);

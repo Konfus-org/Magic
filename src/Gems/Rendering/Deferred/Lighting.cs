@@ -50,7 +50,6 @@ internal sealed class Lighting(AssetManager assets)
                 view.Gpu.SkyView,
                 view.Gpu.LightTable,
                 view.Gpu.LightTiles,
-                view.Visibility,
                 view.Gpu.Depth,
                 view.Gpu.GBufferNormal,
                 view.Gpu.GBufferBase,

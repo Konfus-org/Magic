@@ -42,7 +42,7 @@ public sealed class GpuWorldGem : IGem, IRenderInto<(GpuView, GpuInstances)>, IH
     /// What is done to the picture when no entity has a <see cref="PostProcessing"/>: the temporal anti-aliasing, the
     /// exposure and the AgX tonemap.
     /// </summary>
-    private readonly PostProcessing _defaultPost = new();
+    private readonly PostProcessing _defaultPost;
     private readonly FrameView _frameView;
     private readonly SkyLuts _sky;
     private readonly LightTiles _lightTiles;
@@ -520,11 +520,9 @@ public sealed class GpuWorldGem : IGem, IRenderInto<(GpuView, GpuInstances)>, IH
                 Vertices = _resources.VertexPool,
                 Indices = _resources.IndexPool,
                 Meshes = _resources.Meshes,
-                ClusterPool = _resources.ClusterPool,
-                ClusterModels = _resources.ClusterModels,
-                ImpostorTable = _resources.ImpostorTable,
+                Models = _resources.Models,
                 MaterialShaders = _resources.MaterialShaders,
-                HeapTextures = _resources.GetHeapTextures(graph),
+                HeapTextures = _resources.GetHeapTextures(),
                 LightTable = lights.Value.Table,
                 LightTiles = lights.Value.Tiles,
                 LightCount = lights.Value.Count,

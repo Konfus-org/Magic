@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- The tests of the GPU world's model preprocessing: the cluster hierarchy on known meshes. They run on the
+  <!-- The tests of the cluster renderer's model preprocessing: the cluster hierarchy on known meshes. They run on the
        testing platform xunit v3 carries, which dotnet test drives. -->
   <PropertyGroup>
     <IsPackable>false</IsPackable>
@@ -12,6 +12,6 @@
     <PackageReference Include="xunit.v3" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="$(MagicRoot)src/Gems/Rendering/GpuWorld/GpuWorld.csproj" />
+    <ProjectReference Include="$(MagicRoot)src/Gems/Rendering/ClusteredGeometry/ClusteredGeometry.csproj" />
   </ItemGroup>
 </Project>
