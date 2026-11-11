@@ -67,7 +67,7 @@ public readonly record struct TextureDescription
 
     public required GpuFormat Format { get; init; }
 
-    public required TextureUsages Usage { get; init; }
+    public TextureUsages Usage { get; init; } = TextureUsages.Storage | TextureUsages.Sampled;
 
     public TextureKind Kind { get; init; } = TextureKind.Texture2D;
 

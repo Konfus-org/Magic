@@ -77,9 +77,9 @@ internal sealed class GpuResources(
     private readonly List<(ulong Model, string Name, MeshDerived Made, ModelEntry Entry)> _madeModels = [];
 
     // 2 MiB of vertices and 1 MiB of indices at the start; each grows with the scene.
-    private readonly BufferPool _vertices = new(GpuDescriptions.GetBuffer("Vertex pool", 0), GpuVertex.Bytes, 1 << 16);
+    private readonly BufferPool _vertices = new(new() { Bytes = 0, Name = "Vertex pool" }, GpuVertex.Bytes, 1 << 16);
 
-    private readonly BufferPool _indices = new(GpuDescriptions.GetBuffer("Index pool", 0), sizeof(uint), 1 << 18);
+    private readonly BufferPool _indices = new(new() { Bytes = 0, Name = "Index pool" }, sizeof(uint), 1 << 18);
 
     private readonly FreeList _meshRanges = new(MeshCapacity);
 
@@ -156,7 +156,7 @@ internal sealed class GpuResources(
         if (graph.Features.HasRayQuery)
         {
             Result<GpuBuffer> meshes = graph.Buffer(
-                GpuDescriptions.GetBuffer("Mesh table", MeshCapacity * GpuMesh.Bytes)
+                new() { Bytes = MeshCapacity * GpuMesh.Bytes, Name = "Mesh table" }
             );
             if (!meshes.Ok)
                 return Result.Failure(meshes.Error);

@@ -139,50 +139,72 @@ internal sealed class ClusterPasses
     {
         (int width, int height) = (gpu.Width, gpu.Height);
         int depthPyramidLevels = TextureDescription.GetFullLevels(width, height);
-        Result<GpuBuffer> budget = graph.Buffer(GpuDescriptions.GetBuffer("Cluster budget", BudgetBytes));
-        Result<GpuBuffer> counts = graph.Buffer(GpuDescriptions.GetBuffer("Counts", CountsBytes, IndirectUsage));
+        Result<GpuBuffer> budget = graph.Buffer(new() { Bytes = BudgetBytes, Name = "Cluster budget" });
+        Result<GpuBuffer> counts = graph.Buffer(
+            new()
+            {
+                Bytes = CountsBytes,
+                Usage = IndirectUsage,
+                Name = "Counts",
+            }
+        );
         Result<GpuBuffer> instanceRows = graph.Buffer(
-            GpuDescriptions.GetBuffer("Instance rows", (long)gpu.InstanceCapacity * sizeof(uint))
+            new() { Bytes = (long)gpu.InstanceCapacity * sizeof(uint), Name = "Instance rows" }
         );
         Result<GpuBuffer> retestArguments = graph.Buffer(
-            GpuDescriptions.GetBuffer("Retest arguments", RetestArgumentsBytes, IndirectUsage)
+            new()
+            {
+                Bytes = RetestArgumentsBytes,
+                Usage = IndirectUsage,
+                Name = "Retest arguments",
+            }
         );
         Result<GpuBuffer> visibleClusters = graph.Buffer(
-            GpuDescriptions.GetBuffer("Visible clusters", (long)MaxVisibleClusters * 8)
+            new() { Bytes = (long)MaxVisibleClusters * 8, Name = "Visible clusters" }
         );
         Result<GpuBuffer> drawArguments = graph.Buffer(
-            GpuDescriptions.GetBuffer(
-                "Draw arguments",
-                (long)MaxVisibleClusters * DrawRegions * DrawArgumentsBytes,
-                IndirectUsage
-            )
+            new()
+            {
+                Bytes = (long)MaxVisibleClusters * DrawRegions * DrawArgumentsBytes,
+                Usage = IndirectUsage,
+                Name = "Draw arguments",
+            }
         );
         Result<GpuBuffer> retestList = graph.Buffer(
-            GpuDescriptions.GetBuffer("Retest list", (long)MaxVisibleClusters * 8)
+            new() { Bytes = (long)MaxVisibleClusters * 8, Name = "Retest list" }
         );
         Result<GpuTexture> visibility = graph.Texture(
-            GpuDescriptions.GetTexture(
-                "Visibility",
-                width,
-                height,
-                GpuFormat.R32Uint,
-                TextureUsages.ColorTarget | TextureUsages.Sampled
-            )
+            new()
+            {
+                Width = width,
+                Height = height,
+                Format = GpuFormat.R32Uint,
+                Usage = TextureUsages.ColorTarget | TextureUsages.Sampled,
+                Name = "Visibility",
+            }
         );
         // The glass's buffer only while the view has glass targets to resolve it into.
         Result<GpuTexture> glassVisibility = gpu.GlassDepth.IsNone
             ? Result.Success(GpuTexture.None)
             : graph.Texture(
-                GpuDescriptions.GetTexture(
-                    "Glass visibility",
-                    width,
-                    height,
-                    GpuFormat.R32Uint,
-                    TextureUsages.ColorTarget | TextureUsages.Sampled
-                )
+                new()
+                {
+                    Width = width,
+                    Height = height,
+                    Format = GpuFormat.R32Uint,
+                    Usage = TextureUsages.ColorTarget | TextureUsages.Sampled,
+                    Name = "Glass visibility",
+                }
             );
         Result<GpuTexture> depthPyramid = graph.Texture(
-            GpuDescriptions.GetTexture("Depth pyramid", width, height, GpuFormat.R32Sfloat, levels: depthPyramidLevels)
+            new()
+            {
+                Width = width,
+                Height = height,
+                Format = GpuFormat.R32Sfloat,
+                Levels = depthPyramidLevels,
+                Name = "Depth pyramid",
+            }
         );
         Result asked = Result.FindFailure(
             visibility,

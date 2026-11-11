@@ -134,13 +134,14 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
         // The structure over the view's instances and its instances asked for every frame, so the structure built last
         // stays, and the hit materials table with a row for each of the material table's.
         Result<GpuBuffer> hitMaterials = graph.Buffer(
-            GpuDescriptions.GetBuffer("Hit materials", (long)world.MaterialCapacity * HitMaterialBytes)
+            new() { Bytes = (long)world.MaterialCapacity * HitMaterialBytes, Name = "Hit materials" }
         );
         Result<GpuBuffer> instances = graph.Buffer(
-            GpuDescriptions.GetBuffer(
-                "Acceleration instances",
-                (long)view.InstanceCapacity * GpuAccelerationInstance.Bytes
-            )
+            new()
+            {
+                Bytes = (long)view.InstanceCapacity * GpuAccelerationInstance.Bytes,
+                Name = "Acceleration instances",
+            }
         );
         Result<GpuAcceleration> topLevel = instances.Ok
             ? graph.Acceleration(

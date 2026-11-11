@@ -48,7 +48,7 @@ public readonly record struct BufferDescription
 
     public required long Bytes { get; init; }
 
-    public required BufferUsages Usage { get; init; }
+    public BufferUsages Usage { get; init; } = BufferUsages.Storage;
 
     /// <summary>
     /// What a GPU debugger shows it as.

@@ -97,14 +97,14 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
             * ((height + DenoiseGroupSize - 1) / DenoiseGroupSize);
         int written = (int)(frame.Index % 2);
         Result<GpuBuffer> constants = graph.Buffer(
-            GpuDescriptions.GetBuffer("Shadow denoiser constants", Unsafe.SizeOf<ShadowDenoiseConstants>())
+            new() { Bytes = Unsafe.SizeOf<ShadowDenoiseConstants>(), Name = "Shadow denoiser constants" }
         );
         Result<GpuBuffer> tileStates = graph.Buffer(
-            GpuDescriptions.GetBuffer("Shadow tile states", groups * sizeof(uint))
+            new() { Bytes = groups * sizeof(uint), Name = "Shadow tile states" }
         );
-        Result<GpuBuffer> sunTiles = graph.Buffer(GpuDescriptions.GetBuffer("Sun shadow tiles", tiles * sizeof(uint)));
-        Result<GpuBuffer> tracedMask = graph.Buffer(GpuDescriptions.GetBuffer(_maskNames[written], maskBytes));
-        Result<GpuBuffer> previousMask = graph.Buffer(GpuDescriptions.GetBuffer(_maskNames[1 - written], maskBytes));
+        Result<GpuBuffer> sunTiles = graph.Buffer(new() { Bytes = tiles * sizeof(uint), Name = "Sun shadow tiles" });
+        Result<GpuBuffer> tracedMask = graph.Buffer(new() { Bytes = maskBytes, Name = _maskNames[written] });
+        Result<GpuBuffer> previousMask = graph.Buffer(new() { Bytes = maskBytes, Name = _maskNames[1 - written] });
         // Without glass, which the view has targets for only while a material draws translucent, the sun's light stays
         // white, so no tint is asked for and the graph frees the last one's.
         bool hasGlass = !view.GlassDepth.IsNone;
@@ -119,12 +119,18 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
         bool isPictureSize = (width, height) == (view.Width, view.Height);
         Result<GpuBuffer> mask = isPictureSize
             ? tracedMask
-            : graph.Buffer(GpuDescriptions.GetBuffer("Shadow mask", (long)view.Width * view.Height * BytesPerPixel));
+            : graph.Buffer(new() { Bytes = (long)view.Width * view.Height * BytesPerPixel, Name = "Shadow mask" });
         Result<GpuTexture> sunTint =
             isPictureSize || !hasGlass
                 ? tracedTint
                 : graph.Texture(
-                    GpuDescriptions.GetTexture("Sun tint", view.Width, view.Height, GpuFormat.R16G16B16A16Sfloat)
+                    new()
+                    {
+                        Width = view.Width,
+                        Height = view.Height,
+                        Format = GpuFormat.R16G16B16A16Sfloat,
+                        Name = "Sun tint",
+                    }
                 );
         Result asked = Result.FindFailure(
             constants,
@@ -267,7 +273,15 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
 
         // A texture at the traced size.
         Result<GpuTexture> GetTracedTexture(string name, GpuFormat format) =>
-            graph.Texture(GpuDescriptions.GetTexture(name, width, height, format));
+            graph.Texture(
+                new()
+                {
+                    Width = width,
+                    Height = height,
+                    Format = format,
+                    Name = name,
+                }
+            );
     }
 }
 

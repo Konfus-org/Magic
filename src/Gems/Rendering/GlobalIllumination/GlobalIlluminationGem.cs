@@ -105,7 +105,7 @@ public sealed class GlobalIlluminationGem
 
         GpuView gpu = input.View;
         Result<GpuBuffer> constants = graph.Buffer(
-            GpuDescriptions.GetBuffer("GI constants", Unsafe.SizeOf<GIConstants>())
+            new() { Bytes = Unsafe.SizeOf<GIConstants>(), Name = "GI constants" }
         );
         (int Width, int Height) tracedSize = gpu.Scaled(Settings.IndirectScale);
         GIView view = new(

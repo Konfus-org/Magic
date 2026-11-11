@@ -60,12 +60,12 @@ internal sealed class LightTiles(AssetManager assets)
         EcsSnapshot<Transform, RectLight> rects
     )
     {
-        Result<GpuBuffer> table = graph.Buffer(GpuDescriptions.GetBuffer("Light table", MaxLights * GpuLight.Bytes));
+        Result<GpuBuffer> table = graph.Buffer(new() { Bytes = MaxLights * GpuLight.Bytes, Name = "Light table" });
         if (!table.Ok)
             return Result.Failure(table.Error);
 
         Result<GpuBuffer> tiles = graph.Buffer(
-            GpuDescriptions.GetBuffer("Light tiles", (long)GetTiles(width) * GetTiles(height) * Buckets * sizeof(uint))
+            new() { Bytes = (long)GetTiles(width) * GetTiles(height) * Buckets * sizeof(uint), Name = "Light tiles" }
         );
         if (!tiles.Ok)
             return Result.Failure(tiles.Error);

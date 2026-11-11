@@ -45,7 +45,13 @@ public readonly record struct GpuPass
 
     public required string Name { get; init; }
 
-    public required GpuPassKind Kind { get; init; }
+    /// <summary>
+    /// What the pass does, from the shaders it binds: none for a transfer pass.
+    /// </summary>
+    public GpuPassKind Kind =>
+        DrawShaders is not null ? GpuPassKind.Draw
+        : Shader is not null ? GpuPassKind.Compute
+        : GpuPassKind.Transfer;
 
     public RenderStage Stage { get; init; }
 
@@ -132,11 +138,11 @@ public readonly record struct GpuUse
 /// <summary>
 /// A buffer or a texture, as a pass names what it reads or writes.
 /// </summary>
-public readonly record struct GpuResource(GpuBuffer Buffer, GpuTexture Texture, bool IsTexture)
+public readonly record struct GpuResource(uint Id, bool IsTexture)
 {
-    public static implicit operator GpuResource(GpuBuffer buffer) => new(buffer, default, false);
+    public static implicit operator GpuResource(GpuBuffer buffer) => new(buffer.Id, false);
 
-    public static implicit operator GpuResource(GpuTexture texture) => new(default, texture, true);
+    public static implicit operator GpuResource(GpuTexture texture) => new(texture.Id, true);
 }
 
 /// <summary>

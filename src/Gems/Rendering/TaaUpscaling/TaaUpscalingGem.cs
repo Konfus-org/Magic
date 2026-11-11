@@ -44,13 +44,14 @@ public sealed class TaaUpscalingGem : IGem, IRenderInto<Upscaling>
         graph.GetState(_shader) != GpuState.Ready ? null : _upscaling;
 
     private static TextureDescription GetResolved(string name, int width, int height) =>
-        GpuDescriptions.GetTexture(
-            name,
-            width,
-            height,
-            GpuFormat.R16G16B16A16Sfloat,
-            TextureUsages.Storage | TextureUsages.Sampled | TextureUsages.CopySource
-        );
+        new()
+        {
+            Width = width,
+            Height = height,
+            Format = GpuFormat.R16G16B16A16Sfloat,
+            Usage = TextureUsages.Storage | TextureUsages.Sampled | TextureUsages.CopySource,
+            Name = name,
+        };
 
     /// <summary>
     /// The pass that resolves the view's output at the size it is shown at, and the picture it resolves; none when

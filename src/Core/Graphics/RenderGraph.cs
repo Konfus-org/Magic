@@ -127,7 +127,6 @@ public sealed class RenderGraph
             new()
             {
                 Name = name,
-                Kind = GpuPassKind.Compute,
                 Stage = stage,
                 Shader = shader,
             }
@@ -154,7 +153,6 @@ public sealed class RenderGraph
             new()
             {
                 Name = name,
-                Kind = GpuPassKind.Draw,
                 Stage = stage,
                 Targets = targets,
                 DrawShaders = shaders,
@@ -258,14 +256,7 @@ public sealed class RenderGraph
     /// </summary>
     public void Clear(GpuBuffer buffer)
     {
-        Begin(
-            new()
-            {
-                Name = "Transfers",
-                Kind = GpuPassKind.Transfer,
-                Stage = RenderStage.Prepare,
-            }
-        );
+        Begin(new() { Name = "Transfers", Stage = RenderStage.Prepare });
         AddUse(GetUse(buffer, GpuAccess.CopyDestination));
         Add(new() { Kind = GpuCommandKind.FillBuffer, Id = buffer.Id });
         EndPass();
@@ -345,15 +336,11 @@ public sealed class RenderGraph
         Add(new() { Kind = GpuCommandKind.PushConstants, Constants = constants });
 
     /// <summary>
-    /// Says the open pass touches <paramref name="buffer"/> as <paramref name="access"/>.
-    /// </summary>
-    internal void Use(GpuBuffer buffer, GpuAccess access) => AddUse(GetUse(buffer, access));
-
-    /// <summary>
-    /// Says the open pass touches <paramref name="texture"/> as <paramref name="access"/>, every level or
+    /// Says the open pass touches <paramref name="resource"/> as <paramref name="access"/>, every level of a texture or
     /// <paramref name="level"/> alone.
     /// </summary>
-    internal void Use(GpuTexture texture, GpuAccess access, int level = -1) => AddUse(GetUse(texture, access, level));
+    internal void Use(GpuResource resource, GpuAccess access, int level = -1) =>
+        AddUse(GetUse(resource, access, level));
 
     /// <summary>
     /// Says the pass touches each of <paramref name="resources"/> as <paramref name="access"/>, every level of a texture.
@@ -362,26 +349,15 @@ public sealed class RenderGraph
     {
         foreach (GpuResource resource in resources)
         {
-            if (resource.IsTexture)
-                Use(resource.Texture, access);
-            else
-                Use(resource.Buffer, access);
+            Use(resource, access);
         }
     }
 
-    private static GpuUse GetUse(GpuBuffer buffer, GpuAccess access) =>
+    private static GpuUse GetUse(GpuResource resource, GpuAccess access, int level = -1) =>
         new()
         {
-            Id = buffer.Id,
-            IsTexture = false,
-            Access = access,
-        };
-
-    private static GpuUse GetUse(GpuTexture texture, GpuAccess access, int level = -1) =>
-        new()
-        {
-            Id = texture.Id,
-            IsTexture = true,
+            Id = resource.Id,
+            IsTexture = resource.IsTexture,
             Access = access,
             Level = level,
         };
@@ -422,14 +398,7 @@ public sealed class RenderGraph
     private void BeginTransfer(RenderStage stage)
     {
         if (_pass is not { Kind: GpuPassKind.Transfer } open || open.Stage != stage)
-            Begin(
-                new()
-                {
-                    Name = "Transfers",
-                    Kind = GpuPassKind.Transfer,
-                    Stage = stage,
-                }
-            );
+            Begin(new() { Name = "Transfers", Stage = stage });
     }
 
     /// <summary>
