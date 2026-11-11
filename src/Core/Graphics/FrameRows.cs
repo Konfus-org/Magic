@@ -194,6 +194,60 @@ public record struct GpuIndirectLight
 }
 
 /// <summary>
+/// The air between the camera and what it sees, the twin of the library's <c>Light/Air.slang</c> Air: the volume of the
+/// light it scatters and lets through out to a distance, the haze past it and the clouds over it, written once a frame
+/// into the frame's buffer after <see cref="GpuIndirectLight"/> by what fills the volume, and all 0 where nothing does.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public record struct GpuAir
+{
+    public const int Offset = GpuIndirectLight.Offset + GpuIndirectLight.Bytes;
+
+    public const int Bytes = 60;
+
+    /// <summary>
+    /// The heap ids of the volume and the sampler it is read with.
+    /// </summary>
+    public uint Volume;
+
+    public uint Sampler;
+
+    /// <summary>
+    /// The metres the volume reaches.
+    /// </summary>
+    public float Distance;
+
+    /// <summary>
+    /// The haze: how much of the light a metre of it scatters at its height, the metres above that at which it is half
+    /// as thick, how much it scatters onward, and its colour.
+    /// </summary>
+    public float Density;
+
+    public float Height;
+
+    public float HalfHeight;
+
+    public float Anisotropy;
+
+    public Vector3 Color;
+
+    /// <summary>
+    /// The heap id of the sky's clouds as seen from the camera, 0 where there are none.
+    /// </summary>
+    public uint Clouds;
+
+    /// <summary>
+    /// The clouds: how much of the sky they cover, from 0 to 1, the height of their base in metres, and the wind that
+    /// carries them, across the ground in metres per second.
+    /// </summary>
+    public float CloudCover;
+
+    public float CloudHeight;
+
+    public Vector2 Wind;
+}
+
+/// <summary>
 /// The probe grid: its size, the heap ids of its buffers and where it lies in the world, the twin of the library's
 /// <c>Light/Probes.slang</c> ProbeGridConstants.
 /// </summary>

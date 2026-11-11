@@ -606,15 +606,11 @@ internal sealed class GpuResources(
         Result<long> jitters = await shaders
             .ReflectConstantAsync(shader, "Jitters", CancellationToken.None)
             .ConfigureAwait(false);
-        Result<long> rays = await shaders
-            .ReflectConstantAsync(shader, "Rays", CancellationToken.None)
-            .ConfigureAwait(false);
         await threads.Enter(EngineThread.Render);
         _effectNeeds[shader.Module.Id] = new EffectNeeds(
             levels.Ok ? (int)levels.Value : 0,
             history.Ok && history.Value != 0,
-            jitters.Ok && jitters.Value != 0,
-            rays.Ok && rays.Value != 0
+            jitters.Ok && jitters.Value != 0
         );
     }
 

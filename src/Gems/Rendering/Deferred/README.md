@@ -21,22 +21,15 @@ that draws its geometry.
 - A surface takes the light that reaches it indirectly from the frame's indirect light, where a gem traced it for the
   frame, and from the sky everywhere else. A surface with a roughness of 0.6 or less reflects what
   it holds of the reflections; a rougher one its diffuse light, so a closed room reflects none of the sky.
-- The first `Weather`'s effects, such as the fog, and then the first `PostProcessing`'s run over the lit picture in
-  order, and finish it for the screen: each is a material whose shader implements the pixel effect contract, with
-  params of its own as a surface material's are. With no `PostProcessing`, the picture gets the engine's
-  `TemporalAntiAliasing`, `Exposure` and `Agx` materials; a `PostProcessing` lists every effect it wants, those
-  included, so another tonemap is another material in the tonemap's place. Each reads the picture the ones before it
-  left and writes another; one that declares levels first fills each level of a target of its own, which one that
-  declares a history, as the temporal anti-aliasing and the exposure do, keeps from frame to frame as its history.
-  While an effect that declares jitter runs, as the temporal anti-aliasing does, the
-  camera draws each frame through a different point in each pixel. An effect shows once its material and its passes
-  are built, and not while one loads or when one failed. An effect that asks what lies along a ray, as the volumetric
-  light does, is answered through the world as rays see it, which lets all the light through where no gem builds it,
-  and doesn't run on a GPU that doesn't trace rays.
-  The fog thickens with the air, and the volumetric light gathers its shafts, up to the nearest surface, a pane of glass
-  included, so a pane keeps its colour, and what is seen through a pane is fogged only as far as the pane. The fog is lit by the sun and the sky alone,
-  unshadowed; with the fog's `sun` param at 0 and `VolumetricLight` listed, the sun's light in the fog comes only where
-  the air sees the sun, in shafts.
+- The first `PostProcessing`'s effects run over the lit picture in order, and finish it for the screen: each is a
+  material whose shader implements the pixel effect contract, with params of its own as a surface material's are. With
+  no `PostProcessing`, the picture gets the engine's `TemporalAntiAliasing`, `Exposure` and `Agx` materials; a
+  `PostProcessing` lists every effect it wants, those included, so another tonemap is another material in the tonemap's
+  place. Each reads the picture the ones before it left and writes another; one that declares levels first fills each
+  level of a target of its own, which one that declares a history, as the temporal anti-aliasing and the exposure do,
+  keeps from frame to frame as its history. While an effect that declares jitter runs, as the temporal anti-aliasing
+  does, the camera draws each frame through a different point in each pixel. An effect shows once its material and its
+  passes are built, and not while one loads or when one failed.
 - The `Exposure` effect meters the picture each frame from its average log luminance, as the effects before it leave
   it, and adapts to a change over about a second, as an eye does; a new domain or picture size takes its first reading
   at once. Its `compensation` param adds stops to it. The `Agx` effect is the AgX tonemap.
@@ -46,6 +39,8 @@ that draws its geometry.
   surfaces, so it hides nothing behind it from the depth pyramid or the lighting. The nearest pane in front of each
   pixel's opaque surface lets what is behind through its colour and its clarity, and through any pane between where a
   gem builds the world as rays see it; it reflects the light around it, more at a grazing angle, and the sun lights it.
+- Where a gem filled the frame's air, the picture is seen through it up to the nearest pane, or the opaque surface
+  where there is none, before the effects run. Where the air has clouds, the sky shows them and they shade the sun.
 - The finished picture is stretched over the window, filtered; where a gem upscales it, that gem's picture is copied
   to the window instead. A screenshot is of what the window shows.
 

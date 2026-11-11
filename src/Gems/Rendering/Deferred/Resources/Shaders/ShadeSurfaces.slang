@@ -1,9 +1,9 @@
 // Every pixel of the picture lit, into the HDR picture: a surface by the sun through the air, by the local lights its
-// tile lists, each dimmed by the shadow mask and the sun coloured by its tint through glass, and by the light around
-// it, traced on a GPU that traces rays and else the sky's, and what it reflects, traced where it is smooth enough, its
-// direct and indirect light summed over the shared BRDF; and the sky itself where nothing was drawn. The pass header's
-// x is the frame's buffer, which holds the lights, the shadows and the GI constants, whose light ids are 0 where
-// nothing is traced.
+// tile lists, each dimmed by the shadow mask, the sun also by the clouds and coloured by its tint through glass, and by
+// the light around it, traced on a GPU that traces rays and else the sky's, and what it reflects, traced where it is
+// smooth enough, its direct and indirect light summed over the shared BRDF; and the sky itself, with its clouds, where
+// nothing was drawn. The pass header's x is the frame's buffer, which holds the lights, the shadows, the GI constants,
+// whose light ids are 0 where nothing is traced, and the air.
 module "ShadeSurfaces";
 
 import Core.Heap;
@@ -13,6 +13,7 @@ import Core.Math;
 import Core.Pack;
 import Scene.Lights;
 import Scene.Shadows;
+import Light.Air;
 import Light.Indirect;
 import Light.Lights;
 import Sky.ISky;
@@ -85,7 +86,7 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
         float3 sky = lights.hasSky != 0u
             ? S.Evaluate(CreateSkyInputs(lights, -view, true))
             : GetOpenSkyRadiance(lights) * lerp(0.6, 1.4, 1.0 - uv.y);
-        hdr.Store(thread.xy, float4(sky, 1.0));
+        hdr.Store(thread.xy, float4(ApplyClouds(sky, -view), 1.0));
         return;
     }
 
@@ -103,11 +104,12 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
         : lights.sunIlluminance.rgb;
     Shadows shadows = GetShadows();
     uint4 shadowWords = LoadShadowMask(shadows.mask, thread.xy, size.x);
-    float3 sunLight = sunIlluminance * GetShadow(shadowWords, 0u) * LoadSunTint(shadows.sunTint, thread.xy);
+    float3 world = relative + frame.cameraPosition.xyz;
+    float3 sunLight = sunIlluminance * GetShadow(shadowWords, 0u) * LoadSunTint(shadows.sunTint, thread.xy)
+        * GetCloudShadow(GetAir(), world, toSun, frame.timeSec);
     float3 color = Evaluate(brdf, normal, view, toSun) * sunLight;
 
     // The lights of the pixel's tile, a word of bits at a time.
-    float3 world = relative + frame.cameraPosition.xyz;
     ArrayRef<uint> tiles = { lights.tiles };
     uint tilesAcross = (size.x + LightTileSize - 1u) / LightTileSize;
     uint offset = GetLightTileOffset(thread.xy / LightTileSize, tilesAcross);

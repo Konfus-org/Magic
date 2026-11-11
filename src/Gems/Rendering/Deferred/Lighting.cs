@@ -31,13 +31,15 @@ internal sealed class Lighting(AssetManager assets)
     /// Every pixel's surface shaded from the sky's tables, its tile's lights and <paramref name="shadows"/> where there
     /// are any, and from <paramref name="indirect"/>, or the sky where nothing traced it this frame; then the
     /// nearest glass over it, lit by the light around it from the probes where there are any, and its rays through
-    /// <paramref name="traced"/> where there is one.
+    /// <paramref name="traced"/> where there is one; and the picture seen through <paramref name="air"/> where something
+    /// filled it.
     /// </summary>
     public void Record(
         in RenderView view,
         in GpuConstants header,
         ShadowMask? shadows,
         TracedWorld? traced,
+        Air? air,
         ReadOnlySpan<GpuResource> indirect
     )
     {
@@ -63,6 +65,9 @@ internal sealed class Lighting(AssetManager assets)
 
         shade.Reads(indirect);
 
+        if (air is { Clouds: { } clouds })
+            shade.Reads(clouds);
+
         shade.Writes(view.Gpu.Hdr).DispatchOver(view.Gpu.Width, view.Gpu.Height);
 
         // The nearest pane over the shaded picture, from what the resolve left in the glass targets.
@@ -83,6 +88,9 @@ internal sealed class Lighting(AssetManager assets)
 
         if (traced is { } world)
             translucent.Reads(world.HitMaterials, view.Gpu.Meshes, view.Gpu.Instances);
+
+        if (air is { } filled)
+            translucent.Reads(filled.Volume);
 
         translucent.Writes(view.Gpu.Hdr).DispatchOver(view.Gpu.Width, view.Gpu.Height);
     }

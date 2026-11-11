@@ -1,7 +1,7 @@
 namespace Magic.Graphics;
 
 /// <summary>
-/// An effect at its place in a frame's lists: its material, ready when its material, textures and passes are, its passes'
+/// An effect at its place in a frame's list: its material, ready when its material, textures and passes are, its passes'
 /// entries specialised to its shader, and what it declares it needs. Its material's row is the view's effect row at
 /// its place.
 /// </summary>
@@ -14,7 +14,7 @@ public readonly record struct GpuEffect(
 );
 
 /// <summary>
-/// What an effect's shader declares it needs: levels of a target of its own, last frame's target as its history, the
-/// camera jittered, and rays.
+/// What an effect's shader declares it needs: levels of a target of its own, last frame's target as its history, and
+/// the camera jittered.
 /// </summary>
-public readonly record struct EffectNeeds(int Levels, bool HasHistory, bool HasJitter, bool HasRays);
+public readonly record struct EffectNeeds(int Levels, bool HasHistory, bool HasJitter);
