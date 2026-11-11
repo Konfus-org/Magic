@@ -2,7 +2,6 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
-using Magic.CommandLine;
 using Magic.Files;
 
 namespace Magic.Utils;
@@ -42,7 +41,7 @@ internal static class ValueText
 
         for (int i = 0; i < parts.Length; i++)
         {
-            Result<object> part = ParseOne(EntityPaths.GetValueType(parts[i]), words[i]);
+            Result<object> part = ParseOne(GetValueType(parts[i]), words[i]);
             if (!part.Ok)
                 return Result.Failure($"{parts[i].Name}: {part.Error}");
 
@@ -75,7 +74,7 @@ internal static class ValueText
         if (parts.Length < 2)
             return FormatOne(value);
 
-        return string.Join(' ', parts.Select(part => FormatOne(EntityPaths.GetValue(part, value))));
+        return string.Join(' ', parts.Select(part => FormatOne(GetValue(part, value))));
     }
 
     public static void SetMember(MemberInfo member, object owner, object? value)
@@ -85,6 +84,12 @@ internal static class ValueText
         else
             ((PropertyInfo)member).SetValue(owner, value);
     }
+
+    public static Type GetValueType(MemberInfo member) =>
+        member is FieldInfo field ? field.FieldType : ((PropertyInfo)member).PropertyType;
+
+    public static object? GetValue(MemberInfo member, object owner) =>
+        member is FieldInfo field ? field.GetValue(owner) : ((PropertyInfo)member).GetValue(owner);
 
     /// <summary>
     /// <paramref name="text"/> as a <paramref name="type"/>, read as JSON; a bare word is read as JSON's text, for a
@@ -117,13 +122,18 @@ internal static class ValueText
         if (!json.Ok)
             return value?.ToString() ?? "null";
 
-        bool isBare =
+        // Text or a choice is written bare when it reads back as the same text.
+        if (
             json.Value.ValueKind == JsonValueKind.String
             && json.Value.GetString() is { Length: > 0 } text
             && !IsJson(text)
-            && !text.Contains(' ', StringComparison.Ordinal);
+            && !text.Contains(' ', StringComparison.Ordinal)
+        )
+        {
+            return text;
+        }
 
-        return isBare ? json.Value.GetString() ?? string.Empty : json.Value.GetRawText();
+        return json.Value.GetRawText();
     }
 
     /// <summary>
