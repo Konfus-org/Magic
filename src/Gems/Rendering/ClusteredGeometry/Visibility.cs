@@ -35,8 +35,7 @@ internal readonly record struct CullBuffers(
     GpuBuffer RetestArguments,
     GpuBuffer VisibleClusters,
     GpuBuffer DrawArguments,
-    GpuBuffer RetestList,
-    GpuBuffer ImpostorDraws
+    GpuBuffer RetestList
 );
 
 /// <summary>
@@ -56,6 +55,8 @@ internal sealed class Visibility(AssetManager assets)
     private const int CountsBytes = 320;
 
     private const int DrawArgumentsBytes = 16;
+
+    private const int DrawRegions = (int)DrawRegion.RetestedImpostors + 1;
 
     private const int RetestArgumentsBytes = 12;
 
@@ -139,8 +140,8 @@ internal sealed class Visibility(AssetManager assets)
 
     /// <summary>
     /// The view the clusters are drawn into: the cull's buffers and the cluster targets asked for, the retest dispatch at
-    /// no groups, and the cluster constants that name them and <paramref name="pools"/> uploaded after the indirect
-    /// light's row. The budget pass zeroes the counts once it has read last frame's.
+    /// no groups, and the cluster constants that name them and <paramref name="pools"/> uploaded after the air's
+    /// row. The budget pass zeroes the counts once it has read last frame's.
     /// </summary>
     public static Result<RenderView> Prepare(
         RenderGraph graph,
@@ -165,19 +166,12 @@ internal sealed class Visibility(AssetManager assets)
         Result<GpuBuffer> drawArguments = graph.Buffer(
             GpuDescriptions.GetBuffer(
                 "Draw arguments",
-                (long)MaxVisibleClusters * 5 * DrawArgumentsBytes,
+                (long)MaxVisibleClusters * DrawRegions * DrawArgumentsBytes,
                 IndirectUsage
             )
         );
         Result<GpuBuffer> retestList = graph.Buffer(
             GpuDescriptions.GetBuffer("Retest list", (long)MaxVisibleClusters * 8)
-        );
-        Result<GpuBuffer> impostorDraws = graph.Buffer(
-            GpuDescriptions.GetBuffer(
-                "Impostor draws",
-                (long)MaxVisibleClusters * 2 * DrawArgumentsBytes,
-                IndirectUsage
-            )
         );
         Result<GpuTexture> visibility = graph.Texture(
             GpuDescriptions.GetTexture(
@@ -222,7 +216,6 @@ internal sealed class Visibility(AssetManager assets)
                     visibleClusters,
                     drawArguments,
                     retestList,
-                    impostorDraws,
                 ]
         )
         {
@@ -238,8 +231,7 @@ internal sealed class Visibility(AssetManager assets)
             retestArguments.Value,
             visibleClusters.Value,
             drawArguments.Value,
-            retestList.Value,
-            impostorDraws.Value
+            retestList.Value
         );
         RenderView view = new(gpu, graph, pools, cull, visibility.Value, glassVisibility.Value, hzb.Value);
         ClusterConstants clusters = new()
@@ -294,7 +286,7 @@ internal sealed class Visibility(AssetManager assets)
         view.Graph.Compute(
                 "Count clusters",
                 _cullShader,
-                new GpuConstants(view.Gpu.Frame.Id, ModeCount, cull.ImpostorDraws.Id, cull.InstanceRows.Id),
+                new GpuConstants(view.Gpu.Frame.Id, ModeCount, cull.InstanceRows.Id),
                 RenderStage.Geometry
             )
             .Reads(view.Gpu.Frame, view.Gpu.Instances, view.Pools.Clusters, view.Pools.Models, view.Hzb)
@@ -312,7 +304,7 @@ internal sealed class Visibility(AssetManager assets)
         view.Graph.Compute(
                 "Place clusters",
                 _cullShader,
-                new GpuConstants(view.Gpu.Frame.Id, ModePlace, cull.ImpostorDraws.Id, cull.InstanceRows.Id),
+                new GpuConstants(view.Gpu.Frame.Id, ModePlace, cull.InstanceRows.Id),
                 RenderStage.Geometry
             )
             .Reads(
@@ -324,40 +316,19 @@ internal sealed class Visibility(AssetManager assets)
                 view.Hzb,
                 cull.InstanceRows
             )
-            .Writes(
-                cull.Counts,
-                cull.VisibleClusters,
-                cull.DrawArguments,
-                cull.RetestList,
-                cull.RetestArguments,
-                cull.ImpostorDraws
-            )
+            .Writes(cull.Counts, cull.VisibleClusters, cull.DrawArguments, cull.RetestList, cull.RetestArguments)
             .Dispatch(across, down);
-        RecordDraw(
-            view,
-            _drawShaders,
-            "Draw visibility",
-            GetTargets(view, TargetLoad.Clear),
-            drawsOffset: 0,
-            countOffset: 0
-        );
-        RecordDraw(
-            view,
-            _fadingShaders,
-            "Draw fading",
-            GetTargets(view, TargetLoad.Keep),
-            drawsOffset: (ulong)MaxVisibleClusters * 2 * DrawArgumentsBytes,
-            countOffset: 24
-        );
+        RecordDraw(view, _drawShaders, "Draw visibility", GetTargets(view, TargetLoad.Clear), DrawRegion.Visible);
+        RecordDraw(view, _fadingShaders, "Draw fading", GetTargets(view, TargetLoad.Keep), DrawRegion.Fading);
         ImmutableArray<GpuResource> heapTextures = [.. view.Gpu.HeapTextures, .. view.Pools.Atlases];
-        RecordImpostors(view, heapTextures, "Draw impostors", drawsOffset: 0, countOffset: 16);
+        RecordImpostors(view, heapTextures, "Draw impostors", DrawRegion.Impostors);
         RecordHzb(view);
 
         // Retest the list against the new pyramid, as many groups as the cull left in the retest arguments.
         view.Graph.Compute(
                 "Retest clusters",
                 _cullShader,
-                new GpuConstants(view.Gpu.Frame.Id, ModeRetest, cull.ImpostorDraws.Id),
+                new GpuConstants(view.Gpu.Frame.Id, ModeRetest),
                 RenderStage.Geometry
             )
             .Reads(
@@ -370,32 +341,18 @@ internal sealed class Visibility(AssetManager assets)
                 cull.RetestList,
                 cull.VisibleClusters
             )
-            .Writes(cull.Counts, cull.DrawArguments, cull.ImpostorDraws)
+            .Writes(cull.Counts, cull.DrawArguments)
             .Indirect(cull.RetestArguments)
             .DispatchIndirect(cull.RetestArguments, 0);
-        RecordDraw(
-            view,
-            _drawShaders,
-            "Draw retested",
-            GetTargets(view, TargetLoad.Keep),
-            drawsOffset: (ulong)MaxVisibleClusters * DrawArgumentsBytes,
-            countOffset: 8
-        );
+        RecordDraw(view, _drawShaders, "Draw retested", GetTargets(view, TargetLoad.Keep), DrawRegion.Retested);
         RecordDraw(
             view,
             _fadingShaders,
             "Draw retested fading",
             GetTargets(view, TargetLoad.Keep),
-            drawsOffset: (ulong)MaxVisibleClusters * 3 * DrawArgumentsBytes,
-            countOffset: 28
+            DrawRegion.RetestedFading
         );
-        RecordImpostors(
-            view,
-            heapTextures,
-            "Draw retested impostors",
-            drawsOffset: (ulong)MaxVisibleClusters * DrawArgumentsBytes,
-            countOffset: 20
-        );
+        RecordImpostors(view, heapTextures, "Draw retested impostors", DrawRegion.RetestedImpostors);
         RecordHzb(view);
 
         // The nearest translucent surface in front of the opaque ones, from both passes' draws, where the view has glass.
@@ -410,8 +367,7 @@ internal sealed class Visibility(AssetManager assets)
                     Colors = [new GpuTarget { Texture = view.GlassVisibility, Load = TargetLoad.Clear }],
                     Depth = new GpuTarget { Texture = view.Gpu.GlassDepth, Load = TargetLoad.Clear },
                 },
-                drawsOffset: (ulong)MaxVisibleClusters * 4 * DrawArgumentsBytes,
-                countOffset: 40,
+                DrawRegion.Glass,
                 view.Gpu.Depth
             );
         }
@@ -449,7 +405,7 @@ internal sealed class Visibility(AssetManager assets)
         };
 
     /// <summary>
-    /// The visible clusters of one region of the draws, drawn with <paramref name="shaders"/> into
+    /// The visible clusters of <paramref name="region"/> of the draws, drawn with <paramref name="shaders"/> into
     /// <paramref name="targets"/>, one indirect draw each, the shaders reading <paramref name="reads"/> beside the
     /// clusters.
     /// </summary>
@@ -458,67 +414,67 @@ internal sealed class Visibility(AssetManager assets)
         in DrawShaders shaders,
         string name,
         in GpuRenderTargets targets,
-        ulong drawsOffset,
-        ulong countOffset,
+        DrawRegion region,
         params ReadOnlySpan<GpuResource> reads
     ) =>
-        view
-            .Graph.Draw(name, shaders, targets, new GpuConstants(view.Gpu.Frame.Id), RenderStage.Geometry)
-            .Reads(
-                view.Gpu.Frame,
-                view.Gpu.Instances,
-                view.Gpu.Vertices,
-                view.Pools.Vertices,
-                view.Pools.Clusters,
-                view.Pools.Models,
-                view.Pools.Indices,
-                view.Cull.VisibleClusters
-            )
-            .Reads(reads)
-            .Indirect(view.Cull.DrawArguments, view.Cull.Counts)
+        DrawIndirect(
+            view.Graph.Draw(name, shaders, targets, new GpuConstants(view.Gpu.Frame.Id), RenderStage.Geometry)
+                .Reads(
+                    view.Gpu.Frame,
+                    view.Gpu.Instances,
+                    view.Gpu.Vertices,
+                    view.Pools.Vertices,
+                    view.Pools.Clusters,
+                    view.Pools.Models,
+                    view.Pools.Indices,
+                    view.Cull.VisibleClusters
+                )
+                .Reads(reads),
+            view,
+            region
+        );
+
+    /// <summary>
+    /// Ends <paramref name="draw"/> with an indirect draw of each the cull left in <paramref name="region"/> of the
+    /// draws, as many as it counted at the region's word of the counts.
+    /// </summary>
+    private static void DrawIndirect(DrawPass draw, in RenderView view, DrawRegion region) =>
+        draw.Indirect(view.Cull.DrawArguments, view.Cull.Counts)
             .DrawIndirectCount(
                 view.Cull.DrawArguments,
-                drawsOffset,
+                (ulong)region * MaxVisibleClusters * DrawArgumentsBytes,
                 view.Cull.Counts,
-                countOffset,
-                MaxVisibleClusters,
-                DrawArgumentsBytes
+                (ulong)region * sizeof(uint),
+                MaxVisibleClusters
             );
 
     /// <summary>
-    /// The impostors the cull left at <paramref name="drawsOffset"/>, into the view's visibility buffer and depth,
-    /// one indirect draw each, reading their atlases among <paramref name="heapTextures"/>.
+    /// The impostors the cull left in <paramref name="region"/> of the draws, into the view's visibility buffer and
+    /// depth, one indirect draw each, reading their atlases among <paramref name="heapTextures"/>.
     /// </summary>
     private void RecordImpostors(
         in RenderView view,
         ImmutableArray<GpuResource> heapTextures,
         string name,
-        ulong drawsOffset,
-        ulong countOffset
+        DrawRegion region
     ) =>
-        view
-            .Graph.Draw(
-                name,
-                _impostorShaders,
-                new GpuRenderTargets
-                {
-                    Colors = [new GpuTarget { Texture = view.Visibility, Load = TargetLoad.Keep }],
-                    Depth = new GpuTarget { Texture = view.Gpu.Depth, Load = TargetLoad.Keep },
-                },
-                new GpuConstants(view.Gpu.Frame.Id, 0, view.Pools.Impostors.Id),
-                RenderStage.Geometry
-            )
-            .Reads(view.Gpu.Frame, view.Gpu.Instances, view.Pools.Impostors, view.Pools.Models)
-            .Reads(heapTextures.AsSpan())
-            .Indirect(view.Cull.ImpostorDraws, view.Cull.Counts)
-            .DrawIndirectCount(
-                view.Cull.ImpostorDraws,
-                drawsOffset,
-                view.Cull.Counts,
-                countOffset,
-                MaxVisibleClusters,
-                DrawArgumentsBytes
-            );
+        DrawIndirect(
+            view.Graph.Draw(
+                    name,
+                    _impostorShaders,
+                    new GpuRenderTargets
+                    {
+                        Colors = [new GpuTarget { Texture = view.Visibility, Load = TargetLoad.Keep }],
+                        Depth = new GpuTarget { Texture = view.Gpu.Depth, Load = TargetLoad.Keep },
+                    },
+                    new GpuConstants(view.Gpu.Frame.Id, 0, view.Pools.Impostors.Id),
+                    RenderStage.Geometry
+                )
+                .Reads(view.Gpu.Frame, view.Gpu.Instances, view.Pools.Impostors, view.Pools.Models)
+                .Reads(heapTextures.AsSpan()),
+            view,
+            region
+        );
 
     /// <summary>
     /// The depth pyramid from the depth so far, a level a pass.
@@ -575,5 +531,22 @@ internal sealed class Visibility(AssetManager assets)
             .Writes(view.Gpu.GBufferNormal, view.Gpu.GBufferBase, view.Gpu.GBufferSurface, view.Gpu.Velocity)
             .Writes(view.Gpu.GlassBase, view.Gpu.GlassNormal, view.Gpu.GlassSurface)
             .DispatchOver(view.Gpu.Width, view.Gpu.Height);
+    }
+
+    /// <summary>
+    /// The regions of the draw arguments, each as many draws as the visible list has rows and counted at word
+    /// <c>region * 4</c> of the counts, the twin of <c>Scene/Visibility.slang</c>'s: the clusters last frame's depth
+    /// pyramid shows and those the retest finds this frame's shows, the same of the instances in the impostor handoff,
+    /// the translucent clusters of both, and the impostors of both.
+    /// </summary>
+    private enum DrawRegion
+    {
+        Visible,
+        Retested,
+        Fading,
+        RetestedFading,
+        Glass,
+        Impostors,
+        RetestedImpostors,
     }
 }

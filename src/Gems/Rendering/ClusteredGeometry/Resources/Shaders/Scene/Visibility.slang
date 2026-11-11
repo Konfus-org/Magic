@@ -32,21 +32,21 @@ public struct DrawArguments
     public uint firstInstance;
 }
 
-public static const uint DrawArgumentsBytes = 16u;
-
-// The counts buffer's words, as byte offsets: what the cull passes add to and the draws read their counts from.
-public static const uint CountVisibleDraws = 0u;
-public static const uint CountRetest = 4u;
-public static const uint CountRetestDraws = 8u;
-public static const uint CountVisibleList = 12u;
-// The translucent clusters' draws, from both cull passes, in the draws' fifth region.
-public static const uint CountGlassDraws = 40u;
+// The draw arguments' regions, each as many draws as the visible list has rows and counted at word region * 4 of the
+// counts buffer: the clusters the old depth pyramid shows, then those the retest finds the new one shows; the same two
+// of the clusters in the impostor handoff, which draw with the dither; the translucent clusters from both; and the
+// impostors of both, C#'s DrawRegion.
+public static const uint FadingRegion = 2u;
 public static const uint GlassRegion = 4u;
+public static const uint ImpostorRegion = 5u;
 
-// The rows of the visible list the frame's instances asked for, which the cluster budget reads next frame, and the
-// first distance bin with no room left: instances in it and past it draw as their impostors.
-public static const uint CountWantedRows = 32u;
-public static const uint CountFitBins = 36u;
+// The counts buffer's other words, as byte offsets: the retest list's length, the visible list's, the rows of it the
+// frame's instances asked for, which the cluster budget reads next frame, and the first distance bin with no room
+// left: instances in it and past it draw as their impostors.
+public static const uint CountRetest = 28u;
+public static const uint CountVisibleList = 32u;
+public static const uint CountWantedRows = 36u;
+public static const uint CountFitBins = 40u;
 
 // The counts buffer's distance bins from DemandBinsOffset, a word each: the rows asked for by the instances whose
 // nearest point is that far from the camera, four bins to each doubling of the distance in metres.
@@ -82,7 +82,7 @@ public struct Barycentrics
 
 // The barycentrics at pixelNdc, clip-space xy in [-1, 1] with y up, of the triangle whose vertices are clip0 to
 // clip2 after projection, for an output size pixels across and down.
-public Barycentrics ComputeBarycentrics(float4 clip0, float4 clip1, float4 clip2, float2 pixelNdc, float2 size)
+public Barycentrics GetBarycentrics(float4 clip0, float4 clip1, float4 clip2, float2 pixelNdc, float2 size)
 {
     float3 invW = 1.0 / float3(clip0.w, clip1.w, clip2.w);
     float2 ndc0 = clip0.xy * invW.x;
@@ -153,7 +153,7 @@ public PixelTriangle LoadPixelTriangle(FrameConstants frame, uint visibleIndex, 
     result.p0 = Relative(frame, ToWorld(result.instance.world, result.v0.position));
     result.p1 = Relative(frame, ToWorld(result.instance.world, result.v1.position));
     result.p2 = Relative(frame, ToWorld(result.instance.world, result.v2.position));
-    result.bary = ComputeBarycentrics(
+    result.bary = GetBarycentrics(
         mul(float4(result.p0, 1.0), frame.viewProjection),
         mul(float4(result.p1, 1.0), frame.viewProjection),
         mul(float4(result.p2, 1.0), frame.viewProjection),

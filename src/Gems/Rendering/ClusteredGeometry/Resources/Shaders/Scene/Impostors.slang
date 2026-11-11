@@ -31,16 +31,6 @@ public static const uint ImpostorInstanceMask = (1u << ImpostorSlotShift) - 1u;
 
 public uint EncodeImpostorId(uint instance, uint slot) { return ImpostorFlag | ((slot & 7u) << ImpostorSlotShift) | instance; }
 
-// The counts buffer's words the cull adds impostor draws at: those the old depth pyramid shows, and those the retest
-// finds the new one shows.
-public static const uint CountImpostorDraws = 16u;
-public static const uint CountRetestImpostorDraws = 20u;
-
-// The counts buffer's words the cull adds the draws of clusters in the handoff at, which draw with the dither, and the
-// draw arguments' regions they go in, after the first and retested draws of the plain clusters.
-public static const uint CountFadingDraws = 24u;
-public static const uint CountRetestFadingDraws = 28u;
-
 // A retest list entry's cluster for an instance whose impostor the old pyramid hid, and for one drawn whole.
 public static const uint RetestImpostor = 0xFFFFFFFFu;
 public static const uint RetestWholeImpostor = 0xFFFFFFFEu;
@@ -95,16 +85,18 @@ struct ImpostorView
     float3 up;
 }
 
-ImpostorView GetView(uint2 cell)
+// The frame looking along forward, as the CPU baker's ImpostorBuilder.GetViewFrame builds it.
+ImpostorView CreateViewFrame(float3 forward)
 {
-    float2 flat = float2(cell) / float(ImpostorViews - 1u) * 2.0 - 1.0;
+    float3 up0 = abs(forward.y) < 0.999 ? float3(0.0, 1.0, 0.0) : float3(0.0, 0.0, 1.0);
     ImpostorView view;
-    view.forward = DecodeOctahedral(flat);
-    float3 up0 = abs(view.forward.y) < 0.999 ? float3(0.0, 1.0, 0.0) : float3(0.0, 0.0, 1.0);
-    view.right = normalize(cross(up0, view.forward));
-    view.up = cross(view.forward, view.right);
+    view.forward = forward;
+    view.right = normalize(cross(up0, forward));
+    view.up = cross(forward, view.right);
     return view;
 }
+
+ImpostorView GetView(uint2 cell) { return CreateViewFrame(DecodeOctahedral(float2(cell) / float(ImpostorViews - 1u) * 2.0 - 1.0)); }
 
 // The quad an impostor draws as, camera-relative: the corner at uv in [0, 1]² of the box's outline as the camera sees
 // it, on the plane through the box's nearest corner, so the depth it writes is never nearer than the quad.
@@ -112,10 +104,7 @@ public float3 GetImpostorCorner(FrameConstants frame, GpuInstance instance, GpuI
 {
     float3 center = Relative(frame, instance.boundsCenter);
     float centerAlong = length(center);
-    float3 forward = center / max(centerAlong, 1e-3);
-    float3 up0 = abs(forward.y) < 0.999 ? float3(0.0, 1.0, 0.0) : float3(0.0, 0.0, 1.0);
-    float3 right = normalize(cross(up0, forward));
-    float3 up = cross(forward, right);
+    ImpostorView view = CreateViewFrame(center / max(centerAlong, 1e-3));
 
     // The box's eight corners, seen from the camera: their spread across and up on the plane through the centre,
     // each along its line of sight, and the nearest along the view.
@@ -130,8 +119,8 @@ public float3 GetImpostorCorner(FrameConstants frame, GpuInstance instance, GpuI
             (i & 4u) != 0u ? impostor.boundsMax.z : impostor.boundsMin.z
         );
         float3 corner = Relative(frame, ToWorld(instance.world, local));
-        float along = max(dot(corner, forward), 1e-3);
-        float2 onPlane = float2(dot(corner, right), dot(corner, up)) * (centerAlong / along);
+        float along = max(dot(corner, view.forward), 1e-3);
+        float2 onPlane = float2(dot(corner, view.right), dot(corner, view.up)) * (centerAlong / along);
         low = min(low, onPlane);
         high = max(high, onPlane);
         nearest = min(nearest, along);
@@ -139,7 +128,7 @@ public float3 GetImpostorCorner(FrameConstants frame, GpuInstance instance, GpuI
 
     // The outline on the centre's plane, slid along the lines of sight onto the nearest corner's.
     float2 at = lerp(low, high, uv);
-    float3 onCenter = right * at.x + up * at.y + forward * centerAlong;
+    float3 onCenter = view.right * at.x + view.up * at.y + view.forward * centerAlong;
     return onCenter * (max(nearest, 1e-3) / centerAlong);
 }
 
