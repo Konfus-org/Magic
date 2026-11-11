@@ -151,7 +151,7 @@ void BlendDiffuse(uint3 thread : SV_DispatchThreadID)
     float depth = depthTexture.Load(pixel, 0u).x;
     float4 current = filtered.Load(thread.xy, 0u);
     StoreViewDepth(frame, blend, thread.xy, depth);
-    if (gi.hasHistory == 0u || depth == 0.0)
+    if (blend.hasHistory == 0u || depth == 0.0)
     {
         light.Store(thread.xy, current);
         return;

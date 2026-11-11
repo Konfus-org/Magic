@@ -14,13 +14,15 @@ import Core.Sampling;
 import Light.Indirect;
 
 // What a traced effect blends over frames: this frame's light, with its variance in alpha, and the view depth of each
-// of its pixels; and the last frame's of both, which this frame's blends with.
+// of its pixels; and the last frame's of both, which this frame's blends with, 0 while they hold nothing of the view
+// and this frame starts them afresh.
 public struct TracedBlendConstants
 {
     public uint light;
     public uint depth;
     public uint lightHistory;
     public uint depthHistory;
+    public uint hasHistory;
 }
 
 public struct TracedDiffuseConstants
@@ -51,8 +53,6 @@ public struct GIConstants
     public TracedReflectionConstants reflections;
     // Linear, clamped to the edges: what the history is read with.
     public uint sampler;
-    // 0 while the history holds nothing of the view: this frame starts it afresh.
-    public uint hasHistory;
     // The traced textures' size.
     public uint2 tracedSize;
 }

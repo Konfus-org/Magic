@@ -16,11 +16,6 @@ internal record struct GIConstants
     public uint Sampler;
 
     /// <summary>
-    /// 0 while the history holds nothing of the view: this frame starts it afresh.
-    /// </summary>
-    public uint HasHistory;
-
-    /// <summary>
     /// The traced textures' size.
     /// </summary>
     public uint TracedWidth;
@@ -71,4 +66,9 @@ internal record struct TracedBlendConstants
     public uint LightHistory;
 
     public uint DepthHistory;
+
+    /// <summary>
+    /// 0 while the history holds nothing of the view: this frame starts it afresh.
+    /// </summary>
+    public uint HasHistory;
 }

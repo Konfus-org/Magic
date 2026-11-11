@@ -41,6 +41,11 @@ public sealed class GlobalIlluminationGem
     /// </summary>
     private (int Width, int Height)? _traced;
 
+    /// <summary>
+    /// The size the reflections were last traced at; none while they are off. Render thread.
+    /// </summary>
+    private (int Width, int Height)? _reflected;
+
     public GlobalIlluminationGem(
         GlobalIlluminationSettings settings,
         AssetManager assets,
@@ -66,11 +71,20 @@ public sealed class GlobalIlluminationGem
     public GlobalIlluminationSettings Settings { get; set; }
 
     /// <summary>
-    /// The frame's indirect light, while the passes' shaders are built, what they read and write is made, and rays see
-    /// an instance; none otherwise, and the surfaces take the sky's light.
+    /// The frame's indirect light, while it is on, the passes' shaders are built, what they read and write is made,
+    /// and rays see an instance; none otherwise, and the surfaces take the sky's light.
     /// </summary>
     public IndirectLight? Render(in Frame frame, RenderGraph graph, in TracedInput input)
     {
+        // Off, no domain waits for the passes, and the probes start afresh once it is back on.
+        if (!Settings.IsIndirectLightOn)
+        {
+            _built.TrySetResult();
+            _traced = null;
+
+            return null;
+        }
+
         // The shaders are the GPU provider's to build, the first ask starting each; one that fails holds no domain back.
         GpuState shaders = GetState(graph, _shaders.AsSpan());
         if (shaders != GpuState.Loading)
@@ -122,9 +136,22 @@ public sealed class GlobalIlluminationGem
                 input.Traced.HitMaterials,
             ]
         );
-        Result<ProbeBuffers> probes = _probes.Prepare(graph, _traced is not null, input.Traced.Box);
+        Result<ProbeBuffers> probes = _probes.Prepare(
+            graph,
+            _traced is not null,
+            input.Traced.Box,
+            (Settings.ProbesAcross, Settings.ProbesUp)
+        );
         Result<TracedDiffuseBuffers> diffuse = TracedDiffuse.Prepare(view, frame.Index);
-        Result<TracedReflectionBuffers> reflections = TracedReflections.Prepare(view, frame.Index);
+        Result<TracedReflectionBuffers> reflections = Settings.IsReflectionsOn
+            ? TracedReflections.Prepare(
+                view with
+                {
+                    HasHistory = view.HasHistory && _reflected == tracedSize,
+                },
+                frame.Index
+            )
+            : Result.Success(default(TracedReflectionBuffers));
         Result<GpuSampler> sampler = graph.Sampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
@@ -146,7 +173,6 @@ public sealed class GlobalIlluminationGem
                     Diffuse = diffuse.Value.Constants,
                     Reflections = reflections.Value.Constants,
                     Sampler = sampler.Value.Id,
-                    HasHistory = view.HasHistory ? 1u : 0u,
                     TracedWidth = (uint)tracedSize.Width,
                     TracedHeight = (uint)tracedSize.Height,
                 },
@@ -163,8 +189,11 @@ public sealed class GlobalIlluminationGem
         graph.Upload(gpu.Frame, [row], GpuIndirectLight.Offset);
         _probes.Record(view, probes.Value);
         _diffuse.Record(view, probes.Value, diffuse.Value);
-        _reflections.Record(view, probes.Value, reflections.Value);
+        if (Settings.IsReflectionsOn)
+            _reflections.Record(view, probes.Value, reflections.Value);
+
         _traced = tracedSize;
+        _reflected = Settings.IsReflectionsOn ? tracedSize : null;
 
         return new IndirectLight(diffuseLight, reflectionLight, probes.Value.Probes, probes.Value.Depth);
     }

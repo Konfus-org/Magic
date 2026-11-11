@@ -187,9 +187,12 @@ public sealed class DeferredGem
         if (input.Air is null)
             graph.Upload(gpu.Frame, [default(GpuAir)], GpuAir.Offset);
 
-        ReadOnlySpan<GpuResource> indirect = input.Light is { } light
-            ? [light.Diffuse, light.Reflections, light.Probes, light.ProbeDepth]
-            : [];
+        ReadOnlySpan<GpuResource> indirect = input.Light switch
+        {
+            { Reflections.IsNone: true } light => [light.Diffuse, light.Probes, light.ProbeDepth],
+            { } light => [light.Diffuse, light.Reflections, light.Probes, light.ProbeDepth],
+            null => [],
+        };
 
         // The passes, each in its stage, each reading what the ones before it wrote: the shading, lit by the frame's
         // indirect light where something traced it, a debug view's light in its place, the effects, which finish the

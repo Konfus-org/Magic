@@ -5,14 +5,15 @@ namespace Magic.GlobalIllumination;
 
 /// <summary>
 /// What a traced effect blends over frames, at the traced size: this frame's light, with its variance in alpha, and the
-/// view depth of each of its pixels, and last frame's of both, which this frame's blends with. It keeps two of each and
-/// swaps them every frame.
+/// view depth of each of its pixels, and last frame's of both, which this frame's blends with while
+/// <paramref name="HasHistory"/>. It keeps two of each and swaps them every frame.
 /// </summary>
 internal readonly record struct TracedBlend(
     GpuTexture Light,
     GpuTexture Depth,
     GpuTexture LightHistory,
-    GpuTexture DepthHistory
+    GpuTexture DepthHistory,
+    bool HasHistory
 )
 {
     public TracedBlendConstants Constants =>
@@ -22,11 +23,13 @@ internal readonly record struct TracedBlend(
             Depth = Depth.Id,
             LightHistory = LightHistory.Id,
             DepthHistory = DepthHistory.Id,
+            HasHistory = HasHistory ? 1u : 0u,
         };
 
     /// <summary>
     /// The textures asked for under <paramref name="names"/>, the first light and the second, then the first depth and
-    /// the second: the even frames write the first of each and the odd the second, the other being the history.
+    /// the second: the even frames write the first of each and the odd the second, the other being the history, which
+    /// holds the view as <paramref name="view"/> says.
     /// </summary>
     public static Result<TracedBlend> Prepare(in GIView view, ReadOnlySpan<string> names, uint frameIndex)
     {
@@ -44,6 +47,8 @@ internal readonly record struct TracedBlend(
                 return Result.Failure(made.Error);
         }
 
-        return Result.Success(new TracedBlend(light.Value, depth.Value, lightHistory.Value, depthHistory.Value));
+        return Result.Success(
+            new TracedBlend(light.Value, depth.Value, lightHistory.Value, depthHistory.Value, view.HasHistory)
+        );
     }
 }
