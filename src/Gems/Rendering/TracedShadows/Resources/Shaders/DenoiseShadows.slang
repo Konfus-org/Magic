@@ -268,10 +268,13 @@ void ClassifyShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupT
     float mean = lerp(shadowBefore, current, 1.0 / count);
     float variance = count > 1.0 ? mean * (1.0 - mean) * count / (count - 1.0) : 1.0;
 
-    // Last frame's shadow clamped to the neighbourhood, and trusted less the further it stood outside it.
+    // Last frame's shadow clamped to the neighbourhood, and trusted less the further it stood outside it. The
+    // neighbourhood holds every surface around, so the range always takes in this frame's ray: a shadowed floor beside
+    // a sunlit face keeps its own dark rather than the face's light.
     float spatialVariance = max(neighbourhood - neighbourhood * neighbourhood, 0.0);
     float deviation = sqrt(spatialVariance);
-    float clamped = clamp(shadowBefore, neighbourhood - 0.5 * deviation, neighbourhood + 0.5 * deviation);
+    float clamped = clamp(
+        shadowBefore, min(neighbourhood - 0.5 * deviation, current), max(neighbourhood + 0.5 * deviation, current));
     float discontinuity = (shadowBefore - neighbourhood) / max(0.5 * deviation, 0.001);
     count *= exp(-discontinuity * discontinuity / 20.0);
 
