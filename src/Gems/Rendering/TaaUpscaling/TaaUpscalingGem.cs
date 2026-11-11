@@ -84,7 +84,7 @@ public sealed class TaaUpscalingGem : IGem, IRenderInto<Upscaling>
                 "Upscale picture",
                 _shader,
                 new GpuConstants(view.Frame.Id, hasHistory ? history.Id : resolved.Id, resolved.Id, sampler.Value.Id),
-                RenderStage.Post
+                RenderStages.Post
             )
             .Reads(view.Frame, view.Output, view.Depth, view.Velocity)
             .Reads(past)

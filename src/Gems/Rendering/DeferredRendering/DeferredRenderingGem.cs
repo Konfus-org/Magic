@@ -588,7 +588,7 @@ public sealed class DeferredRenderingGem
         // Every pixel's surface shaded from the sky's tables, its tile's lights, the shadows where there are any and the
         // indirect light, or the sky where nothing traced it.
         ComputePass shade = graph
-            .Compute("Shade surfaces", _shadeShader, new GpuConstants(gpu.Frame.Id), RenderStage.Shade)
+            .Compute("Shade surfaces", _shadeShader, new GpuConstants(gpu.Frame.Id), RenderStages.Shade)
             .Reads(
                 gpu.Frame,
                 gpu.SkyTransmittance,
@@ -616,7 +616,7 @@ public sealed class DeferredRenderingGem
         if (!gpu.GlassDepth.IsNone || input.Air is not null)
         {
             ComputePass translucent = graph
-                .Compute("Shade translucent", _translucentShader, new GpuConstants(gpu.Frame.Id), RenderStage.Shade)
+                .Compute("Shade translucent", _translucentShader, new GpuConstants(gpu.Frame.Id), RenderStages.Shade)
                 .Reads(
                     gpu.Frame,
                     gpu.SkyTransmittance,
@@ -647,7 +647,7 @@ public sealed class DeferredRenderingGem
                     "Show light",
                     _lightViewShader,
                     new GpuConstants(gpu.Frame.Id, (uint)settings.RenderView),
-                    RenderStage.Shade
+                    RenderStages.Shade
                 )
                 .Reads(gpu.Frame, gpu.Depth, gpu.GBufferNormal)
                 .Reads(indirect)
@@ -669,7 +669,7 @@ public sealed class DeferredRenderingGem
                     BitConverter.SingleToUInt32Bits(settings.DepthViewFar),
                     BitConverter.SingleToUInt32Bits(Math.Clamp(settings.Gamma, 0.5f, 2f))
                 ),
-                RenderStage.Post
+                RenderStages.Post
             )
             .Reads(gpu.Frame, gpu.Depth, gpu.GBufferNormal, gpu.GBufferBase, gpu.GBufferSurface, gpu.Velocity, gpu.Hdr)
             .Writes(gpu.Output)
@@ -681,7 +681,7 @@ public sealed class DeferredRenderingGem
         GpuTexture shown = upscaled.IsNone ? gpu.Output : upscaled;
         GpuTexture target = graph.WindowTarget;
         if (!target.IsNone)
-            graph.Blit(shown, target, RenderStage.Post, settings.UpscaleFilter);
+            graph.Blit(shown, target, RenderStages.Post, settings.UpscaleFilter);
 
         // One readback buffer, so one screenshot a frame: the last asked for, read back at the size it is shown at, and
         // through a copy stretched to it with the upscale filter, of 8 bits a channel, where the shown picture is
@@ -722,9 +722,9 @@ public sealed class DeferredRenderingGem
             else
             {
                 if (read.Value != shown)
-                    graph.Blit(shown, read.Value, RenderStage.Post, settings.UpscaleFilter);
+                    graph.Blit(shown, read.Value, RenderStages.Post, settings.UpscaleFilter);
 
-                graph.ReadBack(read.Value, readback.Value, RenderStage.Post);
+                graph.ReadBack(read.Value, readback.Value, RenderStages.Post);
                 SaveScreenshotAsync(readback.Value, saved.Path, width, height).FireAndForget();
             }
         }

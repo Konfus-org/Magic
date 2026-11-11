@@ -77,41 +77,22 @@ public readonly record struct GpuPass
 }
 
 /// <summary>
-/// The frame's stages: every pass of a stage runs after every pass of the stage before, whichever gem recorded it
-/// first, and within a stage in the order they were recorded.
+/// Where a pass runs in the frame: every pass of a lower <see cref="Order"/> runs before every pass of a higher one,
+/// whichever gem recorded it first, and passes of one order run in the order they were recorded. Core names the first
+/// and the last; a renderer names the stages between them.
 /// </summary>
-public enum RenderStage : byte
+public readonly record struct RenderStage(byte Order)
 {
     /// <summary>
     /// What the frame's CPU data goes up as: uploads, clears and acceleration structures, and what is worked out from
-    /// them before anything draws, such as the sky's tables.
+    /// them before anything draws.
     /// </summary>
-    Prepare,
-
-    /// <summary>
-    /// What the view sees: depth, the GBuffer and the glass targets.
-    /// </summary>
-    Geometry,
-
-    /// <summary>
-    /// What lights the view's surfaces: each tile's lights, shadows and indirect light.
-    /// </summary>
-    Light,
-
-    /// <summary>
-    /// The view's surfaces shaded into the picture.
-    /// </summary>
-    Shade,
-
-    /// <summary>
-    /// What finishes the picture, and its copy to the window or a screenshot.
-    /// </summary>
-    Post,
+    public static readonly RenderStage Prepare = new(0);
 
     /// <summary>
     /// What draws over the finished picture, as a debug UI does.
     /// </summary>
-    Overlay,
+    public static readonly RenderStage Overlay = new(byte.MaxValue);
 }
 
 /// <summary>

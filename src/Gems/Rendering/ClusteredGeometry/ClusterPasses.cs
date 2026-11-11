@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Linq;
 using System.Runtime.InteropServices;
 using Magic.Assets;
+using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
 using Magic.Graphics;
 using Magic.Utils;
@@ -251,7 +252,7 @@ internal sealed class ClusterPasses
 
         // Budget: last frame's count steers the frame's handoff and error threshold, then the counts start again.
         graph
-            .Compute("Budget clusters", _budgetShader, new GpuConstants(gpu.Frame.Id), RenderStage.Geometry)
+            .Compute("Budget clusters", _budgetShader, new GpuConstants(gpu.Frame.Id), RenderStages.Geometry)
             .Writes(gpu.Frame, counts.Value, budget.Value)
             .Dispatch(1, 1);
 
@@ -260,17 +261,17 @@ internal sealed class ClusterPasses
         uint across = (uint)Math.Min(gpu.InstanceCount, CullGroupsPerRow);
         uint down = (uint)Math.Max((gpu.InstanceCount + CullGroupsPerRow - 1) / CullGroupsPerRow, 1);
         graph
-            .Compute("Count clusters", _countShader, new GpuConstants(gpu.Frame.Id), RenderStage.Geometry)
+            .Compute("Count clusters", _countShader, new GpuConstants(gpu.Frame.Id), RenderStages.Geometry)
             .Reads(gpu.Frame, gpu.Instances, pools.Clusters, pools.Models, depthPyramid.Value)
             .Writes(counts.Value, instanceRows.Value)
             .Dispatch(across, down);
         graph
-            .Compute("Fit clusters", _fitShader, new GpuConstants(gpu.Frame.Id), RenderStage.Geometry)
+            .Compute("Fit clusters", _fitShader, new GpuConstants(gpu.Frame.Id), RenderStages.Geometry)
             .Reads(gpu.Frame)
             .Writes(counts.Value)
             .Dispatch(1, 1);
         graph
-            .Compute("Place clusters", _placeShader, new GpuConstants(gpu.Frame.Id), RenderStage.Geometry)
+            .Compute("Place clusters", _placeShader, new GpuConstants(gpu.Frame.Id), RenderStages.Geometry)
             .Reads(
                 gpu.Frame,
                 gpu.Instances,
@@ -289,7 +290,7 @@ internal sealed class ClusterPasses
 
         // Retest the list against the new pyramid, as many groups as the cull left in the retest arguments.
         graph
-            .Compute("Retest clusters", _retestShader, new GpuConstants(gpu.Frame.Id), RenderStage.Geometry)
+            .Compute("Retest clusters", _retestShader, new GpuConstants(gpu.Frame.Id), RenderStages.Geometry)
             .Reads(
                 gpu.Frame,
                 gpu.Instances,
@@ -338,7 +339,7 @@ internal sealed class ClusterPasses
                     "Resolve materials",
                     resolves[shader],
                     new GpuConstants(gpu.Frame.Id, (uint)shader),
-                    RenderStage.Geometry
+                    RenderStages.Geometry
                 )
                 .Reads(
                     gpu.Frame,
@@ -381,7 +382,7 @@ internal sealed class ClusterPasses
         ) =>
             DrawIndirect(
                 graph
-                    .Draw(name, shaders, targets, new GpuConstants(gpu.Frame.Id), RenderStage.Geometry)
+                    .Draw(name, shaders, targets, new GpuConstants(gpu.Frame.Id), RenderStages.Geometry)
                     .Reads(
                         gpu.Frame,
                         gpu.Instances,
@@ -405,7 +406,7 @@ internal sealed class ClusterPasses
                         _impostorShaders,
                         GetTargets(TargetLoad.Keep),
                         new GpuConstants(gpu.Frame.Id),
-                        RenderStage.Geometry
+                        RenderStages.Geometry
                     )
                     .Reads(gpu.Frame, gpu.Instances, pools.Impostors, pools.Models)
                     .Reads(gpu.HeapTextures.AsSpan())
@@ -436,7 +437,7 @@ internal sealed class ClusterPasses
                         DepthPyramidPasses[level],
                         _depthPyramidShader,
                         new GpuConstants(gpu.Frame.Id, (uint)level, picture.Id),
-                        RenderStage.Geometry
+                        RenderStages.Geometry
                     )
                     .Reads(gpu.Frame);
                 if (level == 0)

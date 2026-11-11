@@ -143,7 +143,7 @@ internal sealed class PixelEffects
                         "Fill effect level",
                         levelEntry,
                         new GpuConstants(gpu.Frame.Id, passTable.Value.Id, (uint)pass),
-                        RenderStage.Post
+                        RenderStages.Post
                     )
                     .Reads(surface)
                     .Reads(picture)
@@ -162,7 +162,7 @@ internal sealed class PixelEffects
                     "Apply effect",
                     apply,
                     new GpuConstants(gpu.Frame.Id, passTable.Value.Id, (uint)pass),
-                    RenderStage.Post
+                    RenderStages.Post
                 )
                 .Reads(surface)
                 .Reads(picture);
@@ -176,7 +176,7 @@ internal sealed class PixelEffects
 
         graph.Upload(passTable.Value, passes[..pass]);
         if (picture != gpu.Hdr)
-            graph.Blit(picture, gpu.Hdr, RenderStage.Post, TextureFilter.Linear);
+            graph.Blit(picture, gpu.Hdr, RenderStages.Post, TextureFilter.Linear);
     }
 
     private static TextureDescription GetTarget(string name, in GpuView gpu, int levels) =>

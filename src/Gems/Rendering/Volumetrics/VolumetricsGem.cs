@@ -160,13 +160,13 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
             ? [world.HitMaterials, gpu.Instances, gpu.Meshes]
             : [];
         graph
-            .Compute("Scatter air", _scatterShader, header, RenderStage.Light)
+            .Compute("Scatter air", _scatterShader, header, RenderStages.Light)
             .Reads(traced)
             .Reads(gpu.Frame, gpu.LightTable, history.Value)
             .Writes(scattering.Value)
             .DispatchOver(size.Width, size.Height, Slices);
         graph
-            .Compute("Integrate air", _integrateShader, header, RenderStage.Light)
+            .Compute("Integrate air", _integrateShader, header, RenderStages.Light)
             .Reads(gpu.Frame, scattering.Value)
             .Writes(air.Value)
             .DispatchOver(size.Width, size.Height);
@@ -182,7 +182,7 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
                     "Draw clouds",
                     _cloudShader,
                     new GpuConstants(gpu.Frame.Id, picture.Id, (uint)block, 0),
-                    RenderStage.Light
+                    RenderStages.Light
                 )
                 .Reads(gpu.Frame)
                 .Writes(picture)

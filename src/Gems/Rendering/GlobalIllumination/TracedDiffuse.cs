@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using Magic.Assets;
+using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
 using Magic.Graphics;
 using Magic.Utils;
@@ -58,19 +59,19 @@ internal sealed class TracedDiffuse(AssetManager assets)
         (int width, int height) = view.TracedSize;
         GpuConstants header = view.Header;
         graph
-            .Compute("Trace diffuse", _traceShader, header, RenderStage.Light)
+            .Compute("Trace diffuse", _traceShader, header, RenderStages.Light)
             .Reads(view.World.AsSpan())
             .Reads(view.Gpu.Frame, view.Constants, view.Gpu.Depth, view.Gpu.GBufferNormal)
             .Reads(grid.Probes, grid.Depth)
             .Writes(diffuse.Traced)
             .DispatchOver(width, height);
         graph
-            .Compute("Filter diffuse", _filterShader, header, RenderStage.Light)
+            .Compute("Filter diffuse", _filterShader, header, RenderStages.Light)
             .Reads(view.Gpu.Frame, view.Constants, view.Gpu.Depth, diffuse.Traced)
             .Writes(diffuse.Filtered)
             .DispatchOver(width, height);
         graph
-            .Compute("Blend diffuse", _blendShader, header, RenderStage.Light)
+            .Compute("Blend diffuse", _blendShader, header, RenderStages.Light)
             .Reads(
                 view.Gpu.Frame,
                 view.Constants,

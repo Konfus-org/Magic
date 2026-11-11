@@ -107,7 +107,7 @@ internal sealed class LightTiles(AssetManager assets)
     public void Record(RenderGraph graph, in GpuView view, in GpuConstants header)
     {
         graph
-            .Compute("Cull lights", _cullShader, header, RenderStage.Light)
+            .Compute("Cull lights", _cullShader, header, RenderStages.Light)
             .Reads(view.Frame, view.LightTable, view.Depth)
             .Writes(view.LightTiles)
             .Dispatch((uint)GetTiles(view.Width), (uint)GetTiles(view.Height));

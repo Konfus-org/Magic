@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Numerics;
 using Magic.Assets;
+using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
 using Magic.Graphics;
 using Magic.Utils;
@@ -154,29 +155,29 @@ internal sealed class Probes(AssetManager assets)
         GpuConstants header = view.Header;
         uint probeCount = grid.DimensionX * grid.DimensionY * grid.DimensionZ;
         graph
-            .Compute("Ask probe rays", _askShader, header, RenderStage.Light)
+            .Compute("Ask probe rays", _askShader, header, RenderStages.Light)
             .Reads(view.Gpu.Frame, view.Constants, grid.Probes, update.Variance)
             .Writes(update.RayCounts)
             .Dispatch(probeCount);
         graph
-            .Compute("Plan probe rays", _planShader, header, RenderStage.Light)
+            .Compute("Plan probe rays", _planShader, header, RenderStages.Light)
             .Reads(view.Gpu.Frame, view.Constants)
             .Writes(update.RayCounts, update.RayArguments)
             .Dispatch(1);
         graph
-            .Compute("List probe rays", _listShader, header, RenderStage.Light)
+            .Compute("List probe rays", _listShader, header, RenderStages.Light)
             .Reads(view.Constants, update.RayCounts)
             .Writes(update.RayList)
             .Dispatch(probeCount);
         graph
-            .Compute("Trace probes", _traceShader, header, RenderStage.Light)
+            .Compute("Trace probes", _traceShader, header, RenderStages.Light)
             .Reads(view.World.AsSpan())
             .Reads(view.Gpu.Frame, view.Constants, grid.Probes, update.RayList, update.RayCounts, grid.Depth)
             .Writes(update.Rays)
             .Indirect(update.RayArguments)
             .DispatchIndirect(update.RayArguments, 0);
         graph
-            .Compute("Blend probes", _blendShader, header, RenderStage.Light)
+            .Compute("Blend probes", _blendShader, header, RenderStages.Light)
             .Reads(view.Gpu.Frame, view.Constants, update.Rays, update.RayCounts)
             .Writes(grid.Probes, update.Variance, grid.Depth)
             .Dispatch(probeCount);

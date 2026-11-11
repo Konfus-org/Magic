@@ -16,8 +16,6 @@ namespace Magic.Graphics;
 /// </summary>
 public sealed class RenderGraph
 {
-    private static readonly RenderStage[] _stages = Enum.GetValues<RenderStage>();
-
     private readonly List<GpuPass> _passes = [];
 
     private readonly ImmutableArray<GpuUse>.Builder _uses = ImmutableArray.CreateBuilder<GpuUse>();
@@ -179,13 +177,24 @@ public sealed class RenderGraph
     {
         EndOpenPass();
         ImmutableArray<GpuPass>.Builder ordered = ImmutableArray.CreateBuilder<GpuPass>(_passes.Count);
-        foreach (RenderStage stage in _stages)
+        // Each turn takes the lowest stage not yet taken, then its passes in the order they were recorded.
+        int taken = -1;
+        while (ordered.Count < _passes.Count)
         {
+            int stage = byte.MaxValue;
             foreach (GpuPass pass in _passes)
             {
-                if (pass.Stage == stage)
+                if (pass.Stage.Order > taken && pass.Stage.Order < stage)
+                    stage = pass.Stage.Order;
+            }
+
+            foreach (GpuPass pass in _passes)
+            {
+                if (pass.Stage.Order == stage)
                     ordered.Add(pass);
             }
+
+            taken = stage;
         }
 
         _passes.Clear();

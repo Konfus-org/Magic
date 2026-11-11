@@ -178,7 +178,7 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
         // Trace each traced pixel's shadows from the view's surfaces.
         GpuConstants header = new(view.Frame.Id, constants.Value.Id);
         graph
-            .Compute("Trace shadows", _traceShader, header, RenderStage.Light)
+            .Compute("Trace shadows", _traceShader, header, RenderStages.Light)
             .Reads(
                 view.Frame,
                 constants.Value,
@@ -197,7 +197,7 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
         // Denoise: classify the sun's tiles, filter once or twice, as the settings say, then once more as the mask blends
         // with last frame's.
         graph
-            .Compute("Classify shadows", _classifyShader, header, RenderStage.Light)
+            .Compute("Classify shadows", _classifyShader, header, RenderStages.Light)
             .Reads(
                 view.Frame,
                 constants.Value,
@@ -219,7 +219,7 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
             (GpuTexture source, GpuTexture output) =
                 pass == 0 ? (sunBlend.Value, sunHistory.Value) : (sunHistory.Value, sunBlend.Value);
             graph
-                .Compute(_filterPassNames[pass], _filterShader, header with { W = (uint)pass }, RenderStage.Light)
+                .Compute(_filterPassNames[pass], _filterShader, header with { W = (uint)pass }, RenderStages.Light)
                 .Reads(view.Frame, constants.Value, tileStates.Value, view.Depth, view.GBufferNormal, source)
                 .Writes(output)
                 .DispatchOver(width, height);
@@ -235,7 +235,7 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
                 {
                     W = filtered.Id,
                 },
-                RenderStage.Light
+                RenderStages.Light
             )
             .Reads(
                 view.Frame,
@@ -255,7 +255,7 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
         if (!isPictureSize)
         {
             graph
-                .Compute("Upsample shadows", _upsampleShader, header, RenderStage.Light)
+                .Compute("Upsample shadows", _upsampleShader, header, RenderStages.Light)
                 .Reads(
                     view.Frame,
                     constants.Value,

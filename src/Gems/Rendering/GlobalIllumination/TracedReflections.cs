@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using Magic.Assets;
+using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
 using Magic.Graphics;
 using Magic.Utils;
@@ -72,14 +73,14 @@ internal sealed class TracedReflections(AssetManager assets)
         (int width, int height) = view.TracedSize;
         GpuConstants header = view.Header;
         graph
-            .Compute("Trace reflections", _traceShader, header, RenderStage.Light)
+            .Compute("Trace reflections", _traceShader, header, RenderStages.Light)
             .Reads(view.World.AsSpan())
             .Reads(view.Gpu.Frame, view.Constants, view.Gpu.Depth, view.Gpu.GBufferNormal, view.Gpu.GBufferSurface)
             .Reads(grid.Probes, grid.Depth)
             .Writes(reflections.Traced, reflections.Rays)
             .DispatchOver(width, height);
         graph
-            .Compute("Resolve reflections", _resolveShader, header, RenderStage.Light)
+            .Compute("Resolve reflections", _resolveShader, header, RenderStages.Light)
             .Reads(
                 view.Gpu.Frame,
                 view.Constants,
@@ -92,7 +93,7 @@ internal sealed class TracedReflections(AssetManager assets)
             .Writes(reflections.Resolved, reflections.Distance)
             .DispatchOver(width, height);
         graph
-            .Compute("Blend reflections", _blendShader, header, RenderStage.Light)
+            .Compute("Blend reflections", _blendShader, header, RenderStages.Light)
             .Reads(
                 view.Gpu.Frame,
                 view.Constants,
