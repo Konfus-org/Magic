@@ -6,7 +6,8 @@ using Magic.Utils;
 namespace Magic.Debugging;
 
 /// <summary>
-/// Provides static methods and utilities for logging messages at various severity levels and managing log sinks.
+/// Logs from any thread: each line goes to the terminal and to each sink a gem registers. The last lines are kept, so
+/// a sink that registers late and a crash file get them too.
 /// </summary>
 public static class Log
 {

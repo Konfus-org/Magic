@@ -62,12 +62,6 @@ internal static class MetricsLog
         }
     }
 
-    private static bool IsLogged(Instrument instrument, string category) =>
-        (
-            instrument.Meter.Name.StartsWith("Magic.", StringComparison.Ordinal)
-            || instrument.Meter.Name == "System.Runtime"
-        ) && (category == All || instrument.Name.Split('.').Contains(category));
-
     private static string Describe(string name, in Sum sum, double seconds)
     {
         string unit = sum.Instrument.Unit ?? string.Empty;
@@ -128,7 +122,10 @@ internal static class MetricsLog
             {
                 InstrumentPublished = (instrument, listening) =>
                 {
-                    if (IsLogged(instrument, category))
+                    // The Magic.* meters and .NET's runtime, each instrument with the category as a part of its name.
+                    string meter = instrument.Meter.Name;
+                    bool isOurs = meter.StartsWith("Magic.", StringComparison.Ordinal) || meter == "System.Runtime";
+                    if (isOurs && (category == All || instrument.Name.Split('.').Contains(category)))
                         listening.EnableMeasurementEvents(instrument);
                 },
             };
