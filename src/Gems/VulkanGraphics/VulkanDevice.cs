@@ -37,6 +37,8 @@ internal sealed unsafe class VulkanDevice : IDisposable
 
     private const string ImageAtomicInt64Extension = "VK_EXT_shader_image_atomic_int64";
 
+    private const string MemoryBudgetExtension = "VK_EXT_memory_budget";
+
     /// <summary>
     /// The Vulkan loader's variables for which drivers it loads: the ones it leaves out, by their manifests' names, and
     /// the only ones it loads.
@@ -118,6 +120,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
         TimestampPeriod = picked.TimestampPeriod;
         InstanceApi.vkGetPhysicalDeviceMemoryProperties(PhysicalDevice, out VkPhysicalDeviceMemoryProperties memory);
         Memory = memory;
+        HasMemoryBudget = picked.Extensions.Contains(MemoryBudgetExtension);
         Device = CreateDevice(picked);
         Api = new VkDeviceApi(InstanceApi, Device);
         Api.vkGetDeviceQueue(QueueFamily, 0, out VkQueue queue);
@@ -173,6 +176,12 @@ internal sealed unsafe class VulkanDevice : IDisposable
 
     public bool HasDebugUtils { get; }
 
+    /// <summary>
+    /// Whether the driver says how much memory the process holds in each heap, through
+    /// <see cref="GetDeviceMemoryUsage"/>.
+    /// </summary>
+    public bool HasMemoryBudget { get; }
+
     public void Dispose()
     {
         Api.vkDeviceWaitIdle();
@@ -201,6 +210,25 @@ internal sealed unsafe class VulkanDevice : IDisposable
         }
 
         return -1;
+    }
+
+    /// <summary>
+    /// Bytes of device-local memory the driver says the process holds now: the resources, the window's images and the
+    /// driver's own. Only with <see cref="HasMemoryBudget"/>.
+    /// </summary>
+    public long GetDeviceMemoryUsage()
+    {
+        VkPhysicalDeviceMemoryBudgetPropertiesEXT budget = new();
+        VkPhysicalDeviceMemoryProperties2 properties = new() { pNext = &budget };
+        InstanceApi.vkGetPhysicalDeviceMemoryProperties2(PhysicalDevice, &properties);
+        long bytes = 0;
+        for (int i = 0; i < properties.memoryProperties.memoryHeapCount; i++)
+        {
+            if (properties.memoryProperties.memoryHeaps[i].flags.HasFlag(VkMemoryHeapFlags.DeviceLocal))
+                bytes += (long)budget.heapUsage[i];
+        }
+
+        return bytes;
     }
 
     [UnmanagedCallersOnly]
@@ -551,6 +579,9 @@ internal sealed unsafe class VulkanDevice : IDisposable
 
         if (pick.Features.HasImageAtomic64)
             extensions.Add(ImageAtomicInt64Extension);
+
+        if (HasMemoryBudget)
+            extensions.Add(MemoryBudgetExtension);
 
         using NativeStrings extensionNames = new(extensions);
         VkPhysicalDeviceMeshShaderFeaturesEXT mesh = new() { meshShader = true, taskShader = true };

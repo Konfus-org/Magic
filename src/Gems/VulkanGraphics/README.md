@@ -28,9 +28,12 @@ compiler.
   mode, which can tear, where the surface has it, else in mailbox mode. Setting it remakes the window's images. The
   window has as few images as its surface takes, and two at least, with one more in mailbox mode.
 - Its resources and frames are the render thread's, and its members throw on any other.
-- It publishes each pass's and each frame's time on the GPU, and the device memory it holds and has, on its
-  `Magic.Gems.VulkanGraphics` meter, whose tags name the Vulkan version, the GPU, its kind and its driver.
-- Each frame in flight uploads through a staging ring of host memory, which the memory gauge counts. A ring grows for
+- It publishes each pass's and each frame's time on the GPU, and the memory it holds and the GPU has, on its
+  `Magic.Gems.VulkanGraphics` meter, whose tags name the Vulkan version, the GPU, its kind and its driver. The memory
+  in use is what the driver says the process holds in the GPU's own heaps, the window's images and the driver's own
+  memory included, where the driver has `VK_EXT_memory_budget`; elsewhere it is what the resources hold, and its
+  `source` tag says which. The allocated gauge is what the resources hold either way.
+- Each frame in flight uploads through a staging ring of host memory, which the allocated gauge counts. A ring grows for
   a big upload, such as a world's models arriving, and shrinks back a few seconds after uploads are small again.
 - A Debug build turns on the Khronos validation layer when the Vulkan SDK is installed, and logs what it reports.
 - Headless, there is no window image: `WindowTarget` is none, and everything else works the same, on a software

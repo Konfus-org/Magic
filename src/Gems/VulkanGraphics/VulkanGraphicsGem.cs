@@ -36,6 +36,12 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IHasSettings<VulkanG
     private readonly VulkanSwapchain? _swapchain;
     private readonly Meter _meter;
     private readonly Gauge<long> _memoryUsage;
+
+    /// <summary>
+    /// Where <see cref="_memoryUsage"/> comes from: the driver's heaps, or the resources alone where it says nothing.
+    /// </summary>
+    private readonly KeyValuePair<string, object?> _memorySource;
+    private readonly Gauge<long> _memoryAllocated;
     private readonly Gauge<long> _memoryLimit;
 
     /// <summary>
@@ -66,7 +72,16 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IHasSettings<VulkanG
         _memoryUsage = _meter.CreateGauge<long>(
             "magic.gems.vulkan_graphics.gpu.memory.usage",
             "By",
-            "Device memory the resources hold."
+            "Device memory the process holds, as the driver says, else as the resources hold; its source tag says which."
+        );
+        _memorySource = new(
+            "magic.gems.vulkan_graphics.gpu.memory.source",
+            _device.HasMemoryBudget ? "driver" : "resources"
+        );
+        _memoryAllocated = _meter.CreateGauge<long>(
+            "magic.gems.vulkan_graphics.gpu.memory.allocated",
+            "By",
+            "Memory the resources hold, host staging included."
         );
         _memoryLimit = _meter.CreateGauge<long>(
             "magic.gems.vulkan_graphics.gpu.memory.limit",
@@ -256,8 +271,16 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IHasSettings<VulkanG
         // The next frame: what the GPU is done with finished, so a readback awaited completes whether or not anything
         // draws, then its commands begun and the window's next image taken.
         _frames.Poll();
-        _memoryUsage.Record(_resources.MemoryBytes);
+        _memoryAllocated.Record(_resources.MemoryBytes);
         _memoryLimit.Record(_device.Limits.DeviceMemoryBytes);
+
+        // The driver is asked only while something listens.
+        if (_memoryUsage.Enabled)
+        {
+            long usage = _device.HasMemoryBudget ? _device.GetDeviceMemoryUsage() : _resources.MemoryBytes;
+            _memoryUsage.Record(usage, _memorySource);
+        }
+
         BeginFrame();
     }
 
