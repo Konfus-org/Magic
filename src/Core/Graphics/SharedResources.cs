@@ -1,3 +1,5 @@
+using static Magic.Graphics.GpuDescriptions;
+
 namespace Magic.Graphics;
 
 /// <summary>
@@ -45,11 +47,16 @@ public static class SharedResources
     /// <summary>
     /// The sky's tables: its transmittance, multiple scattering and view.
     /// </summary>
-    public static readonly TextureDescription SkyTransmittance = GetTexture("Sky transmittance", 256, 64);
+    public static readonly TextureDescription SkyTransmittance = GetTexture("Sky transmittance", 256, 64, Rgba16Float);
 
-    public static readonly TextureDescription SkyMultiScattering = GetTexture("Sky multi-scattering", 32, 32);
+    public static readonly TextureDescription SkyMultiScattering = GetTexture(
+        "Sky multi-scattering",
+        32,
+        32,
+        Rgba16Float
+    );
 
-    public static readonly TextureDescription SkyView = GetTexture("Sky view", 192, 108);
+    public static readonly TextureDescription SkyView = GetTexture("Sky view", 192, 108, Rgba16Float);
 
     /// <summary>
     /// The view's depth and GBuffer at the picture's size.
@@ -68,28 +75,7 @@ public static class SharedResources
         GpuFormat.R8G8B8A8Unorm
     );
 
-    public static readonly TextureDescription Velocity = GetTexture("Velocity", 0, 0);
+    public static readonly TextureDescription Velocity = GetTexture("Velocity", 0, 0, Rgba16Float);
 
-    private static BufferDescription GetBuffer(string name, long bytes) =>
-        new()
-        {
-            Bytes = bytes,
-            Usage = BufferUsages.Storage,
-            Name = name,
-        };
-
-    private static TextureDescription GetTexture(
-        string name,
-        int width,
-        int height,
-        GpuFormat format = GpuFormat.R16G16B16A16Sfloat
-    ) =>
-        new()
-        {
-            Width = width,
-            Height = height,
-            Format = format,
-            Usage = TextureUsages.Storage | TextureUsages.Sampled,
-            Name = name,
-        };
+    private const GpuFormat Rgba16Float = GpuFormat.R16G16B16A16Sfloat;
 }
