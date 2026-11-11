@@ -62,7 +62,8 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
     public ShadowMask? Render(in Frame frame, RenderGraph graph, in TracedInput input)
     {
         // Off, the history starts afresh once it is back on.
-        if (!Settings.IsTracedShadowsOn)
+        TracedShadowsSettings settings = Settings;
+        if (!settings.IsTracedShadowsOn)
         {
             _traced = default;
 
@@ -77,7 +78,7 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
         // The masks and the denoiser's targets at the traced size, this frame's and last frame's mask and moments by
         // the frame's index, and the mask and tint shading reads at the view's size.
         GpuView view = input.View;
-        (int width, int height) = view.Scaled(Settings.ShadowScale);
+        (int width, int height) = view.Scaled(settings.ShadowScale);
         long tiles = (long)((width + SunTileWidth - 1) / SunTileWidth) * ((height + SunTileHeight - 1) / SunTileHeight);
         long maskBytes = (long)width * height * BytesPerPixel;
         long groups =
@@ -97,12 +98,12 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
         // white, so no tint is asked for and the graph frees the last one's.
         bool hasGlass = !view.GlassDepth.IsNone;
         Result<GpuTexture> tracedTint = hasGlass
-            ? Traced("Traced sun tint", GpuFormat.R16G16B16A16Sfloat)
+            ? GetTracedTexture("Traced sun tint", GpuFormat.R16G16B16A16Sfloat)
             : Result.Success(GpuTexture.None);
-        Result<GpuTexture> sunBlend = Traced("Sun shadow blend", GpuFormat.R16G16Sfloat);
-        Result<GpuTexture> sunHistory = Traced("Sun shadow history", GpuFormat.R16G16Sfloat);
-        Result<GpuTexture> moments = Traced(_momentNames[written], GpuFormat.R16G16Sfloat);
-        Result<GpuTexture> previousMoments = Traced(_momentNames[1 - written], GpuFormat.R16G16Sfloat);
+        Result<GpuTexture> sunBlend = GetTracedTexture("Sun shadow blend", GpuFormat.R16G16Sfloat);
+        Result<GpuTexture> sunHistory = GetTracedTexture("Sun shadow history", GpuFormat.R16G16Sfloat);
+        Result<GpuTexture> moments = GetTracedTexture(_momentNames[written], GpuFormat.R16G16Sfloat);
+        Result<GpuTexture> previousMoments = GetTracedTexture(_momentNames[1 - written], GpuFormat.R16G16Sfloat);
         // Traced at the picture's size, the traced mask and tint are what shading reads.
         bool isPictureSize = (width, height) == (view.Width, view.Height);
         Result<GpuBuffer> mask = isPictureSize
@@ -194,7 +195,7 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
             .DispatchOver(width, height);
 
         // Each pass reads the last one's output; the first pass's is what the next frame blends with.
-        int passes = Math.Clamp(Settings.ShadowFilterPasses, 1, _filterPassNames.Length);
+        int passes = Math.Clamp(settings.ShadowFilterPasses, 1, _filterPassNames.Length);
         GpuTexture filtered = passes == 1 ? sunHistory.Value : sunBlend.Value;
         for (int pass = 0; pass < passes; pass++)
         {
@@ -224,28 +225,29 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
             )
             .Writes(tracedMask.Value)
             .DispatchOver(width, height);
-        if (isPictureSize)
-            return new ShadowMask(mask.Value, sunTint.Value);
 
         // The mask and the sun's tint at the picture's size, each pixel read from the traced pixels on its surface.
-        graph
-            .Compute("Upsample shadows", _upsampleShader, header, RenderStage.Light)
-            .Reads(
-                view.Frame,
-                constants.Value,
-                view.Depth,
-                view.GBufferNormal,
-                view.GBufferSurface,
-                tracedMask.Value,
-                tracedTint.Value
-            )
-            .Writes(mask.Value, sunTint.Value)
-            .DispatchOver(view.Width, view.Height);
+        if (!isPictureSize)
+        {
+            graph
+                .Compute("Upsample shadows", _upsampleShader, header, RenderStage.Light)
+                .Reads(
+                    view.Frame,
+                    constants.Value,
+                    view.Depth,
+                    view.GBufferNormal,
+                    view.GBufferSurface,
+                    tracedMask.Value,
+                    tracedTint.Value
+                )
+                .Writes(mask.Value, sunTint.Value)
+                .DispatchOver(view.Width, view.Height);
+        }
 
         return new ShadowMask(mask.Value, sunTint.Value);
 
         // A texture at the traced size.
-        Result<GpuTexture> Traced(string name, GpuFormat format) =>
+        Result<GpuTexture> GetTracedTexture(string name, GpuFormat format) =>
             graph.Texture(GpuDescriptions.GetTexture(name, width, height, format));
     }
 }

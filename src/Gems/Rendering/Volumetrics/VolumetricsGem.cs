@@ -50,7 +50,7 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
     private static readonly string[] _scatteringNames = ["Air scattering 0", "Air scattering 1"];
 
     private readonly IEcs _ecs;
-    private readonly Mailbox<AirInputs> _inputs = new();
+    private readonly Mailbox<EcsSnapshot<Weather>> _weather = new();
     private readonly ShaderEntry _scatterShader;
     private readonly ShaderEntry _integrateShader;
     private readonly ShaderEntry _cloudShader;
@@ -80,14 +80,12 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
     public VolumetricsSettings Settings { get; set; }
 
     /// <summary>
-    /// Publishes the settings and the world's weather for <see cref="Render"/>.
+    /// Publishes the world's weather for <see cref="Render"/>.
     /// </summary>
     public void LateUpdate(in Frame frame)
     {
-        AirInputs back = _inputs.Back;
-        back.Settings = Settings;
-        _ecs.Snapshot(back.Weather);
-        _inputs.Publish();
+        _ecs.Snapshot(_weather.Back);
+        _weather.Publish();
     }
 
     /// <summary>
@@ -96,9 +94,10 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
     /// </summary>
     public Air? Render(in Frame frame, RenderGraph graph, in VolumetricsInput input)
     {
+        VolumetricsSettings settings = Settings;
         bool isBuilt = graph.GetState(_scatterShader, _integrateShader) == GpuState.Ready;
         if (
-            _inputs.TakeNewest() is not { Weather.First: [var weather, ..], Settings: var settings }
+            _weather.TakeNewest() is not { First: [var weather, ..] }
             || weather is { FogDensity: <= 0, CloudCover: <= 0 }
             || !isBuilt
         )
@@ -208,14 +207,4 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
             Usage = TextureUsages.Storage | TextureUsages.Sampled,
             Name = name,
         };
-
-    /// <summary>
-    /// What the game thread hands a frame: the settings and the world's weather, copied as its frame ends.
-    /// </summary>
-    private sealed class AirInputs
-    {
-        public VolumetricsSettings Settings { get; set; } = new();
-
-        public EcsSnapshot<Weather> Weather { get; } = new();
-    }
 }
