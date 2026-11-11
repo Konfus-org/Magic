@@ -23,6 +23,25 @@ namespace Magic.Projects;
 internal static class GemRegistry
 {
     /// <summary>
+    /// What the host takes itself and so no gem provides: any number of gems can be sinks or hook into domain loading,
+    /// and the assets say which gem reads or writes a type. A generic contract is held by its definition.
+    /// </summary>
+    private static readonly HashSet<Type> _hostContracts =
+    [
+        typeof(IGem),
+        typeof(IDisposable),
+        typeof(ILogSink),
+        typeof(IHookIntoDomainLoading),
+        typeof(IRender),
+        typeof(IAssetImporter<>),
+        typeof(IAssetExporter<>),
+        typeof(IHasSettings<>),
+        typeof(IRender<,>),
+        typeof(IRenderFrom<>),
+        typeof(IRenderInto<>),
+    ];
+
+    /// <summary>
     /// Finds the gems <paramref name="listed"/> beside Magic and registers each with <paramref name="services"/>, which
     /// already holds what the host provides: the gems to make, each after the gems its code references and its
     /// constructor takes. A name listed twice, the wrong version, a referenced gem not listed, an interface already
@@ -61,31 +80,25 @@ internal static class GemRegistry
             named.Add((name, at < 0 ? string.Empty : listing[(at + 1)..]));
         }
 
-        // Load each and look at what it holds.
-        List<GemInfo> found = [];
-        foreach ((string name, string wanted) in named)
-        {
-            Result<GemInfo> gem = Find(files, name, contexts);
-            if (!gem.Ok)
-            {
-                Log.Error(gem.Error);
-                continue;
-            }
-
-            if (wanted.Length > 0 && !IsVersion(gem.Value.Version, wanted))
-            {
-                Log.Error($"Gem {name} is {gem.Value.Version.ToString(3)}, but the project asks for {wanted}.");
-                continue;
-            }
-
-            found.Add(gem.Value);
-        }
-
-        // Register each with the services as its class and every interface it provides.
+        // Load each, look at what it holds, and register it with the services as its class and every interface it provides.
         List<GemInfo> registered = [];
         Dictionary<Type, GemInfo> providers = [];
-        foreach (GemInfo gem in found)
+        foreach ((string name, string wanted) in named)
         {
+            Result<GemInfo> found = Find(files, name, contexts);
+            if (!found.Ok)
+            {
+                Log.Error(found.Error);
+                continue;
+            }
+
+            GemInfo gem = found.Value;
+            if (wanted.Length > 0 && !IsVersion(gem.Version, wanted))
+            {
+                Log.Error($"Gem {name} is {gem.Version.ToString(3)}, but the project asks for {wanted}.");
+                continue;
+            }
+
             if (FindClash(services, gem) is { } clash)
             {
                 Log.Error(clash);
@@ -190,9 +203,18 @@ internal static class GemRegistry
     private static Result<GemInfo> Find(IFileSystem files, string name, Dictionary<string, GemLoadContext> contexts)
     {
         string path = GetPath(files, name);
-        Result<Assembly> loaded = LoadAssembly(contexts[name], path, name);
+        Result<Assembly> loaded;
+        try
+        {
+            loaded = contexts[name].LoadGem();
+        }
+        catch (Exception ex) when (ex is BadImageFormatException or FileLoadException or IOException)
+        {
+            loaded = Result.Failure(ex.Message);
+        }
+
         if (!loaded.Ok)
-            return Result.Failure(loaded.Error);
+            return Result.Failure($"Gem {name} could not be loaded from {path}: {loaded.Error}");
 
         // An assembly it references named like a listed gem is that gem; one named like a gem beside Magic that it doesn't
         // carry in its folder is a gem the project must list.
@@ -228,21 +250,10 @@ internal static class GemRegistry
         if (constructors != 1)
             return Result.Failure($"Gem {name}: {gem.Name} must have one public constructor; it has {constructors}.");
 
-        // What the host takes itself isn't provided, so any number of gems can be sinks or hook into domain loading, and
-        // the assets say which gem reads or writes a type.
         List<Type> provides = [];
         foreach (Type contract in gem.GetInterfaces())
         {
-            if (contract.IsGenericType && IsHostContract(contract.GetGenericTypeDefinition()))
-                continue;
-
-            bool isHostTaken =
-                contract == typeof(IGem)
-                || contract == typeof(IDisposable)
-                || contract == typeof(ILogSink)
-                || contract == typeof(IHookIntoDomainLoading)
-                || contract == typeof(IRender);
-            if (!isHostTaken)
+            if (!_hostContracts.Contains(contract.IsGenericType ? contract.GetGenericTypeDefinition() : contract))
                 provides.Add(contract);
         }
 
@@ -267,34 +278,6 @@ internal static class GemRegistry
                 contexts[name]
             )
         );
-    }
-
-    /// <summary>
-    /// Whether a gem implementing <paramref name="contract"/> hands it to the host, rather than provide it to other gems.
-    /// </summary>
-    private static bool IsHostContract(Type contract) =>
-        contract == typeof(IAssetImporter<>)
-        || contract == typeof(IHasSettings<>)
-        || contract == typeof(IAssetExporter<>)
-        || contract == typeof(IRender<,>)
-        || contract == typeof(IRenderFrom<>)
-        || contract == typeof(IRenderInto<>);
-
-    /// <summary>
-    /// The assembly at <paramref name="path"/>, loaded from its file into <paramref name="context"/>.
-    /// </summary>
-    private static Result<Assembly> LoadAssembly(GemLoadContext context, string path, string name)
-    {
-        try
-        {
-            Result<Assembly> loaded = context.LoadGem();
-
-            return loaded.Ok ? loaded : Result.Failure($"Gem {name} could not be loaded from {path}: {loaded.Error}");
-        }
-        catch (Exception ex) when (ex is BadImageFormatException or FileLoadException or IOException)
-        {
-            return Result.Failure($"Gem {name} could not be loaded from {path}: {ex.Message}");
-        }
     }
 
     /// <summary>
