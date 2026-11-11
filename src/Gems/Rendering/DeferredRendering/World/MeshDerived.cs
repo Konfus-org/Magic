@@ -9,7 +9,7 @@ namespace Magic.DeferredRendering.World;
 /// as the GPU reads them, one mesh after another, and their triangles as indices into them, which rays and every
 /// renderer draw. The renderer adds where it put them in the pools.
 /// </summary>
-public sealed class MeshDerived
+internal sealed class MeshDerived
 {
     public required ImmutableArray<GpuVertex> Vertices { get; init; }
 

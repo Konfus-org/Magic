@@ -3,7 +3,6 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Numerics;
-using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.Debugging;
 using Magic.DeferredRendering.View;
@@ -68,25 +67,14 @@ internal sealed class GpuResources(
     private readonly ModelPlace[] _models = new ModelPlace[ModelCapacity];
 
     /// <summary>
-    /// Each model asked for and not evicted, by its id, made or not, with when it was last asked, in
-    /// <see cref="Environment.TickCount64"/> milliseconds.
+    /// Each model asked for and not evicted, by its id.
     /// </summary>
-    private readonly Dictionary<ulong, long> _askedModels = [];
-
-    private readonly Dictionary<ulong, ResidentModel> _residentModels = [];
-
-    private readonly HashSet<ulong> _failedModels = [];
-
-    /// <summary>
-    /// The models this frame's <see cref="Prepare"/> placed in the pools, to copy up once the pools are asked for at
-    /// their size.
-    /// </summary>
-    private readonly List<(MeshDerived Made, ResidentModel Where)> _placedModels = [];
+    private readonly Dictionary<ulong, ModelEntry> _modelEntries = [];
 
     /// <summary>
     /// The models made since the last frame, by their id with their name, which the next <see cref="Prepare"/> settles.
     /// </summary>
-    private readonly List<(ulong Model, string Name, MeshDerived Made)> _madeModels = [];
+    private readonly List<(ulong Model, string Name, MeshDerived Made, ModelEntry Entry)> _madeModels = [];
 
     // 2 MiB of vertices and 1 MiB of indices at the start; each grows with the scene.
     private readonly BufferPool _vertices = new(GpuDescriptions.GetBuffer("Vertex pool", 0), GpuVertex.Bytes, 1 << 16);
@@ -176,12 +164,68 @@ internal sealed class GpuResources(
             Meshes = meshes.Value;
         }
 
-        foreach ((ulong model, string name, MeshDerived made) in _madeModels)
+        // Each model made takes ranges of the pools, which grow to hold it, and of the mesh table, an index and its row
+        // of the model table; the failure model when the model table is full. One placed in a frame whose pools failed
+        // is placed already.
+        foreach ((ulong model, string name, MeshDerived made, ModelEntry entry) in _madeModels)
         {
-            Place(model, name, made);
+            if (entry.State != GpuState.Loading)
+                continue;
+
+            SettledModels++;
+            if (!_modelRows.CanAllocate(1))
+            {
+                Log.Error($"{name} is drawn as the failure model: the model table is full.");
+                entry.State = GpuState.Failed;
+
+                continue;
+            }
+
+            ResidentModel where = new(
+                (uint)_vertices.Allocate(made.Vertices.Length),
+                (uint)made.Vertices.Length,
+                (uint)_indices.Allocate(made.Indices.Length),
+                (uint)made.Indices.Length,
+                made.BoundsCenter,
+                made.BoundsRadius,
+                (uint)_modelRows.Allocate(1)
+            );
+
+            // Its meshes as rays see them, leaving out a mesh with no triangles, take a range of the mesh table on a
+            // GPU that traces rays and while one holds them; with none, rays pass through it.
+            ImmutableArray<(GpuMesh Mesh, uint Triangles)>.Builder meshes = ImmutableArray.CreateBuilder<(
+                GpuMesh Mesh,
+                uint Triangles
+            )>();
+            for (int i = 0; i < made.Meshes.Length && !Meshes.IsNone; i++)
+            {
+                GpuMesh mesh = made.Meshes[i];
+                uint end = i + 1 < made.Meshes.Length ? made.Meshes[i + 1].IndexOffset : (uint)made.Indices.Length;
+                uint triangles = (end - mesh.IndexOffset) / 3;
+                if (triangles > 0)
+                    meshes.Add((mesh with { IndexOffset = where.IndexOffset + mesh.IndexOffset }, triangles));
+            }
+
+            if (!_meshRanges.CanAllocate(meshes.Count))
+                meshes.Clear();
+
+            // An arrival is a use, so a model that took longer to make than it may go unused is copied up before it
+            // can be evicted.
+            entry.Asked = Environment.TickCount64;
+            entry.Where = where;
+            entry.State = GpuState.Ready;
+            _models[where.ModelIndex] = new ModelPlace(
+                new Handle<Model>(model),
+                where.VertexOffset,
+                where.VertexCount,
+                made.BoundsMin,
+                made.BoundsMax,
+                meshes.Count == 0 ? 0 : (uint)_meshRanges.Allocate(meshes.Count),
+                meshes.ToImmutable()
+            );
+            Log.Info($"{name}: {made.Vertices.Length} vertices, {made.Indices.Length / 3} triangles.");
         }
 
-        _madeModels.Clear();
         Result<GpuBuffer> vertices = _vertices.GetBuffer(graph);
         if (!vertices.Ok)
             return Result.Failure(vertices.Error);
@@ -193,9 +237,14 @@ internal sealed class GpuResources(
 
         IndexPool = indices.Value;
 
-        // Each placed model copied up, with its meshes into the mesh table where it has a range of it.
-        foreach ((MeshDerived made, ResidentModel where) in _placedModels)
+        // Each placed model copied up, now that the pools are asked for at their size, with its meshes into the mesh
+        // table where it has a range of it.
+        foreach ((_, _, MeshDerived made, ModelEntry entry) in _madeModels)
         {
+            if (entry.State != GpuState.Ready)
+                continue;
+
+            ResidentModel where = entry.Where;
             graph.Upload(VertexPool, made.Vertices.AsSpan(), (ulong)where.VertexOffset * GpuVertex.Bytes);
 
             // Indices point into the whole pool.
@@ -224,7 +273,7 @@ internal sealed class GpuResources(
             }
         }
 
-        _placedModels.Clear();
+        _madeModels.Clear();
 
         return Result.Success();
     }
@@ -241,9 +290,9 @@ internal sealed class GpuResources(
     {
         long before = frameStart - (keepSec * 1000L);
         bool hasUnused = false;
-        foreach (ulong id in _residentModels.Keys)
+        foreach (ModelEntry entry in _modelEntries.Values)
         {
-            hasUnused |= IsUnused(id, before);
+            hasUnused |= entry.State == GpuState.Ready && entry.Asked < before;
         }
 
         if (!hasUnused)
@@ -255,11 +304,12 @@ internal sealed class GpuResources(
                 Get(renderer.Model);
         }
 
-        foreach ((ulong id, ResidentModel where) in _residentModels)
+        foreach ((ulong id, ModelEntry entry) in _modelEntries)
         {
-            if (!IsUnused(id, before))
+            if (entry.State != GpuState.Ready || entry.Asked >= before)
                 continue;
 
+            ResidentModel where = entry.Where;
             ModelPlace place = _models[where.ModelIndex];
             _vertices.Free((int)where.VertexOffset, (int)where.VertexCount);
             _indices.Free((int)where.IndexOffset, (int)where.IndexCount);
@@ -268,8 +318,7 @@ internal sealed class GpuResources(
 
             _modelRows.Free((int)where.ModelIndex, 1);
             _models[where.ModelIndex] = default;
-            _residentModels.Remove(id);
-            _askedModels.Remove(id);
+            _modelEntries.Remove(id);
             Log.Info(
                 $"{assets.GetPath(new Handle<Model>(id)) ?? $"model {id}"} left the GPU: nothing asked for it in {keepSec} s."
             );
@@ -380,21 +429,25 @@ internal sealed class GpuResources(
     /// </summary>
     public ResidentModel? Get(Handle<Model> model)
     {
-        if (_failedModels.Contains(model.Id))
+        if (HasFailed(model))
         {
             Handle<Model> failure = assets.GetFailure<Model, Model>();
-            if (failure == Handle<Model>.None || _failedModels.Contains(failure.Id))
+            if (failure == Handle<Model>.None || HasFailed(failure))
                 return null;
 
             return Get(failure) is { } stand ? stand with { IsFailure = true } : null;
         }
 
-        ref long asked = ref CollectionsMarshal.GetValueRefOrAddDefault(_askedModels, model.Id, out bool wasAsked);
-        asked = Environment.TickCount64;
-        if (!wasAsked)
-            LoadAsync(model).FireAndForget();
+        if (!_modelEntries.TryGetValue(model.Id, out ModelEntry? entry))
+        {
+            entry = new ModelEntry();
+            _modelEntries[model.Id] = entry;
+            LoadAsync(model, entry).FireAndForget();
+        }
 
-        return _residentModels.TryGetValue(model.Id, out ResidentModel resident) ? resident : null;
+        entry.Asked = Environment.TickCount64;
+
+        return entry.State == GpuState.Ready ? entry.Where : null;
     }
 
     /// <summary>
@@ -403,7 +456,7 @@ internal sealed class GpuResources(
     /// </summary>
     public bool HasArrived(Handle<Model> model)
     {
-        if (_residentModels.ContainsKey(model.Id))
+        if (_modelEntries.GetValueOrDefault(model.Id)?.State == GpuState.Ready)
             return true;
 
         if (!HasFailed(model))
@@ -417,7 +470,7 @@ internal sealed class GpuResources(
     /// <summary>
     /// Whether the model could not be made, and is drawn as the failure model.
     /// </summary>
-    public bool HasFailed(Handle<Model> model) => _failedModels.Contains(model.Id);
+    public bool HasFailed(Handle<Model> model) => _modelEntries.GetValueOrDefault(model.Id)?.State == GpuState.Failed;
 
     /// <summary>
     /// Asks for every texture read and its sampler, and copies the levels of the textures that arrived, in the frame's
@@ -472,28 +525,6 @@ internal sealed class GpuResources(
             TextureFormat.Bc7Srgb => GpuFormat.Bc7Srgb,
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "not a texture format"),
         };
-
-    /// <summary>
-    /// The model's meshes as rays see them, from <paramref name="indexOffset"/> in the index pool, with their
-    /// triangles, leaving out a mesh with none.
-    /// </summary>
-    private static ImmutableArray<(GpuMesh Mesh, uint Triangles)> GetMeshes(MeshDerived made, uint indexOffset)
-    {
-        ImmutableArray<(GpuMesh Mesh, uint Triangles)>.Builder meshes = ImmutableArray.CreateBuilder<(
-            GpuMesh Mesh,
-            uint Triangles
-        )>();
-        for (int i = 0; i < made.Meshes.Length; i++)
-        {
-            GpuMesh mesh = made.Meshes[i];
-            uint end = i + 1 < made.Meshes.Length ? made.Meshes[i + 1].IndexOffset : (uint)made.Indices.Length;
-            uint triangles = (end - mesh.IndexOffset) / 3;
-            if (triangles > 0)
-                meshes.Add((mesh with { IndexOffset = indexOffset + mesh.IndexOffset }, triangles));
-        }
-
-        return meshes.ToImmutable();
-    }
 
     /// <summary>
     /// Writes <paramref name="texture"/>'s heap id into the field named <paramref name="name"/> of <paramref name="words"/>,
@@ -564,12 +595,6 @@ internal sealed class GpuResources(
         return (uint)_materialShaders.Count - 1;
     }
 
-    /// <summary>
-    /// Whether the model was last asked for before tick <paramref name="before"/>, so one asked for this frame stays
-    /// whatever the keep time.
-    /// </summary>
-    private bool IsUnused(ulong model, long before) => _askedModels[model] < before;
-
     private async Task LoadAsync(Handle<Material> handle)
     {
         Result<Material> loaded = await assets.LoadAsync(handle, null, CancellationToken.None).ConfigureAwait(false);
@@ -626,7 +651,7 @@ internal sealed class GpuResources(
         _arrivedTextures.Add((asset, first, entry));
     }
 
-    private async Task LoadAsync(Handle<Model> model)
+    private async Task LoadAsync(Handle<Model> model, ModelEntry entry)
     {
         Result<MeshDerived> derived = await assets
             .LoadPreprocessedAsync(model, models, CancellationToken.None)
@@ -637,61 +662,13 @@ internal sealed class GpuResources(
         if (!derived.Ok)
         {
             Log.Error($"{name} is drawn as the failure model: {derived.Error}");
-            _failedModels.Add(model.Id);
+            entry.State = GpuState.Failed;
             SettledModels++;
 
             return;
         }
 
-        _madeModels.Add((model.Id, name, derived.Value));
-    }
-
-    /// <summary>
-    /// The model given ranges of the pools, which grow to hold it, and of the mesh table, its index and its row of the
-    /// model table, for <see cref="Prepare"/> to copy up; the failure model when the model table is full.
-    /// </summary>
-    private void Place(ulong model, string name, MeshDerived made)
-    {
-        SettledModels++;
-        if (!_modelRows.CanAllocate(1))
-        {
-            Log.Error($"{name} is drawn as the failure model: the model table is full.");
-            _failedModels.Add(model);
-
-            return;
-        }
-
-        ResidentModel where = new(
-            (uint)_vertices.Allocate(made.Vertices.Length),
-            (uint)made.Vertices.Length,
-            (uint)_indices.Allocate(made.Indices.Length),
-            (uint)made.Indices.Length,
-            made.BoundsCenter,
-            made.BoundsRadius,
-            (uint)_modelRows.Allocate(1)
-        );
-
-        // Its meshes as rays see them take a range of the mesh table, on a GPU that traces rays and while one holds
-        // them; with none, rays pass through it.
-        ImmutableArray<(GpuMesh Mesh, uint Triangles)> meshes = Meshes.IsNone ? [] : GetMeshes(made, where.IndexOffset);
-        if (!_meshRanges.CanAllocate(meshes.Length))
-            meshes = [];
-
-        // An arrival is a use, so a model that took longer to make than it may go unused is copied up before it can be
-        // evicted.
-        _askedModels[model] = Environment.TickCount64;
-        _residentModels[model] = where;
-        _models[where.ModelIndex] = new ModelPlace(
-            new Handle<Model>(model),
-            where.VertexOffset,
-            where.VertexCount,
-            made.BoundsMin,
-            made.BoundsMax,
-            meshes.IsEmpty ? 0 : (uint)_meshRanges.Allocate(meshes.Length),
-            meshes
-        );
-        _placedModels.Add((made, where));
-        Log.Info($"{name}: {made.Vertices.Length} vertices, {made.Indices.Length / 3} triangles.");
+        _madeModels.Add((model.Id, name, derived.Value, entry));
     }
 
     /// <summary>
@@ -703,6 +680,19 @@ internal sealed class GpuResources(
         ShaderTypeArgument Shader,
         bool IsTranslucent
     );
+
+    /// <summary>
+    /// A model asked for: where it is in the loading, when it was last asked, in
+    /// <see cref="Environment.TickCount64"/> milliseconds, and where it is in the pools once it is resident.
+    /// </summary>
+    private sealed class ModelEntry
+    {
+        public GpuState State { get; set; }
+
+        public long Asked { get; set; }
+
+        public ResidentModel Where { get; set; }
+    }
 
     /// <summary>
     /// A texture asked for: where it is in the loading, what it and its sampler are made to once it is read, and their
