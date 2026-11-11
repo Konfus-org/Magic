@@ -59,8 +59,11 @@ public LightSample SampleLight(GpuLight light, float3 position, float3 normal)
         from = light.position + basis[0] * x + basis[1] * y;
     }
 
+    // A light is never nearer than its own size, a sphere's radius or a rectangle's as a disc of its area, so it gives
+    // at most what its face could rather than growing without bound at its surface.
     float3 toLight = from - position;
-    float distance = max(length(toLight), light.radius);
+    float size = light.type == LightRect ? sqrt(light.width * light.height / Pi) : light.radius;
+    float distance = max(length(toLight), size);
     sample.direction = toLight / max(length(toLight), Epsilon);
     float spread = 1.0;
     if (light.type == LightSpot)
