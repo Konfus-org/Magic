@@ -27,6 +27,12 @@ public interface IWindow
     int Height { get; }
 
     /// <summary>
+    /// How many of the window's pixels a UI the size the OS asks for gives each of its points, as 1.5 on a display set
+    /// to 150 %.
+    /// </summary>
+    float DisplayScale { get; }
+
+    /// <summary>
     /// What the OS knows the window by; none when there is no window.
     /// </summary>
     WindowHandle Handle { get; }

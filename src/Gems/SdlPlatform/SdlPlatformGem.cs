@@ -112,12 +112,14 @@ public sealed class SdlPlatformGem
     private float _pixelDensity = 1;
 
     /// <summary>
-    /// The window's size in pixels, read by the platform thread as the window opens and on each pump, and written whole
-    /// for any thread; 0 when headless.
+    /// The window's size in pixels and its display's scale, read by the platform thread as the window opens and on each
+    /// pump, and written whole for any thread; 0 and 1 when headless.
     /// </summary>
     private int _width;
 
     private int _height;
+
+    private float _displayScale = 1;
 
     private string _title;
 
@@ -256,6 +258,11 @@ public sealed class SdlPlatformGem
     /// 0 when headless.
     /// </summary>
     public int Height => Volatile.Read(ref _height);
+
+    /// <summary>
+    /// 1 when headless.
+    /// </summary>
+    public float DisplayScale => Volatile.Read(ref _displayScale);
 
     public WindowHandle Handle { get; }
 
@@ -766,7 +773,7 @@ public sealed class SdlPlatformGem
     }
 
     /// <summary>
-    /// The window's size in pixels, written whole for any thread to read. Platform thread.
+    /// The window's size in pixels and its display's scale, written whole for any thread to read. Platform thread.
     /// </summary>
     private unsafe void ReadSize()
     {
@@ -775,6 +782,7 @@ public sealed class SdlPlatformGem
         SDL_GetWindowSizeInPixels(_window, &width, &height);
         Volatile.Write(ref _width, width);
         Volatile.Write(ref _height, height);
+        Volatile.Write(ref _displayScale, SDL_GetWindowDisplayScale(_window));
     }
 
     /// <summary>
