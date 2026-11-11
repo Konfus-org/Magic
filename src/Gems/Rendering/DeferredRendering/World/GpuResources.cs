@@ -101,9 +101,10 @@ internal sealed class GpuResources(
     public GpuBuffer Meshes { get; private set; }
 
     /// <summary>
-    /// Each resident model by its model index, the one its instances name, none where no model is.
+    /// Each resident model by its model index, the one its instances name, up to the last row in use; none where no
+    /// model is.
     /// </summary>
-    public ReadOnlyMemory<ModelPlace> Models => _models;
+    public ReadOnlyMemory<ModelPlace> Models => _models.AsMemory(0, _modelRows.End);
 
     /// <summary>
     /// The material shaders rows are drawn with, each as a resolve pass specialises to it, in the order a row numbers

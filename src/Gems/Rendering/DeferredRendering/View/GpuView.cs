@@ -86,8 +86,9 @@ public readonly record struct GpuView
     public required GpuBuffer Meshes { get; init; }
 
     /// <summary>
-    /// Each model on the GPU by its model index, the one its instances name, none where no model is: what a gem that
-    /// keeps a row for each model compares its own with each frame.
+    /// Each model on the GPU by its model index, the one its instances name, up to the last row in use, none where no
+    /// model is: what a gem that keeps a row for each model compares its own with each frame, dropping its rows past
+    /// the end.
     /// </summary>
     public required ReadOnlyMemory<ModelPlace> Models { get; init; }
 

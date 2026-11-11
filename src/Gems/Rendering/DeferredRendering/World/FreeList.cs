@@ -12,6 +12,12 @@ public sealed class FreeList(int capacity, int taken = 0)
     private readonly List<(int Start, int Length)> _free = [(taken, capacity - taken)];
 
     /// <summary>
+    /// The element after the last one taken: the start of the free range that runs to the end of the pool, or the
+    /// pool's capacity when none does.
+    /// </summary>
+    public int End => _free is [.., var (start, length)] && start + length == capacity ? start : capacity;
+
+    /// <summary>
     /// Whether a free range holds <paramref name="length"/> elements.
     /// </summary>
     public bool CanAllocate(int length) => _free.Exists(range => range.Length >= length);

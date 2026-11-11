@@ -71,9 +71,13 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
         // Each model's structure asked for every frame, so the GPU provider keeps it, row for row with the view's
         // models. A row whose model changed lets the old structure go, and has the new model's made and built over its
         // meshes in the pools; one the provider compacted comes back moved, holding what it held. Either builds the
-        // instances again.
+        // instances again. A row past the view's last row in use is dropped, and its structure, no longer asked for,
+        // goes.
         bool isChanged = world.Version != _built.Version;
         ReadOnlySpan<ModelPlace> models = view.Models.Span;
+        if (_models.Count > models.Length)
+            _models.RemoveRange(models.Length, _models.Count - models.Length);
+
         while (_models.Count < models.Length)
         {
             _models.Add(default);

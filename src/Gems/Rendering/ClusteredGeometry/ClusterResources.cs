@@ -78,6 +78,15 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
         if (Result.FindFailure(table, impostors) is { Ok: false } failedTable)
             return Result.Failure(failedTable.Error);
 
+        // A row past the view's last row in use has lost its model: its ranges given back, and the row dropped.
+        for (int index = models.Length; index < _rows.Count; index++)
+        {
+            Free(_rows[index]);
+        }
+
+        if (_rows.Count > models.Length)
+            _rows.RemoveRange(models.Length, _rows.Count - models.Length);
+
         // A row whose model changed draws nothing until what it holds now arrives.
         while (_rows.Count < models.Length)
         {
@@ -89,17 +98,7 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
             if (_rows[index].Place == models[index])
                 continue;
 
-            // The row's ranges given back to the free lists; its atlases go once no frame asks for them.
-            Row old = _rows[index];
-            if (old.State == RowState.Ready)
-            {
-                _vertices.Free((int)old.VertexOffset, (int)old.VertexCount);
-                _indices.Free((int)old.IndexOffset, (int)old.IndexCount);
-                _clusters.Free((int)old.ClusterOffset, (int)old.ClusterCount);
-                if (old.ImpostorRow != 0)
-                    _impostorRows.Free((int)old.ImpostorRow, 1);
-            }
-
+            Free(_rows[index]);
             ModelPlace place = models[index];
             bool isEmpty = place.Model == Handle<Model>.None;
             _rows[index] = new Row { Place = place, State = isEmpty ? RowState.Empty : RowState.Loading };
@@ -109,10 +108,11 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
         }
 
         // Each model read since the last frame takes its ranges, which may grow the pools. A model read for a row that
-        // has since changed, or that a read before it settled, is dropped; the row asked for what it holds now.
+        // has since changed or been dropped, or that a read before it settled, is dropped; the row asked for what it
+        // holds now.
         foreach ((int index, ModelPlace place, Result<ModelClusters> made) in _madeModels)
         {
-            if (_rows[index].Place != place || _rows[index].State != RowState.Loading)
+            if (index >= _rows.Count || _rows[index].Place != place || _rows[index].State != RowState.Loading)
                 continue;
 
             if (!made.Ok)
@@ -184,6 +184,21 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
             format,
             TextureUsages.Sampled | TextureUsages.CopyDestination
         );
+
+    /// <summary>
+    /// The row's ranges given back to the free lists, when it holds a model; its atlases go once no frame asks for them.
+    /// </summary>
+    private void Free(Row row)
+    {
+        if (row.State != RowState.Ready)
+            return;
+
+        _vertices.Free((int)row.VertexOffset, (int)row.VertexCount);
+        _indices.Free((int)row.IndexOffset, (int)row.IndexCount);
+        _clusters.Free((int)row.ClusterOffset, (int)row.ClusterCount);
+        if (row.ImpostorRow != 0)
+            _impostorRows.Free((int)row.ImpostorRow, 1);
+    }
 
     private string GetName(ModelPlace place) => assets.GetPath(place.Model) ?? $"model {place.Model.Id}";
 
