@@ -10,8 +10,9 @@ To use it, list `GlobalIllumination` in a project's `.magic` file with a gem tha
 
 - A grid of probes over what rays see of the world, a metre past it on every side, gathers the light that bounces.
   The grid follows the world slowly as instances come and go, and a world no ray sees is lit by the sky. Each frame
-  its probes trace rays, more of them where their light still changes and in view, each lit where it lands by one
-  light picked at random, the sun among them, by the sky where it hits nothing, and by the probes themselves. Each
+  its probes ask for rays, more of them where their light still changes and in view, and take them in turn while they
+  fit in the frame's budget; one that waits keeps its light. Each ray is lit where it lands by one light picked at
+  random, the sun among them, by the sky where it hits nothing, and by the probes themselves. Each
   probe blends them into the light it holds from each direction and how far it sees, and moves away from a surface it
   is too near. A ray reads the material it lands on averaged over its whole texture, with no specular of its own, so a
   metal reflects black.
