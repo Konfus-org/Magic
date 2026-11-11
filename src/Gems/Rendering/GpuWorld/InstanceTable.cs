@@ -96,10 +96,10 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
 
     /// <summary>
     /// The frame's instances as the gems that build from them take them: the rows, what the CPU keeps beside each, how
-    /// many rows the material table holds, and how many times the rows have changed.
+    /// many rows the material table holds and has room for, and how many times the rows have changed.
     /// </summary>
     public GpuInstances Instances =>
-        new(_rows.AsMemory(0, Count), _extras.AsMemory(0, Count), _materialSlots.Count, _version);
+        new(_rows.AsMemory(0, Count), _extras.AsMemory(0, Count), _materialSlots.Count, _materialRows.Length, _version);
 
     /// <summary>
     /// The rows of <paramref name="renderers"/>, from what changed since the last fill: each its model's place in the
@@ -361,14 +361,16 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
 
 /// <summary>
 /// The frame's instances as the instance table holds them on the CPU, for the gems that build from each instance: the
-/// rows as the GPU reads them, what the CPU keeps beside each by instance index, how many rows the material table holds,
-/// and how many times the rows have changed, so what is built from them is built again when it differs. Read on the
-/// render thread in the frame it is made for.
+/// rows as the GPU reads them, what the CPU keeps beside each by instance index, how many rows the material table holds
+/// and has room for, so a table with a row for each of its rows is asked for at that size, and how many times the rows
+/// have changed, so what is built from them is built again when it differs. Read on the render thread in the frame it is
+/// made for.
 /// </summary>
 public readonly record struct GpuInstances(
     ReadOnlyMemory<GpuInstance> Rows,
     ReadOnlyMemory<InstanceExtra> Extras,
     int MaterialCount,
+    int MaterialCapacity,
     long Version
 );
 

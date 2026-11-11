@@ -32,7 +32,8 @@ internal enum ResourceState : byte
 /// its handle, made by the preprocessor on a worker, settled into the pools of vertices and indices, the mesh table
 /// with its acceleration structure and the model table at the start of the next frame, and copied up in it. The pools,
 /// the textures and each resident model's acceleration structure are asked of the graph every frame, so the GPU
-/// provider keeps what they hold. Each pool hands out ranges first fit from a free list. A model not asked for in
+/// provider keeps what they hold. Each pool hands out ranges first fit from a free list, and the vertex and index pools
+/// grow when none holds a model. A model not asked for in
 /// <see cref="UnusedSec"/>, and held by no renderer drawn, is evicted: its ranges go back to the free lists, its row of
 /// the model table is emptied and its structure is no longer asked for, so the GPU provider frees it, and the next ask
 /// makes it again.
@@ -53,10 +54,6 @@ internal sealed class GpuResources(
     /// How long, in seconds of real time, a model stays on the GPU after its last ask.
     /// </summary>
     private const int UnusedSec = 60;
-
-    private static readonly int _vertexCapacity = (int)(SharedResources.Vertices.Bytes / GpuVertex.Bytes);
-
-    private static readonly int _indexCapacity = (int)(SharedResources.Indices.Bytes / sizeof(uint));
 
     private static readonly int _meshCapacity = (int)(SharedResources.Meshes.Bytes / GpuMesh.Bytes);
 
@@ -100,17 +97,21 @@ internal sealed class GpuResources(
 
     private readonly HashSet<ulong> _failedModels = [];
 
-    private readonly List<(MeshDerived Derived, ResidentModel Where)> _arrivedModels = [];
+    /// <summary>
+    /// The models this frame's <see cref="Prepare"/> placed in the pools, to copy up once the pools are asked for at
+    /// their size.
+    /// </summary>
+    private readonly List<(ulong Model, string Name, MeshDerived Made, ResidentModel Where)> _placedModels = [];
 
     /// <summary>
-    /// The models made since the last frame, by their id with their name, which the next <see cref="SettleModels"/>
-    /// settles.
+    /// The models made since the last frame, by their id with their name, which the next <see cref="Prepare"/> settles.
     /// </summary>
     private readonly List<(ulong Model, string Name, MeshDerived Made)> _madeModels = [];
 
-    private readonly FreeList _vertexRanges = new(_vertexCapacity);
+    // 2 MiB of vertices and 1 MiB of indices at the start; each grows with the scene.
+    private readonly BufferPool _vertices = new(SharedResources.Vertices, GpuVertex.Bytes, 1 << 16);
 
-    private readonly FreeList _indexRanges = new(_indexCapacity);
+    private readonly BufferPool _indices = new(SharedResources.Indices, sizeof(uint), 1 << 18);
 
     private readonly FreeList _meshRanges = new(_meshCapacity);
 
@@ -159,38 +160,13 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// The pools models are copied into, asked for every frame before any model is, so what they hold stays.
+    /// The pools, with the models made since the last frame settled into them, asked for every frame before any
+    /// renderer's row is built, so what they hold stays. The models take their ranges first, so a pool they grow is
+    /// asked for at its new size before their acceleration structures name it and they are copied into it. Every
+    /// resident model's acceleration structure is asked for too; one the provider compacted comes back moved, and every
+    /// row is built again to refer to it there.
     /// </summary>
     public Result Prepare(RenderGraph graph)
-    {
-        Result<GpuBuffer> vertices = graph.Buffer(SharedResources.Vertices);
-        if (!vertices.Ok)
-            return Result.Failure(vertices.Error);
-
-        VertexPool = vertices.Value;
-        Result<GpuBuffer> indices = graph.Buffer(SharedResources.Indices);
-        if (!indices.Ok)
-            return Result.Failure(indices.Error);
-
-        IndexPool = indices.Value;
-        if (!graph.Features.HasRayQuery)
-            return Result.Success();
-
-        Result<GpuBuffer> meshes = graph.Buffer(SharedResources.Meshes);
-        if (!meshes.Ok)
-            return Result.Failure(meshes.Error);
-
-        Meshes = meshes.Value;
-
-        return Result.Success();
-    }
-
-    /// <summary>
-    /// Every resident model's acceleration structure asked for, so the GPU provider keeps it, and the models made since
-    /// the last frame settled into the pools, after the pools were asked for and before any renderer's row is built.
-    /// A structure the provider compacted comes back moved, and every row is built again to refer to it there.
-    /// </summary>
-    public void SettleModels(RenderGraph graph)
     {
         foreach (ulong model in _residentModels.Keys)
         {
@@ -208,10 +184,53 @@ internal sealed class GpuResources(
 
         foreach ((ulong model, string name, MeshDerived made) in _madeModels)
         {
-            Settle(graph, model, name, made);
+            Place(model, name, made);
         }
 
         _madeModels.Clear();
+        Result<GpuBuffer> vertices = _vertices.GetBuffer(graph);
+        if (!vertices.Ok)
+            return Result.Failure(vertices.Error);
+
+        VertexPool = vertices.Value;
+        Result<GpuBuffer> indices = _indices.GetBuffer(graph);
+        if (!indices.Ok)
+            return Result.Failure(indices.Error);
+
+        IndexPool = indices.Value;
+        if (graph.Features.HasRayQuery)
+        {
+            Result<GpuBuffer> meshes = graph.Buffer(SharedResources.Meshes);
+            if (!meshes.Ok)
+                return Result.Failure(meshes.Error);
+
+            Meshes = meshes.Value;
+        }
+
+        // Each placed model copied up, with its acceleration structure over the pools on a GPU that traces rays.
+        foreach ((ulong model, string name, MeshDerived made, ResidentModel placed) in _placedModels)
+        {
+            ResidentModel where = Meshes.IsNone ? placed : AskAcceleration(graph, name, made, placed);
+            _residentModels[model] = where;
+            graph.Upload(VertexPool, made.Vertices.AsSpan(), (ulong)where.VertexOffset * GpuVertex.Bytes);
+
+            // Indices point into the whole pool.
+            Span<uint> rebased = graph.Upload<uint>(
+                IndexPool,
+                made.Indices.Length,
+                (ulong)where.IndexOffset * sizeof(uint)
+            );
+            for (int i = 0; i < made.Indices.Length; i++)
+            {
+                rebased[i] = made.Indices[i] + where.VertexOffset;
+            }
+
+            UploadMeshes(graph, made, where);
+        }
+
+        _placedModels.Clear();
+
+        return Result.Success();
     }
 
     /// <summary>
@@ -238,8 +257,8 @@ internal sealed class GpuResources(
             if (!IsUnused(id, now))
                 continue;
 
-            _vertexRanges.Free((int)where.VertexOffset, (int)where.VertexCount);
-            _indexRanges.Free((int)where.IndexOffset, (int)where.IndexCount);
+            _vertices.Free((int)where.VertexOffset, (int)where.VertexCount);
+            _indices.Free((int)where.IndexOffset, (int)where.IndexCount);
             _modelRows.Free((int)where.ModelIndex, 1);
             _models[where.ModelIndex] = default;
 
@@ -351,7 +370,7 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// Whether the model is in the pools, copied up in the last upload pass at the latest, or could not be made and the
+    /// Whether the model is in the pools, copied up in this frame's transfers at the latest, or could not be made and the
     /// failure model it is drawn as has arrived in its place, or has no place to arrive in.
     /// </summary>
     public bool HasArrived(Handle<Model> model)
@@ -373,30 +392,11 @@ internal sealed class GpuResources(
     public bool HasFailed(Handle<Model> model) => _failedModels.Contains(model.Id);
 
     /// <summary>
-    /// Copies the models that arrived since the last frame, asks for every texture read and its sampler, and copies the
-    /// levels of the textures that arrived, in the frame's upload pass.
+    /// Asks for every texture read and its sampler, and copies the levels of the textures that arrived, in the frame's
+    /// upload pass.
     /// </summary>
     public void Upload(RenderGraph graph)
     {
-        foreach ((MeshDerived derived, ResidentModel where) in _arrivedModels)
-        {
-            graph.Upload(VertexPool, derived.Vertices.AsSpan(), (ulong)where.VertexOffset * GpuVertex.Bytes);
-
-            // Indices point into the whole pool.
-            Span<uint> rebased = graph.Upload<uint>(
-                IndexPool,
-                derived.Indices.Length,
-                (ulong)where.IndexOffset * sizeof(uint)
-            );
-            for (int i = 0; i < derived.Indices.Length; i++)
-            {
-                rebased[i] = derived.Indices[i] + where.VertexOffset;
-            }
-
-            UploadMeshes(graph, derived, where);
-        }
-
-        _arrivedModels.Clear();
         foreach (TextureEntry entry in _textures.Values)
         {
             Ask(graph, entry);
@@ -733,29 +733,24 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// The model made into the pools' ranges and given its index and its row of the model table, with its acceleration
-    /// structure over its meshes on a GPU that traces rays, all copied up by the next upload; the failure model when the
-    /// pools are full.
+    /// The model given ranges of the pools, which grow to hold it, its index and its row of the model table, for
+    /// <see cref="Prepare"/> to copy up with its acceleration structure; the failure model when the model table is full.
     /// </summary>
-    private void Settle(RenderGraph graph, ulong model, string name, MeshDerived made)
+    private void Place(ulong model, string name, MeshDerived made)
     {
         SettledModels++;
-        bool fits =
-            _vertexRanges.CanAllocate(made.Vertices.Length)
-            && _indexRanges.CanAllocate(made.Indices.Length)
-            && _modelRows.CanAllocate(1);
-        if (!fits)
+        if (!_modelRows.CanAllocate(1))
         {
-            Log.Error($"{name} is drawn as the failure model: the geometry pools are full.");
+            Log.Error($"{name} is drawn as the failure model: the model table is full.");
             _failedModels.Add(model);
 
             return;
         }
 
         ResidentModel where = new(
-            (uint)_vertexRanges.Allocate(made.Vertices.Length),
+            (uint)_vertices.Allocate(made.Vertices.Length),
             (uint)made.Vertices.Length,
-            (uint)_indexRanges.Allocate(made.Indices.Length),
+            (uint)_indices.Allocate(made.Indices.Length),
             (uint)made.Indices.Length,
             made.BoundsCenter,
             made.BoundsRadius,
@@ -763,16 +758,13 @@ internal sealed class GpuResources(
             made.BoundsMax,
             (uint)_modelRows.Allocate(1)
         );
-        // A mesh table is there only on a GPU that traces rays.
-        if (!Meshes.IsNone)
-            where = AskAcceleration(graph, name, made, where);
 
         // An arrival is a use, so a model that took longer to make than it may go unused is copied up before it can be
         // evicted.
         _askedModels[model] = Environment.TickCount64;
         _residentModels[model] = where;
         _models[where.ModelIndex] = new ModelPlace(new Handle<Model>(model), where.VertexOffset);
-        _arrivedModels.Add((made, where));
+        _placedModels.Add((model, name, made, where));
         Log.Info($"{name}: {made.Vertices.Length} vertices, {made.Indices.Length / 3} triangles.");
     }
 
@@ -794,7 +786,7 @@ internal sealed class GpuResources(
                     VertexPool,
                     0,
                     GpuVertex.Bytes,
-                    (uint)_vertexCapacity,
+                    where.VertexOffset + where.VertexCount,
                     IndexPool,
                     (ulong)mesh.IndexOffset * sizeof(uint),
                     triangles

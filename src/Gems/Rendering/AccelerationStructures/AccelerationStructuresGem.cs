@@ -26,6 +26,11 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
     : IGem,
         IRender<AccelerationStructuresInput, TracedWorld>
 {
+    /// <summary>
+    /// A hit materials row, a <c>GpuHitMaterial</c> as the shader library lays it out.
+    /// </summary>
+    private const int HitMaterialBytes = 32;
+
     private readonly ShaderEntry _averageShader = new()
     {
         Module = assets.Find<Shader>("Shaders/AverageMaterials.slang"),
@@ -57,7 +62,8 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
         GpuInstances world = input.Instances;
         Result<(GpuBuffer Instances, GpuAcceleration Structure, GpuBuffer HitMaterials)> made = Prepare(
             graph,
-            view.InstanceCapacity
+            view.InstanceCapacity,
+            world.MaterialCapacity
         );
         if (!made.Ok)
         {
@@ -106,14 +112,20 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
 
     /// <summary>
     /// The structure over at most <paramref name="capacity"/> instances and its instances asked for, every frame, so the
-    /// structure built last stays, and the hit materials table.
+    /// structure built last stays, and the hit materials table with a row for each of the material table's.
     /// </summary>
     private static Result<(GpuBuffer Instances, GpuAcceleration Structure, GpuBuffer HitMaterials)> Prepare(
         RenderGraph graph,
-        int capacity
+        int capacity,
+        int materialCapacity
     )
     {
-        Result<GpuBuffer> hitMaterials = graph.Buffer(SharedResources.HitMaterials);
+        Result<GpuBuffer> hitMaterials = graph.Buffer(
+            SharedResources.HitMaterials with
+            {
+                Bytes = (long)materialCapacity * HitMaterialBytes,
+            }
+        );
         if (!hitMaterials.Ok)
             return Result.Failure(hitMaterials.Error);
 

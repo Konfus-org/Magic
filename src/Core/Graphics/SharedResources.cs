@@ -19,11 +19,12 @@ public static class SharedResources
     public static readonly BufferDescription Instances = GetBuffer("Instance table", (1L << 18) * 248);
 
     /// <summary>
-    /// The vertex pool, 32 bytes a vertex, and the index pool.
+    /// The vertex pool, 32 bytes a vertex, and the index pool: asked for at the size the gem that keeps the models gives,
+    /// which grows with them.
     /// </summary>
-    public static readonly BufferDescription Vertices = GetBuffer("Vertex pool", (1L << 21) * 32);
+    public static readonly BufferDescription Vertices = GetBuffer("Vertex pool", 0);
 
-    public static readonly BufferDescription Indices = GetBuffer("Index pool", (1L << 23) * sizeof(uint));
+    public static readonly BufferDescription Indices = GetBuffer("Index pool", 0);
 
     /// <summary>
     /// The mesh table a ray hit finds its triangles and material slot through, 8 bytes a mesh.
@@ -31,9 +32,10 @@ public static class SharedResources
     public static readonly BufferDescription Meshes = GetBuffer("Mesh table", (1L << 16) * 8);
 
     /// <summary>
-    /// Each material row as a ray hit reads it, 32 bytes an instance.
+    /// Each material row as a ray hit reads it, 32 bytes a row: asked for with a row for each row the material table
+    /// has room for.
     /// </summary>
-    public static readonly BufferDescription HitMaterials = GetBuffer("Hit materials", (1L << 18) * 32);
+    public static readonly BufferDescription HitMaterials = GetBuffer("Hit materials", 0);
 
     /// <summary>
     /// The local lights, 64 bytes each.

@@ -182,8 +182,7 @@ public sealed class GpuWorldGem
         if (shaders != GpuState.Ready)
             return null;
 
-        // The pools before any model is asked for, whose acceleration structure names them, and every frame, so what
-        // they hold stays.
+        // The pools, with the models made since the last frame settled into them, before any renderer's row is built.
         Result pools = _resources.Prepare(graph);
         if (!pools.Ok)
         {
@@ -191,9 +190,6 @@ public sealed class GpuWorldGem
 
             return null;
         }
-
-        // The models made since the last frame settle into the pools before any renderer's row is built.
-        _resources.SettleModels(graph);
 
         if (_inputs.TryTake(out RenderInputs? newest))
         {
