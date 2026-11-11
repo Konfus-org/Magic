@@ -28,14 +28,13 @@ public struct ShadowDenoiseConstants
     public uint sunBlend;
     // The first filter pass's, which the next frame blends with.
     public uint sunHistory;
-    // The sun's mean, its sum of squared differences and how many frames they hold, and the pixel's view depth: this
-    // frame's and last frame's.
+    // How many frames the sun's shadow holds and the pixel's view depth: this frame's and last frame's.
     public uint moments;
     public uint previousMoments;
     // The traced mask, as the rays left it and then denoised in place, and last frame's.
     public uint mask;
     public uint previousMask;
-    // The sun's tint as traced.
+    // The sun's tint as traced; 0 while no glass tints it.
     public uint sunTint;
     // Whether last frame's targets hold a frame of this size.
     public uint hasHistory;
@@ -215,7 +214,7 @@ void ClassifyShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupT
         if (isInside)
         {
             blend.Store(thread.xy, float4(value, 0.0, 0.0, 0.0));
-            moments.Store(thread.xy, float4(value, 0.0, isReceiver ? 1.0 : 0.0, viewDepth));
+            moments.Store(thread.xy, float4(isReceiver ? 1.0 : 0.0, viewDepth, 0.0, 0.0));
         }
 
         return;
@@ -242,51 +241,47 @@ void ClassifyShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupT
     uint tile = sunTiles[GetSunTileIndex(pixel / SunTileSize, size.x)];
     float current = (tile & GetSunTileBit(pixel)) != 0u ? 1.0 : 0.0;
 
-    // The running mean and variance of the sun's rays here, restarted where last frame saw something else.
+    // How many frames the sun's rays here were seen for, restarted where last frame saw something else.
     TextureRef normalTexture = { frame.gbufferNormal };
     TextureRef velocityTexture = { frame.velocity };
     float3 normal = DecodeOctahedral(normalTexture.Load(picturePixel, 0u).xy * 2.0 - 1.0);
     float3 toEye = -normalize(ReconstructRelative(frame, uv, depth));
     float viewDepthThen = velocityTexture.Load(picturePixel, 0u).z;
     bool hasHistory = denoise.hasHistory != 0u;
-    float3 previous = float3(0.0);
-    if (hasHistory)
-    {
-        TextureRef previousMoments = { denoise.previousMoments };
-        float4 before = previousMoments.Load(GetHistoryPixel(historyUv, size), 0u);
-        if (!IsDisoccluded(historyUv, before.w, viewDepthThen, normal, toEye))
-            previous = before.xyz;
-    }
-
-    float count = previous.z + 1.0;
-    float mean = previous.x + (current - previous.x) / count;
-    float squares = previous.y + (current - previous.x) * (current - mean);
-    float variance = count > 1.0 ? squares / (count - 1.0) : 1.0;
-    float3 running = float3(mean, squares, count);
-
-    // Last frame's shadow clamped to the neighbourhood, and trusted less the further it stood outside it.
-    float spatialVariance = max(neighbourhood - neighbourhood * neighbourhood, 0.0);
-    float deviation = sqrt(spatialVariance);
+    float count = 1.0;
     float shadowBefore = current;
     if (hasHistory)
     {
+        TextureRef previousMoments = { denoise.previousMoments };
+        float2 before = previousMoments.Load(GetHistoryPixel(historyUv, size), 0u).xy;
+        if (!IsDisoccluded(historyUv, before.y, viewDepthThen, normal, toEye))
+            count += before.x;
+
         TextureRef history = { denoise.sunHistory };
         SamplerRef sampler = { GetLights().lutSampler };
         shadowBefore = history.SampleLevel(sampler, historyUv, 0.0).x;
     }
 
+    // A ray is lit or not, so the variance of the rays here is their mean times its complement, the mean last frame's
+    // shadow with this ray added.
+    float mean = lerp(shadowBefore, current, 1.0 / count);
+    float variance = count > 1.0 ? mean * (1.0 - mean) * count / (count - 1.0) : 1.0;
+
+    // Last frame's shadow clamped to the neighbourhood, and trusted less the further it stood outside it.
+    float spatialVariance = max(neighbourhood - neighbourhood * neighbourhood, 0.0);
+    float deviation = sqrt(spatialVariance);
     float clamped = clamp(shadowBefore, neighbourhood - 0.5 * deviation, neighbourhood + 0.5 * deviation);
     float discontinuity = (shadowBefore - neighbourhood) / max(0.5 * deviation, 0.001);
-    running.z *= exp(-discontinuity * discontinuity / 20.0);
+    count *= exp(-discontinuity * discontinuity / 20.0);
 
     // Few frames say little, so the filter is told the variance is larger.
-    if (running.z < 16.0)
-        variance = max(variance, spatialVariance) * max(16.0 - running.z, 1.0);
+    if (count < 16.0)
+        variance = max(variance, spatialVariance) * max(16.0 - count, 1.0);
 
-    float historyWeight = sqrt(max(8.0 - running.z, 0.0) / 8.0);
+    float historyWeight = sqrt(max(8.0 - count, 0.0) / 8.0);
     float shadow = lerp(clamped, current, lerp(0.05, 1.0, historyWeight));
     blend.Store(thread.xy, float4(shadow, variance, 0.0, 0.0));
-    moments.Store(thread.xy, float4(running, viewDepth));
+    moments.Store(thread.xy, float4(count, viewDepth, 0.0, 0.0));
 }
 
 groupshared float2 groupShadows[16][16];
@@ -436,7 +431,7 @@ void BlendShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupThre
     if (isReprojected)
     {
         TextureRef previousMoments = { denoise.previousMoments };
-        isReprojected = abs(previousMoments.Load(historyPixel, 0u).w - velocity.z) <= 1.0;
+        isReprojected = abs(previousMoments.Load(historyPixel, 0u).y - velocity.z) <= 1.0;
     }
 
     // Where last frame saw something else, the rays as they are; elsewhere each slot blended with last frame's, the
@@ -475,6 +470,7 @@ void UpsampleShadows(uint3 thread : SV_DispatchThreadID)
         return;
 
     uint2 tracedSize = uint2(denoise.width, denoise.height);
+    bool isTinted = shadows.sunTint != 0u;
     StorageRef tints = { shadows.sunTint, 0u };
     TextureRef tracedTints = { denoise.sunTint };
     TextureRef depthTexture = { frame.depth };
@@ -482,7 +478,9 @@ void UpsampleShadows(uint3 thread : SV_DispatchThreadID)
     if (depth == 0.0)
     {
         StoreShadowMask(shadows.mask, thread.xy, size.x, uint4(0xFFFFFFFFu));
-        tints.Store(thread.xy, float4(1.0));
+        if (isTinted)
+            tints.Store(thread.xy, float4(1.0));
+
         return;
     }
 
@@ -500,7 +498,9 @@ void UpsampleShadows(uint3 thread : SV_DispatchThreadID)
     {
         uint2 texel = taps.GetTexel(i);
         words[i] = LoadShadowMask(denoise.mask, texel, tracedSize.x);
-        tint += tracedTints.Load(texel, 0u).rgb * taps.weights[i];
+        if (isTinted)
+            tint += tracedTints.Load(texel, 0u).rgb * taps.weights[i];
+
         bool isSameTile = all(GetPicturePixel(frame, texel, tracedSize, float2(0.0)) / LightTileSize == tile);
         tileWeights[i] = isSameTile ? taps.weights[i] : 0.0;
     }
@@ -522,5 +522,6 @@ void UpsampleShadows(uint3 thread : SV_DispatchThreadID)
     }
 
     StoreShadowMask(shadows.mask, thread.xy, size.x, result);
-    tints.Store(thread.xy, float4(sunSum > 0.0 ? tint / sunSum : tracedTints.Load(nearest, 0u).rgb, 1.0));
+    if (isTinted)
+        tints.Store(thread.xy, float4(sunSum > 0.0 ? tint / sunSum : tracedTints.Load(nearest, 0u).rgb, 1.0));
 }

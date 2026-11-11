@@ -116,8 +116,12 @@ void TraceShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupThre
         float3 sunTint;
         uint4 words = Trace(frame, lights, GetPicturePixel(frame, thread.xy, size, float2(0.0)), sunTint);
         StoreShadowMask(denoise.mask, thread.xy, size.x, words);
-        StorageRef tints = { denoise.sunTint, 0u };
-        tints.Store(thread.xy, float4(sunTint, 1.0));
+        if (denoise.sunTint != 0u)
+        {
+            StorageRef tints = { denoise.sunTint, 0u };
+            tints.Store(thread.xy, float4(sunTint, 1.0));
+        }
+
         if (GetShadow(words, 0u) > 0.5)
             InterlockedOr(groupSunTiles[local.y / SunTileSize.y], GetSunTileBit(thread.xy));
     }

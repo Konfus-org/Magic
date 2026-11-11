@@ -14,7 +14,7 @@ namespace Magic.TracedShadows;
 /// <paramref name="SunTint"/>, at the picture's, which shading reads. <paramref name="TracedMask"/> is the mask as the
 /// rays left it, then denoised in place, <paramref name="SunTiles"/> a bit for each pixel its sun ray reached the sun
 /// from, a word for each 8 by 4 pixels, and <paramref name="TracedTint"/> the colour the sun's light takes on through
-/// glass; the previous ones are what the last frame wrote.
+/// glass, both tints none while the view draws no glass; the previous ones are what the last frame wrote.
 /// </summary>
 internal readonly record struct ShadowBuffers(
     GpuBuffer Constants,
@@ -43,7 +43,7 @@ internal readonly record struct ShadowBuffers(
 /// <see cref="ShadowMask"/>. It is public because nothing in its assembly makes it: Magic does, by reflection, when a
 /// project lists the gem.
 /// </summary>
-public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManager assets)
+public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManager assets, IShaderCompiler shaders)
     : IGem,
         IHasSettings<TracedShadowsSettings>,
         IRender<TracedInput, ShadowMask>
@@ -71,6 +71,11 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
     private readonly ShaderEntry _filterShader = GetEntry(assets, "DenoiseShadows", "FilterShadows");
     private readonly ShaderEntry _blendShader = GetEntry(assets, "DenoiseShadows", "BlendShadows");
     private readonly ShaderEntry _upsampleShader = GetEntry(assets, "DenoiseShadows", "UpsampleShadows");
+
+    /// <summary>
+    /// Each material shader's <c>Translucent</c> constant, reflected the first time a view draws with it.
+    /// </summary>
+    private readonly Dictionary<ShaderTypeArgument, Task<Result<long>>> _translucent = [];
 
     /// <summary>
     /// The size the frame drawn last traced at, which the next blends with only at the same size.
@@ -132,6 +137,28 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
     private static int Scale(int side, float scale) => Math.Clamp((int)MathF.Round(side * scale), 1, side);
 
     /// <summary>
+    /// Whether the view draws with a translucent material shader, as glass is, whose colour the sun's light takes on
+    /// through it. A shader counts as opaque until its constant is reflected.
+    /// </summary>
+    private bool HasGlass(in GpuView view)
+    {
+        bool hasGlass = false;
+        for (int i = 0; i < view.MaterialShaders.Count; i++)
+        {
+            ShaderTypeArgument shader = view.MaterialShaders[i];
+            if (!_translucent.TryGetValue(shader, out Task<Result<long>>? translucent))
+            {
+                translucent = shaders.ReflectConstantAsync(shader, "Translucent", CancellationToken.None);
+                _translucent.Add(shader, translucent);
+            }
+
+            hasGlass |= translucent is { IsCompletedSuccessfully: true, Result: { Ok: true, Value: not 0 } };
+        }
+
+        return hasGlass;
+    }
+
+    /// <summary>
     /// The masks and the denoiser's targets asked for at the traced size, this frame's and last frame's mask and
     /// moments by <paramref name="frameIndex"/>, the mask and tint shading reads at the view's size, and the
     /// denoiser's constants uploaded.
@@ -156,21 +183,26 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
         Result<GpuBuffer> sunTiles = graph.Buffer(GpuDescriptions.GetBuffer("Sun shadow tiles", tiles * sizeof(uint)));
         Result<GpuBuffer> tracedMask = graph.Buffer(GpuDescriptions.GetBuffer(_maskNames[written], maskBytes));
         Result<GpuBuffer> previousMask = graph.Buffer(GpuDescriptions.GetBuffer(_maskNames[1 - written], maskBytes));
-        Result<GpuTexture> tracedTint = Traced("Traced sun tint", GpuFormat.R16G16B16A16Sfloat);
+        // Without glass the sun's light stays white, so no tint is asked for and the graph frees the last one's.
+        bool hasGlass = HasGlass(view);
+        Result<GpuTexture> tracedTint = hasGlass
+            ? Traced("Traced sun tint", GpuFormat.R16G16B16A16Sfloat)
+            : Result.Success(GpuTexture.None);
         Result<GpuTexture> sunBlend = Traced("Sun shadow blend", GpuFormat.R16G16Sfloat);
         Result<GpuTexture> sunHistory = Traced("Sun shadow history", GpuFormat.R16G16Sfloat);
-        Result<GpuTexture> moments = Traced(_momentNames[written], GpuFormat.R16G16B16A16Sfloat);
-        Result<GpuTexture> previousMoments = Traced(_momentNames[1 - written], GpuFormat.R16G16B16A16Sfloat);
+        Result<GpuTexture> moments = Traced(_momentNames[written], GpuFormat.R16G16Sfloat);
+        Result<GpuTexture> previousMoments = Traced(_momentNames[1 - written], GpuFormat.R16G16Sfloat);
         // Traced at the picture's size, the traced mask and tint are what shading reads.
         bool isPictureSize = (width, height) == (view.Width, view.Height);
         Result<GpuBuffer> mask = isPictureSize
             ? tracedMask
             : graph.Buffer(GpuDescriptions.GetBuffer("Shadow mask", (long)view.Width * view.Height * BytesPerPixel));
-        Result<GpuTexture> sunTint = isPictureSize
-            ? tracedTint
-            : graph.Texture(
-                GpuDescriptions.GetTexture("Sun tint", view.Width, view.Height, GpuFormat.R16G16B16A16Sfloat)
-            );
+        Result<GpuTexture> sunTint =
+            isPictureSize || !hasGlass
+                ? tracedTint
+                : graph.Texture(
+                    GpuDescriptions.GetTexture("Sun tint", view.Width, view.Height, GpuFormat.R16G16B16A16Sfloat)
+                );
         foreach (
             Result made in (ReadOnlySpan<Result>)
                 [
@@ -241,7 +273,7 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
         GpuView view = input.View;
         GpuConstants header = new(view.Frame.Id, shadows.Constants.Id);
         (int width, int height) = _traced;
-        graph
+        ComputePass trace = graph
             .Compute("Trace shadows", _traceShader, header, RenderStage.Light)
             .Reads(
                 view.Frame,
@@ -255,8 +287,11 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
                 view.Meshes,
                 input.Traced.HitMaterials
             )
-            .Writes(shadows.TracedMask, shadows.SunTiles, shadows.TracedTint)
-            .DispatchOver(width, height);
+            .Writes(shadows.TracedMask, shadows.SunTiles);
+        if (!shadows.TracedTint.IsNone)
+            trace.Writes(shadows.TracedTint);
+
+        trace.DispatchOver(width, height);
 
         // Denoise: classify the sun's tiles, filter twice, then once more as the mask blends with last frame's.
         graph
@@ -307,7 +342,7 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
             return;
 
         // The mask and the sun's tint at the picture's size, each pixel read from the traced pixels on its surface.
-        graph
+        ComputePass upsample = graph
             .Compute("Upsample shadows", _upsampleShader, header, RenderStage.Light)
             .Reads(
                 view.Frame,
@@ -315,11 +350,13 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
                 view.Depth,
                 view.GBufferNormal,
                 view.GBufferSurface,
-                shadows.TracedMask,
-                shadows.TracedTint
+                shadows.TracedMask
             )
-            .Writes(shadows.Mask, shadows.SunTint)
-            .DispatchOver(view.Width, view.Height);
+            .Writes(shadows.Mask);
+        if (!shadows.TracedTint.IsNone)
+            upsample.Reads(shadows.TracedTint).Writes(shadows.SunTint);
+
+        upsample.DispatchOver(view.Width, view.Height);
     }
 }
 
