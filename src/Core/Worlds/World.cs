@@ -164,7 +164,7 @@ public sealed class World : IEcs, IDisposable
         CancellationToken cancel
     )
     {
-        Result opened = await RunLoadingAsync(() => OpenDomainAsync(domain, progress, cancel), cancel)
+        Result opened = await RunInTurnAsync(() => OpenDomainAsync(domain, progress, cancel), cancel)
             .ConfigureAwait(false);
 
         return opened.Ok ? opened : Result.Failure($"The domain does not open: {opened.Error}");
@@ -688,26 +688,6 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Runs <paramref name="change"/> as a change, which may set <see cref="IsLoading"/>, and ends with it unset.
-    /// </summary>
-    private Task<Result> RunLoadingAsync(Func<Task<Result>> change, CancellationToken cancel) =>
-        RunInTurnAsync(
-            async () =>
-            {
-                try
-                {
-                    return await change().ConfigureAwait(false);
-                }
-                finally
-                {
-                    IsLoading = false;
-                    IsShowingLoadingScreen = false;
-                }
-            },
-            cancel
-        );
-
-    /// <summary>
     /// Puts the world back as the JSON <paramref name="bytes"/> hold it, in place of everything in the world. Why not,
     /// when it doesn't read or one of its domains doesn't open, which leaves the world as it was.
     /// </summary>
@@ -717,7 +697,7 @@ public sealed class World : IEcs, IDisposable
         if (!saved.Ok)
             return Result.Failure(saved.Error);
 
-        return await RunLoadingAsync(() => OpenSaveAsync(saved.Value, progress, cancel), cancel).ConfigureAwait(false);
+        return await RunInTurnAsync(() => OpenSaveAsync(saved.Value, progress, cancel), cancel).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -792,7 +772,7 @@ public sealed class World : IEcs, IDisposable
     /// there before: what is there leaves, globals too with <paramref name="isClearingGlobals"/>, the gems clean up after it,
     /// and the loading screen shows while they prepare what comes. Once they have and no asset is on its way, the loading
     /// screen leaves, the gems clean up after it, <paramref name="arrive"/> makes what comes, and the replace ends after a
-    /// frame has drawn it. Sets <see cref="IsLoading"/>, for the caller to unset.
+    /// frame has drawn it. <see cref="IsLoading"/> is set while it runs.
     /// </summary>
     private async Task ReplaceAsync(
         ImmutableArray<ImmutableArray<IComponent>> arriving,
@@ -802,80 +782,89 @@ public sealed class World : IEcs, IDisposable
     )
     {
         IsLoading = true;
-
-        // The project's loading screen, else the engine's, a black void: the entities it is; none, which is warned
-        // about, when it doesn't load.
-        Handle<Domain> project = _app.Project?.LoadingScreen ?? Handle<Domain>.None;
-        Handle<Domain> screenDomain =
-            project == Handle<Domain>.None ? _assets.Find<Domain>("Domains/Loading/Loading.domain") : project;
-        ImmutableArray<ImmutableArray<IComponent>> screen = [];
-        if (screenDomain != Handle<Domain>.None)
+        try
         {
-            Result<DomainRead> read = await ReadDomainAsync(screenDomain, null, cancel).ConfigureAwait(false);
-            if (read.Ok)
-                screen = GetEntities(read.Value);
-            else
-                Log.Warn($"No loading screen is shown: {read.Error}");
-        }
-
-        // Everything in the world leaves but its globals, those too with isClearingGlobals. A global that stays outlives
-        // the domain that owned it, so it is owned by none, as an entity made as the game runs.
-        await _threads.Enter(EngineThread.Game);
-        ImmutableArray<Entity>.Builder leaving = ImmutableArray.CreateBuilder<Entity>();
-        ImmutableArray<Entity>.Builder staying = ImmutableArray.CreateBuilder<Entity>();
-        foreach (EcsChunk chunk in Query())
-        {
-            foreach (Entity entity in chunk.Entities)
+            // The project's loading screen, else the engine's, a black void: the entities it is; none, which is warned
+            // about, when it doesn't load.
+            Handle<Domain> project = _app.Project?.LoadingScreen ?? Handle<Domain>.None;
+            Handle<Domain> screenDomain =
+                project == Handle<Domain>.None ? _assets.Find<Domain>("Domains/Loading/Loading.domain") : project;
+            ImmutableArray<ImmutableArray<IComponent>> screen = [];
+            if (screenDomain != Handle<Domain>.None)
             {
-                bool isGlobal = Has<Tags>(entity) && Get<Tags>(entity).Has(Tag.Global);
-                if (isClearingGlobals || !isGlobal)
-                    leaving.Add(entity);
+                Result<DomainRead> read = await ReadDomainAsync(screenDomain, null, cancel).ConfigureAwait(false);
+                if (read.Ok)
+                    screen = GetEntities(read.Value);
                 else
-                    staying.Add(entity);
+                    Log.Warn($"No loading screen is shown: {read.Error}");
             }
-        }
 
-        DestroyEntities(leaving.ToImmutable());
-        foreach (Entity entity in staying)
+            // Everything in the world leaves but its globals, those too with isClearingGlobals. A global that stays
+            // outlives the domain that owned it, so it is owned by none, as an entity made as the game runs.
+            await _threads.Enter(EngineThread.Game);
+            ImmutableArray<Entity>.Builder leaving = ImmutableArray.CreateBuilder<Entity>();
+            ImmutableArray<Entity>.Builder staying = ImmutableArray.CreateBuilder<Entity>();
+            foreach (EcsChunk chunk in Query())
+            {
+                foreach (Entity entity in chunk.Entities)
+                {
+                    bool isGlobal = Has<Tags>(entity) && Get<Tags>(entity).Has(Tag.Global);
+                    if (isClearingGlobals || !isGlobal)
+                        leaving.Add(entity);
+                    else
+                        staying.Add(entity);
+                }
+            }
+
+            DestroyEntities(leaving.ToImmutable());
+            foreach (Entity entity in staying)
+            {
+                Remove<Owner>(entity);
+            }
+
+            _read.Clear();
+            Domains = [];
+            await RunHooksAsync(hooks => hooks.OnDomainUnloadedAsync(cancel), "cleaning up").ConfigureAwait(false);
+
+            await _threads.Enter(EngineThread.Game);
+            ImmutableArray<Entity> loading = CreateEntities(screen);
+            IsShowingLoadingScreen = true;
+            await RunHooksAsync(hooks => hooks.OnDomainLoadingAsync(arriving, cancel), "preparing")
+                .ConfigureAwait(false);
+
+            // A gem that doesn't hook into domain loading may still be loading what comes.
+            while (_assets.HasLoadsInFlight)
+            {
+                await WaitForFrameAsync(cancel).ConfigureAwait(false);
+            }
+
+            await _threads.Enter(EngineThread.Game);
+            DestroyEntities(loading);
+            await RunHooksAsync(hooks => hooks.OnDomainUnloadedAsync(cancel), "cleaning up").ConfigureAwait(false);
+
+            await _threads.Enter(EngineThread.Game);
+            arrive();
+            IsShowingLoadingScreen = false;
+
+            // The next frame publishes what came, wherever this went on in the frame; it has shown once that one is
+            // drawn.
+            uint arrived = PublishedFrame + 1;
+            while (DrawnFrame < arrived)
+            {
+                await WaitForFrameAsync(cancel).ConfigureAwait(false);
+            }
+
+            // The low-latency GC Program asks for seldom collects gen 2, so what the load, the unloads and the gems'
+            // first copies of the arrived world threw away would stay committed: one collection that compacts and
+            // decommits gives it back, once that world's first frame is drawn.
+            await _threads.Enter(EngineThread.Game);
+            GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        }
+        finally
         {
-            Remove<Owner>(entity);
+            IsLoading = false;
+            IsShowingLoadingScreen = false;
         }
-
-        _read.Clear();
-        Domains = [];
-        await RunHooksAsync(hooks => hooks.OnDomainUnloadedAsync(cancel), "cleaning up").ConfigureAwait(false);
-
-        await _threads.Enter(EngineThread.Game);
-        ImmutableArray<Entity> loading = CreateEntities(screen);
-        IsShowingLoadingScreen = true;
-        await RunHooksAsync(hooks => hooks.OnDomainLoadingAsync(arriving, cancel), "preparing").ConfigureAwait(false);
-
-        // A gem that doesn't hook into domain loading may still be loading what comes.
-        while (_assets.HasLoadsInFlight)
-        {
-            await WaitForFrameAsync(cancel).ConfigureAwait(false);
-        }
-
-        await _threads.Enter(EngineThread.Game);
-        DestroyEntities(loading);
-        await RunHooksAsync(hooks => hooks.OnDomainUnloadedAsync(cancel), "cleaning up").ConfigureAwait(false);
-
-        await _threads.Enter(EngineThread.Game);
-        arrive();
-        IsShowingLoadingScreen = false;
-
-        // The next frame publishes what came, wherever this went on in the frame; it has shown once that one is drawn.
-        uint arrived = PublishedFrame + 1;
-        while (DrawnFrame < arrived)
-        {
-            await WaitForFrameAsync(cancel).ConfigureAwait(false);
-        }
-
-        // The low-latency GC Program asks for seldom collects gen 2, so what the load, the unloads and the gems' first
-        // copies of the arrived world threw away would stay committed: one collection that compacts and decommits gives
-        // it back, once that world's first frame is drawn.
-        await _threads.Enter(EngineThread.Game);
-        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
     }
 
     /// <summary>
