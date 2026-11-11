@@ -21,6 +21,7 @@ asked, when its trigger fits: read its `SKILL.md` and follow it. Claude Code als
 | [cleanup](docs/skills/cleanup/SKILL.md) | The user asks to clean up, refactor or simplify code |
 | [simplify-review](docs/skills/simplify-review/SKILL.md) | The user asks to simplify or review an area |
 | [timeouts](docs/skills/timeouts/SKILL.md) | Starting a build, a test run, a validation, a run of Magic, a wait or any background command |
+| [profiling](docs/skills/profiling/SKILL.md) | Profiling, or any mention of performance, frame time, stutter, allocations, memory, VRAM or GPU time |
 | [retro](docs/skills/retro/SKILL.md) | A swarm finishes, a slice went badly, or the user corrects the workflow |
 
 ## Commands
