@@ -3,8 +3,8 @@
 Draws every model in the world's view as a hierarchy of clusters, GPU-driven, and far away as its impostor, into the
 view's depth, GBuffer and glass targets for the gems that light them.
 
-To use it, list `ClusteredGeometry` in a project's `.magic` file after the gem that keeps the world on the GPU, whose
-view it draws, with a gem that lights the GBuffer.
+To use it, list `ClusteredGeometry` in a project's `.magic` file after the renderer, whose view it draws and which
+lights its GBuffer.
 
 ## What it draws
 

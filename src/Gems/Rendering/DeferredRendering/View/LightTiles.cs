@@ -24,12 +24,12 @@ internal sealed class LightTiles(AssetManager assets)
     /// <summary>
     /// The twin of <c>Scene/Lights.slang</c>'s.
     /// </summary>
-    public const int TileSize = 32;
+    private const int TileSize = 32;
 
     /// <summary>
     /// The twin of <c>Scene/Lights.slang</c>'s.
     /// </summary>
-    public const int MaxLights = 1024;
+    private const int MaxLights = 1024;
 
     private const int Buckets = MaxLights / 32;
 
@@ -48,8 +48,8 @@ internal sealed class LightTiles(AssetManager assets)
     public ImmutableArray<ShaderEntry> Shaders => [_cullShader];
 
     /// <summary>
-    /// The table and the view's tiles asked for, and the world's lights into the table, point lights first, in a
-    /// transfer pass the caller opened.
+    /// The table and the view's tiles asked for, and the world's lights into the table, point lights first, in the
+    /// frame's upload pass.
     /// </summary>
     public Result<LightBuffers> Prepare(
         RenderGraph graph,
@@ -104,10 +104,12 @@ internal sealed class LightTiles(AssetManager assets)
     /// <summary>
     /// Each tile's lights, from the view's depth.
     /// </summary>
-    public void Record(RenderGraph graph, in GpuView view, in GpuConstants header)
+    public void Record(RenderGraph graph, in GpuView view)
     {
+        // The depth is the geometry gem's, drawn in the Geometry stage: the Light stage puts this pass after it,
+        // although the view's step records it first.
         graph
-            .Compute("Cull lights", _cullShader, header, RenderStages.Light)
+            .Compute("Cull lights", _cullShader, new GpuConstants(view.Frame.Id), RenderStages.Light)
             .Reads(view.Frame, view.LightTable, view.Depth)
             .Writes(view.LightTiles)
             .Dispatch((uint)GetTiles(view.Width), (uint)GetTiles(view.Height));

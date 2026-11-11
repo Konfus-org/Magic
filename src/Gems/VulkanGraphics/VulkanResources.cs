@@ -770,7 +770,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
             new BufferDescription(name, (long)sizes.accelerationStructureSize, BufferUsages.Acceleration)
         );
         Result<VulkanBuffer> scratch = CreateVulkanBuffer(
-            new BufferDescription($"{name} scratch", (long)Math.Max(sizes.buildScratchSize, 256), BufferUsages.Storage)
+            new BufferDescription($"{name} scratch", (long)Math.Max(sizes.buildScratchSize, 256))
         );
         if (!buffer.Ok || !scratch.Ok)
         {

@@ -32,7 +32,7 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
         IRender<AccelerationStructuresInput, TracedWorld>
 {
     /// <summary>
-    /// A hit materials row, a <c>GpuHitMaterial</c> as the shader library lays it out.
+    /// A hit materials row, a <c>GpuHitMaterial</c> as the renderer's <c>Trace/HitSurface.slang</c> lays it out.
     /// </summary>
     private const int HitMaterialBytes = 32;
 

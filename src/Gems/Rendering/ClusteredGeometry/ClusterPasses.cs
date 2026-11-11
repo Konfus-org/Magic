@@ -17,7 +17,7 @@ namespace Magic.ClusteredGeometry;
 /// </summary>
 internal sealed class ClusterPasses
 {
-    public const int MaxVisibleClusters = 1 << 18;
+    private const int MaxVisibleClusters = 1 << 18;
 
     private const float ErrorThresholdPixels = 1;
 
@@ -214,7 +214,7 @@ internal sealed class ClusterPasses
         graph
             .Compute("Budget clusters", _budgetShader, new GpuConstants(gpu.Frame.Id), RenderStages.Geometry)
             .Writes(gpu.Frame, counts.Value, budget.Value)
-            .Dispatch(1, 1);
+            .Dispatch(1);
 
         // Cull: one group an instance over its clusters, counted by distance, the nearest given their rows while the
         // list has room and the rest drawn as their impostors, what last frame's pyramid hid onto the retest list.
@@ -229,7 +229,7 @@ internal sealed class ClusterPasses
             .Compute("Fit clusters", _fitShader, new GpuConstants(gpu.Frame.Id), RenderStages.Geometry)
             .Reads(gpu.Frame)
             .Writes(counts.Value)
-            .Dispatch(1, 1);
+            .Dispatch(1);
         graph
             .Compute("Place clusters", _placeShader, new GpuConstants(gpu.Frame.Id), RenderStages.Geometry)
             .Reads(
@@ -426,7 +426,7 @@ internal sealed class ClusterPasses
 
     /// <summary>
     /// The regions of the draw arguments, each as many draws as the visible list has rows and counted at word
-    /// <c>region * 4</c> of the counts, the twin of <c>Scene/Visibility.slang</c>'s: the clusters last frame's depth
+    /// <c>region * 4</c> of the counts, the twin of <c>CullClusters.slang</c>'s: the clusters last frame's depth
     /// pyramid shows and those the retest finds this frame's shows, the same of the instances in the impostor handoff,
     /// the translucent clusters of both, and the impostors of both.
     /// </summary>

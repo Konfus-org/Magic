@@ -38,9 +38,9 @@ public sealed class ClusteredGeometryGem
     private readonly ClusterPasses _passes;
 
     /// <summary>
-    /// Whether the gem draws: failed once a shader is not built. Render thread.
+    /// Whether the gem draws: not once a shader, a pool or a frame's passes are not made. Render thread.
     /// </summary>
-    private Result _started = Result.Success();
+    private bool _isRunning = true;
 
     /// <summary>
     /// How many domains have loaded since the start, and what the newest waits on before it shows: its models clustered
@@ -76,7 +76,7 @@ public sealed class ClusteredGeometryGem
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph, in ClusteredGeometryInput input)
     {
-        if (!_started.Ok)
+        if (!_isRunning)
             return;
 
         // The shaders are the GPU provider's to build, the first ask starting each; one that fails ends the start.
@@ -126,7 +126,7 @@ public sealed class ClusteredGeometryGem
         await _threads.Enter(EngineThread.Render);
         _domainsLoaded++;
         Interlocked.Exchange(ref _loading, null)?.TrySetResult();
-        if (!_started.Ok)
+        if (!_isRunning)
             return;
 
         TaskCompletionSource loading = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -141,6 +141,6 @@ public sealed class ClusteredGeometryGem
     {
         Log.Error($"The clusters are not drawn: {error}");
         Interlocked.Exchange(ref _loading, null)?.TrySetResult();
-        _started = Result.Failure(error);
+        _isRunning = false;
     }
 }

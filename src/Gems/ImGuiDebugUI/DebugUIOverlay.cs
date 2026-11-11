@@ -21,7 +21,6 @@ namespace Magic.ImGuiDebugUI;
 /// </summary>
 internal sealed class DebugUIOverlay
 {
-    private const string ShaderPath = "Shaders/DrawDebugUI.slang";
     private const int MinBufferBytes = 16 * 1024;
 
     private readonly Mailbox<DebugUIFrame> _frames;
@@ -41,20 +40,9 @@ internal sealed class DebugUIOverlay
     {
         _frames = frames;
         _textureChanges = textureChanges;
-        Handle<Shader> shader = assets.Find<Shader>(ShaderPath);
         _shaders = new DrawShaders(
-            new ShaderEntry
-            {
-                Module = shader,
-                Name = "DrawDebugUIVertex",
-                Stage = ShaderStage.Vertex,
-            },
-            new ShaderEntry
-            {
-                Module = shader,
-                Name = "DrawDebugUIPixel",
-                Stage = ShaderStage.Pixel,
-            }
+            PassShaders.GetEntry(assets, "DrawDebugUI", "DrawDebugUIVertex", ShaderStage.Vertex),
+            PassShaders.GetEntry(assets, "DrawDebugUI", "DrawDebugUIPixel", ShaderStage.Pixel)
         )
         {
             Blend = BlendMode.Alpha,
@@ -87,17 +75,11 @@ internal sealed class DebugUIOverlay
         Result<GpuBuffer> indices = graph.Buffer(
             GetDescription("Debug UI indices", indexRows.Length * sizeof(uint), BufferUsages.Index)
         );
-        Result<GpuBuffer> constants = graph.Buffer(
-            new BufferDescription("Debug UI constants", DebugUIConstants.Bytes, BufferUsages.Storage)
-        );
+        Result<GpuBuffer> constants = graph.Buffer(new BufferDescription("Debug UI constants", DebugUIConstants.Bytes));
         Result<GpuSampler> sampler = graph.Sampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
-        Result made =
-            !vertices.Ok ? vertices
-            : !indices.Ok ? indices
-            : !constants.Ok ? constants
-            : sampler;
+        Result made = Result.FindFailure(vertices, indices, constants, sampler);
         if (!made.Ok)
         {
             Log.Error($"The debug UI is not drawn: {made.Error}");

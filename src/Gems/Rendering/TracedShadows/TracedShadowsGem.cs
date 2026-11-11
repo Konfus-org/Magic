@@ -61,13 +61,14 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
     public TracedShadowsSettings Settings { get; set; } = settings;
 
     /// <summary>
-    /// The frame's shadows, traced and denoised, their ids written into the frame's buffer; none while the passes'
-    /// shaders are built or what they write is not made.
+    /// The frame's shadows, traced and denoised, their ids written into the frame's buffer; none while it is off,
+    /// the passes' shaders build, or what they write is not made.
     /// </summary>
     public ShadowMask? Render(in Frame frame, RenderGraph graph, in TracedInput input)
     {
-        // Off, the history starts afresh once it is back on.
         TracedShadowsSettings settings = Settings;
+
+        // Off, the history starts afresh once it is back on.
         if (!settings.IsTracedShadowsOn)
         {
             _traced = default;

@@ -25,7 +25,7 @@ The rules for Slang shaders in Magic. [Code Standards](CODE_STANDARDS.md) covers
 - Totals across a dispatch run in a one-thread pass after it (`FitClusters`).
 - Use wave intrinsics only where the result can't depend on wave size (32 or 64) or the order is already arbitrary. No
   16-bit types, and no runtime-indexed resource arrays but the heap's.
-- Guard values where they go wrong: clamp roughness with the library's helper, keep n·v above 0, normalise with the
+- Guard values where they go wrong: clamp roughness where the BRDF takes it, keep n·v above 0, normalise with the
   helper that allows zero, and use `SampleGrad` or `SampleLevel` inside a branch.
 - A compute pass has no implicit derivatives. Code it may run takes them as inputs, as `SurfaceInputs` and
   `SkyInputs` do.

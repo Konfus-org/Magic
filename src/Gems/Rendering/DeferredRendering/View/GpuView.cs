@@ -7,8 +7,8 @@ using Magic.Graphics;
 namespace Magic.DeferredRendering.View;
 
 /// <summary>
-/// The world as the GPU holds it this frame, and the view it is seen through: what the gem that keeps the world on the
-/// GPU makes each frame for the gems that draw it. The frame's buffer holds the library's <c>Core/Frame</c>, then the
+/// The world as the GPU holds it this frame, and the view it is seen through: what the view's step makes each frame for
+/// the gems that draw it. The frame's buffer holds the library's <c>Core/Frame</c>, then the
 /// rows of <c>FrameRows.cs</c>; every target is at the picture's size.
 /// </summary>
 public readonly record struct GpuView
@@ -134,6 +134,16 @@ public readonly record struct GpuView
     /// </summary>
     public static ShaderTypeArgument GetAtmosphere(AssetManager assets) =>
         new(assets.Find<Shader>("Shaders/Sky/Atmosphere.slang"), "Atmosphere");
+
+    /// <summary>
+    /// The view's size times <paramref name="scale"/>, each side rounded and kept between one pixel and the view's:
+    /// the size of a pass drawn at a setting's fraction of the picture.
+    /// </summary>
+    public (int Width, int Height) Scaled(float scale) =>
+        (
+            Math.Clamp((int)MathF.Round(Width * scale), 1, Width),
+            Math.Clamp((int)MathF.Round(Height * scale), 1, Height)
+        );
 }
 
 /// <summary>
@@ -151,19 +161,3 @@ public readonly record struct ModelPlace(
     uint MeshOffset,
     ImmutableArray<(GpuMesh Mesh, uint Triangles)> Meshes
 );
-
-public static class GpuViewExtensions
-{
-    extension(GpuView view)
-    {
-        /// <summary>
-        /// The view's size times <paramref name="scale"/>, each side rounded and kept between one pixel and the view's:
-        /// the size of a pass drawn at a setting's fraction of the picture.
-        /// </summary>
-        public (int Width, int Height) Scaled(float scale) =>
-            (
-                Math.Clamp((int)MathF.Round(view.Width * scale), 1, view.Width),
-                Math.Clamp((int)MathF.Round(view.Height * scale), 1, view.Height)
-            );
-    }
-}

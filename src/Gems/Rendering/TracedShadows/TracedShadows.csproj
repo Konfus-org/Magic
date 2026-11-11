@@ -9,7 +9,8 @@
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its interfaces. -->
+    <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its interfaces, and
+         the renderer a project lists beside it, whose view it shadows. -->
     <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" Private="false" />
     <ProjectReference Include="../DeferredRendering/DeferredRendering.csproj" Private="false" />
   </ItemGroup>

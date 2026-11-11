@@ -105,6 +105,34 @@ public sealed class DeferredRenderingGem
     /// </summary>
     private readonly ImmutableArray<ShaderEntry> _viewShaders;
 
+    private readonly ShaderEntry _shadeShader;
+
+    private readonly ShaderEntry _translucentShader;
+
+    private readonly ShaderEntry _lightViewShader;
+
+    private readonly ShaderEntry _showShader;
+
+    /// <summary>
+    /// Every shader the shading's passes run, which the GPU provider builds before the step draws.
+    /// </summary>
+    private readonly ImmutableArray<ShaderEntry> _shadingShaders;
+
+    private readonly PixelEffects _pixelEffects = new();
+
+    private readonly RendererDebugWindow? _debugWindow;
+
+    private readonly IGraphicsApi _gpu;
+
+    private readonly EventCoordinator _events;
+
+    /// <summary>
+    /// The screenshots asked for on the game thread, which the shading's step takes on the render thread.
+    /// </summary>
+    private readonly Channel<ScreenshotRequested> _screenshots = Channel.CreateUnbounded<ScreenshotRequested>(
+        new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
+    );
+
     private readonly Subscription _preprocessing;
 
     /// <summary>
@@ -135,17 +163,6 @@ public sealed class DeferredRenderingGem
     /// </summary>
     private int _preparedDomains;
 
-    private readonly IGraphicsApi _gpu;
-    private readonly EventCoordinator _events;
-    private readonly Channel<ScreenshotRequested> _screenshots = Channel.CreateUnbounded<ScreenshotRequested>(
-        new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
-    );
-    private readonly ShaderEntry _shadeShader;
-    private readonly ShaderEntry _translucentShader;
-    private readonly ShaderEntry _lightViewShader;
-    private readonly ShaderEntry _showShader;
-    private readonly PixelEffects _pixelEffects = new();
-    private readonly RendererDebugWindow? _debugWindow;
     private bool _hasDrawn;
 
     public DeferredRenderingGem(
@@ -187,16 +204,18 @@ public sealed class DeferredRenderingGem
         _debugWindow = debugUI is null ? null : new RendererDebugWindow(debugUI, input);
         _gpu = gpu;
         _events = events;
+        ImmutableArray<ShaderTypeArgument> atmosphere = [GpuView.GetAtmosphere(assets)];
         _shadeShader = PassShaders.GetEntry(assets, "ShadeSurfaces", "ShadeSurfaces") with
         {
-            TypeArguments = [GpuView.GetAtmosphere(assets)],
+            TypeArguments = atmosphere,
         };
         _translucentShader = PassShaders.GetEntry(assets, "ShadeTranslucent", "ShadeTranslucent") with
         {
-            TypeArguments = [GpuView.GetAtmosphere(assets)],
+            TypeArguments = atmosphere,
         };
         _lightViewShader = PassShaders.GetEntry(assets, "ShowSurface", "ShowLight");
         _showShader = PassShaders.GetEntry(assets, "ShowSurface", "ShowSurface");
+        _shadingShaders = [_shadeShader, _translucentShader, _lightViewShader, _showShader];
     }
 
     /// <summary>
@@ -297,7 +316,7 @@ public sealed class DeferredRenderingGem
         {
             bool isPrepared =
                 !_effects.IsLoading(graph, preparing.Effects)
-                && graph.GetState(_shadeShader, _translucentShader, _lightViewShader, _showShader) != GpuState.Loading;
+                && graph.GetState(_shadingShaders.AsSpan()) != GpuState.Loading;
             bool hasFailure = false;
             foreach (Handle<Model> model in preparing.Models)
             {
@@ -531,11 +550,10 @@ public sealed class DeferredRenderingGem
         }
 
         // The sky's tables while there is a sky, and each tile's lights.
-        GpuConstants header = new(view.Frame.Id);
         if (inputs.Skies.Count > 0)
-            _sky.Record(graph, view, header);
+            _sky.Record(graph, view);
 
-        _lightTiles.Record(graph, view, header);
+        _lightTiles.Record(graph, view);
         return (view, _instances.Instances);
 
         TextureDescription GetTarget(string name, GpuFormat format) => new(name, width, height, format);
@@ -554,7 +572,7 @@ public sealed class DeferredRenderingGem
     {
         // The shaders are the GPU provider's to build, the first ask starting each; while one failed, the renderer
         // draws nothing.
-        if (graph.GetState(_shadeShader, _translucentShader, _lightViewShader, _showShader) != GpuState.Ready)
+        if (graph.GetState(_shadingShaders.AsSpan()) != GpuState.Ready)
             return;
 
         GpuView gpu = input.View;
@@ -571,7 +589,6 @@ public sealed class DeferredRenderingGem
             .Reads(
                 gpu.Frame,
                 gpu.SkyTransmittance,
-                gpu.SkyMultiScattering,
                 gpu.SkyView,
                 gpu.LightTable,
                 gpu.LightTiles,
@@ -599,7 +616,6 @@ public sealed class DeferredRenderingGem
                 .Reads(
                     gpu.Frame,
                     gpu.SkyTransmittance,
-                    gpu.SkyMultiScattering,
                     gpu.SkyView,
                     gpu.Depth,
                     gpu.GlassDepth,

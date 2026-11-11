@@ -17,7 +17,7 @@ internal sealed class FrameView
 
     /// <summary>
     /// Last frame's view and its size, while a frame was drawn since the view was last forgotten: what a thing that
-    /// moved carries where it was from, and whether last frame's depth pyramid is there to cull against.
+    /// moved carries where it was from, and whether the view has a history.
     /// </summary>
     private (Matrix4x4 ViewProjection, Vector4 CameraPosition, int Width, int Height)? _previous;
 
@@ -34,8 +34,8 @@ internal sealed class FrameView
     }
 
     /// <summary>
-    /// Forgets the last frame's camera, depth pyramid and shadows, so the next frame moves nothing on from where a view
-    /// that is gone looked, culls against no pyramid of it and blends no shadows of it.
+    /// Forgets the last frame's camera and size, so the next frame moves nothing on from where a view that is gone
+    /// looked, and each gem that keeps a history of the view starts it again.
     /// </summary>
     public void ClearHistory() => _previous = null;
 
@@ -61,7 +61,7 @@ internal sealed class FrameView
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
         if (!sampler.Ok)
-            return Result.Failure($"the lighting sampler was not made: {sampler.Error}");
+            return Result.Failure(sampler.Error);
 
         int width = view.Width;
         int height = view.Height;

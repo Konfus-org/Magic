@@ -411,8 +411,9 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// Adds <paramref name="use"/> to a transfer pass of <paramref name="stage"/>: the open one, or a new one when the open one uses the same
-    /// resource another way or has written the same texture level, as a pass's barriers all come before its commands. Uploads into one buffer share a pass, as each writes its own range.
+    /// Adds <paramref name="use"/> to a transfer pass of <paramref name="stage"/>: the open one, or a new one when the
+    /// open one uses the same resource another way or has written the same texture level, as a pass's barriers all come
+    /// before its commands. Uploads into one buffer share a pass, as each writes its own range.
     /// </summary>
     private void UseInTransfer(in GpuUse use, RenderStage stage)
     {

@@ -110,11 +110,9 @@ internal sealed class PixelEffects
                 levels == 0 || !needs.HasHistory
                     ? Result.Success(GpuTexture.None)
                     : graph.Texture(GetTarget(_targetNames[filled ^ 1], gpu, levels));
-            if (!target.Ok || !history.Ok)
+            if (Result.FindFailure(target, history) is { Ok: false } unmade)
             {
-                Log.Error(
-                    $"The effect at {place} in the list is not drawn: {(target.Ok ? history.Error : target.Error)}"
-                );
+                Log.Error($"The effect at {place} in the list is not drawn: {unmade.Error}");
 
                 continue;
             }
@@ -175,12 +173,5 @@ internal sealed class PixelEffects
     }
 
     private static TextureDescription GetTarget(string name, in GpuView gpu, int levels) =>
-        new(
-            name,
-            gpu.Width,
-            gpu.Height,
-            GpuFormat.R16G16B16A16Sfloat,
-            TextureUsages.Storage | TextureUsages.Sampled,
-            levels
-        );
+        new(name, gpu.Width, gpu.Height, GpuFormat.R16G16B16A16Sfloat, Levels: levels);
 }

@@ -37,7 +37,7 @@ public record struct GpuInstance
     public float BoundsRadius;
 
     /// <summary>
-    /// The model's index, 0 for none: its row of any table a renderer keeps a row a model in.
+    /// The model's index, 0 for none: its row in each table that keeps a row a model.
     /// </summary>
     public uint Model;
 

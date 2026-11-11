@@ -24,14 +24,15 @@ internal sealed class Probes(AssetManager assets)
     private const int MaxProbesUp = 16;
 
     /// <summary>
-    /// The rays all the probes trace in a frame, the twin of <c>UpdateProbes.slang</c>'s.
+    /// The rays all the probes trace in a frame, and the texels along a probe's irradiance tile: the twins of
+    /// <c>UpdateProbes.slang</c>'s.
     /// </summary>
     private const int RayBudget = 131072;
+    private const int IrradianceTexels = 8;
 
     /// <summary>
-    /// The twins of <c>Light/Probes.slang</c>'s.
+    /// The twins of the renderer's <c>Light/Probes.slang</c>'s.
     /// </summary>
-    private const int IrradianceTexels = 8;
     private const int DepthTile = 18;
     private const int ProbeBytes = 80;
 

@@ -486,7 +486,7 @@ internal sealed class GpuResources(
 
             Result<GpuTexture> texture = graph.Texture(description);
             Result<GpuSampler> sampler = graph.Sampler(entry.SamplerDescription);
-            Result made = !texture.Ok ? texture : sampler;
+            Result made = Result.FindFailure(texture, sampler);
             if (!made.Ok)
             {
                 Log.Error($"{description.Name} is drawn as a failure: {made.Error}");

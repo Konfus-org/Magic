@@ -87,12 +87,12 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
         if (_rows.Count > models.Length)
             _rows.RemoveRange(models.Length, _rows.Count - models.Length);
 
-        // A row whose model changed draws nothing until what it holds now arrives.
         while (_rows.Count < models.Length)
         {
             _rows.Add(default);
         }
 
+        // A row whose model changed draws nothing until what it holds now arrives.
         for (int index = 0; index < models.Length; index++)
         {
             if (_rows[index].Place == models[index])

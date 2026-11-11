@@ -19,8 +19,10 @@ internal sealed class SkyLuts(AssetManager assets)
 
     public ImmutableArray<ShaderEntry> Shaders => [_transmittanceShader, _multiScatteringShader, _viewShader];
 
-    public void Record(RenderGraph graph, in GpuView view, in GpuConstants header)
+    public void Record(RenderGraph graph, in GpuView view)
     {
+        GpuConstants header = new(view.Frame.Id);
+
         // Each table is filled over its texels, at the size the view's step asked for it.
         TextureDescription transmittance = graph.GetDescription(view.SkyTransmittance);
         TextureDescription multiScattering = graph.GetDescription(view.SkyMultiScattering);
