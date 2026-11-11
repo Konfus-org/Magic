@@ -14,9 +14,9 @@ internal record struct ClusterConstants
 {
     public const int Offset = GpuAir.Offset + GpuAir.Bytes;
 
-    public uint HzbLevels;
+    public uint DepthPyramidLevels;
 
-    public uint HasHzb;
+    public uint HasDepthPyramid;
 
     public float ErrorThreshold;
 
@@ -47,7 +47,7 @@ internal record struct ClusterConstants
 
     public uint RetestArguments;
 
-    public uint Hzb;
+    public uint DepthPyramid;
 
     public uint Visibility;
 

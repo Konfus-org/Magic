@@ -18,9 +18,9 @@ public static const uint ClusterConstantsOffset = AirOffset + AirBytes;
 // the cluster budget sets the handoff and the error threshold at the start of the frame.
 public struct ClusterConstants
 {
-    public uint hzbLevels;
+    public uint depthPyramidLevels;
     // Whether the depth pyramid holds last frame, so a cluster may be tested against it.
-    public uint hasHzb;
+    public uint hasDepthPyramid;
     // Pixels of projected error a drawn cluster may have, as the cluster budget raises it.
     public float errorThreshold;
     // The pixel radius on screen under which an instance hands off to its impostor, as the cluster budget raises it;
@@ -41,7 +41,7 @@ public struct ClusterConstants
     public uint counts;
     public uint retestList;
     public uint retestArguments;
-    public uint hzb;
+    public uint depthPyramid;
     public uint visibility;
     // The nearest translucent surface in front of the opaque ones: its visibility id, 0 where there is none.
     public uint glassVisibility;

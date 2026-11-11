@@ -251,7 +251,7 @@ Outcome Test(FrameConstants frame, GpuInstance instance, uint clusterIndex, bool
             return Outcome.Culled;
     }
 
-    if ((clusters.hasHzb != 0u || isRetest) && IsOccluded(frame, center, radius))
+    if ((clusters.hasDepthPyramid != 0u || isRetest) && IsOccluded(frame, center, radius))
         return isRetest ? Outcome.Culled : Outcome.Hidden;
 
     return Outcome.Shown;
@@ -290,7 +290,7 @@ void AddClusterDraw(GpuInstance instance, uint clusterIndex, uint row, bool isFa
 void TestImpostor(FrameConstants frame, uint instanceIndex, GpuInstance instance, bool isWhole, bool isRetest)
 {
     ClusterConstants clusters = GetClusters();
-    bool isHidden = (clusters.hasHzb != 0u || isRetest) && IsOccluded(frame, Relative(frame, instance.boundsCenter), instance.boundsRadius);
+    bool isHidden = (clusters.hasDepthPyramid != 0u || isRetest) && IsOccluded(frame, Relative(frame, instance.boundsCenter), instance.boundsRadius);
     if (isHidden && (isRetest || TryAddRetest(instanceIndex, isWhole ? RetestWholeImpostor : RetestImpostor)))
         return;
 

@@ -41,7 +41,7 @@ when a model draws as its impostor.
 - `ClusterResources` keeps a row for each row of the view's model table: when a row's model changes, it reads the new
   model's clusters from the cache and copies them into its own pools, and gives the old one's ranges back. A pool
   starts small, and a model that doesn't fit grows it by half; the GPU provider keeps what it held.
-- `Visibility` records the passes: the cluster budget, the cull, the draws into the visibility buffer, the depth
+- `ClusterPasses` records the passes: the cluster budget, the cull, the draws into the visibility buffer, the depth
   pyramid, the retest, the glass and the per-material resolve.
 - The shaders are the `Shaders/` modules in this gem's `Resources`, built on the shader library
   ([Shaders](../../../Resources/Shaders/README.md)). The passes are at the folder's root, and what they share is under it:

@@ -2,7 +2,7 @@
 // depth of the texels below it, the last row and column of an odd level folded in so no texel goes uncovered. The
 // pass header's y is the level written, and its z the picture level 0 also clears, 0 for none: the HDR picture, which
 // the material resolve writes emissive light into, so a pixel no resolve writes this frame adds none.
-module "BuildHzb";
+module "BuildDepthPyramid";
 
 import Core.Heap;
 import Core.Pass;
@@ -11,13 +11,13 @@ import Scene.Clusters;
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
-void BuildHzb(uint3 thread : SV_DispatchThreadID)
+void BuildDepthPyramid(uint3 thread : SV_DispatchThreadID)
 {
     ClusterConstants clusters = GetClusters();
     FrameConstants frame = GetFrame();
     PassHeader header = GetPassHeader();
     uint level = header.y;
-    StorageRef target = { clusters.hzb, level };
+    StorageRef target = { clusters.depthPyramid, level };
     uint2 size = target.GetSize();
     if (any(thread.xy >= size))
         return;
@@ -33,7 +33,7 @@ void BuildHzb(uint3 thread : SV_DispatchThreadID)
         return;
     }
 
-    TextureRef source = { clusters.hzb };
+    TextureRef source = { clusters.depthPyramid };
     uint2 sourceSize = source.GetSize(level - 1u);
     uint2 first = thread.xy * 2u;
     uint2 count = uint2(2u, 2u);

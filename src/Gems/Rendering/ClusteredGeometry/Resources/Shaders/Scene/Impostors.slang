@@ -1,4 +1,4 @@
-// Octahedral impostors. An instance whose model baked an atlas (the mesh preprocessor's ImpostorBuilder) draws
+// Octahedral impostors. An instance whose model baked an atlas as it was clustered (C#'s ImpostorBuilder) draws
 // as a quad fitted to its box once it is under a handoff's pixel radius on screen or past its distance, the three
 // views nearest the camera's direction blended; in the handoff its clusters draw too, each pixel shown by one of the
 // two by a dither on the fade, so nothing pops (Brucks, "Octahedral Impostors", 2018).

@@ -66,14 +66,14 @@ public bool IsOccluded(FrameConstants frame, float3 center, float radius)
     float2 uvMin = saturate(ToUv(rectangle.xw));
     float2 uvMax = saturate(ToUv(rectangle.zy));
     float2 pixels = (uvMax - uvMin) * float2(frame.width, frame.height);
-    float level = clamp(ceil(log2(max(max(pixels.x, pixels.y), 1.0))), 0.0, float(clusters.hzbLevels - 1u));
-    TextureRef hzb = { clusters.hzb };
-    uint2 size = hzb.GetSize(uint(level));
+    float level = clamp(ceil(log2(max(max(pixels.x, pixels.y), 1.0))), 0.0, float(clusters.depthPyramidLevels - 1u));
+    TextureRef depthPyramid = { clusters.depthPyramid };
+    uint2 size = depthPyramid.GetSize(uint(level));
     uint2 t0 = GetTexelAt(uvMin, size);
     uint2 t1 = GetTexelAt(uvMax, size);
     float farthest = min(
-        min(hzb.Load(t0, uint(level)).x, hzb.Load(uint2(t1.x, t0.y), uint(level)).x),
-        min(hzb.Load(uint2(t0.x, t1.y), uint(level)).x, hzb.Load(t1, uint(level)).x)
+        min(depthPyramid.Load(t0, uint(level)).x, depthPyramid.Load(uint2(t1.x, t0.y), uint(level)).x),
+        min(depthPyramid.Load(uint2(t0.x, t1.y), uint(level)).x, depthPyramid.Load(t1, uint(level)).x)
     );
     float nearest = ToReversedDepth(viewCenter.z - radius, frame.near);
     return nearest < farthest;

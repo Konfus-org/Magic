@@ -176,7 +176,7 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
         ImmutableArray<GpuResource>.Builder atlases = ImmutableArray.CreateBuilder<GpuResource>();
         foreach (Row row in _rows)
         {
-            if (row.Impostor is not { } atlas || row.ImpostorUv is not { } uvAtlas)
+            if (row.ImpostorDescription is not { } atlas || row.ImpostorUvDescription is not { } uvAtlas)
                 continue;
 
             if (graph.Texture(atlas) is { Ok: true } surface)
@@ -288,8 +288,8 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
         graph.Upload(uvAtlas.Value, MemoryMarshal.AsBytes(made.ImpostorUv.AsSpan()));
         row = row with
         {
-            Impostor = atlasDescription,
-            ImpostorUv = uvDescription,
+            ImpostorDescription = atlasDescription,
+            ImpostorUvDescription = uvDescription,
             ImpostorRow = (uint)_impostorRows.Allocate(1),
         };
         GpuImpostor impostor = new()
@@ -338,9 +338,9 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
 
         public uint ClusterCount { get; init; }
 
-        public TextureDescription? Impostor { get; init; }
+        public TextureDescription? ImpostorDescription { get; init; }
 
-        public TextureDescription? ImpostorUv { get; init; }
+        public TextureDescription? ImpostorUvDescription { get; init; }
 
         public uint ImpostorRow { get; init; }
     }

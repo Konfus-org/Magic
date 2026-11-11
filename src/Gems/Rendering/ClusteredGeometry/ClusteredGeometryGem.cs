@@ -35,7 +35,7 @@ public sealed class ClusteredGeometryGem
     private readonly Threads _threads;
     private readonly Subscription _preprocessing;
     private readonly ClusterResources _resources;
-    private readonly Visibility _visibility;
+    private readonly ClusterPasses _passes;
 
     /// <summary>
     /// Whether the gem draws: failed once a shader is not built. Render thread.
@@ -56,7 +56,7 @@ public sealed class ClusteredGeometryGem
         ClusterPreprocessor clusters = new();
         _preprocessing = assets.Register(clusters);
         _resources = new ClusterResources(clusters, assets, threads);
-        _visibility = new Visibility(assets);
+        _passes = new ClusterPasses(assets);
     }
 
     /// <summary>
@@ -68,8 +68,7 @@ public sealed class ClusteredGeometryGem
     public void Dispose()
     {
         _preprocessing.Dispose();
-        _loading?.TrySetResult();
-        _loading = null;
+        Interlocked.Exchange(ref _loading, null)?.TrySetResult();
     }
 
     /// <summary>
@@ -81,14 +80,13 @@ public sealed class ClusteredGeometryGem
             return;
 
         // The shaders are the GPU provider's to build, the first ask starting each; one that fails ends the start.
-        GpuState shaders = graph.GetState(_visibility.Shaders.AsSpan());
+        GpuState shaders = graph.GetState(_passes.Shaders.AsSpan());
         if (shaders == GpuState.Failed)
             FailStart("a shader was not built.");
 
         if (shaders != GpuState.Ready)
             return;
 
-        ClusteredGeometrySettings settings = Settings;
         GpuView gpu = input.View;
         Result<ClusterPools> pools = _resources.Prepare(graph, gpu.Models.Span);
         if (!pools.Ok)
@@ -101,31 +99,18 @@ public sealed class ClusteredGeometryGem
         // The loading domain shows once its models are clustered on the GPU and the resolve for each material shader is
         // built.
         if (
-            _loading is { } loading
+            _loading is not null
             && gpu.PreparedDomains >= _domainsLoaded
             && !_resources.IsLoading
-            && graph.GetState(_visibility.GetResolveShaders(gpu.MaterialShaders)) != GpuState.Loading
+            && graph.GetState(_passes.GetResolveShaders(gpu.MaterialShaders)) != GpuState.Loading
         )
         {
-            loading.TrySetResult();
-            _loading = null;
+            Interlocked.Exchange(ref _loading, null)?.TrySetResult();
         }
 
-        Result<RenderView> view = Visibility.Prepare(
-            graph,
-            gpu,
-            pools.Value,
-            settings.ImpostorPixels,
-            settings.ImpostorDistance
-        );
-        if (!view.Ok)
-        {
-            Log.Error($"The clusters are not drawn: {view.Error}");
-
-            return;
-        }
-
-        _visibility.Record(view.Value);
+        Result recorded = _passes.Record(graph, gpu, pools.Value, Settings);
+        if (!recorded.Ok)
+            FailStart(recorded.Error);
     }
 
     /// <summary>
@@ -140,8 +125,7 @@ public sealed class ClusteredGeometryGem
     {
         await _threads.Enter(EngineThread.Render);
         _domainsLoaded++;
-        _loading?.TrySetResult();
-        _loading = null;
+        Interlocked.Exchange(ref _loading, null)?.TrySetResult();
         if (!_started.Ok)
             return;
 
@@ -156,8 +140,7 @@ public sealed class ClusteredGeometryGem
     private void FailStart(string error)
     {
         Log.Error($"The clusters are not drawn: {error}");
-        _loading?.TrySetResult();
-        _loading = null;
+        Interlocked.Exchange(ref _loading, null)?.TrySetResult();
         _started = Result.Failure(error);
     }
 }
