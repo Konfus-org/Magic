@@ -18,6 +18,7 @@ asked, when its trigger fits: read its `SKILL.md` and follow it. Claude Code als
 | [tidy-worktrees](docs/skills/tidy-worktrees/SKILL.md) | The start of every session |
 | [investigate](docs/skills/investigate/SKILL.md) | Something is broken, logs an error or draws wrong |
 | [new-gem](docs/skills/new-gem/SKILL.md) | A slice needs a new gem |
+| [cleanup](docs/skills/cleanup/SKILL.md) | The user asks to clean up, refactor or simplify code |
 | [simplify-review](docs/skills/simplify-review/SKILL.md) | The user asks to simplify or review an area |
 | [timeouts](docs/skills/timeouts/SKILL.md) | Starting a build, a test run, a validation, a run of Magic, a wait or any background command |
 | [retro](docs/skills/retro/SKILL.md) | A swarm finishes, a slice went badly, or the user corrects the workflow |
