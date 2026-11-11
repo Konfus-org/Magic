@@ -54,100 +54,118 @@ internal static class Program
         using App app = new();
         Settings settings = new(app, new FileSystem());
         Task<Result<byte[]>>? worldRestorePoint = null;
-        bool isLaunching = true;
+        string[]? launchCommands = commandLine;
 
         // One pass per run, all new for it: a typed command that asks for another project or mode, or a change to a gem's
         // code, ends the run, and the next starts anew.
         while (true)
         {
-            FileSystem files = new();
-            EventCoordinator events = new();
-            Threads threads = new();
-            Caches caches = new(files, app);
-            using AssetManager assets = new(files, caches, events, app);
-            using World world = new(assets, files, events, threads, app);
-            Cli cli = new(app, settings, files, events, assets, world);
+            (int? exitCode, worldRestorePoint) = RunPass(app, settings, launchCommands, worldRestorePoint);
+            if (exitCode is { } code)
+                return code;
 
-            if (isLaunching)
-            {
-                isLaunching = false;
-                Result ran = cli.Execute(commandLine);
-                if (!ran.Ok)
-                {
-                    Log.Critical($"Couldn't run the command line: {ran.Error}");
-                    return 1;
-                }
-            }
-
-            if (app.HasFailed)
-                return ExitFailed();
-
-            // A job, like new or --version, is done once it ran, and failed if it logged an error, as a project that
-            // won't open does.
-            if (app.IsExiting || app.Project is not { } project)
-                return Log.ErrorCount == 0 ? 0 : 1;
-
-            // The project's folder comes first, as the first winning a path two directories have.
-            assets.Register(files.GetParent(project.Path));
-
-            // The services, then the gems the project lists, which join them.
-            ServiceCollection services = [];
-            services.AddSingleton(app);
-            services.AddSingleton(settings);
-            services.AddSingleton<IFileSystem>(files);
-            services.AddSingleton(events);
-            services.AddSingleton(threads);
-            services.AddSingleton(caches);
-            services.AddSingleton(assets);
-            services.AddSingleton(world);
-            List<RegisteredGem> registered = GemRegistry.Register(files, project.Gems, services);
-
-            // Never disposed, since its singletons are the gems, which Gems ends.
-            services.MakeReadOnly();
-            IServiceProvider provider = services.BuildServiceProvider();
-
-            Log.Info($"Running {project.Name} in {(app.IsHeadless ? "headless" : "GUI")} mode.");
-
-            app.StartRun();
-            using Gems gems = new(registered, provider, app, settings, files, assets, world, events, threads);
-            settings.ReportUnknownKeys();
-            world
-                .StartAsync(worldRestorePoint?.WaitAsync(app.Lifetime), Terminal.Progress, app.Lifetime)
-                .FireAndForget();
-
-            // If we don't have a window and aren't headless something is wrong, early out.
-            if (!app.IsHeadless && app.Window is null)
-            {
-                Log.Warn(
-                    $"{project.Name} has no gem that provides a window, so the run is exiting. List one, or use --headless."
-                );
-                app.Exit();
-            }
-
-            // The frames run on the game thread, while this one, the platform thread, pumps the OS's events until the
-            // run ends; then the game thread's last frame finishes, and this thread is the game thread for what ends.
-            threads.Start(EngineThread.Game, () => RunFrame(app, world, gems, cli));
-            while (!app.Lifetime.IsCancellationRequested)
-            {
-                threads.Pump(EngineThread.Platform);
-                if (app.Platform is { } platform)
-                    platform.Pump();
-                else
-                    app.Lifetime.WaitHandle.WaitOne(_platformWait);
-            }
-
-            threads.Stop(EngineThread.Game);
-            if (app.HasFailed)
-                return ExitFailed();
-
-            // The world is saved while the gems are still whole, for a restart of this same project; they end as this pass
-            // does, last made first.
-            worldRestorePoint = app.IsExiting || app.Project != project ? null : world.SaveAsync();
-
-            Log.Info($"Closing {project.Name} and {(app.IsExiting ? "exiting" : "restarting")}.");
-            if (app.IsExiting)
-                return 0;
+            launchCommands = null;
         }
+    }
+
+    // Kept out of Run's loop, where CA2000 falsely reports the world as not disposed (dotnet/roslyn-analyzers#7047).
+    /// <summary>
+    /// Runs one pass, all new for it: the command line first when it is given, then the project until its run ends.
+    /// Gives Run's exit code, or null and the world as this run saved it when the next run must start.
+    /// </summary>
+    private static (int? ExitCode, Task<Result<byte[]>>? WorldRestorePoint) RunPass(
+        App app,
+        Settings settings,
+        string[]? launchCommands,
+        Task<Result<byte[]>>? worldRestorePoint
+    )
+    {
+        FileSystem files = new();
+        EventCoordinator events = new();
+        Threads threads = new();
+        Caches caches = new(files, app);
+        using AssetManager assets = new(files, caches, events, app);
+        using World world = new(assets, files, events, threads, app);
+        Cli cli = new(app, settings, files, events, assets, world);
+
+        if (launchCommands is not null)
+        {
+            Result ran = cli.Execute(launchCommands);
+            if (!ran.Ok)
+            {
+                Log.Critical($"Couldn't run the command line: {ran.Error}");
+                return (1, null);
+            }
+        }
+
+        if (app.HasFailed)
+            return (ExitFailed(), null);
+
+        // A job, like new or --version, is done once it ran, and failed if it logged an error, as a project that
+        // won't open does.
+        if (app.IsExiting || app.Project is not { } project)
+            return (Log.ErrorCount == 0 ? 0 : 1, null);
+
+        // The project's folder comes first, as the first winning a path two directories have.
+        assets.Register(files.GetParent(project.Path));
+
+        // The services, then the gems the project lists, which join them.
+        ServiceCollection services = [];
+        services.AddSingleton(app);
+        services.AddSingleton(settings);
+        services.AddSingleton<IFileSystem>(files);
+        services.AddSingleton(events);
+        services.AddSingleton(threads);
+        services.AddSingleton(caches);
+        services.AddSingleton(assets);
+        services.AddSingleton(world);
+        List<RegisteredGem> registered = GemRegistry.Register(files, project.Gems, services);
+
+        // Never disposed, since its singletons are the gems, which Gems ends.
+        services.MakeReadOnly();
+        IServiceProvider provider = services.BuildServiceProvider();
+
+        Log.Info($"Running {project.Name} in {(app.IsHeadless ? "headless" : "GUI")} mode.");
+
+        app.StartRun();
+        using Gems gems = new(registered, provider, app, settings, files, assets, world, events, threads);
+        settings.ReportUnknownKeys();
+        world.StartAsync(worldRestorePoint?.WaitAsync(app.Lifetime), Terminal.Progress, app.Lifetime).FireAndForget();
+
+        // If we don't have a window and aren't headless something is wrong, early out.
+        if (!app.IsHeadless && app.Window is null)
+        {
+            Log.Warn(
+                $"{project.Name} has no gem that provides a window, so the run is exiting. List one, or use --headless."
+            );
+            app.Exit();
+        }
+
+        // The frames run on the game thread, while this one, the platform thread, pumps the OS's events until the
+        // run ends; then the game thread's last frame finishes, and this thread is the game thread for what ends.
+        threads.Start(EngineThread.Game, () => RunFrame(app, world, gems, cli));
+        while (!app.Lifetime.IsCancellationRequested)
+        {
+            threads.Pump(EngineThread.Platform);
+            if (app.Platform is { } platform)
+                platform.Pump();
+            else
+                app.Lifetime.WaitHandle.WaitOne(_platformWait);
+        }
+
+        threads.Stop(EngineThread.Game);
+        if (app.HasFailed)
+            return (ExitFailed(), null);
+
+        // The world is saved while the gems are still whole, for a restart of this same project; they end as this pass
+        // does, last made first.
+        worldRestorePoint = app.IsExiting || app.Project != project ? null : world.SaveAsync();
+
+        Log.Info($"Closing {project.Name} and {(app.IsExiting ? "exiting" : "restarting")}.");
+        if (app.IsExiting)
+            return (0, null);
+
+        return (null, worldRestorePoint);
 
         // One frame on the game thread, after what was posted to it: Core's own steps are timed for whatever listens, and
         // the gems' pump times its hooks itself. Under --fail-on-error, the first error logged ends the run; the exit
