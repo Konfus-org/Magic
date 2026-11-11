@@ -25,7 +25,7 @@ import Surface.Brdf;
 // reflections as far as they cover the pixel, where the surface is smooth enough for them. Elsewhere it is the sky along
 // the mirror direction, giving way to the diffuse as the surface roughens; where the diffuse is traced it is the diffuse
 // alone, so a closed room reflects none of the sky.
-float3 GetIndirectLight<S : ISky>(
+float3 ShadeIndirectLight<S : ISky>(
     FrameConstants frame,
     Lights lights,
     Brdf brdf,
@@ -123,7 +123,7 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
         }
     }
 
-    color += GetIndirectLight<S>(frame, lights, brdf, surface.x, thread.xy, relative, normal, view) * surface.z
+    color += ShadeIndirectLight<S>(frame, lights, brdf, surface.x, thread.xy, relative, normal, view) * surface.z
         + hdr.Load(thread.xy).rgb;
     hdr.Store(thread.xy, float4(color, 1.0));
 }

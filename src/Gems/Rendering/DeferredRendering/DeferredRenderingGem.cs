@@ -50,9 +50,9 @@ public readonly record struct ShadingInput(
 /// shadowed by the frame's shadow mask where there is one, the nearest glass over it, the effects, a debug view where
 /// one is asked for, and the output into the window and any screenshot asked for. Where nothing made the world as rays
 /// see it, the shadows, the indirect light or the air, their rows of the frame's buffer are 0. As a domain replaces the
-/// world, it forgets the view's history and holds the loading screen until what comes is on the GPU and the passes are
-/// built. It is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the
-/// gem.
+/// world, it forgets the view's history and holds the loading screen until what comes is on the GPU and the shading's
+/// shaders are built. It is public because nothing in its assembly makes it: Magic does, by reflection, when a project
+/// lists the gem.
 /// </summary>
 public sealed class DeferredRenderingGem
     : IGem,
@@ -142,23 +142,11 @@ public sealed class DeferredRenderingGem
     );
     private readonly ShaderEntry _shadeShader;
     private readonly ShaderEntry _translucentShader;
-    private readonly ShaderEntry _lightShader;
+    private readonly ShaderEntry _lightViewShader;
     private readonly ShaderEntry _showShader;
     private readonly PixelEffects _pixelEffects = new();
     private readonly RendererDebugWindow? _debugWindow;
-
-    /// <summary>
-    /// Every shader the shading's passes run, which the GPU provider builds before the frame is drawn.
-    /// </summary>
-    private readonly ImmutableArray<ShaderEntry> _shadingShaders;
     private bool _hasDrawn;
-
-    /// <summary>
-    /// How many domains have loaded since the start, and what the newest waits on before it shows: the gem's passes
-    /// built, once the view counts it prepared. Render thread.
-    /// </summary>
-    private int _domainsLoaded;
-    private TaskCompletionSource? _loading;
 
     public DeferredRenderingGem(
         DeferredRenderingSettings settings,
@@ -207,9 +195,8 @@ public sealed class DeferredRenderingGem
         {
             TypeArguments = [GpuView.GetAtmosphere(assets)],
         };
-        _lightShader = PassShaders.GetEntry(assets, "ShowSurface", "ShowLight");
+        _lightViewShader = PassShaders.GetEntry(assets, "ShowSurface", "ShowLight");
         _showShader = PassShaders.GetEntry(assets, "ShowSurface", "ShowSurface");
-        _shadingShaders = [_shadeShader, _translucentShader, _lightShader, _showShader];
     }
 
     /// <summary>
@@ -303,11 +290,14 @@ public sealed class DeferredRenderingGem
         _instances.Fill(inputs.Renderers, frame.Index);
 
         // The loading domain shows once the models, materials and effects it waits for are on the GPU, or failed: drawn
-        // as the failure material, which is then waited for too, or, for an effect, left out. Its models are asked for
-        // here, as the pools only take them once they are made; an ask for one asked for already does nothing.
+        // as the failure material, which is then waited for too, or, for an effect, left out; and once the shading's
+        // shaders are built, or failed. Its models are asked for here, as the pools only take them once they are made;
+        // an ask for one asked for already does nothing.
         if (_preparing is { } preparing)
         {
-            bool isPrepared = !_effects.IsLoading(graph, preparing.Effects);
+            bool isPrepared =
+                !_effects.IsLoading(graph, preparing.Effects)
+                && graph.GetState(_shadeShader, _translucentShader, _lightViewShader, _showShader) != GpuState.Loading;
             bool hasFailure = false;
             foreach (Handle<Model> model in preparing.Models)
             {
@@ -563,22 +553,12 @@ public sealed class DeferredRenderingGem
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph, in ShadingInput input)
     {
-        // The shaders are the GPU provider's to build, the first ask starting each. While one failed, the renderer draws
-        // nothing and holds no domain back; else the loading domain shows once its models and materials are on the GPU.
-        GpuState shaders = graph.GetState(_shadingShaders.AsSpan());
-        GpuView gpu = input.View;
-        if (
-            _loading is { } loading
-            && (shaders == GpuState.Failed || (shaders == GpuState.Ready && gpu.PreparedDomains >= _domainsLoaded))
-        )
-        {
-            loading.TrySetResult();
-            _loading = null;
-        }
-
-        if (shaders != GpuState.Ready)
+        // The shaders are the GPU provider's to build, the first ask starting each; while one failed, the renderer
+        // draws nothing.
+        if (graph.GetState(_shadeShader, _translucentShader, _lightViewShader, _showShader) != GpuState.Ready)
             return;
 
+        GpuView gpu = input.View;
         DeferredRenderingSettings settings = Settings;
 
         ReadOnlySpan<GpuResource> indirect = input.Light is { } light
@@ -645,7 +625,7 @@ public sealed class DeferredRenderingGem
             graph
                 .Compute(
                     "Show light",
-                    _lightShader,
+                    _lightViewShader,
                     new GpuConstants(gpu.Frame.Id, (uint)settings.RenderView),
                     RenderStage.Shade
                 )
@@ -683,7 +663,9 @@ public sealed class DeferredRenderingGem
         if (!target.IsNone)
             graph.Blit(shown, target, RenderStage.Post, settings.UpscaleFilter);
 
-        // One readback buffer, so one screenshot a frame: the last asked for.
+        // One readback buffer, so one screenshot a frame: the last asked for, read back at the size it is shown at, and
+        // through a copy stretched to it with the upscale filter, of 8 bits a channel, where the shown picture is
+        // another size or has more; written once the GPU is done with it.
         ScreenshotRequested? shot = null;
         while (_screenshots.Reader.TryRead(out ScreenshotRequested asked))
         {
@@ -691,7 +673,35 @@ public sealed class DeferredRenderingGem
         }
 
         if (shot is { } saved)
-            SaveScreenshot(graph, shown, gpu.ShownWidth, gpu.ShownHeight, settings.UpscaleFilter, saved.Path);
+        {
+            (int width, int height) = (gpu.ShownWidth, gpu.ShownHeight);
+            TextureDescription drawn = graph.GetDescription(shown);
+            Result<GpuBuffer> readback = graph.Buffer(
+                GpuDescriptions.GetBuffer("Output readback", (long)width * height * 4, BufferUsages.Readback)
+            );
+            Result<GpuTexture> read =
+                drawn.Format == GpuFormat.R8G8B8A8Unorm && drawn.Width == width && drawn.Height == height
+                    ? Result.Success(shown)
+                    : graph.Texture(
+                        GpuDescriptions.GetTexture(
+                            "Screenshot copy",
+                            width,
+                            height,
+                            GpuFormat.R8G8B8A8Unorm,
+                            TextureUsages.CopyDestination | TextureUsages.CopySource
+                        )
+                    );
+            if (Result.FindFailure(readback, read) is { Ok: false } failed)
+                Log.Error($"The screenshot was not taken: {failed.Error}");
+            else
+            {
+                if (read.Value != shown)
+                    graph.Blit(shown, read.Value, RenderStage.Post, settings.UpscaleFilter);
+
+                graph.ReadBack(read.Value, readback.Value, RenderStage.Post);
+                SaveScreenshotAsync(readback.Value, saved.Path, width, height).FireAndForget();
+            }
+        }
 
         if (!_hasDrawn)
         {
@@ -712,12 +722,11 @@ public sealed class DeferredRenderingGem
     }
 
     /// <summary>
-    /// Holds the domain loading until it can show. First the view's part: asks for every model and material
-    /// <paramref name="entities"/> draw, and the effects of their first post processing, or the default's, and waits
-    /// until they are on the GPU, or failed and drawn as the failure or left out. Materials are asked for at once; models
-    /// once the pools are made, and the effects, by the view's step. Then the shading's part: waits until its passes are
-    /// built, once the view counts the domain prepared. One that comes while another waits ends that one. On the render
-    /// thread, whose tables and counts these are.
+    /// Holds the domain loading until it can show: asks for every model and material <paramref name="entities"/> draw,
+    /// and the effects of their first post processing, or the default's, and waits until they are on the GPU, or failed
+    /// and drawn as the failure or left out, and until the shading's shaders are built or failed. Materials are asked
+    /// for at once; models once the pools are made, and the effects, by the view's step. One that comes while another
+    /// waits ends that one. On the render thread, whose tables and counts these are.
     /// </summary>
     public async Task OnDomainLoadingAsync(
         ImmutableArray<ImmutableArray<IComponent>> entities,
@@ -766,14 +775,6 @@ public sealed class DeferredRenderingGem
             _preparing = preparing;
             await preparing.Done.Task.WaitAsync(cancel).ConfigureAwait(false);
         }
-
-        await _threads.Enter(EngineThread.Render);
-        _domainsLoaded++;
-        _loading?.TrySetResult();
-        _loading = null;
-        TaskCompletionSource loading = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        _loading = loading;
-        await loading.Task.WaitAsync(cancel).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -828,50 +829,6 @@ public sealed class DeferredRenderingGem
         Log.Error($"The world is not put on the GPU: {error}");
         EndPreparing();
         _isRunning = false;
-    }
-
-    /// <summary>
-    /// The picture the window shows read back at <paramref name="width"/> by <paramref name="height"/>, the size it is
-    /// shown at, through a copy stretched to it with <paramref name="filter"/>, and of 8 bits a channel where it is
-    /// another size or has more, and written to <paramref name="path"/> once the GPU is done with it.
-    /// </summary>
-    private void SaveScreenshot(
-        RenderGraph graph,
-        GpuTexture shown,
-        int width,
-        int height,
-        TextureFilter filter,
-        string path
-    )
-    {
-        TextureDescription drawn = graph.GetDescription(shown);
-        Result<GpuBuffer> readback = graph.Buffer(
-            GpuDescriptions.GetBuffer("Output readback", (long)width * height * 4, BufferUsages.Readback)
-        );
-        Result<GpuTexture> read =
-            drawn.Format == GpuFormat.R8G8B8A8Unorm && drawn.Width == width && drawn.Height == height
-                ? Result.Success(shown)
-                : graph.Texture(
-                    GpuDescriptions.GetTexture(
-                        "Screenshot copy",
-                        width,
-                        height,
-                        GpuFormat.R8G8B8A8Unorm,
-                        TextureUsages.CopyDestination | TextureUsages.CopySource
-                    )
-                );
-        if (!readback.Ok || !read.Ok)
-        {
-            Log.Error($"The screenshot was not taken: {(readback.Ok ? read.Error : readback.Error)}");
-
-            return;
-        }
-
-        if (read.Value != shown)
-            graph.Blit(shown, read.Value, RenderStage.Post, filter);
-
-        graph.ReadBack(read.Value, readback.Value, RenderStage.Post);
-        SaveScreenshotAsync(readback.Value, path, width, height).FireAndForget();
     }
 
     /// <summary>

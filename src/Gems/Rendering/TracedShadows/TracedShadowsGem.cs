@@ -43,7 +43,11 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
     private readonly ShaderEntry _traceShader = PassShaders.GetEntry(assets, "TraceShadows", "TraceShadows");
     private readonly ShaderEntry _classifyShader = PassShaders.GetEntry(assets, "DenoiseShadows", "ClassifyShadows");
     private readonly ShaderEntry _filterShader = PassShaders.GetEntry(assets, "DenoiseShadows", "FilterShadows");
-    private readonly ShaderEntry _blendShader = PassShaders.GetEntry(assets, "DenoiseShadows", "BlendShadows");
+    private readonly ShaderEntry _lastFilterShader = PassShaders.GetEntry(
+        assets,
+        "DenoiseShadows",
+        "FilterLastAndBlendShadows"
+    );
     private readonly ShaderEntry _upsampleShader = PassShaders.GetEntry(assets, "DenoiseShadows", "UpsampleShadows");
 
     /// <summary>
@@ -72,7 +76,13 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
         }
 
         // The shaders are the GPU provider's to build, the first ask starting each.
-        GpuState state = graph.GetState(_traceShader, _classifyShader, _filterShader, _blendShader, _upsampleShader);
+        GpuState state = graph.GetState(
+            _traceShader,
+            _classifyShader,
+            _filterShader,
+            _lastFilterShader,
+            _upsampleShader
+        );
         if (state != GpuState.Ready)
             return null;
 
@@ -212,7 +222,15 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
         // The sun's slot filtered a last time from the last pass's into the mask the rays wrote, and the tile lights'
         // slots blended with last frame's.
         graph
-            .Compute("Blend shadows", _blendShader, header with { W = filtered.Id }, RenderStage.Light)
+            .Compute(
+                "Filter last and blend shadows",
+                _lastFilterShader,
+                header with
+                {
+                    W = filtered.Id,
+                },
+                RenderStage.Light
+            )
             .Reads(
                 view.Frame,
                 constants.Value,
