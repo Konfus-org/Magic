@@ -34,16 +34,6 @@ internal sealed class ClusterPasses
 
     private const BufferUsages IndirectUsage = BufferUsages.Storage | BufferUsages.Indirect;
 
-    // The cull's passes, the pass header's y: count each instance's rows by distance, find how many distances from the
-    // nearest fit, give those their rows, and retest what last frame's pyramid hid.
-    private const uint ModeCount = 0;
-
-    private const uint ModeFit = 1;
-
-    private const uint ModePlace = 2;
-
-    private const uint ModeRetest = 3;
-
     // A name for each level of the depth pyramid, as many as a texture can have: GPU timings are kept by name.
     private static readonly ImmutableArray<string> DepthPyramidPasses =
     [
@@ -52,7 +42,13 @@ internal sealed class ClusterPasses
 
     private readonly ShaderEntry _budgetShader;
 
-    private readonly ShaderEntry _cullShader;
+    private readonly ShaderEntry _countShader;
+
+    private readonly ShaderEntry _fitShader;
+
+    private readonly ShaderEntry _placeShader;
+
+    private readonly ShaderEntry _retestShader;
 
     private readonly DrawShaders _drawShaders;
 
@@ -75,7 +71,10 @@ internal sealed class ClusterPasses
     public ClusterPasses(AssetManager assets)
     {
         _budgetShader = PassShaders.GetEntry(assets, "BudgetClusters", "BudgetClusters");
-        _cullShader = PassShaders.GetEntry(assets, "CullClusters", "CullClusters");
+        _countShader = PassShaders.GetEntry(assets, "CullClusters", "CountClusters");
+        _fitShader = PassShaders.GetEntry(assets, "CullClusters", "FitClusters");
+        _placeShader = PassShaders.GetEntry(assets, "CullClusters", "PlaceClusters");
+        _retestShader = PassShaders.GetEntry(assets, "CullClusters", "RetestClusters");
         ShaderEntry clusterVertex = PassShaders.GetEntry(
             assets,
             "DrawVisibility",
@@ -114,7 +113,10 @@ internal sealed class ClusterPasses
         Shaders =
         [
             _budgetShader,
-            _cullShader,
+            _countShader,
+            _fitShader,
+            _placeShader,
+            _retestShader,
             clusterVertex,
             _drawShaders.Pixel,
             _fadingShaders.Pixel,
@@ -219,17 +221,15 @@ internal sealed class ClusterPasses
             DepthPyramid = depthPyramid.Value.Id,
             Visibility = visibility.Value.Id,
             GlassVisibility = glassVisibility.Value.Id,
+            Impostors = pools.Impostors.Id,
+            InstanceRows = instanceRows.Value.Id,
+            Budget = budget.Value.Id,
         };
         graph.Upload(gpu.Frame, [clusters], ClusterConstants.Offset);
 
         // Budget: last frame's count steers the frame's handoff and error threshold, then the counts start again.
         graph
-            .Compute(
-                "Budget clusters",
-                _budgetShader,
-                new GpuConstants(gpu.Frame.Id, 0, budget.Value.Id),
-                RenderStage.Geometry
-            )
+            .Compute("Budget clusters", _budgetShader, new GpuConstants(gpu.Frame.Id), RenderStage.Geometry)
             .Writes(gpu.Frame, counts.Value, budget.Value)
             .Dispatch(1, 1);
 
@@ -238,27 +238,17 @@ internal sealed class ClusterPasses
         uint across = (uint)Math.Min(gpu.InstanceCount, CullGroupsPerRow);
         uint down = (uint)Math.Max((gpu.InstanceCount + CullGroupsPerRow - 1) / CullGroupsPerRow, 1);
         graph
-            .Compute(
-                "Count clusters",
-                _cullShader,
-                new GpuConstants(gpu.Frame.Id, ModeCount, instanceRows.Value.Id),
-                RenderStage.Geometry
-            )
+            .Compute("Count clusters", _countShader, new GpuConstants(gpu.Frame.Id), RenderStage.Geometry)
             .Reads(gpu.Frame, gpu.Instances, pools.Clusters, pools.Models, depthPyramid.Value)
             .Writes(counts.Value, instanceRows.Value)
             .Dispatch(across, down);
         graph
-            .Compute("Fit clusters", _cullShader, new GpuConstants(gpu.Frame.Id, ModeFit), RenderStage.Geometry)
+            .Compute("Fit clusters", _fitShader, new GpuConstants(gpu.Frame.Id), RenderStage.Geometry)
             .Reads(gpu.Frame)
             .Writes(counts.Value)
             .Dispatch(1, 1);
         graph
-            .Compute(
-                "Place clusters",
-                _cullShader,
-                new GpuConstants(gpu.Frame.Id, ModePlace, instanceRows.Value.Id),
-                RenderStage.Geometry
-            )
+            .Compute("Place clusters", _placeShader, new GpuConstants(gpu.Frame.Id), RenderStage.Geometry)
             .Reads(
                 gpu.Frame,
                 gpu.Instances,
@@ -277,7 +267,7 @@ internal sealed class ClusterPasses
 
         // Retest the list against the new pyramid, as many groups as the cull left in the retest arguments.
         graph
-            .Compute("Retest clusters", _cullShader, new GpuConstants(gpu.Frame.Id, ModeRetest), RenderStage.Geometry)
+            .Compute("Retest clusters", _retestShader, new GpuConstants(gpu.Frame.Id), RenderStage.Geometry)
             .Reads(
                 gpu.Frame,
                 gpu.Instances,
@@ -325,7 +315,7 @@ internal sealed class ClusterPasses
                 .Compute(
                     "Resolve materials",
                     resolves[shader],
-                    new GpuConstants(gpu.Frame.Id, pools.Impostors.Id, (uint)shader),
+                    new GpuConstants(gpu.Frame.Id, (uint)shader),
                     RenderStage.Geometry
                 )
                 .Reads(
@@ -392,7 +382,7 @@ internal sealed class ClusterPasses
                         name,
                         _impostorShaders,
                         GetTargets(TargetLoad.Keep),
-                        new GpuConstants(gpu.Frame.Id, 0, pools.Impostors.Id),
+                        new GpuConstants(gpu.Frame.Id),
                         RenderStage.Geometry
                     )
                     .Reads(gpu.Frame, gpu.Instances, pools.Impostors, pools.Models)

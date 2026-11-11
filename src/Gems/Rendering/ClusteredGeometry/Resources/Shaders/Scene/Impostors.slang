@@ -31,10 +31,6 @@ public static const uint ImpostorInstanceMask = (1u << ImpostorSlotShift) - 1u;
 
 public uint EncodeImpostorId(uint instance, uint slot) { return ImpostorFlag | ((slot & 7u) << ImpostorSlotShift) | instance; }
 
-// A retest list entry's cluster for an instance whose impostor the old pyramid hid, and for one drawn whole.
-public static const uint RetestImpostor = 0xFFFFFFFFu;
-public static const uint RetestWholeImpostor = 0xFFFFFFFEu;
-
 // One model's impostor, C#'s GpuImpostor: the box around the model in its frame, the heap id of its atlas and of the
 // atlas of the texture coordinates each texel shows.
 public struct GpuImpostor
@@ -45,9 +41,9 @@ public struct GpuImpostor
     public uint uvAtlas;
 }
 
-public GpuImpostor LoadImpostor(uint table, uint row)
+public GpuImpostor LoadImpostor(uint row)
 {
-    ArrayRef<GpuImpostor> impostors = { table };
+    ArrayRef<GpuImpostor> impostors = { GetClusters().impostors };
     return impostors[row];
 }
 

@@ -22,7 +22,7 @@ The rules for Slang shaders in Magic. [Code Standards](CODE_STANDARDS.md) covers
   reference as its handle (`GpuTexture`, `GpuSampler`). Nothing checks that the two match, so change them together.
 - A contract between shaders is an interface (`IMaterial`, `ISky`, `IPixelEffect`), and a pass that works with any is
   generic over it.
-- Totals across a dispatch run in its last group (`IsLastGroup`), not in a one-group pass after it.
+- Totals across a dispatch run in a one-thread pass after it (`FitClusters`).
 - Use wave intrinsics only where the result can't depend on wave size (32 or 64) or the order is already arbitrary. No
   16-bit types, and no runtime-indexed resource arrays but the heap's.
 - Guard values where they go wrong: clamp roughness with the library's helper, keep n·v above 0, normalise with the

@@ -5,9 +5,9 @@ using Magic.DeferredRendering.View;
 namespace Magic.ClusteredGeometry;
 
 /// <summary>
-/// What the cluster passes read beyond the frame, the twin of <c>Scene/Clusters.slang</c>'s: the cull's limits and
-/// buffers, the depth pyramid, the visibility ids and the impostor handoff, written once a frame into the constants
-/// buffer after <see cref="GpuAir"/>.
+/// What the cluster passes read beyond the frame, 84 bytes, the twin of <c>Scene/Clusters.slang</c>'s: the cull's
+/// limits and buffers, the depth pyramid, the visibility ids, the impostor handoff and table, and the cluster budget,
+/// written once a frame into the constants buffer after <see cref="GpuAir"/>.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct ClusterConstants
@@ -52,6 +52,12 @@ internal record struct ClusterConstants
     public uint Visibility;
 
     public uint GlassVisibility;
+
+    public uint Impostors;
+
+    public uint InstanceRows;
+
+    public uint Budget;
 }
 
 /// <summary>
