@@ -27,10 +27,40 @@ public sealed record SdlPlatformSettings
     public Size WindowedSize { get; init; } = new(1280, 720);
 
     /// <summary>
+    /// Whether the window's edges can be dragged to resize it when it is windowed.
+    /// </summary>
+    public bool IsResizable { get; init; } = true;
+
+    /// <summary>
+    /// The display the window shows on, by its place in the system's list of displays; the first is usually the main
+    /// one.
+    /// </summary>
+    public int Display { get; init; }
+
+    /// <summary>
+    /// How many times the mouse's motion is multiplied: 2 moves twice as far.
+    /// </summary>
+    [Category("Input")]
+    public float MouseSensitivity { get; init; } = 1;
+
+    /// <summary>
+    /// Seconds over which the mouse's motion eases in, which steadies a jittery mouse and makes it lag; 0 is raw.
+    /// </summary>
+    [Category("Input")]
+    public float MouseSmoothing { get; init; }
+
+    /// <summary>
     /// How far a gamepad's stick moves from its centre before it counts, as a part of its full deflection.
     /// </summary>
     [Category("Input")]
     public float StickDeadZone { get; init; } = 0.15f;
+
+    /// <summary>
+    /// The power a stick's deflection past its dead zone is raised to: 1 is linear, and more gives finer control near
+    /// the centre and the same speed at full deflection.
+    /// </summary>
+    [Category("Input")]
+    public float StickCurve { get; init; } = 1;
 
     /// <summary>
     /// How far a control moves before it counts as pressed, as a part of its full travel: a stick or trigger part of
