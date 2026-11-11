@@ -61,7 +61,19 @@ public sealed class Threads
     /// </summary>
     internal void Start(EngineThread thread, Action frame)
     {
-        Thread made = new(() => Run(thread, frame)) { Name = thread.ToString(), IsBackground = true };
+        // The thread's loop, for as long as it is still the one running `thread`: Stop takes that away.
+        Thread made = new(() =>
+        {
+            while (Volatile.Read(ref _running[(int)thread]) == Thread.CurrentThread)
+            {
+                Pump(thread);
+                frame();
+            }
+        })
+        {
+            Name = thread.ToString(),
+            IsBackground = true,
+        };
         Volatile.Write(ref _threadIds[(int)thread], made.ManagedThreadId);
         Volatile.Write(ref _running[(int)thread], made);
         made.Start();
@@ -103,18 +115,6 @@ public sealed class Threads
             {
                 Log.Error($"What was posted to the {thread} thread threw: {ex}");
             }
-        }
-    }
-
-    /// <summary>
-    /// The loop of a thread <see cref="Start"/> made, for as long as it is still the one running <paramref name="thread"/>.
-    /// </summary>
-    private void Run(EngineThread thread, Action frame)
-    {
-        while (Volatile.Read(ref _running[(int)thread]) == Thread.CurrentThread)
-        {
-            Pump(thread);
-            frame();
         }
     }
 }
