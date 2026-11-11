@@ -56,8 +56,7 @@ public sealed class GpuWorldGem
     private readonly MaterialInstance _failure;
 
     /// <summary>
-    /// What is done to the picture when no entity has a <see cref="PostProcessing"/>: the temporal anti-aliasing, the
-    /// exposure and the AgX tonemap.
+    /// What is done to the picture when no entity has a <see cref="PostProcessing"/>: the exposure and the AgX tonemap.
     /// </summary>
     private readonly PostProcessing _defaultPost;
 
@@ -120,12 +119,8 @@ public sealed class GpuWorldGem
         _preprocessing = assets.Register(models);
         _resources = new GpuResources(models, caches, assets, shaders, threads);
         _failure = new MaterialInstance { Handle = assets.GetFailure<Material, Model>() };
-        _defaultPost.Effects[0] = new MaterialInstance
-        {
-            Handle = assets.Find<Material>("Materials/TemporalAntiAliasing.mat"),
-        };
-        _defaultPost.Effects[1] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Exposure.mat") };
-        _defaultPost.Effects[2] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Agx.mat") };
+        _defaultPost.Effects[0] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Exposure.mat") };
+        _defaultPost.Effects[1] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Agx.mat") };
         _instances = new InstanceTable(assets, _resources, _failure);
         _frameView = new FrameView(_resources);
         _sky = new SkyLuts(assets);
