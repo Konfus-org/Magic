@@ -283,3 +283,5 @@ dotnet_diagnostic.CA1028.severity = none
 dotnet_diagnostic.CA1724.severity = none
 # Data structs keep their public fields (CODESTANDARDS State), so an ECS component's can be written through a span.
 dotnet_code_quality.CA1051.exclude_structs = true
+# CA2000 checks each method alone: following calls into a long constructor reports a false leak of an object in a using.
+dotnet_code_quality.CA2000.interprocedural_analysis_kind = None
