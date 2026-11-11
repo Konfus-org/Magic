@@ -214,10 +214,16 @@ public sealed class World : IEcs, IDisposable
                 Result.Failure(IsLoading ? "the world is loading." : "no domain is open.")
             );
 
-        ImmutableArray<DomainRead> domains = GetOpenDomains();
+        ImmutableArray<Handle<Domain>> open = Domains;
+        ImmutableArray<DomainRead> domains = [.. open.Select(domain => _read[domain])];
         WorldState now = GetState();
 
-        return Task.Run(() => ToSave(domains, now));
+        return Task.Run(Result<byte[]> () =>
+        {
+            Result<JsonNode?> changes = Diff(GetBaseState(domains), now);
+
+            return changes.Ok ? ToBytes(new SaveFile(open, changes.Value)) : Result.Failure(changes.Error);
+        });
     }
 
     /// <summary>
@@ -431,19 +437,6 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// The save of <paramref name="now"/>: <paramref name="domains"/>, and how it differs from what their files make, as
-    /// UTF-8 JSON; why not, when JSON can't hold it.
-    /// </summary>
-    private static Result<byte[]> ToSave(ImmutableArray<DomainRead> domains, WorldState now)
-    {
-        Result<JsonNode?> changes = Diff(GetBaseState(domains), now);
-
-        return changes.Ok
-            ? ToBytes(new SaveFile([.. domains.Select(domain => domain.Domain)], changes.Value))
-            : Result.Failure(changes.Error);
-    }
-
-    /// <summary>
     /// How <paramref name="to"/> differs from <paramref name="from"/>, as a JSON diff; none when it doesn't, and why not,
     /// when JSON can't hold either.
     /// </summary>
@@ -651,17 +644,6 @@ public sealed class World : IEcs, IDisposable
             .ConfigureAwait(false);
 
     /// <summary>
-    /// <paramref name="domain"/> comes, and is in the world from then on. Game thread.
-    /// </summary>
-    private void Add(DomainRead domain)
-    {
-        ImmutableArray<Entity> coming = CreateEntities(GetEntities(domain));
-        _read[domain.Domain] = domain;
-        Domains = Domains.Add(domain.Domain);
-        Log.Info($"Opened {GetName(domain.Domain)}: {coming.Length} entities.");
-    }
-
-    /// <summary>
     /// One entity for each of <paramref name="entities"/>. Game thread.
     /// </summary>
     private ImmutableArray<Entity> CreateEntities(ImmutableArray<ImmutableArray<IComponent>> entities)
@@ -724,11 +706,6 @@ public sealed class World : IEcs, IDisposable
         return new WorldState(placed, made.ToImmutable(), IsPaused, TimeScale);
     }
 
-    /// <summary>
-    /// The domains open, with the prefabs each placed as they were read. Game thread.
-    /// </summary>
-    private ImmutableArray<DomainRead> GetOpenDomains() => [.. Domains.Select(domain => _read[domain])];
-
     private string GetName(Handle<Domain> domain) => _assets.GetPath(domain) ?? "a domain";
 
     /// <summary>
@@ -757,7 +734,10 @@ public sealed class World : IEcs, IDisposable
                 isClearingGlobals: false,
                 () =>
                 {
-                    Add(opened);
+                    ImmutableArray<Entity> coming = CreateEntities(placed);
+                    _read[domain] = opened;
+                    Domains = Domains.Add(domain);
+                    Log.Info($"Opened {GetName(domain)}: {coming.Length} entities.");
                     CreateEntities(player);
                 },
                 cancel
@@ -975,17 +955,9 @@ public sealed class World : IEcs, IDisposable
             {
                 foreach (Handle<Domain> open in Domains)
                 {
-                    Result<Domain> domain = await _assets.LoadAsync(open, null, cancel).ConfigureAwait(false);
-                    if (!domain.Ok)
-                    {
-                        Log.Error($"{GetName(open)} is not opened again: {domain.Error}");
-
-                        continue;
-                    }
-
                     bool isChanged =
                         changed.Contains(open.Id)
-                        || GetPlaces(domain.Value).Any(place => changed.Contains(place.Prefab.Id));
+                        || GetPlaces(_read[open].Asset).Any(place => changed.Contains(place.Prefab.Id));
                     if (isChanged)
                         await ReopenAsync(open, cancel).ConfigureAwait(false);
                 }
