@@ -130,6 +130,16 @@ public readonly record struct GpuUse
 }
 
 /// <summary>
+/// A buffer or a texture, as a pass names what it reads or writes.
+/// </summary>
+public readonly record struct GpuResource(GpuBuffer Buffer, GpuTexture Texture, bool IsTexture)
+{
+    public static implicit operator GpuResource(GpuBuffer buffer) => new(buffer, default, false);
+
+    public static implicit operator GpuResource(GpuTexture texture) => new(default, texture, true);
+}
+
+/// <summary>
 /// Whether a draw pass keeps, clears or ignores what a target holds as it begins.
 /// </summary>
 public enum TargetLoad : byte
@@ -178,8 +188,8 @@ public readonly record struct GpuRenderTargets
 public readonly record struct GpuConstants(uint X, uint Y = 0, uint Z = 0, uint W = 0);
 
 /// <summary>
-/// Which command a <see cref="GpuCommand"/> is; the fields each reads are on the <see cref="RenderGraph"/> method that
-/// records it.
+/// Which command a <see cref="GpuCommand"/> is; the fields each reads are on the method of <see cref="RenderGraph"/>,
+/// <see cref="ComputePass"/> or <see cref="DrawPass"/> that records it.
 /// </summary>
 public enum GpuCommandKind : byte
 {
@@ -201,7 +211,7 @@ public enum GpuCommandKind : byte
 
 /// <summary>
 /// One command, as plain fields a kind reads its own way: a resource's id and a second's, two byte offsets, a size,
-/// four numbers and a block of constants. <see cref="RenderGraph"/> fills them; the GPU provider reads them.
+/// four numbers and a block of constants. The graph and its passes fill them; the GPU provider reads them.
 /// </summary>
 public readonly record struct GpuCommand
 {

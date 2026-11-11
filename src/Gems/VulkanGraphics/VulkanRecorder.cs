@@ -103,8 +103,8 @@ internal sealed unsafe class VulkanRecorder(
             $"A {kind} of {command.Size} bytes from {command.Id} to {command.Id2} names a resource that has left the heap."
         );
 
-    private static VkImageSubresourceLayers GetLayers(VulkanTexture texture, uint level, uint layer) =>
-        new(texture.Description.Format.ToAspect(), level, layer, 1);
+    private static VkImageSubresourceLayers GetLayers(VulkanTexture texture, uint level) =>
+        new(texture.Description.Format.ToAspect(), level, 0, 1);
 
     private static VkExtent3D GetExtent(VulkanTexture texture, uint level) =>
         new(
@@ -374,11 +374,11 @@ internal sealed unsafe class VulkanRecorder(
                 break;
             case GpuCommandKind.BindIndexBuffer:
                 if (resources.Buffers[command.Id] is { } indices)
-                    api.vkCmdBindIndexBuffer(cmd, indices.Buffer, command.Offset, VkIndexType.Uint32);
+                    api.vkCmdBindIndexBuffer(cmd, indices.Buffer, 0, VkIndexType.Uint32);
 
                 break;
             case GpuCommandKind.DrawIndexed:
-                api.vkCmdDrawIndexed(cmd, command.X, command.Y, command.Z, 0, command.W);
+                api.vkCmdDrawIndexed(cmd, command.X, 1, command.Z, 0, 0);
                 break;
             case GpuCommandKind.DrawIndirectCount:
                 if (resources.Buffers[command.Id] is { } plain && resources.Buffers[command.Id2] is { } plainCount)
@@ -416,7 +416,7 @@ internal sealed unsafe class VulkanRecorder(
                     VkBufferImageCopy region = new()
                     {
                         bufferOffset = command.Offset,
-                        imageSubresource = GetLayers(into, command.X, command.Y),
+                        imageSubresource = GetLayers(into, command.X),
                         imageExtent = GetExtent(into, command.X),
                     };
                     api.vkCmdCopyBufferToImage(
@@ -437,9 +437,8 @@ internal sealed unsafe class VulkanRecorder(
                 {
                     VkBufferImageCopy region = new()
                     {
-                        bufferOffset = command.Offset2,
-                        imageSubresource = GetLayers(read, command.X, command.Y),
-                        imageExtent = GetExtent(read, command.X),
+                        imageSubresource = GetLayers(read, 0),
+                        imageExtent = GetExtent(read, 0),
                     };
                     api.vkCmdCopyImageToBuffer(
                         cmd,
@@ -461,8 +460,8 @@ internal sealed unsafe class VulkanRecorder(
                     VkExtent3D targetExtent = GetExtent(over, 0);
                     VkImageBlit region = new()
                     {
-                        srcSubresource = GetLayers(blitted, 0, 0),
-                        dstSubresource = GetLayers(over, 0, 0),
+                        srcSubresource = GetLayers(blitted, 0),
+                        dstSubresource = GetLayers(over, 0),
                     };
                     region.srcOffsets[1] = new VkOffset3D((int)sourceExtent.width, (int)sourceExtent.height, 1);
                     region.dstOffsets[1] = new VkOffset3D((int)targetExtent.width, (int)targetExtent.height, 1);
@@ -481,13 +480,7 @@ internal sealed unsafe class VulkanRecorder(
                 break;
             case GpuCommandKind.FillBuffer:
                 if (resources.Buffers[command.Id] is { } filled)
-                    api.vkCmdFillBuffer(
-                        cmd,
-                        filled.Buffer,
-                        command.Offset,
-                        command.Size == 0 ? ulong.MaxValue : command.Size,
-                        command.X
-                    );
+                    api.vkCmdFillBuffer(cmd, filled.Buffer, 0, ulong.MaxValue, 0);
 
                 break;
             case GpuCommandKind.BuildAcceleration:

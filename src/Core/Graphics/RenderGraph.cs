@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Drawing;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Assets;
@@ -255,16 +254,21 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// Every byte of <paramref name="buffer"/> set to 0.
+    /// Every byte of <paramref name="buffer"/> set to 0, in a transfer pass of its own, as it writes the whole buffer.
     /// </summary>
     public void Clear(GpuBuffer buffer)
     {
-        // A clear writes the whole buffer, so it follows any other use of it in a pass of its own.
-        if (_pass is { Kind: GpuPassKind.Transfer } && IsHeld(buffer))
-            EndPass();
-
-        UseInTransfer(GetUse(buffer, GpuAccess.CopyDestination), RenderStage.Prepare);
+        Begin(
+            new()
+            {
+                Name = "Transfers",
+                Kind = GpuPassKind.Transfer,
+                Stage = RenderStage.Prepare,
+            }
+        );
+        AddUse(GetUse(buffer, GpuAccess.CopyDestination));
         Add(new() { Kind = GpuCommandKind.FillBuffer, Id = buffer.Id });
+        EndPass();
     }
 
     /// <summary>
@@ -331,112 +335,14 @@ public sealed class RenderGraph
         _pass = null;
     }
 
-    internal void PushConstants(in GpuConstants constants) =>
-        Add(new() { Kind = GpuCommandKind.PushConstants, Constants = constants });
-
-    internal void Dispatch(uint groupsX, uint groupsY = 1, uint groupsZ = 1) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.Dispatch,
-                X = groupsX,
-                Y = groupsY,
-                Z = groupsZ,
-            }
-        );
-
-    /// <summary>
-    /// Three unsigned group counts read from <paramref name="arguments"/> at <paramref name="offset"/>.
-    /// </summary>
-    internal void DispatchIndirect(GpuBuffer arguments, ulong offset) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.DispatchIndirect,
-                Id = arguments.Id,
-                Offset = offset,
-            }
-        );
-
-    /// <summary>
-    /// Each of <paramref name="draws"/> clipped to its scissor with its constants pushed, its 32-bit indices read from
-    /// <paramref name="indices"/>.
-    /// </summary>
-    internal void DrawIndexed(GpuBuffer indices, scoped ReadOnlySpan<IndexedDraw> draws)
+    internal void Add(in GpuCommand command)
     {
-        Use(indices, GpuAccess.Index);
-        Add(new() { Kind = GpuCommandKind.BindIndexBuffer, Id = indices.Id });
-        foreach (IndexedDraw draw in draws)
-        {
-            // A draw with no pixels to draw into is left out, as a negative size would wrap round to a huge one.
-            if (draw.Scissor.Width <= 0 || draw.Scissor.Height <= 0)
-                continue;
-
-            Rectangle scissor = draw.Scissor;
-            Add(
-                new()
-                {
-                    Kind = GpuCommandKind.SetScissor,
-                    X = (uint)scissor.X,
-                    Y = (uint)scissor.Y,
-                    Z = (uint)scissor.Width,
-                    W = (uint)scissor.Height,
-                }
-            );
-            PushConstants(draw.Constants);
-            Add(
-                new()
-                {
-                    Kind = GpuCommandKind.DrawIndexed,
-                    X = draw.IndexCount,
-                    Y = 1,
-                    Z = draw.FirstIndex,
-                }
-            );
-        }
+        ThrowIfNotInPass();
+        _commands.Add(command);
     }
 
-    /// <summary>
-    /// As many draws as the unsigned count at <paramref name="countOffset"/> in <paramref name="count"/>, up to
-    /// <paramref name="maxDraws"/>, their arguments <paramref name="stride"/> bytes apart from
-    /// <paramref name="argumentsOffset"/> in <paramref name="arguments"/>, each four unsigned integers: vertices,
-    /// instances, first vertex, first instance.
-    /// </summary>
-    internal void DrawIndirectCount(
-        GpuBuffer arguments,
-        ulong argumentsOffset,
-        GpuBuffer count,
-        ulong countOffset,
-        uint maxDraws,
-        uint stride = 16
-    ) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.DrawIndirectCount,
-                Id = arguments.Id,
-                Offset = argumentsOffset,
-                Id2 = count.Id,
-                Offset2 = countOffset,
-                X = maxDraws,
-                Y = stride,
-            }
-        );
-
-    /// <summary>
-    /// A thread for each of <paramref name="x"/> by <paramref name="y"/> by <paramref name="z"/>, in as many groups of
-    /// the pass's shader as cover them: in a pass <see cref="Compute"/> began.
-    /// </summary>
-    internal void DispatchThreads(uint x, uint y, uint z) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.DispatchThreads,
-                X = x,
-                Y = y,
-                Z = z,
-            }
-        );
+    internal void PushConstants(in GpuConstants constants) =>
+        Add(new() { Kind = GpuCommandKind.PushConstants, Constants = constants });
 
     /// <summary>
     /// Says the open pass touches <paramref name="buffer"/> as <paramref name="access"/>.
@@ -494,10 +400,20 @@ public sealed class RenderGraph
     /// </summary>
     private void EndOpenPass()
     {
-        if (_pass is { Kind: GpuPassKind.Transfer })
+        if (_pass is not { } open)
+            return;
+
+        if (open.Kind == GpuPassKind.Transfer)
+        {
             EndPass();
-        else
-            DropOpenPass();
+            return;
+        }
+
+        // The gem threw in its Render or forgot to end the pass: the other gems' passes still draw.
+        Log.Error($"The pass {open.Name} was never ended, so it is left out of the frame.");
+        _uses.Clear();
+        _commands.Clear();
+        _pass = null;
     }
 
     /// <summary>
@@ -518,8 +434,7 @@ public sealed class RenderGraph
 
     /// <summary>
     /// Adds <paramref name="use"/> to a transfer pass of <paramref name="stage"/>: the open one, or a new one when the open one uses the same
-    /// resource another way, has written the same texture level or has cleared the buffer, as a pass's barriers all
-    /// come before its commands. Uploads into one buffer share a pass, as each writes its own range.
+    /// resource another way or has written the same texture level, as a pass's barriers all come before its commands. Uploads into one buffer share a pass, as each writes its own range.
     /// </summary>
     private void UseInTransfer(in GpuUse use, RenderStage stage)
     {
@@ -538,49 +453,12 @@ public sealed class RenderGraph
                 held.Id == use.Id
                 && held.IsTexture == use.IsTexture
                 && (held.Level == use.Level || held.Level < 0 || use.Level < 0);
-            bool isWrittenAgain = use.Access == GpuAccess.CopyDestination && (use.IsTexture || IsCleared(use.Id));
+            bool isWrittenAgain = use.Access == GpuAccess.CopyDestination && use.IsTexture;
             if (isSame && (held.Access != use.Access || isWrittenAgain))
                 return true;
         }
 
         return false;
-    }
-
-    private bool IsHeld(GpuBuffer buffer)
-    {
-        foreach (GpuUse held in _uses)
-        {
-            if (!held.IsTexture && held.Id == buffer.Id)
-                return true;
-        }
-
-        return false;
-    }
-
-    private bool IsCleared(uint buffer)
-    {
-        foreach (GpuCommand command in _commands)
-        {
-            if (command.Kind == GpuCommandKind.FillBuffer && command.Id == buffer)
-                return true;
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// A pass a gem began and never ended, left out, as the gem threw in its Render or forgot: the other gems' passes
-    /// still draw.
-    /// </summary>
-    private void DropOpenPass()
-    {
-        if (_pass is not { } open)
-            return;
-
-        Log.Error($"The pass {open.Name} was never ended, so it is left out of the frame.");
-        _uses.Clear();
-        _commands.Clear();
-        _pass = null;
     }
 
     /// <summary>
@@ -592,12 +470,6 @@ public sealed class RenderGraph
         ThrowIfNotInPass();
         if (use.Id != 0 && !_uses.Contains(use))
             _uses.Add(use);
-    }
-
-    private void Add(in GpuCommand command)
-    {
-        ThrowIfNotInPass();
-        _commands.Add(command);
     }
 
     private void ThrowIfNotInPass()

@@ -138,9 +138,7 @@ internal sealed class Rendering
         while (steps.Count > 0)
         {
             int next = steps.FindIndex(step =>
-                step.Inputs.All(input =>
-                    !makers.TryGetValue(input.Type, out Maker maker) || ordered.Contains(maker.Step)
-                )
+                step.Inputs.All(input => !makers.TryGetValue(input, out Maker maker) || ordered.Contains(maker.Step))
             );
             if (next < 0)
             {
@@ -187,9 +185,9 @@ internal sealed class Rendering
         public abstract ImmutableArray<Maker> Outputs { get; }
 
         /// <summary>
-        /// Each type it takes, and whether a gem must make it.
+        /// Each type it takes.
         /// </summary>
-        public abstract ImmutableArray<(Type Type, bool IsRequired)> Inputs { get; }
+        public abstract ImmutableArray<Type> Inputs { get; }
 
         /// <summary>
         /// A type it must take that no gem makes, once bound; it can never render.
@@ -260,14 +258,12 @@ internal sealed class Rendering
                 ]
             : [new Maker(typeof(TOutput), this, null)];
 
-        public override ImmutableArray<(Type Type, bool IsRequired)> Inputs =>
+        public override ImmutableArray<Type> Inputs =>
             [
                 .. _constructor
                     ?.GetParameters()
                     .Select(static parameter =>
-                        Nullable.GetUnderlyingType(parameter.ParameterType) is { } type
-                            ? (type, false)
-                            : (parameter.ParameterType, true)
+                        Nullable.GetUnderlyingType(parameter.ParameterType) ?? parameter.ParameterType
                     )
                     ?? [],
             ];
