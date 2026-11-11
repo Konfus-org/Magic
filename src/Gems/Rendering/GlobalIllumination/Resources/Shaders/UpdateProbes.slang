@@ -1,8 +1,9 @@
 // The probe grid's light brought up to date each frame (Majercik et al., "Dynamic Diffuse Global Illumination with
-// Ray-Traced Irradiance Fields", 2019): each probe is given rays as its light still changes, each ray is traced into the
-// world and lit where it lands by one light picked at random and by the probes themselves, and each probe blends its
-// rays into its light's harmonics and its map of distances, moving away from a surface it is near. The pass header's x
-// is the frame's buffer, which holds the lights and IndirectLight, which holds the grid.
+// Ray-Traced Irradiance Fields", 2019): each probe asks for rays as its light still changes, and the probes are given
+// them in turn while they fit in a budget for all of them; each ray is traced into the world and lit where it lands by
+// one light picked at random and by the probes themselves, and each probe given rays blends them into its light's
+// harmonics and its map of distances, moving away from a surface it is near. The pass header's x is the frame's
+// buffer, which holds the lights and IndirectLight, which holds the grid.
 module "UpdateProbes";
 
 import Core.Heap;
@@ -22,6 +23,9 @@ import Scene.Models;
 
 // The rays the trace runs a group of.
 static const uint TraceGroupSize = 64u;
+
+// The rays all the probes trace in a frame, C#'s Probes.RayBudget: at least the most one probe traces.
+static const uint ProbeRayBudget = 131072u;
 
 static const uint IrradianceTexelCount = IrradianceTexels * IrradianceTexels;
 static const uint DepthTexelCount = DepthTexels * DepthTexels;
@@ -123,15 +127,12 @@ ProbeVariance EstimateMean(ProbeVariance data, float3 value, float shortBlend)
 }
 
 groupshared uint groupInconsistency;
-groupshared uint groupRayCount;
-groupshared uint groupRayStart;
 
 // A group a probe: as many rays as its light still changes, up to the most, a tenth of that out of view and all of them
-// on the first update; their count, an entry each in the ray list, the probe in the low 20 bits and the ray above, and
-// the trace's groups raised to reach them.
+// before it first blends its rays, kept as its count.
 [shader("compute")]
 [numthreads(32, 1, 1)]
-void AllocateProbeRays(uint3 group : SV_GroupID, uint index : SV_GroupIndex)
+void AskProbeRays(uint3 group : SV_GroupID, uint index : SV_GroupIndex)
 {
     FrameConstants frame = GetFrame();
     ProbeGridConstants grid = GetProbeGrid();
@@ -150,31 +151,111 @@ void AllocateProbeRays(uint3 group : SV_GroupID, uint index : SV_GroupIndex)
     // A float of 0 or more orders as its bits do.
     InterlockedMax(groupInconsistency, asuint(inconsistency));
     GroupMemoryBarrierWithGroupSync();
-    if (index == 0u)
+    if (index != 0u)
+        return;
+
+    uint rayCount = uint(saturate(asfloat(groupInconsistency)) * float(MaxProbeRays));
+    GpuProbe loaded = LoadProbe(grid, probe);
+    float3 position = Relative(frame, GetProbePosition(grid, GetProbeCoord(grid, probe), loaded));
+    if (!IsSphereInFrustum(frame, position, Max3(grid.cellSize) * 2.0))
+        rayCount /= 10u;
+
+    rayCount = clamp((rayCount + ProbeRayStep - 1u) / ProbeRayStep * ProbeRayStep, ProbeRayStep, MaxProbeRays);
+    if (!HasBlended(loaded))
+        rayCount = MaxProbeRays;
+
+    BufferRef counts = { grid.rayCounts };
+    counts.Store(GetProbeRayCountOffset(probe), rayCount);
+}
+
+// The threads that plan the frame's rays, each over a run of the probes.
+static const uint PlanGroupSize = 1024u;
+
+groupshared uint groupRaySums[PlanGroupSize];
+groupshared uint groupServed;
+groupshared uint groupTraced;
+
+// One group: the probes taken in turn from the one the last frame stopped at, each given the rays it asked for, and
+// where they start, while they fit in the budget, and none past it, so every probe has its turn within a few frames;
+// the rays given in all, the trace's groups to reach them, and the probe the next frame starts at.
+[shader("compute")]
+[numthreads(PlanGroupSize, 1, 1)]
+void PlanProbeRays(uint index : SV_GroupIndex)
+{
+    ProbeGridConstants grid = GetProbeGrid();
+    BufferRef counts = { grid.rayCounts };
+    BufferRef arguments = { grid.rayArguments };
+    uint probeCount = grid.dimensions.x * grid.dimensions.y * grid.dimensions.z;
+    uint cursor = arguments.Load<uint>(12u) % probeCount;
+    uint perThread = (probeCount + PlanGroupSize - 1u) / PlanGroupSize;
+    uint first = min(index * perThread, probeCount);
+    uint last = min(first + perThread, probeCount);
+    uint sum = 0u;
+    for (uint turn = first; turn < last; turn++)
     {
-        uint rayCount = uint(saturate(asfloat(groupInconsistency)) * float(MaxProbeRays));
-        uint3 coord = GetProbeCoord(grid, probe);
-        float3 position = Relative(frame, GetProbePosition(grid, coord, LoadProbe(grid, probe)));
-        if (!IsSphereInFrustum(frame, position, Max3(grid.cellSize) * 2.0))
-            rayCount /= 10u;
-
-        rayCount = clamp((rayCount + ProbeRayStep - 1u) / ProbeRayStep * ProbeRayStep, ProbeRayStep, MaxProbeRays);
-        if (grid.hasHistory == 0u)
-            rayCount = MaxProbeRays;
-
-        BufferRef counts = { grid.rayCounts };
-        counts.Store(GetProbeRayCountOffset(probe), rayCount);
-        groupRayCount = rayCount;
-        groupRayStart = counts.InterlockedAdd(0u, rayCount);
-        BufferRef arguments = { grid.rayArguments };
-        arguments.InterlockedMax(0u, (groupRayStart + rayCount + TraceGroupSize - 1u) / TraceGroupSize);
+        sum += counts.Load<uint>(GetProbeRayCountOffset((cursor + turn) % probeCount));
     }
 
-    GroupMemoryBarrierWithGroupSync();
-    ArrayRef<uint> list = { grid.rayList };
-    for (uint ray = index; ray < groupRayCount; ray += 32u)
+    if (index == 0u)
     {
-        list[groupRayStart + ray] = probe | (ray << 20u);
+        groupServed = 0u;
+        groupTraced = 0u;
+    }
+
+    // The runs' sums added up over the runs before and their own (Hillis and Steele).
+    groupRaySums[index] = sum;
+    GroupMemoryBarrierWithGroupSync();
+    for (uint step = 1u; step < PlanGroupSize; step <<= 1u)
+    {
+        uint before = index >= step ? groupRaySums[index - step] : 0u;
+        GroupMemoryBarrierWithGroupSync();
+        groupRaySums[index] += before;
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    uint start = groupRaySums[index] - sum;
+    uint served = 0u;
+    for (uint turn = first; turn < last; turn++)
+    {
+        uint probe = (cursor + turn) % probeCount;
+        uint rayCount = counts.Load<uint>(GetProbeRayCountOffset(probe));
+        bool fits = start + rayCount <= ProbeRayBudget;
+        counts.Store(GetProbeRayCountOffset(probe), fits ? rayCount : 0u);
+        counts.Store(GetProbeRayStartOffset(probe), start);
+        start += rayCount;
+        if (fits)
+        {
+            served++;
+            InterlockedMax(groupTraced, start);
+        }
+    }
+
+    InterlockedAdd(groupServed, served);
+    GroupMemoryBarrierWithGroupSync();
+    if (index != 0u)
+        return;
+
+    counts.Store(0u, groupTraced);
+    arguments.Store(0u, (groupTraced + TraceGroupSize - 1u) / TraceGroupSize);
+    arguments.Store(4u, 1u);
+    arguments.Store(8u, 1u);
+    arguments.Store(12u, (cursor + groupServed) % probeCount);
+}
+
+// A group a probe given rays this frame: an entry each in the ray list, the probe in the low 20 bits and the ray above.
+[shader("compute")]
+[numthreads(32, 1, 1)]
+void ListProbeRays(uint3 group : SV_GroupID, uint index : SV_GroupIndex)
+{
+    ProbeGridConstants grid = GetProbeGrid();
+    uint probe = group.x;
+    BufferRef counts = { grid.rayCounts };
+    uint rayCount = counts.Load<uint>(GetProbeRayCountOffset(probe));
+    uint start = counts.Load<uint>(GetProbeRayStartOffset(probe));
+    ArrayRef<uint> list = { grid.rayList };
+    for (uint ray = index; ray < rayCount; ray += 32u)
+    {
+        list[start + ray] = probe | (ray << 20u);
     }
 }
 
@@ -252,7 +333,7 @@ void TraceProbes<S : ISky>(uint3 thread : SV_DispatchThreadID)
     }
 
     ArrayRef<uint4> rays = { grid.rays };
-    rays[probe * MaxProbeRays + rayIndex] = EncodeProbeRay(ray);
+    rays[thread.x] = EncodeProbeRay(ray);
 }
 
 groupshared float4 groupRays[DepthTexelCount];
@@ -271,6 +352,11 @@ void BlendProbeIrradiance(uint3 group : SV_GroupID, uint3 local : SV_GroupThread
     BufferRef counts = { grid.rayCounts };
     ArrayRef<uint4> rays = { grid.rays };
     uint rayCount = min(counts.Load<uint>(GetProbeRayCountOffset(probe)), MaxProbeRays);
+    if (rayCount == 0u)
+        return;
+
+    uint start = counts.Load<uint>(GetProbeRayStartOffset(probe));
+    bool hasBlended = HasBlended(LoadProbe(grid, probe));
     float3 sum = float3(0.0);
     float totalWeight = 0.0;
     for (uint first = 0u; first < rayCount; first += IrradianceTexelCount)
@@ -278,7 +364,7 @@ void BlendProbeIrradiance(uint3 group : SV_GroupID, uint3 local : SV_GroupThread
         uint batch = min(IrradianceTexelCount, rayCount - first);
         if (index < batch)
         {
-            ProbeRay ray = DecodeProbeRay(rays[probe * MaxProbeRays + first + index]);
+            ProbeRay ray = DecodeProbeRay(rays[start + first + index]);
             groupRays[index] = float4(ray.direction, ray.depth);
             groupRadiance[index] = ray.radiance;
         }
@@ -303,7 +389,7 @@ void BlendProbeIrradiance(uint3 group : SV_GroupID, uint3 local : SV_GroupThread
     ArrayRef<uint4> variance = { grid.variance };
     uint texel = probe * IrradianceTexelCount + index;
     ProbeVariance data = DecodeProbeVariance(variance[texel]);
-    if (grid.hasHistory == 0u)
+    if (!hasBlended)
     {
         ProbeVariance fresh = {};
         data = fresh;
@@ -377,6 +463,11 @@ void BlendProbeDepth(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID, u
     BufferRef counts = { grid.rayCounts };
     ArrayRef<uint4> rays = { grid.rays };
     uint rayCount = min(counts.Load<uint>(GetProbeRayCountOffset(probe)), MaxProbeRays);
+    if (rayCount == 0u)
+        return;
+
+    uint start = counts.Load<uint>(GetProbeRayStartOffset(probe));
+    bool hasBlended = HasBlended(LoadProbe(grid, probe));
     float2 moments = float2(0.0);
     float totalWeight = 0.0;
     float3 push = float3(0.0);
@@ -385,7 +476,7 @@ void BlendProbeDepth(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID, u
         uint batch = min(DepthTexelCount, rayCount - first);
         if (index < batch)
         {
-            ProbeRay ray = DecodeProbeRay(rays[probe * MaxProbeRays + first + index]);
+            ProbeRay ray = DecodeProbeRay(rays[start + first + index]);
             groupRays[index] = float4(ray.direction, ray.depth);
         }
 
@@ -413,7 +504,7 @@ void BlendProbeDepth(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID, u
 
     uint2 corner = GetProbeDepthTexel(grid, coord) - 1u;
     StorageRef depthTarget = { grid.depth, 0u };
-    if (grid.hasHistory != 0u)
+    if (hasBlended)
         moments = lerp(depthTarget.Load(corner + 1u + local.xy).xy, moments, DepthBlend);
 
     groupMoments[index] = moments;
@@ -431,7 +522,7 @@ void BlendProbeDepth(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID, u
     ArrayRef<GpuProbe> probes = { grid.probes };
     GpuProbe updated = probes[probe];
     float3 limit = grid.cellSize * 0.5;
-    float3 offset = grid.hasHistory != 0u ? updated.offset.xyz * limit : float3(0.0);
-    updated.offset = float4(clamp(lerp(offset, push, OffsetBlend), -limit, limit) / limit, 0.0);
+    float3 offset = hasBlended ? updated.offset.xyz * limit : float3(0.0);
+    updated.offset = float4(clamp(lerp(offset, push, OffsetBlend), -limit, limit) / limit, 1.0);
     probes[probe] = updated;
 }

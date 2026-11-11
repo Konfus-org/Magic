@@ -17,7 +17,12 @@ internal sealed class StatsWindow(IDebugUI ui)
     private const double BytesPerMegabyte = 1024 * 1024;
     private const double BytesPerGigabyte = 1024 * 1024 * 1024;
     private const string GemMeterPrefix = "Magic.Gems.";
-    private const string ProcessMemory = "dotnet.process.memory.working_set";
+    private const string WorkingSet = "dotnet.process.memory.working_set";
+
+    /// <summary>
+    /// OpenTelemetry's name for the RAM the process holds, which the platform gem publishes as only this process's.
+    /// </summary>
+    private const string ProcessMemoryUsage = "process.memory.usage";
     private const string GpuPrefix = "gpu.";
     private const string GpuFrameDuration = "gpu.frame.duration";
     private const string MemoryUsageSuffix = "memory.usage";
@@ -75,7 +80,8 @@ internal sealed class StatsWindow(IDebugUI ui)
         double drawnSec = 0;
         double workSec = 0;
         double gpuSec = 0;
-        double processBytes = 0;
+        double privateBytes = 0;
+        double workingSetBytes = 0;
         double gpuBytes = 0;
         foreach (MetricRow row in rows)
         {
@@ -87,15 +93,19 @@ internal sealed class StatsWindow(IDebugUI ui)
             {
                 Section part = memory.GetChild(GetPart(row.Meter));
                 part.Rows.Add(ToCells(GetLabel(name, row), row));
-                if (name.EndsWith(MemoryUsageSuffix, StringComparison.Ordinal))
+                if (name == ProcessMemoryUsage)
+                {
+                    privateBytes = row.Value;
+                }
+                else if (name.EndsWith(MemoryUsageSuffix, StringComparison.Ordinal))
                 {
                     part.Amount += row.Value;
                     gpuBytes += name.StartsWith(GpuPrefix, StringComparison.Ordinal) ? row.Value : 0;
                 }
-                else if (row.Instrument == ProcessMemory)
+                else if (row.Instrument == WorkingSet)
                 {
                     part.Amount += row.Value;
-                    processBytes = row.Value;
+                    workingSetBytes = row.Value;
                 }
             }
             else if (row.Instrument is Metrics.HookDuration or Metrics.StepDuration)
@@ -147,6 +157,9 @@ internal sealed class StatsWindow(IDebugUI ui)
         }
 
         gpu.SetLabel($"GPU: {FormatAmount(gpuSec, "s")}");
+
+        // The process's own RAM where the platform gem says it, else .NET's working set, shared pages and all.
+        double processBytes = privateBytes > 0 ? privateBytes : workingSetBytes;
         string gpuMemory = gpuBytes > 0 ? FormatGigabytes(", GPU", gpuBytes) : string.Empty;
         memory.SetLabel($"Memory: {FormatGigabytes("RAM", processBytes)}{gpuMemory}");
         foreach (Section part in memory.Children)

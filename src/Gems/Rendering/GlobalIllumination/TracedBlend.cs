@@ -4,9 +4,9 @@ using Magic.Utils;
 namespace Magic.GlobalIllumination;
 
 /// <summary>
-/// What a traced effect blends over frames, at half the view's size: this frame's light, with its variance in alpha,
-/// and the view depth of each of its pixels, and last frame's of both, which this frame's blends with. It keeps two of
-/// each and swaps them every frame.
+/// What a traced effect blends over frames, at the traced size: this frame's light, with its variance in alpha, and the
+/// view depth of each of its pixels, and last frame's of both, which this frame's blends with. It keeps two of each and
+/// swaps them every frame.
 /// </summary>
 internal readonly record struct TracedBlend(
     GpuTexture Light,

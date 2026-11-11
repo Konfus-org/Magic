@@ -21,19 +21,6 @@
                 "PostProcessing": {
                     "effects": [
                         {
-                            "handle": {
-                                "id": 4000506431506868452
-                            },
-                            "overrides": {
-                                "intensity": {
-                                    "x": 4
-                                },
-                                "anisotropy": {
-                                    "x": 0.6
-                                }
-                            }
-                        },
-                        {
                             "id": 16110046817102106845
                         },
                         {
@@ -85,21 +72,8 @@
             "name": "Weather",
             "components": {
                 "Weather": {
-                    "effects": [
-                        {
-                            "handle": {
-                                "id": 8828027672504642575
-                            },
-                            "overrides": {
-                                "anisotropy": {
-                                    "x": 0.6
-                                },
-                                "sun": {
-                                    "x": 0
-                                }
-                            }
-                        }
-                    ]
+                    "fogDensity": 0.02,
+                    "fogAnisotropy": 0.6
                 }
             }
         },

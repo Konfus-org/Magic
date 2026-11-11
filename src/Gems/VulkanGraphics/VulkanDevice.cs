@@ -37,6 +37,21 @@ internal sealed unsafe class VulkanDevice : IDisposable
 
     private const string ImageAtomicInt64Extension = "VK_EXT_shader_image_atomic_int64";
 
+    private const string MemoryBudgetExtension = "VK_EXT_memory_budget";
+
+    /// <summary>
+    /// The Vulkan loader's variables for which drivers it loads: the ones it leaves out, by their manifests' names, and
+    /// the only ones it loads.
+    /// </summary>
+    private const string DisabledDriversVariable = "VK_LOADER_DRIVERS_DISABLE";
+
+    private const string SelectedDriversVariable = "VK_LOADER_DRIVERS_SELECT";
+
+    /// <summary>
+    /// Dozen's manifests, such as <c>dzn_icd.x64.json</c>.
+    /// </summary>
+    private const string DozenDrivers = "*dzn*";
+
     private readonly VkDebugUtilsMessengerEXT _messenger;
 
     public VulkanDevice(IWindow? window, bool wantsValidation)
@@ -45,19 +60,45 @@ internal sealed unsafe class VulkanDevice : IDisposable
         if (started != VkResult.Success)
             throw new InvalidOperationException($"Vulkan is not installed on this machine: {started}.");
 
-        HasValidation = wantsValidation && HasLayer(ValidationLayer);
-        HashSet<string> instanceExtensions = GetInstanceExtensions();
-        HasDebugUtils = instanceExtensions.Contains(DebugUtilsExtension);
-        bool hasPortability = instanceExtensions.Contains(PortabilityEnumerationExtension);
+        // Dozen, Vulkan over Direct3D 12, loads Direct3D 12 and each GPU's Direct3D driver, a few hundred MB, for GPUs a
+        // native driver gives already: the loader leaves it out, unless the user picks the drivers or no other driver
+        // gives a GPU. It reads the variable as it looks for drivers, so a device made again, as after a restart,
+        // decides again.
+        bool isSkippingDozen =
+            Environment.GetEnvironmentVariable(DisabledDriversVariable) is null
+            && Environment.GetEnvironmentVariable(SelectedDriversVariable) is null;
+        if (isSkippingDozen)
+        {
+            Environment.SetEnvironmentVariable(DisabledDriversVariable, DozenDrivers);
+            if (!HasGpu())
+            {
+                Log.Info("Only Dozen gives a GPU, so Vulkan is drawn through Direct3D 12.");
+                Environment.SetEnvironmentVariable(DisabledDriversVariable, null);
+            }
+        }
+
         WindowHandle handle = window?.Handle ?? default;
-        List<string> wantedExtensions = [.. VulkanSurface.GetExtensions(handle.System)];
-        if (HasDebugUtils)
-            wantedExtensions.Add(DebugUtilsExtension);
+        try
+        {
+            HasValidation = wantsValidation && HasLayer(ValidationLayer);
+            HashSet<string> instanceExtensions = GetInstanceExtensions();
+            HasDebugUtils = instanceExtensions.Contains(DebugUtilsExtension);
+            bool hasPortability = instanceExtensions.Contains(PortabilityEnumerationExtension);
+            List<string> wantedExtensions = [.. VulkanSurface.GetExtensions(handle.System)];
+            if (HasDebugUtils)
+                wantedExtensions.Add(DebugUtilsExtension);
 
-        if (hasPortability)
-            wantedExtensions.Add(PortabilityEnumerationExtension);
+            if (hasPortability)
+                wantedExtensions.Add(PortabilityEnumerationExtension);
 
-        Instance = CreateInstance(wantedExtensions, hasPortability);
+            Instance = CreateInstance(wantedExtensions, hasPortability);
+        }
+        finally
+        {
+            if (isSkippingDozen)
+                Environment.SetEnvironmentVariable(DisabledDriversVariable, null);
+        }
+
         InstanceApi = new VkInstanceApi(Instance);
         if (HasDebugUtils && HasValidation)
             _messenger = CreateMessenger();
@@ -79,6 +120,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
         TimestampPeriod = picked.TimestampPeriod;
         InstanceApi.vkGetPhysicalDeviceMemoryProperties(PhysicalDevice, out VkPhysicalDeviceMemoryProperties memory);
         Memory = memory;
+        HasMemoryBudget = picked.Extensions.Contains(MemoryBudgetExtension);
         Device = CreateDevice(picked);
         Api = new VkDeviceApi(InstanceApi, Device);
         Api.vkGetDeviceQueue(QueueFamily, 0, out VkQueue queue);
@@ -134,6 +176,12 @@ internal sealed unsafe class VulkanDevice : IDisposable
 
     public bool HasDebugUtils { get; }
 
+    /// <summary>
+    /// Whether the driver says how much memory the process holds in each heap, through
+    /// <see cref="GetDeviceMemoryUsage"/>.
+    /// </summary>
+    public bool HasMemoryBudget { get; }
+
     public void Dispose()
     {
         Api.vkDeviceWaitIdle();
@@ -162,6 +210,25 @@ internal sealed unsafe class VulkanDevice : IDisposable
         }
 
         return -1;
+    }
+
+    /// <summary>
+    /// Bytes of device-local memory the driver says the process holds now: the resources, the window's images and the
+    /// driver's own. Only with <see cref="HasMemoryBudget"/>.
+    /// </summary>
+    public long GetDeviceMemoryUsage()
+    {
+        VkPhysicalDeviceMemoryBudgetPropertiesEXT budget = new();
+        VkPhysicalDeviceMemoryProperties2 properties = new() { pNext = &budget };
+        InstanceApi.vkGetPhysicalDeviceMemoryProperties2(PhysicalDevice, &properties);
+        long bytes = 0;
+        for (int i = 0; i < properties.memoryProperties.memoryHeapCount; i++)
+        {
+            if (properties.memoryProperties.memoryHeaps[i].flags.HasFlag(VkMemoryHeapFlags.DeviceLocal))
+                bytes += (long)budget.heapUsage[i];
+        }
+
+        return bytes;
     }
 
     [UnmanagedCallersOnly]
@@ -225,6 +292,23 @@ internal sealed unsafe class VulkanDevice : IDisposable
             VkPhysicalDeviceType.Other => "other",
             _ => "other",
         };
+
+    /// <summary>
+    /// Whether the drivers the loader takes now give a GPU, asked through an instance made for it and freed.
+    /// </summary>
+    private static bool HasGpu()
+    {
+        VkApplicationInfo application = new() { apiVersion = VkVersion.Version_1_3 };
+        VkInstanceCreateInfo createInfo = new() { pApplicationInfo = &application };
+        if (vkCreateInstance(&createInfo, out VkInstance probe) != VkResult.Success)
+            return false;
+
+        VkInstanceApi api = new(probe);
+        api.vkEnumeratePhysicalDevices(out uint gpus);
+        api.vkDestroyInstance();
+
+        return gpus > 0;
+    }
 
     private VkInstance CreateInstance(List<string> extensions, bool hasPortability)
     {
@@ -495,6 +579,9 @@ internal sealed unsafe class VulkanDevice : IDisposable
 
         if (pick.Features.HasImageAtomic64)
             extensions.Add(ImageAtomicInt64Extension);
+
+        if (HasMemoryBudget)
+            extensions.Add(MemoryBudgetExtension);
 
         using NativeStrings extensionNames = new(extensions);
         VkPhysicalDeviceMeshShaderFeaturesEXT mesh = new() { meshShader = true, taskShader = true };

@@ -21,6 +21,7 @@ static const float BlackLuminance = 0.001;
 public struct Exposure : IPixelEffect
 {
     public static const uint Levels = 16;
+    public static const uint History = 1;
 
     public float compensation;
 

@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Reflection;
 using System.Text.Json.Nodes;
+using Magic.Ecs.Components;
 
 namespace Magic.Assets.Pipeline;
 
@@ -52,6 +53,10 @@ internal static class AssetScan
             return false;
 
         if (!type.IsValueType || (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Handle<>)))
+            return true;
+
+        // A renderer's material set holds its slots in the process's store, behind an id, and shows them as a property.
+        if (type == typeof(MaterialSet))
             return true;
 
         return _canHoldHandle.GetOrAdd(

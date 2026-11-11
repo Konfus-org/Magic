@@ -2,8 +2,9 @@
 // towards the sun, and one towards each of the first lights its tile lists, each aimed at a random point of the light
 // so that a wider light casts a softer shadow; how much of the light gets through, 1 where nothing is in the way and 0
 // past something opaque. The sun's rays also go into its tiles, for the denoiser, one bit a pixel: lit at random as
-// often as the light gets through; and the colour its light takes on through glass into the sun's tint. The pass
-// header's x is the frame's buffer, which holds the lights and the shadows.
+// often as the light gets through; and the colour its light takes on through glass into the sun's tint. A thread is a
+// traced pixel, which traces from the picture's pixel at its footprint's corner. The pass header's x is the frame's
+// buffer, which holds the lights and the shadows, and its y the denoiser's constants, with the traced targets.
 module "TraceShadows";
 
 import Core.Heap;
@@ -19,6 +20,8 @@ import Scene.Shadows;
 import Light.Lights;
 import Trace.HitSurface;
 import Scene.Models;
+import Light.Indirect;
+import DenoiseShadows;
 
 // The sun's bits of the group's two tiles, the upper and the lower 8 by 4 pixels.
 groupshared uint groupSunTiles[2];
@@ -101,7 +104,8 @@ void TraceShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupThre
     FrameConstants frame = GetFrame();
     Lights lights = GetLights();
     Shadows shadows = GetShadows();
-    uint2 size = uint2(frame.width, frame.height);
+    ShadowDenoiseConstants denoise = GetDenoise();
+    uint2 size = uint2(denoise.width, denoise.height);
     if (local.x == 0u && local.y < 2u)
         groupSunTiles[local.y] = 0u;
 
@@ -110,10 +114,14 @@ void TraceShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupThre
     if (isInside)
     {
         float3 sunTint;
-        uint4 words = Trace(frame, lights, thread.xy, sunTint);
-        StoreShadowMask(shadows.mask, thread.xy, size.x, words);
-        StorageRef tints = { shadows.sunTint, 0u };
-        tints.Store(thread.xy, float4(sunTint, 1.0));
+        uint4 words = Trace(frame, lights, GetPicturePixel(frame, thread.xy, size, float2(0.0)), sunTint);
+        StoreShadowMask(denoise.mask, thread.xy, size.x, words);
+        if (denoise.sunTint != 0u)
+        {
+            StorageRef tints = { denoise.sunTint, 0u };
+            tints.Store(thread.xy, float4(sunTint, 1.0));
+        }
+
         if (GetShadow(words, 0u) > 0.5)
             InterlockedOr(groupSunTiles[local.y / SunTileSize.y], GetSunTileBit(thread.xy));
     }

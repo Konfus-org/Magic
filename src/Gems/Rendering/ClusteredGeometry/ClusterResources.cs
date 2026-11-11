@@ -48,11 +48,23 @@ internal sealed class ClusterResources(
     private readonly FreeList _impostorRows = CreateImpostorRows();
 
     // About 3 MiB in all at the start; each grows with the scene.
-    private readonly ClusterPool _vertices = new("Cluster vertex pool", GpuVertex.Bytes, 1 << 16);
+    private readonly BufferPool _vertices = new(
+        GpuDescriptions.GetBuffer("Cluster vertex pool", 0),
+        GpuVertex.Bytes,
+        1 << 16
+    );
 
-    private readonly ClusterPool _indices = new("Cluster index pool", sizeof(uint), 1 << 18);
+    private readonly BufferPool _indices = new(
+        GpuDescriptions.GetBuffer("Cluster index pool", 0),
+        sizeof(uint),
+        1 << 18
+    );
 
-    private readonly ClusterPool _clusters = new("Cluster pool", GpuCluster.Bytes, 1 << 12);
+    private readonly BufferPool _clusters = new(
+        GpuDescriptions.GetBuffer("Cluster pool", 0),
+        GpuCluster.Bytes,
+        1 << 12
+    );
 
     /// <summary>
     /// Whether a model in the view's table is still being read, and its row draws nothing yet.

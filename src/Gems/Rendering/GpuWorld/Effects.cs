@@ -6,17 +6,16 @@ using Magic.Utils;
 namespace Magic.GpuWorld;
 
 /// <summary>
-/// The effects a frame runs over the lit picture, the air's and then the picture's, each resolved at its place: its
-/// material's row, packed as a surface material's is, the entries of its passes specialised to its shader, and what
-/// it declares it needs. An effect is ready once its material, its textures and its passes are, and failed when one
-/// of them failed or it asks for rays on a GPU that doesn't trace them.
+/// The effects a frame runs over the lit picture, each resolved at its place: its material's row, packed as a surface
+/// material's is, the entries of its passes specialised to its shader, and what it declares it needs. An effect is
+/// ready once its material, its textures and its passes are, and failed when one of them failed.
 /// </summary>
 internal sealed class Effects(AssetManager assets, GpuResources resources)
 {
     /// <summary>
-    /// The places in the lists a frame runs, the weather's and the post processing's.
+    /// The places in the list a frame runs, the post processing's.
     /// </summary>
-    public const int Places = 2 * MaterialSlots.Capacity;
+    public const int Places = MaterialSlots.Capacity;
 
     private readonly ShaderEntry _applyShader = PassShaders.GetEntry(assets, "ApplyPixelEffect", "ApplyPixelEffect");
 
@@ -34,12 +33,9 @@ internal sealed class Effects(AssetManager assets, GpuResources resources)
     private readonly GpuMaterial[] _rows = new GpuMaterial[Places];
 
     /// <summary>
-    /// Each place of <paramref name="lists"/> resolved, the first list's places first, and their rows uploaded.
+    /// Each place of <paramref name="list"/> resolved, and their rows uploaded.
     /// </summary>
-    public Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> Resolve(
-        RenderGraph graph,
-        ReadOnlySpan<MaterialSlots> lists
-    )
+    public Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> Resolve(RenderGraph graph, MaterialSlots list)
     {
         Result<GpuBuffer> rows = graph.Buffer(GpuDescriptions.GetBuffer("Effect rows", Places * GpuMaterial.Bytes));
         if (!rows.Ok)
@@ -47,8 +43,7 @@ internal sealed class Effects(AssetManager assets, GpuResources resources)
 
         for (int place = 0; place < Places; place++)
         {
-            MaterialInstance slot = lists[place / MaterialSlots.Capacity][place % MaterialSlots.Capacity];
-            (_resolved[place], _rows[place]) = Resolve(graph, slot);
+            (_resolved[place], _rows[place]) = Resolve(graph, list[place]);
         }
 
         graph.Upload(rows.Value, _rows.AsSpan());
@@ -57,17 +52,14 @@ internal sealed class Effects(AssetManager assets, GpuResources resources)
     }
 
     /// <summary>
-    /// Whether any of <paramref name="lists"/>' effects is still loading, its material, its textures or its passes.
+    /// Whether any of <paramref name="list"/>'s effects is still loading, its material, its textures or its passes.
     /// </summary>
-    public bool IsLoading(RenderGraph graph, ReadOnlySpan<MaterialSlots> lists)
+    public bool IsLoading(RenderGraph graph, MaterialSlots list)
     {
         bool isLoading = false;
-        foreach (MaterialSlots list in lists)
+        foreach (MaterialInstance slot in list)
         {
-            foreach (MaterialInstance slot in list)
-            {
-                isLoading |= Resolve(graph, slot).Effect.State == GpuState.Loading;
-            }
+            isLoading |= Resolve(graph, slot).Effect.State == GpuState.Loading;
         }
 
         return isLoading;
@@ -90,10 +82,6 @@ internal sealed class Effects(AssetManager assets, GpuResources resources)
 
             return (new GpuEffect(slot.Handle.Id, state, default, default, needs), row);
         }
-
-        // An effect that asks for rays fails at once on a GPU that doesn't trace them, before its passes are built.
-        if (needs.HasRays && !graph.Features.HasRayQuery)
-            return (new GpuEffect(slot.Handle.Id, GpuState.Failed, default, default, needs), row);
 
         ShaderEntry apply = GetSpecialised(_applyShader, shader);
         ShaderEntry level = GetSpecialised(_levelShader, shader);

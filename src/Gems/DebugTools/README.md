@@ -23,6 +23,7 @@ Core and the gems publish what they measure on their own `System.Diagnostics.Met
 gem on `Magic.Gems.<Gem>`, its instruments named `magic.gems.<gem_snake_case>.*`, time in seconds and memory in bytes.
 A gem's meter is made with it and disposed with it. Record a gauge each frame rather than make an observable one,
 and time work into a histogram of seconds with its `Start` and `RecordSince`, which do nothing while nothing listens.
+A number the OS keeps for the whole process, rather than one of a frame, is an observable gauge, asked when read.
 Core's console command `stats [category] <seconds>` also logs them, as text, every so many seconds, with or without
 this gem: `stats gpu 30` logs those with gpu in their name.
 
@@ -30,4 +31,7 @@ this gem: `stats gpu 30` logs those with gpu in their name.
 - An instrument named `gpu.*` shows under GPU, with its tags' values as rows of a fold of its own, and the meter's tags
   above it.
 - An instrument in bytes shows under its gem in Memory; one named `memory.usage` is the gem's total, and
-  `gpu.memory.usage` also shows in the counter.
+  `gpu.memory.usage` also shows in the counter as the GPU's.
+- `process.memory.usage`, OpenTelemetry's name for a process's memory, is the RAM in the counter and the Memory header:
+  what only this process holds, from the platform gem. Without one, they show .NET's working set, which counts the
+  pages the process shares with others too.

@@ -57,7 +57,8 @@ public readonly record struct GpuView
     public required int InstanceCount { get; init; }
 
     /// <summary>
-    /// The most instances the table holds.
+    /// How many instances the table holds this frame; it grows as the world does, so what is sized by it is asked for
+    /// again each frame.
     /// </summary>
     public required int InstanceCapacity { get; init; }
 
@@ -102,7 +103,7 @@ public readonly record struct GpuView
     public required GpuTexture SkyView { get; init; }
 
     /// <summary>
-    /// The effects run over the lit picture this frame, by their place in the air's list and then the picture's.
+    /// The effects run over the lit picture this frame, by their place in the post processing's list.
     /// </summary>
     public required ReadOnlyMemory<GpuEffect> Effects { get; init; }
 

@@ -1,9 +1,11 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Magic.Assets;
 using Magic.Configuration;
 using Magic.Debugging;
+using Magic.Files;
 using Magic.Input;
 using Magic.Platform;
 using Magic.Projects;
@@ -65,6 +67,8 @@ public sealed class SdlPlatformGem
 
     private readonly AssetManager _assets;
 
+    private readonly Meter _meter;
+
     private readonly unsafe SDL_Window* _window;
 
     /// <summary>
@@ -121,12 +125,28 @@ public sealed class SdlPlatformGem
 
     private string _text = string.Empty;
 
-    public unsafe SdlPlatformGem(SdlPlatformSettings settings, App app, Threads threads, AssetManager assets)
+    public unsafe SdlPlatformGem(
+        SdlPlatformSettings settings,
+        App app,
+        Threads threads,
+        AssetManager assets,
+        IFileSystem files
+    )
     {
         _settings = settings;
         _app = app;
         _threads = threads;
         _assets = assets;
+
+        // The gem's meter goes with it, so nothing holds the gem's code once it unloads. The OS is asked only when the
+        // meter is read, as the number is the process's rather than a frame's.
+        _meter = new Meter("Magic.Gems.SdlPlatform");
+        _meter.CreateObservableGauge<long>(
+            "magic.gems.sdl_platform.process.memory.usage",
+            () => ProcessMemory.GetPrivateResidentBytes(files) is { } bytes ? [new(bytes)] : [],
+            "By",
+            "RAM only this process holds, as the OS's tools show it."
+        );
         _title = app.Project?.Name ?? string.Empty;
 
         uint systems = app.IsHeadless ? SDL_INIT_GAMEPAD : SDL_INIT_VIDEO | SDL_INIT_GAMEPAD;
@@ -312,6 +332,7 @@ public sealed class SdlPlatformGem
 
     public unsafe void Dispose()
     {
+        _meter.Dispose();
         foreach (nint gamepad in _gamepads.Values)
         {
             SDL_CloseGamepad((SDL_Gamepad*)gamepad);

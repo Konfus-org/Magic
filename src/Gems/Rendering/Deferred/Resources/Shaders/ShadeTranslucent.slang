@@ -1,9 +1,10 @@
 // The nearest translucent surface of each pixel shaded over the lit picture: what is behind it, as shading left it,
 // through the pane's colour, and through any other pane between, which a ray finds on a GPU that traces rays; what it
 // reflects of the light around it, more of it at a grazing angle (Schlick's Fresnel); and the sun on it, its
-// highlight and what its body scatters. Each pane's surface is what the resolve left in the frame's glass targets, as
-// its material decided it, and where it is the glass depth; the entry is specialised to the sky. The pass header's x
-// is the frame's buffer, which holds the lights and the probe grid's constants, whose probes are 0 where there are none.
+// highlight and what its body scatters; then the air in front of it, or in front of the opaque surface where no pane
+// is. Each pane's surface is what the resolve left in the frame's glass targets, as its material decided it, and where
+// it is the glass depth; the entry is specialised to the sky. The pass header's x is the frame's buffer, which holds
+// the lights, the probe grid's constants, whose probes are 0 where there are none, and the air.
 module "ShadeTranslucent";
 
 import Core.Heap;
@@ -14,11 +15,15 @@ import Core.Pack;
 import Scene.Lights;
 import Light.Probes;
 import Light.Indirect;
+import Light.Air;
 import Surface.Brdf;
 import Sky.ISky;
 import Trace.HitSurface;
 import Trace.HitLight;
 import Scene.Models;
+
+// The reversed depth a pixel where nothing was drawn is seen through the air at: far along its ray, short of infinity.
+static const float FarDepth = 1e-6;
 
 // How much of the light a pane reflects straight on: an index of refraction of 1.5.
 static const float PaneReflectance = 0.04;
@@ -42,18 +47,28 @@ void ShadeTranslucent<S : ISky>(uint3 thread : SV_DispatchThreadID)
     if (any(thread.xy >= size))
         return;
 
-    // Where no pane is in front of the opaque surface, the glass depth is cleared to nothing.
+    // Where no pane is in front of the opaque surface, the glass depth is cleared to nothing, and the picture is only
+    // seen through the air, where something filled it, to the surface or far along the ray where nothing was drawn.
     TextureRef glassDepth = { frame.glassDepth };
     float paneDepth = glassDepth.Load(thread.xy, 0u).x;
+    StorageRef picture = { frame.hdr, 0u };
+    float2 center = GetTexelCenterUv(thread.xy, size);
     if (paneDepth == 0.0)
+    {
+        if (GetAir().volume == 0u)
+            return;
+
+        TextureRef opaqueDepth = { frame.depth };
+        float3 seen = ReconstructRelative(frame, center, max(opaqueDepth.Load(thread.xy, 0u).x, FarDepth));
+        picture.Store(thread.xy, float4(ApplyAir(picture.Load(thread.xy).rgb, seen), 1.0));
         return;
+    }
 
     TextureRef bases = { frame.glassBase };
     TextureRef normals = { frame.glassNormal };
     TextureRef surfaces = { frame.glassSurface };
     float4 base = bases.Load(thread.xy, 0u);
     float4 surface = surfaces.Load(thread.xy, 0u);
-    float2 center = GetTexelCenterUv(thread.xy, size);
     float3 position = ReconstructRelative(frame, center, paneDepth);
     float3 view = NormalizeSafe(-position, float3(0.0, 0.0, -1.0));
     float3 paneNormal = DecodeOctahedral(normals.Load(thread.xy, 0u).xy * 2.0 - 1.0);
@@ -65,7 +80,6 @@ void ShadeTranslucent<S : ISky>(uint3 thread : SV_DispatchThreadID)
     float fresnel = PaneReflectance + (1.0 - PaneReflectance) * Pow5(1.0 - saturate(dot(normal, view)));
 
     // What is behind, through the pane and any other between it and the opaque surface.
-    StorageRef picture = { frame.hdr, 0u };
     float3 through = base.rgb * (1.0 - base.a);
     float3 toSun = lights.sunDirection.xyz;
     float3 sunIlluminance = lights.hasSky != 0u
@@ -90,5 +104,5 @@ void ShadeTranslucent<S : ISky>(uint3 thread : SV_DispatchThreadID)
         + body.diffuse * GetSurroundings<S>(lights, world, normal)
         + Evaluate(body, normal, view, toSun) * sunIlluminance
         + surface.yzw;
-    picture.Store(thread.xy, float4(color, 1.0));
+    picture.Store(thread.xy, float4(ApplyAir(color, position), 1.0));
 }

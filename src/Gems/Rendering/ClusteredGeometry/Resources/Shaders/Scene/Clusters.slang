@@ -6,15 +6,15 @@ module "Scene/Clusters";
 import Core.Heap;
 import Core.Pack;
 import Core.Pass;
-import Light.Indirect;
+import Light.Air;
 
 public static const uint MaxClusterTriangles = 128u;
 
 // Where the cluster constants are in the buffer every pass header's x names: after the frame, the models, the world as
-// rays see it, the lights, the shadows and the indirect light.
-public static const uint ClusterConstantsOffset = IndirectLightOffset + IndirectLightBytes;
+// rays see it, the lights, the shadows, the indirect light and the air.
+public static const uint ClusterConstantsOffset = AirOffset + AirBytes;
 
-// What the cluster passes read beyond the frame, C#'s ClusterConstants, written once a frame after the indirect light;
+// What the cluster passes read beyond the frame, C#'s ClusterConstants, written once a frame after the air;
 // the cluster budget sets the handoff and the error threshold at the start of the frame.
 public struct ClusterConstants
 {

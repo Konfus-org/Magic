@@ -1,7 +1,7 @@
-// The shadow mask: for each pixel, how much of each light lighting it reaches it, 8 bits a light in 4 words. The sun
-// is the first slot and the first lights the pixel's tile lists, in the order of their bits, the rest; a light past
-// the last slot is unshadowed. Beside it, the sun's tiles: a bit for each pixel of 8 by 4 that its ray reached the sun
-// from, a word a tile, row by row; and the sun's tint: the colour of the sun's light that reaches the pixel through
+// The shadow mask: for each pixel, how much of each light lighting it reaches it, 8 bits a light in 4 words. The sun is
+// the first slot and the first lights the pixel's tile lists, in the order of their bits, the rest; a light past the
+// last slot is unshadowed. Beside it, the sun's tiles: a bit for each traced pixel of 8 by 4 that its ray reached the
+// sun from, a word a tile, row by row; and the sun's tint: the colour of the sun's light that reaches the pixel through
 // glass over how bright it is, which the sun's slot holds, so the two together give the light coloured.
 module "Scene/Shadows";
 

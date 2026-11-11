@@ -9,20 +9,20 @@ using Magic.Utils;
 namespace Magic.Deferred;
 
 /// <summary>
-/// The effects run over the lit picture before the output, the air's and then the picture's, in order: each a material
-/// whose shader implements the pixel effect contract, its row packed as a surface material's is, and passes of the
-/// entries specialised to its shader: one for each level of its own target it declares, then its apply, which reads the
-/// picture the effects before it left and writes the other of two, the last copied back into the HDR picture. An
-/// effect with levels has two targets by its place in the lists, which swap each frame, so the one it filled last frame
-/// is its history, and one that declares jitter has the camera jittered while it runs. An effect is left out while its
-/// material, its textures or its passes load, and when one of them failed.
+/// The effects run over the lit picture before the output, in order: each a material whose shader implements the pixel
+/// effect contract, its row packed as a surface material's is, and passes of the entries specialised to its shader: one
+/// for each level of its own target it declares, then its apply, which reads the picture the effects before it left and
+/// writes the other of two, the last copied back into the HDR picture. An effect with levels has a target by its place
+/// in the list; one that declares a history has two, which swap each frame, so the one it filled last frame is its
+/// history. One that declares jitter has the camera jittered while it runs. An effect is left out while its material,
+/// its textures or its passes load, and when one of them failed.
 /// </summary>
 internal sealed class PixelEffects
 {
     /// <summary>
-    /// The places in the lists a frame runs, the weather's and the post processing's.
+    /// The places in the list a frame runs, the post processing's.
     /// </summary>
-    private const int Places = 2 * MaterialSlots.Capacity;
+    private const int Places = MaterialSlots.Capacity;
 
     /// <summary>
     /// The most levels an effect's target has: the storage levels the heap keeps of a texture.
@@ -30,7 +30,8 @@ internal sealed class PixelEffects
     private const int MostLevels = 16;
 
     /// <summary>
-    /// The names of the two targets of the effect at each place, by the parity of the frame that fills it.
+    /// The names of the two targets of the effect at each place: one with a history fills them by the parity of the
+    /// frame, one without fills the first.
     /// </summary>
     private static readonly string[] _targetNames = [.. Enumerable.Range(0, 2 * Places).Select(i => $"Effect {i}")];
 
@@ -45,10 +46,9 @@ internal sealed class PixelEffects
     private readonly ulong[] _lastFrame = new ulong[Places];
 
     /// <summary>
-    /// Runs the view's effects that are ready, in order, on frame <paramref name="frameIndex"/>, their rays through
-    /// <paramref name="traced"/> where there is one.
+    /// Runs the view's effects that are ready, in order, on frame <paramref name="frameIndex"/>.
     /// </summary>
-    public void Record(in RenderView view, TracedWorld? traced, uint frameIndex)
+    public void Record(in RenderView view, uint frameIndex)
     {
         RenderGraph graph = view.Graph;
 
@@ -69,17 +69,31 @@ internal sealed class PixelEffects
                 Math.Min(MostLevels, TextureDescription.GetFullLevels(view.Gpu.Width, view.Gpu.Height))
             );
 
-            Result<(GpuTexture Target, GpuTexture History)> targets = GetTargets(view, place, frameIndex, levels);
+            Result<(GpuTexture Target, GpuTexture History)> targets = GetTargets(
+                view,
+                place,
+                frameIndex,
+                levels,
+                needs.HasHistory
+            );
             if (!targets.Ok)
             {
-                Log.Error($"The effect at {place} in the lists is not drawn: {targets.Error}");
+                Log.Error($"The effect at {place} in the list is not drawn: {targets.Error}");
 
                 continue;
             }
 
             (GpuTexture target, GpuTexture history) = targets.Value;
             _running.Add(
-                new RunningEffect(place, apply, level, levels, target, history, view.Gpu.HasHistory && ranLastFrame)
+                new RunningEffect(
+                    place,
+                    apply,
+                    level,
+                    levels,
+                    target,
+                    history,
+                    needs.HasHistory && view.Gpu.HasHistory && ranLastFrame
+                )
             );
             _lastFrame[place] = material;
             passCount += levels + 1;
@@ -123,17 +137,12 @@ internal sealed class PixelEffects
             view.Gpu.EffectRows,
             passTable.Value,
             view.Gpu.Depth,
-            view.Gpu.GlassDepth,
             view.Gpu.GBufferNormal,
             view.Gpu.GBufferBase,
             view.Gpu.GBufferSurface,
             view.Gpu.Velocity,
         ];
 
-        // What an effect's rays read of the world, on a GPU that traces them.
-        ReadOnlySpan<GpuResource> rays = traced is { } world
-            ? [world.HitMaterials, view.Gpu.Meshes, view.Gpu.Instances]
-            : [];
         (GpuTexture picture, GpuTexture other) = (view.Gpu.Hdr, otherPicture.Value);
         int pass = 0;
         for (int effect = 0; effect < count; effect++)
@@ -149,6 +158,7 @@ internal sealed class PixelEffects
                 HasHistory = running.HasHistory ? 1u : 0u,
                 Sampler = sampler.Value.Id,
             };
+            ReadOnlySpan<GpuResource> history = running.History == GpuTexture.None ? [] : [running.History];
             for (int level = 0; level < running.Levels; level++)
             {
                 passes[pass] = shared with { Level = (uint)level, Output = running.Target.Id };
@@ -160,8 +170,8 @@ internal sealed class PixelEffects
                         RenderStage.Post
                     )
                     .Reads(surface)
-                    .Reads(rays)
-                    .Reads(picture, running.History);
+                    .Reads(picture)
+                    .Reads(history);
                 if (level > 0)
                     fill.Reads(running.Target, level - 1);
 
@@ -179,10 +189,9 @@ internal sealed class PixelEffects
                     RenderStage.Post
                 )
                 .Reads(surface)
-                .Reads(rays)
                 .Reads(picture);
             if (running.Levels > 0)
-                applied.Reads(running.Target, running.History);
+                applied.Reads(running.Target).Reads(history);
 
             applied.Writes(other).DispatchOver(view.Gpu.Width, view.Gpu.Height);
             pass++;
@@ -194,21 +203,27 @@ internal sealed class PixelEffects
     }
 
     /// <summary>
-    /// The two targets of the effect at <paramref name="place"/> with <paramref name="levels"/>: the one frame
-    /// <paramref name="frameIndex"/> fills, by its parity, and the one the frame before filled; none without levels.
+    /// The targets of the effect at <paramref name="place"/> with <paramref name="levels"/>: the one frame
+    /// <paramref name="frameIndex"/> fills, and with <paramref name="hasHistory"/> the one the frame before filled, the
+    /// two swapping by the frame's parity; none without levels. Without a history the effect fills the same one each
+    /// frame, and the other is no longer asked for.
     /// </summary>
     private static Result<(GpuTexture Target, GpuTexture History)> GetTargets(
         in RenderView view,
         int place,
         uint frameIndex,
-        int levels
+        int levels,
+        bool hasHistory
     )
     {
         if (levels == 0)
             return Result.Success((GpuTexture.None, GpuTexture.None));
 
-        int filled = (2 * place) + (int)(frameIndex % 2);
+        int filled = (2 * place) + (hasHistory ? (int)(frameIndex % 2) : 0);
         Result<GpuTexture> target = view.Graph.Texture(GetTarget(_targetNames[filled], view, levels));
+        if (!hasHistory)
+            return target.Ok ? Result.Success((target.Value, GpuTexture.None)) : Result.Failure(target.Error);
+
         Result<GpuTexture> history = view.Graph.Texture(GetTarget(_targetNames[filled ^ 1], view, levels));
         if (!target.Ok || !history.Ok)
             return Result.Failure(target.Ok ? history.Error : target.Error);
@@ -227,8 +242,8 @@ internal sealed class PixelEffects
         );
 
     /// <summary>
-    /// An effect a frame runs: its entries, the levels of its target, its target and its history, none without levels,
-    /// and whether the history holds what it filled last frame.
+    /// An effect a frame runs: its entries, the levels of its target, its target, none without levels, and its history,
+    /// none unless it declares one, and whether the history holds what it filled last frame.
     /// </summary>
     private readonly record struct RunningEffect(
         int Place,

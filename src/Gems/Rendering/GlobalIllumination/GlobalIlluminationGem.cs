@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Magic.Assets;
+using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Graphics;
@@ -17,7 +18,11 @@ namespace Magic.GlobalIllumination;
 /// <see cref="IndirectLight"/>, which shading takes. It is public because nothing in its assembly makes it: Magic does,
 /// by reflection, when a project lists the gem.
 /// </summary>
-public sealed class GlobalIlluminationGem : IGem, IRender<TracedInput, IndirectLight>, IHookIntoDomainLoading
+public sealed class GlobalIlluminationGem
+    : IGem,
+        IHasSettings<GlobalIlluminationSettings>,
+        IRender<TracedInput, IndirectLight>,
+        IHookIntoDomainLoading
 {
     private readonly Threads _threads;
     private readonly Probes _probes;
@@ -32,12 +37,18 @@ public sealed class GlobalIlluminationGem : IGem, IRender<TracedInput, IndirectL
     private readonly TaskCompletionSource _built = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>
-    /// The picture's size the history was last traced at; none while it holds nothing of the world. Render thread.
+    /// The size the history was last traced at; none while it holds nothing of the world. Render thread.
     /// </summary>
     private (int Width, int Height)? _traced;
 
-    public GlobalIlluminationGem(AssetManager assets, Threads threads, IGraphicsApi gpu)
+    public GlobalIlluminationGem(
+        GlobalIlluminationSettings settings,
+        AssetManager assets,
+        Threads threads,
+        IGraphicsApi gpu
+    )
     {
+        Settings = settings;
         _threads = threads;
         _probes = new Probes(assets);
         _diffuse = new TracedDiffuse(assets);
@@ -48,6 +59,11 @@ public sealed class GlobalIlluminationGem : IGem, IRender<TracedInput, IndirectL
         if (!gpu.Features.HasRayQuery)
             _built.TrySetResult();
     }
+
+    /// <summary>
+    /// How the light is traced, which <see cref="Render"/> reads whole each frame. Game thread.
+    /// </summary>
+    public GlobalIlluminationSettings Settings { get; set; }
 
     /// <summary>
     /// The frame's indirect light, while the passes' shaders are built, what they read and write is made, and rays see
@@ -82,13 +98,14 @@ public sealed class GlobalIlluminationGem : IGem, IRender<TracedInput, IndirectL
             return null;
         }
 
+        float scale = Settings.IndirectScale;
+        (int Width, int Height) tracedSize = (Scale(gpu.Width, scale), Scale(gpu.Height, scale));
         GIView view = new(
             graph,
             gpu.Frame,
             constants.Value,
-            gpu.Width,
-            gpu.Height,
-            HasHistory: _traced == (gpu.Width, gpu.Height),
+            tracedSize,
+            HasHistory: _traced == tracedSize,
             gpu.Depth,
             gpu.GBufferNormal,
             gpu.GBufferSurface,
@@ -130,6 +147,8 @@ public sealed class GlobalIlluminationGem : IGem, IRender<TracedInput, IndirectL
                     Reflections = reflections.Value.Constants,
                     Sampler = sampler.Value.Id,
                     HasHistory = view.HasHistory ? 1u : 0u,
+                    TracedWidth = (uint)tracedSize.Width,
+                    TracedHeight = (uint)tracedSize.Height,
                 },
             ]
         );
@@ -145,7 +164,7 @@ public sealed class GlobalIlluminationGem : IGem, IRender<TracedInput, IndirectL
         _probes.Record(view, probes.Value);
         _diffuse.Record(view, probes.Value, diffuse.Value);
         _reflections.Record(view, probes.Value, reflections.Value);
-        _traced = (gpu.Width, gpu.Height);
+        _traced = tracedSize;
 
         return new IndirectLight(diffuseLight, reflectionLight, probes.Value.Probes, probes.Value.Depth);
     }
@@ -162,6 +181,11 @@ public sealed class GlobalIlluminationGem : IGem, IRender<TracedInput, IndirectL
 
     public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel) =>
         _built.Task.WaitAsync(cancel);
+
+    /// <summary>
+    /// A side of the picture at <paramref name="scale"/>, from 1 pixel up to the whole side.
+    /// </summary>
+    private static int Scale(int side, float scale) => Math.Clamp((int)MathF.Round(side * scale), 1, side);
 
     /// <summary>
     /// Where <paramref name="shaders"/> are: failed if any failed, loading while any loads, else ready. Each is asked,

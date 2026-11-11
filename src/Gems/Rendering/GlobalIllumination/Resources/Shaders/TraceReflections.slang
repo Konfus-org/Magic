@@ -1,8 +1,8 @@
-// The light each smooth surface reflects, traced at half the picture's size: from one pixel of each 2 by 2, a ray along
-// a direction its specular reflects the view into, drawn by its roughness, bringing back the sky where it hits nothing
-// and the light of the surface it lands on, lit by one light at random and by the probes; then resolved over a few
-// neighbours, each weighed by how much the pixel's own specular would reflect its ray, and blended with the frames
-// before where the surface, or what it reflects, was. Shading reads the result through Light/Indirect.
+// The light each smooth surface reflects, traced at a part of the picture's size: from one pixel of each traced pixel's
+// footprint, a ray along a direction its specular reflects the view into, drawn by its roughness, bringing back the sky
+// where it hits nothing and the light of the surface it lands on, lit by one light at random and by the probes; then
+// resolved over a few neighbours, each weighed by how much the pixel's own specular would reflect its ray, and blended
+// with the frames before where the surface, or what it reflects, was. Shading reads the result through Light/Indirect.
 // Adapted from Wicked Engine's ray-traced reflections and its stochastic screen-space reflection resolve. The pass
 // header's x is the frame's buffer, which holds the lights and the indirect light; its y is the GI buffer.
 module "TraceReflections";
@@ -69,7 +69,7 @@ void TraceReflections<S : ISky>(uint3 thread : SV_DispatchThreadID)
 {
     FrameConstants frame = GetFrame();
     TracedReflectionConstants reflections = GetGIConstants().reflections;
-    if (any(thread.xy >= GetTracedSize(frame)))
+    if (any(thread.xy >= GetGIConstants().tracedSize))
         return;
 
     StorageRef traced = { reflections.traced, 0u };
@@ -122,8 +122,9 @@ float GetRayWeight(ReflectingSurface surface, float4 ray)
 void ResolveReflections(uint3 thread : SV_DispatchThreadID)
 {
     FrameConstants frame = GetFrame();
-    TracedReflectionConstants reflections = GetGIConstants().reflections;
-    uint2 size = GetTracedSize(frame);
+    GIConstants gi = GetGIConstants();
+    TracedReflectionConstants reflections = gi.reflections;
+    uint2 size = gi.tracedSize;
     if (any(thread.xy >= size))
         return;
 
@@ -132,7 +133,7 @@ void ResolveReflections(uint3 thread : SV_DispatchThreadID)
     StorageRef resolved = { reflections.resolved, 0u };
     StorageRef distance = { reflections.distance, 0u };
     ReflectingSurface surface;
-    if (!LoadReflectingSurface(frame, thread.xy * TracedScale, surface))
+    if (!LoadReflectingSurface(frame, GetPicturePixel(frame, thread.xy, size, float2(0.0)), surface))
     {
         resolved.Store(thread.xy, float4(0.0));
         distance.Store(thread.xy, float4(RayRange, 0.0, 0.0, 0.0));
@@ -183,11 +184,11 @@ void BlendReflections(uint3 thread : SV_DispatchThreadID)
 {
     FrameConstants frame = GetFrame();
     GIConstants gi = GetGIConstants();
-    uint2 size = GetTracedSize(frame);
+    uint2 size = gi.tracedSize;
     if (any(thread.xy >= size))
         return;
 
-    uint2 pixel = thread.xy * TracedScale;
+    uint2 pixel = GetPicturePixel(frame, thread.xy, size, float2(0.0));
     TracedBlendConstants blend = gi.reflections.blend;
     TextureRef resolved = { gi.reflections.resolved };
     StorageRef light = { blend.light, 0u };

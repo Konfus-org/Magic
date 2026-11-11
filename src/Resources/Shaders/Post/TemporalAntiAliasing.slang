@@ -27,6 +27,7 @@ static const float MiddleGrey = 0.18;
 public struct TemporalAntiAliasing : IPixelEffect
 {
     public static const uint Levels = 1;
+    public static const uint History = 1;
     public static const uint Jitters = 1;
 
     public override float4 Level(PixelEffectInputs inputs)

@@ -1,9 +1,9 @@
-// The light that reaches each surface indirectly, traced at half the picture's size: from one pixel of each 2 by 2, two
-// rays over its hemisphere as the diffuse lobe weighs it, each bringing back the light of the surface it lands on, lit by
-// one light at random and by the probes, or the probes' light at the pixel where it reaches nothing within range; then
-// filtered over its neighbours, and blended with the frames before where they saw the same surface. Shading reads the
-// result through Light/Indirect. Adapted from Wicked Engine's ray-traced diffuse. The pass header's x is the
-// frame's buffer, which holds the lights and the indirect light; its y is the GI buffer.
+// The light that reaches each surface indirectly, traced at a part of the picture's size: from one pixel of each traced
+// pixel's footprint, two rays over its hemisphere as the diffuse lobe weighs it, each bringing back the light of the
+// surface it lands on, lit by one light at random and by the probes, or the probes' light at the pixel where it reaches
+// nothing within range; then filtered over its neighbours, and blended with the frames before where they saw the same
+// surface. Shading reads the result through Light/Indirect. Adapted from Wicked Engine's ray-traced diffuse. The pass
+// header's x is the frame's buffer, which holds the lights and the indirect light; its y is the GI buffer.
 module "TraceDiffuse";
 
 import Core.Heap;
@@ -42,7 +42,7 @@ void TraceDiffuse<S : ISky>(uint3 thread : SV_DispatchThreadID)
 {
     FrameConstants frame = GetFrame();
     TracedDiffuseConstants diffuse = GetGIConstants().diffuse;
-    if (any(thread.xy >= GetTracedSize(frame)))
+    if (any(thread.xy >= GetGIConstants().tracedSize))
         return;
 
     uint2 pixel = GetTracedPixel(frame, thread.xy);
@@ -93,15 +93,16 @@ void TraceDiffuse<S : ISky>(uint3 thread : SV_DispatchThreadID)
 void FilterDiffuse(uint3 thread : SV_DispatchThreadID)
 {
     FrameConstants frame = GetFrame();
-    TracedDiffuseConstants diffuse = GetGIConstants().diffuse;
-    uint2 size = GetTracedSize(frame);
+    GIConstants gi = GetGIConstants();
+    TracedDiffuseConstants diffuse = gi.diffuse;
+    uint2 size = gi.tracedSize;
     if (any(thread.xy >= size))
         return;
 
     TextureRef depthTexture = { frame.depth };
     TextureRef traced = { diffuse.traced };
     StorageRef filtered = { diffuse.filtered, 0u };
-    float depth = depthTexture.Load(thread.xy * TracedScale, 0u).x;
+    float depth = depthTexture.Load(GetPicturePixel(frame, thread.xy, size, float2(0.0)), 0u).x;
     if (depth == 0.0)
     {
         filtered.Store(thread.xy, float4(0.0));
@@ -118,7 +119,7 @@ void FilterDiffuse(uint3 thread : SV_DispatchThreadID)
             continue;
 
         // No weight at a tenth of the depth apart, relative so a surface seen at a glancing angle keeps its neighbours.
-        float neighbourDepth = depthTexture.Load(neighbour * TracedScale, 0u).x;
+        float neighbourDepth = depthTexture.Load(GetPicturePixel(frame, neighbour, size, float2(0.0)), 0u).x;
         float gap = abs(viewDepth - ToViewDepth(neighbourDepth, frame.near)) / viewDepth;
         float weight = neighbourDepth > 0.0 ? 1.0 - saturate(gap * 10.0) : 0.0;
         if (weight <= 0.0)
@@ -138,11 +139,11 @@ void BlendDiffuse(uint3 thread : SV_DispatchThreadID)
 {
     FrameConstants frame = GetFrame();
     GIConstants gi = GetGIConstants();
-    uint2 size = GetTracedSize(frame);
+    uint2 size = gi.tracedSize;
     if (any(thread.xy >= size))
         return;
 
-    uint2 pixel = thread.xy * TracedScale;
+    uint2 pixel = GetPicturePixel(frame, thread.xy, size, float2(0.0));
     TracedBlendConstants blend = gi.diffuse.blend;
     TextureRef depthTexture = { frame.depth };
     TextureRef filtered = { gi.diffuse.filtered };

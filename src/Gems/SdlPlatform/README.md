@@ -16,3 +16,6 @@ To use it, list `SdlPlatform` in a project's `.magic` file.
 - The window and clipboard's members are the game thread's, and throw on any other; what is set reaches the OS on the
   platform thread's next pump. The window's size is read from any.
 - Headless, it opens no window and needs no display. Only gamepads give input, and the clipboard's text stays in the gem.
+- It publishes the RAM only this process holds, as `process.memory.usage` on its `Magic.Gems.SdlPlatform` meter: the
+  private working set on Windows, the anonymous resident pages (`RssAnon`) on Linux, and the physical footprint on
+  macOS, the numbers the OS's own tools show. They come from the OS through bindings written in this gem.

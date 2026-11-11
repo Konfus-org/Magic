@@ -161,7 +161,6 @@ public sealed class GpuWorldGem
         _ecs.Snapshot(back.RectLights);
         _ecs.Snapshot(back.Skies);
         _ecs.Snapshot(back.PostProcessing);
-        _ecs.Snapshot(back.Weather);
         back.WorldNumber = _worldNumber;
         _inputs.Publish();
     }
@@ -183,8 +182,7 @@ public sealed class GpuWorldGem
         if (shaders != GpuState.Ready)
             return null;
 
-        // The pools before any model is asked for, whose acceleration structure names them, and every frame, so what
-        // they hold stays.
+        // The pools, with the models made since the last frame settled into them, before any renderer's row is built.
         Result pools = _resources.Prepare(graph);
         if (!pools.Ok)
         {
@@ -192,9 +190,6 @@ public sealed class GpuWorldGem
 
             return null;
         }
-
-        // The models made since the last frame settle into the pools before any renderer's row is built.
-        _resources.SettleModels(graph);
 
         if (_inputs.TryTake(out RenderInputs? newest))
         {
@@ -229,14 +224,9 @@ public sealed class GpuWorldGem
 
         _resources.Upload(graph);
 
-        // The air's effects before the picture's, so a post effect works on the fogged picture; the camera jitters while
-        // one of them asks for it, or while a gem upscales.
-        MaterialSlots air = inputs.Weather.Count > 0 ? inputs.Weather.First[0].Effects : default;
+        // The picture's effects; the camera jitters while one of them asks for it, or while a gem upscales.
         PostProcessing post = inputs.PostProcessing.Count > 0 ? inputs.PostProcessing.First[0] : _defaultPost;
-        Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> effects = _effects.Resolve(
-            graph,
-            [air, post.Effects]
-        );
+        Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> effects = _effects.Resolve(graph, post.Effects);
         if (!effects.Ok)
         {
             Log.Error($"The frame's view is not made: {effects.Error}");
@@ -282,8 +272,8 @@ public sealed class GpuWorldGem
     }
 
     /// <summary>
-    /// Asks for every model and material <paramref name="entities"/> draw, and the effects of their first weather and
-    /// first post processing, or the default's, and ends in the frame they are on the GPU, or failed and drawn as the
+    /// Asks for every model and material <paramref name="entities"/> draw, and the effects of their first post
+    /// processing, or the default's, and ends in the frame they are on the GPU, or failed and drawn as the
     /// failure or left out. Materials are asked for at once; models once the pools are made, and the effects, by
     /// <see cref="Render"/>. One that comes while another waits ends that one. On the render thread, whose tables
     /// these are.
@@ -320,11 +310,7 @@ public sealed class GpuWorldGem
             _resources.Get(material);
         }
 
-        // The effects as Render runs them: the first weather's, then the first post processing's, or the default's.
-        MaterialSlots air = entities
-            .SelectMany(entity => entity.OfType<Weather>())
-            .Select(weather => weather.Effects)
-            .FirstOrDefault();
+        // The effects as Render runs them: the first post processing's, or the default's.
         MaterialSlots post = entities
             .SelectMany(entity => entity.OfType<PostProcessing>())
             .Select(processing => processing.Effects)
@@ -334,7 +320,7 @@ public sealed class GpuWorldGem
         Preparing preparing = new(
             [.. renderers.Select(renderer => renderer.Model).Distinct()],
             materials,
-            [air, post],
+            post,
             new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
         );
         _preparing = preparing;
@@ -427,7 +413,7 @@ public sealed class GpuWorldGem
     /// </summary>
     private bool IsPrepared(RenderGraph graph, Preparing preparing)
     {
-        bool isPrepared = !_effects.IsLoading(graph, preparing.Effects.AsSpan());
+        bool isPrepared = !_effects.IsLoading(graph, preparing.Effects);
         bool hasFailure = false;
         foreach (Handle<Model> model in preparing.Models)
         {
@@ -565,7 +551,7 @@ public sealed class GpuWorldGem
                 Output = view.Output,
                 Instances = tables.Value.Rows,
                 InstanceCount = instanceCount,
-                InstanceCapacity = InstanceTable.Capacity,
+                InstanceCapacity = _instances.Capacity,
                 Materials = tables.Value.Materials,
                 Vertices = _resources.VertexPool,
                 Indices = _resources.IndexPool,
@@ -587,13 +573,13 @@ public sealed class GpuWorldGem
     }
 
     /// <summary>
-    /// The models and materials a domain loading draws, the lists of effects its frames run, and what ends once they are
-    /// all on the GPU.
+    /// The models and materials a domain loading draws, the effects its frames run, and what ends once they are all on
+    /// the GPU.
     /// </summary>
     private sealed record Preparing(
         ImmutableArray<Handle<Model>> Models,
         ImmutableArray<Handle<Material>> Materials,
-        ImmutableArray<MaterialSlots> Effects,
+        MaterialSlots Effects,
         TaskCompletionSource Done
     );
 }

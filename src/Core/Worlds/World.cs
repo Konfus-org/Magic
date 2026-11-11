@@ -303,8 +303,9 @@ public sealed class World : IEcs, IDisposable
         where T2 : unmanaged, IComponent => Ecs.Mutate<T1, T2>();
 
     /// <summary>
-    /// Changes the world for the prefabs and domains the assets read again, as the last frame's take heard it, and lets
-    /// a replace waiting for this frame go on. Game thread, as each frame starts, before the gems' hooks.
+    /// Changes the world for the prefabs and domains the assets read again, as the last frame's take heard it, frees the
+    /// material sets no renderer holds any more, and lets a replace waiting for this frame go on. Game thread, as each
+    /// frame starts, before the gems' hooks.
     /// </summary>
     internal void Pump()
     {
@@ -322,6 +323,9 @@ public sealed class World : IEcs, IDisposable
             if (changed.Count > 0)
                 ReopenAsync(changed, _app.Lifetime).FireAndForget();
         }
+
+        if (_ecs is { } ecs)
+            MaterialSet.SweepIfDue(ecs);
 
         // Let a replace waiting for this frame go on.
         TaskCompletionSource starting = _frameStarting;
@@ -856,10 +860,7 @@ public sealed class World : IEcs, IDisposable
         DestroyEntities(loading);
         await RunHooksAsync(hooks => hooks.OnDomainUnloadedAsync(cancel), "cleaning up").ConfigureAwait(false);
 
-        // The low-latency GC Program asks for seldom collects gen 2, so what the load and the unloads threw away would
-        // stay committed: one collection that compacts and decommits gives it back, before anything of the world shows.
         await _threads.Enter(EngineThread.Game);
-        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
         arrive();
         IsShowingLoadingScreen = false;
 
@@ -869,6 +870,12 @@ public sealed class World : IEcs, IDisposable
         {
             await WaitForFrameAsync(cancel).ConfigureAwait(false);
         }
+
+        // The low-latency GC Program asks for seldom collects gen 2, so what the load, the unloads and the gems' first
+        // copies of the arrived world threw away would stay committed: one collection that compacts and decommits gives
+        // it back, once that world's first frame is drawn.
+        await _threads.Enter(EngineThread.Game);
+        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
     }
 
     /// <summary>

@@ -23,6 +23,7 @@
     <Project Path="Gems/Rendering/GpuWorld/GpuWorld.csproj" />
     <Project Path="Gems/Rendering/TaaUpscaling/TaaUpscaling.csproj" />
     <Project Path="Gems/Rendering/TracedShadows/TracedShadows.csproj" />
+    <Project Path="Gems/Rendering/Volumetrics/Volumetrics.csproj" />
   </Folder>
   <Folder Name="/Docs/">
     <File Path="../AGENTS.md" />

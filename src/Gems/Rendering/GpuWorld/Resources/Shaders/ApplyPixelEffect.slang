@@ -1,8 +1,8 @@
 // A pixel effect's passes: each level of its target filled, then the effect applied over every pixel of the picture.
 // A pass reads its GpuEffectPass from the table whose heap id is the pass header's y, at the row its z names, and the
 // effect's struct from its row of the params table that names. The effect is handed each pixel as the effects before
-// it left it, with where its surface and the nearest pane of glass in front of it are; what it gives back is written
-// into the other picture, for the next effect or the output.
+// it left it, with where its surface is; what it gives back is written into the other picture, for the next effect or
+// the output.
 module "ApplyPixelEffect";
 
 import Core.Heap;
@@ -62,11 +62,6 @@ PixelEffectInputs CreateInputs(FrameConstants frame, GpuEffectPass pass, uint2 p
     float depth = inputs.depth.Load(texel, 0u).x;
     inputs.position = ReconstructRelative(frame, inputs.uv, max(depth, FarDepth));
     inputs.viewDepth = depth > 0.0 ? ToViewDepth(depth, frame.near) : 0.0;
-
-    // The nearer of that surface and the nearest pane of glass in front of it, in reversed depth the greater.
-    TextureRef glassDepth = { frame.glassDepth };
-    float nearest = max(max(depth, glassDepth.Load(texel, 0u).x), FarDepth);
-    inputs.nearestPosition = ReconstructRelative(frame, inputs.uv, nearest);
 
     TextureRef normals = { frame.gbufferNormal };
     TextureRef bases = { frame.gbufferBase };
