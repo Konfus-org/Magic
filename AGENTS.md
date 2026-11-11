@@ -25,6 +25,7 @@ asked, when its trigger fits: read its `SKILL.md` and follow it. Claude Code als
 | [profiling](docs/skills/profiling/SKILL.md) | Profiling, or any mention of performance, frame time, stutter, allocations, memory, VRAM or GPU time |
 | [qa](docs/skills/qa/SKILL.md) | A swarm's QA worker, or the user asks for QA of a branch |
 | [retro](docs/skills/retro/SKILL.md) | A swarm finishes, a slice went badly, or the user corrects the workflow |
+| [ste-docs](docs/skills/ste-docs/SKILL.md) | Writing docs, skills, plans, comments or summaries |
 
 ## Commands
 
@@ -244,16 +245,8 @@ Agents tend to over-build. Less is more: the best change often removes more code
 
 ## Writing
 
-Write docs, skills, plans, summaries and replies to the user with these rules, a short form of ASD-STE100 Simplified
-Technical English.
-
-- Write one instruction in one sentence. Write a step as a command: "Run the tests."
-- Put the condition before the instruction: "If the build fails, stop."
-- Keep a sentence to 20 words in a procedure and to 25 words in a description.
-- Use the active voice. Name who or what does the action.
-- Use "must", "do not" and "can" for a rule. Do not use "should", "may" or "might" in a rule.
-- Use one word for one meaning, and the words in the glossary only with their meanings there.
-- Keep a paragraph to one topic and six sentences. Write steps as a numbered list.
+Write docs, skills, plans, comments, summaries and replies to the user with the
+[ste-docs skill](docs/skills/ste-docs/SKILL.md). Use the words in the glossary only with their meanings there.
 
 When you reply to the user:
 
