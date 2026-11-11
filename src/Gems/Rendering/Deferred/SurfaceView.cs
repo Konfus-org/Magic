@@ -90,14 +90,14 @@ internal sealed class SurfaceView(AssetManager assets)
     }
 
     /// <summary>
-    /// The output drawn as the debug view asks.
+    /// The output drawn as the debug view asks, a Depth view black from <paramref name="depthViewFar"/> metres.
     /// </summary>
-    public void Record(in RenderView view, DebugView debugView) =>
+    public void Record(in RenderView view, DebugView debugView, float depthViewFar) =>
         view
             .Graph.Compute(
                 "Show surface",
                 _showShader,
-                new GpuConstants(view.Gpu.Frame.Id, (uint)debugView),
+                new GpuConstants(view.Gpu.Frame.Id, (uint)debugView, BitConverter.SingleToUInt32Bits(depthViewFar)),
                 RenderStage.Post
             )
             .Reads(

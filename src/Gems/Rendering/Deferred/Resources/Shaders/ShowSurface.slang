@@ -1,9 +1,10 @@
-// What the output shows, as the view the pass header's y names asks: the picture as its effects finished it, encoded for
-// the screen, or each pixel's GBuffer, so a roughness of a half reads as a half and an albedo as the colour it is. A
-// GBuffer view is black where nothing was drawn, but for the velocity, which the sky has too. A view of light alone
-// first writes it into the picture in place of the lit one, so the effects finish it as they would the picture: the
-// traced diffuse light as shading reads it, which a white diffuse surface would reflect, or the traced reflections'
-// light, which it reads from the frame's GI constants, whose light ids are 0 where nothing is traced.
+// What the output shows, as the view the pass header's y names asks: the picture as its effects finished it, encoded
+// for the screen, or each pixel's GBuffer, so a roughness of a half reads as a half and an albedo as the colour it is.
+// A GBuffer view is black where nothing was drawn, but for the velocity, which the sky has too; a depth view is also
+// black from the metres the header's z holds. A view of light alone first writes it into the picture in place of the
+// lit one, so the effects finish it as they would the picture: the traced diffuse light as shading reads it, which a
+// white diffuse surface would reflect, or the traced reflections' light, which it reads from the frame's GI constants,
+// whose light ids are 0 where nothing is traced.
 module "ShowSurface";
 
 import Core.Heap;
@@ -29,10 +30,8 @@ enum SurfaceView : uint
     Reflections,
 }
 
-// How far a depth view reaches, in metres: what is this far away or farther is black.
-static const float DepthViewFar = 1000.0;
-
-float3 GetSurfaceView(FrameConstants frame, SurfaceView view, uint2 pixel)
+// The view of a pixel's surface; a depth view is black from depthViewFar metres away.
+float3 GetSurfaceView(FrameConstants frame, SurfaceView view, float depthViewFar, uint2 pixel)
 {
     if (view == SurfaceView.Velocity)
     {
@@ -54,7 +53,7 @@ float3 GetSurfaceView(FrameConstants frame, SurfaceView view, uint2 pixel)
     case SurfaceView.Depth:
         // On a log scale, so what is near and what is far both read: white at the camera.
         float viewDepth = ToViewDepth(depthTexture.Load(pixel, 0u).x, frame.near);
-        return float3(1.0 - saturate(log2(1.0 + viewDepth) / log2(1.0 + DepthViewFar)));
+        return float3(1.0 - saturate(log2(1.0 + viewDepth) / log2(1.0 + depthViewFar)));
     case SurfaceView.Roughness:
         return float3(surfaceTexture.Load(pixel, 0u).x);
     case SurfaceView.Metalness:
@@ -115,9 +114,12 @@ void ShowSurface(uint3 thread : SV_DispatchThreadID)
 
     PassHeader header = GetPassHeader();
     SurfaceView view = (SurfaceView)header.y;
+    float depthViewFar = asfloat(header.z);
     bool isPicture = view == SurfaceView.Final || view == SurfaceView.IndirectDiffuse || view == SurfaceView.Reflections;
     TextureRef picture = { frame.hdr };
-    float3 color = isPicture ? ToSrgb(picture.Load(thread.xy, 0u).rgb) : GetSurfaceView(frame, view, thread.xy);
+    float3 color = isPicture
+        ? ToSrgb(picture.Load(thread.xy, 0u).rgb)
+        : GetSurfaceView(frame, view, depthViewFar, thread.xy);
     StorageRef output = { frame.output, 0u };
     output.Store(thread.xy, float4(color, 1.0));
 }

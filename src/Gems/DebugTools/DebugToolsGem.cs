@@ -8,19 +8,18 @@ namespace Magic.DebugTools;
 
 /// <summary>
 /// The debug UI's lines and windows over what the meters measure, each shown by its setting (<see cref="Settings"/>),
-/// which its key also turns on and off: the frame rate and memory line (F1), on from the start in a Debug build, the
-/// stats window (F3) and the window of every gem's settings (F4). It listens to the meters only while the counter or the
-/// stats window shows, and collects what they measured twice a second. They are drawn with <see cref="IDebugUI"/> in
-/// Update, so the gem takes the UI and is made after it. Without a gem that provides input no key works. It is public
-/// because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
+/// which its key, also a setting, turns on and off: the frame rate and memory line (F1), on from the start in a Debug
+/// build, the stats window (F3) and the window of every gem's settings (F4). It listens to the meters only while the
+/// counter or the stats window shows, and collects what they measured as often as
+/// <see cref="DebugToolsSettings.StatsCollectSec"/> says. They are drawn with <see cref="IDebugUI"/> in Update, so
+/// the gem takes the UI and is made after it. Without a gem that provides input no key works. It is public because
+/// nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
 public sealed class DebugToolsGem(DebugToolsSettings settings, Settings allSettings, IDebugUI ui, IInput? input = null)
     : IGem,
         IHasSettings<DebugToolsSettings>,
         IDisposable
 {
-    private static readonly TimeSpan _collectEvery = TimeSpan.FromSeconds(0.5);
-
     private readonly MetricsReader _metrics = new();
 
     private readonly StatsWindow _stats = new(ui);
@@ -41,19 +40,19 @@ public sealed class DebugToolsGem(DebugToolsSettings settings, Settings allSetti
 
     public void Update(in Frame frame)
     {
-        if (input is not null && input[Control.KeyF1].WasPressed)
+        if (input is not null && input[Settings.CounterKey].WasPressed)
             Settings = Settings with { IsCounterShown = !Settings.IsCounterShown };
 
-        if (input is not null && input[Control.KeyF3].WasPressed)
+        if (input is not null && input[Settings.StatsKey].WasPressed)
             Settings = Settings with { IsStatsOpen = !Settings.IsStatsOpen };
 
-        if (input is not null && input[Control.KeyF4].WasPressed)
+        if (input is not null && input[Settings.SettingsKey].WasPressed)
             Settings = Settings with { IsSettingsOpen = !Settings.IsSettingsOpen };
 
-        // Collect what the meters measured twice a second, while anything shows.
+        // Collect what the meters measured every so often, while anything shows.
         bool isListening = Settings.IsCounterShown || Settings.IsStatsOpen;
         _metrics.Listen(isListening);
-        if (isListening && Stopwatch.GetElapsedTime(_collectedTimestamp) >= _collectEvery)
+        if (isListening && Stopwatch.GetElapsedTime(_collectedTimestamp).TotalSeconds >= Settings.StatsCollectSec)
         {
             _collectedTimestamp = Stopwatch.GetTimestamp();
             _stats.Refresh(_metrics.Collect());
