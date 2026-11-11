@@ -19,13 +19,12 @@ namespace Magic.GpuWorld;
 /// material asset by its handle, read once, with the textures it names asked for and its shader's struct reflected,
 /// and handed out as the row a slot's params make over its own, packed as that struct lays them out; a model asset by
 /// its handle, made by the preprocessor on a worker, settled into the pools of vertices and indices, the mesh table
-/// with its acceleration structure and the model table at the start of the next frame, and copied up in it. The pools,
-/// the textures and each resident model's acceleration structure are asked of the graph every frame, so the GPU
-/// provider keeps what they hold. Each pool hands out ranges first fit from a free list, and the vertex and index pools
-/// grow when none holds a model. A model not asked for in the seconds it is kept, and held by no renderer drawn, is
-/// evicted: its ranges go back to the free lists, its row of the model table is emptied and its structure is no longer
-/// asked for, so the GPU provider frees it, and the next ask makes it again. A smoothly filtered texture is sampled
-/// with <paramref name="anisotropy"/>, and goes up without its <paramref name="droppedLevels"/> largest mip levels.
+/// on a GPU that traces rays and the model table at the start of the next frame, and copied up in it. The pools and
+/// the textures are asked of the graph every frame, so the GPU provider keeps what they hold. Each pool hands out ranges
+/// first fit from a free list, and the vertex and index pools grow when none holds a model. A model not asked for in the
+/// seconds it is kept, and held by no renderer drawn, is evicted: its ranges go back to the free lists and its row of
+/// the model table is emptied, and the next ask makes it again. A smoothly filtered texture is sampled with
+/// <paramref name="anisotropy"/>, and goes up without its <paramref name="droppedLevels"/> largest mip levels.
 /// </summary>
 internal sealed class GpuResources(
     ModelPreprocessor models,
@@ -81,7 +80,7 @@ internal sealed class GpuResources(
     /// The models this frame's <see cref="Prepare"/> placed in the pools, to copy up once the pools are asked for at
     /// their size.
     /// </summary>
-    private readonly List<(ulong Model, string Name, MeshDerived Made, ResidentModel Where)> _placedModels = [];
+    private readonly List<(MeshDerived Made, ResidentModel Where)> _placedModels = [];
 
     /// <summary>
     /// The models made since the last frame, by their id with their name, which the next <see cref="Prepare"/> settles.
@@ -96,8 +95,8 @@ internal sealed class GpuResources(
     private readonly FreeList _meshRanges = new(MeshCapacity);
 
     /// <summary>
-    /// How many times models were made, failed or had their acceleration structure moved by the GPU provider, ever:
-    /// when it changes, a renderer waiting for its model may draw now, and every row is built again.
+    /// How many times models were made or failed, ever: when it changes, a renderer waiting for its model may draw now,
+    /// and every row is built again.
     /// </summary>
     public int SettledModels { get; private set; }
 
@@ -106,8 +105,9 @@ internal sealed class GpuResources(
     public GpuBuffer IndexPool { get; private set; }
 
     /// <summary>
-    /// Every resident model's meshes as rays see them, a <see cref="GpuMesh"/> a row, in the order its acceleration
-    /// structure's geometries name them; none on a GPU that traces no rays.
+    /// Every resident model's meshes as rays see them, a <see cref="GpuMesh"/> a row, from its
+    /// <see cref="ModelPlace.MeshOffset"/> in the order of its <see cref="ModelPlace.Meshes"/>; none on a GPU that
+    /// traces no rays.
     /// </summary>
     public GpuBuffer Meshes { get; private set; }
 
@@ -159,24 +159,20 @@ internal sealed class GpuResources(
     /// <summary>
     /// The pools, with the models made since the last frame settled into them, asked for every frame before any
     /// renderer's row is built, so what they hold stays. The models take their ranges first, so a pool they grow is
-    /// asked for at its new size before their acceleration structures name it and they are copied into it. Every
-    /// resident model's acceleration structure is asked for too; one the provider compacted comes back moved, and every
-    /// row is built again to refer to it there.
+    /// asked for at its new size before they are copied into it.
     /// </summary>
     public Result Prepare(RenderGraph graph)
     {
-        foreach (ulong model in _residentModels.Keys)
+        // The mesh table first, on a GPU that traces rays, so a model placed takes a range of it only there.
+        if (graph.Features.HasRayQuery)
         {
-            ref ResidentModel resident = ref CollectionsMarshal.GetValueRefOrNullRef(_residentModels, model);
-            if (resident.AccelerationDescription is not { } description)
-                continue;
+            Result<GpuBuffer> meshes = graph.Buffer(
+                GpuDescriptions.GetBuffer("Mesh table", MeshCapacity * GpuMesh.Bytes)
+            );
+            if (!meshes.Ok)
+                return Result.Failure(meshes.Error);
 
-            Result<GpuAcceleration> acceleration = graph.Acceleration(description);
-            if (!acceleration.Ok || acceleration.Value == resident.Acceleration)
-                continue;
-
-            resident = resident with { Acceleration = acceleration.Value };
-            SettledModels++;
+            Meshes = meshes.Value;
         }
 
         foreach ((ulong model, string name, MeshDerived made) in _madeModels)
@@ -195,23 +191,10 @@ internal sealed class GpuResources(
             return Result.Failure(indices.Error);
 
         IndexPool = indices.Value;
-        if (graph.Features.HasRayQuery)
-        {
-            Result<GpuBuffer> meshes = graph.Buffer(
-                GpuDescriptions.GetBuffer("Mesh table", MeshCapacity * GpuMesh.Bytes)
-            );
-            if (!meshes.Ok)
-                return Result.Failure(meshes.Error);
 
-            Meshes = meshes.Value;
-        }
-
-        // Each placed model copied up, with its acceleration structure over the pools on a GPU that traces rays.
-        foreach ((ulong model, string name, MeshDerived made, ResidentModel placed) in _placedModels)
+        // Each placed model copied up, with its meshes into the mesh table where it has a range of it.
+        foreach ((MeshDerived made, ResidentModel where) in _placedModels)
         {
-            List<(GpuMesh Mesh, uint Triangles)> meshes = Meshes.IsNone ? [] : GetMeshes(made, placed.IndexOffset);
-            ResidentModel where = AskAcceleration(graph, name, meshes, placed);
-            _residentModels[model] = where;
             graph.Upload(VertexPool, made.Vertices.AsSpan(), (ulong)where.VertexOffset * GpuVertex.Bytes);
 
             // Indices point into the whole pool.
@@ -225,7 +208,19 @@ internal sealed class GpuResources(
                 rebased[i] = made.Indices[i] + where.VertexOffset;
             }
 
-            UploadMeshes(graph, meshes, where);
+            ModelPlace place = _models[where.ModelIndex];
+            if (place.Meshes.IsEmpty)
+                continue;
+
+            Span<GpuMesh> rows = graph.Upload<GpuMesh>(
+                Meshes,
+                place.Meshes.Length,
+                (ulong)place.MeshOffset * GpuMesh.Bytes
+            );
+            for (int i = 0; i < rows.Length; i++)
+            {
+                rows[i] = place.Meshes[i].Mesh;
+            }
         }
 
         _placedModels.Clear();
@@ -236,8 +231,8 @@ internal sealed class GpuResources(
     /// <summary>
     /// Evicts every model not asked for in the <paramref name="keepSec"/> before <paramref name="frameStart"/>, the tick
     /// the frame started at, that none of <paramref name="drawn"/> holds: its ranges go back to the pools' free lists,
-    /// its row of the model table is emptied and its acceleration structure is no longer asked for. A model asked for
-    /// this frame stays, whatever the keep time.
+    /// its range of the mesh table too, and its row of the model table is emptied. A model asked for this frame stays,
+    /// whatever the keep time.
     /// Renderers not written since their rows were built ask for nothing, so once a model looks unused each model
     /// <paramref name="drawn"/> holds is asked for first.
     /// </summary>
@@ -264,15 +259,14 @@ internal sealed class GpuResources(
             if (!IsUnused(id, before))
                 continue;
 
+            ModelPlace place = _models[where.ModelIndex];
             _vertices.Free((int)where.VertexOffset, (int)where.VertexCount);
             _indices.Free((int)where.IndexOffset, (int)where.IndexCount);
+            if (!place.Meshes.IsEmpty)
+                _meshRanges.Free((int)place.MeshOffset, place.Meshes.Length);
+
             _modelRows.Free((int)where.ModelIndex, 1);
             _models[where.ModelIndex] = default;
-
-            // Its acceleration structure goes once no frame asks for it.
-            if (!where.Acceleration.IsNone)
-                _meshRanges.Free((int)where.MeshOffset, (int)where.MeshCount);
-
             _residentModels.Remove(id);
             _askedModels.Remove(id);
             Log.Info(
@@ -482,9 +476,12 @@ internal sealed class GpuResources(
     /// The model's meshes as rays see them, from <paramref name="indexOffset"/> in the index pool, with their
     /// triangles, leaving out a mesh with none.
     /// </summary>
-    private static List<(GpuMesh Mesh, uint Triangles)> GetMeshes(MeshDerived made, uint indexOffset)
+    private static ImmutableArray<(GpuMesh Mesh, uint Triangles)> GetMeshes(MeshDerived made, uint indexOffset)
     {
-        List<(GpuMesh Mesh, uint Triangles)> meshes = [];
+        ImmutableArray<(GpuMesh Mesh, uint Triangles)>.Builder meshes = ImmutableArray.CreateBuilder<(
+            GpuMesh Mesh,
+            uint Triangles
+        )>();
         for (int i = 0; i < made.Meshes.Length; i++)
         {
             GpuMesh mesh = made.Meshes[i];
@@ -494,7 +491,7 @@ internal sealed class GpuResources(
                 meshes.Add((mesh with { IndexOffset = indexOffset + mesh.IndexOffset }, triangles));
         }
 
-        return meshes;
+        return meshes.ToImmutable();
     }
 
     /// <summary>
@@ -649,8 +646,8 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// The model given ranges of the pools, which grow to hold it, its index and its row of the model table, for
-    /// <see cref="Prepare"/> to copy up with its acceleration structure; the failure model when the model table is full.
+    /// The model given ranges of the pools, which grow to hold it, and of the mesh table, its index and its row of the
+    /// model table, for <see cref="Prepare"/> to copy up; the failure model when the model table is full.
     /// </summary>
     private void Place(ulong model, string name, MeshDerived made)
     {
@@ -670,88 +667,30 @@ internal sealed class GpuResources(
             (uint)made.Indices.Length,
             made.BoundsCenter,
             made.BoundsRadius,
-            made.BoundsMin,
-            made.BoundsMax,
             (uint)_modelRows.Allocate(1)
         );
+
+        // Its meshes as rays see them take a range of the mesh table, on a GPU that traces rays and while one holds
+        // them; with none, rays pass through it.
+        ImmutableArray<(GpuMesh Mesh, uint Triangles)> meshes = Meshes.IsNone ? [] : GetMeshes(made, where.IndexOffset);
+        if (!_meshRanges.CanAllocate(meshes.Length))
+            meshes = [];
 
         // An arrival is a use, so a model that took longer to make than it may go unused is copied up before it can be
         // evicted.
         _askedModels[model] = Environment.TickCount64;
         _residentModels[model] = where;
-        _models[where.ModelIndex] = new ModelPlace(new Handle<Model>(model), where.VertexOffset);
-        _placedModels.Add((model, name, made, where));
+        _models[where.ModelIndex] = new ModelPlace(
+            new Handle<Model>(model),
+            where.VertexOffset,
+            where.VertexCount,
+            made.BoundsMin,
+            made.BoundsMax,
+            meshes.IsEmpty ? 0 : (uint)_meshRanges.Allocate(meshes.Length),
+            meshes
+        );
+        _placedModels.Add((made, where));
         Log.Info($"{name}: {made.Vertices.Length} vertices, {made.Indices.Length / 3} triangles.");
-    }
-
-    /// <summary>
-    /// The model's place with its acceleration structure over its meshes, a geometry each, asked for, what it is made
-    /// to, and their range in the mesh table; as it was, with none, when the structure could not be made.
-    /// </summary>
-    private ResidentModel AskAcceleration(
-        RenderGraph graph,
-        string name,
-        List<(GpuMesh Mesh, uint Triangles)> meshes,
-        ResidentModel where
-    )
-    {
-        if (meshes.Count == 0 || !_meshRanges.CanAllocate(meshes.Count))
-            return where;
-
-        List<TriangleGeometry> geometries = [];
-        foreach ((GpuMesh mesh, uint triangles) in meshes)
-        {
-            geometries.Add(
-                new TriangleGeometry(
-                    VertexPool,
-                    0,
-                    GpuVertex.Bytes,
-                    where.VertexOffset + where.VertexCount,
-                    IndexPool,
-                    (ulong)mesh.IndexOffset * sizeof(uint),
-                    triangles
-                )
-            );
-        }
-
-        // The indices hold the vertex offset, so the name does too: one name and description are one set of triangles.
-        BottomLevelDescription description = new()
-        {
-            Geometries = [.. geometries],
-            Name = $"{name} acceleration {where.VertexOffset}",
-        };
-        Result<GpuAcceleration> acceleration = graph.Acceleration(description);
-        if (!acceleration.Ok)
-        {
-            Log.Warn($"{name} has no acceleration structure, so rays pass through it: {acceleration.Error}");
-
-            return where;
-        }
-
-        return where with
-        {
-            MeshOffset = (uint)_meshRanges.Allocate(meshes.Count),
-            MeshCount = (uint)meshes.Count,
-            Acceleration = acceleration.Value,
-            AccelerationDescription = description,
-        };
-    }
-
-    /// <summary>
-    /// The model's meshes into the mesh table and its acceleration structure built, after its pools landed.
-    /// </summary>
-    private void UploadMeshes(RenderGraph graph, List<(GpuMesh Mesh, uint Triangles)> meshes, ResidentModel where)
-    {
-        if (where.Acceleration.IsNone)
-            return;
-
-        Span<GpuMesh> rows = graph.Upload<GpuMesh>(Meshes, meshes.Count, (ulong)where.MeshOffset * GpuMesh.Bytes);
-        for (int i = 0; i < meshes.Count; i++)
-        {
-            rows[i] = meshes[i].Mesh;
-        }
-
-        graph.BuildAcceleration(where.Acceleration);
     }
 
     /// <summary>
@@ -783,7 +722,7 @@ internal sealed class GpuResources(
 }
 
 /// <summary>
-/// Where a model is in the pools, each range its offset and count, and the sphere and the box around it in its own frame;
+/// Where a model is in the pools, each range its offset and count, and the sphere around it in its own frame;
 /// <paramref name="IsFailure"/> when it stands in for a model that could not be made, to be drawn as a failure.
 /// </summary>
 internal readonly record struct ResidentModel(
@@ -793,12 +732,6 @@ internal readonly record struct ResidentModel(
     uint IndexCount,
     Vector3 BoundsCenter,
     float BoundsRadius,
-    Vector3 BoundsMin,
-    Vector3 BoundsMax,
     uint ModelIndex,
-    bool IsFailure = false,
-    uint MeshOffset = 0,
-    uint MeshCount = 0,
-    GpuAcceleration Acceleration = default,
-    BottomLevelDescription? AccelerationDescription = null
+    bool IsFailure = false
 );

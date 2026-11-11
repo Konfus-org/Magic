@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Numerics;
 using Magic.Assets;
 using Magic.Debugging;
@@ -14,13 +15,15 @@ namespace Magic.AccelerationStructures;
 public readonly record struct AccelerationStructuresInput(GpuView View, GpuInstances Instances);
 
 /// <summary>
-/// The world as rays see it, on a GPU that traces rays: the top-level acceleration structure over the instances, an
-/// instance row for every instance whose model has its triangles' structure, built again when the instances change,
-/// what a ray query traces through; and the hit materials table, each material row averaged by a pass of its material
-/// shader each frame, what a ray hit reads its surface from. Each frame it writes them into the frame's buffer and makes
-/// the frame's <see cref="TracedWorld"/>; on a GPU that doesn't trace rays it makes none. The instances, their models'
-/// structures and the material rows are the world's gem's, taken as its <see cref="GpuInstances"/>. It is public
-/// because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
+/// The world as rays see it, on a GPU that traces rays: each model's triangles' structure, a geometry for each of its
+/// meshes in the mesh table, built once as the model arrives and let go as it leaves; the top-level acceleration
+/// structure over the instances, an instance row for every instance whose model has its triangles' structure, built
+/// again when the instances or those structures change, what a ray query traces through; and the hit materials table,
+/// each material row averaged by a pass of its material shader each frame, what a ray hit reads its surface from. Each
+/// frame it writes them into the frame's buffer and makes the frame's <see cref="TracedWorld"/>; on a GPU that doesn't
+/// trace rays it makes none. The models, the instances and the material rows are the world's gem's, taken as its
+/// <see cref="GpuView"/> and <see cref="GpuInstances"/>. It is public because nothing in its assembly makes it: Magic
+/// does, by reflection, when a project lists the gem.
 /// </summary>
 public sealed class AccelerationStructuresGem(AssetManager assets)
     : IGem,
@@ -39,14 +42,21 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
     private readonly List<ShaderEntry> _averageShaders = [];
 
     /// <summary>
+    /// Each model's triangles' structure, by its model index: the place it is made for, what it is made to, none when
+    /// the model has no meshes or it could not be made, and the structure, none until it is made.
+    /// </summary>
+    private readonly List<(ModelPlace Place, BottomLevelDescription? Description, GpuAcceleration Structure)> _models =
+    [];
+
+    /// <summary>
     /// The instance table's version the last build was of, how many instances rays see in it, those whose model has its
     /// triangles' structure, and the box over their world boxes, min over max where none do.
     /// </summary>
     private (long Version, int Count, (Vector3 Min, Vector3 Max) Box) _built;
 
     /// <summary>
-    /// The world as rays see it this frame, built again when the instances changed, written into the frame's buffer;
-    /// none on a GPU that doesn't trace rays, or while what it is built into is not made.
+    /// The world as rays see it this frame, built again when the instances or the models' structures changed, written
+    /// into the frame's buffer; none on a GPU that doesn't trace rays, or while what it is built into is not made.
     /// </summary>
     public TracedWorld? Render(in Frame frame, RenderGraph graph, in AccelerationStructuresInput input)
     {
@@ -55,6 +65,69 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
 
         GpuView view = input.View;
         GpuInstances world = input.Instances;
+
+        // Each model's structure asked for every frame, so the GPU provider keeps it, row for row with the view's
+        // models. A row whose model changed lets the old structure go, and has the new model's made and built over its
+        // meshes in the pools; one the provider compacted comes back moved, holding what it held. Either builds the
+        // instances again.
+        bool isChanged = world.Version != _built.Version;
+        ReadOnlySpan<ModelPlace> models = view.Models.Span;
+        while (_models.Count < models.Length)
+        {
+            _models.Add(default);
+        }
+
+        for (int index = 0; index < models.Length; index++)
+        {
+            (ModelPlace Place, BottomLevelDescription? Description, GpuAcceleration Structure) row = _models[index];
+            ModelPlace place = models[index];
+            if (row.Place != place)
+            {
+                // The indices hold the vertex offset, so the name does too: one name and description are one set of
+                // triangles.
+                row = (place, null, GpuAcceleration.None);
+                if (!place.Meshes.IsDefaultOrEmpty)
+                {
+                    row.Description = new BottomLevelDescription
+                    {
+                        Geometries =
+                        [
+                            .. place.Meshes.Select(mesh => new TriangleGeometry(
+                                view.Vertices,
+                                0,
+                                GpuVertex.Bytes,
+                                place.VertexOffset + place.VertexCount,
+                                view.Indices,
+                                (ulong)mesh.Mesh.IndexOffset * sizeof(uint),
+                                mesh.Triangles
+                            )),
+                        ],
+                        Name =
+                            $"{assets.GetPath(place.Model) ?? $"model {place.Model.Id}"} acceleration {place.VertexOffset}",
+                    };
+                }
+            }
+
+            if (row.Description is { } description)
+            {
+                Result<GpuAcceleration> structure = graph.Acceleration(description);
+                if (!structure.Ok && row.Structure.IsNone)
+                {
+                    Log.Warn($"{description.Name} is not made, so rays pass through its model: {structure.Error}");
+                    row.Description = null;
+                }
+                else if (structure.Ok && structure.Value != row.Structure)
+                {
+                    if (row.Structure.IsNone)
+                        graph.BuildAcceleration(structure.Value);
+
+                    row.Structure = structure.Value;
+                    isChanged = true;
+                }
+            }
+
+            _models[index] = row;
+        }
 
         // The structure over the view's instances and its instances asked for every frame, so the structure built last
         // stays, and the hit materials table with a row for each of the material table's.
@@ -67,7 +140,7 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
                 (long)view.InstanceCapacity * GpuAccelerationInstance.Bytes
             )
         );
-        Result<GpuAcceleration> structure = instances.Ok
+        Result<GpuAcceleration> topLevel = instances.Ok
             ? graph.Acceleration(
                 new TopLevelDescription
                 {
@@ -77,16 +150,59 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
                 }
             )
             : Result.Failure(instances.Error);
-        if (Result.FindFailure(hitMaterials, instances, structure) is { Ok: false } failed)
+        if (Result.FindFailure(hitMaterials, instances, topLevel) is { Ok: false } failed)
         {
             Log.Error($"The world's acceleration structure is not made: {failed.Error}");
 
             return null;
         }
 
-        // Built again whenever the rows changed since the last build; a model's arrival builds every row again.
-        if (world.Version != _built.Version)
-            _built = Build(graph, instances.Value, structure.Value, world);
+        // Built again over the instances whose model has its structure, their rows written straight into the frame's
+        // upload ring after the models' structures are built; counted first, since the ring is asked for the rows
+        // before they are written. None is built for no instance.
+        if (isChanged)
+        {
+            ReadOnlySpan<GpuInstance> rows = world.Rows.Span;
+            int count = 0;
+            (Vector3 Min, Vector3 Max) box = (new Vector3(float.MaxValue), new Vector3(float.MinValue));
+            foreach (GpuInstance instance in rows)
+            {
+                (ModelPlace place, _, GpuAcceleration structure) = _models[(int)instance.Model];
+                if (structure.IsNone)
+                    continue;
+
+                (Vector3 min, Vector3 max) = ToWorldBox(place.BoundsMin, place.BoundsMax, instance.World);
+                count++;
+                box = (Vector3.Min(box.Min, min), Vector3.Max(box.Max, max));
+            }
+
+            if (count > 0)
+            {
+                Span<GpuAccelerationInstance> written = graph.Upload<GpuAccelerationInstance>(instances.Value, count);
+                int next = 0;
+                for (int i = 0; i < rows.Length; i++)
+                {
+                    (ModelPlace place, _, GpuAcceleration structure) = _models[(int)rows[i].Model];
+                    if (structure.IsNone)
+                        continue;
+
+                    Matrix4x4 transform = rows[i].World;
+                    written[next++] = new GpuAccelerationInstance
+                    {
+                        Row0 = new(transform.M11, transform.M21, transform.M31, transform.M41),
+                        Row1 = new(transform.M12, transform.M22, transform.M32, transform.M42),
+                        Row2 = new(transform.M13, transform.M23, transform.M33, transform.M43),
+                        CustomIndexAndMask = (uint)i | (0xFFu << 24),
+                        OffsetAndFlags = place.MeshOffset | (GpuAccelerationInstance.FlagNoOpaque << 24),
+                        Reference = structure.Address,
+                    };
+                }
+
+                graph.BuildAcceleration(topLevel.Value, (uint)count);
+            }
+
+            _built = (world.Version, count, box);
+        }
 
         // Each material row averaged into the hit materials, a pass for each material shader, which fills the rows it
         // draws.
@@ -110,7 +226,7 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
                 .DispatchOver(world.MaterialCount, 1);
         }
 
-        GpuAcceleration acceleration = _built.Count == 0 ? GpuAcceleration.None : structure.Value;
+        GpuAcceleration acceleration = _built.Count == 0 ? GpuAcceleration.None : topLevel.Value;
         graph.Upload(
             view.Frame,
             [new GpuTracedWorld { Acceleration = acceleration.Id, HitMaterials = hitMaterials.Value.Id }],
@@ -121,57 +237,19 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
     }
 
     /// <summary>
-    /// The structure built again over the instances whose model has its triangles' structure, their rows written
-    /// straight into the frame's upload ring, in the frame's transfers, after the world's gem uploaded the models'
-    /// structures; and the build's version, how many instances it holds and the box over their world boxes, min over
-    /// max where none do. None is built for no instance.
+    /// The box in the world around a box in a model's frame placed by <paramref name="world"/>: its centre placed, and
+    /// its half extent along each world axis the sum of how far each of the model's axes reaches along it.
     /// </summary>
-    private static (long Version, int Count, (Vector3 Min, Vector3 Max) Box) Build(
-        RenderGraph graph,
-        GpuBuffer instances,
-        GpuAcceleration structure,
-        GpuInstances world
-    )
+    private static (Vector3 Min, Vector3 Max) ToWorldBox(Vector3 min, Vector3 max, Matrix4x4 world)
     {
-        // Counted first, since the upload ring is asked for the rows before they are written.
-        ReadOnlySpan<InstanceExtra> extras = world.Extras.Span;
-        int count = 0;
-        (Vector3 Min, Vector3 Max) box = (new Vector3(float.MaxValue), new Vector3(float.MinValue));
-        foreach (InstanceExtra extra in extras)
-        {
-            if (extra.Acceleration == 0)
-                continue;
+        Vector3 center = Vector3.Transform((min + max) / 2, world);
+        Vector3 extent = (max - min) / 2;
+        Vector3 reach = new(
+            (Math.Abs(world.M11) * extent.X) + (Math.Abs(world.M21) * extent.Y) + (Math.Abs(world.M31) * extent.Z),
+            (Math.Abs(world.M12) * extent.X) + (Math.Abs(world.M22) * extent.Y) + (Math.Abs(world.M32) * extent.Z),
+            (Math.Abs(world.M13) * extent.X) + (Math.Abs(world.M23) * extent.Y) + (Math.Abs(world.M33) * extent.Z)
+        );
 
-            count++;
-            box = (Vector3.Min(box.Min, extra.Box.Min), Vector3.Max(box.Max, extra.Box.Max));
-        }
-
-        if (count == 0)
-            return (world.Version, count, box);
-
-        ReadOnlySpan<GpuInstance> rows = world.Rows.Span;
-        Span<GpuAccelerationInstance> written = graph.Upload<GpuAccelerationInstance>(instances, count);
-        int next = 0;
-        for (int i = 0; i < rows.Length; i++)
-        {
-            InstanceExtra extra = extras[i];
-            if (extra.Acceleration == 0)
-                continue;
-
-            Matrix4x4 transform = rows[i].World;
-            written[next++] = new GpuAccelerationInstance
-            {
-                Row0 = new(transform.M11, transform.M21, transform.M31, transform.M41),
-                Row1 = new(transform.M12, transform.M22, transform.M32, transform.M42),
-                Row2 = new(transform.M13, transform.M23, transform.M33, transform.M43),
-                CustomIndexAndMask = (uint)i | (0xFFu << 24),
-                OffsetAndFlags = extra.MeshOffset | (GpuAccelerationInstance.FlagNoOpaque << 24),
-                Reference = extra.Acceleration,
-            };
-        }
-
-        graph.BuildAcceleration(structure, (uint)count);
-
-        return (world.Version, count, box);
+        return (center - reach, center + reach);
     }
 }

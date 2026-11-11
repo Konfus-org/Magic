@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Numerics;
 using Magic.Assets;
 using Magic.Graphics;
 
@@ -134,9 +135,20 @@ public readonly record struct GpuView
 }
 
 /// <summary>
-/// A model on the GPU: its asset, and where its vertices start in the vertex pool, which its indices add.
+/// A model on the GPU: its asset, where its vertices are in the vertex pool, which its indices add, the box around it in
+/// its own frame, and where its meshes start in the mesh table with each one rays see: where its indices start in the
+/// index pool, its material slot and its triangles. It has no meshes on a GPU that traces no rays, or when the mesh
+/// table had no room for them.
 /// </summary>
-public readonly record struct ModelPlace(Handle<Model> Model, uint VertexOffset);
+public readonly record struct ModelPlace(
+    Handle<Model> Model,
+    uint VertexOffset,
+    uint VertexCount,
+    Vector3 BoundsMin,
+    Vector3 BoundsMax,
+    uint MeshOffset,
+    ImmutableArray<(GpuMesh Mesh, uint Triangles)> Meshes
+);
 
 public static class GpuViewExtensions
 {

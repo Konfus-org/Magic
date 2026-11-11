@@ -45,7 +45,7 @@ The gem's settings are `GpuWorldSettings`, under `Rendering`. `get Rendering` li
 `GpuWorldGem.Render` is the frame's upload in order, top to bottom, ending in the view it hands on.
 
 - A texture, material or model asset comes from `GpuResources`, which reads it on the first ask. It asks the graph
-  for the model pools, each texture and its sampler, and each resident model's acceleration structure every frame. The pools start small and grow by half, or by what a model needs, as models arrive. It evicts a model once nothing has asked for it in a while and no renderer drawn holds it. A
+  for the model pools, the mesh table on a GPU that traces rays, and each texture and its sampler every frame. The pools start small and grow by half, or by what a model needs, as models arrive. It evicts a model once nothing has asked for it in a while and no renderer drawn holds it. A
   renderer's instance row is built again, asking for its model, when the renderer is written and when a model
   arrives; the material rows its slots are drawn with are made again each frame.
 - The shaders are the `Shaders/` modules in this gem's `Resources`, built on the shader library

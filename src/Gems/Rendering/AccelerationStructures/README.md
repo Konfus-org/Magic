@@ -1,7 +1,7 @@
 # AccelerationStructures
 
-Builds the world as rays see it, on a GPU that traces rays, for the gems that trace them: the acceleration structure
-over the instances and each material as a ray hit reads it. Without it, or on a GPU that doesn't trace rays, nothing
+Builds the world as rays see it, on a GPU that traces rays, for the gems that trace them: every acceleration structure
+and each material as a ray hit reads it. Without it, or on a GPU that doesn't trace rays, nothing
 traces rays: there are no traced shadows or indirect light, and glass and the effects see nothing through the world.
 
 To use it, list `AccelerationStructures` in a project's `.magic` file with the gem that keeps the world on the GPU,
@@ -9,8 +9,10 @@ whose instances it builds from.
 
 ## What it builds
 
-- The top-level acceleration structure over every instance whose model has its triangles' structure, which the
-  world's gem makes as the model arrives. It is built again in a frame whose instances changed.
+- Each model's triangles' structure, over its meshes in the mesh table, built once as the model arrives on the GPU
+  and let go as it leaves.
+- The top-level acceleration structure over every instance whose model has its triangles' structure. It is built
+  again in a frame whose instances or models changed.
 - Each material as a ray hit reads it: its texture averaged over the whole texture, made again each frame.
 - The box over the world boxes of the instances rays see.
 

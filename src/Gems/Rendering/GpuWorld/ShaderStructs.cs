@@ -115,7 +115,7 @@ internal record struct GpuLight
 
 /// <summary>
 /// A mesh as a ray sees it, the twin of <c>Scene/Models.slang</c>'s: where its triangles start in the index pool and
-/// its material slot, the row of the mesh table an acceleration structure's geometry names.
+/// its material slot, the row of the mesh table a ray hit's geometry names.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public readonly record struct GpuMesh(uint IndexOffset, uint MaterialSlot)

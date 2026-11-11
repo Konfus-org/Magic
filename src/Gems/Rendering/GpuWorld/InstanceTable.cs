@@ -38,8 +38,6 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
 
     private GpuInstance[] _rows = new GpuInstance[MinCapacity];
 
-    private InstanceExtra[] _extras = new InstanceExtra[MinCapacity];
-
     /// <summary>
     /// Whether each block of rows differs from what <see cref="Upload"/> last copied.
     /// </summary>
@@ -93,11 +91,11 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
     public int Capacity => _rows.Length;
 
     /// <summary>
-    /// The frame's instances as the gems that build from them take them: the rows, what the CPU keeps beside each, how
-    /// many rows the material table holds and has room for, and how many times the rows have changed.
+    /// The frame's instances as the gems that build from them take them: the rows, how many rows the material table holds
+    /// and has room for, and how many times the rows have changed.
     /// </summary>
     public GpuInstances Instances =>
-        new(_rows.AsMemory(0, Count), _extras.AsMemory(0, Count), _materialSlots.Count, _materialRows.Length, _version);
+        new(_rows.AsMemory(0, Count), _materialSlots.Count, _materialRows.Length, _version);
 
     /// <summary>
     /// The rows of <paramref name="renderers"/>, from what changed since the last fill: each its model's place in the
@@ -125,7 +123,6 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
         {
             int capacity = GetCapacity(Count);
             Array.Resize(ref _rows, capacity);
-            Array.Resize(ref _extras, capacity);
             Array.Resize(ref _entities, capacity);
             Array.Resize(ref _isDirty, capacity / BlockSize);
         }
@@ -188,23 +185,6 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
         UploadChangedRows(graph, rows.Value);
 
         return Result.Success((rows.Value, materials.Value));
-    }
-
-    /// <summary>
-    /// The box in the world around a box in a model's frame placed by <paramref name="world"/>: its centre placed, and
-    /// its half extent along each world axis the sum of how far each of the model's axes reaches along it.
-    /// </summary>
-    private static (Vector3 Min, Vector3 Max) ToWorldBox(Vector3 min, Vector3 max, Matrix4x4 world)
-    {
-        Vector3 center = Vector3.Transform((min + max) / 2, world);
-        Vector3 extent = (max - min) / 2;
-        Vector3 reach = new(
-            (Math.Abs(world.M11) * extent.X) + (Math.Abs(world.M21) * extent.Y) + (Math.Abs(world.M31) * extent.Z),
-            (Math.Abs(world.M12) * extent.X) + (Math.Abs(world.M22) * extent.Y) + (Math.Abs(world.M32) * extent.Z),
-            (Math.Abs(world.M13) * extent.X) + (Math.Abs(world.M23) * extent.Y) + (Math.Abs(world.M33) * extent.Z)
-        );
-
-        return (center - reach, center + reach);
     }
 
     /// <summary>
@@ -273,13 +253,6 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
 
             _rows[index] = row;
             _entities[index] = entity;
-            _extras[index] = resident is { Acceleration.IsNone: false } traced
-                ? new InstanceExtra(
-                    traced.Acceleration.Address,
-                    traced.MeshOffset,
-                    ToWorldBox(traced.BoundsMin, traced.BoundsMax, renderers.First[index].Matrix)
-                )
-                : default;
         }
 
         for (int block = start / BlockSize; block <= (start + length - 1) / BlockSize; block++)
@@ -349,21 +322,13 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
 
 /// <summary>
 /// The frame's instances as the instance table holds them on the CPU, for the gems that build from each instance: the
-/// rows as the GPU reads them, what the CPU keeps beside each by instance index, how many rows the material table holds
-/// and has room for, so a table with a row for each of its rows is asked for at that size, and how many times the rows
-/// have changed, so what is built from them is built again when it differs. Read on the render thread in the frame it is
-/// made for.
+/// rows as the GPU reads them, how many rows the material table holds and has room for, so a table with a row for each
+/// of its rows is asked for at that size, and how many times the rows have changed, so what is built from them is built
+/// again when it differs. Read on the render thread in the frame it is made for.
 /// </summary>
 public readonly record struct GpuInstances(
     ReadOnlyMemory<GpuInstance> Rows,
-    ReadOnlyMemory<InstanceExtra> Extras,
     int MaterialCount,
     int MaterialCapacity,
     long Version
 );
-
-/// <summary>
-/// What the CPU keeps beside an instance's row: its model's acceleration structure's address, 0 when it has none,
-/// where its meshes start in the mesh table, and the box around it in the world.
-/// </summary>
-public readonly record struct InstanceExtra(ulong Acceleration, uint MeshOffset, (Vector3 Min, Vector3 Max) Box);
