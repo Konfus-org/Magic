@@ -36,7 +36,7 @@ internal enum ResourceState : byte
 /// grow when none holds a model. A model not asked for in the seconds it is kept, and held by no renderer drawn, is
 /// evicted: its ranges go back to the free lists, its row of the model table is emptied and its structure is no longer
 /// asked for, so the GPU provider frees it, and the next ask makes it again. A smoothly filtered texture is sampled
-/// with <paramref name="anisotropy"/>.
+/// with <paramref name="anisotropy"/>, and goes up without its <paramref name="droppedLevels"/> largest mip levels.
 /// </summary>
 internal sealed class GpuResources(
     ModelPreprocessor models,
@@ -44,7 +44,8 @@ internal sealed class GpuResources(
     AssetManager assets,
     IShaderCompiler shaders,
     Threads threads,
-    int anisotropy
+    int anisotropy,
+    int droppedLevels
 )
 {
     private const int ModelCapacity = 4096;
@@ -60,7 +61,7 @@ internal sealed class GpuResources(
     /// </summary>
     private readonly Dictionary<ulong, Material?> _materials = [];
 
-    private readonly List<(Texture Asset, TextureEntry Entry)> _arrivedTextures = [];
+    private readonly List<(Texture Asset, int First, TextureEntry Entry)> _arrivedTextures = [];
 
     /// <summary>
     /// Each material shader's struct as reflection lays it out, by the shader's id, null while it is reflected; its
@@ -399,15 +400,15 @@ internal sealed class GpuResources(
             Ask(graph, entry);
         }
 
-        foreach ((Texture asset, TextureEntry entry) in _arrivedTextures)
+        foreach ((Texture asset, int first, TextureEntry entry) in _arrivedTextures)
         {
             if (entry.State != ResourceState.Ready)
                 continue;
 
-            for (int level = 0; level < asset.Levels.Length; level++)
+            for (int level = first; level < asset.Levels.Length; level++)
             {
                 TextureLevel source = asset.Levels[level];
-                graph.Upload(entry.Texture, asset.Pixels.Span.Slice(source.Offset, source.Size), level);
+                graph.Upload(entry.Texture, asset.Pixels.Span.Slice(source.Offset, source.Size), level - first);
             }
         }
 
@@ -680,15 +681,16 @@ internal sealed class GpuResources(
             return;
         }
 
-        // The next upload asks for the texture and its sampler and copies its levels in.
+        // The next upload asks for the texture and its sampler and copies its levels in, from the first one kept.
         Texture asset = loaded.Value;
+        int first = Math.Clamp(droppedLevels, 0, asset.Levels.Length - 1);
         entry.Description = new TextureDescription
         {
-            Width = asset.Width,
-            Height = asset.Height,
+            Width = asset.Levels[first].Width,
+            Height = asset.Levels[first].Height,
             Format = ToGpu(asset.Format),
             Usage = TextureUsages.Sampled | TextureUsages.CopyDestination,
-            Levels = asset.Levels.Length,
+            Levels = asset.Levels.Length - first,
             Name = name,
         };
         entry.SamplerDescription = new SamplerDescription
@@ -697,7 +699,7 @@ internal sealed class GpuResources(
             Wrap = asset.Wrap,
             Anisotropy = asset.Filter == TextureFilter.Linear ? anisotropy : 1,
         };
-        _arrivedTextures.Add((asset, entry));
+        _arrivedTextures.Add((asset, first, entry));
     }
 
     private async Task LoadAsync(Handle<Model> model)

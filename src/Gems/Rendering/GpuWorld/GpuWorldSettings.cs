@@ -40,4 +40,12 @@ public sealed record GpuWorldSettings
     /// </summary>
     [RequireRestart]
     public int Anisotropy { get; init; } = 8;
+
+    /// <summary>
+    /// How many of a texture's largest mip levels are left off the GPU, each halving its width and height and saving
+    /// about three quarters of its memory: a softer picture for less video memory. A texture keeps at least its smallest
+    /// level. 0 keeps every level.
+    /// </summary>
+    [RequireRestart]
+    public int DroppedTextureLevels { get; init; }
 }

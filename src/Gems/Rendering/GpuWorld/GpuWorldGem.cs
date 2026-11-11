@@ -117,7 +117,15 @@ public sealed class GpuWorldGem
         _threads = threads;
         ModelPreprocessor models = new();
         _preprocessing = assets.Register(models);
-        _resources = new GpuResources(models, caches, assets, shaders, threads, settings.Anisotropy);
+        _resources = new GpuResources(
+            models,
+            caches,
+            assets,
+            shaders,
+            threads,
+            settings.Anisotropy,
+            settings.DroppedTextureLevels
+        );
         _failure = new MaterialInstance { Handle = assets.GetFailure<Material, Model>() };
         _defaultPost.Effects[0] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Exposure.mat") };
         _defaultPost.Effects[1] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Agx.mat") };
