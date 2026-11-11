@@ -1,4 +1,6 @@
-namespace Magic.Graphics;
+using Magic.Graphics;
+
+namespace Magic.GpuWorld;
 
 /// <summary>
 /// The light that reaches the view's surfaces indirectly this frame: the traced diffuse light and reflections at a part

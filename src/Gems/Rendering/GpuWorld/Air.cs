@@ -1,4 +1,6 @@
-namespace Magic.Graphics;
+using Magic.Graphics;
+
+namespace Magic.GpuWorld;
 
 /// <summary>
 /// The air between the camera and what it sees this frame: a volume over the view of the light the air scatters towards

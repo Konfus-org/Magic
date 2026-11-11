@@ -1,4 +1,6 @@
-namespace Magic.Graphics;
+using Magic.Graphics;
+
+namespace Magic.GpuWorld;
 
 /// <summary>
 /// How much of each light reaches each pixel this frame: the mask shading reads, the layout the library's

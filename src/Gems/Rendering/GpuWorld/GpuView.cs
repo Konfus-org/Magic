@@ -1,7 +1,8 @@
 using System.Collections.Immutable;
 using Magic.Assets;
+using Magic.Graphics;
 
-namespace Magic.Graphics;
+namespace Magic.GpuWorld;
 
 /// <summary>
 /// The world as the GPU holds it this frame, and the view it is seen through: what the gem that keeps the world on the
@@ -124,6 +125,12 @@ public readonly record struct GpuView
     /// domain shows waits until this counts the domain it was told of.
     /// </summary>
     public required int PreparedDomains { get; init; }
+
+    /// <summary>
+    /// The atmosphere, for an entry generic over the sky it shades with.
+    /// </summary>
+    public static ShaderTypeArgument GetAtmosphere(AssetManager assets) =>
+        new(assets.Find<Shader>("Shaders/Sky/Atmosphere.slang"), "Atmosphere");
 }
 
 /// <summary>

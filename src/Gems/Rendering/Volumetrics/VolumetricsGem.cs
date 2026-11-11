@@ -4,6 +4,7 @@ using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
+using Magic.GpuWorld;
 using Magic.Graphics;
 using Magic.Projects;
 using Magic.Threading;

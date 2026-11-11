@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.Configuration;
 using Magic.Debugging;
+using Magic.GpuWorld;
 using Magic.Graphics;
 using Magic.Projects;
 using Magic.Utils;

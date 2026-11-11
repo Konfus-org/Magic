@@ -3,8 +3,7 @@ using Magic.Assets;
 namespace Magic.Graphics;
 
 /// <summary>
-/// The entries a gem's passes run, in the modules of its <c>Shaders/</c> folder, and the library shaders an entry is
-/// specialised with.
+/// The entries a gem's passes run, in the modules of its <c>Shaders/</c> folder.
 /// </summary>
 public static class PassShaders
 {
@@ -20,10 +19,4 @@ public static class PassShaders
             Name = name,
             Stage = stage,
         };
-
-    /// <summary>
-    /// The atmosphere, for an entry generic over the sky it shades with.
-    /// </summary>
-    public static ShaderTypeArgument GetAtmosphere(AssetManager assets) =>
-        new(assets.Find<Shader>("Shaders/Sky/Atmosphere.slang"), "Atmosphere");
 }

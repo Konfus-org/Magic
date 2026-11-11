@@ -3,6 +3,7 @@ using Magic.Assets;
 using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Ecs;
+using Magic.GpuWorld;
 using Magic.Graphics;
 using Magic.Projects;
 using Magic.Threading;

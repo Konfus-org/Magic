@@ -1,6 +1,7 @@
 using System.Numerics;
+using Magic.Graphics;
 
-namespace Magic.Graphics;
+namespace Magic.GpuWorld;
 
 /// <summary>
 /// The world as rays see it this frame, on a GPU that traces them: the acceleration structure over the instances, each

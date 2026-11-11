@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs.Components;
+using Magic.GpuWorld;
 using Magic.Graphics;
 using Magic.Utils;
 

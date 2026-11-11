@@ -89,11 +89,11 @@ public sealed class DeferredRenderingGem
         _threads = threads;
         _shadeShader = PassShaders.GetEntry(assets, "ShadeSurfaces", "ShadeSurfaces") with
         {
-            TypeArguments = [PassShaders.GetAtmosphere(assets)],
+            TypeArguments = [GpuView.GetAtmosphere(assets)],
         };
         _translucentShader = PassShaders.GetEntry(assets, "ShadeTranslucent", "ShadeTranslucent") with
         {
-            TypeArguments = [PassShaders.GetAtmosphere(assets)],
+            TypeArguments = [GpuView.GetAtmosphere(assets)],
         };
         _lightShader = PassShaders.GetEntry(assets, "ShowSurface", "ShowLight");
         _showShader = PassShaders.GetEntry(assets, "ShowSurface", "ShowSurface");

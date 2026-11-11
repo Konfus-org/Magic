@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Numerics;
 using Magic.Assets;
+using Magic.GpuWorld;
 using Magic.Graphics;
 using Magic.Utils;
 
@@ -62,7 +63,7 @@ internal sealed class Probes(AssetManager assets)
     private readonly ShaderEntry _listShader = PassShaders.GetEntry(assets, "UpdateProbes", "ListProbeRays");
     private readonly ShaderEntry _traceShader = PassShaders.GetEntry(assets, "UpdateProbes", "TraceProbes") with
     {
-        TypeArguments = [PassShaders.GetAtmosphere(assets)],
+        TypeArguments = [GpuView.GetAtmosphere(assets)],
     };
     private readonly ShaderEntry _blendShader = PassShaders.GetEntry(assets, "UpdateProbes", "BlendProbes");
 

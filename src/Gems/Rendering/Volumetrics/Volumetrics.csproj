@@ -11,5 +11,6 @@
   <ItemGroup>
     <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its log. -->
     <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" Private="false" />
+    <ProjectReference Include="../GpuWorld/GpuWorld.csproj" Private="false" />
   </ItemGroup>
 </Project>

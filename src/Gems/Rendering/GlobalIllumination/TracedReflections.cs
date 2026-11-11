@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using Magic.Assets;
+using Magic.GpuWorld;
 using Magic.Graphics;
 using Magic.Utils;
 
@@ -26,7 +27,7 @@ internal sealed class TracedReflections(AssetManager assets)
         "TraceReflections"
     ) with
     {
-        TypeArguments = [PassShaders.GetAtmosphere(assets)],
+        TypeArguments = [GpuView.GetAtmosphere(assets)],
     };
     private readonly ShaderEntry _resolveShader = PassShaders.GetEntry(
         assets,

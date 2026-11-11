@@ -1,4 +1,6 @@
-namespace Magic.Graphics;
+using Magic.Graphics;
+
+namespace Magic.GpuWorld;
 
 /// <summary>
 /// An effect at its place in a frame's list: its material, ready when its material, textures and passes are, its passes'

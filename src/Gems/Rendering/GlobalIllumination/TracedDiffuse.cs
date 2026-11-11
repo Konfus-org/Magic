@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using Magic.Assets;
+using Magic.GpuWorld;
 using Magic.Graphics;
 using Magic.Utils;
 
@@ -22,7 +23,7 @@ internal sealed class TracedDiffuse(AssetManager assets)
 
     private readonly ShaderEntry _traceShader = PassShaders.GetEntry(assets, "TraceDiffuse", "TraceDiffuse") with
     {
-        TypeArguments = [PassShaders.GetAtmosphere(assets)],
+        TypeArguments = [GpuView.GetAtmosphere(assets)],
     };
     private readonly ShaderEntry _filterShader = PassShaders.GetEntry(assets, "TraceDiffuse", "FilterDiffuse");
     private readonly ShaderEntry _blendShader = PassShaders.GetEntry(assets, "TraceDiffuse", "BlendDiffuse");

@@ -1,6 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Magic.Graphics;
+using Magic.GpuWorld;
 
 namespace Magic.ClusteredGeometry;
 

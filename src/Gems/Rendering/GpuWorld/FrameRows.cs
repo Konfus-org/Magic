@@ -1,7 +1,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 
-namespace Magic.Graphics;
+namespace Magic.GpuWorld;
 
 /// <summary>
 /// What every pass of a frame reads, the twin of the library's <c>Core/Frame.slang</c>: the view, the output's size and
