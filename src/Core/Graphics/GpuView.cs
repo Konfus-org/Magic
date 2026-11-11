@@ -17,6 +17,14 @@ public readonly record struct GpuView
     public required int Height { get; init; }
 
     /// <summary>
+    /// The size the finished picture is shown at, which the output is upscaled or stretched to: the window's, or one
+    /// set.
+    /// </summary>
+    public required int ShownWidth { get; init; }
+
+    public required int ShownHeight { get; init; }
+
+    /// <summary>
     /// Whether last frame drew this view at this size, in this world: what its targets hold is last frame's.
     /// </summary>
     public required bool HasHistory { get; init; }

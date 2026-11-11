@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Drawing;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Magic.Assets;
 using Magic.Debugging;
 using Magic.Utils;
 
@@ -221,10 +222,10 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// Level 0 of <paramref name="from"/> stretched over level 0 of <paramref name="to"/>, filtered linearly; the formats
-    /// may differ, in <paramref name="stage"/>.
+    /// Level 0 of <paramref name="from"/> stretched over level 0 of <paramref name="to"/>, read with
+    /// <paramref name="filter"/>; the formats may differ, in <paramref name="stage"/>.
     /// </summary>
-    public void Blit(GpuTexture from, GpuTexture to, RenderStage stage)
+    public void Blit(GpuTexture from, GpuTexture to, RenderStage stage, TextureFilter filter)
     {
         UseInTransfer(GetUse(from, GpuAccess.CopySource), stage);
         UseInTransfer(GetUse(to, GpuAccess.CopyDestination), stage);
@@ -234,6 +235,7 @@ public sealed class RenderGraph
                 Kind = GpuCommandKind.BlitTexture,
                 Id = from.Id,
                 Id2 = to.Id,
+                X = (uint)filter,
             }
         );
     }

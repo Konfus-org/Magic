@@ -93,6 +93,14 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
     /// </summary>
     public ShadowMask? Render(in Frame frame, RenderGraph graph, in TracedInput input)
     {
+        // Off, the history starts afresh once it is back on.
+        if (!Settings.IsTracedShadowsOn)
+        {
+            _traced = default;
+
+            return null;
+        }
+
         // The shaders are the GPU provider's to build, the first ask starting each, so each is asked.
         bool isBuilt = graph.GetState(_traceShader) == GpuState.Ready;
         isBuilt &= graph.GetState(_classifyShader) == GpuState.Ready;
@@ -293,7 +301,8 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
 
         trace.DispatchOver(width, height);
 
-        // Denoise: classify the sun's tiles, filter twice, then once more as the mask blends with last frame's.
+        // Denoise: classify the sun's tiles, filter once or twice, as the settings say, then once more as the mask blends
+        // with last frame's.
         graph
             .Compute("Classify shadows", _classifyShader, header, RenderStage.Light)
             .Reads(
@@ -310,7 +319,9 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
             .DispatchOver(width, height);
 
         // Each pass reads the last one's output; the first pass's is what the next frame blends with.
-        for (int pass = 0; pass < _filterPassNames.Length; pass++)
+        int passes = Math.Clamp(Settings.ShadowFilterPasses, 1, _filterPassNames.Length);
+        GpuTexture filtered = passes == 1 ? shadows.SunHistory : shadows.SunBlend;
+        for (int pass = 0; pass < passes; pass++)
         {
             (GpuTexture source, GpuTexture output) =
                 pass == 0 ? (shadows.SunBlend, shadows.SunHistory) : (shadows.SunHistory, shadows.SunBlend);
@@ -321,10 +332,10 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
                 .DispatchOver(width, height);
         }
 
-        // The sun's slot filtered a last time into the mask the rays wrote, and the tile lights' slots blended with
-        // last frame's.
+        // The sun's slot filtered a last time from the last pass's into the mask the rays wrote, and the tile lights'
+        // slots blended with last frame's.
         graph
-            .Compute("Blend shadows", _blendShader, header, RenderStage.Light)
+            .Compute("Blend shadows", _blendShader, header with { W = (uint)passes }, RenderStage.Light)
             .Reads(
                 view.Frame,
                 shadows.Constants,
@@ -332,7 +343,7 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
                 view.Depth,
                 view.GBufferNormal,
                 view.Velocity,
-                shadows.SunBlend,
+                filtered,
                 shadows.PreviousMask,
                 shadows.PreviousMoments
             )

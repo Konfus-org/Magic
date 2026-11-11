@@ -8,8 +8,9 @@ using Magic.Files;
 namespace Magic.Utils;
 
 /// <summary>
-/// A value as the console types it: one value in JSON, a bare word for text or a choice, or one word per part of a
-/// value with several, in their order (<c>1 2 3</c> for a position, <c>2560 1440</c> for a size).
+/// A value as the console types it: one value in JSON, a bare word for text or a choice, one word per part of a value
+/// with several, in their order (<c>1 2 3</c> for a position, <c>2560 1440</c> for a size), or one word per element of
+/// a list (<c>Bloom Vignette</c>).
 /// </summary>
 internal static class ValueText
 {
@@ -20,6 +21,10 @@ internal static class ValueText
     {
         if (words.IsEmpty)
             return Result.Failure($"it needs a {type.Name}.");
+
+        // A list typed whole as JSON reads as one value; else each word is an element.
+        if (IsList(type) && !(words.Length == 1 && IsJson(words[0])))
+            return ParseOne(type, $"[{string.Join(',', words.ToArray().Select(ToJson))}]");
 
         if (words.Length == 1)
             return ParseOne(type, words[0]);
@@ -87,7 +92,7 @@ internal static class ValueText
     /// </summary>
     private static Result<object> ParseOne(Type type, string text)
     {
-        string json = IsJson(text) ? text : JsonSerializer.Serialize(text);
+        string json = ToJson(text);
         Result<JsonElement> element = Json.Read<JsonElement>(Encoding.UTF8.GetBytes(json));
         if (!element.Ok)
             return Result.Failure($"'{text}' is not JSON: {element.Error}");
@@ -120,6 +125,17 @@ internal static class ValueText
 
         return isBare ? json.Value.GetString() ?? string.Empty : json.Value.GetRawText();
     }
+
+    /// <summary>
+    /// <paramref name="text"/> as it is when it is JSON, else as JSON's text.
+    /// </summary>
+    private static string ToJson(string text) => IsJson(text) ? text : JsonSerializer.Serialize(text);
+
+    /// <summary>
+    /// Whether a <paramref name="type"/> is a list of values, which text is not.
+    /// </summary>
+    private static bool IsList(Type type) =>
+        type != typeof(string) && type.IsAssignableTo(typeof(System.Collections.IEnumerable));
 
     /// <summary>
     /// Whether <paramref name="text"/> is JSON, as a value typed bare is not: a number, a literal, a string, an object or

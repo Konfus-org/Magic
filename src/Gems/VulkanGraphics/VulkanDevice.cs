@@ -54,7 +54,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
 
     private readonly VkDebugUtilsMessengerEXT _messenger;
 
-    public VulkanDevice(IWindow? window, bool wantsValidation)
+    public VulkanDevice(IWindow? window, string gpu, bool wantsValidation)
     {
         VkResult started = vkInitialize();
         if (started != VkResult.Success)
@@ -112,7 +112,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
                 Surface = surface.Value;
         }
 
-        Pick picked = PickPhysicalDevice();
+        Pick picked = PickPhysicalDevice(gpu);
         PhysicalDevice = picked.Device;
         QueueFamily = picked.QueueFamily;
         Features = picked.Features;
@@ -354,37 +354,47 @@ internal sealed unsafe class VulkanDevice : IDisposable
     }
 
     /// <summary>
-    /// The GPU to use: among those with the baseline that can show the window, a discrete one, else an integrated,
-    /// else whatever draws, a software device last.
+    /// The GPU to use: among those with the baseline that can show the window, the first whose name holds
+    /// <paramref name="named"/> when it isn't empty; else a discrete one, else an integrated, else whatever draws, a
+    /// software device last.
     /// </summary>
-    private Pick PickPhysicalDevice()
+    private Pick PickPhysicalDevice(string named)
     {
         InstanceApi.vkEnumeratePhysicalDevices(out uint count);
         Span<VkPhysicalDevice> devices = new VkPhysicalDevice[count];
         InstanceApi.vkEnumeratePhysicalDevices(devices);
-        Pick? best = null;
+        List<Pick> usable = [];
         List<string> refused = [];
         foreach (VkPhysicalDevice device in devices)
         {
             Result<Pick> examined = Examine(device);
-            if (!examined.Ok)
-            {
+            if (examined.Ok)
+                usable.Add(examined.Value);
+            else
                 refused.Add(examined.Error);
-
-                continue;
-            }
-
-            if (best is null || examined.Value.Score > best.Value.Score)
-                best = examined.Value;
         }
 
-        if (best is { } pick)
-            return pick;
+        if (usable.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"No GPU has what Magic needs: Vulkan 1.3 with bindless descriptors and dynamic rendering. "
+                    + string.Join(" ", refused)
+            );
+        }
 
-        throw new InvalidOperationException(
-            $"No GPU has what Magic needs: Vulkan 1.3 with bindless descriptors and dynamic rendering. "
-                + string.Join(" ", refused)
+        if (named.Length == 0)
+            return usable.MaxBy(pick => pick.Score);
+
+        int found = usable.FindIndex(pick =>
+            pick.Limits.DeviceName.Contains(named, StringComparison.OrdinalIgnoreCase)
         );
+        if (found >= 0)
+            return usable[found];
+
+        string names = string.Join(", ", usable.Select(pick => pick.Limits.DeviceName));
+        Log.Warn($"Rendering.Gpu {named} names none of the GPUs that can draw ({names}), so the fastest draws.");
+
+        return usable.MaxBy(pick => pick.Score);
     }
 
     [SuppressMessage(

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
@@ -12,6 +13,7 @@ using Magic.Projects;
 using Magic.SdlBindings;
 using Magic.Threading;
 using Magic.Utils;
+using Magic.Worlds;
 using static Magic.SdlBindings.SDL_EventType;
 using static Magic.SdlBindings.SDL_GamepadAxis;
 using static Magic.SdlBindings.SDL_MouseWheelDirection;
@@ -31,6 +33,10 @@ namespace Magic.SdlPlatform;
 /// for the rest of a frame. What the game thread sets on the window and clipboard is handed to the platform thread
 /// the same way. It is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists
 /// the gem.
+/// </para>
+/// <para>
+/// It also paces the frames: <see cref="Update"/> first waits out the frame rate its settings cap the frames at, one cap
+/// while the window has the focus and another while it hasn't, and losing the focus can pause the world.
 /// </para>
 /// </summary>
 public sealed class SdlPlatformGem
@@ -66,6 +72,8 @@ public sealed class SdlPlatformGem
     private readonly Threads _threads;
 
     private readonly AssetManager _assets;
+
+    private readonly World _world;
 
     private readonly Meter _meter;
 
@@ -112,12 +120,14 @@ public sealed class SdlPlatformGem
     private float _pixelDensity = 1;
 
     /// <summary>
-    /// The window's size in pixels, read by the platform thread as the window opens and on each pump, and written whole
-    /// for any thread; 0 when headless.
+    /// The window's size in pixels and its display's scale, read by the platform thread as the window opens and on each
+    /// pump, and written whole for any thread; 0 and 1 when headless.
     /// </summary>
     private int _width;
 
     private int _height;
+
+    private float _displayScale = 1;
 
     private string _title;
 
@@ -125,18 +135,30 @@ public sealed class SdlPlatformGem
 
     private string _text = string.Empty;
 
+    /// <summary>
+    /// Whether the window has the keyboard's focus, as its last focus event said; always, headless.
+    /// </summary>
+    private bool _isFocused = true;
+
+    /// <summary>
+    /// When the last frame the frame cap held back was let go, 0 before the first.
+    /// </summary>
+    private long _pacedTimestamp;
+
     public unsafe SdlPlatformGem(
         SdlPlatformSettings settings,
         App app,
         Threads threads,
         AssetManager assets,
-        IFileSystem files
+        IFileSystem files,
+        World world
     )
     {
         _settings = settings;
         _app = app;
         _threads = threads;
         _assets = assets;
+        _world = world;
 
         // The gem's meter goes with it, so nothing holds the gem's code once it unloads. The OS is asked only when the
         // meter is read, as the number is the process's rather than a frame's.
@@ -168,16 +190,30 @@ public sealed class SdlPlatformGem
             ),
         };
 
-        // macOS draws through a Metal layer, which the window must be opened for; elsewhere the OS's window is enough.
+        // macOS draws through a Metal layer, which the window must be opened for; elsewhere the OS's window is enough. The
+        // window opens centred on its display, as one already fullscreen or maximized can't be moved there.
         ulong flags =
             mode
-            | SDL_WINDOW_RESIZABLE
+            | (settings.IsResizable ? SDL_WINDOW_RESIZABLE : 0)
             | SDL_WINDOW_HIGH_PIXEL_DENSITY
             | (OperatingSystem.IsMacOS() ? SDL_WINDOW_METAL : 0);
-        fixed (byte* title = CString.ToBytes(_title))
+        long centered = SDL_WINDOWPOS_CENTERED_MASK | FindDisplay(settings.Display);
+        uint properties = SDL_CreateProperties();
+        SetNumber(properties, SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER, (long)flags);
+        SetNumber(properties, SDL_PROP_WINDOW_CREATE_X_NUMBER, centered);
+        SetNumber(properties, SDL_PROP_WINDOW_CREATE_Y_NUMBER, centered);
+        SetNumber(properties, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, settings.WindowedSize.Width);
+        SetNumber(properties, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, settings.WindowedSize.Height);
+        fixed (
+            byte* name = SDL_PROP_WINDOW_CREATE_TITLE_STRING,
+                title = CString.ToBytes(_title)
+        )
         {
-            _window = SDL_CreateWindow(title, settings.WindowedSize.Width, settings.WindowedSize.Height, flags);
+            SDL_SetStringProperty(properties, name, title);
         }
+
+        _window = SDL_CreateWindowWithProperties(properties);
+        SDL_DestroyProperties(properties);
 
         if (_window == null)
         {
@@ -192,6 +228,7 @@ public sealed class SdlPlatformGem
 
         Handle = ReadHandle();
         ReadSize();
+        _isFocused = (SDL_GetWindowFlags(_window) & SDL_WINDOW_INPUT_FOCUS) != 0;
 
         // Typed characters come as text events only while text input is on: always, as a desktop has no on-screen
         // keyboard for it to bring up.
@@ -257,20 +294,30 @@ public sealed class SdlPlatformGem
     /// </summary>
     public int Height => Volatile.Read(ref _height);
 
+    /// <summary>
+    /// 1 when headless.
+    /// </summary>
+    public float DisplayScale => Volatile.Read(ref _displayScale);
+
     public WindowHandle Handle { get; }
 
     public ReadOnlySpan<InputDevice> Devices => CollectionsMarshal.AsSpan(_devices);
 
     /// <summary>
-    /// The window's and input's settings. A new window mode is shown on the platform thread. Game thread.
+    /// The window's and input's settings. A new window mode, display or resizability is shown on the platform thread.
+    /// Game thread.
     /// </summary>
     public SdlPlatformSettings Settings
     {
         get => _settings;
         set
         {
-            if (value.Mode != _settings.Mode && !_app.IsHeadless)
-                ShowModeAsync(value.Mode).FireAndForget();
+            bool isWindowChanged =
+                value.Mode != _settings.Mode
+                || value.Display != _settings.Display
+                || value.IsResizable != _settings.IsResizable;
+            if (isWindowChanged && !_app.IsHeadless)
+                ShowWindowAsync(_settings, value).FireAndForget();
 
             _settings = value;
         }
@@ -348,12 +395,18 @@ public sealed class SdlPlatformGem
     }
 
     /// <summary>
-    /// Makes input this frame's: what happened last frame is over, SDL's events since are applied, and sticks and
-    /// triggers are read as they stand now.
+    /// Waits out the frame cap, then makes input this frame's: what happened last frame is over, SDL's events since are
+    /// applied, and sticks and triggers are read as they stand now.
     /// </summary>
     public unsafe void Update(in Frame frame)
     {
-        // What happened last frame is over: pressed and released clear, and a mouse's motion and wheel go back to 0.
+        WaitForFrameCap();
+
+        // What happened last frame is over: pressed and released clear, and a mouse's wheel goes back to 0. Its motion
+        // eases: it keeps what the frame's share of new motion leaves of last frame's, all of it gone with no smoothing.
+        // The share grows with the frame's length, so the ease is the same at any frame rate.
+        float smoothingSec = _settings.MouseSmoothing;
+        float motionShare = smoothingSec > 0 ? 1 - MathF.Exp(-(float)frame.AppDeltaSec / smoothingSec) : 1;
         for (int i = 0; i < _devices.Count; i++)
         {
             ControlState[] states = _controls[i];
@@ -365,14 +418,20 @@ public sealed class SdlPlatformGem
             if (_devices[i].Kind != DeviceKind.Mouse)
                 continue;
 
-            states[Control.MouseMotionX.Index] = default;
-            states[Control.MouseMotionY.Index] = default;
+            states[Control.MouseMotionX.Index] = default(ControlState) with
+            {
+                Value = states[Control.MouseMotionX.Index].Value * (1 - motionShare),
+            };
+            states[Control.MouseMotionY.Index] = default(ControlState) with
+            {
+                Value = states[Control.MouseMotionY.Index].Value * (1 - motionShare),
+            };
             states[Control.MouseWheelX.Index] = default;
             states[Control.MouseWheelY.Index] = default;
         }
 
         _text = string.Empty;
-        ApplyEvents();
+        ApplyEvents(motionShare);
 
         // Sticks and triggers as they stand now, rather than added up from events.
         foreach ((uint id, nint gamepad) in _gamepads)
@@ -458,6 +517,33 @@ public sealed class SdlPlatformGem
     }
 
     /// <summary>
+    /// Sets the named number in <paramref name="properties"/>.
+    /// </summary>
+    private static unsafe void SetNumber(uint properties, ReadOnlySpan<byte> name, long value)
+    {
+        fixed (byte* key = name)
+        {
+            SDL_SetNumberProperty(properties, key, value);
+        }
+    }
+
+    /// <summary>
+    /// SDL's id of the display at <paramref name="index"/> in its list; the main display, with a warning, when there is
+    /// no such display.
+    /// </summary>
+    private static unsafe uint FindDisplay(int index)
+    {
+        int count;
+        uint* displays = SDL_GetDisplays(&count);
+        uint display = index >= 0 && index < count ? displays[index] : SDL_GetPrimaryDisplay();
+        SDL_free(displays);
+        if (index < 0 || index >= count)
+            Log.Warn($"There is no display {index}: there are {count}, from 0. The window shows on the main one.");
+
+        return display;
+    }
+
+    /// <summary>
     /// Gives a control a new value, and with it whether it went down or came up. Pressed and released only ever turn on
     /// within a frame, so a tap between two frames shows as both.
     /// </summary>
@@ -474,8 +560,26 @@ public sealed class SdlPlatformGem
     }
 
     /// <summary>
+    /// Holds the frame back until a frame at the cap's rate is due after the last one held back, so frames start no
+    /// faster than the cap; a frame already late is let go at once, and the next is due a whole frame after it.
+    /// </summary>
+    private void WaitForFrameCap()
+    {
+        int framesPerSecond = _isFocused ? _settings.MaxFrameRate : _settings.BackgroundFrameRate;
+        if (framesPerSecond <= 0)
+            return;
+
+        long now = Stopwatch.GetTimestamp();
+        long due = _pacedTimestamp + (Stopwatch.Frequency / framesPerSecond);
+        if (due > now)
+            SDL_DelayPrecise((ulong)Stopwatch.GetElapsedTime(now, due).Ticks * 100);
+
+        _pacedTimestamp = Math.Max(due, now);
+    }
+
+    /// <summary>
     /// An SDL axis, -32768 to 32767, as -1 to 1: 0 inside the dead zone, and past it growing from 0 to 1 at full
-    /// deflection, so the zone's edge is no step. Triggers only reach the positive half.
+    /// deflection along the stick's curve, so the zone's edge is no step. Triggers only reach the positive half.
     /// </summary>
     private float ToStick(short value)
     {
@@ -483,19 +587,19 @@ public sealed class SdlPlatformGem
         float raw = Math.Max(value / 32767f, -1f);
         float past = MathF.Abs(raw) - deadZone;
 
-        return past <= 0 ? 0 : MathF.CopySign(past / (1 - deadZone), raw);
+        return past <= 0 ? 0 : MathF.CopySign(MathF.Pow(past / (1 - deadZone), _settings.StickCurve), raw);
     }
 
     /// <summary>
     /// Applies SDL's events the platform thread handed over since the last frame to the devices and their controls, in
-    /// the order they happened.
+    /// the order they happened, with <paramref name="motionShare"/> of the mouse's new motion.
     /// </summary>
     [SuppressMessage(
         "Style",
         "IDE0010:Add missing cases",
         Justification = "SDL has far more events than the gem reads; the rest are ignored on purpose."
     )]
-    private unsafe void ApplyEvents()
+    private unsafe void ApplyEvents(float motionShare)
     {
         while (_events.Reader.TryRead(out (SDL_Event Event, string Text) pumped))
         {
@@ -505,6 +609,15 @@ public sealed class SdlPlatformGem
                 case SDL_EVENT_QUIT:
                     Log.Info("Exiting: the window was closed or the system asked Magic to quit.");
                     _app.Exit();
+                    break;
+                case SDL_EVENT_WINDOW_FOCUS_GAINED:
+                case SDL_EVENT_WINDOW_FOCUS_LOST:
+                    _isFocused = (SDL_EventType)sdlEvent.type == SDL_EVENT_WINDOW_FOCUS_GAINED;
+
+                    // PROTO: coming back resumes a world the game had paused itself, until a game's menu owns the pause.
+                    if (_settings.PauseWhenUnfocused)
+                        _world.IsPaused = !_isFocused;
+
                     break;
                 case SDL_EVENT_KEYBOARD_ADDED:
                     GetOrAddDevice(DeviceKind.Keyboard, sdlEvent.kdevice.which, pumped.Text);
@@ -548,20 +661,22 @@ public sealed class SdlPlatformGem
                     break;
                 case SDL_EVENT_MOUSE_MOTION:
                 {
-                    // SDL's points as window pixels; motion and wheel count up over the frame.
+                    // SDL's points as window pixels; motion and wheel count up over the frame, the motion scaled by
+                    // the sensitivity and taken at the frame's share.
                     float density = Volatile.Read(ref _pixelDensity);
+                    float motionScale = density * _settings.MouseSensitivity * motionShare;
                     ControlState[] mouse = GetOrAddDevice(DeviceKind.Mouse, sdlEvent.motion.which, string.Empty);
                     SetState(mouse, Control.MouseX, sdlEvent.motion.x * density);
                     SetState(mouse, Control.MouseY, sdlEvent.motion.y * density);
                     SetState(
                         mouse,
                         Control.MouseMotionX,
-                        mouse[Control.MouseMotionX.Index].Value + (sdlEvent.motion.xrel * density)
+                        mouse[Control.MouseMotionX.Index].Value + (sdlEvent.motion.xrel * motionScale)
                     );
                     SetState(
                         mouse,
                         Control.MouseMotionY,
-                        mouse[Control.MouseMotionY.Index].Value + (sdlEvent.motion.yrel * density)
+                        mouse[Control.MouseMotionY.Index].Value + (sdlEvent.motion.yrel * motionScale)
                     );
 
                     break;
@@ -742,14 +857,38 @@ public sealed class SdlPlatformGem
     }
 
     /// <summary>
-    /// Shows the window as <paramref name="mode"/> says on the platform thread, unless the run ended meanwhile.
+    /// Shows the window as <paramref name="settings"/> say where they differ from <paramref name="old"/>, on the platform
+    /// thread, unless the run ended meanwhile.
     /// </summary>
-    private async Task ShowModeAsync(WindowMode mode)
+    private async Task ShowWindowAsync(SdlPlatformSettings old, SdlPlatformSettings settings)
     {
         CancellationToken lifetime = _app.Lifetime;
         await _threads.Enter(EngineThread.Platform);
         if (!lifetime.IsCancellationRequested)
-            SetMode(mode);
+            SetWindow(old, settings);
+    }
+
+    /// <summary>
+    /// Gives the window the display, mode and resizability <paramref name="settings"/> change from <paramref name="old"/>.
+    /// It moves to another display as a window, as one fullscreen or maximized can't be moved: once it is a window,
+    /// which some systems finish later, centred there, then back in its mode.
+    /// </summary>
+    private unsafe void SetWindow(SdlPlatformSettings old, SdlPlatformSettings settings)
+    {
+        bool isMoving = settings.Display != old.Display;
+        if (isMoving)
+        {
+            SetMode(WindowMode.Windowed);
+            SDL_SyncWindow(_window);
+            int centered = (int)(SDL_WINDOWPOS_CENTERED_MASK | FindDisplay(settings.Display));
+            SDL_SetWindowPosition(_window, centered, centered);
+        }
+
+        if (isMoving || settings.Mode != old.Mode)
+            SetMode(settings.Mode);
+
+        if (settings.IsResizable != old.IsResizable)
+            SDL_SetWindowResizable(_window, settings.IsResizable);
     }
 
     /// <summary>
@@ -766,7 +905,7 @@ public sealed class SdlPlatformGem
     }
 
     /// <summary>
-    /// The window's size in pixels, written whole for any thread to read. Platform thread.
+    /// The window's size in pixels and its display's scale, written whole for any thread to read. Platform thread.
     /// </summary>
     private unsafe void ReadSize()
     {
@@ -775,6 +914,7 @@ public sealed class SdlPlatformGem
         SDL_GetWindowSizeInPixels(_window, &width, &height);
         Volatile.Write(ref _width, width);
         Volatile.Write(ref _height, height);
+        Volatile.Write(ref _displayScale, SDL_GetWindowDisplayScale(_window));
     }
 
     /// <summary>

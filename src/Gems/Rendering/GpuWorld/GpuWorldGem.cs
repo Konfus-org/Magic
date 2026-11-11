@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Numerics;
 using Magic.Assets;
@@ -40,7 +41,13 @@ public sealed class GpuWorldGem
 
     private const int DefaultHeight = 720;
 
+    private const int AutoRenderWidth = 1920;
+
+    private const int AutoRenderHeight = 1080;
+
     private readonly IEcs _ecs;
+
+    private readonly AssetManager _assets;
 
     private readonly Threads _threads;
 
@@ -56,8 +63,7 @@ public sealed class GpuWorldGem
     private readonly MaterialInstance _failure;
 
     /// <summary>
-    /// What is done to the picture when no entity has a <see cref="PostProcessing"/>: the temporal anti-aliasing, the
-    /// exposure and the AgX tonemap.
+    /// What is done to the picture when no entity has a <see cref="PostProcessing"/>: the exposure and the AgX tonemap.
     /// </summary>
     private readonly PostProcessing _defaultPost;
 
@@ -115,17 +121,22 @@ public sealed class GpuWorldGem
     {
         Settings = settings;
         _ecs = ecs;
+        _assets = assets;
         _threads = threads;
         ModelPreprocessor models = new();
         _preprocessing = assets.Register(models);
-        _resources = new GpuResources(models, caches, assets, shaders, threads);
+        _resources = new GpuResources(
+            models,
+            caches,
+            assets,
+            shaders,
+            threads,
+            settings.Anisotropy,
+            settings.DroppedTextureLevels
+        );
         _failure = new MaterialInstance { Handle = assets.GetFailure<Material, Model>() };
-        _defaultPost.Effects[0] = new MaterialInstance
-        {
-            Handle = assets.Find<Material>("Materials/TemporalAntiAliasing.mat"),
-        };
-        _defaultPost.Effects[1] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Exposure.mat") };
-        _defaultPost.Effects[2] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Agx.mat") };
+        _defaultPost.Effects[0] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Exposure.mat") };
+        _defaultPost.Effects[1] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Agx.mat") };
         _instances = new InstanceTable(assets, _resources, _failure);
         _frameView = new FrameView(_resources);
         _sky = new SkyLuts(assets);
@@ -183,6 +194,8 @@ public sealed class GpuWorldGem
             return null;
 
         // The pools, with the models made since the last frame settled into them, before any renderer's row is built.
+        // Every model asked for from here on is asked at or after the frame's start, which eviction keeps.
+        long frameStart = Environment.TickCount64;
         Result pools = _resources.Prepare(graph);
         if (!pools.Ok)
         {
@@ -208,10 +221,8 @@ public sealed class GpuWorldGem
             return null;
 
         // Entities -> resources -> rows: the renderers written since the inputs before ask for their models and have
-        // their rows built again, the materials' rows are made again at upload, and a model no renderer drawn holds
-        // leaves once nothing asked for it in a while.
+        // their rows built again, and the materials' rows are made again at upload.
         int instanceCount = _instances.Fill(inputs.Renderers, frame.Index);
-        _resources.EvictUnusedModels(inputs.Renderers.Second[..instanceCount]);
 
         // The loading domain shows once what it draws and its effects are on the GPU.
         if (_preparing is { } preparing && IsPrepared(graph, preparing))
@@ -222,11 +233,21 @@ public sealed class GpuWorldGem
             EndPreparing();
         }
 
+        // A model no renderer drawn holds, and nothing asked for this frame, leaves once it is kept long enough; the
+        // loading domain's models were just asked for, so they stay while it waits.
+        _resources.EvictUnusedModels(
+            inputs.Renderers.Second[..instanceCount],
+            frameStart,
+            inputs.Settings.ModelKeepSec
+        );
+
         _resources.Upload(graph);
 
         // The picture's effects; the camera jitters while one of them asks for it, or while a gem upscales.
-        PostProcessing post = inputs.PostProcessing.Count > 0 ? inputs.PostProcessing.First[0] : _defaultPost;
-        Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> effects = _effects.Resolve(graph, post.Effects);
+        Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> effects = _effects.Resolve(
+            graph,
+            GetEffects(inputs)
+        );
         if (!effects.Ok)
         {
             Log.Error($"The frame's view is not made: {effects.Error}");
@@ -406,6 +427,38 @@ public sealed class GpuWorldGem
     }
 
     /// <summary>
+    /// The effects the frame runs: the first post processing's, or the engine's, exposed by the exposure compensation;
+    /// each whose material the settings turn off left out.
+    /// </summary>
+    private MaterialSlots GetEffects(RenderInputs inputs)
+    {
+        MaterialSlots effects;
+        if (inputs.PostProcessing.Count > 0)
+            effects = inputs.PostProcessing.First[0].Effects;
+        else
+        {
+            effects = _defaultPost.Effects;
+            effects[0].Overrides["compensation"] = inputs.Settings.ExposureCompensation;
+        }
+
+        // Most frames turn nothing off, so they name no material.
+        ImmutableArray<string> disabled = inputs.Settings.DisabledEffects;
+        if (disabled.IsEmpty)
+            return effects;
+
+        for (int place = 0; place < MaterialSlots.Capacity; place++)
+        {
+            if (
+                _assets.GetPath(effects[place].Handle) is { } path
+                && disabled.Contains(Path.GetFileNameWithoutExtension(path))
+            )
+                effects[place] = default;
+        }
+
+        return effects;
+    }
+
+    /// <summary>
     /// Asks for the models and the effects <paramref name="preparing"/> waits for, which the pools only take once they are
     /// made, and for the failure material a model that failed is drawn with, an ask for one asked for already doing
     /// nothing; then whether every one of them and every material is on the GPU, or failed: drawn as the failure, which
@@ -473,22 +526,28 @@ public sealed class GpuWorldGem
         if (!tables.Ok)
             return Result.Failure(tables.Error);
 
-        // The picture in the window's shape, scaled down to fit the resolution but never up, which the window stretches
-        // it over or a gem upscales it to; at the window's size when the resolution has no side, and 1280 by 720
-        // headless.
-        TextureDescription window = graph.WindowTarget.IsNone ? default : graph.GetDescription(graph.WindowTarget);
-        (int width, int height) = (DefaultWidth, DefaultHeight);
-        if (window.Width > 0)
+        // The finished picture at the resolution, or at the window's size when it has no side, and 1280 by 720 with no
+        // window; the world drawn at the render scale of it, or when that is auto at the most that fits 1920 by 1080,
+        // never more than all of it.
+        Size shown = inputs.Settings.Resolution;
+        if (shown.Width <= 0 || shown.Height <= 0)
         {
-            Size box = inputs.Settings.Resolution;
-            float scale =
-                box.Width <= 0 || box.Height <= 0
-                    ? 1
-                    : MathF.Min(1, MathF.Min((float)box.Width / window.Width, (float)box.Height / window.Height));
-            (width, height) = ((int)MathF.Round(window.Width * scale), (int)MathF.Round(window.Height * scale));
+            TextureDescription window = graph.WindowTarget.IsNone ? default : graph.GetDescription(graph.WindowTarget);
+            shown = window.Width > 0 ? new Size(window.Width, window.Height) : new Size(DefaultWidth, DefaultHeight);
         }
 
+        float scale = MathF.Min(
+            1,
+            inputs.Settings.RenderScale > 0
+                ? inputs.Settings.RenderScale
+                : MathF.Min((float)AutoRenderWidth / shown.Width, (float)AutoRenderHeight / shown.Height)
+        );
+        int width = Math.Max(1, (int)MathF.Round(shown.Width * scale));
+        int height = Math.Max(1, (int)MathF.Round(shown.Height * scale));
+
         RenderCamera camera = GetCamera(inputs.Cameras);
+        if (inputs.Settings.FieldOfView > 0)
+            camera = camera with { FieldOfView = inputs.Settings.FieldOfView };
         Result<FrameTargets> targets = _frameView.Upload(
             graph,
             camera,
@@ -523,6 +582,7 @@ public sealed class GpuWorldGem
             inputs.Skies,
             camera,
             GetSun(inputs.DirectionalLights),
+            inputs.Settings.SkyBrightness,
             sky.Value,
             lights.Value
         );
@@ -537,6 +597,8 @@ public sealed class GpuWorldGem
                 Frame = view.Constants,
                 Width = view.Width,
                 Height = view.Height,
+                ShownWidth = shown.Width,
+                ShownHeight = shown.Height,
                 HasHistory = view.HasHistory,
                 Depth = view.Depth,
                 GBufferNormal = view.GBufferNormal,

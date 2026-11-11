@@ -60,8 +60,22 @@ public sealed class Settings
     /// <summary>
     /// The options: every member of every registered gem's settings, in the order the gems were made.
     /// </summary>
-    public ImmutableArray<Setting> Options =>
-        [.. _gems.SelectMany(gem => gem.Members.Select(member => gem.ToSetting(member)))];
+    public ImmutableArray<Setting> Options
+    {
+        get
+        {
+            ImmutableArray<Setting>.Builder options = ImmutableArray.CreateBuilder<Setting>();
+            foreach (RegisteredGem gem in _gems)
+            {
+                foreach (SettingMember member in gem.Members)
+                {
+                    options.Add(gem.ToSetting(member));
+                }
+            }
+
+            return options.ToImmutable();
+        }
+    }
 
     /// <summary>
     /// The settings the gem with <typeparamref name="TSettings"/> runs by; with no such gem, what it would be made with.

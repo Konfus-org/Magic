@@ -23,7 +23,7 @@ that draws its geometry.
   it holds of the reflections; a rougher one its diffuse light, so a closed room reflects none of the sky.
 - The first `PostProcessing`'s effects run over the lit picture in order, and finish it for the screen: each is a
   material whose shader implements the pixel effect contract, with params of its own as a surface material's are. With
-  no `PostProcessing`, the picture gets the engine's `TemporalAntiAliasing`, `Exposure` and `Agx` materials; a
+  no `PostProcessing`, the picture gets the engine's `Exposure` and `Agx` materials; a
   `PostProcessing` lists every effect it wants, those included, so another tonemap is another material in the tonemap's
   place. Each reads the picture the ones before it left and writes another; one that declares levels first fills each
   level of a target of its own, which one that declares a history, as the temporal anti-aliasing and the exposure do,

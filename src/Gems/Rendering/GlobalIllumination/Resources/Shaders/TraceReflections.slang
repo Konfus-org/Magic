@@ -197,7 +197,7 @@ void BlendReflections(uint3 thread : SV_DispatchThreadID)
     float4 current = resolved.Load(thread.xy, 0u);
     StoreViewDepth(frame, blend, thread.xy, depth);
     ReflectingSurface surface;
-    if (!LoadReflectingSurface(frame, pixel, surface) || gi.hasHistory == 0u)
+    if (!LoadReflectingSurface(frame, pixel, surface) || blend.hasHistory == 0u)
     {
         light.Store(thread.xy, current);
         return;
