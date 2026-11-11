@@ -95,9 +95,9 @@ struct ImpostorView
     float3 up;
 }
 
-ImpostorView GetView(int2 grid)
+ImpostorView GetView(uint2 cell)
 {
-    float2 flat = float2(grid) / float(ImpostorViews - 1u) * 2.0 - 1.0;
+    float2 flat = float2(cell) / float(ImpostorViews - 1u) * 2.0 - 1.0;
     ImpostorView view;
     view.forward = DecodeOctahedral(flat);
     float3 up0 = abs(view.forward.y) < 0.999 ? float3(0.0, 1.0, 0.0) : float3(0.0, 0.0, 1.0);
@@ -143,6 +143,38 @@ public float3 GetImpostorCorner(FrameConstants frame, GpuInstance instance, GpuI
     return onCenter * (max(nearest, 1e-3) / centerAlong);
 }
 
+// The three grid views around the camera's direction from an instance's model, and their weights, the same for every
+// pixel of it: each view's cell as x + y * ImpostorViews.
+public struct ImpostorBlend
+{
+    public uint3 cells;
+    public float3 weights;
+}
+
+public ImpostorBlend GetImpostorBlend(FrameConstants frame, GpuInstance instance)
+{
+    float3 camera = ToWorld(instance.inverseWorld, frame.cameraPosition.xyz);
+    float3 center = ToWorld(instance.inverseWorld, instance.boundsCenter);
+    float2 grid = (EncodeOctahedral(normalize(camera - center)) * 0.5 + 0.5) * float(ImpostorViews - 1u);
+    uint2 cell = min(uint2(floor(grid)), ImpostorViews - 2u);
+    float2 f = grid - float2(cell);
+    uint at = cell.x + cell.y * ImpostorViews;
+
+    ImpostorBlend blend;
+    if (f.x + f.y < 1.0)
+    {
+        blend.cells = uint3(at, at + 1u, at + ImpostorViews);
+        blend.weights = float3(1.0 - f.x - f.y, f.x, f.y);
+    }
+    else
+    {
+        blend.cells = uint3(at + ImpostorViews + 1u, at + ImpostorViews, at + 1u);
+        blend.weights = float3(f.x + f.y - 1.0, 1.0 - f.x, 1.0 - f.y);
+    }
+
+    return blend;
+}
+
 // What the ray from origin along direction, in the model's frame, sees of the impostor: a model point and normal and
 // the material slot, isHit false where less than minCoverage of the views' weight sees something. The draw asks for
 // half, so a silhouette is where the views agree; the resolve, whose ray can differ from the draw's by rounding, for any,
@@ -157,37 +189,12 @@ public struct ImpostorHit
     public uint2 texel;
 }
 
-public ImpostorHit TraceImpostor(GpuInstance instance, GpuImpostor impostor, ImpostorRay ray, float minCoverage)
+public ImpostorHit TraceImpostor(GpuInstance instance, GpuImpostor impostor, ImpostorBlend blend, ImpostorRay ray, float minCoverage)
 {
     float3 origin = ray.origin;
     float3 direction = ray.direction;
     float3 center = ToWorld(instance.inverseWorld, instance.boundsCenter);
     float radius = instance.boundsRadius / GetMaxScale(instance.world);
-
-    // The three grid views around the camera's direction from the model, and their weights.
-    float2 grid = (EncodeOctahedral(normalize(origin - center)) * 0.5 + 0.5) * float(ImpostorViews - 1u);
-    int2 cell = min(int2(floor(grid)), int2(int(ImpostorViews) - 2));
-    float2 f = grid - float2(cell);
-    int2 views[3];
-    float weights[3];
-    if (f.x + f.y < 1.0)
-    {
-        views[0] = cell;
-        views[1] = cell + int2(1, 0);
-        views[2] = cell + int2(0, 1);
-        weights[0] = 1.0 - f.x - f.y;
-        weights[1] = f.x;
-        weights[2] = f.y;
-    }
-    else
-    {
-        views[0] = cell + int2(1, 1);
-        views[1] = cell + int2(0, 1);
-        views[2] = cell + int2(1, 0);
-        weights[0] = f.x + f.y - 1.0;
-        weights[1] = 1.0 - f.x;
-        weights[2] = 1.0 - f.y;
-    }
 
     TextureRef atlas = { impostor.atlas };
     float coverage = 0.0;
@@ -202,7 +209,8 @@ public ImpostorHit TraceImpostor(GpuInstance instance, GpuImpostor impostor, Imp
     for (int i = 0; i < 3; i++)
     {
         // The ray where it crosses the plane through the centre facing the view, in the view's tile.
-        ImpostorView view = GetView(views[i]);
+        uint2 cell = uint2(blend.cells[i] % ImpostorViews, blend.cells[i] / ImpostorViews);
+        ImpostorView view = GetView(cell);
         float facing = dot(direction, view.forward);
         if (abs(facing) < 1e-4)
             continue;
@@ -213,16 +221,16 @@ public ImpostorHit TraceImpostor(GpuInstance instance, GpuImpostor impostor, Imp
             continue;
 
         uint2 inTile = min(uint2(float2(st.x + 1.0, 1.0 - st.y) * 0.5 * float(ImpostorTile)), ImpostorTile - 1u);
-        uint2 atlasTexel = uint2(views[i]) * ImpostorTile + inTile;
+        uint2 atlasTexel = cell * ImpostorTile + inTile;
         float4 texel = atlas.Load(atlasTexel, 0u);
         if (texel.w < 0.5)
             continue;
 
-        coverage += weights[i];
-        normal += DecodeOctahedral(texel.xy) * weights[i];
-        if (weights[i] > best)
+        coverage += blend.weights[i];
+        normal += DecodeOctahedral(texel.xy) * blend.weights[i];
+        if (blend.weights[i] > best)
         {
-            best = weights[i];
+            best = blend.weights[i];
             hit.slot = uint(texel.w + 0.5) - 1u;
             hit.texel = atlasTexel;
 

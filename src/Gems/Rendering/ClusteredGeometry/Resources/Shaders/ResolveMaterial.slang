@@ -95,7 +95,7 @@ void ResolveOpaque<M : IMaterial>(FrameConstants frame, uint2 pixel)
 
         ImpostorRay ray = GetModelRay(frame, instance, ReconstructRelative(frame, center, 0.5));
         GpuImpostor impostor = LoadImpostor(GetPassHeader().y, LoadClusterModel(instance.model).impostor);
-        ImpostorHit hit = TraceImpostor(instance, impostor, ray, 0.0);
+        ImpostorHit hit = TraceImpostor(instance, impostor, GetImpostorBlend(frame, instance), ray, 0.0);
         model = hit.position;
         inputs.position = Relative(frame, ToWorld(instance.world, hit.position));
         inputs.normal = ToWorldNormal(instance.world, hit.normal);
