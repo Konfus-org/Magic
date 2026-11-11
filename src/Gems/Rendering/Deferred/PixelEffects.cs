@@ -199,7 +199,7 @@ internal sealed class PixelEffects
         }
 
         if (picture != view.Gpu.Hdr)
-            graph.Blit(picture, view.Gpu.Hdr, RenderStage.Post);
+            graph.Blit(picture, view.Gpu.Hdr, RenderStage.Post, TextureFilter.Linear);
     }
 
     /// <summary>

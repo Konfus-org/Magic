@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Magic.Assets;
 using Magic.Input;
 
 namespace Magic.Deferred;
@@ -39,4 +40,12 @@ public sealed record DeferredSettings
     /// Metres from the camera at which the Depth view turns black; nearer is lighter, on a log scale.
     /// </summary>
     public float DepthViewFar { get; init; } = 1000;
+
+    /// <summary>
+    /// How the picture is read where it is stretched over the window or into a screenshot: Nearest keeps each texel a
+    /// hard-edged block, Linear blends between them. A gem that upscales takes the picture to the size it is shown at in
+    /// place of the stretch.
+    /// </summary>
+    [Category("Rendering")]
+    public TextureFilter UpscaleFilter { get; init; }
 }

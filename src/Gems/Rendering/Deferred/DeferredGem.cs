@@ -203,12 +203,12 @@ public sealed class DeferredGem
         _surfaceView.Record(view, inputs.Settings.RenderView, inputs.Settings.DepthViewFar);
 
         // What the window and a screenshot show: the output as a gem upscaled it to the size it is shown at, or the
-        // output itself, stretched over the window, filtered.
+        // output itself, stretched over the window with the upscale filter.
         GpuTexture upscaled = input.Upscaling is { } upscaling ? upscaling.Record(graph, gpu) : GpuTexture.None;
         GpuTexture shown = upscaled.IsNone ? gpu.Output : upscaled;
         GpuTexture target = graph.WindowTarget;
         if (!target.IsNone)
-            graph.Blit(shown, target, RenderStage.Post);
+            graph.Blit(shown, target, RenderStage.Post, inputs.Settings.UpscaleFilter);
 
         // One readback buffer, so one screenshot a frame: the last asked for.
         ScreenshotRequested? shot = null;
@@ -218,7 +218,7 @@ public sealed class DeferredGem
         }
 
         if (shot is { } saved)
-            SaveScreenshot(graph, shown, gpu.ShownWidth, gpu.ShownHeight, saved.Path);
+            SaveScreenshot(graph, shown, gpu.ShownWidth, gpu.ShownHeight, inputs.Settings.UpscaleFilter, saved.Path);
 
         if (!_hasDrawn)
         {
@@ -280,10 +280,17 @@ public sealed class DeferredGem
 
     /// <summary>
     /// The picture the window shows read back at <paramref name="width"/> by <paramref name="height"/>, the size it is
-    /// shown at, through a copy stretched to it, filtered, and of 8 bits a channel where it is another size or has more,
-    /// and written to <paramref name="path"/> once the GPU is done with it.
+    /// shown at, through a copy stretched to it with <paramref name="filter"/>, and of 8 bits a channel where it is
+    /// another size or has more, and written to <paramref name="path"/> once the GPU is done with it.
     /// </summary>
-    private void SaveScreenshot(RenderGraph graph, GpuTexture shown, int width, int height, string path)
+    private void SaveScreenshot(
+        RenderGraph graph,
+        GpuTexture shown,
+        int width,
+        int height,
+        TextureFilter filter,
+        string path
+    )
     {
         TextureDescription drawn = graph.GetDescription(shown);
         Result<GpuBuffer> readback = graph.Buffer(
@@ -309,7 +316,7 @@ public sealed class DeferredGem
         }
 
         if (read.Value != shown)
-            graph.Blit(shown, read.Value, RenderStage.Post);
+            graph.Blit(shown, read.Value, RenderStage.Post, filter);
 
         graph.ReadBack(read.Value, readback.Value, RenderStage.Post);
         Screenshot.SaveAsync(_gpu, _assets, readback.Value, path, width, height).FireAndForget();

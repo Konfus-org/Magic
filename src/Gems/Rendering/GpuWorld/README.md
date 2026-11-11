@@ -28,7 +28,8 @@ texture reader, with a gem that draws its view.
 - The finished picture is `Rendering.Resolution` in size, with a window or without, and the window shows it
   stretched. At `0 0` it is the window's size, or 1280 by 720 with no window.
 - The world is drawn at `Rendering.RenderScale` of that size, and a gem that upscales takes it to that size, or it is
-  stretched. At `0` it is drawn at the most that fits 1920 by 1080.
+  stretched with `Rendering.UpscaleFilter`, `Linear` or `Nearest`. At `0` it is drawn at the most that fits 1920 by
+  1080.
 
 `bake` in the console loads every asset, which makes what every gem makes of every model, then opens every domain under `Domains/`
 in turn and exits, so a release ships with the caches full.

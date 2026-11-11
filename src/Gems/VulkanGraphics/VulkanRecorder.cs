@@ -1,3 +1,4 @@
+using Magic.Assets;
 using Magic.Debugging;
 using Magic.Graphics;
 using Vortice.Vulkan;
@@ -490,7 +491,7 @@ internal sealed unsafe class VulkanRecorder(
                         VkImageLayout.TransferDstOptimal,
                         1,
                         &region,
-                        VkFilter.Linear
+                        ((TextureFilter)command.X).ToVulkan()
                     );
                 }
 
