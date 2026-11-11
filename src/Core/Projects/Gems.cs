@@ -140,7 +140,7 @@ internal sealed class Gems : IDisposable
         Justification = "Whatever a gem's constructor throws, it is logged and the gem is not made; the others go on."
     )]
     public Gems(
-        List<GemInfo> registered,
+        List<RegisteredGem> registered,
         IServiceProvider provider,
         App app,
         Settings settings,
@@ -158,7 +158,7 @@ internal sealed class Gems : IDisposable
 
         // A constructor may load an asset of a type a gem made after it reads.
         assets.Expect(registered.ConvertAll(gem => gem.Type));
-        foreach (GemInfo gem in registered)
+        foreach (RegisteredGem gem in registered)
         {
             // A build writes the gem's assemblies; the run restarts once it has settled.
             Result<IDisposable> watched = files.Watch(

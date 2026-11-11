@@ -39,7 +39,7 @@ public sealed class GemRegistryTests
     {
         await CreateGemsAsync("Lender", "Borrower").ConfigureAwait(true);
 
-        List<GemInfo> gems = GemRegistry.Register(_files, ["Lender", "Borrower"], []);
+        List<RegisteredGem> gems = GemRegistry.Register(_files, ["Lender", "Borrower"], []);
 
         Type lender = gems.Single(gem => gem.Name == "Lender").Type;
         Type borrower = gems.Single(gem => gem.Name == "Borrower").Type;
@@ -51,7 +51,7 @@ public sealed class GemRegistryTests
     {
         await CreateGemsAsync("Lender", "Borrower").ConfigureAwait(true);
 
-        List<GemInfo> gems = GemRegistry.Register(_files, ["Borrower", "Lender"], []);
+        List<RegisteredGem> gems = GemRegistry.Register(_files, ["Borrower", "Lender"], []);
 
         Assert.Equal(["Lender", "Borrower"], gems.ConvertAll(gem => gem.Name));
     }
@@ -61,7 +61,7 @@ public sealed class GemRegistryTests
     {
         await CreateGemsAsync("Absent", "Orphan").ConfigureAwait(true);
 
-        List<GemInfo> gems = GemRegistry.Register(_files, ["Orphan"], []);
+        List<RegisteredGem> gems = GemRegistry.Register(_files, ["Orphan"], []);
 
         Assert.Empty(gems);
         Assert.Contains(

@@ -48,7 +48,11 @@ internal static class GemRegistry
     /// provided or a cycle is refused. Each gem is made by the provider
     /// built from <paramref name="services"/>, once: asked for again after it failed, it throws.
     /// </summary>
-    public static List<GemInfo> Register(IFileSystem files, ImmutableArray<string> listed, ServiceCollection services)
+    public static List<RegisteredGem> Register(
+        IFileSystem files,
+        ImmutableArray<string> listed,
+        ServiceCollection services
+    )
     {
         if (listed.Any())
             Log.Info($"Loading {string.Join(", ", listed)}.");
@@ -81,18 +85,18 @@ internal static class GemRegistry
         }
 
         // Load each, look at what it holds, and register it with the services as its class and every interface it provides.
-        List<GemInfo> registered = [];
-        Dictionary<Type, GemInfo> providers = [];
+        List<RegisteredGem> registered = [];
+        Dictionary<Type, RegisteredGem> providers = [];
         foreach ((string name, string wanted) in named)
         {
-            Result<GemInfo> found = Find(files, name, contexts);
+            Result<RegisteredGem> found = Find(files, name, contexts);
             if (!found.Ok)
             {
                 Log.Error(found.Error);
                 continue;
             }
 
-            GemInfo gem = found.Value;
+            RegisteredGem gem = found.Value;
             if (wanted.Length > 0 && !IsVersion(gem.Version, wanted))
             {
                 Log.Error($"Gem {name} is {gem.Version.ToString(3)}, but the project asks for {wanted}.");
@@ -134,25 +138,28 @@ internal static class GemRegistry
         }
 
         // A gem that takes the world needs what the world is made from.
-        if (providers.TryGetValue(typeof(IEcs), out GemInfo? ecs))
+        if (providers.TryGetValue(typeof(IEcs), out RegisteredGem? ecs))
             providers[typeof(World)] = ecs;
 
         // Sort each after the gems it needs: those its code references, and those its constructor takes, by their class or
         // an interface they provide. A gem in a cycle, or one that needs it, is logged and left out, since the provider
         // hangs making a cycle.
-        Dictionary<string, GemInfo> byName = registered.ToDictionary(gem => gem.Name, StringComparer.OrdinalIgnoreCase);
-        List<GemInfo> sorted = [];
-        HashSet<GemInfo> placed = [];
-        HashSet<GemInfo> refused = [];
-        HashSet<GemInfo> visiting = [];
-        foreach (GemInfo gem in registered)
+        Dictionary<string, RegisteredGem> byName = registered.ToDictionary(
+            gem => gem.Name,
+            StringComparer.OrdinalIgnoreCase
+        );
+        List<RegisteredGem> sorted = [];
+        HashSet<RegisteredGem> placed = [];
+        HashSet<RegisteredGem> refused = [];
+        HashSet<RegisteredGem> visiting = [];
+        foreach (RegisteredGem gem in registered)
         {
             Place(gem);
         }
 
         return sorted;
 
-        bool Place(GemInfo gem)
+        bool Place(RegisteredGem gem)
         {
             if (placed.Contains(gem))
                 return true;
@@ -164,13 +171,13 @@ internal static class GemRegistry
             List<string> needs = [.. gem.References];
             foreach (ParameterInfo parameter in gem.Type.GetConstructors()[0].GetParameters())
             {
-                if (providers.TryGetValue(parameter.ParameterType, out GemInfo? provider))
+                if (providers.TryGetValue(parameter.ParameterType, out RegisteredGem? provider))
                     needs.Add(provider.Name);
             }
 
             foreach (string name in needs)
             {
-                GemInfo? need = byName.GetValueOrDefault(name);
+                RegisteredGem? need = byName.GetValueOrDefault(name);
                 if (need == gem || (need is not null && Place(need)))
                     continue;
 
@@ -200,7 +207,11 @@ internal static class GemRegistry
     /// made: it must hold one <see cref="IGem"/> class with one public constructor, and the project must list every gem
     /// it references.
     /// </summary>
-    private static Result<GemInfo> Find(IFileSystem files, string name, Dictionary<string, GemLoadContext> contexts)
+    private static Result<RegisteredGem> Find(
+        IFileSystem files,
+        string name,
+        Dictionary<string, GemLoadContext> contexts
+    )
     {
         string path = GetPath(files, name);
         Result<Assembly> loaded;
@@ -265,7 +276,7 @@ internal static class GemRegistry
         bool hasResources = files.DirectoryExists(resources);
 
         return Result.Success(
-            new GemInfo(
+            new RegisteredGem(
                 name,
                 author,
                 description,
@@ -305,7 +316,7 @@ internal static class GemRegistry
     /// Why <paramref name="gem"/> is refused when <paramref name="services"/> already provides an interface it does;
     /// null when none.
     /// </summary>
-    private static string? FindClash(ServiceCollection services, GemInfo gem)
+    private static string? FindClash(ServiceCollection services, RegisteredGem gem)
     {
         foreach (Type contract in gem.Provides)
         {

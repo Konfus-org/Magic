@@ -100,7 +100,7 @@ internal static class Program
             services.AddSingleton(caches);
             services.AddSingleton(assets);
             services.AddSingleton(world);
-            List<GemInfo> registered = GemRegistry.Register(files, project.Gems, services);
+            List<RegisteredGem> registered = GemRegistry.Register(files, project.Gems, services);
 
             // Never disposed, since its singletons are the gems, which Gems ends.
             services.MakeReadOnly();
