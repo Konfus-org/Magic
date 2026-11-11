@@ -52,6 +52,15 @@ public float3 GetSunIlluminance<S : ISky>(Lights lights)
     return S.GetSunIlluminance(CreateSkyInputs(lights, lights.sunDirection.xyz, false));
 }
 
+// The sky along a direction, without the sun's disc, whose light the sun's own rays bring.
+public float3 GetSkyRadiance<S : ISky>(Lights lights, float3 direction)
+{
+    if (lights.hasSky == 0u)
+        return GetOpenSkyRadiance(lights);
+
+    return S.Evaluate(CreateSkyInputs(lights, direction, false));
+}
+
 // What a sky is handed to answer for a direction from the camera.
 public SkyInputs CreateSkyInputs(Lights lights, float3 direction, bool hasSunDisc)
 {

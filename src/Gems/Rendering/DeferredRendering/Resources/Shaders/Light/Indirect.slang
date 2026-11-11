@@ -14,7 +14,7 @@ import Scene.Shadows;
 
 // Where the indirect light is in the frame's buffer, right after the shadows, and its bytes: C#'s GpuIndirectLight.
 public static const uint IndirectLightOffset = ShadowsOffset + ShadowsBytes;
-public static const uint IndirectLightBytes = 80u;
+public static const uint IndirectLightBytes = 56u;
 
 public struct IndirectLight
 {

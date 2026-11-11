@@ -8,20 +8,10 @@ import Core.Heap;
 import Core.Math;
 import Core.Pack;
 
-// The most rays a probe traces in a frame, and the step its count of rays moves in, also the fewest it asks for.
-public static const uint MaxProbeRays = 256u;
-public static const uint ProbeRayStep = 4u;
-
-// The directions a probe blends its light in, a side of its octahedral map.
-public static const uint IrradianceTexels = 8u;
-
 // A probe's map of distances in the depth texture: a side of its directions, and of its tile, a texel of border
 // around them.
 public static const uint DepthTexels = 16u;
 public static const uint DepthTile = DepthTexels + 2u;
-
-// How far a probe moves from a surface it is near, as a part of its depth's reach.
-public static const float KeepDistance = 0.1;
 
 public struct ProbeGridConstants
 {
@@ -30,22 +20,10 @@ public struct ProbeGridConstants
     public uint probes;
     public uint depth;
     public uint depthSampler;
-    public uint rays;
-    public uint rayList;
-    public uint rayArguments;
-    public uint rayCounts;
-    public uint variance;
-    // Where the first probe rests in the world, how far a probe's depth reaches, one and a half cells, and the
-    // metres between neighbouring probes.
+    // Where the first probe rests in the world, and the metres between neighbouring probes.
     public float3 origin;
-    public float maxDistance;
     public float3 cellSize;
 }
-
-// The ray counts buffer's words: the rays the probes were given this frame in all at 0, then each probe's count, none
-// while it waits its turn, and where its rays start among the frame's.
-public uint GetProbeRayCountOffset(uint probe) { return 4u + probe * 8u; }
-public uint GetProbeRayStartOffset(uint probe) { return 8u + probe * 8u; }
 
 // A probe as the GPU keeps it, C#'s Probes.ProbeBytes long: its light's spherical harmonics in xyz of each, and in xyz of offset
 // how far it moved from where it rests, as a part of half a cell, in w 1 once it has blended rays.
@@ -65,8 +43,8 @@ public struct ProbeSh
     public float3 c[4];
 }
 
-static const float ShBasis0 = 0.282094792;
-static const float ShBasis1 = 0.488602512;
+public static const float ShBasis0 = 0.282094792;
+public static const float ShBasis1 = 0.488602512;
 
 public ProbeSh CreateProbeSh(GpuProbe probe)
 {
@@ -75,17 +53,6 @@ public ProbeSh CreateProbeSh(GpuProbe probe)
     {
         sh.c[i] = probe.radiance[i].xyz;
     }
-    return sh;
-}
-
-// The harmonics of a value seen along a unit direction.
-public ProbeSh ProjectOntoSh(float3 direction, float3 value)
-{
-    ProbeSh sh;
-    sh.c[0] = ShBasis0 * value;
-    sh.c[1] = ShBasis1 * direction.y * value;
-    sh.c[2] = ShBasis1 * direction.z * value;
-    sh.c[3] = ShBasis1 * direction.x * value;
     return sh;
 }
 

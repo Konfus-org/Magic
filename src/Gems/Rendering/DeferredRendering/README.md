@@ -124,8 +124,7 @@ ends in the view it hands on; the second takes it with what the other gems made.
     through, all 0 where nothing filled it this frame, and `ApplyAir`, which sees a colour at a point through it; and
     the clouds over it, `ApplyClouds` for the sky behind them and `GetCloudShadow` for the sun's light under them.
     `Light/Probes` is the probe grid: where each probe is, what it holds, and the light a point gets from it.
-    `Light/LocalLights` is what a local light gives a point. `Trace/HitLight` is the light a ray brings back from
-    what it lands on.
+    `Light/LocalLights` is what a local light gives a point.
   - `Sky/Atmosphere` is the Earth's atmosphere, which gives the sky, the sun's colour through the air and the sky's
     light on the ground from three tables made each frame.
   - `Surface/Brdf` is how a surface reflects light.

@@ -18,7 +18,6 @@ import Light.Air;
 import Surface.Brdf;
 import Sky.ISky;
 import Trace.HitSurface;
-import Trace.HitLight;
 import Scene.Models;
 
 // How much of the light a pane reflects straight on: an index of refraction of 1.5.

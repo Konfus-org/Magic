@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
+using Magic.Graphics;
 
 namespace Magic.DeferredRendering.View;
 
@@ -181,7 +182,7 @@ public record struct GpuIndirectLight
 {
     public const int Offset = GpuShadows.Offset + GpuShadows.Bytes;
 
-    public const int Bytes = 80;
+    public const int Bytes = 56;
 
     public uint Diffuse;
 
@@ -245,8 +246,8 @@ public record struct GpuAir
 }
 
 /// <summary>
-/// The probe grid: its size, the heap ids of its buffers and where it lies in the world, the twin of
-/// <c>Light/Probes.slang</c> ProbeGridConstants.
+/// The probe grid: its size, its probes, their depth texture and its sampler, and where it lies in the world, the twin
+/// of <c>Light/Probes.slang</c> ProbeGridConstants.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public record struct ProbeGridConstants
@@ -260,29 +261,16 @@ public record struct ProbeGridConstants
 
     public uint DimensionZ;
 
-    public uint Probes;
+    public GpuBuffer Probes;
 
-    public uint Depth;
+    public GpuTexture Depth;
 
-    public uint DepthSampler;
-
-    public uint Rays;
-
-    public uint RayList;
-
-    public uint RayArguments;
-
-    public uint RayCounts;
-
-    public uint Variance;
+    public GpuSampler DepthSampler;
 
     /// <summary>
-    /// Where the first probe rests in the world, how far a probe's depth reaches, and the metres between neighbouring
-    /// probes.
+    /// Where the first probe rests in the world, and the metres between neighbouring probes.
     /// </summary>
     public Vector3 Origin;
-
-    public float MaxDistance;
 
     public Vector3 CellSize;
 }

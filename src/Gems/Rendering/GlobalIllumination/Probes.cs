@@ -8,20 +8,6 @@ using Magic.Utils;
 namespace Magic.GlobalIllumination;
 
 /// <summary>
-/// The probe grid's buffers and depth texture, and the constants that name them.
-/// </summary>
-internal readonly record struct ProbeBuffers(
-    ProbeGridConstants Constants,
-    GpuBuffer Probes,
-    GpuBuffer Rays,
-    GpuBuffer RayList,
-    GpuBuffer RayArguments,
-    GpuBuffer RayCounts,
-    GpuBuffer Variance,
-    GpuTexture Depth
-);
-
-/// <summary>
 /// The probe grid of diffuse light: a box of probes over the traced world's box, given rays in turn within each frame's
 /// budget, more as their light still changes, traced, and blended into each probe's light and distances. The box
 /// follows the world's slowly, so the probes' light moves with it. What the probes hold carries from frame to frame,
@@ -78,11 +64,12 @@ internal sealed class Probes(AssetManager assets)
 
     /// <summary>
     /// The grid's buffers and depth texture asked for at <paramref name="size"/>, from 2 probes a side up to the most,
-    /// the constants that name them, and the probes started at none while they hold nothing or the size changed. The
+    /// named by the grid that shading reads and by the update's own constants, and the probes started at none while
+    /// they hold nothing or the size changed. The
     /// grid is placed over <paramref name="box"/> with a margin: at once when the probes start afresh, else a little
     /// nearer each frame.
     /// </summary>
-    public Result<ProbeBuffers> Prepare(
+    public Result<(ProbeGridConstants Grid, ProbeUpdateConstants Update)> Prepare(
         RenderGraph graph,
         bool hasHistory,
         (Vector3 Min, Vector3 Max) box,
@@ -133,34 +120,27 @@ internal sealed class Probes(AssetManager assets)
             DimensionX = (uint)across,
             DimensionY = (uint)up,
             DimensionZ = (uint)across,
-            Probes = probeTable.Value.Id,
-            Depth = depth.Value.Id,
-            DepthSampler = sampler.Value.Id,
-            Rays = rays.Value.Id,
-            RayList = list.Value.Id,
-            RayArguments = arguments.Value.Id,
-            RayCounts = counts.Value.Id,
-            Variance = variance.Value.Id,
+            Probes = probeTable.Value,
+            Depth = depth.Value,
+            DepthSampler = sampler.Value,
             Origin = _box.Min,
-            MaxDistance = MathF.Max(cellSize.X, MathF.Max(cellSize.Y, cellSize.Z)) * 1.5f,
             CellSize = cellSize,
         };
-        ProbeBuffers buffers = new(
-            grid,
-            probeTable.Value,
-            rays.Value,
-            list.Value,
-            arguments.Value,
-            counts.Value,
-            variance.Value,
-            depth.Value
-        );
+        ProbeUpdateConstants update = new()
+        {
+            Rays = rays.Value,
+            RayList = list.Value,
+            RayArguments = arguments.Value,
+            RayCounts = counts.Value,
+            Variance = variance.Value,
+            MaxDistance = MathF.Max(cellSize.X, MathF.Max(cellSize.Y, cellSize.Z)) * 1.5f,
+        };
 
         // The probes start at none on the first update.
         if (!hasHistory)
-            graph.Clear(buffers.Probes);
+            graph.Clear(grid.Probes);
 
-        return Result.Success(buffers);
+        return Result.Success((grid, update));
     }
 
     /// <summary>
@@ -168,38 +148,37 @@ internal sealed class Probes(AssetManager assets)
     /// starts at kept in the trace's arguments; traced through the world, lit by the lights and the sky, and blended
     /// into the probes given them.
     /// </summary>
-    public void Record(in GIView view, in ProbeBuffers probes)
+    public void Record(in GIView view, in ProbeGridConstants grid, in ProbeUpdateConstants update)
     {
         RenderGraph graph = view.Graph;
         GpuConstants header = view.Header;
-        ProbeGridConstants grid = probes.Constants;
         uint probeCount = grid.DimensionX * grid.DimensionY * grid.DimensionZ;
         graph
             .Compute("Ask probe rays", _askShader, header, RenderStage.Light)
-            .Reads(view.Gpu.Frame, probes.Probes, probes.Variance)
-            .Writes(probes.RayCounts)
+            .Reads(view.Gpu.Frame, view.Constants, grid.Probes, update.Variance)
+            .Writes(update.RayCounts)
             .Dispatch(probeCount);
         graph
             .Compute("Plan probe rays", _planShader, header, RenderStage.Light)
-            .Reads(view.Gpu.Frame)
-            .Writes(probes.RayCounts, probes.RayArguments)
+            .Reads(view.Gpu.Frame, view.Constants)
+            .Writes(update.RayCounts, update.RayArguments)
             .Dispatch(1);
         graph
             .Compute("List probe rays", _listShader, header, RenderStage.Light)
-            .Reads(view.Gpu.Frame, probes.RayCounts)
-            .Writes(probes.RayList)
+            .Reads(view.Constants, update.RayCounts)
+            .Writes(update.RayList)
             .Dispatch(probeCount);
         graph
             .Compute("Trace probes", _traceShader, header, RenderStage.Light)
             .Reads(view.World.AsSpan())
-            .Reads(view.Gpu.Frame, probes.Probes, probes.RayList, probes.RayCounts, probes.Depth)
-            .Writes(probes.Rays)
-            .Indirect(probes.RayArguments)
-            .DispatchIndirect(probes.RayArguments, 0);
+            .Reads(view.Gpu.Frame, view.Constants, grid.Probes, update.RayList, update.RayCounts, grid.Depth)
+            .Writes(update.Rays)
+            .Indirect(update.RayArguments)
+            .DispatchIndirect(update.RayArguments, 0);
         graph
             .Compute("Blend probes", _blendShader, header, RenderStage.Light)
-            .Reads(view.Gpu.Frame, probes.Rays, probes.RayCounts)
-            .Writes(probes.Probes, probes.Variance, probes.Depth)
+            .Reads(view.Gpu.Frame, view.Constants, update.Rays, update.RayCounts)
+            .Writes(grid.Probes, update.Variance, grid.Depth)
             .Dispatch(probeCount);
     }
 }
