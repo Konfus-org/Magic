@@ -12,8 +12,8 @@ progress shows as it happens, which the terminal logger holds back until each pr
 here: tools/Scripts/Format.ps1 formats a change before it is validated, and the build fails on every rule it applies that a
 build can see.
 The tests run against that build, so running them alone (-Only Test) needs one. The Headless step runs each project
-without a window under --fail-on-error, waits for its world and then ten seconds, so what checks the GPU as the run
-starts has checked, types exit into it and passes when it ends with 0; an error logged during the
+without a window under --fail-on-error, waits for its world and then ten seconds,
+types exit into it and passes when it ends with 0; an error logged during the
 run exits 2, and a run still going after -Seconds is killed and fails. The Screenshot step runs
 tools/Scripts/Screenshot.ps1 on each project and prints the images' paths last: open each and look at what it shows
 before reporting the change as working. It needs a display and a GPU; the others do not. Runs from any current
