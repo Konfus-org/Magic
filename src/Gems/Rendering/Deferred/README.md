@@ -41,14 +41,16 @@ that draws its geometry.
   gem builds the world as rays see it; it reflects the light around it, more at a grazing angle, and the sun lights it.
 - Where a gem filled the frame's air, the picture is seen through it up to the nearest pane, or the opaque surface
   where there is none, before the effects run. Where the air has clouds, the sky shows them and they shade the sun.
-- The finished picture is stretched over the window, filtered; where a gem upscales it, that gem's picture is copied
-  to the window instead. A screenshot is of what the window shows.
+- The finished picture's middle tones are shown at `Rendering.Gamma`, and it is stretched over the window with
+  `Rendering.UpscaleFilter`, whose names are in `TextureFilter`; where a gem upscales it, that gem's picture is copied
+  to the window instead. A screenshot is of what the window shows, at the size the picture is shown at.
 
 ## Settings
 
-`get Debug` lists the gem's settings, and `set Debug.RenderView Normal` sets one. `Debug.RenderView` shows one part of
-the GBuffer alone, and `Final` the finished frame again; the names are in `DebugView`. `Debug.IsRenderWindowOpen` opens
-the Rendering window.
+`get Debug` lists the gem's settings, and `set Debug.RenderView Normal` sets one; `Rendering.Gamma` and
+`Rendering.UpscaleFilter` are under `Rendering`, as `set Rendering.UpscaleFilter Nearest`. `Debug.RenderView` shows one
+part of the GBuffer alone, and `Final` the finished frame again; the names are in `DebugView`.
+`Debug.IsRenderWindowOpen` opens the Rendering window.
 
 With a gem that provides the debug UI, F2 opens the Rendering window, which chooses the view. F5 and F6 step through the
 views, and a line on screen names any view but the finished frame. A screenshot is of the renderer's picture alone,

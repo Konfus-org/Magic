@@ -174,14 +174,16 @@ internal sealed class FrameView(GpuResources resources)
     }
 
     /// <summary>
-    /// The view's constants and targets at a size, each asked for. It has history while the last frame drew it at this
+    /// The view's constants and targets at a size, each asked for, the glass targets only while a material draws
+    /// translucent, so the graph frees them in a world with none. It has history while the last frame drew it at this
     /// size: targets made again at another hold nothing of it.
     /// </summary>
     private Result<FrameTargets> TryGetTargets(RenderGraph graph, int width, int height)
     {
         Result<GpuBuffer> constants = graph.Buffer(SharedResources.Frame);
         Result<GpuTexture> depth = graph.Texture(GetShared(SharedResources.Depth));
-        Result<GpuTexture> glassDepth = graph.Texture(
+        bool hasGlass = resources.HasTranslucent;
+        Result<GpuTexture> glassDepth = GetGlass(
             GpuDescriptions.GetTexture(
                 "Glass depth",
                 width,
@@ -190,9 +192,9 @@ internal sealed class FrameView(GpuResources resources)
                 TextureUsages.DepthTarget | TextureUsages.Sampled
             )
         );
-        Result<GpuTexture> glassBase = graph.Texture(GetTarget("Glass base", GpuFormat.R8G8B8A8Unorm));
-        Result<GpuTexture> glassNormal = graph.Texture(GetTarget("Glass normal", GpuFormat.R16G16Unorm));
-        Result<GpuTexture> glassSurface = graph.Texture(GetTarget("Glass surface", GpuFormat.R16G16B16A16Sfloat));
+        Result<GpuTexture> glassBase = GetGlass(GetTarget("Glass base", GpuFormat.R8G8B8A8Unorm));
+        Result<GpuTexture> glassNormal = GetGlass(GetTarget("Glass normal", GpuFormat.R16G16Unorm));
+        Result<GpuTexture> glassSurface = GetGlass(GetTarget("Glass surface", GpuFormat.R16G16B16A16Sfloat));
         Result<GpuTexture> normal = graph.Texture(GetShared(SharedResources.GBufferNormal));
         Result<GpuTexture> baseColor = graph.Texture(GetTarget("GBuffer base", GpuFormat.R8G8B8A8Unorm));
         Result<GpuTexture> surface = graph.Texture(GetShared(SharedResources.GBufferSurface));
@@ -264,6 +266,9 @@ internal sealed class FrameView(GpuResources resources)
             GpuDescriptions.GetTexture(name, width, height, format);
 
         TextureDescription GetShared(in TextureDescription shared) => shared with { Width = width, Height = height };
+
+        Result<GpuTexture> GetGlass(in TextureDescription glass) =>
+            hasGlass ? graph.Texture(glass) : Result.Success(GpuTexture.None);
     }
 }
 

@@ -140,6 +140,23 @@ internal sealed class GpuResources(
     public IReadOnlyList<ShaderTypeArgument> MaterialShaders => _materialShaders;
 
     /// <summary>
+    /// Whether a material shader read so far draws translucent: the view keeps its glass targets while one does.
+    /// </summary>
+    public bool HasTranslucent
+    {
+        get
+        {
+            foreach (MaterialLayout? layout in _layouts.Values)
+            {
+                if (layout is { IsTranslucent: true })
+                    return true;
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>
     /// The textures shaders read through the heap, by the id in a row rather than by a pass's name: every material's
     /// texture on the GPU. A pass that samples them names them in its reads, so each is readable, its copy done, before
     /// the pass runs.

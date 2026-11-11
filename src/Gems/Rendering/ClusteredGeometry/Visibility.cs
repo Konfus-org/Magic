@@ -188,15 +188,18 @@ internal sealed class Visibility(AssetManager assets)
                 TextureUsages.ColorTarget | TextureUsages.Sampled
             )
         );
-        Result<GpuTexture> glassVisibility = graph.Texture(
-            GpuDescriptions.GetTexture(
-                "Glass visibility",
-                width,
-                height,
-                GpuFormat.R32Uint,
-                TextureUsages.ColorTarget | TextureUsages.Sampled
-            )
-        );
+        // The glass's buffer only while the view has glass targets to resolve it into.
+        Result<GpuTexture> glassVisibility = gpu.GlassDepth.IsNone
+            ? Result.Success(GpuTexture.None)
+            : graph.Texture(
+                GpuDescriptions.GetTexture(
+                    "Glass visibility",
+                    width,
+                    height,
+                    GpuFormat.R32Uint,
+                    TextureUsages.ColorTarget | TextureUsages.Sampled
+                )
+            );
         Result<GpuTexture> hzb = graph.Texture(
             GpuDescriptions.GetTexture(
                 "Depth pyramid",
@@ -395,20 +398,23 @@ internal sealed class Visibility(AssetManager assets)
         );
         RecordHzb(view);
 
-        // The nearest translucent surface in front of the opaque ones, from both passes' draws.
-        RecordDraw(
-            view,
-            _glassShaders,
-            "Draw glass",
-            new GpuRenderTargets
-            {
-                Colors = [new GpuTarget { Texture = view.GlassVisibility, Load = TargetLoad.Clear }],
-                Depth = new GpuTarget { Texture = view.Gpu.GlassDepth, Load = TargetLoad.Clear },
-            },
-            drawsOffset: (ulong)MaxVisibleClusters * 4 * DrawArgumentsBytes,
-            countOffset: 40,
-            view.Gpu.Depth
-        );
+        // The nearest translucent surface in front of the opaque ones, from both passes' draws, where the view has glass.
+        if (!view.GlassVisibility.IsNone)
+        {
+            RecordDraw(
+                view,
+                _glassShaders,
+                "Draw glass",
+                new GpuRenderTargets
+                {
+                    Colors = [new GpuTarget { Texture = view.GlassVisibility, Load = TargetLoad.Clear }],
+                    Depth = new GpuTarget { Texture = view.Gpu.GlassDepth, Load = TargetLoad.Clear },
+                },
+                drawsOffset: (ulong)MaxVisibleClusters * 4 * DrawArgumentsBytes,
+                countOffset: 40,
+                view.Gpu.Depth
+            );
+        }
 
         // Resolve each pixel's material into the GBuffer, a pass for each material shader, which resolves the pixels whose
         // rows it draws.
@@ -541,10 +547,11 @@ internal sealed class Visibility(AssetManager assets)
 
     /// <summary>
     /// The pixels whose rows material shader <paramref name="shader"/> draws, resolved into the GBuffer, and the panes
-    /// it draws into the glass targets.
+    /// it draws into the glass targets where the view has them.
     /// </summary>
-    private void RecordResolve(in RenderView view, ImmutableArray<GpuResource> heapTextures, int shader) =>
-        view
+    private void RecordResolve(in RenderView view, ImmutableArray<GpuResource> heapTextures, int shader)
+    {
+        ComputePass resolve = view
             .Graph.Compute(
                 "Resolve materials",
                 _resolveShaders[shader],
@@ -562,11 +569,13 @@ internal sealed class Visibility(AssetManager assets)
                 view.Pools.Indices,
                 view.Gpu.Materials,
                 view.Cull.VisibleClusters,
-                view.Visibility,
-                view.GlassVisibility
+                view.Visibility
             )
             .Reads(heapTextures.AsSpan())
-            .Writes(view.Gpu.GBufferNormal, view.Gpu.GBufferBase, view.Gpu.GBufferSurface, view.Gpu.Velocity)
-            .Writes(view.Gpu.GlassBase, view.Gpu.GlassNormal, view.Gpu.GlassSurface)
-            .DispatchOver(view.Gpu.Width, view.Gpu.Height);
+            .Writes(view.Gpu.GBufferNormal, view.Gpu.GBufferBase, view.Gpu.GBufferSurface, view.Gpu.Velocity);
+        if (!view.GlassVisibility.IsNone)
+            resolve.Reads(view.GlassVisibility).Writes(view.Gpu.GlassBase, view.Gpu.GlassNormal, view.Gpu.GlassSurface);
+
+        resolve.DispatchOver(view.Gpu.Width, view.Gpu.Height);
+    }
 }

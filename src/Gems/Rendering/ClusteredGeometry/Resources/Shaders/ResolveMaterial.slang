@@ -144,10 +144,15 @@ void ResolveOpaque<M : IMaterial>(FrameConstants frame, uint2 pixel)
     surfaceTarget.Store(pixel, float4(surface.roughness, 0.5, surface.occlusion, encodedLift));
 }
 
-// The pixel's nearest translucent surface into the glass targets, where one is in front of the opaque surface.
+// The pixel's nearest translucent surface into the glass targets, where one is in front of the opaque surface; none
+// where the view has no glass, whose buffer's id is 0.
 void ResolveTranslucent<M : IMaterial>(FrameConstants frame, uint2 pixel)
 {
-    UintTextureRef glass = { GetClusters().glassVisibility };
+    uint glassId = GetClusters().glassVisibility;
+    if (glassId == 0u)
+        return;
+
+    UintTextureRef glass = { glassId };
     uint visibleIndex;
     uint triangle;
     if (!DecodeVisibilityId(glass.Load(pixel, 0u), visibleIndex, triangle))

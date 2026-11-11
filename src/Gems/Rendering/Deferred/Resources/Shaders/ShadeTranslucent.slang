@@ -47,10 +47,11 @@ void ShadeTranslucent<S : ISky>(uint3 thread : SV_DispatchThreadID)
     if (any(thread.xy >= size))
         return;
 
-    // Where no pane is in front of the opaque surface, the glass depth is cleared to nothing, and the picture is only
-    // seen through the air, where something filled it, to the surface or far along the ray where nothing was drawn.
+    // Where no pane is in front of the opaque surface, the glass depth is cleared to nothing, or the view has none, its
+    // id 0, and the picture is only seen through the air, where something filled it, to the surface or far along the
+    // ray where nothing was drawn.
     TextureRef glassDepth = { frame.glassDepth };
-    float paneDepth = glassDepth.Load(thread.xy, 0u).x;
+    float paneDepth = frame.glassDepth == 0u ? 0.0 : glassDepth.Load(thread.xy, 0u).x;
     StorageRef picture = { frame.hdr, 0u };
     float2 center = GetTexelCenterUv(thread.xy, size);
     if (paneDepth == 0.0)

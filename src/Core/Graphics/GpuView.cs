@@ -40,7 +40,8 @@ public readonly record struct GpuView
     public required GpuTexture Velocity { get; init; }
 
     /// <summary>
-    /// The nearest glass's depth and surface, in front of the opaque surfaces.
+    /// The nearest glass's depth and surface, in front of the opaque surfaces; none while no material draws
+    /// translucent.
     /// </summary>
     public required GpuTexture GlassDepth { get; init; }
 

@@ -70,7 +70,11 @@ internal sealed class Lighting(AssetManager assets)
 
         shade.Writes(view.Gpu.Hdr).DispatchOver(view.Gpu.Width, view.Gpu.Height);
 
-        // The nearest pane over the shaded picture, from what the resolve left in the glass targets.
+        // The nearest pane over the shaded picture, from what the resolve left in the glass targets, and the air in front
+        // of it or of the opaque surface; nothing to do with neither glass nor air.
+        if (view.Gpu.GlassDepth.IsNone && air is null)
+            return;
+
         ComputePass translucent = view
             .Graph.Compute("Shade translucent", _translucentShader, header, RenderStage.Shade)
             .Reads(
@@ -78,12 +82,11 @@ internal sealed class Lighting(AssetManager assets)
                 view.Gpu.SkyTransmittance,
                 view.Gpu.SkyMultiScattering,
                 view.Gpu.SkyView,
-                view.Gpu.GlassDepth,
-                view.Gpu.GlassBase,
-                view.Gpu.GlassNormal,
-                view.Gpu.GlassSurface,
                 view.Gpu.Depth
             );
+        if (!view.Gpu.GlassDepth.IsNone)
+            translucent.Reads(view.Gpu.GlassDepth, view.Gpu.GlassBase, view.Gpu.GlassNormal, view.Gpu.GlassSurface);
+
         translucent.Reads(indirect);
 
         if (traced is { } world)
