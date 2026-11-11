@@ -17,7 +17,8 @@ compiler.
   fails is logged, and its passes stay out.
 
 - The GPU is the fastest one with Vulkan 1.3, bindless descriptors and dynamic rendering that can show the window;
-  the log names it as the run starts. Mesh shaders, ray queries and 64-bit atomics are noted in `GpuFeatures` when
+  the log names it as the run starts. `Rendering.Gpu` picks another by a part of its name, and changing it restarts
+  the run. Mesh shaders, ray queries and 64-bit atomics are noted in `GpuFeatures` when
   the GPU has them. With ray queries, acceleration structures join the heap: a bottom-level one over triangles of its
   buffers, a top-level one over instances of those, each built by a command of the frame. Once a bottom-level one's
   build has run, the next frame copies it into one of the size it compacts to, which its name then gives with a new
