@@ -9,7 +9,6 @@ module "TraceDiffuse";
 import Core.Heap;
 import Core.Frame;
 import Core.Math;
-import Core.Pack;
 import Core.Random;
 import Core.Sampling;
 import Scene.Lights;
@@ -57,15 +56,13 @@ void TraceDiffuse<S : ISky>(uint3 thread : SV_DispatchThreadID)
 
     Lights lights = GetLights();
     ProbeGridConstants grid = GetProbeGrid();
-    TextureRef normalTexture = { frame.gbufferNormal };
-    float3 normal = DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0);
-    float3 relative = ReconstructRelative(frame, GetTexelCenterUv(pixel, uint2(frame.width, frame.height)), depth);
+    float3 normal = LoadNormal(frame.gbufferNormal, pixel);
+    float3 relative = ReconstructPixel(frame, pixel, depth);
     float3 world = relative + frame.cameraPosition.xyz;
     float3 origin = world + normal * GetRayOffset(frame, relative);
     float3 beyond = GetProbeIrradiance(grid, world, normal);
     float3x3 basis = CreateBasis(normal);
-    AccelerationRef acceleration = { GetTracedWorld().acceleration };
-    RaytracingAccelerationStructure scene = acceleration.Get();
+    RaytracingAccelerationStructure scene = GetTracedAcceleration();
     float3 sum = float3(0.0);
     for (uint i = 0u; i < RayCount; i++)
     {

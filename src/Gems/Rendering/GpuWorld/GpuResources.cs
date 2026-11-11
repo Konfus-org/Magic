@@ -7,7 +7,6 @@ using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs.Components;
-using Magic.Files;
 using Magic.Graphics;
 using Magic.Threading;
 using Magic.Utils;
@@ -30,7 +29,6 @@ namespace Magic.GpuWorld;
 /// </summary>
 internal sealed class GpuResources(
     ModelPreprocessor models,
-    Caches caches,
     AssetManager assets,
     IShaderCompiler shaders,
     Threads threads,
@@ -42,7 +40,7 @@ internal sealed class GpuResources(
 
     private const string FailureShader = "Shaders/Material/Failure.slang";
 
-    private static readonly int _meshCapacity = (int)(SharedResources.Meshes.Bytes / GpuMesh.Bytes);
+    private const int MeshCapacity = 1 << 16;
 
     private readonly Dictionary<ulong, TextureEntry> _textures = [];
 
@@ -62,7 +60,7 @@ internal sealed class GpuResources(
     private readonly List<ShaderTypeArgument> _materialShaders = [];
 
     // The models' indices; row 0 is none, so it is taken from the start.
-    private readonly FreeList _modelRows = CreateRows(ModelCapacity);
+    private readonly FreeList _modelRows = new(ModelCapacity, 1);
 
     /// <summary>
     /// Each resident model by its model index, none where no model is.
@@ -91,11 +89,11 @@ internal sealed class GpuResources(
     private readonly List<(ulong Model, string Name, MeshDerived Made)> _madeModels = [];
 
     // 2 MiB of vertices and 1 MiB of indices at the start; each grows with the scene.
-    private readonly BufferPool _vertices = new(SharedResources.Vertices, GpuVertex.Bytes, 1 << 16);
+    private readonly BufferPool _vertices = new(GpuDescriptions.GetBuffer("Vertex pool", 0), GpuVertex.Bytes, 1 << 16);
 
-    private readonly BufferPool _indices = new(SharedResources.Indices, sizeof(uint), 1 << 18);
+    private readonly BufferPool _indices = new(GpuDescriptions.GetBuffer("Index pool", 0), sizeof(uint), 1 << 18);
 
-    private readonly FreeList _meshRanges = new(_meshCapacity);
+    private readonly FreeList _meshRanges = new(MeshCapacity);
 
     /// <summary>
     /// How many times models were made, failed or had their acceleration structure moved by the GPU provider, ever:
@@ -199,7 +197,9 @@ internal sealed class GpuResources(
         IndexPool = indices.Value;
         if (graph.Features.HasRayQuery)
         {
-            Result<GpuBuffer> meshes = graph.Buffer(SharedResources.Meshes);
+            Result<GpuBuffer> meshes = graph.Buffer(
+                GpuDescriptions.GetBuffer("Mesh table", MeshCapacity * GpuMesh.Bytes)
+            );
             if (!meshes.Ok)
                 return Result.Failure(meshes.Error);
 
@@ -468,14 +468,6 @@ internal sealed class GpuResources(
         _arrivedTextures.Clear();
     }
 
-    private static FreeList CreateRows(int capacity)
-    {
-        FreeList rows = new(capacity);
-        rows.Allocate(1);
-
-        return rows;
-    }
-
     private static GpuFormat ToGpu(TextureFormat format) =>
         format switch
         {
@@ -638,22 +630,9 @@ internal sealed class GpuResources(
 
     private async Task LoadAsync(Handle<Model> model)
     {
-        // The load preprocesses the model into the cache under its version. One loaded before the gem registered its
-        // preprocessor, or one the cache could not keep, is made here, on a worker, and cached.
-        Result<Model> loaded = await assets.LoadAsync(model, null, CancellationToken.None).ConfigureAwait(false);
-        Result<MeshDerived> derived = loaded.Ok
-            ? await caches
-                .ReadAsync(model.Id, assets.GetVersion(model), models, CancellationToken.None)
-                .ConfigureAwait(false)
-            : Result.Failure(loaded.Error);
-        if (loaded.Ok && !derived.Ok)
-        {
-            MeshDerived built = await Task.Run(() => models.Preprocess(loaded.Value)).ConfigureAwait(false);
-            await caches
-                .WriteAsync(model.Id, assets.GetVersion(model), built, models, CancellationToken.None)
-                .ConfigureAwait(false);
-            derived = Result.Success(built);
-        }
+        Result<MeshDerived> derived = await assets
+            .LoadPreprocessedAsync(model, models, CancellationToken.None)
+            .ConfigureAwait(false);
 
         await threads.Enter(EngineThread.Render);
         string name = assets.GetPath(model) ?? $"model {model.Id}";

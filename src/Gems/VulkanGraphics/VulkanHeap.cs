@@ -42,14 +42,10 @@ internal sealed unsafe class VulkanHeap : IDisposable
 
     private const uint BufferBinding = 0;
     private const uint Texture2DBinding = 1;
-    private const uint Texture2DArrayBinding = 2;
-    private const uint CubeBinding = 3;
     private const uint Texture3DBinding = 4;
     private const uint UintTexture2DBinding = 5;
     private const uint Storage2DBinding = 6;
-    private const uint Storage2DArrayBinding = 7;
     private const uint Storage3DBinding = 8;
-    private const uint UintStorage2DBinding = 9;
     private const uint SamplerBinding = 10;
     private const uint AccelerationBinding = 11;
 
@@ -66,14 +62,10 @@ internal sealed unsafe class VulkanHeap : IDisposable
         [
             Binding(BufferBinding, VkDescriptorType.StorageBuffer, Buffers),
             Binding(Texture2DBinding, VkDescriptorType.SampledImage, Textures),
-            Binding(Texture2DArrayBinding, VkDescriptorType.SampledImage, Textures),
-            Binding(CubeBinding, VkDescriptorType.SampledImage, Textures),
             Binding(Texture3DBinding, VkDescriptorType.SampledImage, Textures),
             Binding(UintTexture2DBinding, VkDescriptorType.SampledImage, Textures),
             Binding(Storage2DBinding, VkDescriptorType.StorageImage, levels),
-            Binding(Storage2DArrayBinding, VkDescriptorType.StorageImage, levels),
             Binding(Storage3DBinding, VkDescriptorType.StorageImage, levels),
-            Binding(UintStorage2DBinding, VkDescriptorType.StorageImage, levels),
             Binding(SamplerBinding, VkDescriptorType.Sampler, Samplers),
             Binding(AccelerationBinding, VkDescriptorType.AccelerationStructureKHR, Accelerations),
         ];
@@ -107,8 +99,8 @@ internal sealed unsafe class VulkanHeap : IDisposable
         Span<VkDescriptorPoolSize> sizes =
         [
             new(VkDescriptorType.StorageBuffer, Buffers),
-            new(VkDescriptorType.SampledImage, Textures * 5),
-            new(VkDescriptorType.StorageImage, levels * 4),
+            new(VkDescriptorType.SampledImage, Textures * 3),
+            new(VkDescriptorType.StorageImage, levels * 2),
             new(VkDescriptorType.Sampler, Samplers),
             new(VkDescriptorType.AccelerationStructureKHR, Accelerations),
         ];
@@ -218,22 +210,12 @@ internal sealed unsafe class VulkanHeap : IDisposable
     /// </summary>
     public void WriteTexture(uint id, in TextureDescription description, VkImageView sampled, VkImageView[] levels)
     {
-        bool isInteger = description.Format.IsInteger;
-        uint sampledBinding = description.Kind switch
-        {
-            TextureKind.Texture2D => isInteger ? UintTexture2DBinding : Texture2DBinding,
-            TextureKind.Texture2DArray => Texture2DArrayBinding,
-            TextureKind.Cube => CubeBinding,
-            TextureKind.Texture3D => Texture3DBinding,
-            _ => throw new ArgumentOutOfRangeException(nameof(description), description.Kind, "There is no such kind."),
-        };
-        uint storageBinding = description.Kind switch
-        {
-            TextureKind.Texture2D => isInteger ? UintStorage2DBinding : Storage2DBinding,
-            TextureKind.Texture2DArray or TextureKind.Cube => Storage2DArrayBinding,
-            TextureKind.Texture3D => Storage3DBinding,
-            _ => throw new ArgumentOutOfRangeException(nameof(description), description.Kind, "There is no such kind."),
-        };
+        bool is3D = description.Kind == TextureKind.Texture3D;
+        uint sampledBinding =
+            is3D ? Texture3DBinding
+            : description.Format.IsInteger ? UintTexture2DBinding
+            : Texture2DBinding;
+        uint storageBinding = is3D ? Storage3DBinding : Storage2DBinding;
         bool isSampled = description.Usage.HasFlag(TextureUsages.Sampled);
         bool isStorage = description.Usage.HasFlag(TextureUsages.Storage);
         int count = (isSampled ? 1 : 0) + (isStorage ? levels.Length : 0);

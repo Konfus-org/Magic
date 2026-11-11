@@ -1,6 +1,7 @@
 // The depth pyramid, a level a dispatch: level 0 copies the depth, and each level above keeps the farthest reversed
 // depth of the texels below it, the last row and column of an odd level folded in so no texel goes uncovered. The
-// pass header's y is the level written.
+// pass header's y is the level written, and its z the picture level 0 also clears, 0 for none: the HDR picture, which
+// the material resolve writes emissive light into, so a pixel no resolve writes this frame adds none.
 module "BuildHzb";
 
 import Core.Heap;
@@ -14,7 +15,8 @@ void BuildHzb(uint3 thread : SV_DispatchThreadID)
 {
     ClusterConstants clusters = GetClusters();
     FrameConstants frame = GetFrame();
-    uint level = GetPassHeader().y;
+    PassHeader header = GetPassHeader();
+    uint level = header.y;
     StorageRef target = { clusters.hzb, level };
     uint2 size = target.GetSize();
     if (any(thread.xy >= size))
@@ -24,6 +26,10 @@ void BuildHzb(uint3 thread : SV_DispatchThreadID)
     {
         TextureRef depth = { frame.depth };
         target.Store(thread.xy, float4(depth.Load(thread.xy, 0u).x, 0.0, 0.0, 0.0));
+        StorageRef picture = { header.z, 0u };
+        if (header.z != 0u)
+            picture.Store(thread.xy, float4(0.0, 0.0, 0.0, 0.0));
+
         return;
     }
 

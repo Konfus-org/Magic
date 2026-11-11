@@ -61,15 +61,12 @@ without what other gems draw over it.
 `DeferredGem.Render` is the frame in order, top to bottom: start there. As a domain loads, the loading screen also
 waits for the gem's passes.
 
-- An area is the passes of one part of the frame, each naming the shader entries the GPU provider builds, which it
-  lists in its `Shaders`. It keeps only those entries and what it carries from one frame to the next, such as last
-  frame's view.
 - A pass is one `RenderGraph.Compute` or `RenderGraph.Draw` call saying what it reads and writes, which puts its
-  barriers in. The frame is not drawn until every area's shaders are built.
-- Each frame, an area's `Record` asks the graph for its own textures and buffers by description, and takes what its
-  passes read and write as arguments; `Render` hands the handles on from one area to the next. The same description
-  under a name is the same resource, holding what the last frame left in it; another one, as at a new picture size,
-  makes it again, empty.
+  barriers in. `Render` records each pass under a short comment; the effects' passes are `PixelEffects.Record`'s.
+- The frame is not drawn until every shader entry in `_shaders` is built.
+- Each frame, a pass asks the graph for its own textures and buffers by description. The same description under a
+  name is the same resource, holding what the last frame left in it; another one, as at a new picture size, makes it
+  again, empty.
 - The shaders are the `Shaders/` modules in this gem's `Resources`, built on the shader library
   ([Shaders](../../../Resources/Shaders/README.md)).
 - Parts of the lighting are adapted from another engine under the MIT licence;

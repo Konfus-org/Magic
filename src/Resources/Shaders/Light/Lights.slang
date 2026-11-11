@@ -44,6 +44,30 @@ public float3 SampleLightPoint(GpuLight light, float3 position, float2 xi)
     return light.position + ToWorld(CreateBasis(toReceiver), float3(SampleConcentricDisk(xi) * light.radius, 0.0));
 }
 
+// A direction towards a random point of the sun's disc, from two random numbers, for a ray that makes its shadow soft.
+public float3 SampleSunDirection(float3 toSun, float2 xi)
+{
+    return normalize(ToWorld(CreateBasis(toSun), float3(SampleConcentricDisk(xi) * SunAngularRadius, 1.0)));
+}
+
+// A shadow ray from an origin towards a point: its unit direction, and how far it goes, stopping just short of the
+// point so it doesn't hit what it aims at.
+public struct LightRay
+{
+    public float3 direction;
+    public float distance;
+}
+
+public LightRay CreateLightRay(float3 origin, float3 target)
+{
+    float3 toTarget = target - origin;
+    float reach = length(toTarget);
+    LightRay ray;
+    ray.direction = toTarget / max(reach, Epsilon);
+    ray.distance = reach * 0.999;
+    return ray;
+}
+
 public LightSample SampleLight(GpuLight light, float3 position, float3 normal)
 {
     LightSample sample;

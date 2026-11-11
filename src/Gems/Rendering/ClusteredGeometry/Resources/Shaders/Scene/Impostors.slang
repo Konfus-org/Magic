@@ -144,7 +144,7 @@ public ImpostorBlend GetImpostorBlend(FrameConstants frame, GpuInstance instance
 {
     float3 camera = ToWorld(instance.inverseWorld, frame.cameraPosition.xyz);
     float3 center = ToWorld(instance.inverseWorld, instance.boundsCenter);
-    float2 grid = (EncodeOctahedral(normalize(camera - center)) * 0.5 + 0.5) * float(ImpostorViews - 1u);
+    float2 grid = EncodeUnitVectorUnorm(normalize(camera - center)) * float(ImpostorViews - 1u);
     uint2 cell = min(uint2(floor(grid)), ImpostorViews - 2u);
     float2 f = grid - float2(cell);
     uint at = cell.x + cell.y * ImpostorViews;

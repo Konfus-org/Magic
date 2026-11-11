@@ -42,11 +42,13 @@ internal sealed class FrameView
     /// <summary>
     /// The frame's rows uploaded into its buffer: the view's constants, the camera shifted by <paramref name="jitter"/>;
     /// the models, the instance and material tables; and the lights, the sun, the open sky at
-    /// <paramref name="skyBrightness"/>, the sky's tables, and the light table and its tiles.
+    /// <paramref name="skyBrightness"/>, the sky's tables, and the light table's <paramref name="lightCount"/>
+    /// lights and its tiles.
     /// </summary>
     public Result Upload(
         RenderGraph graph,
         in GpuView view,
+        int lightCount,
         (Transform Transform, Camera Camera) camera,
         in Frame frame,
         Vector2 jitter,
@@ -118,7 +120,7 @@ internal sealed class FrameView
             LutSampler = sampler.Value.Id,
             HasSky = hasSky ? 1u : 0u,
             Table = view.LightTable.Id,
-            Count = (uint)view.LightCount,
+            Count = (uint)lightCount,
             Tiles = view.LightTiles.Id,
         };
 

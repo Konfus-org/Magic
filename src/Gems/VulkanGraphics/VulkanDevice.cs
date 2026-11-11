@@ -27,15 +27,11 @@ internal sealed unsafe class VulkanDevice : IDisposable
 
     private const string SwapchainExtension = "VK_KHR_swapchain";
 
-    private const string MeshShaderExtension = "VK_EXT_mesh_shader";
-
     private const string RayQueryExtension = "VK_KHR_ray_query";
 
     private const string AccelerationStructureExtension = "VK_KHR_acceleration_structure";
 
     private const string DeferredHostOperationsExtension = "VK_KHR_deferred_host_operations";
-
-    private const string ImageAtomicInt64Extension = "VK_EXT_shader_image_atomic_int64";
 
     private const string MemoryBudgetExtension = "VK_EXT_memory_budget";
 
@@ -404,8 +400,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
     )]
     private Result<Pick> Examine(VkPhysicalDevice device)
     {
-        VkPhysicalDeviceMeshShaderFeaturesEXT mesh = new();
-        VkPhysicalDeviceRayQueryFeaturesKHR rayQuery = new() { pNext = &mesh };
+        VkPhysicalDeviceRayQueryFeaturesKHR rayQuery = new();
         VkPhysicalDeviceAccelerationStructureFeaturesKHR acceleration = new() { pNext = &rayQuery };
         VkPhysicalDeviceVulkan13Features features13 = new() { pNext = &acceleration };
         VkPhysicalDeviceVulkan12Features features12 = new() { pNext = &features13 };
@@ -478,7 +473,6 @@ internal sealed unsafe class VulkanDevice : IDisposable
 
         VkPhysicalDeviceLimits limits = properties.properties.limits;
         VkPhysicalDeviceType kind = properties.properties.deviceType;
-        bool hasMeshShaders = extensions.Contains(MeshShaderExtension) && mesh.meshShader && mesh.taskShader;
         bool hasRayQuery =
             extensions.Contains(RayQueryExtension)
             && extensions.Contains(AccelerationStructureExtension)
@@ -506,14 +500,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
                 Driver = $"{CString.Read(properties12.driverName)} {CString.Read(properties12.driverInfo)}",
                 TimestampPeriod = limits.timestampPeriod,
                 Extensions = extensions,
-                Features = new GpuFeatures
-                {
-                    HasMeshShaders = hasMeshShaders,
-                    HasRayQuery = hasRayQuery,
-                    HasAtomic64 = core.shaderInt64 && features12.shaderBufferInt64Atomics,
-                    HasImageAtomic64 = core.shaderInt64 && extensions.Contains(ImageAtomicInt64Extension),
-                    HasSamplerMinMax = features12.samplerFilterMinmax,
-                },
+                Features = new GpuFeatures { HasRayQuery = hasRayQuery },
                 Limits = new GpuLimits
                 {
                     DeviceName = name,
@@ -581,20 +568,13 @@ internal sealed unsafe class VulkanDevice : IDisposable
         if (pick.Extensions.Contains(PortabilitySubsetExtension))
             extensions.Add(PortabilitySubsetExtension);
 
-        if (pick.Features.HasMeshShaders)
-            extensions.Add(MeshShaderExtension);
-
         if (pick.Features.HasRayQuery)
             extensions.AddRange([RayQueryExtension, AccelerationStructureExtension, DeferredHostOperationsExtension]);
-
-        if (pick.Features.HasImageAtomic64)
-            extensions.Add(ImageAtomicInt64Extension);
 
         if (HasMemoryBudget)
             extensions.Add(MemoryBudgetExtension);
 
         using NativeStrings extensionNames = new(extensions);
-        VkPhysicalDeviceMeshShaderFeaturesEXT mesh = new() { meshShader = true, taskShader = true };
         VkPhysicalDeviceRayQueryFeaturesKHR rayQuery = new() { rayQuery = true };
         VkPhysicalDeviceAccelerationStructureFeaturesKHR acceleration = new()
         {
@@ -626,8 +606,6 @@ internal sealed unsafe class VulkanDevice : IDisposable
             timelineSemaphore = true,
             hostQueryReset = true,
             scalarBlockLayout = true,
-            samplerFilterMinmax = pick.Features.HasSamplerMinMax,
-            shaderBufferInt64Atomics = pick.Features.HasAtomic64,
         };
         VkPhysicalDeviceVulkan11Features features11 = new() { pNext = &features12, shaderDrawParameters = true };
         VkPhysicalDeviceFeatures2 features = new()
@@ -644,18 +622,11 @@ internal sealed unsafe class VulkanDevice : IDisposable
                 shaderStorageImageReadWithoutFormat = true,
                 shaderStorageImageWriteWithoutFormat = true,
                 textureCompressionBC = true,
-                shaderInt64 = pick.Features.HasAtomic64 || pick.Features.HasImageAtomic64,
             },
         };
 
         // The optional features chain in after the baseline, each only when the GPU has it.
         void* chain = &features;
-        if (pick.Features.HasMeshShaders)
-        {
-            mesh.pNext = chain;
-            chain = &mesh;
-        }
-
         if (pick.Features.HasRayQuery)
         {
             rayQuery.pNext = chain;
@@ -713,4 +684,22 @@ internal sealed unsafe class VulkanDevice : IDisposable
 
         public required GpuLimits Limits { get; init; }
     }
+}
+
+/// <summary>
+/// What the GPU is and holds: its name, the alignment an upload's offset takes and its device memory.
+/// </summary>
+internal readonly record struct GpuLimits
+{
+    public required string DeviceName { get; init; }
+
+    /// <summary>
+    /// Bytes an upload's offset is a multiple of.
+    /// </summary>
+    public required int UploadAlignment { get; init; }
+
+    /// <summary>
+    /// Bytes of device memory the GPU has for the heap's resources.
+    /// </summary>
+    public required long DeviceMemoryBytes { get; init; }
 }

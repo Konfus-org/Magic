@@ -1,11 +1,11 @@
 // Every pixel of the visibility buffer to a surface: the id names the triangle, its three vertices give the pixel its
 // barycentrics and their derivatives, the attributes interpolate from them, and the material decides the surface,
-// written to the GBuffer, with how far the pixel's point rises off its flat triangle; and the nearest translucent
-// surface of the pixel, from the glass's visibility buffer, to the glass targets. The entry is specialised to one
-// material shader, numbered in the pass header's z, and resolves only the pixels whose rows that shader draws, loading
-// its struct from each; every pass writes the sky's velocity, the same each time. The pixel's velocity is written
-// beside it: where the surface was on last frame's screen, from where its instance was and where the camera was; a
-// pixel of sky moves with the camera alone.
+// written to the GBuffer, with how far the pixel's point rises off its flat triangle, and its emissive light to the
+// picture for the shading to add to; and the nearest translucent surface of the pixel, from the glass's visibility
+// buffer, to the glass targets. The entry is specialised to one material shader, numbered in the pass header's z, and
+// resolves only the pixels whose rows that shader draws, loading its struct from each; every pass writes the sky's
+// velocity, the same each time. The pixel's velocity is written beside it: where the surface was on last frame's
+// screen, from where its instance was and where the camera was; a pixel of sky moves with the camera alone.
 module "ResolveMaterial";
 
 import Core.Heap;
@@ -52,7 +52,8 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
     ResolveTranslucent<M>(frame, thread.xy);
 }
 
-// The pixel's opaque surface into the GBuffer and its velocity, or the sky's velocity where nothing was drawn.
+// The pixel's opaque surface into the GBuffer, its emissive light into the picture and its velocity, or the sky's
+// velocity where nothing was drawn.
 void ResolveOpaque<M : IMaterial>(FrameConstants frame, uint2 pixel)
 {
     Models models = GetModels();
@@ -69,7 +70,7 @@ void ResolveOpaque<M : IMaterial>(FrameConstants frame, uint2 pixel)
     uint shader = GetPassHeader().z;
     if (!isImpostor && !DecodeVisibilityId(id, visibleIndex, triangle))
     {
-        float3 far = ReconstructRelative(frame, center, 1e-6);
+        float3 far = ReconstructRelative(frame, center, FarDepth);
         float4 previousClip = mul(float4(far, 1.0), frame.previousViewProjection);
         float2 previousUv = ToUv(previousClip.xy / max(previousClip.w, Epsilon));
         velocityTarget.Store(pixel, float4(previousUv - unjittered, 0.0, 0.0));
@@ -111,7 +112,6 @@ void ResolveOpaque<M : IMaterial>(FrameConstants frame, uint2 pixel)
         inputs.uv = uv.uv;
         inputs.uvDdx = uv.perTexelX * (footprint / atlasTexel);
         inputs.uvDdy = uv.perTexelY * (footprint / atlasTexel);
-        inputs.viewDirection = NormalizeSafe(-inputs.position, float3(0.0, 0.0, -1.0));
     }
     else
     {
@@ -138,10 +138,12 @@ void ResolveOpaque<M : IMaterial>(FrameConstants frame, uint2 pixel)
     StorageRef normalTarget = { frame.gbufferNormal, 0u };
     StorageRef baseTarget = { frame.gbufferBase, 0u };
     StorageRef surfaceTarget = { frame.gbufferSurface, 0u };
-    normalTarget.Store(pixel, float4(EncodeOctahedral(surface.normal) * 0.5 + 0.5, 0.0, 0.0));
+    normalTarget.Store(pixel, float4(EncodeUnitVectorUnorm(surface.normal), 0.0, 0.0));
     baseTarget.Store(pixel, float4(surface.baseColor, surface.metalness));
     float encodedLift = EncodeLift(frame, inputs.position, lift);
     surfaceTarget.Store(pixel, float4(surface.roughness, 0.5, surface.occlusion, encodedLift));
+    StorageRef picture = { frame.hdr, 0u };
+    picture.Store(pixel, float4(surface.emissive, 1.0));
 }
 
 // The pixel's nearest translucent surface into the glass targets, where one is in front of the opaque surface; none
@@ -171,6 +173,6 @@ void ResolveTranslucent<M : IMaterial>(FrameConstants frame, uint2 pixel)
     StorageRef normalTarget = { frame.glassNormal, 0u };
     StorageRef surfaceTarget = { frame.glassSurface, 0u };
     baseTarget.Store(pixel, float4(surface.baseColor, surface.alpha));
-    normalTarget.Store(pixel, float4(EncodeOctahedral(surface.normal) * 0.5 + 0.5, 0.0, 0.0));
+    normalTarget.Store(pixel, float4(EncodeUnitVectorUnorm(surface.normal), 0.0, 0.0));
     surfaceTarget.Store(pixel, float4(surface.roughness, surface.emissive));
 }

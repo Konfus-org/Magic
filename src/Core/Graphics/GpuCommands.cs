@@ -159,9 +159,7 @@ public readonly record struct GpuTarget
 }
 
 /// <summary>
-/// What a draw pass draws into: up to 8 colour targets of one size, and a depth target or none; or nothing, for a
-/// pass whose pixel shader writes through the heap, which then draws over <see cref="Width"/> by
-/// <see cref="Height"/> pixels.
+/// What a draw pass draws into: up to 8 colour targets of one size, and a depth target or none.
 /// </summary>
 public readonly record struct GpuRenderTargets
 {
@@ -170,28 +168,14 @@ public readonly record struct GpuRenderTargets
     public ImmutableArray<GpuTarget> Colors { get; init; } = [];
 
     public GpuTarget? Depth { get; init; }
-
-    public int Width { get; init; }
-
-    public int Height { get; init; }
 }
 
 /// <summary>
 /// The 16 bytes a pass pushes to its shaders, read there as <c>Core/Pass.slang</c>'s header with the same four names:
-/// what a small pass needs, or in <see cref="X"/> the heap id of the buffer its constants struct is in. Built from
-/// unsigned integers or floats, whichever the shader reads.
+/// what a small pass needs, or in <see cref="X"/> the heap id of the buffer its constants struct is in.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
-public readonly record struct GpuConstants(uint X, uint Y = 0, uint Z = 0, uint W = 0)
-{
-    public static GpuConstants FromFloats(float x, float y = 0, float z = 0, float w = 0) =>
-        new(
-            BitConverter.SingleToUInt32Bits(x),
-            BitConverter.SingleToUInt32Bits(y),
-            BitConverter.SingleToUInt32Bits(z),
-            BitConverter.SingleToUInt32Bits(w)
-        );
-}
+public readonly record struct GpuConstants(uint X, uint Y = 0, uint Z = 0, uint W = 0);
 
 /// <summary>
 /// Which command a <see cref="GpuCommand"/> is; the fields each reads are on the <see cref="RenderGraph"/> method that

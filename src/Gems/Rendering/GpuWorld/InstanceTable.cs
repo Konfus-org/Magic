@@ -24,7 +24,7 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
     /// <summary>
     /// The most rows the table and the material table hold.
     /// </summary>
-    public static readonly int MaxCapacity = (int)(SharedResources.Instances.Bytes / GpuInstance.Bytes);
+    public const int MaxCapacity = 1 << 18;
 
     /// <summary>
     /// How many rows are marked changed and uploaded together.
@@ -77,8 +77,6 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
     /// </summary>
     private long _uploadedVersion;
 
-    private bool _isFullLogged;
-
     /// <summary>
     /// How many times the rows have changed.
     /// </summary>
@@ -113,13 +111,11 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
         if (renderers.Version == _filledAt && !isRebuild)
             return Count;
 
-        if (renderers.Count > MaxCapacity && !_isFullLogged)
-        {
-            Log.Error($"Some renderers are not drawn: the instance table holds {MaxCapacity}.");
-            _isFullLogged = true;
-        }
-
+        // The error shows each time the table fills, not each fill while it is full.
         int lastCount = Count;
+        if (renderers.Count > MaxCapacity && lastCount < MaxCapacity)
+            Log.Error($"Some renderers are not drawn: the instance table holds {MaxCapacity}.");
+
         Count = Math.Min(renderers.Count, MaxCapacity);
         if (Count != lastCount)
             _version++;
@@ -163,10 +159,7 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
     {
         // A table asked for bigger than last frame keeps what it held.
         Result<GpuBuffer> rows = graph.Buffer(
-            SharedResources.Instances with
-            {
-                Bytes = (long)_rows.Length * GpuInstance.Bytes,
-            }
+            GpuDescriptions.GetBuffer("Instance table", (long)_rows.Length * GpuInstance.Bytes)
         );
         if (!rows.Ok)
             return Result.Failure(rows.Error);

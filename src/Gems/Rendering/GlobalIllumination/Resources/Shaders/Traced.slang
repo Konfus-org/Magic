@@ -179,7 +179,7 @@ float GetSameness(float previousDepth, float historyDepth)
 
 float LoadHistoryDepth(TracedHistory history, float2 uv)
 {
-    return history.depth.Load(min(uint2(saturate(uv) * float2(history.size)), history.size - 1u), 0u).x;
+    return history.depth.Load(GetTexelAt(saturate(uv), history.size), 0u).x;
 }
 
 // The light blended with its history, read at texture coordinates where the surface last frame at a view depth was.

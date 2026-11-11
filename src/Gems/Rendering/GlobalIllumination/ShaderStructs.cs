@@ -1,10 +1,12 @@
 using System.Runtime.InteropServices;
+using Magic.Graphics;
 
 namespace Magic.GlobalIllumination;
 
 /// <summary>
 /// The gem's own constants, the pass header's y, the twin of <c>Traced.slang</c>'s: the traced diffuse light's,
-/// the traced reflections', and what both read their history with.
+/// the traced reflections', and what both read their history with. Each texture and sampler is its handle, laid
+/// out as the heap id the shader reads.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct GIConstants
@@ -13,7 +15,7 @@ internal record struct GIConstants
 
     public TracedReflectionConstants Reflections;
 
-    public uint Sampler;
+    public GpuSampler Sampler;
 
     /// <summary>
     /// The traced textures' size.
@@ -24,48 +26,48 @@ internal record struct GIConstants
 }
 
 /// <summary>
-/// The heap ids of the traced diffuse light's textures, the twin of <c>Traced.slang</c>'s.
+/// The traced diffuse light's textures, the twin of <c>Traced.slang</c>'s.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct TracedDiffuseConstants
 {
-    public uint Traced;
+    public GpuTexture Traced;
 
-    public uint Filtered;
+    public GpuTexture Filtered;
 
     public TracedBlendConstants Blend;
 }
 
 /// <summary>
-/// The heap ids of the traced reflections' textures, the twin of <c>Traced.slang</c>'s.
+/// The traced reflections' textures, the twin of <c>Traced.slang</c>'s.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct TracedReflectionConstants
 {
-    public uint Traced;
+    public GpuTexture Traced;
 
-    public uint Rays;
+    public GpuTexture Rays;
 
-    public uint Resolved;
+    public GpuTexture Resolved;
 
-    public uint Distance;
+    public GpuTexture Distance;
 
     public TracedBlendConstants Blend;
 }
 
 /// <summary>
-/// The heap ids of what a traced effect blends over frames, the twin of <c>Traced.slang</c>'s.
+/// What a traced effect blends over frames, the twin of <c>Traced.slang</c>'s.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct TracedBlendConstants
 {
-    public uint Light;
+    public GpuTexture Light;
 
-    public uint Depth;
+    public GpuTexture Depth;
 
-    public uint LightHistory;
+    public GpuTexture LightHistory;
 
-    public uint DepthHistory;
+    public GpuTexture DepthHistory;
 
     /// <summary>
     /// 0 while the history holds nothing of the view: this frame starts it afresh.

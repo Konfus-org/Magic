@@ -400,6 +400,33 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
+    /// What <paramref name="preprocessor"/> made of <paramref name="asset"/> as it loaded, read from the cache; else
+    /// the asset is loaded, and what it makes of it made now, on a worker, and cached. The cache misses when the asset
+    /// loaded before the preprocessor was registered, or the cache could not keep it.
+    /// </summary>
+    public async Task<Result<TMade>> LoadPreprocessedAsync<T, TMade>(
+        Handle<T> asset,
+        IAssetPreprocessor<T, TMade> preprocessor,
+        CancellationToken cancel
+    )
+        where T : IAsset<T>
+    {
+        ulong version = GetVersion(asset);
+        Result<TMade> cached = await Caches.ReadAsync(asset.Id, version, preprocessor, cancel).ConfigureAwait(false);
+        if (cached.Ok)
+            return cached;
+
+        Result<T> loaded = await LoadAsync(asset, null, cancel).ConfigureAwait(false);
+        if (!loaded.Ok)
+            return Result.Failure(loaded.Error);
+
+        TMade made = await Task.Run(() => preprocessor.Preprocess(loaded.Value), cancel).ConfigureAwait(false);
+        await Caches.WriteAsync(asset.Id, version, made, preprocessor, cancel).ConfigureAwait(false);
+
+        return Result.Success(made);
+    }
+
+    /// <summary>
     /// Loads every asset of a type Magic or a gem reads, each as the type its <c>.meta</c> names, so what each importer
     /// that is a cache and each <see cref="IAssetPreprocessor{T, TMade}"/> makes of it is in the cache: their ids, or
     /// why one could not be loaded.

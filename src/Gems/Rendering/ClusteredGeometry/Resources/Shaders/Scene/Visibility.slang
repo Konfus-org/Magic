@@ -7,7 +7,6 @@ module "Scene/Visibility";
 
 import Core.Heap;
 import Core.Frame;
-import Core.Math;
 import Scene.Instances;
 import Scene.Clusters;
 import Scene.Vertices;
@@ -178,6 +177,5 @@ public SurfaceInputs CreateSurfaceInputs(PixelTriangle shown)
     inputs.uv = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, lambda);
     inputs.uvDdx = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, shown.bary.ddx);
     inputs.uvDdy = Interpolate(shown.v0.uv, shown.v1.uv, shown.v2.uv, shown.bary.ddy);
-    inputs.viewDirection = NormalizeSafe(-inputs.position, float3(0.0, 0.0, -1.0));
     return inputs;
 }

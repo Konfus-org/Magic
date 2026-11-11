@@ -110,11 +110,3 @@ public float4 SampleGgxReflection(float3 normal, float3 view, float roughness, f
     float pdf = masking * saturate(dot(viewLocal, half)) * DistributionGgx(alpha, half.z) / nDotV;
     return float4(reflect(-view, ToWorld(basis, half)), pdf);
 }
-
-// What the surface reflects of light from everywhere at once, as the sky's: the diffuse under the average Fresnel.
-public float3 EvaluateAmbient(Brdf brdf, float3 normal, float3 view)
-{
-    float nDotV = max(dot(normal, view), 1e-4);
-    float3 fresnel = brdf.f0 + (max(float3(1.0 - brdf.alpha), brdf.f0) - brdf.f0) * Pow5(1.0 - nDotV);
-    return brdf.diffuse * (1.0 - fresnel) + fresnel * (1.0 - brdf.alpha * 0.5);
-}

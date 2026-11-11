@@ -21,11 +21,7 @@ public T Pow5<T : IFloat>(T x) { T x2 = x * x; return x2 * x2 * x; }
 
 public float Max3(float a, float b, float c) { return max(a, max(b, c)); }
 
-public float Min3(float a, float b, float c) { return min(a, min(b, c)); }
-
 public float Max3(float3 v) { return max(v.x, max(v.y, v.z)); }
-
-public float Min3(float3 v) { return min(v.x, min(v.y, v.z)); }
 
 // v as a unit vector, or fallback when v is too short to have a direction.
 public float3 NormalizeSafe(float3 v, float3 fallback)
@@ -37,10 +33,11 @@ public float3 NormalizeSafe(float3 v, float3 fallback)
 // v as a unit vector, or zero when v is too short to have a direction.
 public float3 NormalizeOrZero(float3 v) { return NormalizeSafe(v, float3(0.0)); }
 
-// x moved from the range [fromLow, fromHigh] to [toLow, toHigh], unclamped.
-public float Remap(float x, float fromLow, float fromHigh, float toLow, float toHigh)
+// Whether a sphere touches the axis-aligned box from low to high.
+public bool IsSphereTouchingBox(float3 center, float radius, float3 low, float3 high)
 {
-    return toLow + ((x - fromLow) / (fromHigh - fromLow)) * (toHigh - toLow);
+    float3 outside = max(max(low - center, center - high), 0.0);
+    return dot(outside, outside) <= radius * radius;
 }
 
 // Metres from the camera plane to what a reversed depth is, given the near plane in metres; infinity at depth 0.
@@ -51,6 +48,12 @@ public float ToReversedDepth(float viewDepth, float nearMetres) { return nearMet
 
 // The centre of a texel as texture coordinates in [0, 1].
 public float2 GetTexelCenterUv(uint2 texel, uint2 size) { return (float2(texel) + 0.5) / float2(size); }
+
+// The texel of a texture size texels across and down that texture coordinates in [0, 1] fall in.
+public uint2 GetTexelAt(float2 uv, uint2 size) { return min(uint2(uv * float2(size)), size - 1u); }
+
+// Whether texture coordinates are in [0, 1], on the picture.
+public bool IsOnScreen(float2 uv) { return all(saturate(uv) == uv); }
 
 // Texture coordinates in [0, 1] as clip-space xy in [-1, 1], y up.
 public float2 ToClip(float2 uv) { return float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0); }

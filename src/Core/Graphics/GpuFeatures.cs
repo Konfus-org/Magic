@@ -7,47 +7,9 @@ namespace Magic.Graphics;
 public readonly record struct GpuFeatures
 {
     /// <summary>
-    /// Task and mesh shaders in place of vertex shaders for cluster drawing.
-    /// </summary>
-    public bool HasMeshShaders { get; init; }
-
-    /// <summary>
     /// Ray queries against acceleration structures from any shader.
     /// </summary>
     public bool HasRayQuery { get; init; }
-
-    /// <summary>
-    /// 64-bit atomics on buffers, which a software rasteriser needs.
-    /// </summary>
-    public bool HasAtomic64 { get; init; }
-
-    /// <summary>
-    /// 64-bit atomics on storage images.
-    /// </summary>
-    public bool HasImageAtomic64 { get; init; }
-
-    /// <summary>
-    /// Samplers that take the least or greatest texel rather than their blend.
-    /// </summary>
-    public bool HasSamplerMinMax { get; init; }
-}
-
-/// <summary>
-/// What the GPU is and holds: its name, the alignment an upload's offset takes and its device memory.
-/// </summary>
-public readonly record struct GpuLimits
-{
-    public required string DeviceName { get; init; }
-
-    /// <summary>
-    /// Bytes an upload's offset is a multiple of.
-    /// </summary>
-    public required int UploadAlignment { get; init; }
-
-    /// <summary>
-    /// Bytes of device memory the GPU has for the heap's resources.
-    /// </summary>
-    public required long DeviceMemoryBytes { get; init; }
 }
 
 /// <summary>

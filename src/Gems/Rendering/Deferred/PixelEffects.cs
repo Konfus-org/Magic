@@ -46,14 +46,12 @@ internal sealed class PixelEffects
     /// <summary>
     /// Runs the view's effects that are ready, in order, on frame <paramref name="frameIndex"/>.
     /// </summary>
-    public void Record(in RenderView view, uint frameIndex)
+    public void Record(RenderGraph graph, in GpuView gpu, uint frameIndex)
     {
-        RenderGraph graph = view.Graph;
-
         // The entries and targets of the effects ready to run, in order.
         _running.Clear();
         int passCount = 0;
-        ReadOnlySpan<GpuEffect> effects = view.Gpu.Effects.Span;
+        ReadOnlySpan<GpuEffect> effects = gpu.Effects.Span;
         for (int place = 0; place < effects.Length; place++)
         {
             (ulong material, GpuState state, ShaderEntry apply, ShaderEntry level, EffectNeeds needs) = effects[place];
@@ -64,7 +62,7 @@ internal sealed class PixelEffects
 
             int levels = Math.Min(
                 needs.Levels,
-                Math.Min(MostLevels, TextureDescription.GetFullLevels(view.Gpu.Width, view.Gpu.Height))
+                Math.Min(MostLevels, TextureDescription.GetFullLevels(gpu.Width, gpu.Height))
             );
 
             // Its target and, with a history, the one the frame before filled, the two swapping by the frame's parity;
@@ -73,11 +71,11 @@ internal sealed class PixelEffects
             Result<GpuTexture> target =
                 levels == 0
                     ? Result.Success(GpuTexture.None)
-                    : graph.Texture(GetTarget(_targetNames[filled], view, levels));
+                    : graph.Texture(GetTarget(_targetNames[filled], gpu, levels));
             Result<GpuTexture> history =
                 levels == 0 || !needs.HasHistory
                     ? Result.Success(GpuTexture.None)
-                    : graph.Texture(GetTarget(_targetNames[filled ^ 1], view, levels));
+                    : graph.Texture(GetTarget(_targetNames[filled ^ 1], gpu, levels));
             if (!target.Ok || !history.Ok)
             {
                 Log.Error(
@@ -95,7 +93,7 @@ internal sealed class PixelEffects
                     levels,
                     target.Value,
                     history.Value,
-                    needs.HasHistory && view.Gpu.HasHistory && ranLastFrame
+                    needs.HasHistory && gpu.HasHistory && ranLastFrame
                 )
             );
             _lastFrame[place] = material;
@@ -115,8 +113,8 @@ internal sealed class PixelEffects
         Result<GpuTexture> otherPicture = graph.Texture(
             GpuDescriptions.GetTexture(
                 "Effect picture",
-                view.Gpu.Width,
-                view.Gpu.Height,
+                gpu.Width,
+                gpu.Height,
                 GpuFormat.R16G16B16A16Sfloat,
                 TextureUsages.Storage | TextureUsages.Sampled | TextureUsages.CopySource
             )
@@ -124,14 +122,11 @@ internal sealed class PixelEffects
         Result<GpuSampler> sampler = graph.Sampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
-        foreach (Result made in (ReadOnlySpan<Result>)[passTable, otherPicture, sampler])
+        if (Result.FindFailure(passTable, otherPicture, sampler) is { Ok: false } failed)
         {
-            if (!made.Ok)
-            {
-                Log.Error($"The picture's effects are not drawn: {made.Error}");
+            Log.Error($"The picture's effects are not drawn: {failed.Error}");
 
-                return;
-            }
+            return;
         }
 
         Span<GpuEffectPass> passes = graph.Upload<GpuEffectPass>(passTable.Value, passCount);
@@ -139,24 +134,24 @@ internal sealed class PixelEffects
         // Each effect's levels into its target, then its apply from one picture into the other, which the next reads.
         ReadOnlySpan<GpuResource> surface =
         [
-            view.Gpu.Frame,
-            view.Gpu.EffectRows,
+            gpu.Frame,
+            gpu.EffectRows,
             passTable.Value,
-            view.Gpu.Depth,
-            view.Gpu.GBufferNormal,
-            view.Gpu.GBufferBase,
-            view.Gpu.GBufferSurface,
-            view.Gpu.Velocity,
+            gpu.Depth,
+            gpu.GBufferNormal,
+            gpu.GBufferBase,
+            gpu.GBufferSurface,
+            gpu.Velocity,
         ];
 
-        (GpuTexture picture, GpuTexture other) = (view.Gpu.Hdr, otherPicture.Value);
+        (GpuTexture picture, GpuTexture other) = (gpu.Hdr, otherPicture.Value);
         int pass = 0;
         for (int effect = 0; effect < count; effect++)
         {
             RunningEffect running = _running[effect];
             GpuEffectPass shared = new()
             {
-                Rows = view.Gpu.EffectRows.Id,
+                Rows = gpu.EffectRows.Id,
                 Row = (uint)running.Place,
                 Picture = picture.Id,
                 Target = running.Target.Id,
@@ -171,7 +166,7 @@ internal sealed class PixelEffects
                     .Compute(
                         "Fill effect level",
                         running.Level,
-                        new GpuConstants(view.Gpu.Frame.Id, passTable.Value.Id, (uint)pass),
+                        new GpuConstants(gpu.Frame.Id, passTable.Value.Id, (uint)pass),
                         RenderStage.Post
                     )
                     .Reads(surface)
@@ -181,7 +176,7 @@ internal sealed class PixelEffects
                     fill.Reads(running.Target, level - 1);
 
                 fill.Writes(running.Target, level)
-                    .DispatchOver(Math.Max(view.Gpu.Width >> level, 1), Math.Max(view.Gpu.Height >> level, 1));
+                    .DispatchOver(Math.Max(gpu.Width >> level, 1), Math.Max(gpu.Height >> level, 1));
                 pass++;
             }
 
@@ -190,7 +185,7 @@ internal sealed class PixelEffects
                 .Compute(
                     "Apply effect",
                     running.Apply,
-                    new GpuConstants(view.Gpu.Frame.Id, passTable.Value.Id, (uint)pass),
+                    new GpuConstants(gpu.Frame.Id, passTable.Value.Id, (uint)pass),
                     RenderStage.Post
                 )
                 .Reads(surface)
@@ -198,20 +193,20 @@ internal sealed class PixelEffects
             if (running.Levels > 0)
                 applied.Reads(running.Target).Reads(running.History);
 
-            applied.Writes(other).DispatchOver(view.Gpu.Width, view.Gpu.Height);
+            applied.Writes(other).DispatchOver(gpu.Width, gpu.Height);
             pass++;
             (picture, other) = (other, picture);
         }
 
-        if (picture != view.Gpu.Hdr)
-            graph.Blit(picture, view.Gpu.Hdr, RenderStage.Post, TextureFilter.Linear);
+        if (picture != gpu.Hdr)
+            graph.Blit(picture, gpu.Hdr, RenderStage.Post, TextureFilter.Linear);
     }
 
-    private static TextureDescription GetTarget(string name, in RenderView view, int levels) =>
+    private static TextureDescription GetTarget(string name, in GpuView gpu, int levels) =>
         GpuDescriptions.GetTexture(
             name,
-            view.Gpu.Width,
-            view.Gpu.Height,
+            gpu.Width,
+            gpu.Height,
             GpuFormat.R16G16B16A16Sfloat,
             TextureUsages.Storage | TextureUsages.Sampled,
             levels

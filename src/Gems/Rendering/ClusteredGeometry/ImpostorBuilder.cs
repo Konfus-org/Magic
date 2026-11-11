@@ -11,9 +11,17 @@ namespace Magic.ClusteredGeometry;
 /// </summary>
 internal static class ImpostorBuilder
 {
-    private const int Views = ModelClusters.ImpostorViews;
-    private const int Tile = ModelClusters.ImpostorTile;
-    private const int Size = ModelClusters.ImpostorSize;
+    /// <summary>
+    /// Views across and down an atlas, on an octahedral grid over the whole sphere.
+    /// </summary>
+    public const int Views = 12;
+
+    /// <summary>
+    /// Texels a side of one view of an atlas.
+    /// </summary>
+    public const int Tile = 64;
+
+    public const int Size = Views * Tile;
 
     /// <summary>
     /// The atlas as RGBA16F halves, and the texture coordinates of the same texels as RG16F halves, row by row, the views

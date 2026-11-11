@@ -31,12 +31,7 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
     /// </summary>
     private const int HitMaterialBytes = 32;
 
-    private readonly ShaderEntry _averageShader = new()
-    {
-        Module = assets.Find<Shader>("Shaders/AverageMaterials.slang"),
-        Name = "AverageMaterials",
-        Stage = ShaderStage.Compute,
-    };
+    private readonly ShaderEntry _averageShader = PassShaders.GetEntry(assets, "AverageMaterials", "AverageMaterials");
 
     /// <summary>
     /// The average entry for each material shader the world's gem has numbered, in their order.
@@ -64,10 +59,7 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
         // The structure over the view's instances and its instances asked for every frame, so the structure built last
         // stays, and the hit materials table with a row for each of the material table's.
         Result<GpuBuffer> hitMaterials = graph.Buffer(
-            SharedResources.HitMaterials with
-            {
-                Bytes = (long)world.MaterialCapacity * HitMaterialBytes,
-            }
+            GpuDescriptions.GetBuffer("Hit materials", (long)world.MaterialCapacity * HitMaterialBytes)
         );
         Result<GpuBuffer> instances = graph.Buffer(
             GpuDescriptions.GetBuffer(
@@ -85,14 +77,11 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
                 }
             )
             : Result.Failure(instances.Error);
-        foreach (Result made in (ReadOnlySpan<Result>)[hitMaterials, instances, structure])
+        if (Result.FindFailure(hitMaterials, instances, structure) is { Ok: false } failed)
         {
-            if (!made.Ok)
-            {
-                Log.Error($"The world's acceleration structure is not made: {made.Error}");
+            Log.Error($"The world's acceleration structure is not made: {failed.Error}");
 
-                return null;
-            }
+            return null;
         }
 
         // Built again whenever the rows changed since the last build; a model's arrival builds every row again.

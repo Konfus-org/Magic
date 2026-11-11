@@ -33,11 +33,6 @@ public enum GpuAccess : byte
     DepthTarget,
 
     /// <summary>
-    /// Read as a depth target that is tested against but not written, and sampled at the same time.
-    /// </summary>
-    DepthRead,
-
-    /// <summary>
     /// Read as the arguments of an indirect dispatch or draw.
     /// </summary>
     Indirect,

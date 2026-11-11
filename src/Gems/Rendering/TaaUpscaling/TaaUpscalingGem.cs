@@ -32,12 +32,7 @@ public sealed class TaaUpscalingGem : IGem, IRenderInto<Upscaling>
 
     public TaaUpscalingGem(AssetManager assets)
     {
-        _shader = new()
-        {
-            Module = assets.Find<Shader>("Shaders/TaaUpscaling.slang"),
-            Name = "UpscalePicture",
-            Stage = ShaderStage.Compute,
-        };
+        _shader = PassShaders.GetEntry(assets, "TaaUpscaling", "UpscalePicture");
         _upscaling = new Upscaling(Record);
     }
 
@@ -65,14 +60,14 @@ public sealed class TaaUpscalingGem : IGem, IRenderInto<Upscaling>
         (int width, int height) = (view.ShownWidth, view.ShownHeight);
         Result<GpuTexture> first = graph.Texture(GetResolved("Resolved picture", width, height));
         Result<GpuTexture> second = graph.Texture(GetResolved("Other resolved picture", width, height));
-        foreach (Result made in (ReadOnlySpan<Result>)[first, second])
+        Result<GpuSampler> sampler = graph.Sampler(
+            new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
+        );
+        if (Result.FindFailure(first, second, sampler) is { Ok: false } failed)
         {
-            if (!made.Ok)
-            {
-                Log.Error($"The picture is not upscaled: {made.Error}");
+            Log.Error($"The picture is not upscaled: {failed.Error}");
 
-                return GpuTexture.None;
-            }
+            return GpuTexture.None;
         }
 
         // Last frame's resolved picture is this frame's history, where last frame drew this view at this size; the
@@ -86,7 +81,7 @@ public sealed class TaaUpscalingGem : IGem, IRenderInto<Upscaling>
             .Compute(
                 "Upscale picture",
                 _shader,
-                new GpuConstants(view.Frame.Id, hasHistory ? history.Id : resolved.Id, resolved.Id),
+                new GpuConstants(view.Frame.Id, hasHistory ? history.Id : resolved.Id, resolved.Id, sampler.Value.Id),
                 RenderStage.Post
             )
             .Reads(view.Frame, view.Output, view.Depth, view.Velocity)

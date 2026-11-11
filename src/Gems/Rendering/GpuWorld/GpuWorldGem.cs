@@ -8,7 +8,6 @@ using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Files;
 using Magic.Graphics;
 using Magic.Projects;
 using Magic.Threading;
@@ -89,9 +88,9 @@ public sealed class GpuWorldGem
     private int _worldNumber;
 
     /// <summary>
-    /// The inputs <see cref="Render"/> uploads, taken from <see cref="_inputs"/>, until newer are. Render thread.
+    /// The number of the world <see cref="Render"/> drew last, none before the first frame. Render thread.
     /// </summary>
-    private RenderInputs? _current;
+    private int? _drawnWorldNumber;
 
     /// <summary>
     /// Whether the gem makes views: failed once a shader or a pool is not made. Render thread.
@@ -114,7 +113,6 @@ public sealed class GpuWorldGem
         GpuWorldSettings settings,
         IShaderCompiler shaders,
         AssetManager assets,
-        Caches caches,
         IEcs ecs,
         Threads threads
     )
@@ -127,7 +125,6 @@ public sealed class GpuWorldGem
         _preprocessing = assets.Register(models);
         _resources = new GpuResources(
             models,
-            caches,
             assets,
             shaders,
             threads,
@@ -204,21 +201,16 @@ public sealed class GpuWorldGem
             return null;
         }
 
-        if (_inputs.TryTake(out RenderInputs? newest))
-        {
-            // The first frame of another world forgets last frame's camera and size, so nothing drawn before carries
-            // into it.
-            if (newest.WorldNumber != _current?.WorldNumber)
-                _frameView.ClearHistory();
-
-            if (_current is not null)
-                _inputs.Return(_current);
-
-            _current = newest;
-        }
-
-        if (_current is not { } inputs)
+        if (_inputs.TakeNewest() is not { } inputs)
             return null;
+
+        // The first frame of another world forgets last frame's camera and size, so nothing drawn before carries
+        // into it.
+        if (inputs.WorldNumber != _drawnWorldNumber)
+        {
+            _frameView.ClearHistory();
+            _drawnWorldNumber = inputs.WorldNumber;
+        }
 
         // Entities -> resources -> rows: the renderers written since the inputs before ask for their models and have
         // their rows built again, and the materials' rows are made again at upload.
@@ -519,8 +511,16 @@ public sealed class GpuWorldGem
         // order; the glass targets only while a material draws translucent, so the graph frees them in a world with
         // none.
         bool hasGlass = _resources.HasTranslucent;
-        Result<GpuBuffer> constants = graph.Buffer(SharedResources.Frame);
-        Result<GpuTexture> depth = graph.Texture(GetShared(SharedResources.Depth));
+        Result<GpuBuffer> constants = graph.Buffer(GpuDescriptions.GetBuffer("Frame constants", 1024));
+        Result<GpuTexture> depth = graph.Texture(
+            GpuDescriptions.GetTexture(
+                "Depth",
+                width,
+                height,
+                GpuFormat.D32Sfloat,
+                TextureUsages.DepthTarget | TextureUsages.Sampled
+            )
+        );
         Result<GpuTexture> glassDepth = GetGlass(
             GpuDescriptions.GetTexture(
                 "Glass depth",
@@ -533,10 +533,10 @@ public sealed class GpuWorldGem
         Result<GpuTexture> glassBase = GetGlass(GetTarget("Glass base", GpuFormat.R8G8B8A8Unorm));
         Result<GpuTexture> glassNormal = GetGlass(GetTarget("Glass normal", GpuFormat.R16G16Unorm));
         Result<GpuTexture> glassSurface = GetGlass(GetTarget("Glass surface", GpuFormat.R16G16B16A16Sfloat));
-        Result<GpuTexture> normal = graph.Texture(GetShared(SharedResources.GBufferNormal));
+        Result<GpuTexture> normal = graph.Texture(GetTarget("GBuffer normal", GpuFormat.R16G16Unorm));
         Result<GpuTexture> baseColor = graph.Texture(GetTarget("GBuffer base", GpuFormat.R8G8B8A8Unorm));
-        Result<GpuTexture> surface = graph.Texture(GetShared(SharedResources.GBufferSurface));
-        Result<GpuTexture> velocity = graph.Texture(GetShared(SharedResources.Velocity));
+        Result<GpuTexture> surface = graph.Texture(GetTarget("GBuffer surface", GpuFormat.R8G8B8A8Unorm));
+        Result<GpuTexture> velocity = graph.Texture(GetTarget("Velocity", GpuFormat.R16G16B16A16Sfloat));
         Result<GpuTexture> hdr = graph.Texture(
             GpuDescriptions.GetTexture(
                 "HDR",
@@ -566,34 +566,29 @@ public sealed class GpuWorldGem
             inputs.SpotLights,
             inputs.RectLights
         );
-        Result<GpuTexture> transmittance = graph.Texture(SharedResources.SkyTransmittance);
-        Result<GpuTexture> multiScattering = graph.Texture(SharedResources.SkyMultiScattering);
-        Result<GpuTexture> skyView = graph.Texture(SharedResources.SkyView);
-        foreach (
-            Result asked in (ReadOnlySpan<Result>)
-                [
-                    constants,
-                    depth,
-                    glassDepth,
-                    glassBase,
-                    glassNormal,
-                    glassSurface,
-                    normal,
-                    baseColor,
-                    surface,
-                    velocity,
-                    hdr,
-                    output,
-                    lights,
-                    transmittance,
-                    multiScattering,
-                    skyView,
-                ]
-        )
-        {
-            if (!asked.Ok)
-                return Result.Failure(asked.Error);
-        }
+        Result<GpuTexture> transmittance = graph.Texture(GetSkyTable("Sky transmittance", 256, 64));
+        Result<GpuTexture> multiScattering = graph.Texture(GetSkyTable("Sky multi-scattering", 32, 32));
+        Result<GpuTexture> skyView = graph.Texture(GetSkyTable("Sky view", 192, 108));
+        Result asked = Result.FindFailure(
+            constants,
+            depth,
+            glassDepth,
+            glassBase,
+            glassNormal,
+            glassSurface,
+            normal,
+            baseColor,
+            surface,
+            velocity,
+            hdr,
+            output,
+            lights,
+            transmittance,
+            multiScattering,
+            skyView
+        );
+        if (!asked.Ok)
+            return Result.Failure(asked.Error);
 
         GpuView view = new()
         {
@@ -626,7 +621,6 @@ public sealed class GpuWorldGem
             HeapTextures = _resources.GetHeapTextures(),
             LightTable = lights.Value.Table,
             LightTiles = lights.Value.Tiles,
-            LightCount = lights.Value.Count,
             SkyTransmittance = transmittance.Value,
             SkyMultiScattering = multiScattering.Value,
             SkyView = skyView.Value,
@@ -637,6 +631,7 @@ public sealed class GpuWorldGem
         Result uploaded = _frameView.Upload(
             graph,
             view,
+            lights.Value.Count,
             camera,
             frame,
             jitter,
@@ -652,7 +647,8 @@ public sealed class GpuWorldGem
         TextureDescription GetTarget(string name, GpuFormat format) =>
             GpuDescriptions.GetTexture(name, width, height, format);
 
-        TextureDescription GetShared(in TextureDescription shared) => shared with { Width = width, Height = height };
+        static TextureDescription GetSkyTable(string name, int width, int height) =>
+            GpuDescriptions.GetTexture(name, width, height, GpuFormat.R16G16B16A16Sfloat);
 
         Result<GpuTexture> GetGlass(in TextureDescription glass) =>
             hasGlass ? graph.Texture(glass) : Result.Success(GpuTexture.None);

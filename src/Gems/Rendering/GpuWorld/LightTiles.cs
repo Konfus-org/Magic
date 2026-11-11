@@ -28,9 +28,9 @@ internal sealed class LightTiles(AssetManager assets)
     /// <summary>
     /// The twin of <c>Scene/Lights.slang</c>'s.
     /// </summary>
-    public static readonly int MaxLights = (int)(SharedResources.Lights.Bytes / GpuLight.Bytes);
+    public const int MaxLights = 1024;
 
-    private static readonly int _buckets = MaxLights / 32;
+    private const int Buckets = MaxLights / 32;
 
     /// <summary>
     /// The frame's lights as the table holds them, written from the snapshots before they upload.
@@ -56,12 +56,12 @@ internal sealed class LightTiles(AssetManager assets)
         EcsSnapshot<Transform, RectLight> rects
     )
     {
-        Result<GpuBuffer> table = graph.Buffer(SharedResources.Lights);
+        Result<GpuBuffer> table = graph.Buffer(GpuDescriptions.GetBuffer("Light table", MaxLights * GpuLight.Bytes));
         if (!table.Ok)
             return Result.Failure(table.Error);
 
         Result<GpuBuffer> tiles = graph.Buffer(
-            GpuDescriptions.GetBuffer("Light tiles", (long)GetTiles(width) * GetTiles(height) * _buckets * sizeof(uint))
+            GpuDescriptions.GetBuffer("Light tiles", (long)GetTiles(width) * GetTiles(height) * Buckets * sizeof(uint))
         );
         if (!tiles.Ok)
             return Result.Failure(tiles.Error);

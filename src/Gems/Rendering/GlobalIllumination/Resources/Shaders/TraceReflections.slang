@@ -10,7 +10,6 @@ module "TraceReflections";
 import Core.Heap;
 import Core.Frame;
 import Core.Math;
-import Core.Pack;
 import Core.Color;
 import Core.Random;
 import Scene.Lights;
@@ -51,12 +50,11 @@ struct ReflectingSurface
 bool LoadReflectingSurface(FrameConstants frame, uint2 pixel, out ReflectingSurface surface)
 {
     TextureRef depthTexture = { frame.depth };
-    TextureRef normalTexture = { frame.gbufferNormal };
     TextureRef surfaceTexture = { frame.gbufferSurface };
     float depth = depthTexture.Load(pixel, 0u).x;
     surface.roughness = surfaceTexture.Load(pixel, 0u).x;
-    surface.normal = DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0);
-    surface.relative = ReconstructRelative(frame, GetTexelCenterUv(pixel, uint2(frame.width, frame.height)), depth);
+    surface.normal = LoadNormal(frame.gbufferNormal, pixel);
+    surface.relative = ReconstructPixel(frame, pixel, depth);
     surface.view = NormalizeSafe(-surface.relative, surface.normal);
     return depth > 0.0 && surface.roughness <= TracedRoughness;
 }
@@ -85,8 +83,7 @@ void TraceReflections<S : ISky>(uint3 thread : SV_DispatchThreadID)
         surface.normal, surface.view, surface.roughness, GetRandom(thread.xy, frame.frameIndex, 1u).xy);
     float3 world = surface.relative + frame.cameraPosition.xyz;
     float3 origin = world + surface.normal * GetRayOffset(frame, surface.relative);
-    AccelerationRef acceleration = { GetTracedWorld().acceleration };
-    RaytracingAccelerationStructure scene = acceleration.Get();
+    RaytracingAccelerationStructure scene = GetTracedAcceleration();
     RayHit hit = GetClosestHit(scene, origin, ray.xyz, RayRange, RAY_FLAG_CULL_BACK_FACING_TRIANGLES);
     Lights lights = GetLights();
     float4 light = float4(GetSkyRadiance<S>(lights, ray.xyz), RayRange);

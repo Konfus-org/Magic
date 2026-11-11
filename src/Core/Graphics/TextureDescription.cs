@@ -10,16 +10,6 @@ public enum TextureKind : byte
     Texture2D,
 
     /// <summary>
-    /// <see cref="TextureDescription.Layers"/> textures of one size, read as one with a layer index.
-    /// </summary>
-    Texture2DArray,
-
-    /// <summary>
-    /// Six square faces, read with a direction.
-    /// </summary>
-    Cube,
-
-    /// <summary>
     /// <see cref="TextureDescription.Depth"/> slices, read with three coordinates.
     /// </summary>
     Texture3D,
@@ -85,11 +75,6 @@ public readonly record struct TextureDescription
     /// Slices of a <see cref="TextureKind.Texture3D"/>; 1 for the rest.
     /// </summary>
     public int Depth { get; init; } = 1;
-
-    /// <summary>
-    /// Layers of a <see cref="TextureKind.Texture2DArray"/>; 6 for a cube, 1 for the rest.
-    /// </summary>
-    public int Layers { get; init; } = 1;
 
     /// <summary>
     /// Mip levels, level 0 the full size and each the half of the one before.

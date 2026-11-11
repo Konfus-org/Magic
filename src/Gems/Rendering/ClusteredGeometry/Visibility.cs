@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
+using System.Runtime.InteropServices;
 using Magic.Assets;
-using Magic.GpuWorld;
 using Magic.Graphics;
 using Magic.Utils;
 
@@ -8,13 +8,22 @@ namespace Magic.ClusteredGeometry;
 
 /// <summary>
 /// The view as the world on the GPU posted it this frame, the graph its passes record into, the pools the clusters are
-/// in, and the targets and buffers they are drawn through, all the view's size.
+/// in, and the targets and buffers they are drawn through, all the view's size. The cull's buffers: what each pass of
+/// it counts, with the rows asked for by distance, the rows each instance asks for, the visible clusters and their
+/// draws, what last frame's depth pyramid hid, to retest, and the cluster budget's level, which carries from frame to
+/// frame.
 /// </summary>
 internal readonly record struct RenderView(
     GpuView Gpu,
     RenderGraph Graph,
     ClusterPools Pools,
-    CullBuffers Cull,
+    GpuBuffer Budget,
+    GpuBuffer Counts,
+    GpuBuffer InstanceRows,
+    GpuBuffer RetestArguments,
+    GpuBuffer VisibleClusters,
+    GpuBuffer DrawArguments,
+    GpuBuffer RetestList,
     GpuTexture Visibility,
     GpuTexture GlassVisibility,
     GpuTexture Hzb
@@ -22,21 +31,6 @@ internal readonly record struct RenderView(
 {
     public int HzbLevels => TextureDescription.GetFullLevels(Gpu.Width, Gpu.Height);
 }
-
-/// <summary>
-/// The cull's buffers: what each pass of it counts, with the rows asked for by distance, the rows each instance asks
-/// for, the visible clusters and their draws, what last frame's depth pyramid hid, to retest, and the cluster budget's
-/// level, which carries from frame to frame.
-/// </summary>
-internal readonly record struct CullBuffers(
-    GpuBuffer Budget,
-    GpuBuffer Counts,
-    GpuBuffer InstanceRows,
-    GpuBuffer RetestArguments,
-    GpuBuffer VisibleClusters,
-    GpuBuffer DrawArguments,
-    GpuBuffer RetestList
-);
 
 /// <summary>
 /// What a view sees: the cluster budget's handoff and error threshold set from what last frame asked for; every
@@ -203,37 +197,37 @@ internal sealed class Visibility(AssetManager assets)
                 levels: TextureDescription.GetFullLevels(width, height)
             )
         );
-        foreach (
-            Result made in (ReadOnlySpan<Result>)
-                [
-                    visibility,
-                    glassVisibility,
-                    hzb,
-                    budget,
-                    counts,
-                    instanceRows,
-                    retestArguments,
-                    visibleClusters,
-                    drawArguments,
-                    retestList,
-                ]
-        )
-        {
-            if (!made.Ok)
-                return Result.Failure(made.Error);
-        }
+        Result asked = Result.FindFailure(
+            visibility,
+            glassVisibility,
+            hzb,
+            budget,
+            counts,
+            instanceRows,
+            retestArguments,
+            visibleClusters,
+            drawArguments,
+            retestList
+        );
+        if (!asked.Ok)
+            return Result.Failure(asked.Error);
 
         graph.Upload(retestArguments.Value, [0u, 1u, 1u]);
-        CullBuffers cull = new(
+        RenderView view = new(
+            gpu,
+            graph,
+            pools,
             budget.Value,
             counts.Value,
             instanceRows.Value,
             retestArguments.Value,
             visibleClusters.Value,
             drawArguments.Value,
-            retestList.Value
+            retestList.Value,
+            visibility.Value,
+            glassVisibility.Value,
+            hzb.Value
         );
-        RenderView view = new(gpu, graph, pools, cull, visibility.Value, glassVisibility.Value, hzb.Value);
         ClusterConstants clusters = new()
         {
             HzbLevels = (uint)view.HzbLevels,
@@ -246,11 +240,11 @@ internal sealed class Visibility(AssetManager assets)
             Indices = pools.Indices.Id,
             Vertices = pools.Vertices.Id,
             Models = pools.Models.Id,
-            VisibleClusters = cull.VisibleClusters.Id,
-            DrawArguments = cull.DrawArguments.Id,
-            Counts = cull.Counts.Id,
-            RetestList = cull.RetestList.Id,
-            RetestArguments = cull.RetestArguments.Id,
+            VisibleClusters = view.VisibleClusters.Id,
+            DrawArguments = view.DrawArguments.Id,
+            Counts = view.Counts.Id,
+            RetestList = view.RetestList.Id,
+            RetestArguments = view.RetestArguments.Id,
             Hzb = view.Hzb.Id,
             Visibility = view.Visibility.Id,
             GlassVisibility = view.GlassVisibility.Id,
@@ -267,16 +261,14 @@ internal sealed class Visibility(AssetManager assets)
     /// </summary>
     public void Record(in RenderView view)
     {
-        CullBuffers cull = view.Cull;
-
         // Budget: last frame's count steers the frame's handoff and error threshold, then the counts start again.
         view.Graph.Compute(
                 "Budget clusters",
                 _budgetShader,
-                new GpuConstants(view.Gpu.Frame.Id, 0, cull.Budget.Id),
+                new GpuConstants(view.Gpu.Frame.Id, 0, view.Budget.Id),
                 RenderStage.Geometry
             )
-            .Writes(view.Gpu.Frame, cull.Counts, cull.Budget)
+            .Writes(view.Gpu.Frame, view.Counts, view.Budget)
             .Dispatch(1, 1);
 
         // Cull: one group an instance over its clusters, counted by distance, the nearest given their rows while the
@@ -286,11 +278,11 @@ internal sealed class Visibility(AssetManager assets)
         view.Graph.Compute(
                 "Count clusters",
                 _cullShader,
-                new GpuConstants(view.Gpu.Frame.Id, ModeCount, cull.InstanceRows.Id),
+                new GpuConstants(view.Gpu.Frame.Id, ModeCount, view.InstanceRows.Id),
                 RenderStage.Geometry
             )
             .Reads(view.Gpu.Frame, view.Gpu.Instances, view.Pools.Clusters, view.Pools.Models, view.Hzb)
-            .Writes(cull.Counts, cull.InstanceRows)
+            .Writes(view.Counts, view.InstanceRows)
             .Dispatch(across, down);
         view.Graph.Compute(
                 "Fit clusters",
@@ -299,12 +291,12 @@ internal sealed class Visibility(AssetManager assets)
                 RenderStage.Geometry
             )
             .Reads(view.Gpu.Frame)
-            .Writes(cull.Counts)
+            .Writes(view.Counts)
             .Dispatch(1, 1);
         view.Graph.Compute(
                 "Place clusters",
                 _cullShader,
-                new GpuConstants(view.Gpu.Frame.Id, ModePlace, cull.InstanceRows.Id),
+                new GpuConstants(view.Gpu.Frame.Id, ModePlace, view.InstanceRows.Id),
                 RenderStage.Geometry
             )
             .Reads(
@@ -314,15 +306,15 @@ internal sealed class Visibility(AssetManager assets)
                 view.Pools.Clusters,
                 view.Pools.Models,
                 view.Hzb,
-                cull.InstanceRows
+                view.InstanceRows
             )
-            .Writes(cull.Counts, cull.VisibleClusters, cull.DrawArguments, cull.RetestList, cull.RetestArguments)
+            .Writes(view.Counts, view.VisibleClusters, view.DrawArguments, view.RetestList, view.RetestArguments)
             .Dispatch(across, down);
         RecordDraw(view, _drawShaders, "Draw visibility", GetTargets(view, TargetLoad.Clear), DrawRegion.Visible);
         RecordDraw(view, _fadingShaders, "Draw fading", GetTargets(view, TargetLoad.Keep), DrawRegion.Fading);
         ImmutableArray<GpuResource> heapTextures = [.. view.Gpu.HeapTextures, .. view.Pools.Atlases];
         RecordImpostors(view, heapTextures, "Draw impostors", DrawRegion.Impostors);
-        RecordHzb(view);
+        RecordHzb(view, GpuTexture.None);
 
         // Retest the list against the new pyramid, as many groups as the cull left in the retest arguments.
         view.Graph.Compute(
@@ -338,12 +330,12 @@ internal sealed class Visibility(AssetManager assets)
                 view.Pools.Clusters,
                 view.Pools.Models,
                 view.Hzb,
-                cull.RetestList,
-                cull.VisibleClusters
+                view.RetestList,
+                view.VisibleClusters
             )
-            .Writes(cull.Counts, cull.DrawArguments)
-            .Indirect(cull.RetestArguments)
-            .DispatchIndirect(cull.RetestArguments, 0);
+            .Writes(view.Counts, view.DrawArguments)
+            .Indirect(view.RetestArguments)
+            .DispatchIndirect(view.RetestArguments, 0);
         RecordDraw(view, _drawShaders, "Draw retested", GetTargets(view, TargetLoad.Keep), DrawRegion.Retested);
         RecordDraw(
             view,
@@ -353,7 +345,10 @@ internal sealed class Visibility(AssetManager assets)
             DrawRegion.RetestedFading
         );
         RecordImpostors(view, heapTextures, "Draw retested impostors", DrawRegion.RetestedImpostors);
-        RecordHzb(view);
+
+        // The picture cleared before the material resolve writes emissive light into it, so a pixel that no resolve
+        // writes this frame, while its pass builds or after it failed, adds none.
+        RecordHzb(view, view.Gpu.Hdr);
 
         // The nearest translucent surface in front of the opaque ones, from both passes' draws, where the view has glass.
         if (!view.GlassVisibility.IsNone)
@@ -372,12 +367,42 @@ internal sealed class Visibility(AssetManager assets)
             );
         }
 
-        // Resolve each pixel's material into the GBuffer, a pass for each material shader, which resolves the pixels whose
-        // rows it draws.
+        // Resolve each pixel's material into the GBuffer, with its emissive light in the picture for the shading to add
+        // to, a pass for each material shader, which resolves the pixels whose rows it draws, and the panes it draws into
+        // the glass targets where the view has them.
         ReadOnlySpan<ShaderEntry> resolves = GetResolveShaders(view.Gpu.MaterialShaders);
         for (int shader = 0; shader < resolves.Length; shader++)
         {
-            RecordResolve(view, heapTextures, shader);
+            view.Graph.Compute(
+                    "Resolve materials",
+                    resolves[shader],
+                    new GpuConstants(view.Gpu.Frame.Id, view.Pools.Impostors.Id, (uint)shader),
+                    RenderStage.Geometry
+                )
+                .Reads(
+                    view.Gpu.Frame,
+                    view.Gpu.Instances,
+                    view.Pools.Impostors,
+                    view.Pools.Clusters,
+                    view.Pools.Models,
+                    view.Gpu.Vertices,
+                    view.Pools.Vertices,
+                    view.Pools.Indices,
+                    view.Gpu.Materials,
+                    view.VisibleClusters,
+                    view.Visibility,
+                    view.GlassVisibility
+                )
+                .Reads(heapTextures.AsSpan())
+                .Writes(
+                    view.Gpu.GBufferNormal,
+                    view.Gpu.GBufferBase,
+                    view.Gpu.GBufferSurface,
+                    view.Gpu.Velocity,
+                    view.Gpu.Hdr
+                )
+                .Writes(view.Gpu.GlassBase, view.Gpu.GlassNormal, view.Gpu.GlassSurface)
+                .DispatchOver(view.Gpu.Width, view.Gpu.Height);
         }
     }
 
@@ -391,7 +416,7 @@ internal sealed class Visibility(AssetManager assets)
             _resolveShaders.Add(_resolveShader with { TypeArguments = [materialShaders[shader]] });
         }
 
-        return System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_resolveShaders);
+        return CollectionsMarshal.AsSpan(_resolveShaders);
     }
 
     /// <summary>
@@ -427,7 +452,7 @@ internal sealed class Visibility(AssetManager assets)
                     view.Pools.Clusters,
                     view.Pools.Models,
                     view.Pools.Indices,
-                    view.Cull.VisibleClusters
+                    view.VisibleClusters
                 )
                 .Reads(reads),
             view,
@@ -439,11 +464,11 @@ internal sealed class Visibility(AssetManager assets)
     /// draws, as many as it counted at the region's word of the counts.
     /// </summary>
     private static void DrawIndirect(DrawPass draw, in RenderView view, DrawRegion region) =>
-        draw.Indirect(view.Cull.DrawArguments, view.Cull.Counts)
+        draw.Indirect(view.DrawArguments, view.Counts)
             .DrawIndirectCount(
-                view.Cull.DrawArguments,
+                view.DrawArguments,
                 (ulong)region * MaxVisibleClusters * DrawArgumentsBytes,
-                view.Cull.Counts,
+                view.Counts,
                 (ulong)region * sizeof(uint),
                 MaxVisibleClusters
             );
@@ -462,11 +487,7 @@ internal sealed class Visibility(AssetManager assets)
             view.Graph.Draw(
                     name,
                     _impostorShaders,
-                    new GpuRenderTargets
-                    {
-                        Colors = [new GpuTarget { Texture = view.Visibility, Load = TargetLoad.Keep }],
-                        Depth = new GpuTarget { Texture = view.Gpu.Depth, Load = TargetLoad.Keep },
-                    },
+                    GetTargets(view, TargetLoad.Keep),
                     new GpuConstants(view.Gpu.Frame.Id, 0, view.Pools.Impostors.Id),
                     RenderStage.Geometry
                 )
@@ -477,9 +498,10 @@ internal sealed class Visibility(AssetManager assets)
         );
 
     /// <summary>
-    /// The depth pyramid from the depth so far, a level a pass.
+    /// The depth pyramid from the depth so far, a level a pass, the first also clearing <paramref name="picture"/>
+    /// unless it is none.
     /// </summary>
-    private void RecordHzb(in RenderView view)
+    private void RecordHzb(in RenderView view, GpuTexture picture)
     {
         for (int level = 0; level < view.HzbLevels; level++)
         {
@@ -487,50 +509,18 @@ internal sealed class Visibility(AssetManager assets)
                 .Graph.Compute(
                     $"Build depth pyramid {level}",
                     _buildHzbShader,
-                    new GpuConstants(view.Gpu.Frame.Id, (uint)level),
+                    new GpuConstants(view.Gpu.Frame.Id, (uint)level, picture.Id),
                     RenderStage.Geometry
                 )
                 .Reads(view.Gpu.Frame);
             if (level == 0)
-                build.Reads(view.Gpu.Depth);
+                build.Reads(view.Gpu.Depth).Writes(picture);
             else
                 build.Reads(view.Hzb, level - 1);
 
             build.Writes(view.Hzb, level);
             build.DispatchOver(Math.Max(view.Gpu.Width >> level, 1), Math.Max(view.Gpu.Height >> level, 1));
         }
-    }
-
-    /// <summary>
-    /// The pixels whose rows material shader <paramref name="shader"/> draws, resolved into the GBuffer, and the panes
-    /// it draws into the glass targets where the view has them.
-    /// </summary>
-    private void RecordResolve(in RenderView view, ImmutableArray<GpuResource> heapTextures, int shader)
-    {
-        view.Graph.Compute(
-                "Resolve materials",
-                _resolveShaders[shader],
-                new GpuConstants(view.Gpu.Frame.Id, view.Pools.Impostors.Id, (uint)shader),
-                RenderStage.Geometry
-            )
-            .Reads(
-                view.Gpu.Frame,
-                view.Gpu.Instances,
-                view.Pools.Impostors,
-                view.Pools.Clusters,
-                view.Pools.Models,
-                view.Gpu.Vertices,
-                view.Pools.Vertices,
-                view.Pools.Indices,
-                view.Gpu.Materials,
-                view.Cull.VisibleClusters,
-                view.Visibility,
-                view.GlassVisibility
-            )
-            .Reads(heapTextures.AsSpan())
-            .Writes(view.Gpu.GBufferNormal, view.Gpu.GBufferBase, view.Gpu.GBufferSurface, view.Gpu.Velocity)
-            .Writes(view.Gpu.GlassBase, view.Gpu.GlassNormal, view.Gpu.GlassSurface)
-            .DispatchOver(view.Gpu.Width, view.Gpu.Height);
     }
 
     /// <summary>

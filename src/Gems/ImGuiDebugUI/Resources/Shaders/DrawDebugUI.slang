@@ -7,6 +7,7 @@ module "DrawDebugUI";
 
 import Core.Heap;
 import Core.Pass;
+import Core.Pack;
 
 // One of the UI's vertices, as ImGui writes it.
 struct DebugUIVertex
@@ -39,12 +40,11 @@ Varyings DrawDebugUIVertex(uint index : SV_VertexID)
     ArrayRef<DebugUIVertex> vertices = { constants.vertices };
     DebugUIVertex vertex = vertices[GetPassHeader().y + index];
     float2 ndc = vertex.position * constants.inverseSize * 2.0 - 1.0;
-    uint color = vertex.color;
 
     Varyings output;
     output.position = float4(ndc.x, -ndc.y, 0.0, 1.0);
     output.uv = vertex.uv;
-    output.color = float4(color & 0xFFu, (color >> 8) & 0xFFu, (color >> 16) & 0xFFu, color >> 24) / 255.0;
+    output.color = UnpackUnorm4x8(vertex.color);
     return output;
 }
 

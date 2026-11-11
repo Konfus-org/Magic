@@ -2,7 +2,7 @@
   <!-- A gem: Magic loads it from Gems/Volumetrics/Volumetrics.dll when a project lists Volumetrics. -->
   <PropertyGroup>
     <!-- Shown beside the gem as Magic starts it. -->
-    <Description>Fills the air with haze, lit by the sky and the sun, and shafts of sunlight where rays see the world.</Description>
+    <Description>Fills the air with haze, lit by the sky and the sun, and shafts of sunlight where rays see the world, and clouds over the sky.</Description>
     <Version>1.0.0</Version>
     <Authors>Konfus</Authors>
     <!-- Copies the gem's own NuGet dependencies next to it, where its load context finds them. -->

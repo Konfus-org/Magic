@@ -9,9 +9,13 @@ namespace Magic.GpuWorld;
 /// </summary>
 internal sealed class SkyLuts(AssetManager assets)
 {
-    private readonly ShaderEntry _transmittanceShader = PassShaders.GetEntry(assets, "SkyLuts", "SkyTransmittance");
-    private readonly ShaderEntry _multiScatteringShader = PassShaders.GetEntry(assets, "SkyLuts", "SkyMultiScattering");
-    private readonly ShaderEntry _viewShader = PassShaders.GetEntry(assets, "SkyLuts", "SkyView");
+    private readonly ShaderEntry _transmittanceShader = PassShaders.GetEntry(assets, "SkyLuts", "FillSkyTransmittance");
+    private readonly ShaderEntry _multiScatteringShader = PassShaders.GetEntry(
+        assets,
+        "SkyLuts",
+        "FillSkyMultiScattering"
+    );
+    private readonly ShaderEntry _viewShader = PassShaders.GetEntry(assets, "SkyLuts", "FillSkyView");
 
     public ImmutableArray<ShaderEntry> Shaders => [_transmittanceShader, _multiScatteringShader, _viewShader];
 

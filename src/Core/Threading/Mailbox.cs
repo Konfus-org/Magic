@@ -16,6 +16,11 @@ public sealed class Mailbox<T>
     private T? _published;
 
     /// <summary>
+    /// The value <see cref="TakeNewest"/> took last, the reader's until a newer one is.
+    /// </summary>
+    private T? _taken;
+
+    /// <summary>
     /// The value the writer fills next, holding whatever it held last time. The writer's thread.
     /// </summary>
     public T Back { get; private set; } = new();
@@ -36,6 +41,24 @@ public sealed class Mailbox<T>
         value = Interlocked.Exchange(ref _published, null);
 
         return value is not null;
+    }
+
+    /// <summary>
+    /// The newest value published, or the one taken before while none is newer; null until one is published. The value
+    /// it replaces is returned for the writer to fill again. For a reader that keeps using the newest, in place of
+    /// <see cref="TryTake"/> and <see cref="Return"/>. The reader's thread.
+    /// </summary>
+    public T? TakeNewest()
+    {
+        if (TryTake(out T? newest))
+        {
+            if (_taken is not null)
+                Return(_taken);
+
+            _taken = newest;
+        }
+
+        return _taken;
     }
 
     /// <summary>

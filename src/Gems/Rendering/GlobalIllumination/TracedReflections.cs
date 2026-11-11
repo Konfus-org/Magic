@@ -6,29 +6,6 @@ using Magic.Utils;
 namespace Magic.GlobalIllumination;
 
 /// <summary>
-/// A frame's traced reflections, at the traced size: the rays' light and their directions, resolved over the
-/// neighbours with the farthest ray that counts, and blended with the history.
-/// </summary>
-internal readonly record struct TracedReflectionBuffers(
-    GpuTexture Traced,
-    GpuTexture Rays,
-    GpuTexture Resolved,
-    GpuTexture Distance,
-    TracedBlend Blend
-)
-{
-    public TracedReflectionConstants Constants =>
-        new()
-        {
-            Traced = Traced.Id,
-            Rays = Rays.Id,
-            Resolved = Resolved.Id,
-            Distance = Distance.Id,
-            Blend = Blend.Constants,
-        };
-}
-
-/// <summary>
 /// On a GPU that traces rays, what each smooth surface reflects: a ray from a pixel of each traced pixel's footprint
 /// along a direction its specular reflects the view into, lit where it lands by a light and the probes, or the sky
 /// where it lands nowhere; resolved over neighbours and blended over frames, into the light shading reads.
@@ -63,7 +40,7 @@ internal sealed class TracedReflections(AssetManager assets)
     /// <summary>
     /// The textures asked for at the traced size; the blended light is the indirect specular light shading reads.
     /// </summary>
-    public static Result<TracedReflectionBuffers> Prepare(in GIView view, uint frameIndex)
+    public static Result<TracedReflectionConstants> Prepare(in GIView view, uint frameIndex)
     {
         RenderGraph graph = view.Graph;
         Result<GpuTexture> traced = graph.Texture(view.GetTraced("Traced reflections", GpuFormat.R16G16B16A16Sfloat));
@@ -72,15 +49,19 @@ internal sealed class TracedReflections(AssetManager assets)
             view.GetTraced("Resolved reflections", GpuFormat.R16G16B16A16Sfloat)
         );
         Result<GpuTexture> distance = graph.Texture(view.GetTraced("Reflection distance", GpuFormat.R32Sfloat));
-        Result<TracedBlend> blend = TracedBlend.Prepare(view, _blendNames, frameIndex);
-        foreach (Result made in (ReadOnlySpan<Result>)[traced, rays, resolved, distance, blend])
-        {
-            if (!made.Ok)
-                return Result.Failure(made.Error);
-        }
+        Result<TracedBlendConstants> blend = TracedBlend.Prepare(view, _blendNames, frameIndex);
+        if (Result.FindFailure(traced, rays, resolved, distance, blend) is { Ok: false } failed)
+            return Result.Failure(failed.Error);
 
         return Result.Success(
-            new TracedReflectionBuffers(traced.Value, rays.Value, resolved.Value, distance.Value, blend.Value)
+            new TracedReflectionConstants
+            {
+                Traced = traced.Value,
+                Rays = rays.Value,
+                Resolved = resolved.Value,
+                Distance = distance.Value,
+                Blend = blend.Value,
+            }
         );
     }
 
@@ -88,7 +69,7 @@ internal sealed class TracedReflections(AssetManager assets)
     /// The rays traced from the view's smooth surfaces through the world, lit by the lights, the sky and the probes,
     /// then resolved and blended with the history.
     /// </summary>
-    public void Record(in GIView view, in ProbeBuffers probes, in TracedReflectionBuffers reflections)
+    public void Record(in GIView view, in ProbeBuffers probes, in TracedReflectionConstants reflections)
     {
         RenderGraph graph = view.Graph;
         (int width, int height) = view.TracedSize;
