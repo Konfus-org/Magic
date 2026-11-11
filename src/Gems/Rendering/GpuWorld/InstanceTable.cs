@@ -184,13 +184,10 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
         // loading as the default, row 0, and one that failed as the failure.
         for (int row = 0; row < _materialSlots.Count; row++)
         {
-            ResourceState state = resources.Get(_materialSlots[row], out _materialRows[row]);
-            if (state == ResourceState.Loading)
+            GpuState state = resources.Get(_materialSlots[row], out _materialRows[row]);
+            if (state == GpuState.Loading)
                 _materialRows[row] = _materialRows[0];
-            else if (
-                state == ResourceState.Failed
-                && resources.Get(failure, out GpuMaterial failed) == ResourceState.Failed
-            )
+            else if (state == GpuState.Failed && resources.Get(failure, out GpuMaterial failed) == GpuState.Failed)
                 _materialRows[row] = failed;
         }
 
@@ -247,7 +244,7 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
             int runRows = 0;
             for (; block < blocks && _isDirty[block]; block++)
             {
-                runRows += GetBlockLength(block);
+                runRows += Math.Min(BlockSize, Count - (block * BlockSize));
             }
 
             graph.Upload(table, _rows.AsSpan(runStart, runRows), (ulong)runStart * GpuInstance.Bytes);
@@ -355,8 +352,6 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
 
         return row;
     }
-
-    private int GetBlockLength(int block) => Math.Min(BlockSize, Count - (block * BlockSize));
 }
 
 /// <summary>

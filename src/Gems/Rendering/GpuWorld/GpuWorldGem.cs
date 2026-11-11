@@ -141,7 +141,7 @@ public sealed class GpuWorldGem
         _frameView = new FrameView();
         _sky = new SkyLuts(assets);
         _lightTiles = new LightTiles(assets);
-        _effects = new Effects(assets, _resources);
+        _effects = new Effects(assets, _resources, shaders, threads);
         _shaders = [.. _sky.Shaders, .. _lightTiles.Shaders];
     }
 
@@ -443,13 +443,13 @@ public sealed class GpuWorldGem
 
         foreach (Handle<Material> material in preparing.Materials)
         {
-            isPrepared &= _resources.Get(material) != ResourceState.Loading;
+            isPrepared &= _resources.Get(material) != GpuState.Loading;
         }
 
         if (!hasFailure || _failure.Handle == Handle<Material>.None)
             return isPrepared;
 
-        return _resources.Get(_failure.Handle) != ResourceState.Loading && isPrepared;
+        return _resources.Get(_failure.Handle) != GpuState.Loading && isPrepared;
     }
 
     /// <summary>

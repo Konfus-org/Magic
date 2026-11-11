@@ -1,6 +1,7 @@
 using Magic.Assets;
 using Magic.Ecs.Components;
 using Magic.Graphics;
+using Magic.Threading;
 using Magic.Utils;
 
 namespace Magic.GpuWorld;
@@ -10,12 +11,12 @@ namespace Magic.GpuWorld;
 /// material's is, the entries of its passes specialised to its shader, and what it declares it needs. An effect is
 /// ready once its material, its textures and its passes are, and failed when one of them failed.
 /// </summary>
-internal sealed class Effects(AssetManager assets, GpuResources resources)
+internal sealed class Effects(AssetManager assets, GpuResources resources, IShaderCompiler shaders, Threads threads)
 {
     /// <summary>
     /// The places in the list a frame runs, the post processing's.
     /// </summary>
-    public const int Places = MaterialSlots.Capacity;
+    private const int Places = MaterialSlots.Capacity;
 
     private readonly ShaderEntry _applyShader = PassShaders.GetEntry(assets, "ApplyPixelEffect", "ApplyPixelEffect");
 
@@ -25,6 +26,11 @@ internal sealed class Effects(AssetManager assets, GpuResources resources)
     /// Each entry specialised to each effect shader, kept, so a frame makes none.
     /// </summary>
     private readonly Dictionary<(ShaderEntry Entry, ShaderTypeArgument Shader), ShaderEntry> _specialised = [];
+
+    /// <summary>
+    /// What each effect shader's struct declares it needs, by the shader's id, null while it is reflected.
+    /// </summary>
+    private readonly Dictionary<ulong, EffectNeeds?> _needs = [];
 
     /// <summary>
     /// The frame's effects and their material rows, by place, written again each frame.
@@ -70,18 +76,20 @@ internal sealed class Effects(AssetManager assets, GpuResources resources)
         if (slot.Handle == Handle<Material>.None)
             return (new GpuEffect(0, GpuState.Failed, default, default, default), default);
 
-        ResourceState material = resources.GetEffect(
-            slot,
-            out GpuMaterial row,
-            out ShaderTypeArgument shader,
-            out EffectNeeds needs
-        );
-        if (material != ResourceState.Ready)
-        {
-            GpuState state = material == ResourceState.Loading ? GpuState.Loading : GpuState.Failed;
+        GpuState material = resources.Pack(slot, out GpuMaterial row, out GpuResources.MaterialLayout layout);
+        if (material != GpuState.Ready)
+            return (new GpuEffect(slot.Handle.Id, material, default, default, default), row);
 
-            return (new GpuEffect(slot.Handle.Id, state, default, default, needs), row);
+        // What it needs is reflected on its first ask, and it waits for that.
+        ShaderTypeArgument shader = layout.Shader;
+        if (!_needs.TryGetValue(shader.Module.Id, out EffectNeeds? declared))
+        {
+            _needs[shader.Module.Id] = null;
+            ReflectNeedsAsync(shader).FireAndForget();
         }
+
+        if (declared is not { } needs)
+            return (new GpuEffect(slot.Handle.Id, GpuState.Loading, default, default, default), row);
 
         ShaderEntry apply = GetSpecialised(_applyShader, shader);
         ShaderEntry level = GetSpecialised(_levelShader, shader);
@@ -100,5 +108,27 @@ internal sealed class Effects(AssetManager assets, GpuResources resources)
         }
 
         return specialised;
+    }
+
+    /// <summary>
+    /// Reflects what the effect shader's struct declares it needs, once: none of what it declares nothing of.
+    /// </summary>
+    private async Task ReflectNeedsAsync(ShaderTypeArgument shader)
+    {
+        Result<long> levels = await shaders
+            .ReflectConstantAsync(shader, "Levels", CancellationToken.None)
+            .ConfigureAwait(false);
+        Result<long> history = await shaders
+            .ReflectConstantAsync(shader, "History", CancellationToken.None)
+            .ConfigureAwait(false);
+        Result<long> jitters = await shaders
+            .ReflectConstantAsync(shader, "Jitters", CancellationToken.None)
+            .ConfigureAwait(false);
+        await threads.Enter(EngineThread.Render);
+        _needs[shader.Module.Id] = new EffectNeeds(
+            levels.Ok ? (int)levels.Value : 0,
+            history.Ok && history.Value != 0,
+            jitters.Ok && jitters.Value != 0
+        );
     }
 }
