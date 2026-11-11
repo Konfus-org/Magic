@@ -7,7 +7,6 @@
 module "UpdateProbes";
 
 import Core.Heap;
-import Core.Pass;
 import Core.Frame;
 import Core.Math;
 import Core.Pack;

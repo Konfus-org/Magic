@@ -89,6 +89,9 @@ public float3 SampleGgxVisibleNormal(float3 viewLocal, float alpha, float2 xi)
     return normalize(float3(alpha * half.x, alpha * half.y, max(half.z, 0.0)));
 }
 
+// The GGX alpha SampleGgxReflection draws a direction with, which a weight over its density must use too.
+public float GetReflectionAlpha(float roughness) { return Pow2(max(roughness, 0.045)); }
+
 // A direction the specular reflects the view into, in xyz, from a microfacet normal drawn as SampleGgxVisibleNormal
 // draws it with a tenth of its tail cut, which only adds noise, and that normal's density in w: the mirror direction
 // at a density of 1 where the surface is all but smooth.
@@ -97,7 +100,7 @@ public float4 SampleGgxReflection(float3 normal, float3 view, float roughness, f
     if (roughness <= 0.05)
         return float4(reflect(-view, normal), 1.0);
 
-    float alpha = Pow2(max(roughness, 0.045));
+    float alpha = GetReflectionAlpha(roughness);
     float3x3 basis = CreateBasis(normal);
     float3 viewLocal = ToLocal(basis, view);
     float3 half = SampleGgxVisibleNormal(viewLocal, alpha, float2(xi.x * 0.9, xi.y));
