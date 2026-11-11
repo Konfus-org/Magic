@@ -40,6 +40,10 @@ public sealed class GpuWorldGem
 
     private const int DefaultHeight = 720;
 
+    private const int AutoRenderWidth = 1920;
+
+    private const int AutoRenderHeight = 1080;
+
     private readonly IEcs _ecs;
 
     private readonly Threads _threads;
@@ -484,20 +488,24 @@ public sealed class GpuWorldGem
         if (!tables.Ok)
             return Result.Failure(tables.Error);
 
-        // The picture in the window's shape, scaled down to fit the resolution but never up, which the window stretches
-        // it over or a gem upscales it to; at the window's size when the resolution has no side, and 1280 by 720
-        // headless.
-        TextureDescription window = graph.WindowTarget.IsNone ? default : graph.GetDescription(graph.WindowTarget);
-        (int width, int height) = (DefaultWidth, DefaultHeight);
-        if (window.Width > 0)
+        // The finished picture at the resolution, or at the window's size when it has no side, and 1280 by 720 with no
+        // window; the world drawn at the render scale of it, or when that is auto at the most that fits 1920 by 1080,
+        // never more than all of it.
+        Size shown = inputs.Settings.Resolution;
+        if (shown.Width <= 0 || shown.Height <= 0)
         {
-            Size box = inputs.Settings.Resolution;
-            float scale =
-                box.Width <= 0 || box.Height <= 0
-                    ? 1
-                    : MathF.Min(1, MathF.Min((float)box.Width / window.Width, (float)box.Height / window.Height));
-            (width, height) = ((int)MathF.Round(window.Width * scale), (int)MathF.Round(window.Height * scale));
+            TextureDescription window = graph.WindowTarget.IsNone ? default : graph.GetDescription(graph.WindowTarget);
+            shown = window.Width > 0 ? new Size(window.Width, window.Height) : new Size(DefaultWidth, DefaultHeight);
         }
+
+        float scale = MathF.Min(
+            1,
+            inputs.Settings.RenderScale > 0
+                ? inputs.Settings.RenderScale
+                : MathF.Min((float)AutoRenderWidth / shown.Width, (float)AutoRenderHeight / shown.Height)
+        );
+        int width = Math.Max(1, (int)MathF.Round(shown.Width * scale));
+        int height = Math.Max(1, (int)MathF.Round(shown.Height * scale));
 
         RenderCamera camera = GetCamera(inputs.Cameras);
         if (inputs.Settings.FieldOfView > 0)
@@ -551,6 +559,8 @@ public sealed class GpuWorldGem
                 Frame = view.Constants,
                 Width = view.Width,
                 Height = view.Height,
+                ShownWidth = shown.Width,
+                ShownHeight = shown.Height,
                 HasHistory = view.HasHistory,
                 Depth = view.Depth,
                 GBufferNormal = view.GBufferNormal,

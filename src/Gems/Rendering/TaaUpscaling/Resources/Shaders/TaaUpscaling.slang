@@ -1,5 +1,5 @@
-// Temporal upscaling: the view's output, the finished picture at the render size, taken to the window's size. Each
-// window pixel is made from the picture's 3 by 3 texels around it, each weighted by how near this frame's sample fell
+// Temporal upscaling: the view's output, the finished picture at the render size, taken to the size it is shown at.
+// Each shown pixel is made from the picture's 3 by 3 texels around it, each weighted by how near this frame's sample fell
 // to the pixel, and blended with what the last frame resolved where its surface was, so the camera's jitter, a
 // different point in each texel each frame, adds up to smooth edges and to detail finer than the picture's texels. The
 // history is held to the range of the 3 by 3 texels, so light that changed doesn't trail, and left out where the last
@@ -8,7 +8,7 @@
 //
 // It works in the output's encoding for the screen, so the picture it resolves is the one the window shows. The pass
 // header's y names the history, last frame's resolved picture, or its z where there is none; z the picture this frame
-// resolves, the window's size, with each pixel's view depth in alpha for the next frame's test.
+// resolves, the size it is shown at, with each pixel's view depth in alpha for the next frame's test.
 module "TaaUpscaling";
 
 import Core.Heap;

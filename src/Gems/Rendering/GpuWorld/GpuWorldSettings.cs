@@ -11,10 +11,16 @@ namespace Magic.GpuWorld;
 public sealed record GpuWorldSettings
 {
     /// <summary>
-    /// The most pixels across and down the picture is drawn at, in the window's shape. A smaller window draws at its
-    /// own size. 0 by 0 is auto: the picture is drawn at the window's size, as it is with a side of 0 or less.
+    /// The finished picture's size in pixels, with a window or without, which the window shows stretched over it. 0 by
+    /// 0 is auto: the window's size, or 1280 by 720 with no window, as it is with a side of 0 or less.
     /// </summary>
-    public Size Resolution { get; init; } = new(1920, 1080);
+    public Size Resolution { get; init; }
+
+    /// <summary>
+    /// The part of the resolution the world is drawn at, more than 0 to 1, before the picture is upscaled or stretched
+    /// to it. 0 is auto: the most that draws at 1920 by 1080 or less.
+    /// </summary>
+    public float RenderScale { get; init; }
 
     /// <summary>
     /// The window camera's vertical field of view in degrees, in place of the camera's own. 0 or less keeps the

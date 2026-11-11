@@ -25,9 +25,10 @@ texture reader, with a gem that draws its view.
   or while a gem upscales the picture.
 - The view is seen through the first camera that draws into the window, at `Rendering.FieldOfView` when that is more
   than 0.
-- The picture is drawn in the window's shape, at most as many pixels across and down as `Rendering.Resolution`,
-  and stretched over the window, or upscaled to it by a gem that upscales. A smaller window draws at its own size, and so does every window when it is `0 0`; a run with no window draws at 1280
-  by 720.
+- The finished picture is `Rendering.Resolution` in size, with a window or without, and the window shows it
+  stretched. At `0 0` it is the window's size, or 1280 by 720 with no window.
+- The world is drawn at `Rendering.RenderScale` of that size, and a gem that upscales takes it to that size, or it is
+  stretched. At `0` it is drawn at the most that fits 1920 by 1080.
 
 `bake` in the console loads every asset, which makes what every gem makes of every model, then opens every domain under `Domains/`
 in turn and exits, so a release ships with the caches full.
