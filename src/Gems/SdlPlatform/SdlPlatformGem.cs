@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
@@ -12,6 +13,7 @@ using Magic.Projects;
 using Magic.SdlBindings;
 using Magic.Threading;
 using Magic.Utils;
+using Magic.Worlds;
 using static Magic.SdlBindings.SDL_EventType;
 using static Magic.SdlBindings.SDL_GamepadAxis;
 using static Magic.SdlBindings.SDL_MouseWheelDirection;
@@ -31,6 +33,10 @@ namespace Magic.SdlPlatform;
 /// for the rest of a frame. What the game thread sets on the window and clipboard is handed to the platform thread
 /// the same way. It is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists
 /// the gem.
+/// </para>
+/// <para>
+/// It also paces the frames: <see cref="Update"/> first waits out the frame rate its settings cap the frames at, one cap
+/// while the window has the focus and another while it hasn't, and losing the focus can pause the world.
 /// </para>
 /// </summary>
 public sealed class SdlPlatformGem
@@ -66,6 +72,8 @@ public sealed class SdlPlatformGem
     private readonly Threads _threads;
 
     private readonly AssetManager _assets;
+
+    private readonly World _world;
 
     private readonly Meter _meter;
 
@@ -127,18 +135,30 @@ public sealed class SdlPlatformGem
 
     private string _text = string.Empty;
 
+    /// <summary>
+    /// Whether the window has the keyboard's focus, as its last focus event said; always, headless.
+    /// </summary>
+    private bool _isFocused = true;
+
+    /// <summary>
+    /// When the last frame the frame cap held back was let go, 0 before the first.
+    /// </summary>
+    private long _pacedTimestamp;
+
     public unsafe SdlPlatformGem(
         SdlPlatformSettings settings,
         App app,
         Threads threads,
         AssetManager assets,
-        IFileSystem files
+        IFileSystem files,
+        World world
     )
     {
         _settings = settings;
         _app = app;
         _threads = threads;
         _assets = assets;
+        _world = world;
 
         // The gem's meter goes with it, so nothing holds the gem's code once it unloads. The OS is asked only when the
         // meter is read, as the number is the process's rather than a frame's.
@@ -208,6 +228,7 @@ public sealed class SdlPlatformGem
 
         Handle = ReadHandle();
         ReadSize();
+        _isFocused = (SDL_GetWindowFlags(_window) & SDL_WINDOW_INPUT_FOCUS) != 0;
 
         // Typed characters come as text events only while text input is on: always, as a desktop has no on-screen
         // keyboard for it to bring up.
@@ -374,11 +395,13 @@ public sealed class SdlPlatformGem
     }
 
     /// <summary>
-    /// Makes input this frame's: what happened last frame is over, SDL's events since are applied, and sticks and
-    /// triggers are read as they stand now.
+    /// Waits out the frame cap, then makes input this frame's: what happened last frame is over, SDL's events since are
+    /// applied, and sticks and triggers are read as they stand now.
     /// </summary>
     public unsafe void Update(in Frame frame)
     {
+        WaitForFrameCap();
+
         // What happened last frame is over: pressed and released clear, and a mouse's wheel goes back to 0. Its motion
         // eases: it keeps what the frame's share of new motion leaves of last frame's, all of it gone with no smoothing.
         // The share grows with the frame's length, so the ease is the same at any frame rate.
@@ -537,6 +560,24 @@ public sealed class SdlPlatformGem
     }
 
     /// <summary>
+    /// Holds the frame back until a frame at the cap's rate is due after the last one held back, so frames start no
+    /// faster than the cap; a frame already late is let go at once, and the next is due a whole frame after it.
+    /// </summary>
+    private void WaitForFrameCap()
+    {
+        int framesPerSecond = _isFocused ? _settings.MaxFrameRate : _settings.BackgroundFrameRate;
+        if (framesPerSecond <= 0)
+            return;
+
+        long now = Stopwatch.GetTimestamp();
+        long due = _pacedTimestamp + (Stopwatch.Frequency / framesPerSecond);
+        if (due > now)
+            SDL_DelayPrecise((ulong)Stopwatch.GetElapsedTime(now, due).Ticks * 100);
+
+        _pacedTimestamp = Math.Max(due, now);
+    }
+
+    /// <summary>
     /// An SDL axis, -32768 to 32767, as -1 to 1: 0 inside the dead zone, and past it growing from 0 to 1 at full
     /// deflection along the stick's curve, so the zone's edge is no step. Triggers only reach the positive half.
     /// </summary>
@@ -568,6 +609,15 @@ public sealed class SdlPlatformGem
                 case SDL_EVENT_QUIT:
                     Log.Info("Exiting: the window was closed or the system asked Magic to quit.");
                     _app.Exit();
+                    break;
+                case SDL_EVENT_WINDOW_FOCUS_GAINED:
+                case SDL_EVENT_WINDOW_FOCUS_LOST:
+                    _isFocused = (SDL_EventType)sdlEvent.type == SDL_EVENT_WINDOW_FOCUS_GAINED;
+
+                    // PROTO: coming back resumes a world the game had paused itself, until a game's menu owns the pause.
+                    if (_settings.PauseWhenUnfocused)
+                        _world.IsPaused = !_isFocused;
+
                     break;
                 case SDL_EVENT_KEYBOARD_ADDED:
                     GetOrAddDevice(DeviceKind.Keyboard, sdlEvent.kdevice.which, pumped.Text);

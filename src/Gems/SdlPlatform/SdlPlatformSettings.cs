@@ -5,7 +5,7 @@ using Magic.Configuration;
 namespace Magic.SdlPlatform;
 
 /// <summary>
-/// The window's and the input's settings.
+/// The window's settings with the frames' pace and the pause while it has no focus, and the input's settings.
 /// </summary>
 [Category("Window")]
 public sealed record SdlPlatformSettings
@@ -36,6 +36,22 @@ public sealed record SdlPlatformSettings
     /// one.
     /// </summary>
     public int Display { get; init; }
+
+    /// <summary>
+    /// The most frames a second while the window has the focus; 0 for no cap. Vsync caps them at the display's rate too.
+    /// </summary>
+    public int MaxFrameRate { get; init; }
+
+    /// <summary>
+    /// The most frames a second while the window doesn't have the focus, to spare the machine; 0 for no cap.
+    /// </summary>
+    public int BackgroundFrameRate { get; init; }
+
+    /// <summary>
+    /// Whether the world pauses while the window doesn't have the focus, and goes on as it gets it back.
+    /// </summary>
+    [Category("Simulation")]
+    public bool PauseWhenUnfocused { get; init; }
 
     /// <summary>
     /// How many times the mouse's motion is multiplied: 2 moves twice as far.
