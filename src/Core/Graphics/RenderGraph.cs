@@ -621,12 +621,13 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// The use added to the open pass, unless it holds the same one, which would only put in a barrier between the two.
+    /// The use added to the open pass, unless it is of a <c>None</c> resource, which has nothing to wait for, or the pass
+    /// holds the same one, which would only put in a barrier between the two.
     /// </summary>
     private void AddUse(in GpuUse use)
     {
         ThrowIfNotInPass();
-        if (!_uses.Contains(use))
+        if (use.Id != 0 && !_uses.Contains(use))
             _uses.Add(use);
     }
 

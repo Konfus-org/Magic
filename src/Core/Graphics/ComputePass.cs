@@ -14,7 +14,7 @@ public readonly record struct GpuResource(GpuBuffer Buffer, GpuTexture Texture, 
 
 /// <summary>
 /// A compute pass being recorded, begun by <see cref="RenderGraph.Compute"/>: say what it reads and writes, which the
-/// GPU provider puts the barriers in for, then end it with what it dispatches.
+/// GPU provider puts the barriers in for, a <c>None</c> one left out, then end it with what it dispatches.
 /// </summary>
 public readonly ref struct ComputePass
 {

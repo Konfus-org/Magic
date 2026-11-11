@@ -551,8 +551,7 @@ internal sealed class Visibility(AssetManager assets)
     /// </summary>
     private void RecordResolve(in RenderView view, ImmutableArray<GpuResource> heapTextures, int shader)
     {
-        ComputePass resolve = view
-            .Graph.Compute(
+        view.Graph.Compute(
                 "Resolve materials",
                 _resolveShaders[shader],
                 new GpuConstants(view.Gpu.Frame.Id, view.Pools.Impostors.Id, (uint)shader),
@@ -569,13 +568,12 @@ internal sealed class Visibility(AssetManager assets)
                 view.Pools.Indices,
                 view.Gpu.Materials,
                 view.Cull.VisibleClusters,
-                view.Visibility
+                view.Visibility,
+                view.GlassVisibility
             )
             .Reads(heapTextures.AsSpan())
-            .Writes(view.Gpu.GBufferNormal, view.Gpu.GBufferBase, view.Gpu.GBufferSurface, view.Gpu.Velocity);
-        if (!view.GlassVisibility.IsNone)
-            resolve.Reads(view.GlassVisibility).Writes(view.Gpu.GlassBase, view.Gpu.GlassNormal, view.Gpu.GlassSurface);
-
-        resolve.DispatchOver(view.Gpu.Width, view.Gpu.Height);
+            .Writes(view.Gpu.GBufferNormal, view.Gpu.GBufferBase, view.Gpu.GBufferSurface, view.Gpu.Velocity)
+            .Writes(view.Gpu.GlassBase, view.Gpu.GlassNormal, view.Gpu.GlassSurface)
+            .DispatchOver(view.Gpu.Width, view.Gpu.Height);
     }
 }

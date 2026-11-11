@@ -277,7 +277,7 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
         GpuView view = input.View;
         GpuConstants header = new(view.Frame.Id, shadows.Constants.Id);
         (int width, int height) = _traced;
-        ComputePass trace = graph
+        graph
             .Compute("Trace shadows", _traceShader, header, RenderStage.Light)
             .Reads(
                 view.Frame,
@@ -291,11 +291,8 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
                 view.Meshes,
                 input.Traced.HitMaterials
             )
-            .Writes(shadows.TracedMask, shadows.SunTiles);
-        if (!shadows.TracedTint.IsNone)
-            trace.Writes(shadows.TracedTint);
-
-        trace.DispatchOver(width, height);
+            .Writes(shadows.TracedMask, shadows.SunTiles, shadows.TracedTint)
+            .DispatchOver(width, height);
 
         // Denoise: classify the sun's tiles, filter once or twice, as the settings say, then once more as the mask blends
         // with last frame's.
@@ -349,7 +346,7 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
             return;
 
         // The mask and the sun's tint at the picture's size, each pixel read from the traced pixels on its surface.
-        ComputePass upsample = graph
+        graph
             .Compute("Upsample shadows", _upsampleShader, header, RenderStage.Light)
             .Reads(
                 view.Frame,
@@ -357,13 +354,11 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
                 view.Depth,
                 view.GBufferNormal,
                 view.GBufferSurface,
-                shadows.TracedMask
+                shadows.TracedMask,
+                shadows.TracedTint
             )
-            .Writes(shadows.Mask);
-        if (!shadows.TracedTint.IsNone)
-            upsample.Reads(shadows.TracedTint).Writes(shadows.SunTint);
-
-        upsample.DispatchOver(view.Width, view.Height);
+            .Writes(shadows.Mask, shadows.SunTint)
+            .DispatchOver(view.Width, view.Height);
     }
 }
 

@@ -59,10 +59,7 @@ internal sealed class Lighting(AssetManager assets)
                 view.Gpu.GBufferSurface
             );
         if (shadows is { } shadowed)
-            shade.Reads(shadowed.Mask);
-
-        if (shadows is { SunTint.IsNone: false } tinted)
-            shade.Reads(tinted.SunTint);
+            shade.Reads(shadowed.Mask, shadowed.SunTint);
 
         shade.Reads(indirect);
 
@@ -83,12 +80,13 @@ internal sealed class Lighting(AssetManager assets)
                 view.Gpu.SkyTransmittance,
                 view.Gpu.SkyMultiScattering,
                 view.Gpu.SkyView,
-                view.Gpu.Depth
-            );
-        if (!view.Gpu.GlassDepth.IsNone)
-            translucent.Reads(view.Gpu.GlassDepth, view.Gpu.GlassBase, view.Gpu.GlassNormal, view.Gpu.GlassSurface);
-
-        translucent.Reads(indirect);
+                view.Gpu.Depth,
+                view.Gpu.GlassDepth,
+                view.Gpu.GlassBase,
+                view.Gpu.GlassNormal,
+                view.Gpu.GlassSurface
+            )
+            .Reads(indirect);
 
         if (traced is { } world)
             translucent.Reads(world.HitMaterials, view.Gpu.Meshes, view.Gpu.Instances);

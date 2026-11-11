@@ -164,7 +164,6 @@ internal sealed class PixelEffects
                 HasHistory = running.HasHistory ? 1u : 0u,
                 Sampler = sampler.Value.Id,
             };
-            ReadOnlySpan<GpuResource> history = running.History == GpuTexture.None ? [] : [running.History];
             for (int level = 0; level < running.Levels; level++)
             {
                 passes[pass] = shared with { Level = (uint)level, Output = running.Target.Id };
@@ -177,7 +176,7 @@ internal sealed class PixelEffects
                     )
                     .Reads(surface)
                     .Reads(picture)
-                    .Reads(history);
+                    .Reads(running.History);
                 if (level > 0)
                     fill.Reads(running.Target, level - 1);
 
@@ -197,7 +196,7 @@ internal sealed class PixelEffects
                 .Reads(surface)
                 .Reads(picture);
             if (running.Levels > 0)
-                applied.Reads(running.Target).Reads(history);
+                applied.Reads(running.Target).Reads(running.History);
 
             applied.Writes(other).DispatchOver(view.Gpu.Width, view.Gpu.Height);
             pass++;
