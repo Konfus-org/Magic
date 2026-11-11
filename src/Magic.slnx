@@ -7,7 +7,6 @@
     <Project Path="Gems/ArchEcs/ArchEcs.csproj" />
     <Project Path="Gems/AssimpModelImporter/AssimpModelImporter.csproj" />
     <Project Path="Gems/DomainImporter/DomainImporter.csproj" />
-    <Project Path="Gems/GpuChecks/GpuChecks.csproj" />
     <Project Path="Gems/PrefabImporter/PrefabImporter.csproj" />
     <Project Path="Gems/SdlPlatform/SdlPlatform.csproj" />
     <Project Path="Gems/SlangShaderCompiler/SlangShaderCompiler.csproj" />
