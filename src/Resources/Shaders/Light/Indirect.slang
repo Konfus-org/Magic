@@ -1,7 +1,8 @@
 // The light that reaches the view's surfaces indirectly, as whatever traces it leaves it for a frame: the diffuse light
-// and the reflections at half the picture's size, and the probe grid around them; and how the picture reads them back
-// at its own size, blurred where they are still noisy. It is a row of the frame's buffer, C#'s GpuIndirectLight, every
-// id 0 where nothing traced it this frame, and the surfaces are lit with the sky.
+// and the reflections at a part of the picture's size, and the probe grid around them; and how the picture reads them
+// back at its own size, blurred where they are still noisy, which anything traced at a part of the picture's size can
+// read its own back with. It is a row of the frame's buffer, C#'s GpuIndirectLight, every id 0 where nothing traced it
+// this frame, and the surfaces are lit with the sky.
 module "Light/Indirect";
 
 import Core.Heap;
@@ -18,7 +19,7 @@ public static const uint IndirectLightBytes = 84u;
 
 public struct IndirectLight
 {
-    // The diffuse light, with its variance in alpha, and the reflections' light, at half the picture's size.
+    // The diffuse light, with its variance in alpha, and the reflections' light, at the size they were traced at.
     public uint diffuse;
     public uint reflections;
     public ProbeGridConstants grid;
@@ -33,11 +34,20 @@ public IndirectLight GetIndirectLight()
 
 public ProbeGridConstants GetProbeGrid() { return GetIndirectLight().grid; }
 
-// How many of the picture's pixels a traced pixel stands for along each side.
-public static const uint TracedScale = 2u;
+// The picture's pixel a pixel traced at a size stands for: the one at a point of its footprint, from 0 to 1 across and
+// down.
+public uint2 GetPicturePixel(FrameConstants frame, uint2 traced, uint2 tracedSize, float2 at)
+{
+    uint2 size = uint2(frame.width, frame.height);
+    return min(uint2((float2(traced) + at) * float2(size) / float2(tracedSize)), size - 1u);
+}
 
-// The traced textures' size.
-public uint2 GetTracedSize(FrameConstants frame) { return max(uint2(frame.width, frame.height) / TracedScale, 1u); }
+// The pixel traced at a size whose footprint holds a pixel of the picture.
+public uint2 GetTracedTexel(FrameConstants frame, uint2 pixel, uint2 tracedSize)
+{
+    float2 uv = GetTexelCenterUv(pixel, uint2(frame.width, frame.height));
+    return min(uint2(uv * float2(tracedSize)), tracedSize - 1u);
+}
 
 // The roughest surface whose reflections are traced; a rougher one reflects its diffuse light, or the sky giving way
 // to its diffuse light where none is traced.
@@ -62,6 +72,19 @@ struct TracedSample
     float coverage;
 }
 
+// The four traced pixels around a pixel of the picture, from the corner, each with its weight, 0 where it wasn't
+// traced, and in coverage how much of their bilinear weight was traced, from 0 to 1.
+public struct TracedTaps
+{
+    public int2 corner;
+    public uint2 size;
+    public float4 weights;
+    public float coverage;
+
+    // The traced pixel of tap i, 0 to 3, row by row.
+    public uint2 GetTexel(uint i) { return uint2(clamp(corner + int2(i & 1u, i >> 1u), int2(0), int2(size) - 1)); }
+}
+
 // How much a pixel of the picture at a depth lies on the surface at a camera-relative point facing a unit normal, seen
 // at a view depth: 1 on its plane and facing its way, less the further their planes are apart and their normals turn.
 float GetSurfaceWeight(FrameConstants frame, uint2 at, float depth, float3 relative, float3 normal, float viewDepth)
@@ -73,42 +96,67 @@ float GetSurfaceWeight(FrameConstants frame, uint2 at, float depth, float3 relat
     return exp(-Pow2(planeError) * PlaneSharpness) * Pow4(saturate(dot(atNormal, normal)));
 }
 
-// The four traced pixels around a pixel of the picture, whose surface is at a camera-relative point facing a unit
-// normal at a view depth, blended by hand: each by its bilinear weight where its own pixel was traced, something drawn
-// there no rougher than a roughness, times how much it lies on the pixel's surface, so an edge takes in little of what
-// lies off it; and not at all where it wasn't traced.
-TracedSample SampleCovered(
-    FrameConstants frame, TextureRef light, uint2 pixel, float3 relative, float3 normal, float viewDepth, float roughest)
+// The four pixels traced at a size around a pixel of the picture, whose surface is at a camera-relative point facing a
+// unit normal at a view depth, weighed for blending by hand: each by its bilinear weight where its own pixel, the one
+// at a point of its footprint from 0 to 1 across and down, was traced, something drawn there no rougher than a
+// roughness, times how much it lies on the pixel's surface, so an edge takes in little of what lies off it; and not at
+// all where it wasn't traced.
+public TracedTaps GetTracedTaps(
+    FrameConstants frame,
+    uint2 size,
+    float2 at,
+    uint2 pixel,
+    float3 relative,
+    float3 normal,
+    float viewDepth,
+    float roughest)
 {
     TextureRef depthTexture = { frame.depth };
     TextureRef surfaceTexture = { frame.gbufferSurface };
-    uint2 size = GetTracedSize(frame);
     float2 texel = GetTexelCenterUv(pixel, uint2(frame.width, frame.height)) * float2(size) - 0.5;
     float2 f = frac(texel);
-    int2 corner = int2(floor(texel));
-    float4 weights = float4((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y);
-    float4 sum = float4(0.0);
-    float weightSum = 0.0;
-    float coverage = 0.0;
+    float4 bilinear = float4((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y);
+    TracedTaps taps;
+    taps.corner = int2(floor(texel));
+    taps.size = size;
+    taps.weights = float4(0.0);
+    taps.coverage = 0.0;
     for (uint i = 0u; i < 4u; i++)
     {
-        uint2 at = uint2(clamp(corner + int2(i & 1u, i >> 1u), int2(0), int2(size) - 1));
-        uint2 traced = at * TracedScale;
+        uint2 traced = GetPicturePixel(frame, taps.GetTexel(i), size, at);
         float depth = depthTexture.Load(traced, 0u).x;
         if (depth == 0.0 || surfaceTexture.Load(traced, 0u).x > roughest)
             continue;
 
         float onSurface = max(GetSurfaceWeight(frame, traced, depth, relative, normal, viewDepth), OffSurfaceWeight);
-        float weight = weights[i] * onSurface;
-        sum += light.Load(at, 0u) * weight;
-        weightSum += weight;
-        coverage += weights[i];
+        taps.weights[i] = bilinear[i] * onSurface;
+        taps.coverage += bilinear[i];
+    }
+
+    return taps;
+}
+
+// The traced light around a pixel of the picture, blended by the taps' weights.
+TracedSample SampleCovered(
+    FrameConstants frame, TextureRef light, uint2 pixel, float3 relative, float3 normal, float viewDepth, float roughest)
+{
+    TracedTaps taps =
+        GetTracedTaps(frame, light.GetSize(0u), float2(0.0), pixel, relative, normal, viewDepth, roughest);
+    float4 sum = float4(0.0);
+    float weightSum = 0.0;
+    for (uint i = 0u; i < 4u; i++)
+    {
+        if (taps.weights[i] <= 0.0)
+            continue;
+
+        sum += light.Load(taps.GetTexel(i), 0u) * taps.weights[i];
+        weightSum += taps.weights[i];
     }
 
     TracedSample sample;
     sample.light = weightSum > 0.0 ? sum.rgb / weightSum : float3(0.0);
     sample.variance = weightSum > 0.0 ? sum.a / weightSum : 0.0;
-    sample.coverage = coverage;
+    sample.coverage = taps.coverage;
     return sample;
 }
 
@@ -121,6 +169,7 @@ float4 SampleTraced(
     FrameConstants frame, TextureRef light, uint2 pixel, float3 relative, float3 normal, float radius, float roughest)
 {
     uint2 size = uint2(frame.width, frame.height);
+    uint2 tracedSize = light.GetSize(0u);
     TextureRef depthTexture = { frame.depth };
     TextureRef surfaceTexture = { frame.gbufferSurface };
     float viewDepth = ToViewDepth(depthTexture.Load(pixel, 0u).x, frame.near);
@@ -148,7 +197,7 @@ float4 SampleTraced(
 
             float weight = exp(-Pow2(float(r) / sigma))
                 * GetSurfaceWeight(frame, at, depth, relative, normal, viewDepth);
-            sum += light.Load(at / TracedScale, 0u).rgb * weight;
+            sum += light.Load(GetTracedTexel(frame, at, tracedSize), 0u).rgb * weight;
             weightSum += weight;
         }
     }

@@ -8,7 +8,7 @@ import Core.Heap;
 import Core.Math;
 import Core.Pack;
 
-// The most rays a probe traces in a frame, C#'s Probes.MaxRays, and the step its count of rays moves in.
+// The most rays a probe traces in a frame, and the step its count of rays moves in, also the fewest it asks for.
 public static const uint MaxProbeRays = 256u;
 public static const uint ProbeRayStep = 4u;
 
@@ -44,16 +44,22 @@ public struct ProbeGridConstants
     public float3 cellSize;
 }
 
-// The ray counts buffer's words: the rays the probes were given this frame in all at 0, then each probe's.
-public uint GetProbeRayCountOffset(uint probe) { return 4u + probe * 4u; }
+// The ray counts buffer's words: the rays the probes were given this frame in all at 0, then each probe's count, none
+// while it waits its turn, and where its rays start among the frame's.
+public uint GetProbeRayCountOffset(uint probe) { return 4u + probe * 8u; }
+public uint GetProbeRayStartOffset(uint probe) { return 8u + probe * 8u; }
 
 // A probe as the GPU keeps it, C#'s Probes.ProbeBytes long: its light's spherical harmonics in xyz of each, and in xyz of offset
-// how far it moved from where it rests, as a part of half a cell.
+// how far it moved from where it rests, as a part of half a cell, in w 1 once it has blended rays.
 public struct GpuProbe
 {
     public float4 radiance[4];
     public float4 offset;
 }
+
+// Whether a probe has blended rays since the probes started afresh: one that hasn't holds no light yet and is read as
+// none, and starts its light afresh when it first blends.
+public bool HasBlended(GpuProbe probe) { return probe.offset.w != 0.0; }
 
 // L1 spherical harmonics of colour: the constant, then the y, z and x bands.
 public struct ProbeSh
@@ -147,6 +153,9 @@ public float3 GetProbeIrradiance(ProbeGridConstants grid, float3 position, float
         uint3 offset = uint3(i, i >> 1u, i >> 2u) & 1u;
         uint3 coord = uint3(clamp(base + int3(offset), int3(0), last));
         GpuProbe probe = LoadProbe(grid, GetProbeIndex(grid, coord));
+        if (!HasBlended(probe))
+            continue;
+
         float3 probePosition = GetProbePosition(grid, coord, probe);
 
         // A point a little off the surface, so the test is not made right where shadowed meets lit.

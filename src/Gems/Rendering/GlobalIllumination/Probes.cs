@@ -21,9 +21,10 @@ internal readonly record struct ProbeBuffers(
 );
 
 /// <summary>
-/// The probe grid of diffuse light: a box of probes over the traced world's box, each frame given rays as their light
-/// still changes, traced, and blended into each probe's light and distances. The box follows the world's slowly, so the
-/// probes' light moves with it. What the probes hold carries from frame to frame, from the first update on.
+/// The probe grid of diffuse light: a box of probes over the traced world's box, given rays in turn within each frame's
+/// budget, more as their light still changes, traced, and blended into each probe's light and distances. The box
+/// follows the world's slowly, so the probes' light moves with it. What the probes hold carries from frame to frame,
+/// from the first update on.
 /// </summary>
 internal sealed class Probes(AssetManager assets)
 {
@@ -35,9 +36,13 @@ internal sealed class Probes(AssetManager assets)
     private const int ProbeCount = ProbesAcross * ProbesUp * ProbesAcross;
 
     /// <summary>
+    /// The rays all the probes trace in a frame, the twin of <c>UpdateProbes.slang</c>'s.
+    /// </summary>
+    private const int RayBudget = 131072;
+
+    /// <summary>
     /// The twins of <c>Light/Probes.slang</c>'s.
     /// </summary>
-    private const int MaxRays = 256;
     private const int IrradianceTexels = 8;
     private const int DepthTile = 18;
     private const int ProbeBytes = 80;
@@ -52,7 +57,9 @@ internal sealed class Probes(AssetManager assets)
     private const float BoxMargin = 1;
     private const float BoxBlend = 0.01f;
 
-    private readonly ShaderEntry _allocateShader = PassShaders.GetEntry(assets, "UpdateProbes", "AllocateProbeRays");
+    private readonly ShaderEntry _askShader = PassShaders.GetEntry(assets, "UpdateProbes", "AskProbeRays");
+    private readonly ShaderEntry _planShader = PassShaders.GetEntry(assets, "UpdateProbes", "PlanProbeRays");
+    private readonly ShaderEntry _listShader = PassShaders.GetEntry(assets, "UpdateProbes", "ListProbeRays");
     private readonly ShaderEntry _traceShader = PassShaders.GetEntry(assets, "UpdateProbes", "TraceProbes") with
     {
         TypeArguments = [PassShaders.GetAtmosphere(assets)],
@@ -69,23 +76,24 @@ internal sealed class Probes(AssetManager assets)
     /// </summary>
     private (Vector3 Min, Vector3 Max) _box;
 
-    public ImmutableArray<ShaderEntry> Shaders => [_allocateShader, _traceShader, _irradianceShader, _depthShader];
+    public ImmutableArray<ShaderEntry> Shaders =>
+        [_askShader, _planShader, _listShader, _traceShader, _irradianceShader, _depthShader];
 
     /// <summary>
-    /// The grid's buffers and depth texture asked for, the constants that name them, and the counts and the trace's
-    /// groups started at none, and the probes too while they hold nothing. The grid is placed over
-    /// <paramref name="box"/> with a margin: at once when the probes start afresh, else a little nearer each frame.
+    /// The grid's buffers and depth texture asked for, the constants that name them, and the probes started at none
+    /// while they hold nothing. The grid is placed over <paramref name="box"/> with a margin: at once when the probes
+    /// start afresh, else a little nearer each frame.
     /// </summary>
     public Result<ProbeBuffers> Prepare(RenderGraph graph, bool hasHistory, (Vector3 Min, Vector3 Max) box)
     {
         long probes = ProbeCount;
         Result<GpuBuffer> probeTable = graph.Buffer(GpuDescriptions.GetBuffer("Probes", probes * ProbeBytes));
-        Result<GpuBuffer> rays = graph.Buffer(GpuDescriptions.GetBuffer("Probe rays", probes * MaxRays * RayBytes));
-        Result<GpuBuffer> list = graph.Buffer(GpuDescriptions.GetBuffer("Probe ray list", probes * MaxRays * 4));
+        Result<GpuBuffer> rays = graph.Buffer(GpuDescriptions.GetBuffer("Probe rays", RayBudget * RayBytes));
+        Result<GpuBuffer> list = graph.Buffer(GpuDescriptions.GetBuffer("Probe ray list", RayBudget * 4));
         Result<GpuBuffer> arguments = graph.Buffer(
             GpuDescriptions.GetBuffer("Probe ray arguments", 16, BufferUsages.Storage | BufferUsages.Indirect)
         );
-        Result<GpuBuffer> counts = graph.Buffer(GpuDescriptions.GetBuffer("Probe ray counts", (probes + 1) * 4));
+        Result<GpuBuffer> counts = graph.Buffer(GpuDescriptions.GetBuffer("Probe ray counts", ((probes * 2) + 1) * 4));
         Result<GpuBuffer> variance = graph.Buffer(
             GpuDescriptions.GetBuffer("Probe variance", probes * IrradianceTexels * IrradianceTexels * VarianceBytes)
         );
@@ -140,9 +148,7 @@ internal sealed class Probes(AssetManager assets)
             depth.Value
         );
 
-        // The counts and the trace's groups start each frame at none, and the probes at none on the first update.
-        graph.Clear(buffers.RayCounts);
-        graph.Upload(buffers.RayArguments, [0u, 1u, 1u]);
+        // The probes start at none on the first update.
         if (!hasHistory)
             graph.Clear(buffers.Probes);
 
@@ -150,17 +156,28 @@ internal sealed class Probes(AssetManager assets)
     }
 
     /// <summary>
-    /// The probes' rays allocated with the trace's groups, traced through the world, lit by the lights and the sky,
-    /// and blended into the probes.
+    /// The rays the probes ask for given to them in turn while they fit in the frame's budget, the probe the next frame
+    /// starts at kept in the trace's arguments; traced through the world, lit by the lights and the sky, and blended
+    /// into the probes given them.
     /// </summary>
     public void Record(in GIView view, in ProbeBuffers probes)
     {
         RenderGraph graph = view.Graph;
         GpuConstants header = view.Header;
         graph
-            .Compute("Allocate probe rays", _allocateShader, header, RenderStage.Light)
+            .Compute("Ask probe rays", _askShader, header, RenderStage.Light)
             .Reads(view.Frame, probes.Probes, probes.Variance)
-            .Writes(probes.RayCounts, probes.RayList, probes.RayArguments)
+            .Writes(probes.RayCounts)
+            .Dispatch(ProbeCount);
+        graph
+            .Compute("Plan probe rays", _planShader, header, RenderStage.Light)
+            .Reads(view.Frame)
+            .Writes(probes.RayCounts, probes.RayArguments)
+            .Dispatch(1);
+        graph
+            .Compute("List probe rays", _listShader, header, RenderStage.Light)
+            .Reads(view.Frame, probes.RayCounts)
+            .Writes(probes.RayList)
             .Dispatch(ProbeCount);
         graph
             .Compute("Trace probes", _traceShader, header, RenderStage.Light)

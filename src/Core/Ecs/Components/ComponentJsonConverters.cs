@@ -128,6 +128,32 @@ internal sealed class MaterialSlotsJsonConverter : JsonConverter<MaterialSlots>
     }
 }
 
+/// <summary>
+/// A renderer's material set as JSON: the array <see cref="MaterialSlotsJsonConverter"/> reads and writes, so a prefab
+/// lists a model's materials in the order its meshes name them. A set read is kept for the process.
+/// </summary>
+[SuppressMessage(
+    "Performance",
+    "CA1812:Avoid uninstantiated internal classes",
+    Justification = "The serializer makes it, as a [JsonConverter] names it."
+)]
+internal sealed class MaterialSetJsonConverter : JsonConverter<MaterialSet>
+{
+    public override MaterialSet Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        MaterialSlots slots = JsonSerializer.Deserialize<MaterialSlots>(ref reader, options);
+
+        return MaterialSet.Read(slots);
+    }
+
+    public override void Write(Utf8JsonWriter writer, MaterialSet value, JsonSerializerOptions options)
+    {
+        MaterialSlots slots = default;
+        value.All.AsSpan().CopyTo(slots);
+        JsonSerializer.Serialize(writer, slots, options);
+    }
+}
+
 internal sealed class MaterialOverridesJsonConverter : JsonConverter<MaterialOverrides>
 {
     public override MaterialOverrides Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)

@@ -56,7 +56,10 @@ internal sealed class Lighting(AssetManager assets)
                 view.Gpu.GBufferSurface
             );
         if (shadows is { } shadowed)
-            shade.Reads(shadowed.Mask, shadowed.SunTint);
+            shade.Reads(shadowed.Mask);
+
+        if (shadows is { SunTint.IsNone: false } tinted)
+            shade.Reads(tinted.SunTint);
 
         shade.Reads(indirect);
 

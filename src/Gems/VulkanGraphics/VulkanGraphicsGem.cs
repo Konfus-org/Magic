@@ -1,6 +1,7 @@
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Graphics;
 using Magic.Platform;
@@ -18,7 +19,7 @@ namespace Magic.VulkanGraphics;
 /// leaves the staging ring empty for what records next.
 /// It is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
+public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IHasSettings<VulkanGraphicsSettings>, IDisposable
 {
     /// <summary>
     /// How many frames in a row a named resource may go unasked for before it is destroyed.
@@ -35,6 +36,12 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     private readonly VulkanSwapchain? _swapchain;
     private readonly Meter _meter;
     private readonly Gauge<long> _memoryUsage;
+
+    /// <summary>
+    /// Where <see cref="_memoryUsage"/> comes from: the driver's heaps, or the resources alone where it says nothing.
+    /// </summary>
+    private readonly KeyValuePair<string, object?> _memorySource;
+    private readonly Gauge<long> _memoryAllocated;
     private readonly Gauge<long> _memoryLimit;
 
     /// <summary>
@@ -47,8 +54,15 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     private readonly Dictionary<string, Named<TopLevelDescription, GpuAcceleration>> _namedTopLevels = [];
     private readonly Dictionary<SamplerDescription, Named<SamplerDescription, GpuSampler>> _samplers = [];
 
-    public VulkanGraphicsGem(App app, Threads threads, IShaderCompiler compiler, IWindow? window = null)
+    public VulkanGraphicsGem(
+        VulkanGraphicsSettings settings,
+        App app,
+        Threads threads,
+        IShaderCompiler compiler,
+        IWindow? window = null
+    )
     {
+        Settings = settings;
         _threads = threads;
         IWindow? drawn = app.IsHeadless ? null : window;
         _device = new VulkanDevice(drawn, wantsValidation: IsDebugBuild);
@@ -58,7 +72,16 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
         _memoryUsage = _meter.CreateGauge<long>(
             "magic.gems.vulkan_graphics.gpu.memory.usage",
             "By",
-            "Device memory the resources hold."
+            "Device memory the process holds, as the driver says, else as the resources hold; its source tag says which."
+        );
+        _memorySource = new(
+            "magic.gems.vulkan_graphics.gpu.memory.source",
+            _device.HasMemoryBudget ? "driver" : "resources"
+        );
+        _memoryAllocated = _meter.CreateGauge<long>(
+            "magic.gems.vulkan_graphics.gpu.memory.allocated",
+            "By",
+            "Memory the resources hold, host staging included."
         );
         _memoryLimit = _meter.CreateGauge<long>(
             "magic.gems.vulkan_graphics.gpu.memory.limit",
@@ -79,6 +102,11 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     public GpuFeatures Features => _device.Features;
 
     public GpuTexture WindowTarget { get; private set; }
+
+    /// <summary>
+    /// How frames reach the window, which the render thread reads whole as each frame begins. Game thread.
+    /// </summary>
+    public VulkanGraphicsSettings Settings { get; set; }
 
     /// <summary>
     /// Whether this is a Debug build, which turns the validation layer on when the Vulkan SDK provides it.
@@ -243,8 +271,16 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
         // The next frame: what the GPU is done with finished, so a readback awaited completes whether or not anything
         // draws, then its commands begun and the window's next image taken.
         _frames.Poll();
-        _memoryUsage.Record(_resources.MemoryBytes);
+        _memoryAllocated.Record(_resources.MemoryBytes);
         _memoryLimit.Record(_device.Limits.DeviceMemoryBytes);
+
+        // The driver is asked only while something listens.
+        if (_memoryUsage.Enabled)
+        {
+            long usage = _device.HasMemoryBudget ? _device.GetDeviceMemoryUsage() : _resources.MemoryBytes;
+            _memoryUsage.Record(usage, _memorySource);
+        }
+
         BeginFrame();
     }
 
@@ -276,7 +312,7 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IDisposable
     {
         _frames.Begin();
         Compact();
-        WindowTarget = _swapchain?.Acquire(_frames.Current.Acquired) ?? GpuTexture.None;
+        WindowTarget = _swapchain?.Acquire(_frames.Current.Acquired, Settings.IsVSyncOn) ?? GpuTexture.None;
     }
 
     /// <summary>

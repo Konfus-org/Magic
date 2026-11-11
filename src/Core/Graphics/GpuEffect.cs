@@ -14,6 +14,7 @@ public readonly record struct GpuEffect(
 );
 
 /// <summary>
-/// What an effect's shader declares it needs: levels of a target of its own, the camera jittered, and rays.
+/// What an effect's shader declares it needs: levels of a target of its own, last frame's target as its history, the
+/// camera jittered, and rays.
 /// </summary>
-public readonly record struct EffectNeeds(int Levels, bool HasJitter, bool HasRays);
+public readonly record struct EffectNeeds(int Levels, bool HasHistory, bool HasJitter, bool HasRays);

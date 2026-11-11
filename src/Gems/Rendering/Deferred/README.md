@@ -26,8 +26,9 @@ that draws its geometry.
   params of its own as a surface material's are. With no `PostProcessing`, the picture gets the engine's
   `TemporalAntiAliasing`, `Exposure` and `Agx` materials; a `PostProcessing` lists every effect it wants, those
   included, so another tonemap is another material in the tonemap's place. Each reads the picture the ones before it
-  left and writes another; one that declares levels first fills each level of a target of its own, which it keeps from
-  frame to frame as its history. While an effect that declares jitter runs, as the temporal anti-aliasing does, the
+  left and writes another; one that declares levels first fills each level of a target of its own, which one that
+  declares a history, as the temporal anti-aliasing and the exposure do, keeps from frame to frame as its history.
+  While an effect that declares jitter runs, as the temporal anti-aliasing does, the
   camera draws each frame through a different point in each pixel. An effect shows once its material and its passes
   are built, and not while one loads or when one failed. An effect that asks what lies along a ray, as the volumetric
   light does, is answered through the world as rays see it, which lets all the light through where no gem builds it,

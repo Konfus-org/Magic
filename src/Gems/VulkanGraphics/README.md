@@ -23,13 +23,17 @@ compiler.
   build has run, the next frame copies it into one of the size it compacts to, which its name then gives with a new
   id and address, and frees the built one with its scratch.
 - It draws into the window through a surface it makes from the window's OS handles, on Windows, X11, Wayland and macOS.
-  The window sets the render thread's frame rate: a release waits for the display, and a Debug build shows each frame
-  as soon as it is drawn, so its frame rate is what the frame costs. The window has as few images as its surface
-  takes, and two at least, with one more in mailbox mode, which a Debug build picks when the surface has it.
+  With `Window.IsVSyncOn` set, the window waits for the display, which caps the frame rate at the display's. It is
+  off by default: each frame shows as soon as it is drawn, so the frame rate is what the frame costs, in immediate
+  mode, which can tear, where the surface has it, else in mailbox mode. Setting it remakes the window's images. The
+  window has as few images as its surface takes, and two at least, with one more in mailbox mode.
 - Its resources and frames are the render thread's, and its members throw on any other.
-- It publishes each pass's and each frame's time on the GPU, and the device memory it holds and has, on its
-  `Magic.Gems.VulkanGraphics` meter, whose tags name the Vulkan version, the GPU, its kind and its driver.
-- Each frame in flight uploads through a staging ring of host memory, which the memory gauge counts. A ring grows for
+- It publishes each pass's and each frame's time on the GPU, and the memory it holds and the GPU has, on its
+  `Magic.Gems.VulkanGraphics` meter, whose tags name the Vulkan version, the GPU, its kind and its driver. The memory
+  in use is what the driver says the process holds in the GPU's own heaps, the window's images and the driver's own
+  memory included, where the driver has `VK_EXT_memory_budget`; elsewhere it is what the resources hold, and its
+  `source` tag says which. The allocated gauge is what the resources hold either way.
+- Each frame in flight uploads through a staging ring of host memory, which the allocated gauge counts. A ring grows for
   a big upload, such as a world's models arriving, and shrinks back a few seconds after uploads are small again.
 - A Debug build turns on the Khronos validation layer when the Vulkan SDK is installed, and logs what it reports.
 - Headless, there is no window image: `WindowTarget` is none, and everything else works the same, on a software
