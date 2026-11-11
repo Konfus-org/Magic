@@ -99,6 +99,25 @@ public sealed class RenderGraph
     public GpuState GetState(in ShaderEntry shader) => Gpu?.GetState(shader) ?? GpuState.Failed;
 
     /// <summary>
+    /// Where <paramref name="shaders"/> are: failed if any failed, loading while any loads, else ready. Each is asked,
+    /// so the first ask starts them all.
+    /// </summary>
+    public GpuState GetState(params ReadOnlySpan<ShaderEntry> shaders)
+    {
+        GpuState all = GpuState.Ready;
+        foreach (ShaderEntry shader in shaders)
+        {
+            GpuState state = GetState(shader);
+            if (state == GpuState.Failed)
+                all = GpuState.Failed;
+            else if (state == GpuState.Loading && all == GpuState.Ready)
+                all = GpuState.Loading;
+        }
+
+        return all;
+    }
+
+    /// <summary>
     /// Begins a compute pass running <paramref name="shader"/> with <paramref name="constants"/> pushed to it: say what
     /// it reads and writes on what this returns, then dispatch, which ends it. The GPU provider leaves the pass out of a
     /// frame while the shader is not built.
@@ -132,7 +151,7 @@ public sealed class RenderGraph
         RenderStage stage
     )
     {
-        BeginDraw(
+        Begin(
             new()
             {
                 Name = name,
@@ -142,6 +161,14 @@ public sealed class RenderGraph
                 DrawShaders = shaders,
             }
         );
+        foreach (GpuTarget color in targets.Colors)
+        {
+            Use(color.Texture, GpuAccess.ColorTarget, color.Level);
+        }
+
+        if (targets.Depth is { } depth)
+            Use(depth.Texture, GpuAccess.DepthTarget, depth.Level);
+
         PushConstants(constants);
 
         return new DrawPass(this);
@@ -190,7 +217,17 @@ public sealed class RenderGraph
         UseInTransfer(GetUse(to, GpuAccess.CopyDestination), RenderStage.Prepare);
         int bytes = rows * Unsafe.SizeOf<T>();
         GpuUpload upload = BeginUpload(bytes);
-        CopyBuffer(upload.Buffer, upload.Offset, to, offset, (ulong)bytes);
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.CopyBuffer,
+                Id = upload.Buffer.Id,
+                Offset = upload.Offset,
+                Id2 = to.Id,
+                Offset2 = offset,
+                Size = (ulong)bytes,
+            }
+        );
 
         return MemoryMarshal.Cast<byte, T>(upload.Bytes[..bytes]);
     }
@@ -205,7 +242,16 @@ public sealed class RenderGraph
         UseInTransfer(GetUse(to, GpuAccess.CopyDestination, level), RenderStage.Prepare);
         GpuUpload upload = BeginUpload(pixels.Length);
         pixels.CopyTo(upload.Bytes);
-        CopyBufferToTexture(upload.Buffer, upload.Offset, to, level);
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.CopyBufferToTexture,
+                Id = upload.Buffer.Id,
+                Offset = upload.Offset,
+                Id2 = to.Id,
+                X = (uint)level,
+            }
+        );
     }
 
     /// <summary>
@@ -319,7 +365,7 @@ public sealed class RenderGraph
     internal void DrawIndexed(GpuBuffer indices, scoped ReadOnlySpan<IndexedDraw> draws)
     {
         Use(indices, GpuAccess.Index);
-        BindIndexBuffer(indices);
+        Add(new() { Kind = GpuCommandKind.BindIndexBuffer, Id = indices.Id });
         foreach (IndexedDraw draw in draws)
         {
             // A draw with no pixels to draw into is left out, as a negative size would wrap round to a huge one.
@@ -327,9 +373,26 @@ public sealed class RenderGraph
                 continue;
 
             Rectangle scissor = draw.Scissor;
-            SetScissor((uint)scissor.X, (uint)scissor.Y, (uint)scissor.Width, (uint)scissor.Height);
+            Add(
+                new()
+                {
+                    Kind = GpuCommandKind.SetScissor,
+                    X = (uint)scissor.X,
+                    Y = (uint)scissor.Y,
+                    Z = (uint)scissor.Width,
+                    W = (uint)scissor.Height,
+                }
+            );
             PushConstants(draw.Constants);
-            DrawIndexed(draw.IndexCount, draw.FirstIndex);
+            Add(
+                new()
+                {
+                    Kind = GpuCommandKind.DrawIndexed,
+                    X = draw.IndexCount,
+                    Y = 1,
+                    Z = draw.FirstIndex,
+                }
+            );
         }
     }
 
@@ -417,72 +480,6 @@ public sealed class RenderGraph
             Level = level,
         };
 
-    private void SetScissor(uint x, uint y, uint width, uint height) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.SetScissor,
-                X = x,
-                Y = y,
-                Z = width,
-                W = height,
-            }
-        );
-
-    /// <summary>
-    /// 32-bit indices.
-    /// </summary>
-    private void BindIndexBuffer(GpuBuffer indices) =>
-        Add(new() { Kind = GpuCommandKind.BindIndexBuffer, Id = indices.Id });
-
-    /// <summary>
-    /// One instance of <paramref name="indices"/> indices from <paramref name="firstIndex"/> on.
-    /// </summary>
-    private void DrawIndexed(uint indices, uint firstIndex) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.DrawIndexed,
-                X = indices,
-                Y = 1,
-                Z = firstIndex,
-            }
-        );
-
-    private void CopyBuffer(
-        GpuBuffer source,
-        ulong sourceOffset,
-        GpuBuffer destination,
-        ulong destinationOffset,
-        ulong bytes
-    ) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.CopyBuffer,
-                Id = source.Id,
-                Offset = sourceOffset,
-                Id2 = destination.Id,
-                Offset2 = destinationOffset,
-                Size = bytes,
-            }
-        );
-
-    /// <summary>
-    /// A whole level of the first layer, tightly packed from <paramref name="sourceOffset"/> on.
-    /// </summary>
-    private void CopyBufferToTexture(GpuBuffer source, ulong sourceOffset, GpuTexture destination, int level) =>
-        Add(
-            new()
-            {
-                Kind = GpuCommandKind.CopyBufferToTexture,
-                Id = source.Id,
-                Offset = sourceOffset,
-                Id2 = destination.Id,
-                X = (uint)level,
-            }
-        );
-
     private GpuUpload BeginUpload(int bytes) =>
         (Gpu ?? throw new InvalidOperationException("There is no GPU provider to upload through.")).BeginUpload(bytes);
 
@@ -549,9 +546,6 @@ public sealed class RenderGraph
         return false;
     }
 
-    /// <summary>
-    /// Begins a draw pass, each of its targets used as a colour or depth target.
-    /// </summary>
     private bool IsHeld(GpuBuffer buffer)
     {
         foreach (GpuUse held in _uses)
@@ -574,18 +568,6 @@ public sealed class RenderGraph
         return false;
     }
 
-    private void BeginDraw(in GpuPass pass)
-    {
-        Begin(pass);
-        foreach (GpuTarget color in pass.Targets.Colors)
-        {
-            Use(color.Texture, GpuAccess.ColorTarget, color.Level);
-        }
-
-        if (pass.Targets.Depth is { } depth)
-            Use(depth.Texture, GpuAccess.DepthTarget, depth.Level);
-    }
-
     /// <summary>
     /// A pass a gem began and never ended, left out, as the gem threw in its Render or forgot: the other gems' passes
     /// still draw.
@@ -602,12 +584,13 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// The use added to the open pass, unless it holds the same one, which would only put in a barrier between the two.
+    /// The use added to the open pass, unless it is of a <c>None</c> resource, which has nothing to wait for, or the pass
+    /// holds the same one, which would only put in a barrier between the two.
     /// </summary>
     private void AddUse(in GpuUse use)
     {
         ThrowIfNotInPass();
-        if (!_uses.Contains(use))
+        if (use.Id != 0 && !_uses.Contains(use))
             _uses.Add(use);
     }
 

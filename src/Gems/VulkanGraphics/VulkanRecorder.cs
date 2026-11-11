@@ -90,21 +90,10 @@ internal sealed unsafe class VulkanRecorder(
     // A write after a write still needs a barrier, so the second sees the first; a read after the same read does not.
     private static bool IsSameRead(GpuAccess before, GpuAccess access) =>
         before == access
-        && access
-            is GpuAccess.ShaderRead
-                or GpuAccess.DepthRead
-                or GpuAccess.Indirect
-                or GpuAccess.Index
-                or GpuAccess.CopySource;
+        && access is GpuAccess.ShaderRead or GpuAccess.Indirect or GpuAccess.Index or GpuAccess.CopySource;
 
     private static VkImageSubresourceRange GetRange(VulkanTexture texture) =>
-        new(
-            texture.Description.Format.ToAspect(),
-            0,
-            (uint)texture.Description.Levels,
-            0,
-            texture.Description.GetLayerCount()
-        );
+        new(texture.Description.Format.ToAspect(), 0, (uint)texture.Description.Levels, 0, 1);
 
     /// <summary>
     /// Says a copy was not recorded: one of what it names has left the heap, so what it would have moved is lost.
@@ -284,12 +273,6 @@ internal sealed unsafe class VulkanRecorder(
         )
         {
             return false;
-        }
-
-        if (targets.Colors.Length == 0 && targets.Depth is null)
-        {
-            width = (uint)targets.Width;
-            height = (uint)targets.Height;
         }
 
         if (width == 0 || height == 0)

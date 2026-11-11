@@ -8,7 +8,8 @@
 //
 // It works in the output's encoding for the screen, so the picture it resolves is the one the window shows. The pass
 // header's y names the history, last frame's resolved picture, or its z where there is none; z the picture this frame
-// resolves, the size it is shown at, with each pixel's view depth in alpha for the next frame's test.
+// resolves, the size it is shown at, with each pixel's view depth in alpha for the next frame's test; w the linear clamp
+// sampler the history is read through.
 module "TaaUpscaling";
 
 import Core.Heap;
@@ -87,11 +88,11 @@ void UpscalePicture(uint3 thread : SV_DispatchThreadID)
     TextureRef history = { header.y };
     float2 velocity = velocities.Load(nearest, 0u).xy;
     float2 historyUv = uv + velocity;
-    bool isOnScreen = all(saturate(historyUv) == historyUv);
+    bool isOnScreen = IsOnScreen(historyUv);
     historyUv = saturate(historyUv);
 
     // Where the surface moved and the history saw another one where it was, the pixel as it is now.
-    float historyDepth = history.Load(min(uint2(historyUv * float2(size)), size - 1u), 0u).a;
+    float historyDepth = history.Load(GetTexelAt(historyUv, size), 0u).a;
     float previousDepth = velocities.Load(texel, 0u).z;
     if (length(velocity) > MovingDistance && abs(previousDepth - historyDepth) > SurfaceGapMetres)
     {
@@ -101,28 +102,9 @@ void UpscalePicture(uint3 thread : SV_DispatchThreadID)
 
     // The history read between pixels, which blurs, so the more the pixel moved off whole pixels the more of now it
     // takes, by the weight of this frame's sample; all of now where its surface was off the screen.
-    float3 before = clamp(LoadBilinear(history, historyUv, size).rgb, low, high);
+    SamplerRef sampler = { header.w };
+    float3 before = clamp(history.SampleLevel(sampler, historyUv, 0.0).rgb, low, high);
     float2 moved = abs(velocity) * float2(size);
     float blend = isOnScreen ? lerp(0.05, 0.8, frac(max(moved.x, moved.y)) * 0.5) * weight : 1.0;
     resolved.Store(thread.xy, float4(lerp(before, current, blend), viewDepth));
-}
-
-// The texture at uv, filtered linearly between its four nearest texels of level 0, the texture's size.
-float4 LoadBilinear(TextureRef texture, float2 uv, uint2 size)
-{
-    float2 place = uv * float2(size) - 0.5;
-    int2 first = int2(floor(place));
-    float2 along = place - float2(first);
-    int2 last = int2(size) - 1;
-    float4 top = lerp(
-        texture.Load(uint2(clamp(first, int2(0), last)), 0u),
-        texture.Load(uint2(clamp(first + int2(1, 0), int2(0), last)), 0u),
-        along.x
-    );
-    float4 bottom = lerp(
-        texture.Load(uint2(clamp(first + int2(0, 1), int2(0), last)), 0u),
-        texture.Load(uint2(clamp(first + int2(1, 1), int2(0), last)), 0u),
-        along.x
-    );
-    return lerp(top, bottom, along.y);
 }

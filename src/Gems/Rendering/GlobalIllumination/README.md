@@ -42,7 +42,7 @@ To use it, list `GlobalIllumination` in a project's `.magic` file with a gem tha
   ([Shaders](../../../Resources/Shaders/README.md)). Each pass reads the frame's buffer, which holds the indirect light,
   as its header's x, and the gem's own constants as its y.
   - `UpdateProbes` brings the probes' light up to date.
-  - `Scene/Traced` is what the light traced at a part of the picture's size shares: the gem's constants, which pixel
+  - `Traced` is what the light traced at a part of the picture's size shares: the gem's constants, which pixel
     traces, how a pass averages its neighbours, and its history.
 - Parts of the traced diffuse light and the traced reflections are adapted from another engine under the MIT
   licence; `THIRD-PARTY-NOTICES.md` holds it.

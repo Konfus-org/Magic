@@ -35,8 +35,6 @@ public struct ProbeGridConstants
     public uint rayArguments;
     public uint rayCounts;
     public uint variance;
-    // 0 while the probes hold nothing: this update starts them afresh.
-    public uint hasHistory;
     // Where the first probe rests in the world, how far a probe's depth reaches, one and a half cells, and the
     // metres between neighbouring probes.
     public float3 origin;
@@ -91,12 +89,6 @@ public ProbeSh ProjectOntoSh(float3 direction, float3 value)
     return sh;
 }
 
-// The radiance the harmonics hold along a unit direction.
-public float3 EvaluateSh(ProbeSh sh, float3 direction)
-{
-    return ShBasis0 * sh.c[0] + ShBasis1 * (direction.y * sh.c[1] + direction.z * sh.c[2] + direction.x * sh.c[3]);
-}
-
 public uint3 GetProbeCoord(ProbeGridConstants grid, uint index)
 {
     uint3 size = grid.dimensions;
@@ -131,7 +123,7 @@ public uint2 GetProbeDepthTexel(ProbeGridConstants grid, uint3 coord)
 float2 GetProbeDepthUv(ProbeGridConstants grid, uint3 coord, float3 direction)
 {
     float2 size = float2(DepthTile * grid.dimensions.x * grid.dimensions.y, DepthTile * grid.dimensions.z);
-    float2 texel = float2(GetProbeDepthTexel(grid, coord)) + (EncodeOctahedral(direction) * 0.5 + 0.5) * DepthTexels;
+    float2 texel = float2(GetProbeDepthTexel(grid, coord)) + EncodeUnitVectorUnorm(direction) * DepthTexels;
     return texel / size;
 }
 

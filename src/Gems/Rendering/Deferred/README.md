@@ -41,14 +41,16 @@ that draws its geometry.
   gem builds the world as rays see it; it reflects the light around it, more at a grazing angle, and the sun lights it.
 - Where a gem filled the frame's air, the picture is seen through it up to the nearest pane, or the opaque surface
   where there is none, before the effects run. Where the air has clouds, the sky shows them and they shade the sun.
-- The finished picture is stretched over the window, filtered; where a gem upscales it, that gem's picture is copied
-  to the window instead. A screenshot is of what the window shows.
+- The finished picture's middle tones are shown at `Rendering.Gamma`, and it is stretched over the window with
+  `Rendering.UpscaleFilter`, whose names are in `TextureFilter`; where a gem upscales it, that gem's picture is copied
+  to the window instead. A screenshot is of what the window shows, at the size the picture is shown at.
 
 ## Settings
 
-`get Debug` lists the gem's settings, and `set Debug.RenderView Normal` sets one. `Debug.RenderView` shows one part of
-the GBuffer alone, and `Final` the finished frame again; the names are in `DebugView`. `Debug.IsRenderWindowOpen` opens
-the Rendering window.
+`get Debug` lists the gem's settings, and `set Debug.RenderView Normal` sets one; `Rendering.Gamma` and
+`Rendering.UpscaleFilter` are under `Rendering`, as `set Rendering.UpscaleFilter Nearest`. `Debug.RenderView` shows one
+part of the GBuffer alone, and `Final` the finished frame again; the names are in `DebugView`.
+`Debug.IsRenderWindowOpen` opens the Rendering window.
 
 With a gem that provides the debug UI, F2 opens the Rendering window, which chooses the view. F5 and F6 step through the
 views, and a line on screen names any view but the finished frame. A screenshot is of the renderer's picture alone,
@@ -59,16 +61,12 @@ without what other gems draw over it.
 `DeferredGem.Render` is the frame in order, top to bottom: start there. As a domain loads, the loading screen also
 waits for the gem's passes.
 
-- An area is the passes of one part of the frame, each naming the shader entries the GPU provider builds, which it
-  lists in its `Shaders`. It keeps only those entries and what it carries from one frame to the next, such as last
-  frame's view.
 - A pass is one `RenderGraph.Compute` or `RenderGraph.Draw` call saying what it reads and writes, which puts its
-  barriers in. The frame is not drawn until every area's shaders are built.
-- Each frame, an area's `Prepare` asks the graph for its own textures and buffers by description, uploads what
-  goes in them in the frame's upload pass, and returns their handles. Its `Record` takes what its passes read and
-  write as arguments, and `Render` hands the handles on from one area to the next. The same description under a name
-  is the same resource, holding what the last frame left in it; another one, as at a new picture size, makes it again,
-  empty.
+  barriers in. `Render` records each pass under a short comment; the effects' passes are `PixelEffects.Record`'s.
+- The frame is not drawn until every shader entry in `_shaders` is built.
+- Each frame, a pass asks the graph for its own textures and buffers by description. The same description under a
+  name is the same resource, holding what the last frame left in it; another one, as at a new picture size, makes it
+  again, empty.
 - The shaders are the `Shaders/` modules in this gem's `Resources`, built on the shader library
   ([Shaders](../../../Resources/Shaders/README.md)).
 - Parts of the lighting are adapted from another engine under the MIT licence;

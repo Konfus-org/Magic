@@ -1,15 +1,15 @@
 namespace Magic.GpuWorld;
 
 /// <summary>
-/// The free ranges of a pool of <c>capacity</c> elements: a free list, handing out ranges first fit and merging a range
-/// given back with the free ranges it touches.
+/// The free ranges of a pool of <c>capacity</c> elements, the first <c>taken</c> of them never free: a free list, handing
+/// out ranges first fit and merging a range given back with the free ranges it touches.
 /// </summary>
-public sealed class FreeList(int capacity)
+public sealed class FreeList(int capacity, int taken = 0)
 {
     /// <summary>
     /// The free ranges, by start, none touching the next.
     /// </summary>
-    private readonly List<(int Start, int Length)> _free = [(0, capacity)];
+    private readonly List<(int Start, int Length)> _free = [(taken, capacity - taken)];
 
     /// <summary>
     /// Whether a free range holds <paramref name="length"/> elements.

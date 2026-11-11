@@ -19,8 +19,6 @@ public sealed class GpuChecksGem : IGem, IRender, IDisposable
 {
     private const int Size = 256;
     private const int Bytes = Size * Size * 4;
-    private const string ShaderPath = "Shaders/Gradient.slang";
-
     private static readonly TextureDescription _gradient = new()
     {
         Width = Size,
@@ -111,22 +109,17 @@ public sealed class GpuChecksGem : IGem, IRender, IDisposable
 
     private async Task CheckAsync(AssetManager assets, Threads threads)
     {
-        Handle<Shader> shader = assets.Find<Shader>(ShaderPath);
-        if (shader == Handle<Shader>.None)
+        ShaderEntry fill = PassShaders.GetEntry(assets, "Gradient", "FillGradient");
+        if (fill.Module == Handle<Shader>.None)
         {
-            Log.Error($"GPU check: there is no {ShaderPath}.");
+            Log.Error("GPU check: there is no Shaders/Gradient.slang.");
 
             return;
         }
 
         // Have Render, on the render thread, whose the GPU is, record the dispatch and its copy into the buffer.
         await threads.Enter(EngineThread.Render);
-        _fill = new ShaderEntry
-        {
-            Module = shader,
-            Name = "FillGradient",
-            Stage = ShaderStage.Compute,
-        };
+        _fill = fill;
         Result<GpuBuffer> readback = await _recorded.Task.ConfigureAwait(false);
         if (!readback.Ok)
         {

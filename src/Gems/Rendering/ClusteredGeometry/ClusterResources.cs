@@ -2,7 +2,6 @@ using System.Collections.Immutable;
 using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.Debugging;
-using Magic.Files;
 using Magic.GpuWorld;
 using Magic.Graphics;
 using Magic.Threading;
@@ -18,12 +17,7 @@ namespace Magic.ClusteredGeometry;
 /// asked for, so the GPU provider frees them. A row is empty, and its instances draw nothing, until its model arrives.
 /// The pools and the atlases are asked of the graph every frame, so the GPU provider keeps what they hold.
 /// </summary>
-internal sealed class ClusterResources(
-    ClusterPreprocessor clusters,
-    Caches caches,
-    AssetManager assets,
-    Threads threads
-)
+internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManager assets, Threads threads)
 {
     private const int ImpostorCapacity = 1024;
 
@@ -45,7 +39,7 @@ internal sealed class ClusterResources(
     private readonly List<(int Index, ModelClusters Made)> _placedModels = [];
 
     // The impostor table's rows; row 0 is none, so it is taken from the start.
-    private readonly FreeList _impostorRows = CreateImpostorRows();
+    private readonly FreeList _impostorRows = new(ImpostorCapacity, 1);
 
     // About 3 MiB in all at the start; each grows with the scene.
     private readonly BufferPool _vertices = new(
@@ -145,11 +139,8 @@ internal sealed class ClusterResources(
         Result<GpuBuffer> vertices = _vertices.GetBuffer(graph);
         Result<GpuBuffer> indices = _indices.GetBuffer(graph);
         Result<GpuBuffer> clusters = _clusters.GetBuffer(graph);
-        foreach (Result made in (ReadOnlySpan<Result>)[vertices, indices, clusters])
-        {
-            if (!made.Ok)
-                return Result.Failure(made.Error);
-        }
+        if (Result.FindFailure(vertices, indices, clusters) is { Ok: false } failed)
+            return Result.Failure(failed.Error);
 
         ClusterPools pools = new(vertices.Value, indices.Value, clusters.Value, table.Value, impostors.Value, []);
         foreach ((int index, ModelClusters made) in _placedModels)
@@ -162,22 +153,14 @@ internal sealed class ClusterResources(
         return Result.Success(pools with { Atlases = GetAtlases(graph) });
     }
 
-    private static FreeList CreateImpostorRows()
-    {
-        FreeList rows = new(ImpostorCapacity);
-        rows.Allocate(1);
-
-        return rows;
-    }
-
     /// <summary>
-    /// An impostor atlas of <see cref="ModelClusters.ImpostorSize"/> texels a side, in <paramref name="format"/>.
+    /// An impostor atlas of <see cref="ImpostorBuilder.Size"/> texels a side, in <paramref name="format"/>.
     /// </summary>
     private static TextureDescription GetAtlasDescription(string name, GpuFormat format) =>
         GpuDescriptions.GetTexture(
             name,
-            ModelClusters.ImpostorSize,
-            ModelClusters.ImpostorSize,
+            ImpostorBuilder.Size,
+            ImpostorBuilder.Size,
             format,
             TextureUsages.Sampled | TextureUsages.CopyDestination
         );
@@ -222,32 +205,13 @@ internal sealed class ClusterResources(
     }
 
     /// <summary>
-    /// The model's clusters, as its preprocessor cached them as the model loaded, or made here, on a worker, and cached
-    /// when the cache could not keep them; settled by the next <see cref="Prepare"/>.
+    /// The model's clusters, as its preprocessor made them, settled by the next <see cref="Prepare"/>.
     /// </summary>
     private async Task LoadAsync(int index, ModelPlace place)
     {
-        Handle<Model> model = place.Model;
-        Result<ModelClusters> made = await caches
-            .ReadAsync(model.Id, assets.GetVersion(model), clusters, CancellationToken.None)
+        Result<ModelClusters> made = await assets
+            .LoadPreprocessedAsync(place.Model, clusters, CancellationToken.None)
             .ConfigureAwait(false);
-        if (!made.Ok)
-        {
-            Result<Model> loaded = await assets.LoadAsync(model, null, CancellationToken.None).ConfigureAwait(false);
-            if (loaded.Ok)
-            {
-                ModelClusters built = await Task.Run(() => clusters.Preprocess(loaded.Value)).ConfigureAwait(false);
-                await caches
-                    .WriteAsync(model.Id, assets.GetVersion(model), built, clusters, CancellationToken.None)
-                    .ConfigureAwait(false);
-                made = Result.Success(built);
-            }
-            else
-            {
-                made = Result.Failure(loaded.Error);
-            }
-        }
-
         await threads.Enter(EngineThread.Render);
         _madeModels.Add((index, place, made));
     }

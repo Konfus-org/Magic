@@ -7,7 +7,6 @@
 module "UpdateProbes";
 
 import Core.Heap;
-import Core.Pass;
 import Core.Frame;
 import Core.Math;
 import Core.Pack;
@@ -308,8 +307,7 @@ void TraceProbes<S : ISky>(uint3 thread : SV_DispatchThreadID)
     uint rayCount = counts.Load<uint>(GetProbeRayCountOffset(probe));
     float3 direction = normalize(mul(GetFibonacciDirection(rayIndex, rayCount), GetRandomRotation(frame.frameIndex)));
 
-    AccelerationRef acceleration = { GetTracedWorld().acceleration };
-    RaytracingAccelerationStructure world = acceleration.Get();
+    RaytracingAccelerationStructure world = GetTracedAcceleration();
     RayHit hit = GetClosestHit(world, origin, direction, 1e30, RAY_FLAG_NONE);
     ProbeRay ray;
     ray.direction = direction;
@@ -326,8 +324,7 @@ void TraceProbes<S : ISky>(uint3 thread : SV_DispatchThreadID)
         ray.depth = surface.isBackface ? hit.distance * 0.9 : hit.distance;
         float3 xi = GetRandom(uint2(thread.x, 0u), frame.frameIndex, 1u);
         float3 light = GetDirectLight<S>(lights, world, surface, xi);
-        if (grid.hasHistory != 0u)
-            light += 0.95 * GetProbeIrradiance(grid, surface.position, surface.normal);
+        light += 0.95 * GetProbeIrradiance(grid, surface.position, surface.normal);
 
         ray.radiance = light * surface.diffuse + surface.emissive;
     }
@@ -336,19 +333,38 @@ void TraceProbes<S : ISky>(uint3 thread : SV_DispatchThreadID)
     rays[thread.x] = EncodeProbeRay(ray);
 }
 
-groupshared float4 groupRays[DepthTexelCount];
-groupshared float3 groupRadiance[IrradianceTexelCount];
+groupshared float4 groupRays[MaxProbeRays];
+groupshared float3 groupRadiance[MaxProbeRays];
+groupshared float3 groupMeans[IrradianceTexelCount];
 groupshared float2 groupMoments[DepthTexelCount];
 
-// A group a probe, a thread a direction of its 8 by 8 map: the probe's rays weighted by how near each is to the
-// direction, followed by the mean estimator, then the map projected into the probe's harmonics.
+// Where border texel i of a probe's depth tile copies from inside it, so a bilinear read at a tile's edge wraps as the
+// octahedron does: xy the texel inside the tile, zw the border texel, both from the tile's corner. A side's texel
+// copies the mirrored texel of the row or column inside it, and a corner the opposite inner corner.
+uint4 GetDepthBorder(uint border)
+{
+    uint i = border % 16u;
+    switch (border / 16u)
+    {
+    case 0u: return uint4(16u - i, 1u, 1u + i, 0u);
+    case 1u: return uint4(16u - i, 16u, 1u + i, 17u);
+    case 2u: return uint4(1u, 16u - i, 0u, 1u + i);
+    case 3u: return uint4(16u, 16u - i, 17u, 1u + i);
+    default: return uint4(16u - (i & 1u) * 15u, 16u - (i >> 1u) * 15u, (i & 1u) * 17u, (i >> 1u) * 17u);
+    }
+}
+
+// A group a probe, a thread a ray and a direction of its 16 by 16 map of distances, the first 64 threads also one of
+// its 8 by 8 map of light. The light: the probe's rays weighted by how near each is to the direction, followed by the
+// mean estimator, then the map projected into the probe's harmonics. The distances: the mean and squared mean of its
+// rays' distances, sharply weighted towards the direction, blended slowly into the map, its border copied around it;
+// and the probe moved away from what its rays found nearer than it should keep. A probe traces at most a ray a thread.
 [shader("compute")]
-[numthreads(IrradianceTexels, IrradianceTexels, 1)]
-void BlendProbeIrradiance(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID, uint index : SV_GroupIndex)
+[numthreads(DepthTexels, DepthTexels, 1)]
+void BlendProbes(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID, uint index : SV_GroupIndex)
 {
     ProbeGridConstants grid = GetProbeGrid();
     uint probe = group.x;
-    float3 texelDirection = DecodeOctahedral((float2(local.xy) + 0.5) / float(IrradianceTexels) * 2.0 - 1.0);
     BufferRef counts = { grid.rayCounts };
     ArrayRef<uint4> rays = { grid.rays };
     uint rayCount = min(counts.Load<uint>(GetProbeRayCountOffset(probe)), MaxProbeRays);
@@ -357,20 +373,23 @@ void BlendProbeIrradiance(uint3 group : SV_GroupID, uint3 local : SV_GroupThread
 
     uint start = counts.Load<uint>(GetProbeRayStartOffset(probe));
     bool hasBlended = HasBlended(LoadProbe(grid, probe));
-    float3 sum = float3(0.0);
-    float totalWeight = 0.0;
-    for (uint first = 0u; first < rayCount; first += IrradianceTexelCount)
+    if (index < rayCount)
     {
-        uint batch = min(IrradianceTexelCount, rayCount - first);
-        if (index < batch)
-        {
-            ProbeRay ray = DecodeProbeRay(rays[start + first + index]);
-            groupRays[index] = float4(ray.direction, ray.depth);
-            groupRadiance[index] = ray.radiance;
-        }
+        ProbeRay ray = DecodeProbeRay(rays[start + index]);
+        groupRays[index] = float4(ray.direction, ray.depth);
+        groupRadiance[index] = ray.radiance;
+    }
 
-        GroupMemoryBarrierWithGroupSync();
-        for (uint r = 0u; r < batch; r++)
+    GroupMemoryBarrierWithGroupSync();
+
+    // The light of the first 64 threads' directions.
+    if (index < IrradianceTexelCount)
+    {
+        uint2 at = uint2(index % IrradianceTexels, index / IrradianceTexels);
+        float3 texelDirection = DecodeUnitVectorUnorm((float2(at) + 0.5) / float(IrradianceTexels));
+        float3 sum = float3(0.0);
+        float totalWeight = 0.0;
+        for (uint r = 0u; r < rayCount; r++)
         {
             float weight = saturate(dot(texelDirection, groupRays[r].xyz));
             if (weight > WeightEpsilon)
@@ -380,28 +399,66 @@ void BlendProbeIrradiance(uint3 group : SV_GroupID, uint3 local : SV_GroupThread
             }
         }
 
-        GroupMemoryBarrierWithGroupSync();
+        if (totalWeight > WeightEpsilon)
+            sum /= totalWeight;
+
+        ArrayRef<uint4> variance = { grid.variance };
+        uint texel = probe * IrradianceTexelCount + index;
+        ProbeVariance data = DecodeProbeVariance(variance[texel]);
+        if (!hasBlended)
+        {
+            ProbeVariance fresh = {};
+            data = fresh;
+            data.mean = sum;
+            data.shortMean = sum;
+            data.inconsistency = 1.0;
+        }
+
+        data = EstimateMean(data, sum, IrradianceBlend);
+        variance[texel] = EncodeProbeVariance(data);
+        groupMeans[index] = data.mean;
+    }
+
+    // The distances of every thread's direction, and the push away from what is too near.
+    float maxDistance = grid.maxDistance;
+    float keep = maxDistance * KeepDistance;
+    float3 texelDirection = DecodeUnitVectorUnorm((float2(local.xy) + 0.5) / float(DepthTexels));
+    float2 moments = float2(0.0);
+    float totalWeight = 0.0;
+    float3 push = float3(0.0);
+    for (uint r = 0u; r < rayCount; r++)
+    {
+        float4 ray = groupRays[r];
+        float depth = ray.w > 0.0 ? clamp(ray.w - 0.01, 0.0, maxDistance) : maxDistance;
+        if (depth < keep)
+            push -= ray.xyz * (keep - depth);
+
+        float weight = pow(saturate(dot(texelDirection, ray.xyz)), 64.0);
+        if (weight > WeightEpsilon)
+        {
+            moments += float2(depth, depth * depth) * weight;
+            totalWeight += weight;
+        }
     }
 
     if (totalWeight > WeightEpsilon)
-        sum /= totalWeight;
+        moments /= totalWeight;
 
-    ArrayRef<uint4> variance = { grid.variance };
-    uint texel = probe * IrradianceTexelCount + index;
-    ProbeVariance data = DecodeProbeVariance(variance[texel]);
-    if (!hasBlended)
+    uint2 corner = GetProbeDepthTexel(grid, GetProbeCoord(grid, probe)) - 1u;
+    StorageRef depthTarget = { grid.depth, 0u };
+    if (hasBlended)
+        moments = lerp(depthTarget.Load(corner + 1u + local.xy).xy, moments, DepthBlend);
+
+    groupMoments[index] = moments;
+    depthTarget.Store(corner + 1u + local.xy, float4(moments, 0.0, 0.0));
+    GroupMemoryBarrierWithGroupSync();
+    if (index < 68u)
     {
-        ProbeVariance fresh = {};
-        data = fresh;
-        data.mean = sum;
-        data.shortMean = sum;
-        data.inconsistency = 1.0;
+        uint4 border = GetDepthBorder(index);
+        uint2 from = border.xy - 1u;
+        depthTarget.Store(corner + border.zw, float4(groupMoments[from.x + from.y * DepthTexels], 0.0, 0.0));
     }
 
-    data = EstimateMean(data, sum, IrradianceBlend);
-    variance[texel] = EncodeProbeVariance(data);
-    groupRadiance[index] = data.mean;
-    GroupMemoryBarrierWithGroupSync();
     if (index != 0u)
         return;
 
@@ -410,8 +467,8 @@ void BlendProbeIrradiance(uint3 group : SV_GroupID, uint3 local : SV_GroupThread
     for (uint i = 0u; i < IrradianceTexelCount; i++)
     {
         uint2 at = uint2(i % IrradianceTexels, i / IrradianceTexels);
-        float3 direction = DecodeOctahedral((float2(at) + 0.5) / float(IrradianceTexels) * 2.0 - 1.0);
-        ProbeSh texelSh = ProjectOntoSh(direction, groupRadiance[i]);
+        float3 direction = DecodeUnitVectorUnorm((float2(at) + 0.5) / float(IrradianceTexels));
+        ProbeSh texelSh = ProjectOntoSh(direction, groupMeans[i]);
         for (uint band = 0u; band < 4u; band++)
         {
             sh.c[band] += texelSh.c[band] * (4.0 * Pi / float(IrradianceTexelCount));
@@ -425,102 +482,6 @@ void BlendProbeIrradiance(uint3 group : SV_GroupID, uint3 local : SV_GroupThread
         updated.radiance[band] = float4(sh.c[band], 0.0);
     }
 
-    probes[probe] = updated;
-}
-
-// Where each border texel of a probe's depth tile copies from inside it, so a bilinear read at a tile's edge wraps as
-// the octahedron does: xy the texel inside the tile, zw the border texel, both from the tile's corner.
-static const uint4 DepthBorder[68] = {
-    uint4(16, 1, 1, 0), uint4(15, 1, 2, 0), uint4(14, 1, 3, 0), uint4(13, 1, 4, 0), uint4(12, 1, 5, 0),
-    uint4(11, 1, 6, 0), uint4(10, 1, 7, 0), uint4(9, 1, 8, 0), uint4(8, 1, 9, 0), uint4(7, 1, 10, 0),
-    uint4(6, 1, 11, 0), uint4(5, 1, 12, 0), uint4(4, 1, 13, 0), uint4(3, 1, 14, 0), uint4(2, 1, 15, 0),
-    uint4(1, 1, 16, 0), uint4(16, 16, 1, 17), uint4(15, 16, 2, 17), uint4(14, 16, 3, 17), uint4(13, 16, 4, 17),
-    uint4(12, 16, 5, 17), uint4(11, 16, 6, 17), uint4(10, 16, 7, 17), uint4(9, 16, 8, 17), uint4(8, 16, 9, 17),
-    uint4(7, 16, 10, 17), uint4(6, 16, 11, 17), uint4(5, 16, 12, 17), uint4(4, 16, 13, 17), uint4(3, 16, 14, 17),
-    uint4(2, 16, 15, 17), uint4(1, 16, 16, 17), uint4(1, 16, 0, 1), uint4(1, 15, 0, 2), uint4(1, 14, 0, 3),
-    uint4(1, 13, 0, 4), uint4(1, 12, 0, 5), uint4(1, 11, 0, 6), uint4(1, 10, 0, 7), uint4(1, 9, 0, 8),
-    uint4(1, 8, 0, 9), uint4(1, 7, 0, 10), uint4(1, 6, 0, 11), uint4(1, 5, 0, 12), uint4(1, 4, 0, 13),
-    uint4(1, 3, 0, 14), uint4(1, 2, 0, 15), uint4(1, 1, 0, 16), uint4(16, 16, 17, 1), uint4(16, 15, 17, 2),
-    uint4(16, 14, 17, 3), uint4(16, 13, 17, 4), uint4(16, 12, 17, 5), uint4(16, 11, 17, 6), uint4(16, 10, 17, 7),
-    uint4(16, 9, 17, 8), uint4(16, 8, 17, 9), uint4(16, 7, 17, 10), uint4(16, 6, 17, 11), uint4(16, 5, 17, 12),
-    uint4(16, 4, 17, 13), uint4(16, 3, 17, 14), uint4(16, 2, 17, 15), uint4(16, 1, 17, 16), uint4(16, 16, 0, 0),
-    uint4(1, 16, 17, 0), uint4(16, 1, 0, 17), uint4(1, 1, 17, 17),
-};
-
-// A group a probe, a thread a direction of its 16 by 16 map of distances: the mean and squared mean of its rays'
-// distances, sharply weighted towards the direction, blended slowly into the map, its border copied around it; and the
-// probe moved away from what its rays found nearer than it should keep.
-[shader("compute")]
-[numthreads(DepthTexels, DepthTexels, 1)]
-void BlendProbeDepth(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID, uint index : SV_GroupIndex)
-{
-    ProbeGridConstants grid = GetProbeGrid();
-    uint probe = group.x;
-    uint3 coord = GetProbeCoord(grid, probe);
-    float maxDistance = grid.maxDistance;
-    float keep = maxDistance * KeepDistance;
-    float3 texelDirection = DecodeOctahedral((float2(local.xy) + 0.5) / float(DepthTexels) * 2.0 - 1.0);
-    BufferRef counts = { grid.rayCounts };
-    ArrayRef<uint4> rays = { grid.rays };
-    uint rayCount = min(counts.Load<uint>(GetProbeRayCountOffset(probe)), MaxProbeRays);
-    if (rayCount == 0u)
-        return;
-
-    uint start = counts.Load<uint>(GetProbeRayStartOffset(probe));
-    bool hasBlended = HasBlended(LoadProbe(grid, probe));
-    float2 moments = float2(0.0);
-    float totalWeight = 0.0;
-    float3 push = float3(0.0);
-    for (uint first = 0u; first < rayCount; first += DepthTexelCount)
-    {
-        uint batch = min(DepthTexelCount, rayCount - first);
-        if (index < batch)
-        {
-            ProbeRay ray = DecodeProbeRay(rays[start + first + index]);
-            groupRays[index] = float4(ray.direction, ray.depth);
-        }
-
-        GroupMemoryBarrierWithGroupSync();
-        for (uint r = 0u; r < batch; r++)
-        {
-            float4 ray = groupRays[r];
-            float depth = ray.w > 0.0 ? clamp(ray.w - 0.01, 0.0, maxDistance) : maxDistance;
-            if (depth < keep)
-                push -= ray.xyz * (keep - depth);
-
-            float weight = pow(saturate(dot(texelDirection, ray.xyz)), 64.0);
-            if (weight > WeightEpsilon)
-            {
-                moments += float2(depth, depth * depth) * weight;
-                totalWeight += weight;
-            }
-        }
-
-        GroupMemoryBarrierWithGroupSync();
-    }
-
-    if (totalWeight > WeightEpsilon)
-        moments /= totalWeight;
-
-    uint2 corner = GetProbeDepthTexel(grid, coord) - 1u;
-    StorageRef depthTarget = { grid.depth, 0u };
-    if (hasBlended)
-        moments = lerp(depthTarget.Load(corner + 1u + local.xy).xy, moments, DepthBlend);
-
-    groupMoments[index] = moments;
-    depthTarget.Store(corner + 1u + local.xy, float4(moments, 0.0, 0.0));
-    GroupMemoryBarrierWithGroupSync();
-    for (uint border = index; border < 68u; border += DepthTexelCount)
-    {
-        uint2 from = DepthBorder[border].xy - 1u;
-        depthTarget.Store(corner + DepthBorder[border].zw, float4(groupMoments[from.x + from.y * DepthTexels], 0.0, 0.0));
-    }
-
-    if (index != 0u)
-        return;
-
-    ArrayRef<GpuProbe> probes = { grid.probes };
-    GpuProbe updated = probes[probe];
     float3 limit = grid.cellSize * 0.5;
     float3 offset = hasBlended ? updated.offset.xyz * limit : float3(0.0);
     updated.offset = float4(clamp(lerp(offset, push, OffsetBlend), -limit, limit) / limit, 1.0);

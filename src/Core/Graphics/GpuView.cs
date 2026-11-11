@@ -40,7 +40,8 @@ public readonly record struct GpuView
     public required GpuTexture Velocity { get; init; }
 
     /// <summary>
-    /// The nearest glass's depth and surface, in front of the opaque surfaces.
+    /// The nearest glass's depth and surface, in front of the opaque surfaces; none while no material draws
+    /// translucent.
     /// </summary>
     public required GpuTexture GlassDepth { get; init; }
 
@@ -102,8 +103,6 @@ public readonly record struct GpuView
 
     public required GpuBuffer LightTiles { get; init; }
 
-    public required int LightCount { get; init; }
-
     public required GpuTexture SkyTransmittance { get; init; }
 
     public required GpuTexture SkyMultiScattering { get; init; }
@@ -131,3 +130,19 @@ public readonly record struct GpuView
 /// A model on the GPU: its asset, and where its vertices start in the vertex pool, which its indices add.
 /// </summary>
 public readonly record struct ModelPlace(Handle<Model> Model, uint VertexOffset);
+
+public static class GpuViewExtensions
+{
+    extension(GpuView view)
+    {
+        /// <summary>
+        /// The view's size times <paramref name="scale"/>, each side rounded and kept between one pixel and the view's:
+        /// the size of a pass drawn at a setting's fraction of the picture.
+        /// </summary>
+        public (int Width, int Height) Scaled(float scale) =>
+            (
+                Math.Clamp((int)MathF.Round(view.Width * scale), 1, view.Width),
+                Math.Clamp((int)MathF.Round(view.Height * scale), 1, view.Height)
+            );
+    }
+}

@@ -29,6 +29,20 @@ public readonly record struct Result
     public static Result<T> Success<T>(T value) => new(true, value, string.Empty);
 
     public static Failure Failure(string error) => new(error);
+
+    /// <summary>
+    /// The first of <paramref name="results"/> that failed, or success when none did: one check of work done in pieces.
+    /// </summary>
+    public static Result FindFailure(params ReadOnlySpan<Result> results)
+    {
+        foreach (Result result in results)
+        {
+            if (!result.Ok)
+                return result;
+        }
+
+        return Success();
+    }
 }
 
 /// <summary>

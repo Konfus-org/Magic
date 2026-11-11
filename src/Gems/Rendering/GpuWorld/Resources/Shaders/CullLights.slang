@@ -4,8 +4,8 @@
 module "CullLights";
 
 import Core.Heap;
-import Core.Pass;
 import Core.Frame;
+import Core.Math;
 import Scene.Lights;
 
 static const uint Threads = 8u;
@@ -32,12 +32,6 @@ Plane CreatePlane(float3 p0, float3 p1, float3 p2)
 }
 
 bool IsSphereOutside(Plane plane, float3 center, float radius) { return dot(plane.normal, center) - plane.offset < -radius; }
-
-bool IsSphereTouchingBox(float3 center, float radius, float3 low, float3 high)
-{
-    float3 outside = max(max(low - center, center - high), 0.0);
-    return dot(outside, outside) <= radius * radius;
-}
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
@@ -89,33 +83,20 @@ void CullLights(uint3 group : SV_GroupID, uint3 thread : SV_DispatchThreadID, ui
             corners[c] = ReconstructRelative(frame, uv, c < 4u ? tileNear : tileFar);
         }
 
-        // The four sides, each through the camera and two near corners, so a tile one depth deep still has them.
+        // The four sides, each through the camera and two near corners, so a tile one depth deep still has them, the
+        // corners in the order that faces each side's normal into the tile.
         float3 eye = float3(0.0);
         Plane sides[4];
-        sides[0] = CreatePlane(eye, corners[2], corners[0]);
-        sides[1] = CreatePlane(eye, corners[1], corners[3]);
-        sides[2] = CreatePlane(eye, corners[0], corners[1]);
-        sides[3] = CreatePlane(eye, corners[3], corners[2]);
+        sides[0] = CreatePlane(eye, corners[0], corners[2]);
+        sides[1] = CreatePlane(eye, corners[3], corners[1]);
+        sides[2] = CreatePlane(eye, corners[1], corners[0]);
+        sides[3] = CreatePlane(eye, corners[2], corners[3]);
         float3 low = corners[0];
         float3 high = corners[0];
-        float3 middle = corners[0];
         for (uint k = 1u; k < 8u; k++)
         {
             low = min(low, corners[k]);
             high = max(high, corners[k]);
-            middle += corners[k];
-        }
-
-        // The planes' facing depends on the corners' winding, which the projection's handedness decides: the corners'
-        // centroid is inside them all, so a plane it is outside of is flipped.
-        middle /= 8.0;
-        for (uint p = 0u; p < 4u; p++)
-        {
-            if (dot(sides[p].normal, middle) - sides[p].offset < 0.0)
-            {
-                sides[p].normal = -sides[p].normal;
-                sides[p].offset = -sides[p].offset;
-            }
         }
 
         uint count = min(lights.count, MaxLights);
@@ -136,9 +117,8 @@ void CullLights(uint3 group : SV_GroupID, uint3 thread : SV_DispatchThreadID, ui
     }
 
     GroupMemoryBarrierWithGroupSync();
-    uint tilesAcross = (size.x + LightTileSize - 1u) / LightTileSize;
     ArrayRef<uint> tiles = { lights.tiles };
-    uint offset = GetLightTileOffset(group.xy, tilesAcross);
+    uint offset = GetLightTileOffset(group.xy, size.x);
     for (uint b = index; b < LightBuckets; b += Threads * Threads)
     {
         tiles[offset + b] = tileBits[b];

@@ -14,8 +14,6 @@ internal record struct ClusterConstants
 {
     public const int Offset = GpuAir.Offset + GpuAir.Bytes;
 
-    public const int Bytes = 72;
-
     public uint HzbLevels;
 
     public uint HasHzb;

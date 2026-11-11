@@ -86,7 +86,7 @@ public sealed class GlobalIlluminationGem
         }
 
         // The shaders are the GPU provider's to build, the first ask starting each; one that fails holds no domain back.
-        GpuState shaders = GetState(graph, _shaders.AsSpan());
+        GpuState shaders = graph.GetState(_shaders.AsSpan());
         if (shaders != GpuState.Loading)
             _built.TrySetResult();
 
@@ -105,25 +105,13 @@ public sealed class GlobalIlluminationGem
         Result<GpuBuffer> constants = graph.Buffer(
             GpuDescriptions.GetBuffer("GI constants", Unsafe.SizeOf<GIConstants>())
         );
-        if (!constants.Ok)
-        {
-            Log.Error($"The indirect light is not traced: {constants.Error}");
-
-            return null;
-        }
-
-        float scale = Settings.IndirectScale;
-        (int Width, int Height) tracedSize = (Scale(gpu.Width, scale), Scale(gpu.Height, scale));
+        (int Width, int Height) tracedSize = gpu.Scaled(Settings.IndirectScale);
         GIView view = new(
             graph,
-            gpu.Frame,
+            gpu,
             constants.Value,
             tracedSize,
             HasHistory: _traced == tracedSize,
-            gpu.Depth,
-            gpu.GBufferNormal,
-            gpu.GBufferSurface,
-            gpu.Velocity,
             [
                 gpu.SkyTransmittance,
                 gpu.SkyMultiScattering,
@@ -142,8 +130,8 @@ public sealed class GlobalIlluminationGem
             input.Traced.Box,
             (Settings.ProbesAcross, Settings.ProbesUp)
         );
-        Result<TracedDiffuseBuffers> diffuse = TracedDiffuse.Prepare(view, frame.Index);
-        Result<TracedReflectionBuffers> reflections = Settings.IsReflectionsOn
+        Result<TracedDiffuseConstants> diffuse = TracedDiffuse.Prepare(view, frame.Index);
+        Result<TracedReflectionConstants> reflections = Settings.IsReflectionsOn
             ? TracedReflections.Prepare(
                 view with
                 {
@@ -151,18 +139,15 @@ public sealed class GlobalIlluminationGem
                 },
                 frame.Index
             )
-            : Result.Success(default(TracedReflectionBuffers));
+            : Result.Success(default(TracedReflectionConstants));
         Result<GpuSampler> sampler = graph.Sampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
-        foreach (Result made in (ReadOnlySpan<Result>)[probes, diffuse, reflections, sampler])
+        if (Result.FindFailure(constants, probes, diffuse, reflections, sampler) is { Ok: false } failed)
         {
-            if (!made.Ok)
-            {
-                Log.Error($"The indirect light is not traced: {made.Error}");
+            Log.Error($"The indirect light is not traced: {failed.Error}");
 
-                return null;
-            }
+            return null;
         }
 
         graph.Upload(
@@ -170,9 +155,9 @@ public sealed class GlobalIlluminationGem
             [
                 new GIConstants
                 {
-                    Diffuse = diffuse.Value.Constants,
-                    Reflections = reflections.Value.Constants,
-                    Sampler = sampler.Value.Id,
+                    Diffuse = diffuse.Value,
+                    Reflections = reflections.Value,
+                    Sampler = sampler.Value,
                     TracedWidth = (uint)tracedSize.Width,
                     TracedHeight = (uint)tracedSize.Height,
                 },
@@ -210,28 +195,4 @@ public sealed class GlobalIlluminationGem
 
     public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel) =>
         _built.Task.WaitAsync(cancel);
-
-    /// <summary>
-    /// A side of the picture at <paramref name="scale"/>, from 1 pixel up to the whole side.
-    /// </summary>
-    private static int Scale(int side, float scale) => Math.Clamp((int)MathF.Round(side * scale), 1, side);
-
-    /// <summary>
-    /// Where <paramref name="shaders"/> are: failed if any failed, loading while any loads, else ready. Each is asked,
-    /// so the first ask starts them all.
-    /// </summary>
-    private static GpuState GetState(RenderGraph graph, ReadOnlySpan<ShaderEntry> shaders)
-    {
-        GpuState all = GpuState.Ready;
-        foreach (ShaderEntry shader in shaders)
-        {
-            GpuState state = graph.GetState(shader);
-            if (state == GpuState.Failed)
-                all = GpuState.Failed;
-            else if (state == GpuState.Loading && all == GpuState.Ready)
-                all = GpuState.Loading;
-        }
-
-        return all;
-    }
 }

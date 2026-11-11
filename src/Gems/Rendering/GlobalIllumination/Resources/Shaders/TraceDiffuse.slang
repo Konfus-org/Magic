@@ -7,16 +7,14 @@
 module "TraceDiffuse";
 
 import Core.Heap;
-import Core.Pass;
 import Core.Frame;
 import Core.Math;
-import Core.Pack;
 import Core.Random;
 import Core.Sampling;
 import Scene.Lights;
 import Light.Probes;
 import Light.Indirect;
-import Scene.Traced;
+import Traced;
 import Sky.ISky;
 import Trace.HitSurface;
 import Trace.HitLight;
@@ -41,8 +39,9 @@ static const float VarianceBlend = 0.6;
 void TraceDiffuse<S : ISky>(uint3 thread : SV_DispatchThreadID)
 {
     FrameConstants frame = GetFrame();
-    TracedDiffuseConstants diffuse = GetGIConstants().diffuse;
-    if (any(thread.xy >= GetGIConstants().tracedSize))
+    GIConstants gi = GetGIConstants();
+    TracedDiffuseConstants diffuse = gi.diffuse;
+    if (any(thread.xy >= gi.tracedSize))
         return;
 
     uint2 pixel = GetTracedPixel(frame, thread.xy);
@@ -57,15 +56,13 @@ void TraceDiffuse<S : ISky>(uint3 thread : SV_DispatchThreadID)
 
     Lights lights = GetLights();
     ProbeGridConstants grid = GetProbeGrid();
-    TextureRef normalTexture = { frame.gbufferNormal };
-    float3 normal = DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0);
-    float3 relative = ReconstructRelative(frame, GetTexelCenterUv(pixel, uint2(frame.width, frame.height)), depth);
+    float3 normal = LoadNormal(frame.gbufferNormal, pixel);
+    float3 relative = ReconstructPixel(frame, pixel, depth);
     float3 world = relative + frame.cameraPosition.xyz;
     float3 origin = world + normal * GetRayOffset(frame, relative);
     float3 beyond = GetProbeIrradiance(grid, world, normal);
     float3x3 basis = CreateBasis(normal);
-    AccelerationRef acceleration = { GetTracedWorld().acceleration };
-    RaytracingAccelerationStructure scene = acceleration.Get();
+    RaytracingAccelerationStructure scene = GetTracedAcceleration();
     float3 sum = float3(0.0);
     for (uint i = 0u; i < RayCount; i++)
     {
@@ -87,7 +84,7 @@ void TraceDiffuse<S : ISky>(uint3 thread : SV_DispatchThreadID)
 }
 
 // A thread a traced pixel: its light filtered over a few neighbours spread at random through the 8 by 8 traced pixels
-// around it, weighed by how near their depths are, as Scene/Traced's NeighbourLight averages them.
+// around it, weighed by how near their depths are, as Traced's NeighbourLight averages them.
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void FilterDiffuse(uint3 thread : SV_DispatchThreadID)
@@ -132,7 +129,7 @@ void FilterDiffuse(uint3 thread : SV_DispatchThreadID)
 }
 
 // A thread a traced pixel: its filtered light blended with the history where the surface was last frame, as
-// Scene/Traced's BlendHistory blends it.
+// Traced's BlendHistory blends it.
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void BlendDiffuse(uint3 thread : SV_DispatchThreadID)
@@ -157,16 +154,12 @@ void BlendDiffuse(uint3 thread : SV_DispatchThreadID)
         return;
     }
 
-    float3 mean;
-    float3 deviation;
-    GetNeighbourhood(filtered, thread.xy, size, mean, deviation);
-
+    Neighbourhood neighbourhood = GetNeighbourhood(filtered, thread.xy, size);
     TracedHistory history = CreateHistory(gi, blend, size);
     TextureRef velocityTexture = { frame.velocity };
     float3 velocity = velocityTexture.Load(pixel, 0u).xyz;
     float2 uv = GetTexelCenterUv(thread.xy, size) + velocity.xy;
-    float sameness;
-    float4 previous = SampleHistory(history, velocity.z, uv, sameness);
     light.Store(
-        thread.xy, BlendHistory(current, previous, sameness, uv, mean, deviation, HistoryBlend, HistorySpread, VarianceBlend));
+        thread.xy,
+        BlendHistory(history, current, neighbourhood, velocity.z, uv, HistoryBlend, HistorySpread, VarianceBlend));
 }

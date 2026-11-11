@@ -64,11 +64,11 @@ public struct TemporalAntiAliasing : IPixelEffect
 
         float2 velocity = inputs.velocity.Load(nearest, 0u).xy;
         float2 historyUv = inputs.uv + velocity;
-        bool isOnScreen = all(saturate(historyUv) == historyUv);
+        bool isOnScreen = IsOnScreen(historyUv);
         historyUv = saturate(historyUv);
 
         // Where the surface moved and the history saw another one where it was, the pixel as it is now.
-        float historyDepth = inputs.history.Load(min(uint2(historyUv * float2(inputs.size)), inputs.size - 1u), 0u).a;
+        float historyDepth = inputs.history.Load(GetTexelAt(historyUv, inputs.size), 0u).a;
         float previousDepth = inputs.velocity.Load(inputs.pixel, 0u).z;
         if (length(velocity) > MovingDistance && abs(previousDepth - historyDepth) > SurfaceGapMetres)
             return float4(current, viewDepth);

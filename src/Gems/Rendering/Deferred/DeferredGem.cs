@@ -30,11 +30,6 @@ public readonly record struct DeferredInput(
 );
 
 /// <summary>
-/// The view as the world on the GPU posted it this frame, and the graph its passes record into.
-/// </summary>
-internal readonly record struct RenderView(GpuView Gpu, RenderGraph Graph);
-
-/// <summary>
 /// Lights the world the GPU holds, deferred: each frame, from the view the world's gem made and the GBuffer a geometry
 /// gem drew into it, the shading, shadowed by the frame's shadow mask where there is one, the nearest glass over it, the
 /// effects, a debug view where one is asked for, and the output into the window and any screenshot asked for. Where
@@ -53,30 +48,21 @@ public sealed class DeferredGem
     private readonly AssetManager _assets;
     private readonly EventCoordinator _events;
     private readonly Threads _threads;
-    private readonly Mailbox<RenderInputs> _inputs = new();
     private readonly Channel<ScreenshotRequested> _screenshots = Channel.CreateUnbounded<ScreenshotRequested>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
     );
-    private readonly Lighting _lighting;
+    private readonly ShaderEntry _shadeShader;
+    private readonly ShaderEntry _translucentShader;
+    private readonly ShaderEntry _lightShader;
+    private readonly ShaderEntry _showShader;
     private readonly PixelEffects _pixelEffects = new();
-    private readonly SurfaceView _surfaceView;
     private readonly RendererDebugWindow? _debugWindow;
 
     /// <summary>
     /// Every shader the passes run, which the GPU provider builds before the frame is drawn.
     /// </summary>
     private readonly ImmutableArray<ShaderEntry> _shaders;
-
-    /// <summary>
-    /// The settings <see cref="Render"/> draws with, taken from <see cref="_inputs"/>, until newer are. Render thread.
-    /// </summary>
-    private RenderInputs? _current;
     private bool _hasDrawn;
-
-    /// <summary>
-    /// Whether the renderer draws: failed once a shader is not built. Render thread.
-    /// </summary>
-    private Result _started = Result.Success();
 
     /// <summary>
     /// How many domains have loaded since the start, and what the newest waits on before it shows: the gem's passes
@@ -101,14 +87,22 @@ public sealed class DeferredGem
         _assets = assets;
         _events = events;
         _threads = threads;
-        _lighting = new Lighting(assets);
-        _surfaceView = new SurfaceView(assets);
-        _shaders = [.. _lighting.Shaders, .. _surfaceView.Shaders];
+        _shadeShader = PassShaders.GetEntry(assets, "ShadeSurfaces", "ShadeSurfaces") with
+        {
+            TypeArguments = [PassShaders.GetAtmosphere(assets)],
+        };
+        _translucentShader = PassShaders.GetEntry(assets, "ShadeTranslucent", "ShadeTranslucent") with
+        {
+            TypeArguments = [PassShaders.GetAtmosphere(assets)],
+        };
+        _lightShader = PassShaders.GetEntry(assets, "ShowSurface", "ShowLight");
+        _showShader = PassShaders.GetEntry(assets, "ShowSurface", "ShowSurface");
+        _shaders = [_shadeShader, _translucentShader, _lightShader, _showShader];
     }
 
     /// <summary>
-    /// What the renderer shows, which <see cref="LateUpdate"/> hands each frame to <see cref="Render"/>, and the debug
-    /// window also sets. Game thread.
+    /// What the renderer shows, which the debug window also sets on the game thread. <see cref="Render"/> reads it on
+    /// the render thread: a record, written whole, which no one changes.
     /// </summary>
     public DeferredSettings Settings { get; set; }
 
@@ -122,18 +116,14 @@ public sealed class DeferredGem
     }
 
     /// <summary>
-    /// Publishes the settings for <see cref="Render"/>, after the screenshots asked for.
+    /// Hands <see cref="Render"/> the screenshots asked for.
     /// </summary>
     public void LateUpdate(in Frame frame)
     {
-        RenderInputs back = _inputs.Back;
-        back.Settings = Settings;
         foreach (ScreenshotRequested asked in frame.Events.Get<ScreenshotRequested>())
         {
             _screenshots.Writer.TryWrite(asked);
         }
-
-        _inputs.Publish();
     }
 
     /// <summary>
@@ -141,37 +131,23 @@ public sealed class DeferredGem
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph, in DeferredInput input)
     {
-        if (!_started.Ok)
-            return;
-
-        // The shaders are the GPU provider's to build, the first ask starting each; one that fails ends the start.
-        GpuState shaders = GetState(graph, _shaders.AsSpan());
-        if (shaders == GpuState.Failed)
-            FailStart("a shader was not built.");
-
-        if (shaders != GpuState.Ready)
-            return;
-
-        if (_inputs.TryTake(out RenderInputs? newest))
-        {
-            if (_current is not null)
-                _inputs.Return(_current);
-
-            _current = newest;
-        }
-
-        if (_current is not { } inputs)
-            return;
-
-        // The loading domain shows once its models and materials are on the GPU, now the gem's passes are built.
+        // The shaders are the GPU provider's to build, the first ask starting each. While one failed, the renderer draws
+        // nothing and holds no domain back; else the loading domain shows once its models and materials are on the GPU.
+        GpuState shaders = graph.GetState(_shaders.AsSpan());
         GpuView gpu = input.View;
-        if (_loading is { } loading && gpu.PreparedDomains >= _domainsLoaded)
+        if (
+            _loading is { } loading
+            && (shaders == GpuState.Failed || (shaders == GpuState.Ready && gpu.PreparedDomains >= _domainsLoaded))
+        )
         {
             loading.TrySetResult();
             _loading = null;
         }
 
-        RenderView view = new(gpu, graph);
+        if (shaders != GpuState.Ready)
+            return;
+
+        DeferredSettings settings = Settings;
 
         // The rows of what no gem made this frame are 0, so the shaders that read them trace, shadow and light nothing
         // indirectly, the sky lights the surfaces, and the air changes nothing.
@@ -187,28 +163,99 @@ public sealed class DeferredGem
         if (input.Air is null)
             graph.Upload(gpu.Frame, [default(GpuAir)], GpuAir.Offset);
 
-        ReadOnlySpan<GpuResource> indirect = input.Light switch
+        ReadOnlySpan<GpuResource> indirect = input.Light is { } light
+            ? [light.Diffuse, light.Reflections, light.Probes, light.ProbeDepth]
+            : [];
+
+        // Every pixel's surface shaded from the sky's tables, its tile's lights, the shadows where there are any and the
+        // indirect light, or the sky where nothing traced it.
+        ComputePass shade = graph
+            .Compute("Shade surfaces", _shadeShader, new GpuConstants(gpu.Frame.Id), RenderStage.Shade)
+            .Reads(
+                gpu.Frame,
+                gpu.SkyTransmittance,
+                gpu.SkyMultiScattering,
+                gpu.SkyView,
+                gpu.LightTable,
+                gpu.LightTiles,
+                gpu.Depth,
+                gpu.GBufferNormal,
+                gpu.GBufferBase,
+                gpu.GBufferSurface
+            )
+            .Reads(indirect);
+        if (input.Shadows is { } shadows)
+            shade.Reads(shadows.Mask, shadows.SunTint);
+
+        if (input.Air is { Clouds: { } clouds })
+            shade.Reads(clouds);
+
+        shade.Writes(gpu.Hdr).DispatchOver(gpu.Width, gpu.Height);
+
+        // The nearest pane over the shaded picture, from what the resolve left in the glass targets, with its rays
+        // through the traced world where there is one, and the air in front of it or of the opaque surface; nothing to
+        // do with neither glass nor air.
+        if (!gpu.GlassDepth.IsNone || input.Air is not null)
         {
-            { Reflections.IsNone: true } light => [light.Diffuse, light.Probes, light.ProbeDepth],
-            { } light => [light.Diffuse, light.Reflections, light.Probes, light.ProbeDepth],
-            null => [],
-        };
+            ComputePass translucent = graph
+                .Compute("Shade translucent", _translucentShader, new GpuConstants(gpu.Frame.Id), RenderStage.Shade)
+                .Reads(
+                    gpu.Frame,
+                    gpu.SkyTransmittance,
+                    gpu.SkyMultiScattering,
+                    gpu.SkyView,
+                    gpu.Depth,
+                    gpu.GlassDepth,
+                    gpu.GlassBase,
+                    gpu.GlassNormal,
+                    gpu.GlassSurface
+                )
+                .Reads(indirect);
+            if (input.Traced is { } traced)
+                translucent.Reads(traced.HitMaterials, gpu.Meshes, gpu.Instances);
 
-        // The passes, each in its stage, each reading what the ones before it wrote: the shading, lit by the frame's
-        // indirect light where something traced it, a debug view's light in its place, the effects, which finish the
-        // picture, and the output.
-        GpuConstants header = new(gpu.Frame.Id);
-        _lighting.Record(view, header, input.Shadows, input.Traced, input.Air, indirect);
+            if (input.Air is { } air)
+                translucent.Reads(air.Volume);
 
-        // A debug view of light draws it into the picture, so the effects finish it as they do the picture.
-        _surfaceView.RecordLight(view, inputs.Settings.RenderView, indirect);
-        _pixelEffects.Record(view, frame.Index);
-        _surfaceView.Record(
-            view,
-            inputs.Settings.RenderView,
-            inputs.Settings.DepthViewFar,
-            Math.Clamp(inputs.Settings.Gamma, 0.5f, 2f)
-        );
+            translucent.Writes(gpu.Hdr).DispatchOver(gpu.Width, gpu.Height);
+        }
+
+        // A debug view of light draws it into the picture in place of the lit one, black where none was traced, so the
+        // effects finish it as they do the picture.
+        if (settings.RenderView is DebugView.IndirectDiffuse or DebugView.Reflections)
+        {
+            graph
+                .Compute(
+                    "Show light",
+                    _lightShader,
+                    new GpuConstants(gpu.Frame.Id, (uint)settings.RenderView),
+                    RenderStage.Shade
+                )
+                .Reads(gpu.Frame, gpu.Depth, gpu.GBufferNormal)
+                .Reads(indirect)
+                .Writes(gpu.Hdr)
+                .DispatchOver(gpu.Width, gpu.Height);
+        }
+
+        _pixelEffects.Record(graph, gpu, frame.Index);
+
+        // The output drawn as the debug view asks, a Depth view black from its far distance, and the picture's middle
+        // tones shown at the gamma.
+        graph
+            .Compute(
+                "Show surface",
+                _showShader,
+                new GpuConstants(
+                    gpu.Frame.Id,
+                    (uint)settings.RenderView,
+                    BitConverter.SingleToUInt32Bits(settings.DepthViewFar),
+                    BitConverter.SingleToUInt32Bits(Math.Clamp(settings.Gamma, 0.5f, 2f))
+                ),
+                RenderStage.Post
+            )
+            .Reads(gpu.Frame, gpu.Depth, gpu.GBufferNormal, gpu.GBufferBase, gpu.GBufferSurface, gpu.Velocity, gpu.Hdr)
+            .Writes(gpu.Output)
+            .DispatchOver(gpu.Width, gpu.Height);
 
         // What the window and a screenshot show: the output as a gem upscaled it to the size it is shown at, or the
         // output itself, stretched over the window with the upscale filter.
@@ -216,7 +263,7 @@ public sealed class DeferredGem
         GpuTexture shown = upscaled.IsNone ? gpu.Output : upscaled;
         GpuTexture target = graph.WindowTarget;
         if (!target.IsNone)
-            graph.Blit(shown, target, RenderStage.Post, inputs.Settings.UpscaleFilter);
+            graph.Blit(shown, target, RenderStage.Post, settings.UpscaleFilter);
 
         // One readback buffer, so one screenshot a frame: the last asked for.
         ScreenshotRequested? shot = null;
@@ -226,7 +273,7 @@ public sealed class DeferredGem
         }
 
         if (shot is { } saved)
-            SaveScreenshot(graph, shown, gpu.ShownWidth, gpu.ShownHeight, inputs.Settings.UpscaleFilter, saved.Path);
+            SaveScreenshot(graph, shown, gpu.ShownWidth, gpu.ShownHeight, settings.UpscaleFilter, saved.Path);
 
         if (!_hasDrawn)
         {
@@ -248,42 +295,9 @@ public sealed class DeferredGem
         _domainsLoaded++;
         _loading?.TrySetResult();
         _loading = null;
-        if (!_started.Ok)
-            return;
-
         TaskCompletionSource loading = new(TaskCreationOptions.RunContinuationsAsynchronously);
         _loading = loading;
         await loading.Task.WaitAsync(cancel).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Where <paramref name="shaders"/> are: failed if any failed, loading while any loads, else ready. Each is asked,
-    /// so the first ask starts them all.
-    /// </summary>
-    private static GpuState GetState(RenderGraph graph, ReadOnlySpan<ShaderEntry> shaders)
-    {
-        GpuState all = GpuState.Ready;
-        foreach (ShaderEntry shader in shaders)
-        {
-            GpuState state = graph.GetState(shader);
-            if (state == GpuState.Failed)
-                all = GpuState.Failed;
-            else if (state == GpuState.Loading && all == GpuState.Ready)
-                all = GpuState.Loading;
-        }
-
-        return all;
-    }
-
-    /// <summary>
-    /// Ends the start as failed: the renderer draws nothing, and holds no domain back.
-    /// </summary>
-    private void FailStart(string error)
-    {
-        Log.Error($"The renderer draws nothing: {error}");
-        _loading?.TrySetResult();
-        _loading = null;
-        _started = Result.Failure(error);
     }
 
     /// <summary>
@@ -327,6 +341,50 @@ public sealed class DeferredGem
             graph.Blit(shown, read.Value, RenderStage.Post, filter);
 
         graph.ReadBack(read.Value, readback.Value, RenderStage.Post);
-        Screenshot.SaveAsync(_gpu, _assets, readback.Value, path, width, height).FireAndForget();
+        SaveScreenshotAsync(readback.Value, path, width, height).FireAndForget();
+    }
+
+    /// <summary>
+    /// Writes what was read back to <paramref name="path"/> once the GPU is done with it, opaque as the window shows it,
+    /// as a texture through the gem that writes them.
+    /// </summary>
+    private async Task SaveScreenshotAsync(GpuBuffer readback, string path, int width, int height)
+    {
+        Result<ReadOnlyMemory<byte>> pixels = await _gpu.ReadBackAsync(
+                readback,
+                0,
+                width * height * 4,
+                CancellationToken.None
+            )
+            .ConfigureAwait(false);
+        if (!pixels.Ok)
+        {
+            Log.Error($"The screenshot could not be read back: {pixels.Error}");
+
+            return;
+        }
+
+        // The window shows no alpha, which a picture may use for its own data.
+        byte[] opaque = pixels.Value.ToArray();
+        for (int alpha = 3; alpha < opaque.Length; alpha += 4)
+        {
+            opaque[alpha] = byte.MaxValue;
+        }
+
+        Texture shot = new()
+        {
+            Width = width,
+            Height = height,
+            Format = TextureFormat.Rgba8Srgb,
+            Pixels = opaque,
+            Levels = [new TextureLevel(width, height, 0, opaque.Length)],
+            HasMipmaps = false,
+            IsCompressed = false,
+        };
+        Result written = await _assets.ExportAsync(shot, path, null, CancellationToken.None).ConfigureAwait(false);
+        if (written.Ok)
+            Terminal.Write(path);
+        else
+            Log.Error($"The screenshot could not be written: {written.Error}");
     }
 }

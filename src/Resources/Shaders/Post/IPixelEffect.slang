@@ -28,16 +28,8 @@ public struct PixelEffectInputs
     public uint2 pixel;
     public uint2 size;
     public uint level;
-    // The pixel's opaque surface relative to the camera, in metres, or far along its ray where nothing was drawn, its
-    // depth along the camera's view, 0 where nothing was drawn.
-    public float3 position;
+    // The pixel's opaque surface's depth along the camera's view, in metres, 0 where nothing was drawn.
     public float viewDepth;
-    // The pixel's opaque surface: its unit normal in the world, its base colour, its roughness and its metalness, all 0
-    // where nothing was drawn.
-    public float3 normal;
-    public float3 baseColor;
-    public float roughness;
-    public float metalness;
     // The picture as the effects before this one left it, the effect's target as this frame has filled it so far, and
     // as last frame left it, and the picture's reversed depth and velocity, each read at any texel, and a sampler that
     // filters between texels and clamps at the edges. The history holds nothing at a new view or size, on the effect's

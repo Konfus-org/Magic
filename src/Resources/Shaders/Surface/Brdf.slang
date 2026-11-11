@@ -89,6 +89,9 @@ public float3 SampleGgxVisibleNormal(float3 viewLocal, float alpha, float2 xi)
     return normalize(float3(alpha * half.x, alpha * half.y, max(half.z, 0.0)));
 }
 
+// The GGX alpha SampleGgxReflection draws a direction with, which a weight over its density must use too.
+public float GetReflectionAlpha(float roughness) { return Pow2(max(roughness, 0.045)); }
+
 // A direction the specular reflects the view into, in xyz, from a microfacet normal drawn as SampleGgxVisibleNormal
 // draws it with a tenth of its tail cut, which only adds noise, and that normal's density in w: the mirror direction
 // at a density of 1 where the surface is all but smooth.
@@ -97,7 +100,7 @@ public float4 SampleGgxReflection(float3 normal, float3 view, float roughness, f
     if (roughness <= 0.05)
         return float4(reflect(-view, normal), 1.0);
 
-    float alpha = Pow2(max(roughness, 0.045));
+    float alpha = GetReflectionAlpha(roughness);
     float3x3 basis = CreateBasis(normal);
     float3 viewLocal = ToLocal(basis, view);
     float3 half = SampleGgxVisibleNormal(viewLocal, alpha, float2(xi.x * 0.9, xi.y));
@@ -106,12 +109,4 @@ public float4 SampleGgxReflection(float3 normal, float3 view, float roughness, f
     float masking = 2.0 * nDotV / (sqrt(nDotV * (nDotV - nDotV * a2) + a2) + nDotV);
     float pdf = masking * saturate(dot(viewLocal, half)) * DistributionGgx(alpha, half.z) / nDotV;
     return float4(reflect(-view, ToWorld(basis, half)), pdf);
-}
-
-// What the surface reflects of light from everywhere at once, as the sky's: the diffuse under the average Fresnel.
-public float3 EvaluateAmbient(Brdf brdf, float3 normal, float3 view)
-{
-    float nDotV = max(dot(normal, view), 1e-4);
-    float3 fresnel = brdf.f0 + (max(float3(1.0 - brdf.alpha), brdf.f0) - brdf.f0) * Pow5(1.0 - nDotV);
-    return brdf.diffuse * (1.0 - fresnel) + fresnel * (1.0 - brdf.alpha * 0.5);
 }

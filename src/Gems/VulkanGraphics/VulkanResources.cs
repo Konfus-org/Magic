@@ -382,13 +382,10 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
 
     public Result<GpuSampler> CreateSampler(in SamplerDescription description)
     {
-        VkSamplerReductionModeCreateInfo reduction = new() { reductionMode = description.Reduction.ToVulkan() };
-        bool hasReduction = description.Reduction != SamplerReduction.Average && device.Features.HasSamplerMinMax;
         VkFilter filter = description.Filter.ToVulkan();
         VkSamplerAddressMode wrap = description.Wrap.ToVulkan();
         VkSamplerCreateInfo createInfo = new()
         {
-            pNext = hasReduction ? &reduction : null,
             magFilter = filter,
             minFilter = filter,
             mipmapMode =
@@ -901,10 +898,8 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
 
     private Result<VulkanTexture> CreateVulkanTexture(in TextureDescription description)
     {
-        bool isCube = description.Kind == TextureKind.Cube;
         VkImageCreateInfo createInfo = new()
         {
-            flags = isCube ? VkImageCreateFlags.CubeCompatible : VkImageCreateFlags.None,
             imageType = description.Kind.ToImageType(),
             format = description.Format.ToVulkan(),
             extent = new VkExtent3D(
@@ -913,7 +908,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
                 (uint)(description.Kind == TextureKind.Texture3D ? description.Depth : 1)
             ),
             mipLevels = (uint)description.Levels,
-            arrayLayers = description.GetLayerCount(),
+            arrayLayers = 1,
             samples = VkSampleCountFlags.Count1,
             tiling = VkImageTiling.Optimal,
             usage = description.Usage.ToVulkan(),
@@ -988,18 +983,15 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     }
 
     /// <summary>
-    /// A view of <paramref name="levels"/> levels from <paramref name="firstLevel"/>: the whole texture as its kind
-    /// is sampled, or one level as it is written and drawn into, where a cube is six layers.
+    /// A view of <paramref name="levels"/> levels from <paramref name="firstLevel"/>: the whole texture as it is
+    /// sampled, or one level as it is written and drawn into.
     /// </summary>
     private Result<VkImageView> CreateView(VkImage image, in TextureDescription description, int firstLevel, int levels)
     {
-        bool isWhole = levels == description.Levels && firstLevel == 0;
-        bool isCube = description.Kind == TextureKind.Cube;
-        VkImageViewType viewType = isWhole || !isCube ? description.Kind.ToViewType() : VkImageViewType.Image2DArray;
         VkImageViewCreateInfo createInfo = new()
         {
             image = image,
-            viewType = viewType,
+            viewType = description.Kind.ToViewType(),
             format = description.Format.ToVulkan(),
             components = VkComponentMapping.Identity,
             subresourceRange = new VkImageSubresourceRange(
@@ -1007,7 +999,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
                 (uint)firstLevel,
                 (uint)levels,
                 0,
-                description.GetLayerCount()
+                1
             ),
         };
         VkResult result = device.Api.vkCreateImageView(&createInfo, out VkImageView view);

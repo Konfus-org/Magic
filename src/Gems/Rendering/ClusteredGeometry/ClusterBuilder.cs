@@ -68,16 +68,46 @@ internal static unsafe class ClusterBuilder
             BuildMesh(model.Meshes[i], firstVertices[i], vertices, indices, clusters);
         }
 
-        (Vector3 center, float radius) = GetSphere(vertices);
-        SetRootParents(clusters, center, radius);
-
-        // The box around the model, which its impostor's quad is fitted to.
+        // The box around the model, which its impostor's quad is fitted to, and the sphere around it: its centre the
+        // box's middle, 0 for a model with no vertices, its radius the farthest vertex from there.
         Vector3 boundsMin = new(float.MaxValue);
         Vector3 boundsMax = new(float.MinValue);
         foreach (GpuVertex vertex in vertices)
         {
             boundsMin = Vector3.Min(boundsMin, vertex.Position);
             boundsMax = Vector3.Max(boundsMax, vertex.Position);
+        }
+
+        Vector3 center = (boundsMin + boundsMax) * 0.5f;
+        float radius2 = 0;
+        foreach (GpuVertex vertex in vertices)
+        {
+            radius2 = Math.Max(radius2, Vector3.DistanceSquared(center, vertex.Position));
+        }
+
+        // Every root's parent: the model's sphere, widened to hold the roots' own, at the error of its diameter, so a
+        // root draws until the whole model projects under the threshold, and then nothing does.
+        float radius = MathF.Sqrt(radius2);
+        float rootsRadius = radius;
+        foreach (GpuCluster cluster in clusters)
+        {
+            if (float.IsPositiveInfinity(cluster.ParentError))
+                rootsRadius = Math.Max(
+                    rootsRadius,
+                    Vector3.Distance(center, cluster.DetailCenter) + cluster.DetailRadius
+                );
+        }
+
+        for (int i = 0; i < clusters.Count; i++)
+        {
+            GpuCluster cluster = clusters[i];
+            if (!float.IsPositiveInfinity(cluster.ParentError))
+                continue;
+
+            cluster.ParentError = 2 * rootsRadius;
+            cluster.ParentCenter = center;
+            cluster.ParentRadius = rootsRadius;
+            clusters[i] = cluster;
         }
 
         // Every model stands far away as an impostor once it is a few pixels across.
@@ -94,31 +124,6 @@ internal static unsafe class ClusterBuilder
             BoundsMin = boundsMin,
             BoundsMax = boundsMax,
         };
-    }
-
-    /// <summary>
-    /// Every root's parent: the model's sphere, widened to hold the roots' own, at the error of its diameter, so a
-    /// root draws until the whole model projects under the threshold, and then nothing does.
-    /// </summary>
-    private static void SetRootParents(List<GpuCluster> clusters, Vector3 center, float radius)
-    {
-        foreach (GpuCluster cluster in clusters)
-        {
-            if (float.IsPositiveInfinity(cluster.ParentError))
-                radius = Math.Max(radius, Vector3.Distance(center, cluster.DetailCenter) + cluster.DetailRadius);
-        }
-
-        for (int i = 0; i < clusters.Count; i++)
-        {
-            GpuCluster cluster = clusters[i];
-            if (!float.IsPositiveInfinity(cluster.ParentError))
-                continue;
-
-            cluster.ParentError = 2 * radius;
-            cluster.ParentCenter = center;
-            cluster.ParentRadius = radius;
-            clusters[i] = cluster;
-        }
     }
 
     /// <summary>
@@ -282,8 +287,8 @@ internal static unsafe class ClusterBuilder
     }
 
     /// <summary>
-    /// The level the groups make: their vertices copied into the pool, once for the whole level, and each group's
-    /// triangles clustered, every cluster with the group's error and sphere and its triangles in the pool.
+    /// The level the groups make: each group's triangles clustered, every cluster with the group's error and sphere,
+    /// and the level's vertices copied into the pool, once for the whole level, every cluster's triangles in the pool.
     /// </summary>
     private static List<Cluster> AddLevel(
         List<Group> made,
@@ -293,14 +298,6 @@ internal static unsafe class ClusterBuilder
         ImmutableArray<GpuVertex>.Builder vertices
     )
     {
-        uint[] levelTriangles = [.. made.SelectMany(group => group.Simplified)];
-        Dictionary<(uint, uint, uint), (uint, uint, uint)> copies = CopyVertices(
-            mesh,
-            levelTriangles,
-            positions,
-            canonical,
-            vertices
-        );
         List<Cluster> parents = [];
         foreach (Group group in made)
         {
@@ -308,19 +305,23 @@ internal static unsafe class ClusterBuilder
             {
                 parent.Gpu.DetailCenter = group.Center;
                 parent.Gpu.DetailRadius = group.Radius;
-                parent.PoolIndices = new uint[parent.Indices.Length];
-                for (int i = 0; i + 2 < parent.Indices.Length; i += 3)
-                {
-                    (uint a, uint b, uint c) = copies[
-                        (parent.Indices[i], parent.Indices[i + 1], parent.Indices[i + 2])
-                    ];
-                    parent.PoolIndices[i] = a;
-                    parent.PoolIndices[i + 1] = b;
-                    parent.PoolIndices[i + 2] = c;
-                }
-
                 parents.Add(parent);
             }
+        }
+
+        uint[] pool = CopyVertices(
+            mesh,
+            [.. made.SelectMany(group => group.Simplified)],
+            [.. parents.SelectMany(parent => parent.Indices)],
+            positions,
+            canonical,
+            vertices
+        );
+        int first = 0;
+        foreach (Cluster parent in parents)
+        {
+            parent.PoolIndices = pool[first..(first + parent.Indices.Length)];
+            first += parent.Indices.Length;
         }
 
         return parents;
@@ -540,32 +541,26 @@ internal static unsafe class ClusterBuilder
     /// Copies of the vertices the simplified triangles use, appended to the pool, with normals from those triangles
     /// alone: a vertex has one copy per smoothing group of its faces, those within <see cref="CreaseAngle"/> of each
     /// other, so a hard edge stays hard; the faces are gathered by position, so the vertices split along a seam
-    /// shade alike. By each triangle of the mesh's indices, the pool indices of its corners.
+    /// shade alike. By each corner of <paramref name="clustered"/>, the same triangles clustered, its copy's pool index.
     /// </summary>
-    private static Dictionary<(uint, uint, uint), (uint, uint, uint)> CopyVertices(
+    private static uint[] CopyVertices(
         Mesh mesh,
         uint[] simplified,
+        uint[] clustered,
         Vector3[] positions,
         uint[] canonical,
         ImmutableArray<GpuVertex>.Builder vertices
     )
     {
+        // The smoothing groups in the simplifier's order, as a group's first face sets the normal it is joined by.
         float creaseCosine = MathF.Cos(CreaseAngle);
-        int triangleCount = simplified.Length / 3;
         Dictionary<uint, List<SmoothingGroup>> groupsOf = [];
-        int[] groupOfCorner = new int[simplified.Length];
-        for (int t = 0; t < triangleCount; t++)
+        for (int first = 0; first < simplified.Length; first += 3)
         {
-            Vector3 p0 = positions[simplified[t * 3]];
-            Vector3 p1 = positions[simplified[(t * 3) + 1]];
-            Vector3 p2 = positions[simplified[(t * 3) + 2]];
-
-            // Clockwise from outside, so the cross of the edges points out; its length weighs the face by its area.
-            Vector3 face = Vector3.Cross(p1 - p0, p2 - p0);
-            Vector3 unit = face.LengthSquared() > 0 ? Vector3.Normalize(face) : Vector3.UnitY;
-            for (int corner = 0; corner < 3; corner++)
+            (Vector3 face, Vector3 unit) = GetFace(simplified, first);
+            for (int corner = first; corner < first + 3; corner++)
             {
-                uint vertex = canonical[simplified[(t * 3) + corner]];
+                uint vertex = canonical[simplified[corner]];
                 if (!groupsOf.TryGetValue(vertex, out List<SmoothingGroup>? groups))
                 {
                     groups = [];
@@ -580,43 +575,47 @@ internal static unsafe class ClusterBuilder
                 }
 
                 groups[found].Sum += face;
-                groupOfCorner[(t * 3) + corner] = found;
             }
         }
 
+        // Each clustered corner's copy: clustering keeps a triangle's corners in order, and a group's first normal
+        // never changes, so the first group within the crease is the one the corner joined above.
         ReadOnlySpan<Vertex> source = mesh.Vertices.Span;
         Dictionary<(uint, int), uint> poolOf = [];
-        uint[] cornerPool = new uint[simplified.Length];
-        for (int i = 0; i < simplified.Length; i++)
+        uint[] pool = new uint[clustered.Length];
+        for (int first = 0; first < clustered.Length; first += 3)
         {
-            (uint vertex, int group) key = (simplified[i], groupOfCorner[i]);
-            if (!poolOf.TryGetValue(key, out uint pool))
+            Vector3 unit = GetFace(clustered, first).Unit;
+            for (int corner = first; corner < first + 3; corner++)
             {
+                List<SmoothingGroup> groups = groupsOf[canonical[clustered[corner]]];
+                (uint vertex, int group) key = (
+                    clustered[corner],
+                    groups.FindIndex(group => Vector3.Dot(group.Unit, unit) >= creaseCosine)
+                );
+                if (poolOf.TryGetValue(key, out pool[corner]))
+                    continue;
+
                 Vertex vertex = source[(int)key.vertex];
-                Vector3 sum = groupsOf[canonical[key.vertex]][key.group].Sum;
-                if (sum.LengthSquared() > 0)
-                    vertex.Normal = Vector3.Normalize(sum);
+                if (groups[key.group].Sum.LengthSquared() > 0)
+                    vertex.Normal = Vector3.Normalize(groups[key.group].Sum);
 
-                pool = (uint)vertices.Count;
+                pool[corner] = (uint)vertices.Count;
                 vertices.Add(Packing.EncodeVertex(vertex));
-                poolOf[key] = pool;
+                poolOf[key] = pool[corner];
             }
-
-            cornerPool[i] = pool;
         }
 
-        Dictionary<(uint, uint, uint), (uint, uint, uint)> copies = [];
-        for (int t = 0; t < triangleCount; t++)
+        return pool;
+
+        // The triangle at corner at: clockwise from outside, so the cross of the edges points out, its length
+        // weighing the face by its area.
+        (Vector3 Face, Vector3 Unit) GetFace(uint[] triangles, int at)
         {
-            int at = t * 3;
-            copies[(simplified[at], simplified[at + 1], simplified[at + 2])] = (
-                cornerPool[at],
-                cornerPool[at + 1],
-                cornerPool[at + 2]
-            );
+            Vector3 p0 = positions[triangles[at]];
+            Vector3 face = Vector3.Cross(positions[triangles[at + 1]] - p0, positions[triangles[at + 2]] - p0);
+            return (face, face.LengthSquared() > 0 ? Vector3.Normalize(face) : Vector3.UnitY);
         }
-
-        return copies;
     }
 
     /// <summary>
@@ -658,32 +657,6 @@ internal static unsafe class ClusterBuilder
         }
 
         return (new Vector3(bounds.center[0], bounds.center[1], bounds.center[2]), bounds.radius);
-    }
-
-    /// <summary>
-    /// The sphere around every vertex: its centre the bounds' middle, its radius the farthest vertex from there.
-    /// </summary>
-    private static (Vector3 Center, float Radius) GetSphere(ImmutableArray<GpuVertex>.Builder vertices)
-    {
-        if (vertices.Count == 0)
-            return (Vector3.Zero, 0);
-
-        Vector3 min = new(float.MaxValue);
-        Vector3 max = new(float.MinValue);
-        foreach (GpuVertex vertex in vertices)
-        {
-            min = Vector3.Min(min, vertex.Position);
-            max = Vector3.Max(max, vertex.Position);
-        }
-
-        Vector3 center = (min + max) * 0.5f;
-        float radius2 = 0;
-        foreach (GpuVertex vertex in vertices)
-        {
-            radius2 = Math.Max(radius2, Vector3.DistanceSquared(center, vertex.Position));
-        }
-
-        return (center, MathF.Sqrt(radius2));
     }
 
     /// <summary>

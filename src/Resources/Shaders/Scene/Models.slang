@@ -56,6 +56,13 @@ public TracedWorld GetTracedWorld()
     return frame.Load<TracedWorld>(TracedWorldOffset);
 }
 
+// The world's top-level acceleration structure; only where GetTracedWorld's acceleration isn't 0.
+public RaytracingAccelerationStructure GetTracedAcceleration()
+{
+    AccelerationRef acceleration = { GetTracedWorld().acceleration };
+    return acceleration.Get();
+}
+
 public GpuMesh LoadMesh(uint table, uint index)
 {
     ArrayRef<GpuMesh> meshes = { table };

@@ -4,8 +4,9 @@ Fills the air between the camera and what it sees with the world's haze, lit by 
 where their light reaches. On a GPU that traces rays, their light falls in shafts through the gaps in whatever blocks
 it. The renderer's shading reads it as the frame's air; without the gem, the air changes nothing.
 
-To use it, list `Volumetrics` in a project's `.magic` file, and give the world's `Weather` a `FogDensity` above 0.
-A gem that builds the world as rays see it shadows the haze; without one, the sun lights all of it.
+To use it, list `Volumetrics` in a project's `.magic` file, and give the world's `Weather` a `FogDensity` or a
+`CloudCover` above 0. A gem that builds the world as rays see it shadows the haze; without one, the sun lights
+all of it.
 
 ## What it draws
 

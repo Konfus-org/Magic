@@ -13,11 +13,10 @@ import Core.Pass;
 import Core.Frame;
 import Core.Math;
 import Core.Color;
-import Core.Pack;
 import Light.Indirect;
 
 // C#'s DebugView.
-enum SurfaceView : uint
+enum DebugView : uint
 {
     Final,
     Albedo,
@@ -32,34 +31,34 @@ enum SurfaceView : uint
 }
 
 // The view of a pixel's surface; a depth view is black from depthViewFar metres away.
-float3 GetSurfaceView(FrameConstants frame, SurfaceView view, float depthViewFar, uint2 pixel)
+float3 GetSurfaceView(FrameConstants frame, DebugView view, float depthViewFar, uint2 pixel)
 {
-    if (view == SurfaceView.Velocity)
+    if (view == DebugView.Velocity)
     {
         TextureRef velocityTexture = { frame.velocity };
         return float3(abs(velocityTexture.Load(pixel, 0u).xy) * 10.0, 0.0);
     }
 
     TextureRef depthTexture = { frame.depth };
-    if (depthTexture.Load(pixel, 0u).x == 0.0)
+    float depth = depthTexture.Load(pixel, 0u).x;
+    if (depth == 0.0)
         return float3(0.0);
 
     TextureRef baseTexture = { frame.gbufferBase };
     TextureRef surfaceTexture = { frame.gbufferSurface };
-    TextureRef normalTexture = { frame.gbufferNormal };
     switch (view)
     {
-    case SurfaceView.Normal:
-        return DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0) * 0.5 + 0.5;
-    case SurfaceView.Depth:
+    case DebugView.Normal:
+        return LoadNormal(frame.gbufferNormal, pixel) * 0.5 + 0.5;
+    case DebugView.Depth:
         // On a log scale, so what is near and what is far both read: white at the camera.
-        float viewDepth = ToViewDepth(depthTexture.Load(pixel, 0u).x, frame.near);
+        float viewDepth = ToViewDepth(depth, frame.near);
         return float3(1.0 - saturate(log2(1.0 + viewDepth) / log2(1.0 + depthViewFar)));
-    case SurfaceView.Roughness:
+    case DebugView.Roughness:
         return float3(surfaceTexture.Load(pixel, 0u).x);
-    case SurfaceView.Metalness:
+    case DebugView.Metalness:
         return float3(baseTexture.Load(pixel, 0u).a);
-    case SurfaceView.Occlusion:
+    case DebugView.Occlusion:
         return float3(surfaceTexture.Load(pixel, 0u).z);
     default:
         return ToSrgb(baseTexture.Load(pixel, 0u).rgb);
@@ -67,30 +66,28 @@ float3 GetSurfaceView(FrameConstants frame, SurfaceView view, float depthViewFar
 }
 
 // The light the indirect diffuse or the reflections view shows at the pixel, black where none was traced.
-float3 GetLightView(FrameConstants frame, SurfaceView view, uint2 pixel)
+float3 GetLightView(FrameConstants frame, DebugView view, uint2 pixel)
 {
     TextureRef depthTexture = { frame.depth };
-    if (depthTexture.Load(pixel, 0u).x == 0.0)
+    float depth = depthTexture.Load(pixel, 0u).x;
+    if (depth == 0.0)
         return float3(0.0);
 
-    if (view == SurfaceView.Reflections)
+    IndirectLight indirect = GetIndirectLight();
+    if (view == DebugView.Reflections)
     {
-        TextureRef reflections = { GetIndirectLight().reflections };
+        TextureRef reflections = { indirect.reflections };
         if (reflections.id == 0u)
             return float3(0.0);
 
         return reflections.Load(GetTracedTexel(frame, pixel, reflections.GetSize(0u)), 0u).rgb;
     }
 
-    uint diffuse = GetIndirectLight().diffuse;
-    if (diffuse == 0u)
+    if (indirect.diffuse == 0u)
         return float3(0.0);
 
-    TextureRef normalTexture = { frame.gbufferNormal };
-    float2 uv = GetTexelCenterUv(pixel, uint2(frame.width, frame.height));
-    float3 relative = ReconstructRelative(frame, uv, depthTexture.Load(pixel, 0u).x);
-    float3 normal = DecodeOctahedral(normalTexture.Load(pixel, 0u).xy * 2.0 - 1.0);
-    return SampleIndirectDiffuse(frame, diffuse, pixel, relative, normal);
+    float3 relative = ReconstructPixel(frame, pixel, depth);
+    return SampleIndirectDiffuse(frame, indirect.diffuse, pixel, relative, LoadNormal(frame.gbufferNormal, pixel));
 }
 
 [shader("compute")]
@@ -102,7 +99,7 @@ void ShowLight(uint3 thread : SV_DispatchThreadID)
         return;
 
     StorageRef picture = { frame.hdr, 0u };
-    picture.Store(thread.xy, float4(GetLightView(frame, (SurfaceView)GetPassHeader().y, thread.xy), 1.0));
+    picture.Store(thread.xy, float4(GetLightView(frame, (DebugView)GetPassHeader().y, thread.xy), 1.0));
 }
 
 [shader("compute")]
@@ -114,10 +111,10 @@ void ShowSurface(uint3 thread : SV_DispatchThreadID)
         return;
 
     PassHeader header = GetPassHeader();
-    SurfaceView view = (SurfaceView)header.y;
+    DebugView view = (DebugView)header.y;
     float depthViewFar = asfloat(header.z);
     float gamma = asfloat(header.w);
-    bool isPicture = view == SurfaceView.Final || view == SurfaceView.IndirectDiffuse || view == SurfaceView.Reflections;
+    bool isPicture = view == DebugView.Final || view == DebugView.IndirectDiffuse || view == DebugView.Reflections;
     TextureRef picture = { frame.hdr };
     float3 color = isPicture
         ? pow(saturate(ToSrgb(picture.Load(thread.xy, 0u).rgb)), 1.0 / gamma)

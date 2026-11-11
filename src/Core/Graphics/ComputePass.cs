@@ -14,7 +14,7 @@ public readonly record struct GpuResource(GpuBuffer Buffer, GpuTexture Texture, 
 
 /// <summary>
 /// A compute pass being recorded, begun by <see cref="RenderGraph.Compute"/>: say what it reads and writes, which the
-/// GPU provider puts the barriers in for, then end it with what it dispatches.
+/// GPU provider puts the barriers in for, a <c>None</c> one left out, then end it with what it dispatches.
 /// </summary>
 public readonly ref struct ComputePass
 {
@@ -49,11 +49,12 @@ public readonly ref struct ComputePass
     }
 
     /// <summary>
-    /// Dispatches a thread a pixel over <paramref name="width"/> by <paramref name="height"/>.
+    /// Dispatches a thread a pixel over <paramref name="width"/> by <paramref name="height"/>, in each of
+    /// <paramref name="depth"/> slices.
     /// </summary>
-    public void DispatchOver(int width, int height)
+    public void DispatchOver(int width, int height, int depth = 1)
     {
-        _graph.DispatchThreads((uint)width, (uint)height, 1);
+        _graph.DispatchThreads((uint)width, (uint)height, (uint)depth);
         _graph.EndPass();
     }
 

@@ -34,7 +34,6 @@ void AverageMaterials<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
     inputs.uv = float2(0.5);
     inputs.uvDdx = float2(1.0, 0.0);
     inputs.uvDdy = float2(0.0, 1.0);
-    inputs.viewDirection = float3(0.0, 1.0, 0.0);
     M material = LoadMaterialParams<M>(models.materials, row);
     SurfaceOutputs surface = material.Evaluate(inputs);
 

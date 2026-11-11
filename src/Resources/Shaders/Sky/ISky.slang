@@ -17,7 +17,6 @@ public struct SkyInputs
     public bool hasSunDisc;
     // The heap ids and sampler of whatever the sky made ahead of the frame.
     public uint transmittanceLut;
-    public uint multiScatteringLut;
     public uint skyViewLut;
     public uint sampler;
 }

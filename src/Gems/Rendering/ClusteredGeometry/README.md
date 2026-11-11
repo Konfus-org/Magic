@@ -49,4 +49,4 @@ when a model draws as its impostor.
     impostor by its model index, what the cull leaves for the draw and the resolve, the triangle a pixel shows, and the
     cull's tests.
   - `Scene/Clusters` is also what the cluster passes read beyond the library's frame: the cull's limits and buffers,
-    the depth pyramid, the visibility ids and the impostor handoff, in the frame's buffer after the indirect light.
+    the depth pyramid, the visibility ids and the impostor handoff, in the frame's buffer after the air.

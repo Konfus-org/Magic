@@ -56,7 +56,7 @@ Write the engine as data flowing through functions, not objects calling each oth
   that take it. Core runs each gem after the gems whose output it takes; gems pass what they draw from one another
   that way, as data, never through a gem in a constructor.
   `LateUpdate` hands `Render` what it draws as data, the newest through a `Mailbox<T>` and what must not be lost
-  through a `Channel<T>`. A gem implements the ones it needs. One that throws in a hook is logged
+  through a `Channel<T>`. `Render` reads a gem's settings record directly: it is immutable and written whole. A gem implements the ones it needs. One that throws in a hook is logged
   and leaves every hook.
 - Where Core needs something from a gem, the gem implements an interface and Core calls it, as with `IEcs` and
   `IAssetImporter<T>`. Add one when a gem first needs it.

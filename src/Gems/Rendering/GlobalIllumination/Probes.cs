@@ -64,12 +64,7 @@ internal sealed class Probes(AssetManager assets)
     {
         TypeArguments = [PassShaders.GetAtmosphere(assets)],
     };
-    private readonly ShaderEntry _irradianceShader = PassShaders.GetEntry(
-        assets,
-        "UpdateProbes",
-        "BlendProbeIrradiance"
-    );
-    private readonly ShaderEntry _depthShader = PassShaders.GetEntry(assets, "UpdateProbes", "BlendProbeDepth");
+    private readonly ShaderEntry _blendShader = PassShaders.GetEntry(assets, "UpdateProbes", "BlendProbes");
 
     /// <summary>
     /// The box the grid spans, where the last frame placed it, and its probes along x and z, and up y.
@@ -78,8 +73,7 @@ internal sealed class Probes(AssetManager assets)
 
     private (int Across, int Up) _size;
 
-    public ImmutableArray<ShaderEntry> Shaders =>
-        [_askShader, _planShader, _listShader, _traceShader, _irradianceShader, _depthShader];
+    public ImmutableArray<ShaderEntry> Shaders => [_askShader, _planShader, _listShader, _traceShader, _blendShader];
 
     /// <summary>
     /// The grid's buffers and depth texture asked for at <paramref name="size"/>, from 2 probes a side up to the most,
@@ -118,13 +112,9 @@ internal sealed class Probes(AssetManager assets)
             )
         );
         Result<GpuSampler> sampler = graph.Sampler(new SamplerDescription { Wrap = TextureWrap.Clamp });
-        foreach (
-            Result made in (ReadOnlySpan<Result>)[probeTable, rays, list, arguments, counts, variance, depth, sampler]
-        )
-        {
-            if (!made.Ok)
-                return Result.Failure(made.Error);
-        }
+        Result asked = Result.FindFailure(probeTable, rays, list, arguments, counts, variance, depth, sampler);
+        if (!asked.Ok)
+            return Result.Failure(asked.Error);
 
         (Vector3 Min, Vector3 Max) target = (box.Min - new Vector3(BoxMargin), box.Max + new Vector3(BoxMargin));
         _box = hasHistory
@@ -144,7 +134,6 @@ internal sealed class Probes(AssetManager assets)
             RayArguments = arguments.Value.Id,
             RayCounts = counts.Value.Id,
             Variance = variance.Value.Id,
-            HasHistory = hasHistory ? 1u : 0u,
             Origin = _box.Min,
             MaxDistance = MathF.Max(cellSize.X, MathF.Max(cellSize.Y, cellSize.Z)) * 1.5f,
             CellSize = cellSize,
@@ -180,35 +169,30 @@ internal sealed class Probes(AssetManager assets)
         uint probeCount = grid.DimensionX * grid.DimensionY * grid.DimensionZ;
         graph
             .Compute("Ask probe rays", _askShader, header, RenderStage.Light)
-            .Reads(view.Frame, probes.Probes, probes.Variance)
+            .Reads(view.Gpu.Frame, probes.Probes, probes.Variance)
             .Writes(probes.RayCounts)
             .Dispatch(probeCount);
         graph
             .Compute("Plan probe rays", _planShader, header, RenderStage.Light)
-            .Reads(view.Frame)
+            .Reads(view.Gpu.Frame)
             .Writes(probes.RayCounts, probes.RayArguments)
             .Dispatch(1);
         graph
             .Compute("List probe rays", _listShader, header, RenderStage.Light)
-            .Reads(view.Frame, probes.RayCounts)
+            .Reads(view.Gpu.Frame, probes.RayCounts)
             .Writes(probes.RayList)
             .Dispatch(probeCount);
         graph
             .Compute("Trace probes", _traceShader, header, RenderStage.Light)
             .Reads(view.World.AsSpan())
-            .Reads(view.Frame, probes.Probes, probes.RayList, probes.RayCounts, probes.Depth)
+            .Reads(view.Gpu.Frame, probes.Probes, probes.RayList, probes.RayCounts, probes.Depth)
             .Writes(probes.Rays)
             .Indirect(probes.RayArguments)
             .DispatchIndirect(probes.RayArguments, 0);
         graph
-            .Compute("Blend probe irradiance", _irradianceShader, header, RenderStage.Light)
-            .Reads(view.Frame, probes.Rays, probes.RayCounts)
-            .Writes(probes.Probes, probes.Variance)
-            .Dispatch(probeCount);
-        graph
-            .Compute("Blend probe depth", _depthShader, header, RenderStage.Light)
-            .Reads(view.Frame, probes.Rays, probes.RayCounts)
-            .Writes(probes.Probes, probes.Depth)
+            .Compute("Blend probes", _blendShader, header, RenderStage.Light)
+            .Reads(view.Gpu.Frame, probes.Rays, probes.RayCounts)
+            .Writes(probes.Probes, probes.Variance, probes.Depth)
             .Dispatch(probeCount);
     }
 }
