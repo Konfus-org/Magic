@@ -40,6 +40,8 @@ The scripts run under `pwsh` and Windows PowerShell ([Tools](tools/README.md)).
   it themselves. They name its window with the worktree's branch, the session's name, and end the run at a time limit.
   Do not start `Magic`, `Magic.exe` or `dotnet run` on the engine or a sample in another way. `Magic new` and
   `Magic --help` open nothing, so they are allowed.
+- **Profiling:** `tools/Scripts/Profiling.ps1 -Minutes <n>` takes a profiling turn for the branch, and `-Release` ends
+  it. While another branch's turn runs, the scripts that build or run Magic wait for it to end.
 - **Claim:** `tools/Scripts/Claim.ps1 -Slice <title> -Scope <paths>` tells every other session what the slice will
   change, and prints any overlap with theirs ([Worktrees](#worktrees)).
 - **Configuration:** build and run `Debug`. To measure or profile performance, use `Optimize`. Use `Release` only when
@@ -73,6 +75,7 @@ In Claude Code, the agent hooks in `.claude/settings.json` hold the workflow wit
 - An edit to a file in the main checkout is refused. Starting Claude Code with `MAGIC_ALLOW_MAIN_EDITS=1` allows it
   for that session; only the user sets it.
 - A command that starts Magic other than through the scripts in [Run Magic](#commands) is refused.
+- A build or a test run is refused while another branch's profiling turn runs.
 - An edit inside another session's claim is refused unless this worktree's own claim covers it too
   ([Worktrees](#worktrees)).
 - The status line shows the slice's size against its limit of 300 lines, and how full the context is.
@@ -171,7 +174,8 @@ subagent and keep only its answer.
     guard clause flattens, a duplicate, a docstring the change made wrong.
   - **How:** never a change in behaviour. The summary says which hunks are the fix and which are cleanup.
   - **When to stop:** a cleanup that grows past a few lines, reaches files the task doesn't touch, or needs a design
-    decision becomes its own proposed task. Never touch another agent's in-flight work.
+    decision becomes its own proposed task. Never touch another agent's in-flight work. A merge train works only on
+    approved slices whose workers have ended (the parallelize skill).
 
 ### Finish
 
@@ -280,7 +284,8 @@ When you reply to the user:
 | worker | A session that builds one slice of a swarm at a time. |
 | swarm plan | The file that holds a swarm's slices and their states (the parallelize skill). |
 | worker limit | How many workers of a swarm run at the same time. |
-| profiling turn | A time in which one worker alone profiles or measures CPU, RAM or GPU use, or runs anything that other runs of Magic can change. The coordinator gives it. |
+| profiling turn | A time in which one branch alone builds and runs Magic, to profile or measure CPU, RAM or GPU use (`tools/Scripts/Profiling.ps1`). |
+| merge train | Approved slices of a swarm that merge together after one validation (the parallelize skill). |
 | root branch | The branch that the slices of one feature merge into before it merges into the merge target. |
 | gem | A plugin: a part of the engine that a project adds or replaces. |
 | hook | A method that the engine calls on a gem each frame (Code Standards). |

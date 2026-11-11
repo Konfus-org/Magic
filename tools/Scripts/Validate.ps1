@@ -77,6 +77,7 @@ function Invoke-Headless {
 }
 
 function Invoke-HeadlessProject([string] $projectPath) {
+    & (Join-Path $PSScriptRoot 'Profiling.ps1') -Wait
     $info = New-Object System.Diagnostics.ProcessStartInfo
     $info.FileName = $magic
     $info.Arguments = "open `"$projectPath`" --headless true --fail-on-error"
@@ -133,6 +134,8 @@ foreach ($step in $steps) {
         }
     }
 
+    # Another branch's profiling turn must not be disturbed: wait for it to end before each step.
+    & (Join-Path $PSScriptRoot 'Profiling.ps1') -Wait
     Write-Output ""
     Write-Output "==> $($step.Name)"
     $started = [System.Diagnostics.Stopwatch]::StartNew()

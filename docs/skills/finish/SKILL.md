@@ -33,8 +33,9 @@ description: Validates, reviews, presents and merges a built slice. Use it on yo
    - If plannotator is not available, show `git diff --stat` and the important hunks in the chat, and wait.
 6. Address each comment, or give the evidence for not addressing it. Validate again, and go back to step 4. If the
    user's review closes with no comments and no approval, ask the user what to do.
-7. Approval in the user's review, or "approved" in the chat, means merge. Do not ask again. If the approval is in
-   the chat, stop the user's review. Then:
+7. Approval in the user's review, or "approved" in the chat, means merge. Do not ask again. If the approval is in the
+   chat, stop the user's review. A worker in a swarm does only step 1 below. It then ends with `STATE: approved`, and a
+   merge train does the rest ([parallelize skill](../parallelize/SKILL.md)). In other cases, do these steps:
    1. Commit on the branch of the worktree ([Commits](../../../AGENTS.md#commits)).
    2. Rebase onto the merge target, and run `tools/Scripts/AgentTaskComplete.ps1` again at the same level. If no new
       work landed, it returns immediately. If it validates again, examine the new screenshots of a `Visual` change.

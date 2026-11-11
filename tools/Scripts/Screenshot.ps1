@@ -67,6 +67,8 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+# Another branch's profiling turn must not be disturbed: wait for it to end.
+& (Join-Path $PSScriptRoot 'Profiling.ps1') -Wait
 if (-not $PSBoundParameters.ContainsKey('Name')) { $Name = git -C $root branch --show-current }
 $magic = Join-Path (Join-Path (Join-Path (Join-Path $root 'Build') 'bin') $Configuration) 'Magic'
 if (Test-Path "$magic.exe") { $magic = "$magic.exe" }

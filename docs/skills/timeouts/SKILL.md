@@ -24,8 +24,11 @@ A command must not run without a time limit. A command that runs forever blocks 
    | `tools/Scripts/AgentTaskComplete.ps1` or `tools/Scripts/Validate.ps1` | 60 minutes |
    | `plannotator review` | 4 hours |
    | One run of a worker of a swarm (`claude -p`) | 1 hour |
+   | `tools/Scripts/Profiling.ps1 -Minutes <n>` | 11 minutes |
    | Other commands | 10 minutes |
 
+   A script that builds or runs Magic waits while another worktree holds a profiling turn. Add the time that the
+   turn has left to the limit of that script.
 3. If the tool has no limit and the command has no option for one, wrap the command.
    - In bash, use `timeout -k 10 <seconds> <command>`.
    - In PowerShell, use the lines below. For a script, the program is `pwsh` or `powershell`, with `-File <script>`
