@@ -18,10 +18,10 @@ public readonly record struct VolumetricsInput(GpuView View, TracedWorld? Traced
 
 /// <summary>
 /// Fills the air between the camera and what it sees with the world's haze: each frame, a volume over the view, lit by
-/// the sky and by the sun where a ray through the world reaches it, blended over frames and summed away from the camera,
-/// recorded in the light stage, written into the frame's buffer and made as the frame's <see cref="Air"/>, which
-/// shading takes. Clear air makes none. It is public because nothing in its assembly makes it: Magic does, by
-/// reflection, when a project lists the gem.
+/// the sky, the sun and the local lights where a ray through the world reaches it, blended over frames and summed away
+/// from the camera, recorded in the light stage, written into the frame's buffer and made as the frame's
+/// <see cref="Air"/>, which shading takes. Clear air makes none. It is public because nothing in its assembly makes it:
+/// Magic does, by reflection, when a project lists the gem.
 /// </summary>
 public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IRender<VolumetricsInput, Air>
 {
@@ -150,7 +150,7 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
         graph
             .Compute("Scatter air", _scatterShader, header, RenderStage.Light)
             .Reads(traced)
-            .Reads(gpu.Frame, history.Value)
+            .Reads(gpu.Frame, gpu.LightTable, history.Value)
             .Writes(scattering.Value)
             .Dispatch(groupsX, groupsY, Slices);
         graph
