@@ -104,6 +104,22 @@ function Get-ReviewStamp($checkout, [string] $branch) {
     return Join-Path (Join-Path $checkout.Common 'agent-review') (ConvertTo-BranchFileName $branch)
 }
 
+# Whether a branch is a slice of a swarm: it tracks a local branch, its root, other than the main checkout's branch,
+# and a swarm plan in agent-swarm/ names that root. The root gets QA and the user's review as a whole, so its slices
+# need no review of their own (the parallelize skill).
+function Test-SwarmSlice($checkout, [string] $branch) {
+    $upstream = [string](Invoke-Git $checkout.Top @('rev-parse', '--symbolic-full-name', "$branch@{upstream}"))
+    if ($upstream -match '^refs/heads/(.+)$') {
+        $root = $Matches[1]
+        $main = [string](Get-Content -LiteralPath (Join-Path $checkout.Common 'HEAD') -TotalCount 1)
+        if ($main.Trim() -eq "ref: refs/heads/$root") { return $false }
+        $plans = Join-Path $checkout.Common 'agent-swarm'
+        if (-not (Test-Path -LiteralPath $plans)) { return $false }
+        return [bool](Get-ChildItem -LiteralPath $plans -Filter '*.md' | Select-String -SimpleMatch -Quiet $root)
+    }
+    return $false
+}
+
 # A claim tools/Scripts/Claim.ps1 wrote: its branch, worktree, slice and scope, one key a line.
 function Read-Claim([string] $path) {
     $claim = @{ branch = ''; worktree = ''; slice = ''; scope = '' }

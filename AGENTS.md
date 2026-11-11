@@ -22,14 +22,13 @@ asked, when its trigger fits: read its `SKILL.md` and follow it. Claude Code als
 | [simplify-review](docs/skills/simplify-review/SKILL.md) | The user asks to simplify or review an area |
 | [timeouts](docs/skills/timeouts/SKILL.md) | Starting a build, a test run, a validation, a run of Magic, a wait or any background command |
 | [profiling](docs/skills/profiling/SKILL.md) | Profiling, or any mention of performance, frame time, stutter, allocations, memory, VRAM or GPU time |
+| [qa](docs/skills/qa/SKILL.md) | A swarm's QA worker, or the user asks for QA of a branch |
 | [retro](docs/skills/retro/SKILL.md) | A swarm finishes, a slice went badly, or the user corrects the workflow |
 
 ## Commands
 
 The scripts run under `pwsh` and Windows PowerShell ([Tools](tools/README.md)).
 
-- **Format:** `tools/Scripts/Format.ps1` formats the files a change touches, CSharpier for the layout. You don't need
-  to run it yourself; the next command does.
 - **Task complete:** `tools/Scripts/AgentTaskComplete.ps1 -Change <level>` formats, runs the steps of
   `tools/Scripts/Validate.ps1` the level needs and stamps the validated state. Run it when a task is done, and again
   after any later edit or rebase. A state already stamped at that level returns at once.
@@ -82,7 +81,7 @@ In Claude Code, the agent hooks in `.claude/settings.json` hold the workflow wit
 - The status line shows the slice's size against its limit of 300 lines, and how full the context is.
 - `git commit` and `git merge` are refused for a state `tools/Scripts/AgentTaskComplete.ps1` hasn't stamped, and for
   a slice the `slice-reviewer` subagent hasn't reviewed. One review covers the slice until fixes add more than about
-  100 lines.
+  100 lines. A swarm's slice, which commits into its root, needs no review.
 - A plan opens in plannotator for the user's approval.
 - C# diagnostics reach you after every edit through the C# language server plugin.
 
@@ -109,8 +108,7 @@ Read a long review file by the part you need: its index first, then only that pa
 
 ### Slices
 
-Work moves one slice at a time, or one slice at a time per worker in a swarm (the parallelize skill). The
-conversation holds the plan; no file does, except a swarm's plan in the git folder (the parallelize skill).
+Work moves one slice at a time, and the conversation holds the plan. A swarm differs where the parallelize skill says.
 
 - **A request is a slice, or gets split into slices.** A sweeping change becomes a list of slices you propose in the
   chat, and is never done as one task.
@@ -120,21 +118,18 @@ conversation holds the plan; no file does, except a swarm's plan in the git fold
   Run `tools/Scripts/AgentTaskComplete.ps1` once, when the slice is done.
 - **Size:** reviewable in about 15 minutes, under about 300 changed lines, one area or one seam between two, and
   one runnable check that shows it works. A request that needs "and" more than once, or a design doc first, is too
-  big: say so plainly and propose the split. A slice for a worker of a swarm also fits in one hour of the worker's
-  time (the parallelize skill).
+  big: say so plainly and propose the split.
 - **Check for drift.** Before each slice, check it against the goal and decisions agreed in the conversation. Say so
   if it doesn't serve them.
-- **Stop after each slice.** Once it merges, propose the next slice and wait. Never start it on your own. A swarm
-  the user approved is the exception: its coordinator starts each slice once the ones it waits on have merged or, for a
-  spike, answered. It also adds the follow-ups that serve its goal (the parallelize skill).
-- **One slice per session**, or one slice at a time per worker in a swarm (the finish skill). When compacting, keep the
+- **Stop after each slice.** Once it merges, propose the next slice and wait. Never start it on your own.
+- **One slice per session.** When compacting, keep the
   slice list, the current slice, its worktree path, the files it changed and its `-Change` level.
 
 ### Kickoff
 
 A request that starts a new effort too big for one slice begins with an interview, then a list of slices, riskiest
 first (the kickoff skill). A list of separate tasks, or an effort whose slices don't all depend on each other, runs
-as a swarm: workers that each build one slice at a time through the normal flow (the parallelize skill).
+as a swarm (the parallelize skill).
 
 ### Modes
 
@@ -175,22 +170,20 @@ subagent and keep only its answer.
     guard clause flattens, a duplicate, a docstring the change made wrong.
   - **How:** never a change in behaviour. The summary says which hunks are the fix and which are cleanup.
   - **When to stop:** a cleanup that grows past a few lines, reaches files the task doesn't touch, or needs a design
-    decision becomes its own proposed task. Never touch another agent's in-flight work. A merge train works only on
-    approved slices whose workers have ended (the parallelize skill).
+    decision becomes its own proposed task. Never touch another agent's in-flight work.
 
 ### Finish
 
 A built slice is validated, reviewed in a fresh context, summarized and shown to the user, and merges only on their
-approval (the finish skill). A swarm's root branch, whose slices the user approved one by one, merges once it is
-validated and reviewed as a whole (the parallelize skill).
+approval (the finish skill). A swarm's slices go into its root branch, which
+gets QA, a cleanup and one review by the user before it merges (the parallelize skill).
 
 ### When Blocked
 
 - A build or test failure outside your files: stop and report it. Don't fix other agents' work.
 - An ambiguity that changes the design: ask. Otherwise pick the reasonable reading and say which.
 - The slice grows past about 300 lines, needs files outside its scope, or runs past its time-box: stop and report
-  what exists. The user decides to continue, split or drop it. In a swarm, the coordinator splits the slice instead
-  (the parallelize skill).
+  what exists. The user decides to continue, split or drop it.
 - The same fix has failed twice: stop and report instead of trying a third time.
 
 ## Design Rules
@@ -282,11 +275,12 @@ When you reply to the user:
 | the user's review | The check of a slice by the user, in plannotator or in the chat. |
 | swarm | Workers that build slices at the same time for one coordinator (the parallelize skill). |
 | coordinator | The session that plans a swarm, gives slices to its workers and merges the root branch. |
-| worker | A session that builds one slice of a swarm at a time. |
+| worker | A session that a coordinator starts: a coder that builds one slice, a merge train, QA or cleanup. |
 | swarm plan | The file that holds a swarm's slices and their states (the parallelize skill). |
 | worker limit | How many workers of a swarm run at the same time. |
 | profiling turn | A time in which one branch alone builds and runs Magic, to profile or measure CPU, RAM or GPU use (`tools/Scripts/Profiling.ps1`). |
-| merge train | Approved slices of a swarm that merge together after one validation (the parallelize skill). |
+| merge train | Done slices of a swarm that one worker builds and merges into the root together (the parallelize skill). |
+| QA | The check of a swarm's root for bugs by a worker that ranks them and fixes nothing (the qa skill). |
 | root branch | The branch that the slices of one feature merge into before it merges into the merge target. |
 | gem | A plugin: a part of the engine that a project adds or replaces. |
 | hook | A method that the engine calls on a gem each frame (Code Standards). |
@@ -330,7 +324,8 @@ tidy-worktrees skill). A coordinator closes its own workers without a new approv
   commit of Markdown alone `docs`. Write the subject alone, never a scope or area prefix such as `fix(core): ` or
   `Core, Gems:`. The `commit-msg` git hook refuses a commit whose subject lacks the type or has a scope, and the
   Commits check a push.
-- Commit only after the user approves the change in the user's review.
+- Commit only after the user approves the change in the user's review. A swarm's coder commits when its slice
+  builds (the parallelize skill).
 - Never push.
 - No co-author lines, and nothing in code, comments, commit messages or branch names that hints the work was
   generated.

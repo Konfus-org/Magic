@@ -1,5 +1,6 @@
 # PreToolUse on git: a git commit in a worktree needs the slice-reviewer to have reviewed its branch, and a new review
-# once the slice grew by more than $Regrowth lines since; a git merge needs the merged branch reviewed.
+# once the slice grew by more than $Regrowth lines since; a git merge needs the merged branch reviewed. A swarm's
+# slice, which commits and merges into its root, needs no review: the root gets QA and the user's review as a whole.
 # Exits 2 with the reason on stderr to refuse, which the agent is shown.
 . (Join-Path $PSScriptRoot 'common.ps1')
 $Regrowth = 100
@@ -24,6 +25,7 @@ try {
         if ($words.Count -eq 0) { exit 0 }
         $branch = $words[0].Trim('"', "'")
         if (-not (Invoke-Git $checkout.Top @('rev-parse', '--verify', '--quiet', "refs/heads/$branch"))) { exit 0 }
+        if (Test-SwarmSlice $checkout $branch) { exit 0 }
         if (Test-Path -LiteralPath (Get-ReviewStamp $checkout $branch)) { exit 0 }
         [Console]::Error.WriteLine("$branch was never reviewed: have the slice-reviewer subagent review it in its worktree first (AGENTS.md, Finish).")
         exit 2
@@ -32,6 +34,7 @@ try {
     if (-not $checkout.IsWorktree) { exit 0 }
     $branch = [string](Invoke-Git $checkout.Top @('branch', '--show-current'))
     if (-not $branch) { exit 0 }
+    if (Test-SwarmSlice $checkout $branch) { exit 0 }
     $stamp = Get-ReviewStamp $checkout $branch
     if (-not (Test-Path -LiteralPath $stamp)) {
         [Console]::Error.WriteLine("This slice ($branch) has no review: have the slice-reviewer subagent review it, naming the worktree, the merge target $($checkout.Target) and the slice, then commit (AGENTS.md, Finish).")

@@ -57,7 +57,7 @@ more code than it adds.
    - If the target is `spike` or `prototype` code that nothing depends on yet, a note that says so
      ([Modes](../../../AGENTS.md#modes)).
 6. **Do the plan, and keep the behaviour the same.** Validate at the `Code` level, or at `Visual` when the target can
-   change what is drawn. Run the check from step 2 before and after the change.
+   change what is drawn. In a swarm, build only, and skip the check from step 2 (the parallelize skill). Run the check from step 2 before and after the change.
 7. **Report:**
    - The net change in lines, as measured.
    - What you removed, merged, flattened and renamed, one line each.
