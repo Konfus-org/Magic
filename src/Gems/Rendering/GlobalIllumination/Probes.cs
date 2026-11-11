@@ -29,11 +29,11 @@ internal readonly record struct ProbeBuffers(
 internal sealed class Probes(AssetManager assets)
 {
     /// <summary>
-    /// Probes along x and z, and up y.
+    /// The most probes along x and z, and up y: the depth texture lays them out in a row of tiles along x and up, as
+    /// many as its 16384 texels hold.
     /// </summary>
-    private const int ProbesAcross = 32;
-    private const int ProbesUp = 8;
-    private const int ProbeCount = ProbesAcross * ProbesUp * ProbesAcross;
+    private const int MaxProbesAcross = 48;
+    private const int MaxProbesUp = 16;
 
     /// <summary>
     /// The rays all the probes trace in a frame, the twin of <c>UpdateProbes.slang</c>'s.
@@ -64,29 +64,35 @@ internal sealed class Probes(AssetManager assets)
     {
         TypeArguments = [PassShaders.GetAtmosphere(assets)],
     };
-    private readonly ShaderEntry _irradianceShader = PassShaders.GetEntry(
-        assets,
-        "UpdateProbes",
-        "BlendProbeIrradiance"
-    );
-    private readonly ShaderEntry _depthShader = PassShaders.GetEntry(assets, "UpdateProbes", "BlendProbeDepth");
+    private readonly ShaderEntry _blendShader = PassShaders.GetEntry(assets, "UpdateProbes", "BlendProbes");
 
     /// <summary>
-    /// The box the grid spans, where the last frame placed it.
+    /// The box the grid spans, where the last frame placed it, and its probes along x and z, and up y.
     /// </summary>
     private (Vector3 Min, Vector3 Max) _box;
 
-    public ImmutableArray<ShaderEntry> Shaders =>
-        [_askShader, _planShader, _listShader, _traceShader, _irradianceShader, _depthShader];
+    private (int Across, int Up) _size;
+
+    public ImmutableArray<ShaderEntry> Shaders => [_askShader, _planShader, _listShader, _traceShader, _blendShader];
 
     /// <summary>
-    /// The grid's buffers and depth texture asked for, the constants that name them, and the probes started at none
-    /// while they hold nothing. The grid is placed over <paramref name="box"/> with a margin: at once when the probes
-    /// start afresh, else a little nearer each frame.
+    /// The grid's buffers and depth texture asked for at <paramref name="size"/>, from 2 probes a side up to the most,
+    /// the constants that name them, and the probes started at none while they hold nothing or the size changed. The
+    /// grid is placed over <paramref name="box"/> with a margin: at once when the probes start afresh, else a little
+    /// nearer each frame.
     /// </summary>
-    public Result<ProbeBuffers> Prepare(RenderGraph graph, bool hasHistory, (Vector3 Min, Vector3 Max) box)
+    public Result<ProbeBuffers> Prepare(
+        RenderGraph graph,
+        bool hasHistory,
+        (Vector3 Min, Vector3 Max) box,
+        (int Across, int Up) size
+    )
     {
-        long probes = ProbeCount;
+        size = (Math.Clamp(size.Across, 2, MaxProbesAcross), Math.Clamp(size.Up, 2, MaxProbesUp));
+        hasHistory &= size == _size;
+        _size = size;
+        (int across, int up) = size;
+        long probes = (long)across * up * across;
         Result<GpuBuffer> probeTable = graph.Buffer(GpuDescriptions.GetBuffer("Probes", probes * ProbeBytes));
         Result<GpuBuffer> rays = graph.Buffer(GpuDescriptions.GetBuffer("Probe rays", RayBudget * RayBytes));
         Result<GpuBuffer> list = graph.Buffer(GpuDescriptions.GetBuffer("Probe ray list", RayBudget * 4));
@@ -100,30 +106,26 @@ internal sealed class Probes(AssetManager assets)
         Result<GpuTexture> depth = graph.Texture(
             GpuDescriptions.GetTexture(
                 "Probe depth",
-                DepthTile * ProbesAcross * ProbesUp,
-                DepthTile * ProbesAcross,
+                DepthTile * across * up,
+                DepthTile * across,
                 GpuFormat.R16G16Sfloat
             )
         );
         Result<GpuSampler> sampler = graph.Sampler(new SamplerDescription { Wrap = TextureWrap.Clamp });
-        foreach (
-            Result made in (ReadOnlySpan<Result>)[probeTable, rays, list, arguments, counts, variance, depth, sampler]
-        )
-        {
-            if (!made.Ok)
-                return Result.Failure(made.Error);
-        }
+        Result asked = Result.FindFailure(probeTable, rays, list, arguments, counts, variance, depth, sampler);
+        if (!asked.Ok)
+            return Result.Failure(asked.Error);
 
         (Vector3 Min, Vector3 Max) target = (box.Min - new Vector3(BoxMargin), box.Max + new Vector3(BoxMargin));
         _box = hasHistory
             ? (Vector3.Lerp(_box.Min, target.Min, BoxBlend), Vector3.Lerp(_box.Max, target.Max, BoxBlend))
             : target;
-        Vector3 cellSize = (_box.Max - _box.Min) / new Vector3(ProbesAcross - 1, ProbesUp - 1, ProbesAcross - 1);
+        Vector3 cellSize = (_box.Max - _box.Min) / new Vector3(across - 1, up - 1, across - 1);
         ProbeGridConstants grid = new()
         {
-            DimensionX = ProbesAcross,
-            DimensionY = ProbesUp,
-            DimensionZ = ProbesAcross,
+            DimensionX = (uint)across,
+            DimensionY = (uint)up,
+            DimensionZ = (uint)across,
             Probes = probeTable.Value.Id,
             Depth = depth.Value.Id,
             DepthSampler = sampler.Value.Id,
@@ -132,7 +134,6 @@ internal sealed class Probes(AssetManager assets)
             RayArguments = arguments.Value.Id,
             RayCounts = counts.Value.Id,
             Variance = variance.Value.Id,
-            HasHistory = hasHistory ? 1u : 0u,
             Origin = _box.Min,
             MaxDistance = MathF.Max(cellSize.X, MathF.Max(cellSize.Y, cellSize.Z)) * 1.5f,
             CellSize = cellSize,
@@ -164,37 +165,34 @@ internal sealed class Probes(AssetManager assets)
     {
         RenderGraph graph = view.Graph;
         GpuConstants header = view.Header;
+        ProbeGridConstants grid = probes.Constants;
+        uint probeCount = grid.DimensionX * grid.DimensionY * grid.DimensionZ;
         graph
             .Compute("Ask probe rays", _askShader, header, RenderStage.Light)
-            .Reads(view.Frame, probes.Probes, probes.Variance)
+            .Reads(view.Gpu.Frame, probes.Probes, probes.Variance)
             .Writes(probes.RayCounts)
-            .Dispatch(ProbeCount);
+            .Dispatch(probeCount);
         graph
             .Compute("Plan probe rays", _planShader, header, RenderStage.Light)
-            .Reads(view.Frame)
+            .Reads(view.Gpu.Frame)
             .Writes(probes.RayCounts, probes.RayArguments)
             .Dispatch(1);
         graph
             .Compute("List probe rays", _listShader, header, RenderStage.Light)
-            .Reads(view.Frame, probes.RayCounts)
+            .Reads(view.Gpu.Frame, probes.RayCounts)
             .Writes(probes.RayList)
-            .Dispatch(ProbeCount);
+            .Dispatch(probeCount);
         graph
             .Compute("Trace probes", _traceShader, header, RenderStage.Light)
             .Reads(view.World.AsSpan())
-            .Reads(view.Frame, probes.Probes, probes.RayList, probes.RayCounts, probes.Depth)
+            .Reads(view.Gpu.Frame, probes.Probes, probes.RayList, probes.RayCounts, probes.Depth)
             .Writes(probes.Rays)
             .Indirect(probes.RayArguments)
             .DispatchIndirect(probes.RayArguments, 0);
         graph
-            .Compute("Blend probe irradiance", _irradianceShader, header, RenderStage.Light)
-            .Reads(view.Frame, probes.Rays, probes.RayCounts)
-            .Writes(probes.Probes, probes.Variance)
-            .Dispatch(ProbeCount);
-        graph
-            .Compute("Blend probe depth", _depthShader, header, RenderStage.Light)
-            .Reads(view.Frame, probes.Rays, probes.RayCounts)
-            .Writes(probes.Probes, probes.Depth)
-            .Dispatch(ProbeCount);
+            .Compute("Blend probes", _blendShader, header, RenderStage.Light)
+            .Reads(view.Gpu.Frame, probes.Rays, probes.RayCounts)
+            .Writes(probes.Probes, probes.Variance, probes.Depth)
+            .Dispatch(probeCount);
     }
 }

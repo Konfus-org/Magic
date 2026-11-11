@@ -69,8 +69,8 @@ public bool IsOccluded(FrameConstants frame, float3 center, float radius)
     float level = clamp(ceil(log2(max(max(pixels.x, pixels.y), 1.0))), 0.0, float(clusters.hzbLevels - 1u));
     TextureRef hzb = { clusters.hzb };
     uint2 size = hzb.GetSize(uint(level));
-    uint2 t0 = min(uint2(uvMin * float2(size)), size - 1u);
-    uint2 t1 = min(uint2(uvMax * float2(size)), size - 1u);
+    uint2 t0 = GetTexelAt(uvMin, size);
+    uint2 t1 = GetTexelAt(uvMax, size);
     float farthest = min(
         min(hzb.Load(t0, uint(level)).x, hzb.Load(uint2(t1.x, t0.y), uint(level)).x),
         min(hzb.Load(uint2(t0.x, t1.y), uint(level)).x, hzb.Load(t1, uint(level)).x)

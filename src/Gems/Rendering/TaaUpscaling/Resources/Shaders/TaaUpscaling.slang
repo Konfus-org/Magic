@@ -1,5 +1,5 @@
-// Temporal upscaling: the view's output, the finished picture at the render size, taken to the window's size. Each
-// window pixel is made from the picture's 3 by 3 texels around it, each weighted by how near this frame's sample fell
+// Temporal upscaling: the view's output, the finished picture at the render size, taken to the size it is shown at.
+// Each shown pixel is made from the picture's 3 by 3 texels around it, each weighted by how near this frame's sample fell
 // to the pixel, and blended with what the last frame resolved where its surface was, so the camera's jitter, a
 // different point in each texel each frame, adds up to smooth edges and to detail finer than the picture's texels. The
 // history is held to the range of the 3 by 3 texels, so light that changed doesn't trail, and left out where the last
@@ -8,27 +8,19 @@
 //
 // It works in the output's encoding for the screen, so the picture it resolves is the one the window shows. The pass
 // header's y names the history, last frame's resolved picture, or its z where there is none; z the picture this frame
-// resolves, the window's size, with each pixel's view depth in alpha for the next frame's test.
+// resolves, the size it is shown at, with each pixel's view depth in alpha for the next frame's test; w the linear clamp
+// sampler the history is read through.
 module "TaaUpscaling";
 
 import Core.Heap;
 import Core.Pass;
 import Core.Frame;
 import Core.Math;
+import Post.TemporalAntiAliasing;
 
 // How fast a sample's weight falls with its distance from the pixel, in pixels: a Gaussian close to the
 // Blackman-Harris window over a pixel, from Karis.
 static const float SampleFalloff = 2.29;
-
-// How far in metres the surface the history saw may be from where the pixel's surface was before it is another.
-static const float SurfaceGapMetres = 1.0;
-
-// How far a pixel's surface moves across the screen in a frame, in texture coordinates, before the history can be of
-// another surface.
-static const float MovingDistance = 0.01;
-
-// The most a 16-bit float holds, which the view depth is kept under.
-static const float HalfMax = 65504.0;
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
@@ -96,11 +88,11 @@ void UpscalePicture(uint3 thread : SV_DispatchThreadID)
     TextureRef history = { header.y };
     float2 velocity = velocities.Load(nearest, 0u).xy;
     float2 historyUv = uv + velocity;
-    bool isOnScreen = all(saturate(historyUv) == historyUv);
+    bool isOnScreen = IsOnScreen(historyUv);
     historyUv = saturate(historyUv);
 
     // Where the surface moved and the history saw another one where it was, the pixel as it is now.
-    float historyDepth = history.Load(min(uint2(historyUv * float2(size)), size - 1u), 0u).a;
+    float historyDepth = history.Load(GetTexelAt(historyUv, size), 0u).a;
     float previousDepth = velocities.Load(texel, 0u).z;
     if (length(velocity) > MovingDistance && abs(previousDepth - historyDepth) > SurfaceGapMetres)
     {
@@ -110,28 +102,9 @@ void UpscalePicture(uint3 thread : SV_DispatchThreadID)
 
     // The history read between pixels, which blurs, so the more the pixel moved off whole pixels the more of now it
     // takes, by the weight of this frame's sample; all of now where its surface was off the screen.
-    float3 before = clamp(LoadBilinear(history, historyUv, size).rgb, low, high);
+    SamplerRef sampler = { header.w };
+    float3 before = clamp(history.SampleLevel(sampler, historyUv, 0.0).rgb, low, high);
     float2 moved = abs(velocity) * float2(size);
     float blend = isOnScreen ? lerp(0.05, 0.8, frac(max(moved.x, moved.y)) * 0.5) * weight : 1.0;
     resolved.Store(thread.xy, float4(lerp(before, current, blend), viewDepth));
-}
-
-// The texture at uv, filtered linearly between its four nearest texels of level 0, the texture's size.
-float4 LoadBilinear(TextureRef texture, float2 uv, uint2 size)
-{
-    float2 place = uv * float2(size) - 0.5;
-    int2 first = int2(floor(place));
-    float2 along = place - float2(first);
-    int2 last = int2(size) - 1;
-    float4 top = lerp(
-        texture.Load(uint2(clamp(first, int2(0), last)), 0u),
-        texture.Load(uint2(clamp(first + int2(1, 0), int2(0), last)), 0u),
-        along.x
-    );
-    float4 bottom = lerp(
-        texture.Load(uint2(clamp(first + int2(0, 1), int2(0), last)), 0u),
-        texture.Load(uint2(clamp(first + int2(1, 1), int2(0), last)), 0u),
-        along.x
-    );
-    return lerp(top, bottom, along.y);
 }

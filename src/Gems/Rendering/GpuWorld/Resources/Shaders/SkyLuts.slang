@@ -4,14 +4,13 @@
 module "SkyLuts";
 
 import Core.Heap;
-import Core.Pass;
 import Core.Math;
 import Scene.Lights;
 import Sky.Atmosphere;
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
-void SkyTransmittance(uint3 thread : SV_DispatchThreadID)
+void FillSkyTransmittance(uint3 thread : SV_DispatchThreadID)
 {
     if (any(thread.xy >= TransmittanceLutSize))
         return;
@@ -26,7 +25,7 @@ void SkyTransmittance(uint3 thread : SV_DispatchThreadID)
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
-void SkyMultiScattering(uint3 thread : SV_DispatchThreadID)
+void FillSkyMultiScattering(uint3 thread : SV_DispatchThreadID)
 {
     if (any(thread.xy >= MultiScatteringLutSize))
         return;
@@ -41,7 +40,7 @@ void SkyMultiScattering(uint3 thread : SV_DispatchThreadID)
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
-void SkyView(uint3 thread : SV_DispatchThreadID)
+void FillSkyView(uint3 thread : SV_DispatchThreadID)
 {
     if (any(thread.xy >= SkyViewLutSize))
         return;

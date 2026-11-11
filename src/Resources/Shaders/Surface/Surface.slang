@@ -14,8 +14,6 @@ public struct SurfaceInputs
     // How uv changes over a pixel across and down: what a texture is sampled with.
     public float2 uvDdx;
     public float2 uvDdy;
-    // Unit, towards the camera.
-    public float3 viewDirection;
 }
 
 public struct SurfaceOutputs

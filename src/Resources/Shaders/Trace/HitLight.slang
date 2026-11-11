@@ -5,7 +5,6 @@ module "Trace/HitLight";
 
 import Core.Heap;
 import Core.Math;
-import Core.Sampling;
 import Scene.Lights;
 import Light.Probes;
 import Light.Lights;
@@ -30,19 +29,16 @@ public float3 GetDirectLight<S : ISky>(
     float distance;
     if (picked == lightCount)
     {
-        float3 toSun = lights.sunDirection.xyz;
-        direction = normalize(ToWorld(CreateBasis(toSun), float3(SampleConcentricDisk(xi.yz) * SunAngularRadius, 1.0)));
-        irradiance = lights.hasSky != 0u
-            ? S.GetSunIlluminance(CreateSkyInputs(lights, toSun, false))
-            : lights.sunIlluminance.rgb;
+        direction = SampleSunDirection(lights.sunDirection.xyz, xi.yz);
+        irradiance = GetSunIlluminance<S>(lights);
         distance = 1e6;
     }
     else
     {
         GpuLight light = LoadLight(lights.table, picked);
-        float3 toTarget = SampleLightPoint(light, surface.position, xi.yz) - origin;
-        distance = length(toTarget) * 0.999;
-        direction = toTarget / max(length(toTarget), Epsilon);
+        LightRay ray = CreateLightRay(origin, SampleLightPoint(light, surface.position, xi.yz));
+        direction = ray.direction;
+        distance = ray.distance;
         irradiance = SampleLight(light, surface.position, surface.normal).irradiance;
     }
 

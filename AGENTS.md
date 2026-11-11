@@ -18,15 +18,17 @@ asked, when its trigger fits: read its `SKILL.md` and follow it. Claude Code als
 | [tidy-worktrees](docs/skills/tidy-worktrees/SKILL.md) | The start of every session |
 | [investigate](docs/skills/investigate/SKILL.md) | Something is broken, logs an error or draws wrong |
 | [new-gem](docs/skills/new-gem/SKILL.md) | A slice needs a new gem |
+| [cleanup](docs/skills/cleanup/SKILL.md) | The user asks to clean up, refactor or simplify code |
 | [simplify-review](docs/skills/simplify-review/SKILL.md) | The user asks to simplify or review an area |
+| [timeouts](docs/skills/timeouts/SKILL.md) | Starting a build, a test run, a validation, a run of Magic, a wait or any background command |
+| [profiling](docs/skills/profiling/SKILL.md) | Profiling, or any mention of performance, frame time, stutter, allocations, memory, VRAM or GPU time |
+| [qa](docs/skills/qa/SKILL.md) | A swarm's QA worker, or the user asks for QA of a branch |
 | [retro](docs/skills/retro/SKILL.md) | A swarm finishes, a slice went badly, or the user corrects the workflow |
 
 ## Commands
 
 The scripts run under `pwsh` and Windows PowerShell ([Tools](tools/README.md)).
 
-- **Format:** `tools/Scripts/Format.ps1` formats the files a change touches, CSharpier for the layout. You don't need
-  to run it yourself; the next command does.
 - **Task complete:** `tools/Scripts/AgentTaskComplete.ps1 -Change <level>` formats, runs the steps of
   `tools/Scripts/Validate.ps1` the level needs and stamps the validated state. Run it when a task is done, and again
   after any later edit or rebase. A state already stamped at that level returns at once.
@@ -34,10 +36,17 @@ The scripts run under `pwsh` and Windows PowerShell ([Tools](tools/README.md)).
   screenshots each and prints the paths.
 - **Screenshot:** `tools/Scripts/Screenshot.ps1` runs a project until its world loads and prints the screenshot's
   path. Use `-Domains`, `-Project` and `-Commands` to reach what the samples don't show.
-- **Window name:** the scripts title each window they open with the worktree's branch, the session's name. Start a
-  windowed run of your own with the console line `name <branch>`.
+- **Run Magic:** start Magic only with `tools/Scripts/Run.ps1`, or with `Screenshot.ps1` and `Validate.ps1`, which run
+  it themselves. They name its window with the worktree's branch, the session's name, and end the run at a time limit.
+  Do not start `Magic`, `Magic.exe` or `dotnet run` on the engine or a sample in another way. `Magic new` and
+  `Magic --help` open nothing, so they are allowed.
+- **Profiling:** `tools/Scripts/Profiling.ps1 -Minutes <n>` takes a profiling turn for the branch, and `-Release` ends
+  it. While another branch's turn runs, the scripts that build or run Magic wait for it to end.
 - **Claim:** `tools/Scripts/Claim.ps1 -Slice <title> -Scope <paths>` tells every other session what the slice will
   change, and prints any overlap with theirs ([Worktrees](#worktrees)).
+- **Configuration:** build and run `Debug`. To measure or profile performance, use `Optimize`. Use `Release` only when
+  the user asks for it.
+- **Time limit:** give every command you start a time limit. Never let a command run forever (the timeouts skill).
 - **The user's review:** `plannotator review` opens the change as a diff in the user's browser and returns when
   they comment or approve (the finish skill).
 
@@ -65,12 +74,14 @@ In Claude Code, the agent hooks in `.claude/settings.json` hold the workflow wit
 - Each session, and each `/clear` or compaction, starts with the checkout and its merge target in context.
 - An edit to a file in the main checkout is refused. Starting Claude Code with `MAGIC_ALLOW_MAIN_EDITS=1` allows it
   for that session; only the user sets it.
+- A command that starts Magic other than through the scripts in [Run Magic](#commands) is refused.
+- A build or a test run is refused while another branch's profiling turn runs.
 - An edit inside another session's claim is refused unless this worktree's own claim covers it too
   ([Worktrees](#worktrees)).
 - The status line shows the slice's size against its limit of 300 lines, and how full the context is.
 - `git commit` and `git merge` are refused for a state `tools/Scripts/AgentTaskComplete.ps1` hasn't stamped, and for
   a slice the `slice-reviewer` subagent hasn't reviewed. One review covers the slice until fixes add more than about
-  100 lines.
+  100 lines. A swarm's slice, which commits into its root, needs no review.
 - A plan opens in plannotator for the user's approval.
 - C# diagnostics reach you after every edit through the C# language server plugin.
 
@@ -97,8 +108,7 @@ Read a long review file by the part you need: its index first, then only that pa
 
 ### Slices
 
-Work moves one slice at a time, or one slice at a time per worker in a swarm (the parallelize skill). The
-conversation holds the plan; no file does, except a swarm's plan in the git folder (the parallelize skill).
+Work moves one slice at a time, and the conversation holds the plan. A swarm differs where the parallelize skill says.
 
 - **A request is a slice, or gets split into slices.** A sweeping change becomes a list of slices you propose in the
   chat, and is never done as one task.
@@ -111,17 +121,15 @@ conversation holds the plan; no file does, except a swarm's plan in the git fold
   big: say so plainly and propose the split.
 - **Check for drift.** Before each slice, check it against the goal and decisions agreed in the conversation. Say so
   if it doesn't serve them.
-- **Stop after each slice.** Once it merges, propose the next slice and wait. Never start it on your own. A swarm
-  the user approved is the exception: its coordinator starts each slice once the ones it waits on have merged or, for a
-  spike, answered (the parallelize skill).
-- **One slice per session**, or one slice at a time per worker in a swarm (the finish skill). When compacting, keep the
+- **Stop after each slice.** Once it merges, propose the next slice and wait. Never start it on your own.
+- **One slice per session.** When compacting, keep the
   slice list, the current slice, its worktree path, the files it changed and its `-Change` level.
 
 ### Kickoff
 
 A request that starts a new effort too big for one slice begins with an interview, then a list of slices, riskiest
 first (the kickoff skill). A list of separate tasks, or an effort whose slices don't all depend on each other, runs
-as a swarm: workers that each build one slice at a time through the normal flow (the parallelize skill).
+as a swarm (the parallelize skill).
 
 ### Modes
 
@@ -167,8 +175,8 @@ subagent and keep only its answer.
 ### Finish
 
 A built slice is validated, reviewed in a fresh context, summarized and shown to the user, and merges only on their
-approval (the finish skill). A swarm's root branch, whose slices the user approved one by one, merges once it is
-validated and reviewed as a whole (the parallelize skill).
+approval (the finish skill). A swarm's slices go into its root branch, which
+gets QA, a cleanup and one review by the user before it merges (the parallelize skill).
 
 ### When Blocked
 
@@ -267,9 +275,12 @@ When you reply to the user:
 | the user's review | The check of a slice by the user, in plannotator or in the chat. |
 | swarm | Workers that build slices at the same time for one coordinator (the parallelize skill). |
 | coordinator | The session that plans a swarm, gives slices to its workers and merges the root branch. |
-| worker | A session that builds one slice of a swarm at a time. |
+| worker | A session that a coordinator starts: a coder that builds one slice, a merge train, QA or cleanup. |
 | swarm plan | The file that holds a swarm's slices and their states (the parallelize skill). |
-| review count | How many of the user's reviews can wait at the same time in a swarm. |
+| worker limit | How many workers of a swarm run at the same time. |
+| profiling turn | A time in which one branch alone builds and runs Magic, to profile or measure CPU, RAM or GPU use (`tools/Scripts/Profiling.ps1`). |
+| merge train | Done slices of a swarm that one worker builds and merges into the root together (the parallelize skill). |
+| QA | The check of a swarm's root for bugs by a worker that ranks them and fixes nothing (the qa skill). |
 | root branch | The branch that the slices of one feature merge into before it merges into the merge target. |
 | gem | A plugin: a part of the engine that a project adds or replaces. |
 | hook | A method that the engine calls on a gem each frame (Code Standards). |
@@ -313,7 +324,8 @@ tidy-worktrees skill). A coordinator closes its own workers without a new approv
   commit of Markdown alone `docs`. Write the subject alone, never a scope or area prefix such as `fix(core): ` or
   `Core, Gems:`. The `commit-msg` git hook refuses a commit whose subject lacks the type or has a scope, and the
   Commits check a push.
-- Commit only after the user approves the change in the user's review.
+- Commit only after the user approves the change in the user's review. A swarm's coder commits when its slice
+  builds (the parallelize skill).
 - Never push.
 - No co-author lines, and nothing in code, comments, commit messages or branch names that hints the work was
   generated.

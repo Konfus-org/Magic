@@ -65,7 +65,7 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IHasSettings<VulkanG
         Settings = settings;
         _threads = threads;
         IWindow? drawn = app.IsHeadless ? null : window;
-        _device = new VulkanDevice(drawn, wantsValidation: IsDebugBuild);
+        _device = new VulkanDevice(drawn, settings.Gpu, wantsValidation: IsDebugBuild);
 
         // The gem's meter goes with it, so nothing holds the gem's code once it unloads.
         _meter = new Meter(new MeterOptions("Magic.Gems.VulkanGraphics") { Tags = _device.Description });

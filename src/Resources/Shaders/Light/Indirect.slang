@@ -9,13 +9,12 @@ import Core.Heap;
 import Core.Pass;
 import Core.Frame;
 import Core.Math;
-import Core.Pack;
 import Light.Probes;
 import Scene.Shadows;
 
 // Where the indirect light is in the frame's buffer, right after the shadows, and its bytes: C#'s GpuIndirectLight.
 public static const uint IndirectLightOffset = ShadowsOffset + ShadowsBytes;
-public static const uint IndirectLightBytes = 84u;
+public static const uint IndirectLightBytes = 80u;
 
 public struct IndirectLight
 {
@@ -45,8 +44,7 @@ public uint2 GetPicturePixel(FrameConstants frame, uint2 traced, uint2 tracedSiz
 // The pixel traced at a size whose footprint holds a pixel of the picture.
 public uint2 GetTracedTexel(FrameConstants frame, uint2 pixel, uint2 tracedSize)
 {
-    float2 uv = GetTexelCenterUv(pixel, uint2(frame.width, frame.height));
-    return min(uint2(uv * float2(tracedSize)), tracedSize - 1u);
+    return GetTexelAt(GetTexelCenterUv(pixel, uint2(frame.width, frame.height)), tracedSize);
 }
 
 // The roughest surface whose reflections are traced; a rougher one reflects its diffuse light, or the sky giving way
@@ -89,9 +87,8 @@ public struct TracedTaps
 // at a view depth: 1 on its plane and facing its way, less the further their planes are apart and their normals turn.
 float GetSurfaceWeight(FrameConstants frame, uint2 at, float depth, float3 relative, float3 normal, float viewDepth)
 {
-    TextureRef normalTexture = { frame.gbufferNormal };
-    float3 atNormal = DecodeOctahedral(normalTexture.Load(at, 0u).xy * 2.0 - 1.0);
-    float3 gap = relative - ReconstructRelative(frame, GetTexelCenterUv(at, uint2(frame.width, frame.height)), depth);
+    float3 atNormal = LoadNormal(frame.gbufferNormal, at);
+    float3 gap = relative - ReconstructPixel(frame, at, depth);
     float planeError = max(abs(dot(gap, atNormal)), abs(dot(gap, normal))) / viewDepth;
     return exp(-Pow2(planeError) * PlaneSharpness) * Pow4(saturate(dot(atNormal, normal)));
 }

@@ -3,7 +3,6 @@ using Magic.Assets;
 using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Ecs;
-using Magic.Files;
 using Magic.Graphics;
 using Magic.Projects;
 using Magic.Threading;
@@ -33,15 +32,9 @@ public sealed class ClusteredGeometryGem
         IDisposable
 {
     private readonly Threads _threads;
-    private readonly Mailbox<RenderInputs> _inputs = new();
     private readonly Subscription _preprocessing;
     private readonly ClusterResources _resources;
     private readonly Visibility _visibility;
-
-    /// <summary>
-    /// The settings <see cref="Render"/> draws with, taken from <see cref="_inputs"/>, until newer are. Render thread.
-    /// </summary>
-    private RenderInputs? _current;
 
     /// <summary>
     /// Whether the gem draws: failed once a shader is not built. Render thread.
@@ -55,19 +48,19 @@ public sealed class ClusteredGeometryGem
     private int _domainsLoaded;
     private TaskCompletionSource? _loading;
 
-    public ClusteredGeometryGem(ClusteredGeometrySettings settings, AssetManager assets, Caches caches, Threads threads)
+    public ClusteredGeometryGem(ClusteredGeometrySettings settings, AssetManager assets, Threads threads)
     {
         Settings = settings;
         _threads = threads;
         ClusterPreprocessor clusters = new();
         _preprocessing = assets.Register(clusters);
-        _resources = new ClusterResources(clusters, caches, assets, threads);
+        _resources = new ClusterResources(clusters, assets, threads);
         _visibility = new Visibility(assets);
     }
 
     /// <summary>
-    /// When a model draws as its impostor, which <see cref="LateUpdate"/> hands each frame to <see cref="Render"/>. Game
-    /// thread.
+    /// When a model draws as its impostor. The game thread sets it whole, and <see cref="Render"/> reads the record it
+    /// finds, which never changes.
     /// </summary>
     public ClusteredGeometrySettings Settings { get; set; }
 
@@ -79,16 +72,6 @@ public sealed class ClusteredGeometryGem
     }
 
     /// <summary>
-    /// Publishes the settings for <see cref="Render"/>.
-    /// </summary>
-    public void LateUpdate(in Frame frame)
-    {
-        RenderInputs back = _inputs.Back;
-        back.Settings = Settings;
-        _inputs.Publish();
-    }
-
-    /// <summary>
     /// Keeps the models the view holds clustered on the GPU, and records the frame's passes in the geometry stage.
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph, in ClusteredGeometryInput input)
@@ -97,24 +80,14 @@ public sealed class ClusteredGeometryGem
             return;
 
         // The shaders are the GPU provider's to build, the first ask starting each; one that fails ends the start.
-        GpuState shaders = GetState(graph, _visibility.Shaders.AsSpan());
+        GpuState shaders = graph.GetState(_visibility.Shaders.AsSpan());
         if (shaders == GpuState.Failed)
             FailStart("a shader was not built.");
 
         if (shaders != GpuState.Ready)
             return;
 
-        if (_inputs.TryTake(out RenderInputs? newest))
-        {
-            if (_current is not null)
-                _inputs.Return(_current);
-
-            _current = newest;
-        }
-
-        if (_current is not { } inputs)
-            return;
-
+        ClusteredGeometrySettings settings = Settings;
         GpuView gpu = input.View;
         Result<ClusterPools> pools = _resources.Prepare(graph, gpu.Models.Span);
         if (!pools.Ok)
@@ -130,7 +103,7 @@ public sealed class ClusteredGeometryGem
             _loading is { } loading
             && gpu.PreparedDomains >= _domainsLoaded
             && !_resources.IsLoading
-            && GetState(graph, _visibility.GetResolveShaders(gpu.MaterialShaders)) != GpuState.Loading
+            && graph.GetState(_visibility.GetResolveShaders(gpu.MaterialShaders)) != GpuState.Loading
         )
         {
             loading.TrySetResult();
@@ -141,8 +114,8 @@ public sealed class ClusteredGeometryGem
             graph,
             gpu,
             pools.Value,
-            inputs.Settings.ImpostorPixels,
-            inputs.Settings.ImpostorDistance
+            settings.ImpostorPixels,
+            settings.ImpostorDistance
         );
         if (!view.Ok)
         {
@@ -177,25 +150,6 @@ public sealed class ClusteredGeometryGem
     }
 
     /// <summary>
-    /// Where <paramref name="shaders"/> are: failed if any failed, loading while any loads, else ready. Each is asked,
-    /// so the first ask starts them all.
-    /// </summary>
-    private static GpuState GetState(RenderGraph graph, ReadOnlySpan<ShaderEntry> shaders)
-    {
-        GpuState all = GpuState.Ready;
-        foreach (ShaderEntry shader in shaders)
-        {
-            GpuState state = graph.GetState(shader);
-            if (state == GpuState.Failed)
-                all = GpuState.Failed;
-            else if (state == GpuState.Loading && all == GpuState.Ready)
-                all = GpuState.Loading;
-        }
-
-        return all;
-    }
-
-    /// <summary>
     /// Ends the start as failed: the gem draws nothing, and holds no domain back.
     /// </summary>
     private void FailStart(string error)
@@ -204,17 +158,5 @@ public sealed class ClusteredGeometryGem
         _loading?.TrySetResult();
         _loading = null;
         _started = Result.Failure(error);
-    }
-
-    /// <summary>
-    /// What the game thread's settings ask of a frame, copied as its frame ends and published for the render thread,
-    /// which reads nothing else of the game thread's.
-    /// </summary>
-    private sealed class RenderInputs
-    {
-        /// <summary>
-        /// The settings the frame is drawn by.
-        /// </summary>
-        public ClusteredGeometrySettings Settings { get; set; } = new();
     }
 }

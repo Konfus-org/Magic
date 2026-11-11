@@ -15,16 +15,22 @@ texture reader, with a gem that draws its view.
   that doesn't load as the magenta failure material.
 - The view names each model on the GPU by its model index, the one its instances name, so a renderer keeps a row of
   its own for each.
-- A model nothing has drawn or waited for in a minute leaves the GPU, and loads again when it is next drawn.
+- A model nothing has drawn or waited for in `Rendering.ModelKeepSec` leaves the GPU, and loads again when it is next
+  drawn.
 - As a domain replaces the world, the loading screen stays until the models, materials and textures of what comes,
   and the effects of its post processing with their passes, are on the GPU, or failed, so its first
   frame is drawn whole, its effects included. Nothing drawn before carries into the frames after.
-- The effects the frame runs are the first post processing's, or the engine's
-  `TemporalAntiAliasing`, `Exposure` and `Agx` when nothing has one; the view names each with its material's row and
-  its passes. The camera jitters while one of them asks for it, or while a gem upscales the picture.
-- The picture is drawn in the window's shape, at most as many pixels across and down as `Rendering.Resolution`,
-  and stretched over the window, or upscaled to it by a gem that upscales. A smaller window draws at its own size, and so does every window when it is `0 0`; a run with no window draws at 1280
-  by 720.
+- The effects the frame runs are the first post processing's, or the engine's `Exposure` and `Agx` when nothing has one,
+  exposed by `Rendering.ExposureCompensation`; an effect whose material `Rendering.DisabledEffects` names, as
+  `Bloom Vignette`, is left out. The view names each with its material's row and its passes. The camera jitters while
+  one of them asks for it, or while a gem upscales the picture.
+- The view is seen through the first camera that draws into the window, at `Rendering.FieldOfView` when that is more
+  than 0.
+- The finished picture is `Rendering.Resolution` in size, with a window or without, and the window shows it
+  stretched. At `0 0` it is the window's size, or 1280 by 720 with no window.
+- The world is drawn at `Rendering.RenderScale` of that size, and a gem that upscales takes it to that size, or it is
+  stretched with `Rendering.UpscaleFilter`, `Linear` or `Nearest`. At `0` it is drawn at the most that fits 1920 by
+  1080.
 
 `bake` in the console loads every asset, which makes what every gem makes of every model, then opens every domain under `Domains/`
 in turn and exits, so a release ships with the caches full.

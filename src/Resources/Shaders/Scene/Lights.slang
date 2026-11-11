@@ -47,6 +47,15 @@ public Lights GetLights()
 // sky's tables are handed on.
 public float3 GetOpenSkyRadiance(Lights lights) { return lights.skyRadiance.rgb * lights.sunIlluminance.r; }
 
+// The sun's light where it reaches the camera: through the sky's air where a sky entity draws the sky, else as it is.
+public float3 GetSunIlluminance<S : ISky>(Lights lights)
+{
+    if (lights.hasSky == 0u)
+        return lights.sunIlluminance.rgb;
+
+    return S.GetSunIlluminance(CreateSkyInputs(lights, lights.sunDirection.xyz, false));
+}
+
 // What a sky is handed to answer for a direction from the camera.
 public SkyInputs CreateSkyInputs(Lights lights, float3 direction, bool hasSunDisc)
 {
@@ -57,13 +66,11 @@ public SkyInputs CreateSkyInputs(Lights lights, float3 direction, bool hasSunDis
     sky.sunIlluminance = lights.sunIlluminance.rgb;
     sky.altitude = lights.cameraAltitude;
     sky.transmittanceLut = lights.transmittanceLut;
-    sky.multiScatteringLut = lights.multiScatteringLut;
     sky.skyViewLut = lights.skyViewLut;
     sky.sampler = lights.lutSampler;
     return sky;
 }
 
-public static const uint LightPoint = 0u;
 public static const uint LightSpot = 1u;
 public static const uint LightRect = 2u;
 
@@ -104,5 +111,8 @@ public float GetLightReach(GpuLight light)
     return light.range + (light.type == LightRect ? 0.5 * length(float2(light.width, light.height)) : 0.0);
 }
 
-// The first of a tile's words of bits in the tile table.
-public uint GetLightTileOffset(uint2 tile, uint tilesAcross) { return (tile.y * tilesAcross + tile.x) * LightBuckets; }
+// The first of a tile's words of bits in the tile table, for a picture width pixels across.
+public uint GetLightTileOffset(uint2 tile, uint width)
+{
+    return (tile.y * ((width + LightTileSize - 1u) / LightTileSize) + tile.x) * LightBuckets;
+}

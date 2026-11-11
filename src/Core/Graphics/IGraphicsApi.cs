@@ -60,7 +60,8 @@ public interface IGraphicsApi
 
     /// <summary>
     /// Whether <paramref name="shader"/> is built for this GPU: a compute entry into its pipeline, a vertex or pixel
-    /// entry compiled. The first ask starts compiling it. <see cref="RenderGraph.GetState"/> asks for it.
+    /// entry compiled. The first ask starts compiling it.
+    /// <see cref="RenderGraph.GetState(in ShaderEntry)"/> asks for it.
     /// </summary>
     GpuState GetState(in ShaderEntry shader);
 

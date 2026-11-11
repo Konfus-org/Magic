@@ -28,9 +28,9 @@ internal sealed class LightTiles(AssetManager assets)
     /// <summary>
     /// The twin of <c>Scene/Lights.slang</c>'s.
     /// </summary>
-    public static readonly int MaxLights = (int)(SharedResources.Lights.Bytes / GpuLight.Bytes);
+    public const int MaxLights = 1024;
 
-    private static readonly int _buckets = MaxLights / 32;
+    private const int Buckets = MaxLights / 32;
 
     /// <summary>
     /// The frame's lights as the table holds them, written from the snapshots before they upload.
@@ -49,21 +49,19 @@ internal sealed class LightTiles(AssetManager assets)
     /// </summary>
     public Result<LightBuffers> Prepare(
         RenderGraph graph,
-        in FrameTargets view,
+        int width,
+        int height,
         EcsSnapshot<Transform, PointLight> points,
         EcsSnapshot<Transform, SpotLight> spots,
         EcsSnapshot<Transform, RectLight> rects
     )
     {
-        Result<GpuBuffer> table = graph.Buffer(SharedResources.Lights);
+        Result<GpuBuffer> table = graph.Buffer(GpuDescriptions.GetBuffer("Light table", MaxLights * GpuLight.Bytes));
         if (!table.Ok)
             return Result.Failure(table.Error);
 
         Result<GpuBuffer> tiles = graph.Buffer(
-            GpuDescriptions.GetBuffer(
-                "Light tiles",
-                (long)GetTiles(view.Width) * GetTiles(view.Height) * _buckets * sizeof(uint)
-            )
+            GpuDescriptions.GetBuffer("Light tiles", (long)GetTiles(width) * GetTiles(height) * Buckets * sizeof(uint))
         );
         if (!tiles.Ok)
             return Result.Failure(tiles.Error);
@@ -103,12 +101,12 @@ internal sealed class LightTiles(AssetManager assets)
     /// <summary>
     /// Each tile's lights, from the view's depth.
     /// </summary>
-    public void Record(RenderGraph graph, in GpuView view, in GpuConstants header, in LightBuffers lights)
+    public void Record(RenderGraph graph, in GpuView view, in GpuConstants header)
     {
         graph
             .Compute("Cull lights", _cullShader, header, RenderStage.Light)
-            .Reads(view.Frame, lights.Table, view.Depth)
-            .Writes(lights.Tiles)
+            .Reads(view.Frame, view.LightTable, view.Depth)
+            .Writes(view.LightTiles)
             .Dispatch((uint)GetTiles(view.Width), (uint)GetTiles(view.Height));
     }
 

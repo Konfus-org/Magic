@@ -7,6 +7,7 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using Magic.Assets;
+using Magic.Configuration;
 using Magic.Files;
 using Magic.Graphics;
 using Magic.Projects;
@@ -36,6 +37,7 @@ public sealed partial class SlangShaderCompilerGem
         IShaderCompiler,
         ICache<CompiledShader>,
         ICache<Reflection>,
+        IHasSettings<SlangShaderCompilerSettings>,
         IDisposable
 {
     private const string ShadersFolder = "Shaders";
@@ -80,18 +82,21 @@ public sealed partial class SlangShaderCompilerGem
     /// </summary>
     private unsafe void* _globalSession;
 
-    public SlangShaderCompilerGem(App app, AssetManager assets, Caches caches)
+    public SlangShaderCompilerGem(App app, AssetManager assets, Caches caches, SlangShaderCompilerSettings settings)
     {
         _assets = assets;
         _caches = caches;
         _lifetime = app.Lifetime;
         _idle = new Timer(_ => ReleaseWhenIdle());
+        Settings = settings;
     }
 
     /// <summary>
     /// Raised when the bytes written change shape, and when the compiler's options or tag change.
     /// </summary>
     public int Version => 4;
+
+    public SlangShaderCompilerSettings Settings { get; set; }
 
     public void Dispose()
     {
@@ -130,7 +135,9 @@ public sealed partial class SlangShaderCompilerGem
         if (!modules.Ok)
             return Result.Failure(modules.Error);
 
-        ulong key = GetKey(entryPath, entry, typeArguments);
+        // Read once, so the compile is made and cached at the same level.
+        ShaderOptimization optimization = Settings.ShaderOptimization;
+        ulong key = GetKey(entryPath, entry, typeArguments, optimization);
         ulong version = GetVersion(modules.Value);
         Result<CompiledShader> cached = await _caches
             .ReadAsync<CompiledShader>(key, version, this, cancel)
@@ -139,7 +146,7 @@ public sealed partial class SlangShaderCompilerGem
             return cached;
 
         Result<CompiledShader> compiled = await RunAsync(
-                () => Compile(modules.Value, entryPath, entry, typeArguments),
+                () => Compile(modules.Value, entryPath, entry, typeArguments, optimization),
                 cancel
             )
             .ConfigureAwait(false);
@@ -256,12 +263,22 @@ public sealed partial class SlangShaderCompilerGem
         return text;
     }
 
-    private static ulong GetKey(string entryPath, in ShaderEntry entry, List<(string Path, string Type)> typeArguments)
+    /// <summary>
+    /// What names one compile: the entry, its stage, its type arguments and the optimization level, each level cached
+    /// apart.
+    /// </summary>
+    private static ulong GetKey(
+        string entryPath,
+        in ShaderEntry entry,
+        List<(string Path, string Type)> typeArguments,
+        ShaderOptimization optimization
+    )
     {
         XxHash64 hash = new();
         hash.Append(Encoding.UTF8.GetBytes(entryPath));
         hash.Append(Encoding.UTF8.GetBytes(entry.Name));
         hash.Append(BitConverter.GetBytes((int)entry.Stage));
+        hash.Append(BitConverter.GetBytes((int)optimization));
         foreach ((string path, string type) in typeArguments)
         {
             hash.Append(Encoding.UTF8.GetBytes(path));
@@ -411,7 +428,8 @@ public sealed partial class SlangShaderCompilerGem
         ImmutableArray<SlangModule> modules,
         string entryPath,
         in ShaderEntry entry,
-        List<(string Path, string Type)> typeArguments
+        List<(string Path, string Type)> typeArguments,
+        ShaderOptimization optimization
     )
     {
         List<nint> owned = [];
@@ -420,7 +438,7 @@ public sealed partial class SlangShaderCompilerGem
         int result;
         try
         {
-            Result<nint> made = CreateSession();
+            Result<nint> made = CreateSession(optimization);
             if (!made.Ok)
                 return Result.Failure(made.Error);
 
@@ -586,10 +604,11 @@ public sealed partial class SlangShaderCompilerGem
         );
 
     /// <summary>
-    /// The session: SPIR-V 1.6, row-major, entry names kept, warnings as errors, and buffers laid out scalar, as C# packs
-    /// a struct and the heap reads one. A change here raises Version. It starts the compiler when it isn't running.
+    /// The session: SPIR-V 1.6, row-major, entry names kept, warnings as errors, buffers laid out scalar, as C# packs a
+    /// struct and the heap reads one, and <paramref name="optimization"/>. A change here, but to the level, raises
+    /// Version. It starts the compiler when it isn't running.
     /// </summary>
-    private unsafe Result<nint> CreateSession()
+    private unsafe Result<nint> CreateSession(ShaderOptimization optimization)
     {
         if (_globalSession == null)
             _globalSession = Slang.CreateGlobalSession();
@@ -611,7 +630,7 @@ public sealed partial class SlangShaderCompilerGem
             options[1] = Int(Slang.Option.VulkanUseEntryPointName, 1);
             options[2] = Int(Slang.Option.MatrixLayoutRow, 1);
             options[3] = Int(Slang.Option.DefaultImageFormatUnknown, 1);
-            options[4] = Int(Slang.Option.Optimization, 1);
+            options[4] = Int(Slang.Option.Optimization, (int)optimization);
             options[5] = new Slang.CompilerOptionEntry
             {
                 Name = Slang.Option.WarningsAsErrors,
@@ -728,7 +747,8 @@ public sealed partial class SlangShaderCompilerGem
         Func<nint, nint, Reflection> read
     )
     {
-        Result<nint> made = CreateSession();
+        // A struct's layout is the same at any level, so reflection compiles at the quickest.
+        Result<nint> made = CreateSession(ShaderOptimization.None);
         if (!made.Ok)
             return Result.Failure(made.Error);
 

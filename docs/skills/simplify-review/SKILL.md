@@ -23,6 +23,8 @@ description: Reviews one area of the code for what can be deleted, merged, flatt
    - A slice plan: findings grouped into slices of under about 300 changed lines each, by the files they touch, with
      each slice's branch, net lines and `-Change` level.
    - An index of the findings, then each finding as `### <AREA>-<n>: <title>`, with its `file:line`, what is wrong,
-     the simpler version in a few lines, the lines it saves, and its risk.
+     the simpler version in a few lines, the lines it saves, and its risk. When it moves types, layers or calls, add a
+     Mermaid graph of the architecture before and after. Do not draw a graph with ASCII characters.
 6. **Hand it over:** sum up the total lines it saves and the decisions waiting on the owner. Offer to run the slices
    that need no decision, side by side where their files don't overlap ([parallelize skill](../parallelize/SKILL.md)).
+   Each slice runs with the [cleanup skill](../cleanup/SKILL.md).

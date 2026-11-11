@@ -15,18 +15,6 @@ namespace Magic.ClusteredGeometry;
 internal sealed class ModelClusters
 {
     /// <summary>
-    /// Views across and down an impostor atlas, on an octahedral grid over the whole sphere.
-    /// </summary>
-    public const int ImpostorViews = 12;
-
-    /// <summary>
-    /// Texels a side of one view of an impostor atlas.
-    /// </summary>
-    public const int ImpostorTile = 64;
-
-    public const int ImpostorSize = ImpostorViews * ImpostorTile;
-
-    /// <summary>
     /// How many vertices the model has of its own, every mesh's one after another: what a leaf draws.
     /// </summary>
     public required int ModelVertexCount { get; init; }
@@ -44,8 +32,8 @@ internal sealed class ModelClusters
     public required ImmutableArray<GpuCluster> Clusters { get; init; }
 
     /// <summary>
-    /// The model's octahedral impostor atlas, <see cref="ImpostorViews"/> by <see cref="ImpostorViews"/> views of
-    /// <see cref="ImpostorTile"/> texels a side, row by row as RGBA16F: each texel the octahedral normal, the depth from
+    /// The model's octahedral impostor atlas, <see cref="ImpostorBuilder.Views"/> by <see cref="ImpostorBuilder.Views"/> views of
+    /// <see cref="ImpostorBuilder.Tile"/> texels a side, row by row as RGBA16F: each texel the octahedral normal, the depth from
     /// the view's front plane over the sphere's diameter, and the material slot plus one, 0 where the view sees nothing.
     /// </summary>
     public required ImmutableArray<Half> Impostor { get; init; }

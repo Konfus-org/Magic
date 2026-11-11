@@ -1,20 +1,23 @@
 # DebugTools
 
-Debug lines and windows over what the meters measure, drawn with the debug UI. It provides nothing and needs a gem that
-provides `IDebugUI`.
+Debug lines and windows over what the meters measure and the gems' settings, drawn with the debug UI. It provides
+nothing and needs a gem that provides `IDebugUI`.
 
 To use it, list `DebugTools` in a project's `.magic` file.
 
-- **Counter**, on F1 or `Debug.IsCounterShown`: the drawn frame rate and frame time, then the GPU's memory and
-  the process's, as a line in the top left corner. It shows from the start in a Debug build. In other builds the debug
-  UI shows lines only while a debug window is open.
-- **Stats**, on F3 or `Debug.IsStatsOpen`: every instrument of the `Magic.*` meters and .NET's `System.Runtime`,
-  in sections that fold. **CPU** shows the game thread's frame and the render thread's, then what Core's own steps and each gem's hooks take
-  of it, each a fold of its own, the slowest first. **GPU** shows what the GPU provider says of the API and the GPU, its frame and its
-  passes. **Memory** shows the process's and the GPU's, then Core's and the process's instruments, and each gem's.
-  **Other** holds the rest, by meter. A histogram shows its mean, how many a second and its most, a counter how much it
-  rose and how much a second, a gauge its latest value.
-- Numbers are collected twice a second, and only while one of them shows.
+- **Counter**, on `Debug.CounterKey` (F1) or `Debug.IsCounterShown`: the drawn frame rate and frame time, then the GPU's
+  memory and the process's, as a line in the top left corner. It shows from the start in a Debug build. In other builds
+  the debug UI shows lines only while a debug window is open.
+- **Stats**, on `Debug.StatsKey` (F3) or `Debug.IsStatsOpen`: every instrument of the `Magic.*` meters and .NET's
+  `System.Runtime`, in sections that fold. **CPU** shows the game thread's frame and the render thread's, then what
+  Core's own steps and each gem's hooks take of it, each a fold of its own, the slowest first. **GPU** shows what the
+  GPU provider says of the API and the GPU, its frame and its passes. **Memory** shows the process's and the GPU's, then
+  Core's and the process's instruments, and each gem's. **Other** holds the rest, by meter. A histogram shows its mean,
+  how many a second and its most, a counter how much it rose and how much a second, a gauge its latest value.
+- **Settings**, on `Debug.SettingsKey` (F4) or `Debug.IsSettingsOpen`: every gem's settings, under a header per
+  category, each with a control for its type and its summary as a tooltip. A change applies at once; one marked
+  `(restarts)` applies with its button, which restarts the run. **Save** keeps them for this user and project.
+- Numbers are collected every `Debug.StatsCollectSec`, and only while the counter or the stats window shows.
 - Without a gem that provides input, no key works.
 
 ## Measuring

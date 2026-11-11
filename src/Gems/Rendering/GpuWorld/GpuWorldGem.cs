@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Numerics;
 using Magic.Assets;
@@ -7,7 +8,6 @@ using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Files;
 using Magic.Graphics;
 using Magic.Projects;
 using Magic.Threading;
@@ -40,7 +40,13 @@ public sealed class GpuWorldGem
 
     private const int DefaultHeight = 720;
 
+    private const int AutoRenderWidth = 1920;
+
+    private const int AutoRenderHeight = 1080;
+
     private readonly IEcs _ecs;
+
+    private readonly AssetManager _assets;
 
     private readonly Threads _threads;
 
@@ -56,8 +62,7 @@ public sealed class GpuWorldGem
     private readonly MaterialInstance _failure;
 
     /// <summary>
-    /// What is done to the picture when no entity has a <see cref="PostProcessing"/>: the temporal anti-aliasing, the
-    /// exposure and the AgX tonemap.
+    /// What is done to the picture when no entity has a <see cref="PostProcessing"/>: the exposure and the AgX tonemap.
     /// </summary>
     private readonly PostProcessing _defaultPost;
 
@@ -83,9 +88,9 @@ public sealed class GpuWorldGem
     private int _worldNumber;
 
     /// <summary>
-    /// The inputs <see cref="Render"/> uploads, taken from <see cref="_inputs"/>, until newer are. Render thread.
+    /// The number of the world <see cref="Render"/> drew last, none before the first frame. Render thread.
     /// </summary>
-    private RenderInputs? _current;
+    private int? _drawnWorldNumber;
 
     /// <summary>
     /// Whether the gem makes views: failed once a shader or a pool is not made. Render thread.
@@ -108,29 +113,32 @@ public sealed class GpuWorldGem
         GpuWorldSettings settings,
         IShaderCompiler shaders,
         AssetManager assets,
-        Caches caches,
         IEcs ecs,
         Threads threads
     )
     {
         Settings = settings;
         _ecs = ecs;
+        _assets = assets;
         _threads = threads;
         ModelPreprocessor models = new();
         _preprocessing = assets.Register(models);
-        _resources = new GpuResources(models, caches, assets, shaders, threads);
+        _resources = new GpuResources(
+            models,
+            assets,
+            shaders,
+            threads,
+            settings.Anisotropy,
+            settings.DroppedTextureLevels
+        );
         _failure = new MaterialInstance { Handle = assets.GetFailure<Material, Model>() };
-        _defaultPost.Effects[0] = new MaterialInstance
-        {
-            Handle = assets.Find<Material>("Materials/TemporalAntiAliasing.mat"),
-        };
-        _defaultPost.Effects[1] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Exposure.mat") };
-        _defaultPost.Effects[2] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Agx.mat") };
+        _defaultPost.Effects[0] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Exposure.mat") };
+        _defaultPost.Effects[1] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Agx.mat") };
         _instances = new InstanceTable(assets, _resources, _failure);
-        _frameView = new FrameView(_resources);
+        _frameView = new FrameView();
         _sky = new SkyLuts(assets);
         _lightTiles = new LightTiles(assets);
-        _effects = new Effects(assets, _resources);
+        _effects = new Effects(assets, _resources, shaders, threads);
         _shaders = [.. _sky.Shaders, .. _lightTiles.Shaders];
     }
 
@@ -175,7 +183,7 @@ public sealed class GpuWorldGem
             return null;
 
         // The shaders are the GPU provider's to build, the first ask starting each; one that fails ends the start.
-        GpuState shaders = GetState(graph, _shaders.AsSpan());
+        GpuState shaders = graph.GetState(_shaders.AsSpan());
         if (shaders == GpuState.Failed)
             FailStart("a shader was not built.");
 
@@ -183,6 +191,8 @@ public sealed class GpuWorldGem
             return null;
 
         // The pools, with the models made since the last frame settled into them, before any renderer's row is built.
+        // Every model asked for from here on is asked at or after the frame's start, which eviction keeps.
+        long frameStart = Environment.TickCount64;
         Result pools = _resources.Prepare(graph);
         if (!pools.Ok)
         {
@@ -191,27 +201,20 @@ public sealed class GpuWorldGem
             return null;
         }
 
-        if (_inputs.TryTake(out RenderInputs? newest))
-        {
-            // The first frame of another world forgets last frame's camera and size, so nothing drawn before carries
-            // into it.
-            if (newest.WorldNumber != _current?.WorldNumber)
-                _frameView.ClearHistory();
-
-            if (_current is not null)
-                _inputs.Return(_current);
-
-            _current = newest;
-        }
-
-        if (_current is not { } inputs)
+        if (_inputs.TakeNewest() is not { } inputs)
             return null;
 
+        // The first frame of another world forgets last frame's camera and size, so nothing drawn before carries
+        // into it.
+        if (inputs.WorldNumber != _drawnWorldNumber)
+        {
+            _frameView.ClearHistory();
+            _drawnWorldNumber = inputs.WorldNumber;
+        }
+
         // Entities -> resources -> rows: the renderers written since the inputs before ask for their models and have
-        // their rows built again, the materials' rows are made again at upload, and a model no renderer drawn holds
-        // leaves once nothing asked for it in a while.
+        // their rows built again, and the materials' rows are made again at upload.
         int instanceCount = _instances.Fill(inputs.Renderers, frame.Index);
-        _resources.EvictUnusedModels(inputs.Renderers.Second[..instanceCount]);
 
         // The loading domain shows once what it draws and its effects are on the GPU.
         if (_preparing is { } preparing && IsPrepared(graph, preparing))
@@ -222,11 +225,21 @@ public sealed class GpuWorldGem
             EndPreparing();
         }
 
+        // A model no renderer drawn holds, and nothing asked for this frame, leaves once it is kept long enough; the
+        // loading domain's models were just asked for, so they stay while it waits.
+        _resources.EvictUnusedModels(
+            inputs.Renderers.Second[..instanceCount],
+            frameStart,
+            inputs.Settings.ModelKeepSec
+        );
+
         _resources.Upload(graph);
 
         // The picture's effects; the camera jitters while one of them asks for it, or while a gem upscales.
-        PostProcessing post = inputs.PostProcessing.Count > 0 ? inputs.PostProcessing.First[0] : _defaultPost;
-        Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> effects = _effects.Resolve(graph, post.Effects);
+        Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> effects = _effects.Resolve(
+            graph,
+            GetEffects(inputs)
+        );
         if (!effects.Ok)
         {
             Log.Error($"The frame's view is not made: {effects.Error}");
@@ -234,7 +247,12 @@ public sealed class GpuWorldGem
             return null;
         }
 
-        bool isJittered = input.Upscaling is not null || HasJitter(effects.Value.Effects.Span);
+        bool isJittered = input.Upscaling is not null;
+        foreach (GpuEffect effect in effects.Value.Effects.Span)
+        {
+            isJittered |= effect.State == GpuState.Ready && effect.Needs.HasJitter;
+        }
+
         Vector2 jitter = isJittered ? FrameView.GetJitter(frame.Index) : Vector2.Zero;
 
         Result<GpuView> view = UploadFrame(graph, inputs, frame, jitter, instanceCount, effects.Value);
@@ -247,16 +265,10 @@ public sealed class GpuWorldGem
 
         // The sky's tables while there is a sky, and each tile's lights.
         GpuConstants header = new(view.Value.Frame.Id);
-        SkyTables sky = new(view.Value.SkyTransmittance, view.Value.SkyMultiScattering, view.Value.SkyView);
         if (inputs.Skies.Count > 0)
-            _sky.Record(graph, header, view.Value.Frame, sky);
+            _sky.Record(graph, view.Value, header);
 
-        _lightTiles.Record(
-            graph,
-            view.Value,
-            header,
-            new LightBuffers(view.Value.LightTable, view.Value.LightTiles, view.Value.LightCount)
-        );
+        _lightTiles.Record(graph, view.Value, header);
         return (view.Value, _instances.Instances);
     }
 
@@ -328,60 +340,27 @@ public sealed class GpuWorldGem
     }
 
     /// <summary>
-    /// Where <paramref name="shaders"/> are: failed if any failed, loading while any loads, else ready. Each is asked,
-    /// so the first ask starts them all.
-    /// </summary>
-    private static GpuState GetState(RenderGraph graph, ReadOnlySpan<ShaderEntry> shaders)
-    {
-        GpuState all = GpuState.Ready;
-        foreach (ShaderEntry shader in shaders)
-        {
-            GpuState state = graph.GetState(shader);
-            if (state == GpuState.Failed)
-                all = GpuState.Failed;
-            else if (state == GpuState.Loading && all == GpuState.Ready)
-                all = GpuState.Loading;
-        }
-
-        return all;
-    }
-
-    /// <summary>
-    /// Whether an effect that runs asks for the camera to jitter.
-    /// </summary>
-    private static bool HasJitter(ReadOnlySpan<GpuEffect> effects)
-    {
-        foreach (GpuEffect effect in effects)
-        {
-            if (effect.State == GpuState.Ready && effect.Needs.HasJitter)
-                return true;
-        }
-
-        return false;
-    }
-
-    /// <summary>
     /// The first camera that draws into the window, else one at the origin.
     /// </summary>
-    private static RenderCamera GetCamera(EcsSnapshot<Transform, Camera> cameras)
+    private static (Transform Transform, Camera Camera) GetCamera(EcsSnapshot<Transform, Camera> cameras)
     {
         for (int i = 0; i < cameras.Count; i++)
         {
-            Camera camera = cameras.Second[i];
-            if (camera.Target.IsWindow)
-                return new RenderCamera(cameras.First[i], camera.FieldOfView, camera.Near);
+            if (cameras.Second[i].Target.IsWindow)
+                return (cameras.First[i], cameras.Second[i]);
         }
 
-        return new RenderCamera(new Transform(), 60, 0.05f);
+        return (new Transform(), new Camera());
     }
 
     /// <summary>
     /// The directional light the frame is lit by: the sun while it is up, else the moon while it is up, else the first
-    /// there is, else a white light from above.
+    /// there is, else a white light from above: towards it, unit, and its colour times its intensity, in lux, above the
+    /// air.
     /// </summary>
-    private static RenderSun GetSun(EcsSnapshot<Transform, DirectionalLight> lights)
+    private static (Vector3 Direction, Vector3 Illuminance) GetSun(EcsSnapshot<Transform, DirectionalLight> lights)
     {
-        RenderSun sun = new(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One);
+        (Vector3 Direction, Vector3 Illuminance) sun = (Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One);
         int sunRank = -1;
         for (int i = 0; i < lights.Count; i++)
         {
@@ -398,11 +377,43 @@ public sealed class GpuWorldGem
                 continue;
 
             Vector3 illuminance = new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity;
-            sun = new RenderSun(towards, illuminance);
+            sun = (towards, illuminance);
             sunRank = rank;
         }
 
         return sun;
+    }
+
+    /// <summary>
+    /// The effects the frame runs: the first post processing's, or the engine's, exposed by the exposure compensation;
+    /// each whose material the settings turn off left out.
+    /// </summary>
+    private MaterialSlots GetEffects(RenderInputs inputs)
+    {
+        MaterialSlots effects;
+        if (inputs.PostProcessing.Count > 0)
+            effects = inputs.PostProcessing.First[0].Effects;
+        else
+        {
+            effects = _defaultPost.Effects;
+            effects[0].Overrides["compensation"] = inputs.Settings.ExposureCompensation;
+        }
+
+        // Most frames turn nothing off, so they name no material.
+        ImmutableArray<string> disabled = inputs.Settings.DisabledEffects;
+        if (disabled.IsEmpty)
+            return effects;
+
+        for (int place = 0; place < MaterialSlots.Capacity; place++)
+        {
+            if (
+                _assets.GetPath(effects[place].Handle) is { } path
+                && disabled.Contains(Path.GetFileNameWithoutExtension(path))
+            )
+                effects[place] = default;
+        }
+
+        return effects;
     }
 
     /// <summary>
@@ -424,13 +435,13 @@ public sealed class GpuWorldGem
 
         foreach (Handle<Material> material in preparing.Materials)
         {
-            isPrepared &= _resources.Get(material) != ResourceState.Loading;
+            isPrepared &= _resources.Get(material) != GpuState.Loading;
         }
 
         if (!hasFailure || _failure.Handle == Handle<Material>.None)
             return isPrepared;
 
-        return _resources.Get(_failure.Handle) != ResourceState.Loading && isPrepared;
+        return _resources.Get(_failure.Handle) != GpuState.Loading && isPrepared;
     }
 
     /// <summary>
@@ -473,103 +484,174 @@ public sealed class GpuWorldGem
         if (!tables.Ok)
             return Result.Failure(tables.Error);
 
-        // The picture in the window's shape, scaled down to fit the resolution but never up, which the window stretches
-        // it over or a gem upscales it to; at the window's size when the resolution has no side, and 1280 by 720
-        // headless.
-        TextureDescription window = graph.WindowTarget.IsNone ? default : graph.GetDescription(graph.WindowTarget);
-        (int width, int height) = (DefaultWidth, DefaultHeight);
-        if (window.Width > 0)
+        // The finished picture at the resolution, or at the window's size when it has no side, and 1280 by 720 with no
+        // window; the world drawn at the render scale of it, or when that is auto at the most that fits 1920 by 1080,
+        // never more than all of it.
+        Size shown = inputs.Settings.Resolution;
+        if (shown.Width <= 0 || shown.Height <= 0)
         {
-            Size box = inputs.Settings.Resolution;
-            float scale =
-                box.Width <= 0 || box.Height <= 0
-                    ? 1
-                    : MathF.Min(1, MathF.Min((float)box.Width / window.Width, (float)box.Height / window.Height));
-            (width, height) = ((int)MathF.Round(window.Width * scale), (int)MathF.Round(window.Height * scale));
+            TextureDescription window = graph.WindowTarget.IsNone ? default : graph.GetDescription(graph.WindowTarget);
+            shown = window.Width > 0 ? new Size(window.Width, window.Height) : new Size(DefaultWidth, DefaultHeight);
         }
 
-        RenderCamera camera = GetCamera(inputs.Cameras);
-        Result<FrameTargets> targets = _frameView.Upload(
-            graph,
-            camera,
-            frame,
-            jitter,
-            width,
-            height,
-            instanceCount,
-            tables.Value.Rows,
-            tables.Value.Materials
+        float scale = MathF.Min(
+            1,
+            inputs.Settings.RenderScale > 0
+                ? inputs.Settings.RenderScale
+                : MathF.Min((float)AutoRenderWidth / shown.Width, (float)AutoRenderHeight / shown.Height)
         );
-        if (!targets.Ok)
-            return Result.Failure(targets.Error);
+        int width = Math.Max(1, (int)MathF.Round(shown.Width * scale));
+        int height = Math.Max(1, (int)MathF.Round(shown.Height * scale));
 
+        (Transform Transform, Camera Camera) camera = GetCamera(inputs.Cameras);
+        if (inputs.Settings.FieldOfView > 0)
+            camera.Camera = camera.Camera with { FieldOfView = inputs.Settings.FieldOfView };
+
+        // The frame's buffer, the view's targets, the light table and its tiles, and the sky's tables asked for in that
+        // order; the glass targets only while a material draws translucent, so the graph frees them in a world with
+        // none.
+        bool hasGlass = _resources.HasTranslucent;
+        Result<GpuBuffer> constants = graph.Buffer(GpuDescriptions.GetBuffer("Frame constants", 1024));
+        Result<GpuTexture> depth = graph.Texture(
+            GpuDescriptions.GetTexture(
+                "Depth",
+                width,
+                height,
+                GpuFormat.D32Sfloat,
+                TextureUsages.DepthTarget | TextureUsages.Sampled
+            )
+        );
+        Result<GpuTexture> glassDepth = GetGlass(
+            GpuDescriptions.GetTexture(
+                "Glass depth",
+                width,
+                height,
+                GpuFormat.D32Sfloat,
+                TextureUsages.DepthTarget | TextureUsages.Sampled
+            )
+        );
+        Result<GpuTexture> glassBase = GetGlass(GetTarget("Glass base", GpuFormat.R8G8B8A8Unorm));
+        Result<GpuTexture> glassNormal = GetGlass(GetTarget("Glass normal", GpuFormat.R16G16Unorm));
+        Result<GpuTexture> glassSurface = GetGlass(GetTarget("Glass surface", GpuFormat.R16G16B16A16Sfloat));
+        Result<GpuTexture> normal = graph.Texture(GetTarget("GBuffer normal", GpuFormat.R16G16Unorm));
+        Result<GpuTexture> baseColor = graph.Texture(GetTarget("GBuffer base", GpuFormat.R8G8B8A8Unorm));
+        Result<GpuTexture> surface = graph.Texture(GetTarget("GBuffer surface", GpuFormat.R8G8B8A8Unorm));
+        Result<GpuTexture> velocity = graph.Texture(GetTarget("Velocity", GpuFormat.R16G16B16A16Sfloat));
+        Result<GpuTexture> hdr = graph.Texture(
+            GpuDescriptions.GetTexture(
+                "HDR",
+                width,
+                height,
+                GpuFormat.R16G16B16A16Sfloat,
+                TextureUsages.Storage
+                    | TextureUsages.ColorTarget
+                    | TextureUsages.Sampled
+                    | TextureUsages.CopyDestination
+            )
+        );
+        Result<GpuTexture> output = graph.Texture(
+            GpuDescriptions.GetTexture(
+                "Output",
+                width,
+                height,
+                GpuFormat.R8G8B8A8Unorm,
+                TextureUsages.Storage | TextureUsages.ColorTarget | TextureUsages.Sampled | TextureUsages.CopySource
+            )
+        );
         Result<LightBuffers> lights = _lightTiles.Prepare(
             graph,
-            targets.Value,
+            width,
+            height,
             inputs.PointLights,
             inputs.SpotLights,
             inputs.RectLights
         );
-        if (!lights.Ok)
-            return Result.Failure(lights.Error);
+        Result<GpuTexture> transmittance = graph.Texture(GetSkyTable("Sky transmittance", 256, 64));
+        Result<GpuTexture> multiScattering = graph.Texture(GetSkyTable("Sky multi-scattering", 32, 32));
+        Result<GpuTexture> skyView = graph.Texture(GetSkyTable("Sky view", 192, 108));
+        Result asked = Result.FindFailure(
+            constants,
+            depth,
+            glassDepth,
+            glassBase,
+            glassNormal,
+            glassSurface,
+            normal,
+            baseColor,
+            surface,
+            velocity,
+            hdr,
+            output,
+            lights,
+            transmittance,
+            multiScattering,
+            skyView
+        );
+        if (!asked.Ok)
+            return Result.Failure(asked.Error);
 
-        Result<SkyTables> sky = SkyLuts.Prepare(graph);
-        if (!sky.Ok)
-            return Result.Failure(sky.Error);
-
-        Result lit = FrameLights.Upload(
+        GpuView view = new()
+        {
+            Frame = constants.Value,
+            Width = width,
+            Height = height,
+            ShownWidth = shown.Width,
+            ShownHeight = shown.Height,
+            HasHistory = _frameView.HasHistory(width, height),
+            Depth = depth.Value,
+            GBufferNormal = normal.Value,
+            GBufferBase = baseColor.Value,
+            GBufferSurface = surface.Value,
+            Velocity = velocity.Value,
+            GlassDepth = glassDepth.Value,
+            GlassBase = glassBase.Value,
+            GlassNormal = glassNormal.Value,
+            GlassSurface = glassSurface.Value,
+            Hdr = hdr.Value,
+            Output = output.Value,
+            Instances = tables.Value.Rows,
+            InstanceCount = instanceCount,
+            InstanceCapacity = _instances.Capacity,
+            Materials = tables.Value.Materials,
+            Vertices = _resources.VertexPool,
+            Indices = _resources.IndexPool,
+            Meshes = _resources.Meshes,
+            Models = _resources.Models,
+            MaterialShaders = _resources.MaterialShaders,
+            HeapTextures = _resources.GetHeapTextures(),
+            LightTable = lights.Value.Table,
+            LightTiles = lights.Value.Tiles,
+            SkyTransmittance = transmittance.Value,
+            SkyMultiScattering = multiScattering.Value,
+            SkyView = skyView.Value,
+            Effects = effects.Effects,
+            EffectRows = effects.Rows,
+            PreparedDomains = _preparedDomains,
+        };
+        Result uploaded = _frameView.Upload(
             graph,
-            targets.Value.Constants,
-            inputs.Skies,
+            view,
+            lights.Value.Count,
             camera,
+            frame,
+            jitter,
             GetSun(inputs.DirectionalLights),
-            sky.Value,
-            lights.Value
+            inputs.Skies.Count > 0,
+            inputs.Settings.SkyBrightness
         );
-        if (!lit.Ok)
-            return Result.Failure(lit.Error);
+        if (!uploaded.Ok)
+            return Result.Failure(uploaded.Error);
 
-        FrameTargets view = targets.Value;
+        return Result.Success(view);
 
-        return Result.Success(
-            new GpuView
-            {
-                Frame = view.Constants,
-                Width = view.Width,
-                Height = view.Height,
-                HasHistory = view.HasHistory,
-                Depth = view.Depth,
-                GBufferNormal = view.GBufferNormal,
-                GBufferBase = view.GBufferBase,
-                GBufferSurface = view.GBufferSurface,
-                Velocity = view.Velocity,
-                GlassDepth = view.GlassDepth,
-                GlassBase = view.GlassBase,
-                GlassNormal = view.GlassNormal,
-                GlassSurface = view.GlassSurface,
-                Hdr = view.Hdr,
-                Output = view.Output,
-                Instances = tables.Value.Rows,
-                InstanceCount = instanceCount,
-                InstanceCapacity = _instances.Capacity,
-                Materials = tables.Value.Materials,
-                Vertices = _resources.VertexPool,
-                Indices = _resources.IndexPool,
-                Meshes = _resources.Meshes,
-                Models = _resources.Models,
-                MaterialShaders = _resources.MaterialShaders,
-                HeapTextures = _resources.GetHeapTextures(),
-                LightTable = lights.Value.Table,
-                LightTiles = lights.Value.Tiles,
-                LightCount = lights.Value.Count,
-                SkyTransmittance = sky.Value.Transmittance,
-                SkyMultiScattering = sky.Value.MultiScattering,
-                SkyView = sky.Value.View,
-                Effects = effects.Effects,
-                EffectRows = effects.Rows,
-                PreparedDomains = _preparedDomains,
-            }
-        );
+        TextureDescription GetTarget(string name, GpuFormat format) =>
+            GpuDescriptions.GetTexture(name, width, height, format);
+
+        static TextureDescription GetSkyTable(string name, int width, int height) =>
+            GpuDescriptions.GetTexture(name, width, height, GpuFormat.R16G16B16A16Sfloat);
+
+        Result<GpuTexture> GetGlass(in TextureDescription glass) =>
+            hasGlass ? graph.Texture(glass) : Result.Success(GpuTexture.None);
     }
 
     /// <summary>

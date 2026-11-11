@@ -1,7 +1,7 @@
 # TracedShadows
 
 Shadows each pixel by tracing rays through the world as rays see it, for the renderer's shading. Without it, or on a
-GPU that doesn't trace rays, nothing is shadowed.
+GPU that doesn't trace rays, or with `Rendering.IsTracedShadowsOn` off, nothing is shadowed.
 
 To use it, list `TracedShadows` in a project's `.magic` file with a gem that builds the world as rays see it.
 
@@ -16,8 +16,9 @@ To use it, list `TracedShadows` in a project's `.magic` file with a gem that bui
   at the picture's size along its surfaces. `set Rendering.ShadowScale 1` sets it live. A smaller scale is faster
   and softens small shadows.
 - Shadows are traced one ray a pixel and light, then denoised. The sun's are smoothed over frames and across the
-  screen. The tile lights' are only smoothed over frames, so their soft edges stay grainy, and one can trail for a
-  moment where a tile's lights change.
+  screen, blurred `Rendering.ShadowFilterPasses` times before a last blur; one is faster and grainier. The tile
+  lights' are only smoothed over frames, so their soft edges stay grainy, and one can trail for a moment where a
+  tile's lights change.
 
 ## How it works
 

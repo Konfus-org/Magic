@@ -3,17 +3,6 @@ using Magic.Assets;
 namespace Magic.Graphics;
 
 /// <summary>
-/// What a sampler makes of the texels under a sample: their blend, or the least or greatest of them, which is what a
-/// depth pyramid is built with.
-/// </summary>
-public enum SamplerReduction : byte
-{
-    Average,
-    Min,
-    Max,
-}
-
-/// <summary>
 /// How to make a sampler.
 /// </summary>
 public readonly record struct SamplerDescription
@@ -33,6 +22,4 @@ public readonly record struct SamplerDescription
     /// Samples taken along a surface seen at a slant, 1 to 16; 1 is none.
     /// </summary>
     public int Anisotropy { get; init; } = 1;
-
-    public SamplerReduction Reduction { get; init; }
 }

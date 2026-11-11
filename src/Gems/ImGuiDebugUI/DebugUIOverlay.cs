@@ -33,11 +33,6 @@ internal sealed class DebugUIOverlay
     /// </summary>
     private readonly Dictionary<ulong, (TextureDescription Description, GpuTexture Made)> _textures = [];
 
-    /// <summary>
-    /// The newest copy taken, this overlay's until a newer is.
-    /// </summary>
-    private DebugUIFrame? _frame;
-
     public DebugUIOverlay(
         AssetManager assets,
         Mailbox<DebugUIFrame> frames,
@@ -73,15 +68,7 @@ internal sealed class DebugUIOverlay
     /// </summary>
     public void Record(RenderGraph graph)
     {
-        if (_frames.TryTake(out DebugUIFrame? newest))
-        {
-            if (_frame is { } drawn)
-                _frames.Return(drawn);
-
-            _frame = newest;
-        }
-
-        if (_frame is not { } frame)
+        if (_frames.TakeNewest() is not { } frame)
             return;
 
         // The texture changes are taken and the textures asked for whether or not there is a window to draw over, so

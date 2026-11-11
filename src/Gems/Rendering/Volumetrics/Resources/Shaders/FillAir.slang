@@ -70,10 +70,7 @@ void ScatterAir(uint3 thread : SV_DispatchThreadID, uint3 group : SV_GroupID, ui
     for (uint i = index; i < min(lights.count, MaxLights); i += Threads * Threads)
     {
         GpuLight light = LoadLight(lights.table, i);
-        float3 center = light.position - frame.cameraPosition.xyz;
-        float3 outside = max(max(low - center, center - high), 0.0);
-        float reach = GetLightReach(light);
-        if (dot(outside, outside) <= reach * reach)
+        if (IsSphereTouchingBox(Relative(frame, light.position), GetLightReach(light), low, high))
         {
             uint slot;
             InterlockedAdd(groupLightCount, 1u, slot);
@@ -134,9 +131,8 @@ void ScatterAir(uint3 thread : SV_DispatchThreadID, uint3 group : SV_GroupID, ui
 
         GpuLight light = LoadLight(lights.table, groupLights[(first + picked) % total]);
         LightSample sample = SampleLight(light, world, float3(0.0));
-        float3 toPoint = SampleLightPoint(light, world, random.yz) - world;
-        float apart = length(toPoint);
-        float3 through = GetTransmittance(world, toPoint / max(apart, Epsilon), apart * 0.999);
+        LightRay ray = CreateLightRay(world, SampleLightPoint(light, world, random.yz));
+        float3 through = GetTransmittance(world, ray.direction, ray.distance);
         float phase = GetAirPhase(air.anisotropy, dot(direction, sample.direction));
         float weight = sum / max(weights[picked], 1e-12) * float(total) / float(count);
         localLight = air.color * sample.irradiance * phase * through * weight;

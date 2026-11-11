@@ -5,7 +5,8 @@ namespace Magic.Deferred;
 
 /// <summary>
 /// The renderer's debug window, drawn with the debug UI's widgets: it takes the settings now and hands back the ones
-/// chosen next. F2 opens it, F5 and F6 step through the views, and a line on screen names any view but the finished frame.
+/// chosen next. Its key (F2) opens it, two more (F5 and F6) step through the views, and a line on screen names any view
+/// but the finished frame.
 /// </summary>
 internal sealed class RendererDebugWindow(IDebugUI ui, IInput? input)
 {
@@ -25,18 +26,24 @@ internal sealed class RendererDebugWindow(IDebugUI ui, IInput? input)
         bool isOpen = current.IsRenderWindowOpen;
         if (input is not null)
         {
-            if (input[Control.KeyF2].WasPressed)
+            if (input[current.RenderWindowKey].WasPressed)
                 isOpen = !isOpen;
 
-            if (input[Control.KeyF5].WasPressed)
+            if (input[current.PreviousViewKey].WasPressed)
                 view = Step(view, -1);
 
-            if (input[Control.KeyF6].WasPressed)
+            if (input[current.NextViewKey].WasPressed)
                 view = Step(view, 1);
         }
 
         if (isOpen)
-            view = Draw(view, ref isOpen);
+        {
+            int viewIndex = (int)view;
+            ui.Begin("Rendering", ref isOpen);
+            ui.Choice("View", ref viewIndex, _viewNames);
+            ui.End();
+            view = (DebugView)viewIndex;
+        }
 
         if (view != DebugView.Final)
             ui.Text(_viewLines[(int)view]);
@@ -53,14 +60,4 @@ internal sealed class RendererDebugWindow(IDebugUI ui, IInput? input)
 
     private static DebugView Step(DebugView view, int by) =>
         (DebugView)(((int)view + by + _viewNames.Length) % _viewNames.Length);
-
-    private DebugView Draw(DebugView current, ref bool isOpen)
-    {
-        ui.Begin("Rendering", ref isOpen);
-        int viewIndex = (int)current;
-        ui.Choice("View", ref viewIndex, _viewNames);
-        ui.End();
-
-        return (DebugView)viewIndex;
-    }
 }

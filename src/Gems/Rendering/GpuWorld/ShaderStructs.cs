@@ -6,7 +6,7 @@ using Magic.Ecs.Components;
 namespace Magic.GpuWorld;
 
 /// <summary>
-/// An instance as the GPU reads it from the instance table, 256 bytes: the twin of <c>Scene/Instances.slang</c>'s,
+/// An instance as the GPU reads it from the instance table, 248 bytes: the twin of <c>Scene/Instances.slang</c>'s,
 /// in the world; the GPU takes the camera's position off a position once transformed.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]

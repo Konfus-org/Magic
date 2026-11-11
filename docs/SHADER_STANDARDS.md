@@ -18,8 +18,8 @@ The rules for Slang shaders in Magic. [Code Standards](CODE_STANDARDS.md) covers
 - Put what a struct does on it as extensions (`instance.ToCameraRelative(position)`), so a struct shared with C# keeps
   only its fields. Return a struct rather than `out` parameters.
 - A struct C# reads or writes holds only 32-bit scalars, their vectors, row-major matrices, heap references and such
-  structs. Its C# twin is sequential with `Pack = 4` and names the Slang module in its summary. Nothing checks that the
-  two match, so change them together.
+  structs. Its C# twin is sequential with `Pack = 4` and names the Slang module in its summary. It can hold a heap
+  reference as its handle (`GpuTexture`, `GpuSampler`). Nothing checks that the two match, so change them together.
 - A contract between shaders is an interface (`IMaterial`, `ISky`, `IPixelEffect`), and a pass that works with any is
   generic over it.
 - Totals across a dispatch run in its last group (`IsLastGroup`), not in a one-group pass after it.

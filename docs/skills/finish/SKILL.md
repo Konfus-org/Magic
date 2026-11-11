@@ -24,31 +24,27 @@ description: Validates, reviews, presents and merges a built slice. Use it on yo
    - Each type, member, field and parameter that you added, and the caller in this slice that needs it. Remove each
      one that has no caller ([Simplest First](../../../AGENTS.md#simplest-first)).
    - The next slice that you propose, in one line.
-5. Start the user's review. From the worktree, run `plannotator review --base <merge target>` in the background. Wait
-   for it.
-   - If it stops before the user decides, run it again. The user's comments stay.
+5. Start the user's review. From the worktree, run
+   `plannotator review --base <merge target>` in the background. Wait for it.
+   - If it ends before the user decides, run it again. The user's comments stay.
    - The page shows the branch of the worktree, which is the title of the session. `plannotator sessions --json`
      lists the URL and the worktree of each open review.
    - If plannotator is not available, show `git diff --stat` and the important hunks in the chat, and wait.
 6. Address each comment, or give the evidence for not addressing it. Validate again, and go back to step 4. If the
    user's review closes with no comments and no approval, ask the user what to do.
-7. Approval in the user's review, or "approved" in the chat, means merge. Do not ask again. If the approval is in
-   the chat, stop the user's review. Then:
+7. Approval in the user's review, or "approved" in the chat, means merge. Do not ask again. If the approval is in the
+   chat, stop the user's review. Then:
    1. Commit on the branch of the worktree ([Commits](../../../AGENTS.md#commits)).
    2. Rebase onto the merge target, and run `tools/Scripts/AgentTaskComplete.ps1` again at the same level. If no new
       work landed, it returns immediately. If it validates again, examine the new screenshots of a `Visual` change.
    3. Resolve conflicts only in your changes. If a conflict needs a change to the work of another agent, stop and ask
       the user.
-   4. Fast-forward the merge target to your branch. Do this in the checkout of the merge target: the main checkout,
-      or the root worktree of a swarm. Do not push.
+   4. Fast-forward the merge target to your branch, in the checkout of the merge target. Do not push.
    5. Release the claim with `tools/Scripts/Claim.ps1 -Release`. Then run `git worktree remove`. Then run
       `git branch -d`. Do not use `-D`.
    6. Remove each other worktree and branch that you made for the task in the same way. This includes the worktree
       that the app made for the session. For a branch that you made from a remote branch, set its upstream to that
       branch first. Then `-d` removes it.
    7. Delete the side sessions that you started and that are done ([tidy-worktrees skill](../tidy-worktrees/SKILL.md)).
-8. Stop.
-   - A worker in a swarm ends with its `SLICE:` line ([parallelize skill](../parallelize/SKILL.md)). The coordinator
-     proposes the next work.
-   - In other cases, propose the next slice. Suggest that the user starts it with a clear context (`/clear`). Give its
-     brief in one or two lines to paste. Do not start it yourself.
+8. Stop. Propose the next slice. Suggest that the user starts it with a clear context (`/clear`). Give its brief in one
+   or two lines to paste. Do not start it yourself.

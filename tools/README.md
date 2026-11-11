@@ -34,6 +34,22 @@ Runs the checks a change must pass, in order, and stops at the first failure:
 
 `-Only` runs some steps, and `-Project` runs another project.
 
+## Profiling.ps1
+
+Takes, waits for or releases a profiling turn: the time in which one worktree alone builds and runs Magic, so that its
+profile is not disturbed. The turn is a file in the repository's git folder that every worktree shares, with the
+holder's worktree, its branch and the time the turn ends. `-Minutes`, at most 20, takes it. It first waits up to ten
+minutes for runs of Magic, builds and test runs from other worktrees to end. `-Release`, run from the holder's
+worktree, ends it, and it ends by itself at its time. `Format.ps1`, `Validate.ps1`, `Screenshot.ps1` and `Run.ps1`
+call `-Wait` first, so they wait while another worktree holds a turn.
+
+## Run.ps1
+
+Runs a project for an agent, the way an agent starts Magic itself; Screenshot.ps1 and Validate.ps1 run it in their own
+way. It names the window with the branch checked out where the script is, or `-Name`, sends `-Commands` as console
+lines, and kills a run still going after `-Seconds`. End `-Commands` with `exit` to end the run sooner. `-Headless` runs
+without a window and ends at the first error logged. It prints what Magic prints, and doesn't build.
+
 ## Screenshot.ps1
 
 Runs a project with a window until its world has loaded, takes a screenshot and prints its path. It doesn't build.

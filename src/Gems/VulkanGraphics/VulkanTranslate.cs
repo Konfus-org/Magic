@@ -100,30 +100,11 @@ internal static class VulkanTranslate
     public static VkImageType ToImageType(this TextureKind kind) =>
         kind == TextureKind.Texture3D ? VkImageType.Image3D : VkImageType.Image2D;
 
-    /// <summary>
-    /// The array layers an image of the description has: a cube's six faces, an array's layers, else one.
-    /// </summary>
-    public static uint GetLayerCount(this in TextureDescription description) =>
-        description.Kind switch
-        {
-            TextureKind.Cube => 6,
-            TextureKind.Texture2DArray => (uint)description.Layers,
-            TextureKind.Texture2D or TextureKind.Texture3D => 1,
-            _ => throw new ArgumentOutOfRangeException(nameof(description), description.Kind, "There is no such kind."),
-        };
-
     public static VkImageAspectFlags ToAspect(this GpuFormat format) =>
         format.IsDepth ? VkImageAspectFlags.Depth : VkImageAspectFlags.Color;
 
     public static VkImageViewType ToViewType(this TextureKind kind) =>
-        kind switch
-        {
-            TextureKind.Texture2D => VkImageViewType.Image2D,
-            TextureKind.Texture2DArray => VkImageViewType.Image2DArray,
-            TextureKind.Cube => VkImageViewType.ImageCube,
-            TextureKind.Texture3D => VkImageViewType.Image3D,
-            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "There is no such kind."),
-        };
+        kind == TextureKind.Texture3D ? VkImageViewType.Image3D : VkImageViewType.Image2D;
 
     public static VkFilter ToVulkan(this TextureFilter filter) =>
         filter == TextureFilter.Nearest ? VkFilter.Nearest : VkFilter.Linear;
@@ -135,15 +116,6 @@ internal static class VulkanTranslate
             TextureWrap.Repeat => VkSamplerAddressMode.Repeat,
             TextureWrap.Mirror => VkSamplerAddressMode.MirroredRepeat,
             _ => throw new ArgumentOutOfRangeException(nameof(wrap), wrap, "There is no such wrap."),
-        };
-
-    public static VkSamplerReductionMode ToVulkan(this SamplerReduction reduction) =>
-        reduction switch
-        {
-            SamplerReduction.Average => VkSamplerReductionMode.WeightedAverage,
-            SamplerReduction.Min => VkSamplerReductionMode.Min,
-            SamplerReduction.Max => VkSamplerReductionMode.Max,
-            _ => throw new ArgumentOutOfRangeException(nameof(reduction), reduction, "There is no such reduction."),
         };
 
     public static VkCullModeFlags ToVulkan(this CullMode cull) =>
@@ -236,13 +208,6 @@ internal static class VulkanTranslate
                 VkPipelineStageFlags2.EarlyFragmentTests | VkPipelineStageFlags2.LateFragmentTests,
                 VkAccessFlags2.DepthStencilAttachmentRead | VkAccessFlags2.DepthStencilAttachmentWrite
             ),
-            GpuAccess.DepthRead => (
-                VkPipelineStageFlags2.EarlyFragmentTests
-                    | VkPipelineStageFlags2.LateFragmentTests
-                    | VkPipelineStageFlags2.FragmentShader
-                    | VkPipelineStageFlags2.ComputeShader,
-                VkAccessFlags2.DepthStencilAttachmentRead | VkAccessFlags2.ShaderSampledRead
-            ),
             GpuAccess.Indirect => (VkPipelineStageFlags2.DrawIndirect, VkAccessFlags2.IndirectCommandRead),
             GpuAccess.Index => (VkPipelineStageFlags2.VertexInput, VkAccessFlags2.IndexRead),
             GpuAccess.CopySource => (VkPipelineStageFlags2.AllTransfer, VkAccessFlags2.TransferRead),
@@ -263,7 +228,6 @@ internal static class VulkanTranslate
             GpuAccess.ShaderWrite => VkImageLayout.General,
             GpuAccess.ColorTarget => VkImageLayout.ColorAttachmentOptimal,
             GpuAccess.DepthTarget => VkImageLayout.DepthAttachmentOptimal,
-            GpuAccess.DepthRead => VkImageLayout.DepthReadOnlyOptimal,
             GpuAccess.Indirect => VkImageLayout.Undefined,
             GpuAccess.Index => VkImageLayout.Undefined,
             GpuAccess.CopySource => VkImageLayout.TransferSrcOptimal,

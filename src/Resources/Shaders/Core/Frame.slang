@@ -6,6 +6,7 @@ module "Core/Frame";
 import Core.Heap;
 import Core.Pass;
 import Core.Math;
+import Core.Pack;
 
 // The frame's bytes, C#'s FrameConstants.Bytes: where the rows after it in its buffer start.
 public static const uint FrameBytes = 528u;
@@ -111,4 +112,20 @@ public float3 ReconstructRelative(FrameConstants frame, float2 uv, float depth)
     float4 clip = float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0);
     float4 relative = mul(clip, frame.inverseViewProjection);
     return relative.xyz / relative.w;
+}
+
+// The camera-relative position a reversed depth puts a pixel of the picture at, through the pixel's centre.
+public float3 ReconstructPixel(FrameConstants frame, uint2 pixel, float depth)
+{
+    return ReconstructRelative(frame, GetTexelCenterUv(pixel, uint2(frame.width, frame.height)), depth);
+}
+
+// The reversed depth a pixel with nothing drawn is put at along its ray: far, but short of infinity.
+public static const float FarDepth = 1e-6;
+
+// The unit normal at a pixel of the normal texture whose heap id is given, kept as the GBuffer keeps it.
+public float3 LoadNormal(uint id, uint2 pixel)
+{
+    TextureRef normals = { id };
+    return DecodeUnitVectorUnorm(normals.Load(pixel, 0u).xy);
 }

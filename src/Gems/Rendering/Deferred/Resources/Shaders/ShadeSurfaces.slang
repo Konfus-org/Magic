@@ -1,16 +1,16 @@
 // Every pixel of the picture lit, into the HDR picture: a surface by the sun through the air, by the local lights its
 // tile lists, each dimmed by the shadow mask, the sun also by the clouds and coloured by its tint through glass, and by
 // the light around it, traced on a GPU that traces rays and else the sky's, and what it reflects, traced where it is
-// smooth enough, its direct and indirect light summed over the shared BRDF; and the sky itself, with its clouds, where
-// nothing was drawn. The pass header's x is the frame's buffer, which holds the lights, the shadows, the GI constants,
-// whose light ids are 0 where nothing is traced, and the air.
+// smooth enough, its direct and indirect light summed over the shared BRDF and added to its own emissive light, which
+// the material resolve left in the picture; and the sky itself, with its clouds, where nothing was drawn. The pass
+// header's x is the frame's buffer, which holds the lights, the shadows, the GI constants, whose light ids are 0 where
+// nothing is traced, and the air.
 module "ShadeSurfaces";
 
 import Core.Heap;
 import Core.Pass;
 import Core.Frame;
 import Core.Math;
-import Core.Pack;
 import Scene.Lights;
 import Scene.Shadows;
 import Light.Air;
@@ -76,7 +76,7 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
     float2 uv = GetTexelCenterUv(thread.xy, size);
     TextureRef depthTexture = { frame.depth };
     float depth = depthTexture.Load(thread.xy, 0u).x;
-    float3 relative = ReconstructRelative(frame, uv, depth > 0.0 ? depth : 1e-6);
+    float3 relative = ReconstructRelative(frame, uv, max(depth, FarDepth));
     float3 view = NormalizeSafe(-relative, float3(0.0, 0.0, -1.0));
     StorageRef hdr = { frame.hdr, 0u };
 
@@ -90,29 +90,24 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
         return;
     }
 
-    TextureRef normalTexture = { frame.gbufferNormal };
     TextureRef baseTexture = { frame.gbufferBase };
     TextureRef surfaceTexture = { frame.gbufferSurface };
-    float3 normal = DecodeOctahedral(normalTexture.Load(thread.xy, 0u).xy * 2.0 - 1.0);
+    float3 normal = LoadNormal(frame.gbufferNormal, thread.xy);
     float4 base = baseTexture.Load(thread.xy, 0u);
     float4 surface = surfaceTexture.Load(thread.xy, 0u);
     Brdf brdf = CreateBrdf(base.rgb, base.a, surface.x, surface.y);
 
     float3 toSun = lights.sunDirection.xyz;
-    float3 sunIlluminance = lights.hasSky != 0u
-        ? S.GetSunIlluminance(CreateSkyInputs(lights, toSun, false))
-        : lights.sunIlluminance.rgb;
     Shadows shadows = GetShadows();
     uint4 shadowWords = LoadShadowMask(shadows.mask, thread.xy, size.x);
     float3 world = relative + frame.cameraPosition.xyz;
-    float3 sunLight = sunIlluminance * GetShadow(shadowWords, 0u) * LoadSunTint(shadows.sunTint, thread.xy)
+    float3 sunLight = GetSunIlluminance<S>(lights) * GetShadow(shadowWords, 0u) * LoadSunTint(shadows.sunTint, thread.xy)
         * GetCloudShadow(GetAir(), world, toSun, frame.timeSec);
     float3 color = Evaluate(brdf, normal, view, toSun) * sunLight;
 
     // The lights of the pixel's tile, a word of bits at a time.
     ArrayRef<uint> tiles = { lights.tiles };
-    uint tilesAcross = (size.x + LightTileSize - 1u) / LightTileSize;
-    uint offset = GetLightTileOffset(thread.xy / LightTileSize, tilesAcross);
+    uint offset = GetLightTileOffset(thread.xy / LightTileSize, size.x);
     uint buckets = (min(lights.count, MaxLights) + 31u) / 32u;
     uint slot = 1u;
     for (uint bucket = 0u; bucket < buckets; bucket++)
@@ -127,6 +122,8 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
             slot++;
         }
     }
-    color += GetIndirectLight<S>(frame, lights, brdf, surface.x, thread.xy, relative, normal, view) * surface.z;
+
+    color += GetIndirectLight<S>(frame, lights, brdf, surface.x, thread.xy, relative, normal, view) * surface.z
+        + hdr.Load(thread.xy).rgb;
     hdr.Store(thread.xy, float4(color, 1.0));
 }

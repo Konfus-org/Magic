@@ -12,9 +12,8 @@ progress shows as it happens, which the terminal logger holds back until each pr
 here: tools/Scripts/Format.ps1 formats a change before it is validated, and the build fails on every rule it applies that a
 build can see.
 The tests run against that build, so running them alone (-Only Test) needs one. The Headless step runs each project
-without a window under --fail-on-error, waits for its world and then ten seconds, so what checks the GPU as the run
-starts has checked, types exit into it and passes when it ends with 0; an error logged during the
-run exits 2, and a run still going after -Seconds is killed and fails. The Screenshot step runs
+without a window under --fail-on-error, waits for its world, types exit into it and passes when it ends with 0; an
+error logged during the run exits 2, and a run still going after -Seconds is killed and fails. The Screenshot step runs
 tools/Scripts/Screenshot.ps1 on each project and prints the images' paths last: open each and look at what it shows
 before reporting the change as working. It needs a display and a GPU; the others do not. Runs from any current
 directory.
@@ -67,8 +66,8 @@ if ($Project.Count -eq 0) {
 }
 $screenshots = @()
 
-# Runs the project headless, waits for its world and ten seconds, types exit into it and waits for it to end; a run
-# still going after -Seconds is killed.
+# Runs the project headless, waits for its world, types exit into it and waits for it to end; a run still going after
+# -Seconds is killed.
 function Invoke-Headless {
     foreach ($one in $Project) {
         Invoke-HeadlessProject $(if ([System.IO.Path]::IsPathRooted($one)) { $one } else { Join-Path $root $one })
@@ -77,6 +76,7 @@ function Invoke-Headless {
 }
 
 function Invoke-HeadlessProject([string] $projectPath) {
+    & (Join-Path $PSScriptRoot 'Profiling.ps1') -Wait
     $info = New-Object System.Diagnostics.ProcessStartInfo
     $info.FileName = $magic
     $info.Arguments = "open `"$projectPath`" --headless true --fail-on-error"
@@ -84,7 +84,6 @@ function Invoke-HeadlessProject([string] $projectPath) {
     $info.RedirectStandardInput = $true
     $process = [System.Diagnostics.Process]::Start($info)
     $process.StandardInput.WriteLine('wait loaded')
-    $process.StandardInput.WriteLine('wait 10s')
     $process.StandardInput.WriteLine('exit')
     $process.StandardInput.Close()
     if (-not $process.WaitForExit($Seconds * 1000)) {
@@ -133,6 +132,8 @@ foreach ($step in $steps) {
         }
     }
 
+    # Another branch's profiling turn must not be disturbed: wait for it to end before each step.
+    & (Join-Path $PSScriptRoot 'Profiling.ps1') -Wait
     Write-Output ""
     Write-Output "==> $($step.Name)"
     $started = [System.Diagnostics.Stopwatch]::StartNew()

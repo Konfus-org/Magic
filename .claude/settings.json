@@ -56,6 +56,17 @@
             "statusMessage": "Checking the slice was validated and reviewed"
           }
         ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-magic-runs.sh\"",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUse": [

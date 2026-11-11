@@ -11,7 +11,6 @@ import Core.Heap;
 import Core.Pass;
 import Core.Frame;
 import Core.Math;
-import Core.Pack;
 import Scene.Lights;
 import Light.Probes;
 import Light.Indirect;
@@ -21,9 +20,6 @@ import Sky.ISky;
 import Trace.HitSurface;
 import Trace.HitLight;
 import Scene.Models;
-
-// The reversed depth a pixel where nothing was drawn is seen through the air at: far along its ray, short of infinity.
-static const float FarDepth = 1e-6;
 
 // How much of the light a pane reflects straight on: an index of refraction of 1.5.
 static const float PaneReflectance = 0.04;
@@ -47,31 +43,30 @@ void ShadeTranslucent<S : ISky>(uint3 thread : SV_DispatchThreadID)
     if (any(thread.xy >= size))
         return;
 
-    // Where no pane is in front of the opaque surface, the glass depth is cleared to nothing, and the picture is only
-    // seen through the air, where something filled it, to the surface or far along the ray where nothing was drawn.
+    // Where no pane is in front of the opaque surface, the glass depth is cleared to nothing, or the view has none, its
+    // id 0, and the picture is only seen through the air, where something filled it, to the surface or far along the
+    // ray where nothing was drawn.
     TextureRef glassDepth = { frame.glassDepth };
-    float paneDepth = glassDepth.Load(thread.xy, 0u).x;
+    float paneDepth = frame.glassDepth == 0u ? 0.0 : glassDepth.Load(thread.xy, 0u).x;
     StorageRef picture = { frame.hdr, 0u };
-    float2 center = GetTexelCenterUv(thread.xy, size);
     if (paneDepth == 0.0)
     {
         if (GetAir().volume == 0u)
             return;
 
         TextureRef opaqueDepth = { frame.depth };
-        float3 seen = ReconstructRelative(frame, center, max(opaqueDepth.Load(thread.xy, 0u).x, FarDepth));
+        float3 seen = ReconstructPixel(frame, thread.xy, max(opaqueDepth.Load(thread.xy, 0u).x, FarDepth));
         picture.Store(thread.xy, float4(ApplyAir(picture.Load(thread.xy).rgb, seen), 1.0));
         return;
     }
 
     TextureRef bases = { frame.glassBase };
-    TextureRef normals = { frame.glassNormal };
     TextureRef surfaces = { frame.glassSurface };
     float4 base = bases.Load(thread.xy, 0u);
     float4 surface = surfaces.Load(thread.xy, 0u);
-    float3 position = ReconstructRelative(frame, center, paneDepth);
+    float3 position = ReconstructPixel(frame, thread.xy, paneDepth);
     float3 view = NormalizeSafe(-position, float3(0.0, 0.0, -1.0));
-    float3 paneNormal = DecodeOctahedral(normals.Load(thread.xy, 0u).xy * 2.0 - 1.0);
+    float3 paneNormal = LoadNormal(frame.glassNormal, thread.xy);
     Lights lights = GetLights();
     TracedWorld traced = GetTracedWorld();
     // A pane is seen from either side.
@@ -82,15 +77,12 @@ void ShadeTranslucent<S : ISky>(uint3 thread : SV_DispatchThreadID)
     // What is behind, through the pane and any other between it and the opaque surface.
     float3 through = base.rgb * (1.0 - base.a);
     float3 toSun = lights.sunDirection.xyz;
-    float3 sunIlluminance = lights.hasSky != 0u
-        ? S.GetSunIlluminance(CreateSkyInputs(lights, toSun, false))
-        : lights.sunIlluminance.rgb;
+    float3 sunIlluminance = GetSunIlluminance<S>(lights);
     if (traced.acceleration != 0u)
     {
-        AccelerationRef acceleration = { traced.acceleration };
-        RaytracingAccelerationStructure scene = acceleration.Get();
+        RaytracingAccelerationStructure scene = GetTracedAcceleration();
         TextureRef depth = { frame.depth };
-        float3 opaque = ReconstructRelative(frame, center, max(depth.Load(thread.xy, 0u).x, 1e-6));
+        float3 opaque = ReconstructPixel(frame, thread.xy, max(depth.Load(thread.xy, 0u).x, FarDepth));
         float offset = GetRayOffset(frame, position);
         float behind = length(opaque - position) * 0.999;
         through *= GetTransmittance(scene, world - view * offset, -view, behind);

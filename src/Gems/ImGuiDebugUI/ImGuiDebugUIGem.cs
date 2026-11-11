@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Unicode;
 using System.Threading.Channels;
 using Magic.Assets;
+using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
@@ -48,14 +49,9 @@ namespace Magic.ImGuiDebugUI;
 /// nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </para>
 /// </summary>
-public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDisposable
+public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IHasSettings<ImGuiDebugUISettings>, IDisposable
 {
     private const int InputBytes = 256;
-
-    /// <summary>
-    /// The height of a line of text in target pixels, which every widget is sized around.
-    /// </summary>
-    private const float FontSize = 20;
 
     /// <summary>
     /// How wide a window that fits what is in it is at least, in font sizes.
@@ -70,40 +66,19 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDispos
     private const float ScrollableWindowHeight = 18;
 
     /// <summary>
-    /// Seconds a line logged to show on screen stays.
-    /// </summary>
-    private const float ReportSec = 5;
-
-    /// <summary>
-    /// Metres from the camera beyond which text in the world is not shown.
-    /// </summary>
-    private const float TextDistance = 50;
-
-    /// <summary>
     /// ImGui's -FLT_MIN width: up to the right edge of whatever the field is in.
     /// </summary>
     private const float Stretch = -1.17549435E-38f;
 
     /// <summary>
-    /// Text in the world, and the lines on screen, sit on a dark plate, so they read over anything behind them, a white
-    /// debug view too.
-    /// </summary>
-    private const uint Plate = 0xC0000000;
-
-    /// <summary>
-    /// Whether the lines logged to show on screen show whatever windows are open, as in a Debug build, or only while one
-    /// is.
-    /// </summary>
-#if DEBUG
-    private const bool IsAlwaysShowing = true;
-#else
-    private const bool IsAlwaysShowing = false;
-#endif
-
-    /// <summary>
     /// The size ImGui lays out in without a window, the one the renderer then draws.
     /// </summary>
     private static readonly Vector2 _windowlessSize = new(1280, 720);
+
+    /// <summary>
+    /// Text in the world, and the lines on screen, sit on a dark plate, so they read over anything behind them, a white
+    /// debug view too, reaching this far past the text before the UI's scale.
+    /// </summary>
     private static readonly Vector2 _platePadding = new(4, 2);
     private static readonly Vector2 _linesMargin = new(8, 8);
 
@@ -119,6 +94,11 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDispos
     private readonly unsafe ImGuiContext_t* _context;
     private readonly DebugUIOverlay _overlay;
     private readonly Reports _reports = new();
+
+    /// <summary>
+    /// The engine's look at a scale of 1, which each change of the UI's scale starts again from.
+    /// </summary>
+    private readonly ImGuiStyle_t _look;
 
     /// <summary>
     /// Each frame ImGui ends, copied for the overlay, and what ImGui asks of its textures, in the order it asks.
@@ -176,9 +156,9 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDispos
     private ulong _lastTextureId;
 
     /// <summary>
-    /// Where the next new window's left edge goes.
+    /// Where the next new window's left edge goes, in font sizes.
     /// </summary>
-    private float _nextWindowX = FontSize * 2;
+    private float _nextWindowX = 2;
     private int _depth;
     private bool _isWindowDrawn;
 
@@ -188,6 +168,7 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDispos
     private bool _isTableShown;
 
     public unsafe ImGuiDebugUIGem(
+        ImGuiDebugUISettings settings,
         App app,
         AssetManager assets,
         IEcs ecs,
@@ -195,6 +176,7 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDispos
         IClipboard? clipboard = null
     )
     {
+        Settings = settings;
         _app = app;
         _ecs = ecs;
         _input = input;
@@ -202,7 +184,7 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDispos
         _overlay = new DebugUIOverlay(assets, _frames, _textureChanges.Reader);
 
         // ImGui writes no ini file, and is told the overlay takes the textures it makes and changes, and draws by vertex
-        // offset; it takes the engine's look, at its size.
+        // offset; it takes the engine's look, scaled each frame (Update).
         _context = ImGui_CreateContext(null);
         ImGui_SetCurrentContext(_context);
         ImGuiIO_t* io = ImGui_GetIO();
@@ -211,7 +193,7 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDispos
         io->DisplayFramebufferScale = Vector2.One.Im;
         ImGuiStyle_t* style = ImGui_GetStyle();
         Look.Apply(style);
-        style->FontSizeBase = FontSize;
+        _look = *style;
 
         // ImGui's clipboard is the platform's, through callbacks that find this gem by the handle in the user data.
         _self = new GCHandle<ImGuiDebugUIGem>(this);
@@ -222,6 +204,8 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDispos
     }
 
     public bool IsEnabled => true;
+
+    public ImGuiDebugUISettings Settings { get; set; }
 
     public unsafe void Dispose()
     {
@@ -239,6 +223,18 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDispos
         ImGuiIO_t* io = ImGui_GetIO();
         if (_input is { } input)
             ImGuiInput.Feed(io, input, _text);
+
+        // The look at the UI's scale and font size, made again from scale 1 only when either changed. ImGui scales the font
+        // by FontScaleMain itself, and its spacing only by ScaleAllSizes.
+        ImGuiStyle_t* style = ImGui_GetStyle();
+        float scale = Settings.UiScale > 0 ? Settings.UiScale : (_app.Window?.DisplayScale ?? 1);
+        if (style->FontScaleMain != scale || style->FontSizeBase != Settings.FontSize)
+        {
+            *style = _look;
+            ImGuiStyle_ScaleAllSizes(style, scale);
+            style->FontSizeBase = Settings.FontSize;
+            style->FontScaleMain = scale;
+        }
 
         // ImGui needs a time step of more than 0, which a frame's may not be.
         io->DisplaySize = GetDisplaySize().Im;
@@ -262,10 +258,10 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDispos
         }
 
         // What gems ask to show always shows; the lines logged to show on screen only while a debug window is drawn, or
-        // always in a Debug build. Everything is taken either way, so what has had its time goes.
+        // always when the settings say so. Everything is taken either way, so what has had its time goes.
         _worldTexts.Clear();
         _screenLines.Clear();
-        _reports.Take(frame.AppSec, IsAlwaysShowing || _isWindowDrawn, _worldTexts, _screenLines);
+        _reports.Take(frame.AppSec, Settings.IsLogAlwaysShown || _isWindowDrawn, _worldTexts, _screenLines);
         DrawReports();
 
         // Ended whether or not anything draws it. Its textures get their ids before the copy, which reads them.
@@ -302,7 +298,7 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDispos
             Log.LoggingLevel.Error or Log.LoggingLevel.Critical => (ReportKind.Alarm, _error),
             _ => (ReportKind.Counted, _white),
         };
-        _reports.Add(new Report(line.Message, kind, color, null, null, ReportSec));
+        _reports.Add(new Report(line.Message, kind, color, null, null, Settings.ReportSec));
     }
 
     /// <summary>
@@ -779,18 +775,20 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDispos
 
             // Each new window to the right of the last, so none opens on top of another: ImGui keeps a window from its first
             // Begin, so one it does not know is new. Sizes go by the font, which says how big the UI is.
-            float width = (scrollable ? ScrollableWindowWidth : FittedWindowWidth) * FontSize;
+            float fontSize = ImGui_GetFontSize();
+            float fontSizesWide = scrollable ? ScrollableWindowWidth : FittedWindowWidth;
+            float width = fontSizesWide * fontSize;
             if (ImGui_FindWindowByName(name) == null)
             {
-                ImGui_SetNextWindowPos(new Vector2(_nextWindowX, FontSize * 2).Im, (int)ImGuiCond_FirstUseEver);
-                _nextWindowX += width + FontSize;
+                ImGui_SetNextWindowPos((new Vector2(_nextWindowX, 2) * fontSize).Im, (int)ImGuiCond_FirstUseEver);
+                _nextWindowX += fontSizesWide + 1;
             }
 
             // A window that fits what is in it needs a least width, as its widgets stretch to the width it has.
             if (scrollable)
             {
                 ImGui_SetNextWindowSize(
-                    new Vector2(width, ScrollableWindowHeight * FontSize).Im,
+                    new Vector2(width, ScrollableWindowHeight * fontSize).Im,
                     (int)ImGuiCond_FirstUseEver
                 );
             }
@@ -839,15 +837,22 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDispos
 
     /// <summary>
     /// What is reported, each on a dark plate with its tooltip while the mouse rests on the plate and on no window: text in
-    /// the world where the window's camera shows it within <see cref="TextDistance"/>, and the lines down the left of the
-    /// picture, oldest first, as many of the last as fit. ImGui draws its background under every window, so the windows
-    /// stay readable over what is reported.
+    /// the world where the window's camera shows it within <see cref="ImGuiDebugUISettings.TextDistance"/>, and the lines
+    /// down the left of the picture, oldest first, as many of the last as fit. ImGui draws its background under every
+    /// window, so the windows stay readable over what is reported.
     /// </summary>
     private unsafe void DrawReports()
     {
         ImDrawList_t* under = ImGui_GetBackgroundDrawList();
         bool canHover = !ImGui_IsWindowHovered((int)ImGuiHoveredFlags_AnyWindow);
         Vector2 size = GetDisplaySize();
+        float reach = Settings.TextDistance;
+
+        // Plates are black at the set opacity, as ImGui packs a colour, and as big as the UI's scale makes them.
+        uint plate = (uint)(Math.Clamp(Settings.OverlayOpacity, 0, 1) * 255) << 24;
+        float scale = ImGui_GetStyle()->FontScaleMain;
+        Vector2 padding = _platePadding * scale;
+        Vector2 margin = _linesMargin * scale;
 
         // Text in the world, as the renderer frames the window's view: the field of view is vertical, and the width follows
         // the target's shape.
@@ -860,7 +865,7 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDispos
             {
                 // Within reach and in front of the camera, which looks along its +Z with +Y up.
                 Vector3 relative = report.Position - eye.Position;
-                if (relative.LengthSquared() > TextDistance * TextDistance)
+                if (relative.LengthSquared() > reach * reach)
                     continue;
 
                 Vector3 local = Vector3.Transform(relative, inverse);
@@ -881,8 +886,8 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDispos
 
         // The lines.
         float lineHeight = ImGui_GetTextLineHeightWithSpacing();
-        int fitting = Math.Max(1, (int)((size.Y - (2 * _linesMargin.Y)) / lineHeight));
-        Vector2 at = _linesMargin;
+        int fitting = Math.Max(1, (int)((size.Y - (2 * margin.Y)) / lineHeight));
+        Vector2 at = margin;
         for (int i = Math.Max(0, _screenLines.Count - fitting); i < _screenLines.Count; i++)
         {
             ShownReport line = _screenLines[i];
@@ -893,9 +898,9 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IDispos
 
         void DrawPlate(Vector2 corner, Vector2 extent, byte* label, in ShownReport report)
         {
-            Vector2 min = corner - _platePadding;
-            Vector2 max = corner + extent + _platePadding;
-            ImDrawList_AddRectFilledEx(under, min.Im, max.Im, Plate, 3f, (int)ImDrawFlags_None);
+            Vector2 min = corner - padding;
+            Vector2 max = corner + extent + padding;
+            ImDrawList_AddRectFilledEx(under, min.Im, max.Im, plate, 3f * scale, (int)ImDrawFlags_None);
             ImDrawList_AddText(under, corner.Im, PackColor(report.Color), label);
             if (report.Tooltip is { } tooltip && canHover && ImGui_IsMouseHoveringRect(min.Im, max.Im))
             {

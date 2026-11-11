@@ -1,13 +1,12 @@
 using Magic.Assets;
-using Magic.Graphics;
 
-namespace Magic.Deferred;
+namespace Magic.Graphics;
 
 /// <summary>
-/// The entries the gem's passes run, in the modules of its <c>Shaders/</c> folder, and the library shaders an entry is
+/// The entries a gem's passes run, in the modules of its <c>Shaders/</c> folder, and the library shaders an entry is
 /// specialised with.
 /// </summary>
-internal static class PassShaders
+public static class PassShaders
 {
     public static ShaderEntry GetEntry(
         AssetManager assets,

@@ -7,22 +7,11 @@ using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs.Components;
-using Magic.Files;
 using Magic.Graphics;
 using Magic.Threading;
 using Magic.Utils;
 
 namespace Magic.GpuWorld;
-
-/// <summary>
-/// Where an asset is in the loading: not yet, on the GPU, or never, drawn as the failure.
-/// </summary>
-internal enum ResourceState : byte
-{
-    Loading,
-    Ready,
-    Failed,
-}
 
 /// <summary>
 /// The GPU resources the gem draws with, each read once on its first ask: a texture asset by its handle, read and asked
@@ -33,29 +22,25 @@ internal enum ResourceState : byte
 /// with its acceleration structure and the model table at the start of the next frame, and copied up in it. The pools,
 /// the textures and each resident model's acceleration structure are asked of the graph every frame, so the GPU
 /// provider keeps what they hold. Each pool hands out ranges first fit from a free list, and the vertex and index pools
-/// grow when none holds a model. A model not asked for in
-/// <see cref="UnusedSec"/>, and held by no renderer drawn, is evicted: its ranges go back to the free lists, its row of
-/// the model table is emptied and its structure is no longer asked for, so the GPU provider frees it, and the next ask
-/// makes it again.
+/// grow when none holds a model. A model not asked for in the seconds it is kept, and held by no renderer drawn, is
+/// evicted: its ranges go back to the free lists, its row of the model table is emptied and its structure is no longer
+/// asked for, so the GPU provider frees it, and the next ask makes it again. A smoothly filtered texture is sampled
+/// with <paramref name="anisotropy"/>, and goes up without its <paramref name="droppedLevels"/> largest mip levels.
 /// </summary>
 internal sealed class GpuResources(
     ModelPreprocessor models,
-    Caches caches,
     AssetManager assets,
     IShaderCompiler shaders,
-    Threads threads
+    Threads threads,
+    int anisotropy,
+    int droppedLevels
 )
 {
     private const int ModelCapacity = 4096;
 
     private const string FailureShader = "Shaders/Material/Failure.slang";
 
-    /// <summary>
-    /// How long, in seconds of real time, a model stays on the GPU after its last ask.
-    /// </summary>
-    private const int UnusedSec = 60;
-
-    private static readonly int _meshCapacity = (int)(SharedResources.Meshes.Bytes / GpuMesh.Bytes);
+    private const int MeshCapacity = 1 << 16;
 
     private readonly Dictionary<ulong, TextureEntry> _textures = [];
 
@@ -64,7 +49,7 @@ internal sealed class GpuResources(
     /// </summary>
     private readonly Dictionary<ulong, Material?> _materials = [];
 
-    private readonly List<(Texture Asset, TextureEntry Entry)> _arrivedTextures = [];
+    private readonly List<(Texture Asset, int First, TextureEntry Entry)> _arrivedTextures = [];
 
     /// <summary>
     /// Each material shader's struct as reflection lays it out, by the shader's id, null while it is reflected; its
@@ -74,13 +59,8 @@ internal sealed class GpuResources(
 
     private readonly List<ShaderTypeArgument> _materialShaders = [];
 
-    /// <summary>
-    /// What each effect shader's struct declares it needs, by the shader's id, null while it is reflected.
-    /// </summary>
-    private readonly Dictionary<ulong, EffectNeeds?> _effectNeeds = [];
-
     // The models' indices; row 0 is none, so it is taken from the start.
-    private readonly FreeList _modelRows = CreateRows(ModelCapacity);
+    private readonly FreeList _modelRows = new(ModelCapacity, 1);
 
     /// <summary>
     /// Each resident model by its model index, none where no model is.
@@ -109,11 +89,11 @@ internal sealed class GpuResources(
     private readonly List<(ulong Model, string Name, MeshDerived Made)> _madeModels = [];
 
     // 2 MiB of vertices and 1 MiB of indices at the start; each grows with the scene.
-    private readonly BufferPool _vertices = new(SharedResources.Vertices, GpuVertex.Bytes, 1 << 16);
+    private readonly BufferPool _vertices = new(GpuDescriptions.GetBuffer("Vertex pool", 0), GpuVertex.Bytes, 1 << 16);
 
-    private readonly BufferPool _indices = new(SharedResources.Indices, sizeof(uint), 1 << 18);
+    private readonly BufferPool _indices = new(GpuDescriptions.GetBuffer("Index pool", 0), sizeof(uint), 1 << 18);
 
-    private readonly FreeList _meshRanges = new(_meshCapacity);
+    private readonly FreeList _meshRanges = new(MeshCapacity);
 
     /// <summary>
     /// How many times models were made, failed or had their acceleration structure moved by the GPU provider, ever:
@@ -143,6 +123,23 @@ internal sealed class GpuResources(
     public IReadOnlyList<ShaderTypeArgument> MaterialShaders => _materialShaders;
 
     /// <summary>
+    /// Whether a material shader read so far draws translucent: the view keeps its glass targets while one does.
+    /// </summary>
+    public bool HasTranslucent
+    {
+        get
+        {
+            foreach (MaterialLayout? layout in _layouts.Values)
+            {
+                if (layout is { IsTranslucent: true })
+                    return true;
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>
     /// The textures shaders read through the heap, by the id in a row rather than by a pass's name: every material's
     /// texture on the GPU. A pass that samples them names them in its reads, so each is readable, its copy done, before
     /// the pass runs.
@@ -152,7 +149,7 @@ internal sealed class GpuResources(
         ImmutableArray<GpuResource>.Builder textures = ImmutableArray.CreateBuilder<GpuResource>();
         foreach (TextureEntry entry in _textures.Values)
         {
-            if (entry.State == ResourceState.Ready)
+            if (entry.State == GpuState.Ready)
                 textures.Add(entry.Texture);
         }
 
@@ -200,7 +197,9 @@ internal sealed class GpuResources(
         IndexPool = indices.Value;
         if (graph.Features.HasRayQuery)
         {
-            Result<GpuBuffer> meshes = graph.Buffer(SharedResources.Meshes);
+            Result<GpuBuffer> meshes = graph.Buffer(
+                GpuDescriptions.GetBuffer("Mesh table", MeshCapacity * GpuMesh.Bytes)
+            );
             if (!meshes.Ok)
                 return Result.Failure(meshes.Error);
 
@@ -210,7 +209,8 @@ internal sealed class GpuResources(
         // Each placed model copied up, with its acceleration structure over the pools on a GPU that traces rays.
         foreach ((ulong model, string name, MeshDerived made, ResidentModel placed) in _placedModels)
         {
-            ResidentModel where = Meshes.IsNone ? placed : AskAcceleration(graph, name, made, placed);
+            List<(GpuMesh Mesh, uint Triangles)> meshes = Meshes.IsNone ? [] : GetMeshes(made, placed.IndexOffset);
+            ResidentModel where = AskAcceleration(graph, name, meshes, placed);
             _residentModels[model] = where;
             graph.Upload(VertexPool, made.Vertices.AsSpan(), (ulong)where.VertexOffset * GpuVertex.Bytes);
 
@@ -225,7 +225,7 @@ internal sealed class GpuResources(
                 rebased[i] = made.Indices[i] + where.VertexOffset;
             }
 
-            UploadMeshes(graph, made, where);
+            UploadMeshes(graph, meshes, where);
         }
 
         _placedModels.Clear();
@@ -234,16 +234,23 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// Evicts every model not asked for in <see cref="UnusedSec"/> that none of <paramref name="drawn"/> holds: its
-    /// ranges go back to the pools' free lists, its row of the model table is emptied and its acceleration structure is
-    /// no longer asked for.
+    /// Evicts every model not asked for in the <paramref name="keepSec"/> before <paramref name="frameStart"/>, the tick
+    /// the frame started at, that none of <paramref name="drawn"/> holds: its ranges go back to the pools' free lists,
+    /// its row of the model table is emptied and its acceleration structure is no longer asked for. A model asked for
+    /// this frame stays, whatever the keep time.
     /// Renderers not written since their rows were built ask for nothing, so once a model looks unused each model
     /// <paramref name="drawn"/> holds is asked for first.
     /// </summary>
-    public void EvictUnusedModels(ReadOnlySpan<Renderer> drawn)
+    public void EvictUnusedModels(ReadOnlySpan<Renderer> drawn, long frameStart, int keepSec)
     {
-        long now = Environment.TickCount64;
-        if (!HasUnusedModel(now))
+        long before = frameStart - (keepSec * 1000L);
+        bool hasUnused = false;
+        foreach (ulong id in _residentModels.Keys)
+        {
+            hasUnused |= IsUnused(id, before);
+        }
+
+        if (!hasUnused)
             return;
 
         foreach (Renderer renderer in drawn)
@@ -254,7 +261,7 @@ internal sealed class GpuResources(
 
         foreach ((ulong id, ResidentModel where) in _residentModels)
         {
-            if (!IsUnused(id, now))
+            if (!IsUnused(id, before))
                 continue;
 
             _vertices.Free((int)where.VertexOffset, (int)where.VertexCount);
@@ -269,7 +276,7 @@ internal sealed class GpuResources(
             _residentModels.Remove(id);
             _askedModels.Remove(id);
             Log.Info(
-                $"{assets.GetPath(new Handle<Model>(id)) ?? $"model {id}"} left the GPU: nothing asked for it in {UnusedSec} s."
+                $"{assets.GetPath(new Handle<Model>(id)) ?? $"model {id}"} left the GPU: nothing asked for it in {keepSec} s."
             );
         }
     }
@@ -277,7 +284,7 @@ internal sealed class GpuResources(
     /// <summary>
     /// Whether the texture is on the GPU, and its heap ids when it is; the first ask starts reading it.
     /// </summary>
-    public ResourceState Get(Handle<Texture> handle, out uint texture, out uint sampler)
+    public GpuState Get(Handle<Texture> handle, out uint texture, out uint sampler)
     {
         if (!_textures.TryGetValue(handle.Id, out TextureEntry? entry))
         {
@@ -296,7 +303,7 @@ internal sealed class GpuResources(
     /// Whether the material, its shader's struct and the textures it names are on the GPU, or it is drawn as the failure;
     /// the first ask starts loading it.
     /// </summary>
-    public ResourceState Get(Handle<Material> handle) => Get(new MaterialInstance { Handle = handle }, out _);
+    public GpuState Get(Handle<Material> handle) => Get(new MaterialInstance { Handle = handle }, out _);
 
     /// <summary>
     /// Whether the slot's material, its shader's struct and the textures it names are on the GPU, and the row the slot's
@@ -306,9 +313,9 @@ internal sealed class GpuResources(
     /// starts loading the material. The row names its shader by its place in <see cref="MaterialShaders"/>, which it
     /// takes on the first row that names it.
     /// </summary>
-    public ResourceState Get(in MaterialInstance slot, out GpuMaterial row)
+    public GpuState Get(in MaterialInstance slot, out GpuMaterial row)
     {
-        ResourceState state = Pack(slot, out row, out MaterialLayout layout);
+        GpuState state = Pack(slot, out row, out MaterialLayout layout);
         if (!layout.Fields.IsDefault)
             row.Shader = GetMaterialShader(layout.Shader) | (layout.IsTranslucent ? GpuMaterial.TranslucentBit : 0);
 
@@ -316,34 +323,60 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// Whether the effect's material, its shader's struct and the textures it names are on the GPU, its row packed as
-    /// <see cref="Get(in MaterialInstance, out GpuMaterial)"/> packs a surface's, and the struct its pass is specialised
-    /// to, with what it declares it needs. An effect's shader is not one of the <see cref="MaterialShaders"/>, which
-    /// only surfaces are resolved with.
+    /// Whether the slot's material, its shader's struct and the textures it names are on the GPU, its params packed into
+    /// the row, and its shader's struct as reflection laid it out; the default struct while it loads.
     /// </summary>
-    public ResourceState GetEffect(
-        in MaterialInstance slot,
-        out GpuMaterial row,
-        out ShaderTypeArgument shader,
-        out EffectNeeds needs
-    )
+    public GpuState Pack(in MaterialInstance slot, out GpuMaterial row, out MaterialLayout layout)
     {
-        ResourceState state = Pack(slot, out row, out MaterialLayout layout);
-        shader = layout.Shader;
-        needs = default;
-        if (state != ResourceState.Ready)
-            return state;
-
-        // What it needs is reflected on its first ask, only an effect's, and it waits for that.
-        if (!_effectNeeds.TryGetValue(shader.Module.Id, out EffectNeeds? declared))
+        row = default;
+        layout = default;
+        if (!_materials.TryGetValue(slot.Handle.Id, out Material? asked))
         {
-            _effectNeeds[shader.Module.Id] = null;
-            ReflectNeedsAsync(shader).FireAndForget();
+            _materials[slot.Handle.Id] = null;
+            LoadAsync(slot.Handle).FireAndForget();
+
+            return GpuState.Loading;
         }
 
-        needs = declared ?? default;
+        if (asked is not { } material || _layouts.GetValueOrDefault(material.Shader.Id) is not { } reflected)
+            return GpuState.Loading;
 
-        return declared is null ? ResourceState.Loading : state;
+        layout = reflected;
+        if (layout.Fields.IsDefault)
+            return GpuState.Failed;
+
+        MaterialOverrides overrides = slot.Overrides;
+        GpuState state = material.Shader == assets.Find<Shader>(FailureShader) ? GpuState.Failed : GpuState.Ready;
+        Span<uint> words = row.Params;
+        foreach (ShaderField field in layout.Fields)
+        {
+            if (!TryGetParam(field.Name, out MaterialParam? param))
+                continue;
+
+            Span<uint> into = words.Slice((int)field.Offset / 4, (int)field.Size / 4);
+            if (field.Struct == "TextureRef")
+            {
+                GpuState texture = PackTexture(layout, field.Name, param.Texture, words);
+                state = texture == GpuState.Ready || state == GpuState.Failed ? state : texture;
+
+                continue;
+            }
+
+            // PROTO: a param that sets a colour fills the field from it, and one that sets none from its vector.
+            bool isColor = param.R != 0 || param.G != 0 || param.B != 0 || param.A != 0;
+            ReadOnlySpan<float> values = isColor
+                ? [param.R, param.G, param.B, param.A]
+                : [param.X, param.Y, param.Z, param.W];
+            for (int i = 0; i < into.Length && i < values.Length; i++)
+            {
+                into[i] = BitConverter.SingleToUInt32Bits(values[i]);
+            }
+        }
+
+        return state;
+
+        bool TryGetParam(string name, [MaybeNullWhen(false)] out MaterialParam param) =>
+            overrides.TryGet(name, out param) || material.Params.TryGetValue(name, out param);
     }
 
     /// <summary>
@@ -397,57 +430,42 @@ internal sealed class GpuResources(
     /// </summary>
     public void Upload(RenderGraph graph)
     {
+        // Each texture read and its sampler asked for, and ready with their heap ids; failed, and drawn as the failure,
+        // when either was not made.
         foreach (TextureEntry entry in _textures.Values)
         {
-            Ask(graph, entry);
-        }
-
-        foreach ((Texture asset, TextureEntry entry) in _arrivedTextures)
-        {
-            if (entry.State != ResourceState.Ready)
+            if (entry.State == GpuState.Failed || entry.Description is not { } description)
                 continue;
 
-            for (int level = 0; level < asset.Levels.Length; level++)
+            Result<GpuTexture> texture = graph.Texture(description);
+            Result<GpuSampler> sampler = graph.Sampler(entry.SamplerDescription);
+            Result made = !texture.Ok ? texture : sampler;
+            if (!made.Ok)
+            {
+                Log.Error($"{description.Name} is drawn as a failure: {made.Error}");
+                entry.State = GpuState.Failed;
+
+                continue;
+            }
+
+            entry.Texture = texture.Value;
+            entry.Sampler = sampler.Value;
+            entry.State = GpuState.Ready;
+        }
+
+        foreach ((Texture asset, int first, TextureEntry entry) in _arrivedTextures)
+        {
+            if (entry.State != GpuState.Ready)
+                continue;
+
+            for (int level = first; level < asset.Levels.Length; level++)
             {
                 TextureLevel source = asset.Levels[level];
-                graph.Upload(entry.Texture, asset.Pixels.Span.Slice(source.Offset, source.Size), level);
+                graph.Upload(entry.Texture, asset.Pixels.Span.Slice(source.Offset, source.Size), level - first);
             }
         }
 
         _arrivedTextures.Clear();
-    }
-
-    /// <summary>
-    /// The texture and its sampler asked for, once it was read, and ready with their heap ids; failed, and drawn as the
-    /// failure, when either was not made.
-    /// </summary>
-    private static void Ask(RenderGraph graph, TextureEntry entry)
-    {
-        if (entry.State == ResourceState.Failed || entry.Description is not { } description)
-            return;
-
-        Result<GpuTexture> texture = graph.Texture(description);
-        Result<GpuSampler> sampler = graph.Sampler(entry.SamplerDescription);
-        Result made = !texture.Ok ? texture : sampler;
-        if (!made.Ok)
-        {
-            Log.Error($"{description.Name} is drawn as a failure: {made.Error}");
-            entry.State = ResourceState.Failed;
-
-            return;
-        }
-
-        entry.Texture = texture.Value;
-        entry.Sampler = sampler.Value;
-        entry.State = ResourceState.Ready;
-    }
-
-    private static FreeList CreateRows(int capacity)
-    {
-        FreeList rows = new(capacity);
-        rows.Allocate(1);
-
-        return rows;
     }
 
     private static GpuFormat ToGpu(TextureFormat format) =>
@@ -480,74 +498,16 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// Whether the slot's material, its shader's struct and the textures it names are on the GPU, its params packed into
-    /// the row, and its shader's struct as reflection laid it out; the default struct while it loads.
-    /// </summary>
-    private ResourceState Pack(in MaterialInstance slot, out GpuMaterial row, out MaterialLayout layout)
-    {
-        row = default;
-        layout = default;
-        if (!_materials.TryGetValue(slot.Handle.Id, out Material? asked))
-        {
-            _materials[slot.Handle.Id] = null;
-            LoadAsync(slot.Handle).FireAndForget();
-
-            return ResourceState.Loading;
-        }
-
-        if (asked is not { } material || _layouts.GetValueOrDefault(material.Shader.Id) is not { } reflected)
-            return ResourceState.Loading;
-
-        layout = reflected;
-        if (layout.Fields.IsDefault)
-            return ResourceState.Failed;
-
-        MaterialOverrides overrides = slot.Overrides;
-        ResourceState state =
-            material.Shader == assets.Find<Shader>(FailureShader) ? ResourceState.Failed : ResourceState.Ready;
-        Span<uint> words = row.Params;
-        foreach (ShaderField field in layout.Fields)
-        {
-            if (!TryGetParam(field.Name, out MaterialParam? param))
-                continue;
-
-            Span<uint> into = words.Slice((int)field.Offset / 4, (int)field.Size / 4);
-            if (field.Struct == "TextureRef")
-            {
-                ResourceState texture = PackTexture(layout, field.Name, param.Texture, words);
-                state = texture == ResourceState.Ready || state == ResourceState.Failed ? state : texture;
-
-                continue;
-            }
-
-            // PROTO: a param that sets a colour fills the field from it, and one that sets none from its vector.
-            bool isColor = param.R != 0 || param.G != 0 || param.B != 0 || param.A != 0;
-            ReadOnlySpan<float> values = isColor
-                ? [param.R, param.G, param.B, param.A]
-                : [param.X, param.Y, param.Z, param.W];
-            for (int i = 0; i < into.Length && i < values.Length; i++)
-            {
-                into[i] = BitConverter.SingleToUInt32Bits(values[i]);
-            }
-        }
-
-        return state;
-
-        bool TryGetParam(string name, [MaybeNullWhen(false)] out MaterialParam param) =>
-            overrides.TryGet(name, out param) || material.Params.TryGetValue(name, out param);
-    }
-
-    /// <summary>
     /// Writes <paramref name="texture"/>'s heap id into the field named <paramref name="name"/> of <paramref name="words"/>,
     /// and its sampler's into the field named for it with "Sampler" after, asking for it; its state, ready as nothing
     /// when it is none.
     /// </summary>
-    private ResourceState PackTexture(MaterialLayout layout, string name, Handle<Texture> texture, Span<uint> words)
+    private GpuState PackTexture(MaterialLayout layout, string name, Handle<Texture> texture, Span<uint> words)
     {
         if (texture == Handle<Texture>.None)
-            return ResourceState.Ready;
+            return GpuState.Ready;
 
-        ResourceState state = Get(texture, out uint id, out uint sampler);
+        GpuState state = Get(texture, out uint id, out uint sampler);
         foreach (ShaderField field in layout.Fields)
         {
             if (field.Name == name)
@@ -593,28 +553,6 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// Reflects what the effect shader's struct declares it needs, once: none of what it declares nothing of.
-    /// </summary>
-    private async Task ReflectNeedsAsync(ShaderTypeArgument shader)
-    {
-        Result<long> levels = await shaders
-            .ReflectConstantAsync(shader, "Levels", CancellationToken.None)
-            .ConfigureAwait(false);
-        Result<long> history = await shaders
-            .ReflectConstantAsync(shader, "History", CancellationToken.None)
-            .ConfigureAwait(false);
-        Result<long> jitters = await shaders
-            .ReflectConstantAsync(shader, "Jitters", CancellationToken.None)
-            .ConfigureAwait(false);
-        await threads.Enter(EngineThread.Render);
-        _effectNeeds[shader.Module.Id] = new EffectNeeds(
-            levels.Ok ? (int)levels.Value : 0,
-            history.Ok && history.Value != 0,
-            jitters.Ok && jitters.Value != 0
-        );
-    }
-
-    /// <summary>
     /// The place of <paramref name="shader"/> in <see cref="MaterialShaders"/>, which it takes at the end the first time.
     /// </summary>
     private uint GetMaterialShader(ShaderTypeArgument shader)
@@ -629,20 +567,10 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// Whether some model on the GPU was not asked for in <see cref="UnusedSec"/> up to <paramref name="now"/>.
+    /// Whether the model was last asked for before tick <paramref name="before"/>, so one asked for this frame stays
+    /// whatever the keep time.
     /// </summary>
-    private bool HasUnusedModel(long now)
-    {
-        foreach (ulong id in _residentModels.Keys)
-        {
-            if (IsUnused(id, now))
-                return true;
-        }
-
-        return false;
-    }
-
-    private bool IsUnused(ulong model, long now) => now - _askedModels[model] >= UnusedSec * 1000L;
+    private bool IsUnused(ulong model, long before) => _askedModels[model] < before;
 
     private async Task LoadAsync(Handle<Material> handle)
     {
@@ -674,49 +602,37 @@ internal sealed class GpuResources(
         if (!loaded.Ok)
         {
             Log.Error($"{name} is drawn as a failure: {loaded.Error}");
-            entry.State = ResourceState.Failed;
+            entry.State = GpuState.Failed;
 
             return;
         }
 
-        // The next upload asks for the texture and its sampler and copies its levels in.
+        // The next upload asks for the texture and its sampler and copies its levels in, from the first one kept.
         Texture asset = loaded.Value;
+        int first = Math.Clamp(droppedLevels, 0, asset.Levels.Length - 1);
         entry.Description = new TextureDescription
         {
-            Width = asset.Width,
-            Height = asset.Height,
+            Width = asset.Levels[first].Width,
+            Height = asset.Levels[first].Height,
             Format = ToGpu(asset.Format),
             Usage = TextureUsages.Sampled | TextureUsages.CopyDestination,
-            Levels = asset.Levels.Length,
+            Levels = asset.Levels.Length - first,
             Name = name,
         };
         entry.SamplerDescription = new SamplerDescription
         {
             Filter = asset.Filter,
             Wrap = asset.Wrap,
-            Anisotropy = asset.Filter == TextureFilter.Linear ? 8 : 1,
+            Anisotropy = asset.Filter == TextureFilter.Linear ? anisotropy : 1,
         };
-        _arrivedTextures.Add((asset, entry));
+        _arrivedTextures.Add((asset, first, entry));
     }
 
     private async Task LoadAsync(Handle<Model> model)
     {
-        // The load preprocesses the model into the cache under its version. One loaded before the gem registered its
-        // preprocessor, or one the cache could not keep, is made here, on a worker, and cached.
-        Result<Model> loaded = await assets.LoadAsync(model, null, CancellationToken.None).ConfigureAwait(false);
-        Result<MeshDerived> derived = loaded.Ok
-            ? await caches
-                .ReadAsync(model.Id, assets.GetVersion(model), models, CancellationToken.None)
-                .ConfigureAwait(false)
-            : Result.Failure(loaded.Error);
-        if (loaded.Ok && !derived.Ok)
-        {
-            MeshDerived built = await Task.Run(() => models.Preprocess(loaded.Value)).ConfigureAwait(false);
-            await caches
-                .WriteAsync(model.Id, assets.GetVersion(model), built, models, CancellationToken.None)
-                .ConfigureAwait(false);
-            derived = Result.Success(built);
-        }
+        Result<MeshDerived> derived = await assets
+            .LoadPreprocessedAsync(model, models, CancellationToken.None)
+            .ConfigureAwait(false);
 
         await threads.Enter(EngineThread.Render);
         string name = assets.GetPath(model) ?? $"model {model.Id}";
@@ -772,9 +688,13 @@ internal sealed class GpuResources(
     /// The model's place with its acceleration structure over its meshes, a geometry each, asked for, what it is made
     /// to, and their range in the mesh table; as it was, with none, when the structure could not be made.
     /// </summary>
-    private ResidentModel AskAcceleration(RenderGraph graph, string name, MeshDerived made, ResidentModel where)
+    private ResidentModel AskAcceleration(
+        RenderGraph graph,
+        string name,
+        List<(GpuMesh Mesh, uint Triangles)> meshes,
+        ResidentModel where
+    )
     {
-        List<(GpuMesh Mesh, uint Triangles)> meshes = GetMeshes(made, where.IndexOffset);
         if (meshes.Count == 0 || !_meshRanges.CanAllocate(meshes.Count))
             return where;
 
@@ -820,12 +740,11 @@ internal sealed class GpuResources(
     /// <summary>
     /// The model's meshes into the mesh table and its acceleration structure built, after its pools landed.
     /// </summary>
-    private void UploadMeshes(RenderGraph graph, MeshDerived derived, ResidentModel where)
+    private void UploadMeshes(RenderGraph graph, List<(GpuMesh Mesh, uint Triangles)> meshes, ResidentModel where)
     {
         if (where.Acceleration.IsNone)
             return;
 
-        List<(GpuMesh Mesh, uint Triangles)> meshes = GetMeshes(derived, where.IndexOffset);
         Span<GpuMesh> rows = graph.Upload<GpuMesh>(Meshes, meshes.Count, (ulong)where.MeshOffset * GpuMesh.Bytes);
         for (int i = 0; i < meshes.Count; i++)
         {
@@ -839,7 +758,7 @@ internal sealed class GpuResources(
     /// A material shader's struct as its rows are packed: its fields as reflection lays them out, default when it could
     /// not be, and the struct a pass is specialised to.
     /// </summary>
-    private readonly record struct MaterialLayout(
+    public readonly record struct MaterialLayout(
         ImmutableArray<ShaderField> Fields,
         ShaderTypeArgument Shader,
         bool IsTranslucent
@@ -851,7 +770,7 @@ internal sealed class GpuResources(
     /// </summary>
     private sealed class TextureEntry
     {
-        public ResourceState State { get; set; }
+        public GpuState State { get; set; }
 
         public TextureDescription? Description { get; set; }
 

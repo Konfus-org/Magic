@@ -47,10 +47,15 @@ public float4 UnpackUnorm4x8(uint packed)
     return float4(packed & 0xFFu, (packed >> 8u) & 0xFFu, (packed >> 16u) & 0xFFu, packed >> 24u) / 255.0;
 }
 
-// A unit vector as one word: its octahedral point at 16 bits an axis, which a normal buffer and a cluster's cone keep.
-public uint EncodeUnitVector(float3 unit) { return PackUnorm2x16(EncodeOctahedral(unit) * 0.5 + 0.5); }
+// A unit vector as its octahedral point moved to [0, 1]², as the GBuffer's normal texture keeps it.
+public float2 EncodeUnitVectorUnorm(float3 unit) { return EncodeOctahedral(unit) * 0.5 + 0.5; }
 
-public float3 DecodeUnitVector(uint packed) { return DecodeOctahedral(UnpackUnorm2x16(packed) * 2.0 - 1.0); }
+public float3 DecodeUnitVectorUnorm(float2 unorm) { return DecodeOctahedral(unorm * 2.0 - 1.0); }
+
+// A unit vector as one word: its octahedral point at 16 bits an axis, which a normal buffer and a cluster's cone keep.
+public uint EncodeUnitVector(float3 unit) { return PackUnorm2x16(EncodeUnitVectorUnorm(unit)); }
+
+public float3 DecodeUnitVector(uint packed) { return DecodeUnitVectorUnorm(UnpackUnorm2x16(packed)); }
 
 // A number in [-1, 1] from a signed 16-bit fraction in the low half of a word, as a cluster's cone cutoff is kept.
 public float UnpackSnorm16(uint packed)

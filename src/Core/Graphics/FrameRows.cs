@@ -156,20 +156,17 @@ public record struct GpuLights
 }
 
 /// <summary>
-/// The frame's shadows, the twin of the library's <c>Scene/Shadows.slang</c>: the mask, the sun's tiles and its tint,
-/// written once a frame into the frame's buffer after <see cref="GpuLights"/> by what traces them, and all 0 where nothing
-/// does.
+/// The frame's shadows, the twin of the library's <c>Scene/Shadows.slang</c>: the mask and the sun's tint, written once
+/// a frame into the frame's buffer after <see cref="GpuLights"/> by what traces them, and all 0 where nothing does.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public record struct GpuShadows
 {
     public const int Offset = GpuLights.Offset + GpuLights.Bytes;
 
-    public const int Bytes = 12;
+    public const int Bytes = 8;
 
     public uint Mask;
-
-    public uint SunTiles;
 
     public uint SunTint;
 }
@@ -184,7 +181,7 @@ public record struct GpuIndirectLight
 {
     public const int Offset = GpuShadows.Offset + GpuShadows.Bytes;
 
-    public const int Bytes = 84;
+    public const int Bytes = 80;
 
     public uint Diffuse;
 
@@ -278,11 +275,6 @@ public record struct ProbeGridConstants
     public uint RayCounts;
 
     public uint Variance;
-
-    /// <summary>
-    /// 0 while the probes hold nothing: this frame's update starts them afresh.
-    /// </summary>
-    public uint HasHistory;
 
     /// <summary>
     /// Where the first probe rests in the world, how far a probe's depth reaches, and the metres between neighbouring

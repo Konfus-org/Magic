@@ -44,13 +44,3 @@ public readonly record struct GpuSampler(uint Id)
 
     public bool IsNone => Id == 0;
 }
-
-/// <summary>
-/// A compute or graphics pipeline the GPU provider built from SPIR-V. <see cref="None"/> is no pipeline.
-/// </summary>
-public readonly record struct GpuPipeline(uint Id)
-{
-    public static GpuPipeline None => default;
-
-    public bool IsNone => Id == 0;
-}

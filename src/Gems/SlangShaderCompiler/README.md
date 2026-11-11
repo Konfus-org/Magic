@@ -9,6 +9,8 @@ To use it, list `SlangShaderCompiler` in a project's `.magic` file.
 - What compiles is cached under a hash of every module's text, in the project's cache, so the second run of an
   unchanged shader compiles nothing. What a struct's reflection finds is cached the same way. A change to the
   compiler's options or tag is a new cache version, which compiles everything once more.
+- The setting `Debug.ShaderOptimization` sets how hard the compiler optimizes. Each level is cached apart, and a
+  change restarts the run, so a level not used before compiles every shader once.
 - The compiler starts with the first compile or reflection the cache doesn't hold, and stops after ten seconds with
   none, giving its memory back. A run whose shaders are all cached never starts it.
 - Warnings are errors. Matrices are row-major. Entry points keep their names.

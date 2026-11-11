@@ -9,8 +9,8 @@ Find the cause first; fix it second, as a slice.
 
 1. **Say what is wrong:** what happens, what should happen instead, and where. If you can't say both, ask.
 2. **Reproduce it** with the narrowest run that shows it, and keep that run as the slice's check:
-   - A run that logs an error or crashes: `'wait loaded', <commands>, 'exit' | Build/bin/Debug/Magic open
-     <project> --headless --fail-on-error`, which exits `2` at the first error.
+   - A run that logs an error or crashes: `tools/Scripts/Run.ps1 -Project <project> -Headless -Commands
+     'wait loaded', <commands>, 'exit'`, which exits `2` at the first error.
    - Something drawn wrong: `tools/Scripts/Screenshot.ps1 -Project <project> -Commands <commands>`, then open the
      image and look at it.
    - A failing test: `dotnet test --project tests/<Gem>.Tests/<Gem>.Tests.csproj`.
