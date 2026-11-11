@@ -37,7 +37,13 @@ internal sealed class RendererDebugWindow(IDebugUI ui, IInput? input)
         }
 
         if (isOpen)
-            view = Draw(view, ref isOpen);
+        {
+            int viewIndex = (int)view;
+            ui.Begin("Rendering", ref isOpen);
+            ui.Choice("View", ref viewIndex, _viewNames);
+            ui.End();
+            view = (DebugView)viewIndex;
+        }
 
         if (view != DebugView.Final)
             ui.Text(_viewLines[(int)view]);
@@ -54,14 +60,4 @@ internal sealed class RendererDebugWindow(IDebugUI ui, IInput? input)
 
     private static DebugView Step(DebugView view, int by) =>
         (DebugView)(((int)view + by + _viewNames.Length) % _viewNames.Length);
-
-    private DebugView Draw(DebugView current, ref bool isOpen)
-    {
-        ui.Begin("Rendering", ref isOpen);
-        int viewIndex = (int)current;
-        ui.Choice("View", ref viewIndex, _viewNames);
-        ui.End();
-
-        return (DebugView)viewIndex;
-    }
 }

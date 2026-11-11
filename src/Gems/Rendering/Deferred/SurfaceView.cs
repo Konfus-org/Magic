@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using Magic.Assets;
+using Magic.GpuWorld;
 using Magic.Graphics;
 
 namespace Magic.Deferred;

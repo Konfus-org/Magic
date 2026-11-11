@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using Magic.Assets;
+using Magic.GpuWorld;
 using Magic.Graphics;
 
 namespace Magic.Deferred;
@@ -13,7 +14,7 @@ internal sealed class Lighting(AssetManager assets)
 {
     private readonly ShaderEntry _shadeShader = PassShaders.GetEntry(assets, "ShadeSurfaces", "ShadeSurfaces") with
     {
-        TypeArguments = [PassShaders.GetAtmosphere(assets)],
+        TypeArguments = [GetAtmosphere(assets)],
     };
 
     private readonly ShaderEntry _translucentShader = PassShaders.GetEntry(
@@ -22,7 +23,7 @@ internal sealed class Lighting(AssetManager assets)
         "ShadeTranslucent"
     ) with
     {
-        TypeArguments = [PassShaders.GetAtmosphere(assets)],
+        TypeArguments = [GetAtmosphere(assets)],
     };
 
     public ImmutableArray<ShaderEntry> Shaders => [_shadeShader, _translucentShader];
@@ -97,4 +98,10 @@ internal sealed class Lighting(AssetManager assets)
 
         translucent.Writes(view.Gpu.Hdr).DispatchOver(view.Gpu.Width, view.Gpu.Height);
     }
+
+    /// <summary>
+    /// The atmosphere, for an entry generic over the sky it shades with.
+    /// </summary>
+    private static ShaderTypeArgument GetAtmosphere(AssetManager assets) =>
+        new(assets.Find<Shader>("Shaders/Sky/Atmosphere.slang"), "Atmosphere");
 }

@@ -66,11 +66,10 @@ waits for the gem's passes.
   frame's view.
 - A pass is one `RenderGraph.Compute` or `RenderGraph.Draw` call saying what it reads and writes, which puts its
   barriers in. The frame is not drawn until every area's shaders are built.
-- Each frame, an area's `Prepare` asks the graph for its own textures and buffers by description, uploads what
-  goes in them in the frame's upload pass, and returns their handles. Its `Record` takes what its passes read and
-  write as arguments, and `Render` hands the handles on from one area to the next. The same description under a name
-  is the same resource, holding what the last frame left in it; another one, as at a new picture size, makes it again,
-  empty.
+- Each frame, an area's `Record` asks the graph for its own textures and buffers by description, and takes what its
+  passes read and write as arguments; `Render` hands the handles on from one area to the next. The same description
+  under a name is the same resource, holding what the last frame left in it; another one, as at a new picture size,
+  makes it again, empty.
 - The shaders are the `Shaders/` modules in this gem's `Resources`, built on the shader library
   ([Shaders](../../../Resources/Shaders/README.md)).
 - Parts of the lighting are adapted from another engine under the MIT licence;
