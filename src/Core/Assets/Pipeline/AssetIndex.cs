@@ -93,8 +93,7 @@ internal sealed record AssetIndex
                 if (!byPath.TryAdd(path, indexed))
                     continue;
 
-                int slash = path.LastIndexOf('/');
-                string folder = slash < 0 ? string.Empty : path[..slash];
+                string folder = GetFolder(path);
                 if (!byFolder.TryGetValue(folder, out List<string>? paths))
                 {
                     paths = [];
@@ -105,17 +104,15 @@ internal sealed record AssetIndex
             }
         }
 
-        Dictionary<string, ImmutableArray<string>> folders = new(StringComparer.OrdinalIgnoreCase);
-        foreach ((string folder, List<string> paths) in byFolder)
-        {
-            folders.Add(folder, [.. paths]);
-        }
-
         return new()
         {
             ById = byId.ToFrozenDictionary(),
             ByPath = byPath.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase),
-            ByFolder = folders.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase),
+            ByFolder = byFolder.ToFrozenDictionary(
+                pair => pair.Key,
+                pair => pair.Value.ToImmutableArray(),
+                StringComparer.OrdinalIgnoreCase
+            ),
             BuiltIn = builtInFiles.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase),
         };
     }
@@ -155,6 +152,17 @@ internal sealed record AssetIndex
         hash.Append(Encoding.UTF8.GetBytes(settings.GetRawText()));
 
         return hash.GetCurrentHashAsUInt64();
+    }
+
+    /// <summary>
+    /// The folder <paramref name="path"/> is in: <c>Materials</c> for <c>Materials/Default.mat</c>, empty at the top.
+    /// The index's folders, an importer's listed folders and a touched file's folder all come from it, so they match.
+    /// </summary>
+    public static string GetFolder(string path)
+    {
+        int slash = path.LastIndexOf('/');
+
+        return slash < 0 ? string.Empty : path[..slash];
     }
 
     /// <summary>

@@ -216,9 +216,7 @@ public sealed class AssetManager : IDisposable
     /// </summary>
     public ImmutableArray<string> GetNeighbors(AssetFile file)
     {
-        string path = file.Path;
-        int slash = path.LastIndexOf('/');
-        string folder = slash < 0 ? string.Empty : path[..slash];
+        string folder = AssetIndex.GetFolder(file.Path);
         lock (_gate)
         {
             LoadedAssets loaded = Loaded;
