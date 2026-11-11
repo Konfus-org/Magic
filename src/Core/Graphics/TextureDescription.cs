@@ -55,36 +55,24 @@ public enum TextureUsages : byte
 }
 
 /// <summary>
-/// How to make a texture: its kind, size, levels and format, and what it is for.
+/// How to make a texture: the name a GPU debugger shows it as, its kind, size, levels and format, and what it is for.
+/// Level 0 is the full size, and each level is half the size of the level before it.
 /// </summary>
-public readonly record struct TextureDescription
+public readonly record struct TextureDescription(
+    string Name,
+    int Width,
+    int Height,
+    GpuFormat Format,
+    TextureUsages Usage = TextureUsages.Storage | TextureUsages.Sampled,
+    int Levels = 1
+)
 {
-    public TextureDescription() { }
-
-    public required int Width { get; init; }
-
-    public required int Height { get; init; }
-
-    public required GpuFormat Format { get; init; }
-
-    public TextureUsages Usage { get; init; } = TextureUsages.Storage | TextureUsages.Sampled;
-
     public TextureKind Kind { get; init; } = TextureKind.Texture2D;
 
     /// <summary>
     /// Slices of a <see cref="TextureKind.Texture3D"/>; 1 for the rest.
     /// </summary>
     public int Depth { get; init; } = 1;
-
-    /// <summary>
-    /// Mip levels, level 0 the full size and each the half of the one before.
-    /// </summary>
-    public int Levels { get; init; } = 1;
-
-    /// <summary>
-    /// What a GPU debugger shows it as.
-    /// </summary>
-    public string Name { get; init; } = string.Empty;
 
     /// <summary>
     /// How many levels a texture of <paramref name="width"/> by <paramref name="height"/> has down to one texel.

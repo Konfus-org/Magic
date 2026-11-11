@@ -82,29 +82,18 @@ internal sealed class Probes(AssetManager assets)
         _size = size;
         (int across, int up) = size;
         long probes = (long)across * up * across;
-        Result<GpuBuffer> probeTable = graph.Buffer(new() { Bytes = probes * ProbeBytes, Name = "Probes" });
-        Result<GpuBuffer> rays = graph.Buffer(new() { Bytes = RayBudget * RayBytes, Name = "Probe rays" });
-        Result<GpuBuffer> list = graph.Buffer(new() { Bytes = RayBudget * 4, Name = "Probe ray list" });
+        Result<GpuBuffer> probeTable = graph.Buffer(new("Probes", probes * ProbeBytes));
+        Result<GpuBuffer> rays = graph.Buffer(new("Probe rays", RayBudget * RayBytes));
+        Result<GpuBuffer> list = graph.Buffer(new("Probe ray list", RayBudget * 4));
         Result<GpuBuffer> arguments = graph.Buffer(
-            new()
-            {
-                Bytes = 16,
-                Usage = BufferUsages.Storage | BufferUsages.Indirect,
-                Name = "Probe ray arguments",
-            }
+            new("Probe ray arguments", 16, BufferUsages.Storage | BufferUsages.Indirect)
         );
-        Result<GpuBuffer> counts = graph.Buffer(new() { Bytes = ((probes * 2) + 1) * 4, Name = "Probe ray counts" });
+        Result<GpuBuffer> counts = graph.Buffer(new("Probe ray counts", ((probes * 2) + 1) * 4));
         Result<GpuBuffer> variance = graph.Buffer(
-            new() { Bytes = probes * IrradianceTexels * IrradianceTexels * VarianceBytes, Name = "Probe variance" }
+            new("Probe variance", probes * IrradianceTexels * IrradianceTexels * VarianceBytes)
         );
         Result<GpuTexture> depth = graph.Texture(
-            new()
-            {
-                Width = DepthTile * across * up,
-                Height = DepthTile * across,
-                Format = GpuFormat.R16G16Sfloat,
-                Name = "Probe depth",
-            }
+            new("Probe depth", DepthTile * across * up, DepthTile * across, GpuFormat.R16G16Sfloat)
         );
         Result<GpuSampler> sampler = graph.Sampler(new SamplerDescription { Wrap = TextureWrap.Clamp });
         Result asked = Result.FindFailure(probeTable, rays, list, arguments, counts, variance, depth, sampler);

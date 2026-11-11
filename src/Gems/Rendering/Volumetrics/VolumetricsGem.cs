@@ -39,14 +39,13 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
 
     private const int CloudBlock = 4;
 
-    private static readonly TextureDescription _cloudsDescription = new()
-    {
-        Width = CloudTexels,
-        Height = CloudTexels,
-        Format = GpuFormat.R16G16B16A16Sfloat,
-        Usage = TextureUsages.Storage | TextureUsages.Sampled,
-        Name = "Clouds",
-    };
+    private static readonly TextureDescription _cloudsDescription = new(
+        "Clouds",
+        CloudTexels,
+        CloudTexels,
+        GpuFormat.R16G16B16A16Sfloat,
+        TextureUsages.Storage | TextureUsages.Sampled
+    );
 
     private static readonly string[] _scatteringNames = ["Air scattering 0", "Air scattering 1"];
 
@@ -198,14 +197,9 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
     /// The description of a volume of the air's cells.
     /// </summary>
     private static TextureDescription GetVolume(string name, (int Width, int Height) size) =>
-        new()
+        new(name, size.Width, size.Height, GpuFormat.R16G16B16A16Sfloat, TextureUsages.Storage | TextureUsages.Sampled)
         {
             Kind = TextureKind.Texture3D,
-            Width = size.Width,
-            Height = size.Height,
             Depth = Slices,
-            Format = GpuFormat.R16G16B16A16Sfloat,
-            Usage = TextureUsages.Storage | TextureUsages.Sampled,
-            Name = name,
         };
 }

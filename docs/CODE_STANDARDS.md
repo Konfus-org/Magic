@@ -223,6 +223,8 @@ what the caller does:
 | Says what it wants in one sentence, such as a query or a chain of setup | Fluent | Each method returns its receiver, or a struct's new value, so the chain reads as `subject.Verb(x).Verb(y)`. |
 | Builds what is valid only once complete, over many calls or across members | Builder | Calls collect into the builder, and `Build()` checks them and returns the finished, immutable value. Only where an initializer with `required` can't express it. |
 
+- A description whose few values are always given takes them in a constructor, as `new("Shadow mask", bytes)`. An
+  initializer sets the rest: `new("Fog", width, height, format) { Depth = slices }`.
 - No `Pipe`, `Cascade`, `Then` or other method that only calls the function it is given. Assign each step, and set
   members in an initializer or as statements:
 

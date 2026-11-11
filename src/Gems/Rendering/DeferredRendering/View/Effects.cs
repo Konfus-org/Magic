@@ -38,7 +38,7 @@ internal sealed class Effects(AssetManager assets, GpuResources resources)
     /// </summary>
     public Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> Resolve(RenderGraph graph, MaterialSlots list)
     {
-        Result<GpuBuffer> rows = graph.Buffer(new() { Bytes = Places * GpuMaterial.Bytes, Name = "Effect rows" });
+        Result<GpuBuffer> rows = graph.Buffer(new("Effect rows", Places * GpuMaterial.Bytes));
         if (!rows.Ok)
             return Result.Failure(rows.Error);
 

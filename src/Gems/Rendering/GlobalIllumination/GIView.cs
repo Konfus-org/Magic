@@ -23,11 +23,5 @@ internal readonly record struct GIView(
     /// The description of a texture of the traced textures' size.
     /// </summary>
     public TextureDescription GetTraced(string name, GpuFormat format) =>
-        new()
-        {
-            Width = TracedSize.Width,
-            Height = TracedSize.Height,
-            Format = format,
-            Name = name,
-        };
+        new(name, TracedSize.Width, TracedSize.Height, format);
 }

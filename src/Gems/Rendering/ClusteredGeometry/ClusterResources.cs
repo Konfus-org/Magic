@@ -43,15 +43,11 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
     private readonly FreeList _impostorRows = new(ImpostorCapacity, 1);
 
     // About 3 MiB in all at the start; each grows with the scene.
-    private readonly BufferPool _vertices = new(
-        new() { Bytes = 0, Name = "Cluster vertex pool" },
-        GpuVertex.Bytes,
-        1 << 16
-    );
+    private readonly BufferPool _vertices = new(new("Cluster vertex pool", 0), GpuVertex.Bytes, 1 << 16);
 
-    private readonly BufferPool _indices = new(new() { Bytes = 0, Name = "Cluster index pool" }, sizeof(uint), 1 << 18);
+    private readonly BufferPool _indices = new(new("Cluster index pool", 0), sizeof(uint), 1 << 18);
 
-    private readonly BufferPool _clusters = new(new() { Bytes = 0, Name = "Cluster pool" }, GpuCluster.Bytes, 1 << 12);
+    private readonly BufferPool _clusters = new(new("Cluster pool", 0), GpuCluster.Bytes, 1 << 12);
 
     /// <summary>
     /// Whether a model in the view's table is still being read, and its row draws nothing yet.
@@ -77,12 +73,8 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
     /// </summary>
     public Result<ClusterPools> Prepare(RenderGraph graph, ReadOnlySpan<ModelPlace> models)
     {
-        Result<GpuBuffer> table = graph.Buffer(
-            new() { Bytes = (long)models.Length * GpuClusterModel.Bytes, Name = "Cluster model table" }
-        );
-        Result<GpuBuffer> impostors = graph.Buffer(
-            new() { Bytes = (long)ImpostorCapacity * GpuImpostor.Bytes, Name = "Impostor table" }
-        );
+        Result<GpuBuffer> table = graph.Buffer(new("Cluster model table", (long)models.Length * GpuClusterModel.Bytes));
+        Result<GpuBuffer> impostors = graph.Buffer(new("Impostor table", (long)ImpostorCapacity * GpuImpostor.Bytes));
         if (Result.FindFailure(table, impostors) is { Ok: false } failedTable)
             return Result.Failure(failedTable.Error);
 
@@ -185,14 +177,13 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
     /// An impostor atlas of <see cref="ImpostorBuilder.Size"/> texels a side, in <paramref name="format"/>.
     /// </summary>
     private static TextureDescription GetAtlasDescription(string name, GpuFormat format) =>
-        new()
-        {
-            Width = ImpostorBuilder.Size,
-            Height = ImpostorBuilder.Size,
-            Format = format,
-            Usage = TextureUsages.Sampled | TextureUsages.CopyDestination,
-            Name = name,
-        };
+        new(
+            name,
+            ImpostorBuilder.Size,
+            ImpostorBuilder.Size,
+            format,
+            TextureUsages.Sampled | TextureUsages.CopyDestination
+        );
 
     private string GetName(ModelPlace place) => assets.GetPath(place.Model) ?? $"model {place.Model.Id}";
 

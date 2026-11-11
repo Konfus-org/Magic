@@ -77,9 +77,9 @@ internal sealed class GpuResources(
     private readonly List<(ulong Model, string Name, MeshDerived Made, ModelEntry Entry)> _madeModels = [];
 
     // 2 MiB of vertices and 1 MiB of indices at the start; each grows with the scene.
-    private readonly BufferPool _vertices = new(new() { Bytes = 0, Name = "Vertex pool" }, GpuVertex.Bytes, 1 << 16);
+    private readonly BufferPool _vertices = new(new("Vertex pool", 0), GpuVertex.Bytes, 1 << 16);
 
-    private readonly BufferPool _indices = new(new() { Bytes = 0, Name = "Index pool" }, sizeof(uint), 1 << 18);
+    private readonly BufferPool _indices = new(new("Index pool", 0), sizeof(uint), 1 << 18);
 
     private readonly FreeList _meshRanges = new(MeshCapacity);
 
@@ -155,9 +155,7 @@ internal sealed class GpuResources(
         // The mesh table first, on a GPU that traces rays, so a model placed takes a range of it only there.
         if (graph.Features.HasRayQuery)
         {
-            Result<GpuBuffer> meshes = graph.Buffer(
-                new() { Bytes = MeshCapacity * GpuMesh.Bytes, Name = "Mesh table" }
-            );
+            Result<GpuBuffer> meshes = graph.Buffer(new("Mesh table", MeshCapacity * GpuMesh.Bytes));
             if (!meshes.Ok)
                 return Result.Failure(meshes.Error);
 
@@ -651,15 +649,14 @@ internal sealed class GpuResources(
         // The next upload asks for the texture and its sampler and copies its levels in, from the first one kept.
         Texture asset = loaded.Value;
         int first = Math.Clamp(droppedLevels, 0, asset.Levels.Length - 1);
-        entry.Description = new TextureDescription
-        {
-            Width = asset.Levels[first].Width,
-            Height = asset.Levels[first].Height,
-            Format = ToGpu(asset.Format),
-            Usage = TextureUsages.Sampled | TextureUsages.CopyDestination,
-            Levels = asset.Levels.Length - first,
-            Name = name,
-        };
+        entry.Description = new TextureDescription(
+            name,
+            asset.Levels[first].Width,
+            asset.Levels[first].Height,
+            ToGpu(asset.Format),
+            TextureUsages.Sampled | TextureUsages.CopyDestination,
+            asset.Levels.Length - first
+        );
         entry.SamplerDescription = new SamplerDescription
         {
             Filter = asset.Filter,

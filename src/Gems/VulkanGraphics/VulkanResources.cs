@@ -617,12 +617,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     public Result<GpuAcceleration> Compact(VkCommandBuffer cmd, VulkanAcceleration built, ulong bytes)
     {
         Result<VulkanBuffer> buffer = CreateVulkanBuffer(
-            new BufferDescription
-            {
-                Bytes = (long)bytes,
-                Usage = BufferUsages.Acceleration,
-                Name = built.Name,
-            }
+            new BufferDescription(built.Name, (long)bytes, BufferUsages.Acceleration)
         );
         if (!buffer.Ok)
             return Result.Failure($"{built.Name} was not compacted: {buffer.Error}");
@@ -772,20 +767,10 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
         }
 
         Result<VulkanBuffer> buffer = CreateVulkanBuffer(
-            new BufferDescription
-            {
-                Bytes = (long)sizes.accelerationStructureSize,
-                Usage = BufferUsages.Acceleration,
-                Name = name,
-            }
+            new BufferDescription(name, (long)sizes.accelerationStructureSize, BufferUsages.Acceleration)
         );
         Result<VulkanBuffer> scratch = CreateVulkanBuffer(
-            new BufferDescription
-            {
-                Bytes = (long)Math.Max(sizes.buildScratchSize, 256),
-                Usage = BufferUsages.Storage,
-                Name = $"{name} scratch",
-            }
+            new BufferDescription($"{name} scratch", (long)Math.Max(sizes.buildScratchSize, 256), BufferUsages.Storage)
         );
         if (!buffer.Ok || !scratch.Ok)
         {

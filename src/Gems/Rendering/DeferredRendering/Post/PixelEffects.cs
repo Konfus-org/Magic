@@ -45,21 +45,16 @@ internal sealed class PixelEffects
     public void Record(RenderGraph graph, in GpuView gpu, uint frameIndex)
     {
         Result<GpuBuffer> passTable = graph.Buffer(
-            new()
-            {
-                Bytes = MaterialSlots.Capacity * (MostLevels + 1) * Unsafe.SizeOf<GpuEffectPass>(),
-                Name = "Effect passes",
-            }
+            new("Effect passes", MaterialSlots.Capacity * (MostLevels + 1) * Unsafe.SizeOf<GpuEffectPass>())
         );
         Result<GpuTexture> otherPicture = graph.Texture(
-            new()
-            {
-                Width = gpu.Width,
-                Height = gpu.Height,
-                Format = GpuFormat.R16G16B16A16Sfloat,
-                Usage = TextureUsages.Storage | TextureUsages.Sampled | TextureUsages.CopySource,
-                Name = "Effect picture",
-            }
+            new(
+                "Effect picture",
+                gpu.Width,
+                gpu.Height,
+                GpuFormat.R16G16B16A16Sfloat,
+                TextureUsages.Storage | TextureUsages.Sampled | TextureUsages.CopySource
+            )
         );
         Result<GpuSampler> sampler = graph.Sampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
@@ -180,13 +175,12 @@ internal sealed class PixelEffects
     }
 
     private static TextureDescription GetTarget(string name, in GpuView gpu, int levels) =>
-        new()
-        {
-            Width = gpu.Width,
-            Height = gpu.Height,
-            Format = GpuFormat.R16G16B16A16Sfloat,
-            Usage = TextureUsages.Storage | TextureUsages.Sampled,
-            Levels = levels,
-            Name = name,
-        };
+        new(
+            name,
+            gpu.Width,
+            gpu.Height,
+            GpuFormat.R16G16B16A16Sfloat,
+            TextureUsages.Storage | TextureUsages.Sampled,
+            levels
+        );
 }

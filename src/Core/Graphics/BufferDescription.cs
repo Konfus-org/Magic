@@ -40,18 +40,6 @@ public enum BufferUsages : byte
 }
 
 /// <summary>
-/// How to make a buffer.
+/// How to make a buffer, and the name a GPU debugger shows it as.
 /// </summary>
-public readonly record struct BufferDescription
-{
-    public BufferDescription() { }
-
-    public required long Bytes { get; init; }
-
-    public BufferUsages Usage { get; init; } = BufferUsages.Storage;
-
-    /// <summary>
-    /// What a GPU debugger shows it as.
-    /// </summary>
-    public string Name { get; init; } = string.Empty;
-}
+public readonly record struct BufferDescription(string Name, long Bytes, BufferUsages Usage = BufferUsages.Storage);

@@ -375,15 +375,14 @@ public sealed class DeferredRenderingGem
         // order; the glass targets only while a material draws translucent, so the graph frees them in a world with
         // none.
         bool hasGlass = _resources.HasTranslucent;
-        TextureDescription depthTarget = new()
-        {
-            Width = width,
-            Height = height,
-            Format = GpuFormat.D32Sfloat,
-            Usage = TextureUsages.DepthTarget | TextureUsages.Sampled,
-            Name = "Depth",
-        };
-        Result<GpuBuffer> constants = graph.Buffer(new() { Bytes = 1024, Name = "Frame constants" });
+        TextureDescription depthTarget = new(
+            "Depth",
+            width,
+            height,
+            GpuFormat.D32Sfloat,
+            TextureUsages.DepthTarget | TextureUsages.Sampled
+        );
+        Result<GpuBuffer> constants = graph.Buffer(new("Frame constants", 1024));
         Result<GpuTexture> depth = graph.Texture(depthTarget);
         Result<GpuTexture> glassDepth = GetGlass(depthTarget with { Name = "Glass depth" });
         Result<GpuTexture> glassBase = GetGlass(GetTarget("Glass base", GpuFormat.R8G8B8A8Unorm));
@@ -394,32 +393,25 @@ public sealed class DeferredRenderingGem
         Result<GpuTexture> surface = graph.Texture(GetTarget("GBuffer surface", GpuFormat.R8G8B8A8Unorm));
         Result<GpuTexture> velocity = graph.Texture(GetTarget("Velocity", GpuFormat.R16G16B16A16Sfloat));
         Result<GpuTexture> hdr = graph.Texture(
-            new()
-            {
-                Width = width,
-                Height = height,
-                Format = GpuFormat.R16G16B16A16Sfloat,
-                Usage =
-                    TextureUsages.Storage
+            new(
+                "HDR",
+                width,
+                height,
+                GpuFormat.R16G16B16A16Sfloat,
+                TextureUsages.Storage
                     | TextureUsages.ColorTarget
                     | TextureUsages.Sampled
-                    | TextureUsages.CopyDestination,
-                Name = "HDR",
-            }
+                    | TextureUsages.CopyDestination
+            )
         );
         Result<GpuTexture> output = graph.Texture(
-            new()
-            {
-                Width = width,
-                Height = height,
-                Format = GpuFormat.R8G8B8A8Unorm,
-                Usage =
-                    TextureUsages.Storage
-                    | TextureUsages.ColorTarget
-                    | TextureUsages.Sampled
-                    | TextureUsages.CopySource,
-                Name = "Output",
-            }
+            new(
+                "Output",
+                width,
+                height,
+                GpuFormat.R8G8B8A8Unorm,
+                TextureUsages.Storage | TextureUsages.ColorTarget | TextureUsages.Sampled | TextureUsages.CopySource
+            )
         );
         Result<LightBuffers> lights = _lightTiles.Prepare(
             graph,
@@ -546,23 +538,10 @@ public sealed class DeferredRenderingGem
         _lightTiles.Record(graph, view, header);
         return (view, _instances.Instances);
 
-        TextureDescription GetTarget(string name, GpuFormat format) =>
-            new()
-            {
-                Width = width,
-                Height = height,
-                Format = format,
-                Name = name,
-            };
+        TextureDescription GetTarget(string name, GpuFormat format) => new(name, width, height, format);
 
         static TextureDescription GetSkyTable(string name, int width, int height) =>
-            new()
-            {
-                Width = width,
-                Height = height,
-                Format = GpuFormat.R16G16B16A16Sfloat,
-                Name = name,
-            };
+            new(name, width, height, GpuFormat.R16G16B16A16Sfloat);
 
         Result<GpuTexture> GetGlass(in TextureDescription glass) =>
             hasGlass ? graph.Texture(glass) : Result.Success(GpuTexture.None);
@@ -697,25 +676,19 @@ public sealed class DeferredRenderingGem
             (int width, int height) = (gpu.ShownWidth, gpu.ShownHeight);
             TextureDescription drawn = graph.GetDescription(shown);
             Result<GpuBuffer> readback = graph.Buffer(
-                new()
-                {
-                    Bytes = (long)width * height * 4,
-                    Usage = BufferUsages.Readback,
-                    Name = "Output readback",
-                }
+                new("Output readback", (long)width * height * 4, BufferUsages.Readback)
             );
             Result<GpuTexture> read =
                 drawn.Format == GpuFormat.R8G8B8A8Unorm && drawn.Width == width && drawn.Height == height
                     ? Result.Success(shown)
                     : graph.Texture(
-                        new()
-                        {
-                            Width = width,
-                            Height = height,
-                            Format = GpuFormat.R8G8B8A8Unorm,
-                            Usage = TextureUsages.CopyDestination | TextureUsages.CopySource,
-                            Name = "Screenshot copy",
-                        }
+                        new(
+                            "Screenshot copy",
+                            width,
+                            height,
+                            GpuFormat.R8G8B8A8Unorm,
+                            TextureUsages.CopyDestination | TextureUsages.CopySource
+                        )
                     );
             if (Result.FindFailure(readback, read) is { Ok: false } failed)
                 Log.Error($"The screenshot was not taken: {failed.Error}");

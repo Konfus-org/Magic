@@ -147,9 +147,7 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
     public Result<(GpuBuffer Rows, GpuBuffer Materials)> Upload(RenderGraph graph)
     {
         // A table asked for bigger than last frame keeps what it held.
-        Result<GpuBuffer> rows = graph.Buffer(
-            new() { Bytes = (long)_rows.Length * GpuInstance.Bytes, Name = "Instance table" }
-        );
+        Result<GpuBuffer> rows = graph.Buffer(new("Instance table", (long)_rows.Length * GpuInstance.Bytes));
         if (!rows.Ok)
             return Result.Failure(rows.Error);
 
@@ -157,7 +155,7 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
             Array.Resize(ref _materialRows, GetCapacity(_materialSlots.Count));
 
         Result<GpuBuffer> materials = graph.Buffer(
-            new() { Bytes = (long)_materialRows.Length * GpuMaterial.Bytes, Name = "Material table" }
+            new("Material table", (long)_materialRows.Length * GpuMaterial.Bytes)
         );
         if (!materials.Ok)
             return Result.Failure(materials.Error);
