@@ -103,7 +103,7 @@ public readonly record struct GpuView
     public required GpuTexture SkyView { get; init; }
 
     /// <summary>
-    /// The effects run over the lit picture this frame, by their place in the air's list and then the picture's.
+    /// The effects run over the lit picture this frame, by their place in the post processing's list.
     /// </summary>
     public required ReadOnlyMemory<GpuEffect> Effects { get; init; }
 

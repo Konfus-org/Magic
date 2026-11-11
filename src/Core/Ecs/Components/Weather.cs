@@ -4,10 +4,9 @@ using Magic.Assets;
 namespace Magic.Ecs.Components;
 
 /// <summary>
-/// The world's weather as it is now: the way the air moves, the haze in it, and the effects the air is drawn with, each
-/// a material such as the fog, in order. A world has one, on an entity of its own, which a script may change as it runs;
-/// whatever draws the air reads it, and so may anything the wind moves. Calm, clear air is no wind, no haze and no
-/// effects. A breeze and a light haze:
+/// The world's weather as it is now: the way the air moves and the haze in it. A world has one, on an entity of its
+/// own, which a script may change as it runs; whatever draws the air reads it, and so may anything the wind moves.
+/// Calm, clear air is no wind and no haze. A breeze and a light haze:
 /// <code>
 /// { "wind": { "x": 6, "y": 0, "z": 3 }, "fogDensity": 0.01 }
 /// </code>
@@ -19,8 +18,6 @@ public record struct Weather : IComponent
     /// The way the air moves, its direction and its strength in one, in metres per second.
     /// </summary>
     public Vector3 Wind;
-
-    public MaterialSlots Effects;
 
     /// <summary>
     /// How much of the light a metre of the haze scatters at <see cref="FogHeight"/>, from 0 to 1: 0 is clear air.

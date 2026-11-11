@@ -32,16 +32,13 @@ compiler loads a module and its imports from the assets, so a game's `Shaders/` 
   a broken asset is drawn with, and glass, which is translucent.
 - `Sky/` is the sky contract, `ISky`, and the Earth's atmosphere, which gives the sky, the sun's colour through the
   air and the sky's light on the ground from three tables made each frame.
-- `Post/` is the pixel effect contract, `IPixelEffect`, which post and weather effects implement, a vignette, a blur,
-  the temporal anti-aliasing, the metered exposure, a bloom, the sun's god rays, the volumetric light and the AgX
-  tonemap. Where an effect runs is its place in the list, so one before the exposure works in light as it is, one after
-  it in exposed light and one after the tonemap in the screen's. An effect that needs a target of its own declares
-  levels of it, which the blur shows, each of which may read the one before it, as the bloom's chain of ever blurrier
-  halves does; one that reads last frame's also declares a history, which the exposure shows; one that blends frames
-  declares jitter, which the temporal anti-aliasing shows. An effect reads the frame and its lights itself, and asks
-  how much light gets through along a ray with `Scene/Shadows`' `GetTransmittance`, and declares rays, as the
-  volumetric light does.
-- `Weather/` is the weather's effects: the fog, a pixel effect whose fields are a fog material's params.
+- `Post/` is the pixel effect contract, `IPixelEffect`, which post effects implement, a vignette, a blur, the temporal
+  anti-aliasing, the metered exposure, a bloom and the AgX tonemap. Where an effect runs is its place in the list, so
+  one before the exposure works in light as it is, one after it in exposed light and one after the tonemap in the
+  screen's. An effect that needs a target of its own declares levels of it, which the blur shows, each of which may read
+  the one before it, as the bloom's chain of ever blurrier halves does; one that reads last frame's also declares a
+  history, which the exposure shows; one that blends frames declares jitter, which the temporal anti-aliasing shows. An
+  effect reads the frame and its lights itself.
 - A contract between shaders is an interface, `I` plus a noun, and a pass that works with any implementation is
   generic over it. A game adds a material, a sky or a post effect by implementing the contract in a module of its own
   and naming it in the asset that uses it.

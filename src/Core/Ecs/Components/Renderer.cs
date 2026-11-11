@@ -24,8 +24,8 @@ public record struct Renderer : IComponent
 }
 
 /// <summary>
-/// Materials by slot, inline in a component of which a world holds a few: the post and weather effects in the order
-/// they run, whose params a script may change each frame, <c>weather.Effects[0].Overrides["density"] = 0.03f</c>.
+/// Materials by slot, inline in a component of which a world holds a few: the post effects in the order they run, whose
+/// params a script may change each frame, <c>post.Effects[0].Overrides["compensation"] = 1f</c>.
 /// <see cref="Capacity"/> of them, each a <see cref="MaterialInstance"/>, inline so the component stays plain unmanaged
 /// data, indexed, an empty slot's handle none. In a file, an array of them, the empty slots after the last left out.
 /// </summary>

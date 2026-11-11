@@ -17,9 +17,9 @@ texture reader, with a gem that draws its view.
   its own for each.
 - A model nothing has drawn or waited for in a minute leaves the GPU, and loads again when it is next drawn.
 - As a domain replaces the world, the loading screen stays until the models, materials and textures of what comes,
-  and the effects of its weather and its post processing with their passes, are on the GPU, or failed, so its first
+  and the effects of its post processing with their passes, are on the GPU, or failed, so its first
   frame is drawn whole, its effects included. Nothing drawn before carries into the frames after.
-- The effects the frame runs are the first weather's, then the first post processing's, or the engine's
+- The effects the frame runs are the first post processing's, or the engine's
   `TemporalAntiAliasing`, `Exposure` and `Agx` when nothing has one; the view names each with its material's row and
   its passes. The camera jitters while one of them asks for it, or while a gem upscales the picture.
 - The picture is drawn in the window's shape, at most as many pixels across and down as `Rendering.Resolution`,
