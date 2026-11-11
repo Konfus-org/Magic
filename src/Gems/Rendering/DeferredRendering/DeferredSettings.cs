@@ -2,7 +2,7 @@ using System.ComponentModel;
 using Magic.Assets;
 using Magic.Input;
 
-namespace Magic.Deferred;
+namespace Magic.DeferredRendering;
 
 /// <summary>
 /// What the renderer shows of a frame, and its debug window with its keys.

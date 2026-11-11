@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- A gem: Magic loads it from Gems/Deferred/Deferred.dll when a project lists Deferred. -->
+  <!-- A gem: Magic loads it from Gems/DeferredRendering/DeferredRendering.dll when a project lists DeferredRendering. -->
   <PropertyGroup>
     <!-- Shown beside the gem as Magic starts it. -->
     <Description>Lights the world the GPU holds, deferred: the shading of the GBuffer, shadowed, the glass over it, the post effects and the output.</Description>

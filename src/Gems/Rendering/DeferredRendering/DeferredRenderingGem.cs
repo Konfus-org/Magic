@@ -13,14 +13,14 @@ using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
 
-namespace Magic.Deferred;
+namespace Magic.DeferredRendering;
 
 /// <summary>
 /// What the deferred renderer takes each frame: the world as the GPU holds it, and, where a gem makes them, the world
 /// as rays see it, each pixel's shadows, the light that reaches the surfaces indirectly, the air between the camera and
 /// them, and the output's upscaling.
 /// </summary>
-public readonly record struct DeferredInput(
+public readonly record struct DeferredRenderingInput(
     GpuView View,
     TracedWorld? Traced,
     ShadowMask? Shadows,
@@ -38,10 +38,10 @@ public readonly record struct DeferredInput(
 /// As a domain loads, it holds the loading screen until its passes are built. It is public because nothing in its
 /// assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class DeferredGem
+public sealed class DeferredRenderingGem
     : IGem,
         IHasSettings<DeferredSettings>,
-        IRenderFrom<DeferredInput>,
+        IRenderFrom<DeferredRenderingInput>,
         IHookIntoDomainLoading
 {
     private readonly IGraphicsApi _gpu;
@@ -71,7 +71,7 @@ public sealed class DeferredGem
     private int _domainsLoaded;
     private TaskCompletionSource? _loading;
 
-    public DeferredGem(
+    public DeferredRenderingGem(
         DeferredSettings settings,
         IGraphicsApi gpu,
         AssetManager assets,
@@ -129,7 +129,7 @@ public sealed class DeferredGem
     /// <summary>
     /// Records the frame's passes, each in its stage, from the view the world's gem made.
     /// </summary>
-    public void Render(in Frame frame, RenderGraph graph, in DeferredInput input)
+    public void Render(in Frame frame, RenderGraph graph, in DeferredRenderingInput input)
     {
         // The shaders are the GPU provider's to build, the first ask starting each. While one failed, the renderer draws
         // nothing and holds no domain back; else the loading domain shows once its models and materials are on the GPU.

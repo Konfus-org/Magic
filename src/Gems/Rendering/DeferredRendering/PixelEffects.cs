@@ -6,7 +6,7 @@ using Magic.Ecs.Components;
 using Magic.Graphics;
 using Magic.Utils;
 
-namespace Magic.Deferred;
+namespace Magic.DeferredRendering;
 
 /// <summary>
 /// The effects run over the lit picture before the output, in order: each a material whose shader implements the pixel

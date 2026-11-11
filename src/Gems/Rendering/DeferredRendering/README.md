@@ -1,11 +1,11 @@
-# Deferred
+# DeferredRendering
 
 Lights the world into the window, deferred: the GBuffer a geometry gem draws, lit by the sun and the sky, from the
 view the gem that keeps the world on the GPU makes each frame. When the console asks for a screenshot, it hands the
 frame as a texture to the gem that writes textures.
 
-To use it, list `Deferred` in a project's `.magic` file beside the gem that keeps the world on the GPU and a gem
-that draws its geometry.
+To use it, list `DeferredRendering` in a project's `.magic` file beside the gem that keeps the world on the GPU and a
+gem that draws its geometry.
 
 ## What it draws
 
@@ -58,8 +58,8 @@ without what other gems draw over it.
 
 ## Changing it
 
-`DeferredGem.Render` is the frame in order, top to bottom: start there. As a domain loads, the loading screen also
-waits for the gem's passes.
+`DeferredRenderingGem.Render` is the frame in order, top to bottom: start there. As a domain loads, the loading screen
+also waits for the gem's passes.
 
 - A pass is one `RenderGraph.Compute` or `RenderGraph.Draw` call saying what it reads and writes, which puts its
   barriers in. `Render` records each pass under a short comment; the effects' passes are `PixelEffects.Record`'s.

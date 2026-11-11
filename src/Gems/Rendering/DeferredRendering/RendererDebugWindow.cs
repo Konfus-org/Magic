@@ -1,7 +1,7 @@
 using Magic.Debugging;
 using Magic.Input;
 
-namespace Magic.Deferred;
+namespace Magic.DeferredRendering;
 
 /// <summary>
 /// The renderer's debug window, drawn with the debug UI's widgets: it takes the settings now and hands back the ones
