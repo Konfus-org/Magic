@@ -36,7 +36,7 @@ To use it, list `GlobalIllumination` in a project's `.magic` file with a gem tha
 ## How it works
 
 - Its `Render` takes the view and the world as rays see it, places the grid, records its passes in the frame's light
-  stage, writes the indirect light into the frame's buffer as the library's `Light/Indirect`, and hands the frame's
+  stage, writes the indirect light into the frame's buffer as the renderer's `Light/Indirect`, and hands the frame's
   `IndirectLight` to the gems that take it. A frame whose world rays see no instance of makes none.
 - The shaders are the `Shaders/` modules in this gem's `Resources`, built on the shader library
   ([Shaders](../../../Resources/Shaders/README.md)). Each pass reads the frame's buffer, which holds the indirect light,

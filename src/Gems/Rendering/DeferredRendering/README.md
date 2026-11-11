@@ -103,6 +103,31 @@ ends in the view it hands on; the second takes it with what the other gems made.
   name is the same resource, holding what the last frame left in it; another one, as at a new picture size, makes it
   again, empty.
 - The shaders are the `Shaders/` modules in this gem's `Resources`, built on the shader library
-  ([Shaders](../../../Resources/Shaders/README.md)).
+  ([Shaders](../../../Resources/Shaders/README.md)). The passes are at the folder's root. The renderer's tables and
+  techniques, which the other rendering gems import too, are under it:
+  - `Scene/Materials` is the material table's row: which material shader draws it, then that shader's struct.
+  - `Scene/Models` is the frame's models, in the frame's buffer after the library's `Core/Frame`: the instance table,
+    the pools of vertices and indices the instances are drawn from, the material table, and the mesh table that says
+    where each mesh's triangles are and which material slot they take. After them is the world as rays see it, all 0
+    where nothing builds it: the acceleration structure, with a geometry for each mesh of each model, the materials as a
+    ray hit reads them, and the box over what rays see. `Scene/Instances` and `Scene/Vertices` are an instance's and a
+    vertex's rows. `Trace/HitSurface` is what rays read of the world through them: how much light gets through along a
+    ray, and the surface one lands on.
+  - `Scene/Lights` is the frame's lights, in the frame's buffer after the models: the sun, the sky's tables, and the
+    light table with the bits of each tile of the screen that say which lights reach it. `Scene/Shadows`, after them, is
+    the shadow mask: how much of the sun and of each of its tile's first lights reaches a pixel, and the colour the sun
+    takes on through glass.
+  - `Light/Indirect` is the frame's indirect light, in the frame's buffer after the shadows: the diffuse light and the
+    reflections at a part of the picture's size and the probe grid, all 0 where nothing traced them this frame, and how
+    the picture reads them back along its surfaces, which any light traced at a part of the picture's size can use.
+    `Light/Air`, after it, is the air between the camera and what it sees: a volume of the light it scatters and lets
+    through, all 0 where nothing filled it this frame, and `ApplyAir`, which sees a colour at a point through it; and
+    the clouds over it, `ApplyClouds` for the sky behind them and `GetCloudShadow` for the sun's light under them.
+    `Light/Probes` is the probe grid: where each probe is, what it holds, and the light a point gets from it.
+    `Light/Lights` is what a local light gives a point. `Trace/HitLight` is the light a ray brings back from what it
+    lands on.
+  - `Sky/Atmosphere` is the Earth's atmosphere, which gives the sky, the sun's colour through the air and the sky's
+    light on the ground from three tables made each frame.
+  - `Surface/Brdf` is how a surface reflects light.
 - Parts of the lighting are adapted from another engine under the MIT licence;
   `THIRD-PARTY-NOTICES.md` holds it.

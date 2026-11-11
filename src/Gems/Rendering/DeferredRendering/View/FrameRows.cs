@@ -78,7 +78,7 @@ public record struct FrameConstants
 }
 
 /// <summary>
-/// The frame's models, the twin of the library's <c>Scene/Models.slang</c>: the instance table and its count, the
+/// The frame's models, the twin of <c>Scene/Models.slang</c>: the instance table and its count, the
 /// pools and tables the instances are drawn from, and the mesh table rays find triangles through, written once a frame
 /// into the frame's buffer after <see cref="FrameConstants"/>.
 /// </summary>
@@ -103,7 +103,7 @@ public record struct GpuModels
 }
 
 /// <summary>
-/// The world as rays see it, the twin of the library's <c>Scene/Models.slang</c> TracedWorld: the acceleration structure
+/// The world as rays see it, the twin of <c>Scene/Models.slang</c> TracedWorld: the acceleration structure
 /// over the instances and the hit materials, written once a frame into the frame's buffer after <see cref="GpuModels"/>
 /// by what builds the structure, and all 0 where nothing does.
 /// </summary>
@@ -120,7 +120,7 @@ public record struct GpuTracedWorld
 }
 
 /// <summary>
-/// The frame's lights, the twin of the library's <c>Scene/Lights.slang</c>: the sun, the sky's tables and the light
+/// The frame's lights, the twin of <c>Scene/Lights.slang</c>: the sun, the sky's tables and the light
 /// table, written once a frame into the frame's buffer after <see cref="GpuTracedWorld"/>.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
@@ -156,7 +156,7 @@ public record struct GpuLights
 }
 
 /// <summary>
-/// The frame's shadows, the twin of the library's <c>Scene/Shadows.slang</c>: the mask and the sun's tint, written once
+/// The frame's shadows, the twin of <c>Scene/Shadows.slang</c>: the mask and the sun's tint, written once
 /// a frame into the frame's buffer after <see cref="GpuLights"/> by what traces them, and all 0 where nothing does.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
@@ -172,7 +172,7 @@ public record struct GpuShadows
 }
 
 /// <summary>
-/// The light that reaches the view's surfaces indirectly, the twin of the library's <c>Light/Indirect.slang</c>
+/// The light that reaches the view's surfaces indirectly, the twin of <c>Light/Indirect.slang</c>
 /// IndirectLight: the traced diffuse light and reflections and the probe grid around them, written once a frame into the
 /// frame's buffer after <see cref="GpuShadows"/> by what traces them, and all 0 where nothing does.
 /// </summary>
@@ -191,7 +191,7 @@ public record struct GpuIndirectLight
 }
 
 /// <summary>
-/// The air between the camera and what it sees, the twin of the library's <c>Light/Air.slang</c> Air: the volume of the
+/// The air between the camera and what it sees, the twin of <c>Light/Air.slang</c> Air: the volume of the
 /// light it scatters and lets through out to a distance, the haze past it and the clouds over it, written once a frame
 /// into the frame's buffer after <see cref="GpuIndirectLight"/> by what fills the volume, and all 0 where nothing does.
 /// </summary>
@@ -245,7 +245,7 @@ public record struct GpuAir
 }
 
 /// <summary>
-/// The probe grid: its size, the heap ids of its buffers and where it lies in the world, the twin of the library's
+/// The probe grid: its size, the heap ids of its buffers and where it lies in the world, the twin of
 /// <c>Light/Probes.slang</c> ProbeGridConstants.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]

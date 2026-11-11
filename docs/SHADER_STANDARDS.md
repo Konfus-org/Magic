@@ -30,6 +30,6 @@ The rules for Slang shaders in Magic. [Code Standards](CODE_STANDARDS.md) covers
 - A compute pass has no implicit derivatives. Code it may run takes them as inputs, as `SurfaceInputs` and
   `SkyInputs` do.
 - Few variants: a generic for what changes the pipeline, a `[branch]` on a draw-wide value for the rest.
-- The BRDF, the material contract and the shading models live once in the shared shader library in
-  `src/Resources/Shaders/`. Every renderer shades with them. A renderer's own tables and techniques go in its gem.
+- The material contract and the shading models live once in the shared shader library in `src/Resources/Shaders/`.
+  Every renderer shades with them. A renderer's own tables and techniques, its BRDF included, go in its gem.
 - Write a technique from its paper and name the paper in a comment. No third-party shader code.

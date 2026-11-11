@@ -18,6 +18,6 @@ whose instances it builds from.
 
 ## How it works
 
-- Its `Render` writes them into the frame's buffer as the library's `Scene/Models` `TracedWorld`, which every shader
+- Its `Render` writes them into the frame's buffer as the renderer's `Scene/Models` `TracedWorld`, which every shader
   that traces reads, and hands the frame's `TracedWorld` to the gems that take it.
 - `AverageMaterials` in this gem's `Resources/Shaders` averages the material rows, a pass for each material shader.
