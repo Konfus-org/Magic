@@ -90,8 +90,8 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
         Result<GpuBuffer> impostors = graph.Buffer(
             GpuDescriptions.GetBuffer("Impostor table", (long)ImpostorCapacity * GpuImpostor.Bytes)
         );
-        if (!table.Ok || !impostors.Ok)
-            return Result.Failure(table.Ok ? impostors.Error : table.Error);
+        if (Result.FindFailure(table, impostors) is { Ok: false } failedTable)
+            return Result.Failure(failedTable.Error);
 
         // A row whose model changed draws nothing until what it holds now arrives.
         while (_rows.Count < models.Length)
@@ -104,7 +104,17 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
             if (_rows[index].Place == models[index])
                 continue;
 
-            Free(_rows[index]);
+            // The row's ranges given back to the free lists; its atlases go once no frame asks for them.
+            Row old = _rows[index];
+            if (old.State == RowState.Ready)
+            {
+                _vertices.Free((int)old.VertexOffset, (int)old.VertexCount);
+                _indices.Free((int)old.IndexOffset, (int)old.IndexCount);
+                _clusters.Free((int)old.ClusterOffset, (int)old.ClusterCount);
+                if (old.ImpostorRow != 0)
+                    _impostorRows.Free((int)old.ImpostorRow, 1);
+            }
+
             ModelPlace place = models[index];
             bool isEmpty = place.Model == Handle<Model>.None;
             _rows[index] = new Row { Place = place, State = isEmpty ? RowState.Empty : RowState.Loading };
@@ -120,16 +130,26 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
             if (_rows[index].Place != place || _rows[index].State != RowState.Loading)
                 continue;
 
-            if (made.Ok)
-            {
-                _rows[index] = Place(place, made.Value);
-                _placedModels.Add((index, made.Value));
-            }
-            else
+            if (!made.Ok)
             {
                 Log.Error($"{GetName(place)} draws no clusters: {made.Error}");
-                _rows[index] = new Row { Place = place, State = RowState.Failed };
+                _rows[index] = new Row { Place = place, State = RowState.Empty };
+                continue;
             }
+
+            ModelClusters model = made.Value;
+            _rows[index] = new Row
+            {
+                Place = place,
+                State = RowState.Ready,
+                VertexOffset = (uint)_vertices.Allocate(model.Vertices.Length),
+                VertexCount = (uint)model.Vertices.Length,
+                IndexOffset = (uint)_indices.Allocate(model.Indices.Length),
+                IndexCount = (uint)model.Indices.Length,
+                ClusterOffset = (uint)_clusters.Allocate(model.Clusters.Length),
+                ClusterCount = (uint)model.Clusters.Length,
+            };
+            _placedModels.Add((index, model));
         }
 
         _madeModels.Clear();
@@ -150,7 +170,22 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
 
         _placedModels.Clear();
 
-        return Result.Success(pools with { Atlases = GetAtlases(graph) });
+        // Every resident impostor's atlases, asked of the graph, so the GPU provider keeps them and a pass that samples
+        // them names them in its reads.
+        ImmutableArray<GpuResource>.Builder atlases = ImmutableArray.CreateBuilder<GpuResource>();
+        foreach (Row row in _rows)
+        {
+            if (row.Impostor is not { } atlas || row.ImpostorUv is not { } uvAtlas)
+                continue;
+
+            if (graph.Texture(atlas) is { Ok: true } surface)
+                atlases.Add(surface.Value);
+
+            if (graph.Texture(uvAtlas) is { Ok: true } uvs)
+                atlases.Add(uvs.Value);
+        }
+
+        return Result.Success(pools with { Atlases = atlases.ToImmutable() });
     }
 
     /// <summary>
@@ -165,44 +200,7 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
             TextureUsages.Sampled | TextureUsages.CopyDestination
         );
 
-    /// <summary>
-    /// Every resident impostor's atlases, asked of the graph, so the GPU provider keeps them and a pass that samples
-    /// them names them in its reads.
-    /// </summary>
-    private ImmutableArray<GpuResource> GetAtlases(RenderGraph graph)
-    {
-        ImmutableArray<GpuResource>.Builder atlases = ImmutableArray.CreateBuilder<GpuResource>();
-        foreach (Row row in _rows)
-        {
-            if (row.Impostor is not { } atlas || row.ImpostorUv is not { } uvAtlas)
-                continue;
-
-            if (graph.Texture(atlas) is { Ok: true } surface)
-                atlases.Add(surface.Value);
-
-            if (graph.Texture(uvAtlas) is { Ok: true } uvs)
-                atlases.Add(uvs.Value);
-        }
-
-        return atlases.ToImmutable();
-    }
-
     private string GetName(ModelPlace place) => assets.GetPath(place.Model) ?? $"model {place.Model.Id}";
-
-    /// <summary>
-    /// The row's ranges given back to the free lists; its atlases go once no frame asks for them.
-    /// </summary>
-    private void Free(in Row row)
-    {
-        if (row.State != RowState.Ready)
-            return;
-
-        _vertices.Free((int)row.VertexOffset, (int)row.VertexCount);
-        _indices.Free((int)row.IndexOffset, (int)row.IndexCount);
-        _clusters.Free((int)row.ClusterOffset, (int)row.ClusterCount);
-        if (row.ImpostorRow != 0)
-            _impostorRows.Free((int)row.ImpostorRow, 1);
-    }
 
     /// <summary>
     /// The model's clusters, as its preprocessor made them, settled by the next <see cref="Prepare"/>.
@@ -215,22 +213,6 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
         await threads.Enter(EngineThread.Render);
         _madeModels.Add((index, place, made));
     }
-
-    /// <summary>
-    /// The row of a model read since the last frame: its ranges taken in the pools, which grow to hold them.
-    /// </summary>
-    private Row Place(ModelPlace place, ModelClusters made) =>
-        new()
-        {
-            Place = place,
-            State = RowState.Ready,
-            VertexOffset = (uint)_vertices.Allocate(made.Vertices.Length),
-            VertexCount = (uint)made.Vertices.Length,
-            IndexOffset = (uint)_indices.Allocate(made.Indices.Length),
-            IndexCount = (uint)made.Indices.Length,
-            ClusterOffset = (uint)_clusters.Allocate(made.Clusters.Length),
-            ClusterCount = (uint)made.Clusters.Length,
-        };
 
     /// <summary>
     /// The model's clusters copied into the ranges its row took in <paramref name="pools"/>, its impostor given a row of
@@ -273,7 +255,7 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
         }
 
         string name = GetName(place);
-        if (!made.Impostor.IsEmpty && _impostorRows.CanAllocate(1))
+        if (_impostorRows.CanAllocate(1))
             row = UploadImpostor(graph, pools.Impostors, name, made, row);
 
         GpuClusterModel model = new(row.ClusterOffset, row.ClusterCount, row.ImpostorRow);
@@ -294,9 +276,9 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
         TextureDescription uvDescription = GetAtlasDescription($"{name} impostor uv", GpuFormat.R16G16Sfloat);
         Result<GpuTexture> atlas = graph.Texture(atlasDescription);
         Result<GpuTexture> uvAtlas = graph.Texture(uvDescription);
-        if (!atlas.Ok || !uvAtlas.Ok)
+        if (Result.FindFailure(atlas, uvAtlas) is { Ok: false } failed)
         {
-            Log.Warn($"{atlasDescription.Name} is not drawn: {(atlas.Ok ? uvAtlas.Error : atlas.Error)}");
+            Log.Warn($"{atlasDescription.Name} is not drawn: {failed.Error}");
 
             return row;
         }
@@ -322,14 +304,14 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
     }
 
     /// <summary>
-    /// Where a row of the model table is in the loading: no model, being read, in the pools, or drawing nothing.
+    /// Where a row of the model table is in the loading: drawing nothing, as it has no model or its model failed to
+    /// load, being read, or in the pools.
     /// </summary>
     private enum RowState : byte
     {
         Empty,
         Loading,
         Ready,
-        Failed,
     }
 
     /// <summary>

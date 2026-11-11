@@ -40,7 +40,7 @@ internal sealed class ModelClusters
 
     /// <summary>
     /// The texture coordinates of the surface each texel of <see cref="Impostor"/> shows, at the same texels, as
-    /// RG16F; empty with it.
+    /// RG16F.
     /// </summary>
     public required ImmutableArray<Half> ImpostorUv { get; init; }
 
