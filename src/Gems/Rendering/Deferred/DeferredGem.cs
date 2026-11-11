@@ -200,7 +200,12 @@ public sealed class DeferredGem
         // A debug view of light draws it into the picture, so the effects finish it as they do the picture.
         _surfaceView.RecordLight(view, inputs.Settings.RenderView, indirect);
         _pixelEffects.Record(view, frame.Index);
-        _surfaceView.Record(view, inputs.Settings.RenderView, inputs.Settings.DepthViewFar);
+        _surfaceView.Record(
+            view,
+            inputs.Settings.RenderView,
+            inputs.Settings.DepthViewFar,
+            Math.Clamp(inputs.Settings.Gamma, 0.5f, 2f)
+        );
 
         // What the window and a screenshot show: the output as a gem upscaled it to the size it is shown at, or the
         // output itself, stretched over the window with the upscale filter.

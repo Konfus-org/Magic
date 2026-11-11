@@ -20,9 +20,10 @@ texture reader, with a gem that draws its view.
 - As a domain replaces the world, the loading screen stays until the models, materials and textures of what comes,
   and the effects of its post processing with their passes, are on the GPU, or failed, so its first
   frame is drawn whole, its effects included. Nothing drawn before carries into the frames after.
-- The effects the frame runs are the first post processing's, or the engine's `Exposure` and `Agx` when nothing has
-  one; the view names each with its material's row and its passes. The camera jitters while one of them asks for it,
-  or while a gem upscales the picture.
+- The effects the frame runs are the first post processing's, or the engine's `Exposure` and `Agx` when nothing has one,
+  exposed by `Rendering.ExposureCompensation`; an effect whose material `Rendering.DisabledEffects` names, as
+  `Bloom Vignette`, is left out. The view names each with its material's row and its passes. The camera jitters while
+  one of them asks for it, or while a gem upscales the picture.
 - The view is seen through the first camera that draws into the window, at `Rendering.FieldOfView` when that is more
   than 0.
 - The finished picture is `Rendering.Resolution` in size, with a window or without, and the window shows it

@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Numerics;
 using Magic.Assets;
@@ -45,6 +46,8 @@ public sealed class GpuWorldGem
     private const int AutoRenderHeight = 1080;
 
     private readonly IEcs _ecs;
+
+    private readonly AssetManager _assets;
 
     private readonly Threads _threads;
 
@@ -118,6 +121,7 @@ public sealed class GpuWorldGem
     {
         Settings = settings;
         _ecs = ecs;
+        _assets = assets;
         _threads = threads;
         ModelPreprocessor models = new();
         _preprocessing = assets.Register(models);
@@ -240,8 +244,10 @@ public sealed class GpuWorldGem
         _resources.Upload(graph);
 
         // The picture's effects; the camera jitters while one of them asks for it, or while a gem upscales.
-        PostProcessing post = inputs.PostProcessing.Count > 0 ? inputs.PostProcessing.First[0] : _defaultPost;
-        Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> effects = _effects.Resolve(graph, post.Effects);
+        Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> effects = _effects.Resolve(
+            graph,
+            GetEffects(inputs)
+        );
         if (!effects.Ok)
         {
             Log.Error($"The frame's view is not made: {effects.Error}");
@@ -418,6 +424,38 @@ public sealed class GpuWorldGem
         }
 
         return sun;
+    }
+
+    /// <summary>
+    /// The effects the frame runs: the first post processing's, or the engine's, exposed by the exposure compensation;
+    /// each whose material the settings turn off left out.
+    /// </summary>
+    private MaterialSlots GetEffects(RenderInputs inputs)
+    {
+        MaterialSlots effects;
+        if (inputs.PostProcessing.Count > 0)
+            effects = inputs.PostProcessing.First[0].Effects;
+        else
+        {
+            effects = _defaultPost.Effects;
+            effects[0].Overrides["compensation"] = inputs.Settings.ExposureCompensation;
+        }
+
+        // Most frames turn nothing off, so they name no material.
+        ImmutableArray<string> disabled = inputs.Settings.DisabledEffects;
+        if (disabled.IsEmpty)
+            return effects;
+
+        for (int place = 0; place < MaterialSlots.Capacity; place++)
+        {
+            if (
+                _assets.GetPath(effects[place].Handle) is { } path
+                && disabled.Contains(Path.GetFileNameWithoutExtension(path))
+            )
+                effects[place] = default;
+        }
+
+        return effects;
     }
 
     /// <summary>

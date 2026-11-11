@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Drawing;
 using Magic.Configuration;
@@ -54,4 +55,15 @@ public sealed record GpuWorldSettings
     /// </summary>
     [RequireRestart]
     public int DroppedTextureLevels { get; init; }
+
+    /// <summary>
+    /// How many stops brighter the picture is exposed, or darker below 0, when the world has no post processing of its
+    /// own: the brightness.
+    /// </summary>
+    public float ExposureCompensation { get; init; }
+
+    /// <summary>
+    /// The post effects left out of every frame, by their material's file name, as Bloom Vignette.
+    /// </summary>
+    public ImmutableArray<string> DisabledEffects { get; init; } = [];
 }

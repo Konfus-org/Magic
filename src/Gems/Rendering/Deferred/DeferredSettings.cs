@@ -48,4 +48,11 @@ public sealed record DeferredSettings
     /// </summary>
     [Category("Rendering")]
     public TextureFilter UpscaleFilter { get; init; }
+
+    /// <summary>
+    /// How bright the picture's middle tones are shown, 0.5 to 2: above 1 lightens them and below 1 darkens them, while
+    /// black and white stay.
+    /// </summary>
+    [Category("Rendering")]
+    public float Gamma { get; init; } = 1;
 }
