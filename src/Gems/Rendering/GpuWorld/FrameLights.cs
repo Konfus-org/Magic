@@ -12,11 +12,9 @@ namespace Magic.GpuWorld;
 /// </summary>
 internal static class FrameLights
 {
-    private const float SkyBrightness = 0.3f;
-
     /// <summary>
-    /// The frame's lights uploaded into the frame's buffer, after the models' row: the sun, the sky and its tables, and
-    /// the light table and its tiles.
+    /// The frame's lights uploaded into the frame's buffer, after the models' row: the sun, the open sky at
+    /// <paramref name="skyBrightness"/>, the sky and its tables, and the light table and its tiles.
     /// </summary>
     public static Result Upload(
         RenderGraph graph,
@@ -24,6 +22,7 @@ internal static class FrameLights
         EcsSnapshot<Sky> skies,
         RenderCamera camera,
         RenderSun sun,
+        float skyBrightness,
         in SkyTables sky,
         in LightBuffers lights
     )
@@ -38,7 +37,7 @@ internal static class FrameLights
         {
             SunDirection = new Vector4(sun.Direction, 0),
             SunIlluminance = new Vector4(sun.Radiance, 0),
-            SkyRadiance = new Vector4(SkyBrightness * 0.8f, SkyBrightness * 0.9f, SkyBrightness, 0),
+            SkyRadiance = new Vector4(skyBrightness * 0.8f, skyBrightness * 0.9f, skyBrightness, 0),
             CameraAltitude = Math.Max(camera.Transform.Position.Y, 0),
             TransmittanceLut = sky.Transmittance.Id,
             MultiScatteringLut = sky.MultiScattering.Id,

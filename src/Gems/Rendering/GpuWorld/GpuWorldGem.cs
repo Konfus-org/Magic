@@ -117,7 +117,7 @@ public sealed class GpuWorldGem
         _threads = threads;
         ModelPreprocessor models = new();
         _preprocessing = assets.Register(models);
-        _resources = new GpuResources(models, caches, assets, shaders, threads);
+        _resources = new GpuResources(models, caches, assets, shaders, threads, settings.Anisotropy);
         _failure = new MaterialInstance { Handle = assets.GetFailure<Material, Model>() };
         _defaultPost.Effects[0] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Exposure.mat") };
         _defaultPost.Effects[1] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Agx.mat") };
@@ -178,6 +178,8 @@ public sealed class GpuWorldGem
             return null;
 
         // The pools, with the models made since the last frame settled into them, before any renderer's row is built.
+        // Every model asked for from here on is asked at or after the frame's start, which eviction keeps.
+        long frameStart = Environment.TickCount64;
         Result pools = _resources.Prepare(graph);
         if (!pools.Ok)
         {
@@ -203,10 +205,8 @@ public sealed class GpuWorldGem
             return null;
 
         // Entities -> resources -> rows: the renderers written since the inputs before ask for their models and have
-        // their rows built again, the materials' rows are made again at upload, and a model no renderer drawn holds
-        // leaves once nothing asked for it in a while.
+        // their rows built again, and the materials' rows are made again at upload.
         int instanceCount = _instances.Fill(inputs.Renderers, frame.Index);
-        _resources.EvictUnusedModels(inputs.Renderers.Second[..instanceCount]);
 
         // The loading domain shows once what it draws and its effects are on the GPU.
         if (_preparing is { } preparing && IsPrepared(graph, preparing))
@@ -216,6 +216,14 @@ public sealed class GpuWorldGem
             );
             EndPreparing();
         }
+
+        // A model no renderer drawn holds, and nothing asked for this frame, leaves once it is kept long enough; the
+        // loading domain's models were just asked for, so they stay while it waits.
+        _resources.EvictUnusedModels(
+            inputs.Renderers.Second[..instanceCount],
+            frameStart,
+            inputs.Settings.ModelKeepSec
+        );
 
         _resources.Upload(graph);
 
@@ -484,6 +492,8 @@ public sealed class GpuWorldGem
         }
 
         RenderCamera camera = GetCamera(inputs.Cameras);
+        if (inputs.Settings.FieldOfView > 0)
+            camera = camera with { FieldOfView = inputs.Settings.FieldOfView };
         Result<FrameTargets> targets = _frameView.Upload(
             graph,
             camera,
@@ -518,6 +528,7 @@ public sealed class GpuWorldGem
             inputs.Skies,
             camera,
             GetSun(inputs.DirectionalLights),
+            inputs.Settings.SkyBrightness,
             sky.Value,
             lights.Value
         );

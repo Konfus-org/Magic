@@ -33,27 +33,23 @@ internal enum ResourceState : byte
 /// with its acceleration structure and the model table at the start of the next frame, and copied up in it. The pools,
 /// the textures and each resident model's acceleration structure are asked of the graph every frame, so the GPU
 /// provider keeps what they hold. Each pool hands out ranges first fit from a free list, and the vertex and index pools
-/// grow when none holds a model. A model not asked for in
-/// <see cref="UnusedSec"/>, and held by no renderer drawn, is evicted: its ranges go back to the free lists, its row of
-/// the model table is emptied and its structure is no longer asked for, so the GPU provider frees it, and the next ask
-/// makes it again.
+/// grow when none holds a model. A model not asked for in the seconds it is kept, and held by no renderer drawn, is
+/// evicted: its ranges go back to the free lists, its row of the model table is emptied and its structure is no longer
+/// asked for, so the GPU provider frees it, and the next ask makes it again. A smoothly filtered texture is sampled
+/// with <paramref name="anisotropy"/>.
 /// </summary>
 internal sealed class GpuResources(
     ModelPreprocessor models,
     Caches caches,
     AssetManager assets,
     IShaderCompiler shaders,
-    Threads threads
+    Threads threads,
+    int anisotropy
 )
 {
     private const int ModelCapacity = 4096;
 
     private const string FailureShader = "Shaders/Material/Failure.slang";
-
-    /// <summary>
-    /// How long, in seconds of real time, a model stays on the GPU after its last ask.
-    /// </summary>
-    private const int UnusedSec = 60;
 
     private static readonly int _meshCapacity = (int)(SharedResources.Meshes.Bytes / GpuMesh.Bytes);
 
@@ -234,16 +230,17 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// Evicts every model not asked for in <see cref="UnusedSec"/> that none of <paramref name="drawn"/> holds: its
-    /// ranges go back to the pools' free lists, its row of the model table is emptied and its acceleration structure is
-    /// no longer asked for.
+    /// Evicts every model not asked for in the <paramref name="keepSec"/> before <paramref name="frameStart"/>, the tick
+    /// the frame started at, that none of <paramref name="drawn"/> holds: its ranges go back to the pools' free lists,
+    /// its row of the model table is emptied and its acceleration structure is no longer asked for. A model asked for
+    /// this frame stays, whatever the keep time.
     /// Renderers not written since their rows were built ask for nothing, so once a model looks unused each model
     /// <paramref name="drawn"/> holds is asked for first.
     /// </summary>
-    public void EvictUnusedModels(ReadOnlySpan<Renderer> drawn)
+    public void EvictUnusedModels(ReadOnlySpan<Renderer> drawn, long frameStart, int keepSec)
     {
-        long now = Environment.TickCount64;
-        if (!HasUnusedModel(now))
+        long before = frameStart - (keepSec * 1000L);
+        if (!HasUnusedModel(before))
             return;
 
         foreach (Renderer renderer in drawn)
@@ -254,7 +251,7 @@ internal sealed class GpuResources(
 
         foreach ((ulong id, ResidentModel where) in _residentModels)
         {
-            if (!IsUnused(id, now))
+            if (!IsUnused(id, before))
                 continue;
 
             _vertices.Free((int)where.VertexOffset, (int)where.VertexCount);
@@ -269,7 +266,7 @@ internal sealed class GpuResources(
             _residentModels.Remove(id);
             _askedModels.Remove(id);
             Log.Info(
-                $"{assets.GetPath(new Handle<Model>(id)) ?? $"model {id}"} left the GPU: nothing asked for it in {UnusedSec} s."
+                $"{assets.GetPath(new Handle<Model>(id)) ?? $"model {id}"} left the GPU: nothing asked for it in {keepSec} s."
             );
         }
     }
@@ -629,20 +626,24 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// Whether some model on the GPU was not asked for in <see cref="UnusedSec"/> up to <paramref name="now"/>.
+    /// Whether some model on the GPU was last asked for before tick <paramref name="before"/>.
     /// </summary>
-    private bool HasUnusedModel(long now)
+    private bool HasUnusedModel(long before)
     {
         foreach (ulong id in _residentModels.Keys)
         {
-            if (IsUnused(id, now))
+            if (IsUnused(id, before))
                 return true;
         }
 
         return false;
     }
 
-    private bool IsUnused(ulong model, long now) => now - _askedModels[model] >= UnusedSec * 1000L;
+    /// <summary>
+    /// Whether the model was last asked for before tick <paramref name="before"/>, so one asked for this frame stays
+    /// whatever the keep time.
+    /// </summary>
+    private bool IsUnused(ulong model, long before) => _askedModels[model] < before;
 
     private async Task LoadAsync(Handle<Material> handle)
     {
@@ -694,7 +695,7 @@ internal sealed class GpuResources(
         {
             Filter = asset.Filter,
             Wrap = asset.Wrap,
-            Anisotropy = asset.Filter == TextureFilter.Linear ? 8 : 1,
+            Anisotropy = asset.Filter == TextureFilter.Linear ? anisotropy : 1,
         };
         _arrivedTextures.Add((asset, entry));
     }
