@@ -5,7 +5,7 @@ using Magic.Graphics;
 using Magic.Projects;
 using Magic.Utils;
 
-namespace Magic.GpuWorld;
+namespace Magic.DeferredRendering.View;
 
 /// <summary>
 /// The frame's rows written from its view: the view's constants, its matrices and targets, the frame's tables and its
@@ -43,7 +43,7 @@ internal sealed class FrameView
     /// The frame's rows uploaded into its buffer: the view's constants, the camera shifted by <paramref name="jitter"/>;
     /// the models, the instance and material tables; and the lights, the sun, the open sky at
     /// <paramref name="skyBrightness"/>, the sky's tables, and the light table's <paramref name="lightCount"/>
-    /// lights and its tiles.
+    /// lights and its tiles; and the rows the gems after the view write, at 0.
     /// </summary>
     public Result Upload(
         RenderGraph graph,
@@ -148,6 +148,13 @@ internal sealed class FrameView
         graph.Upload(view.Frame, [constants]);
         graph.Upload(view.Frame, [models], GpuModels.Offset);
         graph.Upload(view.Frame, [frameLights], GpuLights.Offset);
+
+        // The rows the gems after the view write, 0 until one does, so the shaders that read them trace, shadow and
+        // light nothing indirectly, the sky lights the surfaces, and the air changes nothing.
+        graph.Upload(view.Frame, [default(GpuTracedWorld)], GpuTracedWorld.Offset);
+        graph.Upload(view.Frame, [default(GpuShadows)], GpuShadows.Offset);
+        graph.Upload(view.Frame, [default(GpuIndirectLight)], GpuIndirectLight.Offset);
+        graph.Upload(view.Frame, [default(GpuAir)], GpuAir.Offset);
 
         return Result.Success();
     }

@@ -2,7 +2,9 @@ using System.Linq;
 using System.Numerics;
 using Magic.Assets;
 using Magic.Debugging;
-using Magic.GpuWorld;
+using Magic.DeferredRendering;
+using Magic.DeferredRendering.View;
+using Magic.DeferredRendering.World;
 using Magic.Graphics;
 using Magic.Projects;
 using Magic.Utils;
@@ -21,7 +23,7 @@ public readonly record struct AccelerationStructuresInput(GpuView View, GpuInsta
 /// again when the instances or those structures change, what a ray query traces through; and the hit materials table,
 /// each material row averaged by a pass of its material shader each frame, what a ray hit reads its surface from. Each
 /// frame it writes them into the frame's buffer and makes the frame's <see cref="TracedWorld"/>; on a GPU that doesn't
-/// trace rays it makes none. The models, the instances and the material rows are the world's gem's, taken as its
+/// trace rays it makes none. The models, the instances and the material rows are the renderer's, taken as its
 /// <see cref="GpuView"/> and <see cref="GpuInstances"/>. It is public because nothing in its assembly makes it: Magic
 /// does, by reflection, when a project lists the gem.
 /// </summary>
@@ -37,7 +39,7 @@ public sealed class AccelerationStructuresGem(AssetManager assets)
     private readonly ShaderEntry _averageShader = PassShaders.GetEntry(assets, "AverageMaterials", "AverageMaterials");
 
     /// <summary>
-    /// The average entry for each material shader the world's gem has numbered, in their order.
+    /// The average entry for each material shader the renderer has numbered, in their order.
     /// </summary>
     private readonly List<ShaderEntry> _averageShaders = [];
 

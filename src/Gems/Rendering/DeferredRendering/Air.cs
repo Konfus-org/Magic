@@ -1,6 +1,7 @@
+using Magic.DeferredRendering.View;
 using Magic.Graphics;
 
-namespace Magic.GpuWorld;
+namespace Magic.DeferredRendering;
 
 /// <summary>
 /// The air between the camera and what it sees this frame: a volume over the view of the light the air scatters towards

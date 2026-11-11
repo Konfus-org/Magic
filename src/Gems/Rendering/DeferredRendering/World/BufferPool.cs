@@ -1,7 +1,7 @@
 using Magic.Graphics;
 using Magic.Utils;
 
-namespace Magic.GpuWorld;
+namespace Magic.DeferredRendering.World;
 
 /// <summary>
 /// A pool of rows of <paramref name="rowBytes"/> bytes in a buffer asked for as <paramref name="buffer"/>, with a free

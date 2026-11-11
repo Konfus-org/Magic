@@ -1,10 +1,11 @@
 using Magic.Assets;
+using Magic.DeferredRendering.World;
 using Magic.Ecs.Components;
 using Magic.Graphics;
 using Magic.Threading;
 using Magic.Utils;
 
-namespace Magic.GpuWorld;
+namespace Magic.DeferredRendering.View;
 
 /// <summary>
 /// The effects a frame runs over the lit picture, each resolved at its place: its material's row, packed as a surface

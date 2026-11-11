@@ -10,6 +10,6 @@ the renderer stretches the picture.
   is blended over time twice.
 - Every pass and effect draws at the render size; it is the one step that draws at the size the picture is shown at.
 
-It uses the world's gem, whose view it upscales, and the renderer, which runs its pass once the picture is finished.
+It uses the renderer, whose view it upscales and which runs its pass once the picture is finished.
 
 To use it, list `TaaUpscaling` in a project's `.magic` file.

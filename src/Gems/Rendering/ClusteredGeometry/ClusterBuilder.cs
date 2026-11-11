@@ -4,7 +4,7 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.Debugging;
-using Magic.GpuWorld;
+using Magic.DeferredRendering.World;
 using static Magic.ClusteredGeometry.meshoptimizer;
 
 namespace Magic.ClusteredGeometry;

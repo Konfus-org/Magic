@@ -1,7 +1,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 
-namespace Magic.GpuWorld;
+namespace Magic.DeferredRendering.View;
 
 /// <summary>
 /// What every pass of a frame reads, the twin of the library's <c>Core/Frame.slang</c>: the view, the output's size and

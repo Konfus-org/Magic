@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using System.Runtime.InteropServices;
 using Magic.Assets;
-using Magic.GpuWorld;
+using Magic.DeferredRendering.View;
 using Magic.Graphics;
 using Magic.Utils;
 

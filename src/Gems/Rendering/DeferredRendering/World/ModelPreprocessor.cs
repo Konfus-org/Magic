@@ -7,7 +7,7 @@ using Magic.Assets;
 using Magic.Assets.Pipeline;
 using Magic.Utils;
 
-namespace Magic.GpuWorld;
+namespace Magic.DeferredRendering.World;
 
 /// <summary>
 /// Makes what the GPU holds a model as, its vertices and triangles, as the model loads, and says how the cache keeps it:

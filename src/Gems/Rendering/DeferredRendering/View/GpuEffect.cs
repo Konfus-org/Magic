@@ -1,6 +1,6 @@
 using Magic.Graphics;
 
-namespace Magic.GpuWorld;
+namespace Magic.DeferredRendering.View;
 
 /// <summary>
 /// An effect at its place in a frame's list: its material, ready when its material, textures and passes are, its passes'

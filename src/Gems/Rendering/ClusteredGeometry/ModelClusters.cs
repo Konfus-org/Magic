@@ -1,14 +1,14 @@
 using System.Collections.Immutable;
 using System.Numerics;
 using Magic.Assets;
-using Magic.GpuWorld;
+using Magic.DeferredRendering.World;
 
 namespace Magic.ClusteredGeometry;
 
 /// <summary>
 /// What the cluster renderer draws a <see cref="Model"/> as, made from it once and cached under its version: its
 /// cluster hierarchy, the indices of every cluster's triangles, the vertices the levels above the leaves draw, and the
-/// model's impostor. An index under <see cref="ModelVertexCount"/> is a vertex of the model's own, as the world's gem
+/// model's impostor. An index under <see cref="ModelVertexCount"/> is a vertex of the model's own, as the renderer
 /// holds them; one at or over it is <see cref="Vertices"/>' at the index less that count. A cluster's
 /// <see cref="GpuCluster.IndexOffset"/> is into <see cref="Indices"/>; the renderer adds where it put them in the pools.
 /// </summary>

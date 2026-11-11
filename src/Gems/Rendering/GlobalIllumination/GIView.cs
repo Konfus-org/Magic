@@ -1,5 +1,5 @@
 using System.Collections.Immutable;
-using Magic.GpuWorld;
+using Magic.DeferredRendering.View;
 using Magic.Graphics;
 
 namespace Magic.GlobalIllumination;

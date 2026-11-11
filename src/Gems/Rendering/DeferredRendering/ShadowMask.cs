@@ -1,6 +1,7 @@
+using Magic.DeferredRendering.View;
 using Magic.Graphics;
 
-namespace Magic.GpuWorld;
+namespace Magic.DeferredRendering;
 
 /// <summary>
 /// How much of each light reaches each pixel this frame: the mask shading reads, the layout the library's

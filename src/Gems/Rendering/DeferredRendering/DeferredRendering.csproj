@@ -2,16 +2,14 @@
   <!-- A gem: Magic loads it from Gems/DeferredRendering/DeferredRendering.dll when a project lists DeferredRendering. -->
   <PropertyGroup>
     <!-- Shown beside the gem as Magic starts it. -->
-    <Description>Lights the world the GPU holds, deferred: the shading of the GBuffer, shadowed, the glass over it, the post effects and the output.</Description>
+    <Description>The renderer: keeps the world on the GPU each frame for the gems that draw it, and lights it, deferred: the shading of the GBuffer, shadowed, the glass over it, the post effects and the output.</Description>
     <Version>1.0.0</Version>
     <Authors>Konfus</Authors>
     <!-- Copies the gem's own NuGet dependencies next to it, where its load context finds them. -->
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its interfaces, and
-         the world's gem a project lists beside it, whose upscaling it runs. -->
+    <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its interfaces. -->
     <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" Private="false" />
-    <ProjectReference Include="../GpuWorld/GpuWorld.csproj" Private="false" />
   </ItemGroup>
 </Project>

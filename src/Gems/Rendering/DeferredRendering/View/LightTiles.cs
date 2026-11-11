@@ -2,12 +2,13 @@ using System.Collections.Immutable;
 using System.Numerics;
 using Magic.Assets;
 using Magic.Debugging;
+using Magic.DeferredRendering.World;
 using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Graphics;
 using Magic.Utils;
 
-namespace Magic.GpuWorld;
+namespace Magic.DeferredRendering.View;
 
 /// <summary>
 /// A frame's light table, holding <paramref name="Count"/> lights, and each tile's words of bits, a bit per light.

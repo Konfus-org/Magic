@@ -20,7 +20,7 @@ internal sealed class RendererDebugWindow(IDebugUI ui, IInput? input)
     /// <summary>
     /// <paramref name="current"/>, or a copy with the view and whether the window is open as chosen this frame.
     /// </summary>
-    public DeferredSettings Update(DeferredSettings current)
+    public DeferredRenderingSettings Update(DeferredRenderingSettings current)
     {
         DebugView view = current.RenderView;
         bool isOpen = current.IsRenderWindowOpen;

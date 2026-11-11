@@ -6,12 +6,13 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.Debugging;
+using Magic.DeferredRendering.View;
 using Magic.Ecs.Components;
 using Magic.Graphics;
 using Magic.Threading;
 using Magic.Utils;
 
-namespace Magic.GpuWorld;
+namespace Magic.DeferredRendering.World;
 
 /// <summary>
 /// The GPU resources the gem draws with, each read once on its first ask: a texture asset by its handle, read and asked

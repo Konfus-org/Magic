@@ -11,8 +11,8 @@ using Magic.Utils;
 namespace Magic.Graphics;
 
 /// <summary>
-/// The gems that render, each after every gem whose output it takes: register each as it is made, then pump them once
-/// a frame on the render thread. A gem is named in what is logged and timed by its assembly,
+/// The gems that render, each render form after every form whose output it takes: register each gem as it is made, then
+/// pump them once a frame on the render thread. A gem is named in what is logged and timed by its assembly,
 /// as the project lists it.
 /// </summary>
 internal sealed class Rendering
@@ -22,20 +22,30 @@ internal sealed class Rendering
     private readonly List<Step> _steps = [];
 
     /// <summary>
-    /// <paramref name="gem"/>'s part of the frame while it renders, until the subscription ends; nothing when it doesn't.
-    /// Throws, naming the gems and the type, when it makes what another gem makes, or when it and others take what the
-    /// others make round a cycle; the gems registered before go on as they were.
+    /// <paramref name="gem"/>'s parts of the frame, one for each render form it implements, while it renders, until the
+    /// subscription ends; nothing when it doesn't. Throws, naming the gems and the type, when it makes what another gem
+    /// makes, or when it and others take what the others make round a cycle; the gems registered before go on as they
+    /// were.
     /// </summary>
     public Subscription Register(IGem gem)
     {
-        if (GetForm(gem) is not var (input, output))
+        List<Step> steps =
+        [
+            .. GetForms(gem)
+                .Select(form =>
+                {
+                    Type type = typeof(Step<,>).MakeGenericType(form.Input, form.Output);
+                    return (Step)(
+                        Activator.CreateInstance(type, gem) ?? throw new InvalidOperationException(type.Name)
+                    );
+                }),
+        ];
+        if (steps.Count == 0)
             return new Subscription(static () => { });
 
-        Type type = typeof(Step<,>).MakeGenericType(input, output);
-        Step step = (Step)(Activator.CreateInstance(type, gem) ?? throw new InvalidOperationException(type.Name));
-        Order([.. _steps, step]);
+        Order([.. _steps, .. steps]);
 
-        return new Subscription(() => Order([.. _steps.Where(other => other != step)]));
+        return new Subscription(() => Order([.. _steps.Where(other => other.Instance != gem)]));
     }
 
     /// <summary>
@@ -84,13 +94,13 @@ internal sealed class Rendering
     }
 
     /// <summary>
-    /// What the render form <paramref name="gem"/> implements takes and makes, <see cref="None"/> for either it lacks;
-    /// null when it renders nothing.
+    /// What each render form <paramref name="gem"/> implements takes and makes, <see cref="None"/> for either it lacks;
+    /// none when it renders nothing.
     /// </summary>
-    private static (Type Input, Type Output)? GetForm(IGem gem)
+    private static IEnumerable<(Type Input, Type Output)> GetForms(IGem gem)
     {
         if (gem is IRender)
-            return (typeof(None), typeof(None));
+            yield return (typeof(None), typeof(None));
 
         foreach (Type contract in gem.GetType().GetInterfaces())
         {
@@ -100,16 +110,14 @@ internal sealed class Rendering
             Type form = contract.GetGenericTypeDefinition();
             Type[] types = contract.GenericTypeArguments;
             if (form == typeof(IRender<,>))
-                return (types[0], types[1]);
+                yield return (types[0], types[1]);
 
             if (form == typeof(IRenderFrom<>))
-                return (types[0], typeof(None));
+                yield return (types[0], typeof(None));
 
             if (form == typeof(IRenderInto<>))
-                return (typeof(None), types[0]);
+                yield return (typeof(None), types[0]);
         }
-
-        return null;
     }
 
     /// <summary>

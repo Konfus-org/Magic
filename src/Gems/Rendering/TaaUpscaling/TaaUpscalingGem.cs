@@ -1,6 +1,7 @@
 using Magic.Assets;
 using Magic.Debugging;
-using Magic.GpuWorld;
+using Magic.DeferredRendering;
+using Magic.DeferredRendering.View;
 using Magic.Graphics;
 using Magic.Projects;
 using Magic.Utils;

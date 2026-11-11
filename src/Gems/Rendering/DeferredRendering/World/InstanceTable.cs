@@ -7,7 +7,7 @@ using Magic.Ecs.Components;
 using Magic.Graphics;
 using Magic.Utils;
 
-namespace Magic.GpuWorld;
+namespace Magic.DeferredRendering.World;
 
 /// <summary>
 /// The instance table: a row per renderer, at its index in a snapshot of the renderers. A frame's work is the chunks of

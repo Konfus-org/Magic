@@ -8,7 +8,7 @@ namespace Magic.Graphics;
 /// thread's frames. Core calls <see cref="Render"/> once a frame; the gem records its passes into the frame's graph,
 /// each in its <see cref="RenderStage"/>, and once every gem has, the GPU provider presents it. A gem that takes or makes
 /// what other gems draw from implements <see cref="IRenderFrom{TInput}"/>, <see cref="IRenderInto{TOutput}"/> or
-/// <see cref="IRender{TInput, TOutput}"/> instead.
+/// <see cref="IRender{TInput, TOutput}"/> instead. A gem with more than one part of the frame implements a form for each.
 /// </summary>
 public interface IRender
 {

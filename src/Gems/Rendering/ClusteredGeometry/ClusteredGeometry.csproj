@@ -26,8 +26,8 @@
   </ItemGroup>
   <ItemGroup>
     <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its interfaces, and
-         the world's gem a project lists beside it, whose models it clusters and draws. -->
+         the renderer a project lists beside it, whose models it clusters and draws. -->
     <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" Private="false" />
-    <ProjectReference Include="../GpuWorld/GpuWorld.csproj" Private="false" />
+    <ProjectReference Include="../DeferredRendering/DeferredRendering.csproj" Private="false" />
   </ItemGroup>
 </Project>

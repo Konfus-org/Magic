@@ -11,7 +11,7 @@ view it draws, with a gem that lights the GBuffer.
 - As a model loads, the gem makes what it draws it as, once per change to its file, and keeps it in the cache: a
   hierarchy of clusters of up to 128 triangles. Each level of the hierarchy groups neighbouring clusters of the one
   below and simplifies them, so the GPU picks per cluster how much detail to draw. The leaves draw the model's own
-  vertices, as the world's gem holds them; each level above draws copies of the vertices it kept. meshoptimizer, which
+  vertices, as the renderer holds them; each level above draws copies of the vertices it kept. meshoptimizer, which
   the kit builds from source, does the clustering and the simplifying.
 - Every model also gets an octahedral impostor atlas: 12 by 12 views over the whole sphere, 64 texels a side each,
   every texel the surface's normal, its depth, its material slot and its texture coordinates as the view sees it,

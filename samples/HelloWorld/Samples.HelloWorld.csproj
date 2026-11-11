@@ -70,12 +70,6 @@
       SkipGetTargetFrameworkProperties="true"
     />
     <ProjectReference
-      Include="$(MagicRoot)src/Gems/Rendering/GpuWorld/GpuWorld.csproj"
-      ReferenceOutputAssembly="false"
-      Private="false"
-      SkipGetTargetFrameworkProperties="true"
-    />
-    <ProjectReference
       Include="$(MagicRoot)src/Gems/Rendering/ClusteredGeometry/ClusteredGeometry.csproj"
       ReferenceOutputAssembly="false"
       Private="false"

@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 using Magic.Assets;
 using Magic.Graphics;
 
-namespace Magic.GpuWorld;
+namespace Magic.DeferredRendering.View;
 
 /// <summary>
 /// The passes that make the sky's tables, each frame while there is a sky, their shaders built by the GPU provider.

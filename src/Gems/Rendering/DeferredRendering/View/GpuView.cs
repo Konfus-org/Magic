@@ -1,9 +1,10 @@
 using System.Collections.Immutable;
 using System.Numerics;
 using Magic.Assets;
+using Magic.DeferredRendering.World;
 using Magic.Graphics;
 
-namespace Magic.GpuWorld;
+namespace Magic.DeferredRendering.View;
 
 /// <summary>
 /// The world as the GPU holds it this frame, and the view it is seen through: what the gem that keeps the world on the

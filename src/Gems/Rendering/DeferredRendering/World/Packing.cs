@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Assets;
 
-namespace Magic.GpuWorld;
+namespace Magic.DeferredRendering.World;
 
 /// <summary>
 /// Values packed as <c>Core/Pack.slang</c> unpacks them, the CPU side of the same bits, and read back from the cache's

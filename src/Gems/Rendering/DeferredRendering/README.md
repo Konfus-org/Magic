@@ -1,11 +1,38 @@
 # DeferredRendering
 
-Lights the world into the window, deferred: the GBuffer a geometry gem draws, lit by the sun and the sky, from the
-view the gem that keeps the world on the GPU makes each frame. When the console asks for a screenshot, it hands the
-frame as a texture to the gem that writes textures.
+The renderer. Each frame it runs two render steps. The first keeps the world on the GPU for the gems that draw it:
+the view and its targets at the picture's size, the frame's buffer and its rows, the models, materials and textures
+every renderer draws with, the instances, the lights with each tile's lights, and the sky's tables. The second lights
+that world into the window, deferred: the GBuffer a geometry gem draws, lit by the sun and the sky. When the console
+asks for a screenshot, it hands the frame as a texture to the gem that writes textures. It holds the types the
+rendering gems share.
 
-To use it, list `DeferredRendering` in a project's `.magic` file beside the gem that keeps the world on the GPU and a
-gem that draws its geometry.
+To use it, list `DeferredRendering` in a project's `.magic` file after the GPU provider, the ECS, the model reader and
+the texture reader, with a gem that draws its geometry.
+
+## What it keeps
+
+- As a model loads, the gem makes what the GPU holds it as, once per change to its file, and keeps it in the cache:
+  its vertices as the GPU reads them and each mesh's triangles, which rays and every renderer draw.
+- A model shows once it is on the GPU. One that doesn't load is drawn as the failure model, and a material or texture
+  that doesn't load as the magenta failure material.
+- The view names each model on the GPU by its model index, the one its instances name, so a renderer keeps a row of
+  its own for each.
+- A model nothing has drawn or waited for in `Rendering.ModelKeepSec` leaves the GPU, and loads again when it is next
+  drawn.
+- As a domain replaces the world, the loading screen stays until the models, materials and textures of what comes,
+  the effects of its post processing with their passes, and the gem's passes are on the GPU, or failed, so its first
+  frame is drawn whole, its effects included. Nothing drawn before carries into the frames after.
+- The view is seen through the first camera that draws into the window, at `Rendering.FieldOfView` when that is more
+  than 0.
+- The finished picture is `Rendering.Resolution` in size, with a window or without, and the window shows it
+  stretched. At `0 0` it is the window's size, or 1280 by 720 with no window.
+- The world is drawn at `Rendering.RenderScale` of that size, and a gem that upscales takes it to that size, or it is
+  stretched with `Rendering.UpscaleFilter`, `Linear` or `Nearest`. At `0` it is drawn at the most that fits 1920 by
+  1080.
+
+`bake` in the console loads every asset, which makes what every gem makes of every model, then opens every domain under
+`Domains/` in turn and exits, so a release ships with the caches full.
 
 ## What it draws
 
@@ -23,8 +50,9 @@ gem that draws its geometry.
   it holds of the reflections; a rougher one its diffuse light, so a closed room reflects none of the sky.
 - The first `PostProcessing`'s effects run over the lit picture in order, and finish it for the screen: each is a
   material whose shader implements the pixel effect contract, with params of its own as a surface material's are. With
-  no `PostProcessing`, the picture gets the engine's `Exposure` and `Agx` materials; a
-  `PostProcessing` lists every effect it wants, those included, so another tonemap is another material in the tonemap's
+  no `PostProcessing`, the picture gets the engine's `Exposure` and `Agx` materials, exposed by
+  `Rendering.ExposureCompensation`; an effect whose material `Rendering.DisabledEffects` names, as `Bloom Vignette`, is
+  left out. A `PostProcessing` lists every effect it wants, those included, so another tonemap is another material in the tonemap's
   place. Each reads the picture the ones before it left and writes another; one that declares levels first fills each
   level of a target of its own, which one that declares a history, as the temporal anti-aliasing and the exposure do,
   keeps from frame to frame as its history. While an effect that declares jitter runs, as the temporal anti-aliasing
@@ -47,8 +75,9 @@ gem that draws its geometry.
 
 ## Settings
 
-`get Debug` lists the gem's settings, and `set Debug.RenderView Normal` sets one; `Rendering.Gamma` and
-`Rendering.UpscaleFilter` are under `Rendering`, as `set Rendering.UpscaleFilter Nearest`. `Debug.RenderView` shows one
+The gem's settings are `DeferredRenderingSettings`. `get Rendering` lists those under `Rendering`, and
+`set Rendering.Resolution 2560 1440` sets one; a wrong value logs what it takes. `get Debug` lists the debug view's,
+as `set Debug.RenderView Normal`. `Debug.RenderView` shows one
 part of the GBuffer alone, and `Final` the finished frame again; the names are in `DebugView`.
 `Debug.IsRenderWindowOpen` opens the Rendering window.
 
@@ -58,12 +87,18 @@ without what other gems draw over it.
 
 ## Changing it
 
-`DeferredRenderingGem.Render` is the frame in order, top to bottom: start there. As a domain loads, the loading screen
-also waits for the gem's passes.
+`DeferredRenderingGem` has a `Render` for each step, each the step in order, top to bottom: start there. The first
+ends in the view it hands on; the second takes it with what the other gems made.
 
+- A texture, material or model asset comes from `GpuResources`, which reads it on the first ask. It asks the graph
+  for the model pools, the mesh table on a GPU that traces rays, and each texture and its sampler every frame. The
+  pools start small and grow by half, or by what a model needs, as models arrive. It evicts a model once nothing has
+  asked for it in a while and no renderer drawn holds it. A renderer's instance row is built again, asking for its
+  model, when the renderer is written and when a model arrives; the material rows its slots are drawn with are made
+  again each frame.
 - A pass is one `RenderGraph.Compute` or `RenderGraph.Draw` call saying what it reads and writes, which puts its
   barriers in. `Render` records each pass under a short comment; the effects' passes are `PixelEffects.Record`'s.
-- The frame is not drawn until every shader entry in `_shaders` is built.
+- A step draws nothing until every shader entry it runs is built: `_viewShaders` and `_shadingShaders`.
 - Each frame, a pass asks the graph for its own textures and buffers by description. The same description under a
   name is the same resource, holding what the last frame left in it; another one, as at a new picture size, makes it
   again, empty.

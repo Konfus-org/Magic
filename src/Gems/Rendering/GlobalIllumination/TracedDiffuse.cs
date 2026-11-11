@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 using Magic.Assets;
-using Magic.GpuWorld;
+using Magic.DeferredRendering.View;
 using Magic.Graphics;
 using Magic.Utils;
 

@@ -1,6 +1,7 @@
+using Magic.DeferredRendering.View;
 using Magic.Graphics;
 
-namespace Magic.GpuWorld;
+namespace Magic.DeferredRendering;
 
 /// <summary>
 /// What a gem that upscales makes each frame, before the view is: the passes that take the finished picture, the view's

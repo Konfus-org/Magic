@@ -1,5 +1,5 @@
 using System.Numerics;
-using Magic.GpuWorld;
+using Magic.DeferredRendering.World;
 
 namespace Magic.ClusteredGeometry;
 

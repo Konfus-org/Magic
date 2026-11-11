@@ -1,7 +1,7 @@
 using Magic.Ecs;
 using Magic.Ecs.Components;
 
-namespace Magic.GpuWorld;
+namespace Magic.DeferredRendering.View;
 
 /// <summary>
 /// Everything a frame draws, copied on the game thread as its frame ends and published for the render thread, which
@@ -34,5 +34,5 @@ internal sealed class RenderInputs
     /// <summary>
     /// The settings the frame is drawn by.
     /// </summary>
-    public GpuWorldSettings Settings { get; set; } = new();
+    public DeferredRenderingSettings Settings { get; set; } = new();
 }

@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 using System.Numerics;
 using Magic.Assets;
 
-namespace Magic.GpuWorld;
+namespace Magic.DeferredRendering.World;
 
 /// <summary>
 /// What the GPU holds a <see cref="Model"/> as, made from it once and cached under its version: its meshes' vertices

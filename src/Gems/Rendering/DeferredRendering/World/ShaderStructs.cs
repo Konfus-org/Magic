@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Ecs.Components;
 
-namespace Magic.GpuWorld;
+namespace Magic.DeferredRendering.World;
 
 /// <summary>
 /// An instance as the GPU reads it from the instance table, 248 bytes: the twin of <c>Scene/Instances.slang</c>'s,

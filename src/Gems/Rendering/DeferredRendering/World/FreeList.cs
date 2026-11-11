@@ -1,4 +1,4 @@
-namespace Magic.GpuWorld;
+namespace Magic.DeferredRendering.World;
 
 /// <summary>
 /// The free ranges of a pool of <c>capacity</c> elements, the first <c>taken</c> of them never free: a free list, handing

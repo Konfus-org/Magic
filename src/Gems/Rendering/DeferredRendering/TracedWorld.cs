@@ -1,7 +1,8 @@
 using System.Numerics;
+using Magic.DeferredRendering.View;
 using Magic.Graphics;
 
-namespace Magic.GpuWorld;
+namespace Magic.DeferredRendering;
 
 /// <summary>
 /// The world as rays see it this frame, on a GPU that traces them: the acceleration structure over the instances, each
