@@ -152,10 +152,14 @@ void ScatterAir(uint3 thread : SV_DispatchThreadID, uint3 group : SV_GroupID, ui
         + GetLocalLightRadiance(air, lights, world, direction, float4(pick, random.yz));
     float4 cell = float4(radiance, GetHazeDensity(air, world.y));
 
-    // Last frame's cell where this one's point was then, unless that was off its view or past its reach.
+    // Last frame's cell where this one's centre was then, unless that was off its view or past its reach: the centre,
+    // not this frame's point, so a still view reads its own cell rather than a different blend of its neighbours each
+    // frame.
     if (header.z != 0u)
     {
-        float3 previous = world - frame.previousCameraPosition.xyz;
+        float3 center = frame.cameraPosition.xyz
+            + direction * ToAirDistance((float(thread.z) + 0.5) / float(size.z), air.distance);
+        float3 previous = center - frame.previousCameraPosition.xyz;
         float4 clip = mul(float4(previous, 1.0), frame.previousViewProjection);
         float3 at = float3(ToUv(clip.xy / max(clip.w, Epsilon)), ToAirDepth(length(previous), air.distance));
         if (clip.w > 0.0 && all(at >= 0.0) && all(at <= 1.0))
