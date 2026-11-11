@@ -105,25 +105,14 @@ public sealed class GlobalIlluminationGem
         Result<GpuBuffer> constants = graph.Buffer(
             GpuDescriptions.GetBuffer("GI constants", Unsafe.SizeOf<GIConstants>())
         );
-        if (!constants.Ok)
-        {
-            Log.Error($"The indirect light is not traced: {constants.Error}");
-
-            return null;
-        }
-
         float scale = Settings.IndirectScale;
         (int Width, int Height) tracedSize = (Scale(gpu.Width, scale), Scale(gpu.Height, scale));
         GIView view = new(
             graph,
-            gpu.Frame,
+            gpu,
             constants.Value,
             tracedSize,
             HasHistory: _traced == tracedSize,
-            gpu.Depth,
-            gpu.GBufferNormal,
-            gpu.GBufferSurface,
-            gpu.Velocity,
             [
                 gpu.SkyTransmittance,
                 gpu.SkyMultiScattering,
@@ -155,7 +144,7 @@ public sealed class GlobalIlluminationGem
         Result<GpuSampler> sampler = graph.Sampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
-        foreach (Result made in (ReadOnlySpan<Result>)[probes, diffuse, reflections, sampler])
+        foreach (Result made in (ReadOnlySpan<Result>)[constants, probes, diffuse, reflections, sampler])
         {
             if (!made.Ok)
             {

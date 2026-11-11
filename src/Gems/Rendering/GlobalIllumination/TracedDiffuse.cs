@@ -73,22 +73,22 @@ internal sealed class TracedDiffuse(AssetManager assets)
         graph
             .Compute("Trace diffuse", _traceShader, header, RenderStage.Light)
             .Reads(view.World.AsSpan())
-            .Reads(view.Frame, view.Constants, view.Depth, view.GBufferNormal)
+            .Reads(view.Gpu.Frame, view.Constants, view.Gpu.Depth, view.Gpu.GBufferNormal)
             .Reads(probes.Probes, probes.Depth)
             .Writes(diffuse.Traced)
             .DispatchOver(width, height);
         graph
             .Compute("Filter diffuse", _filterShader, header, RenderStage.Light)
-            .Reads(view.Frame, view.Constants, view.Depth, diffuse.Traced)
+            .Reads(view.Gpu.Frame, view.Constants, view.Gpu.Depth, diffuse.Traced)
             .Writes(diffuse.Filtered)
             .DispatchOver(width, height);
         graph
             .Compute("Blend diffuse", _blendShader, header, RenderStage.Light)
             .Reads(
-                view.Frame,
+                view.Gpu.Frame,
                 view.Constants,
-                view.Depth,
-                view.Velocity,
+                view.Gpu.Depth,
+                view.Gpu.Velocity,
                 diffuse.Filtered,
                 diffuse.Blend.LightHistory,
                 diffuse.Blend.DepthHistory

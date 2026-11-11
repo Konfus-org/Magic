@@ -96,18 +96,18 @@ internal sealed class TracedReflections(AssetManager assets)
         graph
             .Compute("Trace reflections", _traceShader, header, RenderStage.Light)
             .Reads(view.World.AsSpan())
-            .Reads(view.Frame, view.Constants, view.Depth, view.GBufferNormal, view.GBufferSurface)
+            .Reads(view.Gpu.Frame, view.Constants, view.Gpu.Depth, view.Gpu.GBufferNormal, view.Gpu.GBufferSurface)
             .Reads(probes.Probes, probes.Depth)
             .Writes(reflections.Traced, reflections.Rays)
             .DispatchOver(width, height);
         graph
             .Compute("Resolve reflections", _resolveShader, header, RenderStage.Light)
             .Reads(
-                view.Frame,
+                view.Gpu.Frame,
                 view.Constants,
-                view.Depth,
-                view.GBufferNormal,
-                view.GBufferSurface,
+                view.Gpu.Depth,
+                view.Gpu.GBufferNormal,
+                view.Gpu.GBufferSurface,
                 reflections.Traced,
                 reflections.Rays
             )
@@ -116,12 +116,12 @@ internal sealed class TracedReflections(AssetManager assets)
         graph
             .Compute("Blend reflections", _blendShader, header, RenderStage.Light)
             .Reads(
-                view.Frame,
+                view.Gpu.Frame,
                 view.Constants,
-                view.Depth,
-                view.GBufferNormal,
-                view.GBufferSurface,
-                view.Velocity,
+                view.Gpu.Depth,
+                view.Gpu.GBufferNormal,
+                view.Gpu.GBufferSurface,
+                view.Gpu.Velocity,
                 reflections.Resolved,
                 reflections.Distance,
                 reflections.Blend.LightHistory,

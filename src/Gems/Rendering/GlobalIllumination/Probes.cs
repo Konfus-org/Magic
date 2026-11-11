@@ -180,34 +180,34 @@ internal sealed class Probes(AssetManager assets)
         uint probeCount = grid.DimensionX * grid.DimensionY * grid.DimensionZ;
         graph
             .Compute("Ask probe rays", _askShader, header, RenderStage.Light)
-            .Reads(view.Frame, probes.Probes, probes.Variance)
+            .Reads(view.Gpu.Frame, probes.Probes, probes.Variance)
             .Writes(probes.RayCounts)
             .Dispatch(probeCount);
         graph
             .Compute("Plan probe rays", _planShader, header, RenderStage.Light)
-            .Reads(view.Frame)
+            .Reads(view.Gpu.Frame)
             .Writes(probes.RayCounts, probes.RayArguments)
             .Dispatch(1);
         graph
             .Compute("List probe rays", _listShader, header, RenderStage.Light)
-            .Reads(view.Frame, probes.RayCounts)
+            .Reads(view.Gpu.Frame, probes.RayCounts)
             .Writes(probes.RayList)
             .Dispatch(probeCount);
         graph
             .Compute("Trace probes", _traceShader, header, RenderStage.Light)
             .Reads(view.World.AsSpan())
-            .Reads(view.Frame, probes.Probes, probes.RayList, probes.RayCounts, probes.Depth)
+            .Reads(view.Gpu.Frame, probes.Probes, probes.RayList, probes.RayCounts, probes.Depth)
             .Writes(probes.Rays)
             .Indirect(probes.RayArguments)
             .DispatchIndirect(probes.RayArguments, 0);
         graph
             .Compute("Blend probe irradiance", _irradianceShader, header, RenderStage.Light)
-            .Reads(view.Frame, probes.Rays, probes.RayCounts)
+            .Reads(view.Gpu.Frame, probes.Rays, probes.RayCounts)
             .Writes(probes.Probes, probes.Variance)
             .Dispatch(probeCount);
         graph
             .Compute("Blend probe depth", _depthShader, header, RenderStage.Light)
-            .Reads(view.Frame, probes.Rays, probes.RayCounts)
+            .Reads(view.Gpu.Frame, probes.Rays, probes.RayCounts)
             .Writes(probes.Probes, probes.Depth)
             .Dispatch(probeCount);
     }
