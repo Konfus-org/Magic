@@ -7,6 +7,7 @@ code and docs follow.
 
 A skill is a step-by-step procedure in [`docs/skills/`](docs/skills). Any agent uses one on its own, without being
 asked, when its trigger fits: read its `SKILL.md` and follow it. Claude Code also finds them through `.claude/`.
+[`PROJECT.md`](docs/skills/PROJECT.md) gives the commands, paths and rules that the skills name by role.
 
 | Skill | Use it |
 | --- | --- |
