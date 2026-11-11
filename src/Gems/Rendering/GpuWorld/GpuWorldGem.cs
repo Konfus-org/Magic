@@ -255,7 +255,12 @@ public sealed class GpuWorldGem
             return null;
         }
 
-        bool isJittered = input.Upscaling is not null || HasJitter(effects.Value.Effects.Span);
+        bool isJittered = input.Upscaling is not null;
+        foreach (GpuEffect effect in effects.Value.Effects.Span)
+        {
+            isJittered |= effect.State == GpuState.Ready && effect.Needs.HasJitter;
+        }
+
         Vector2 jitter = isJittered ? FrameView.GetJitter(frame.Index) : Vector2.Zero;
 
         Result<GpuView> view = UploadFrame(graph, inputs, frame, jitter, instanceCount, effects.Value);
@@ -368,41 +373,27 @@ public sealed class GpuWorldGem
     }
 
     /// <summary>
-    /// Whether an effect that runs asks for the camera to jitter.
-    /// </summary>
-    private static bool HasJitter(ReadOnlySpan<GpuEffect> effects)
-    {
-        foreach (GpuEffect effect in effects)
-        {
-            if (effect.State == GpuState.Ready && effect.Needs.HasJitter)
-                return true;
-        }
-
-        return false;
-    }
-
-    /// <summary>
     /// The first camera that draws into the window, else one at the origin.
     /// </summary>
-    private static RenderCamera GetCamera(EcsSnapshot<Transform, Camera> cameras)
+    private static (Transform Transform, Camera Camera) GetCamera(EcsSnapshot<Transform, Camera> cameras)
     {
         for (int i = 0; i < cameras.Count; i++)
         {
-            Camera camera = cameras.Second[i];
-            if (camera.Target.IsWindow)
-                return new RenderCamera(cameras.First[i], camera.FieldOfView, camera.Near);
+            if (cameras.Second[i].Target.IsWindow)
+                return (cameras.First[i], cameras.Second[i]);
         }
 
-        return new RenderCamera(new Transform(), 60, 0.05f);
+        return (new Transform(), new Camera());
     }
 
     /// <summary>
     /// The directional light the frame is lit by: the sun while it is up, else the moon while it is up, else the first
-    /// there is, else a white light from above.
+    /// there is, else a white light from above: towards it, unit, and its colour times its intensity, in lux, above the
+    /// air.
     /// </summary>
-    private static RenderSun GetSun(EcsSnapshot<Transform, DirectionalLight> lights)
+    private static (Vector3 Direction, Vector3 Illuminance) GetSun(EcsSnapshot<Transform, DirectionalLight> lights)
     {
-        RenderSun sun = new(Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One);
+        (Vector3 Direction, Vector3 Illuminance) sun = (Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One);
         int sunRank = -1;
         for (int i = 0; i < lights.Count; i++)
         {
@@ -419,7 +410,7 @@ public sealed class GpuWorldGem
                 continue;
 
             Vector3 illuminance = new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity;
-            sun = new RenderSun(towards, illuminance);
+            sun = (towards, illuminance);
             sunRank = rank;
         }
 
@@ -545,26 +536,19 @@ public sealed class GpuWorldGem
         int width = Math.Max(1, (int)MathF.Round(shown.Width * scale));
         int height = Math.Max(1, (int)MathF.Round(shown.Height * scale));
 
-        RenderCamera camera = GetCamera(inputs.Cameras);
+        (Transform Transform, Camera Camera) camera = GetCamera(inputs.Cameras);
         if (inputs.Settings.FieldOfView > 0)
-            camera = camera with { FieldOfView = inputs.Settings.FieldOfView };
-        Result<FrameTargets> targets = _frameView.Upload(
-            graph,
-            camera,
-            frame,
-            jitter,
-            width,
-            height,
-            instanceCount,
-            tables.Value.Rows,
-            tables.Value.Materials
-        );
+            camera.Camera = camera.Camera with { FieldOfView = inputs.Settings.FieldOfView };
+
+        // The targets, the lights and the sky's tables asked for in that order, then the frame's rows written.
+        Result<FrameTargets> targets = _frameView.TryGetTargets(graph, width, height);
         if (!targets.Ok)
             return Result.Failure(targets.Error);
 
         Result<LightBuffers> lights = _lightTiles.Prepare(
             graph,
-            targets.Value,
+            width,
+            height,
             inputs.PointLights,
             inputs.SpotLights,
             inputs.RectLights
@@ -576,18 +560,22 @@ public sealed class GpuWorldGem
         if (!sky.Ok)
             return Result.Failure(sky.Error);
 
-        Result lit = FrameLights.Upload(
+        Result uploaded = _frameView.Upload(
             graph,
-            targets.Value.Constants,
-            inputs.Skies,
+            targets.Value,
             camera,
+            frame,
+            jitter,
+            instanceCount,
+            tables.Value,
             GetSun(inputs.DirectionalLights),
+            inputs.Skies.Count > 0,
             inputs.Settings.SkyBrightness,
             sky.Value,
             lights.Value
         );
-        if (!lit.Ok)
-            return Result.Failure(lit.Error);
+        if (!uploaded.Ok)
+            return Result.Failure(uploaded.Error);
 
         FrameTargets view = targets.Value;
 

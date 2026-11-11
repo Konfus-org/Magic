@@ -49,7 +49,8 @@ internal sealed class LightTiles(AssetManager assets)
     /// </summary>
     public Result<LightBuffers> Prepare(
         RenderGraph graph,
-        in FrameTargets view,
+        int width,
+        int height,
         EcsSnapshot<Transform, PointLight> points,
         EcsSnapshot<Transform, SpotLight> spots,
         EcsSnapshot<Transform, RectLight> rects
@@ -60,10 +61,7 @@ internal sealed class LightTiles(AssetManager assets)
             return Result.Failure(table.Error);
 
         Result<GpuBuffer> tiles = graph.Buffer(
-            GpuDescriptions.GetBuffer(
-                "Light tiles",
-                (long)GetTiles(view.Width) * GetTiles(view.Height) * _buckets * sizeof(uint)
-            )
+            GpuDescriptions.GetBuffer("Light tiles", (long)GetTiles(width) * GetTiles(height) * _buckets * sizeof(uint))
         );
         if (!tiles.Ok)
             return Result.Failure(tiles.Error);
