@@ -21,20 +21,24 @@ internal sealed class SkyLuts(AssetManager assets)
 
     public void Record(RenderGraph graph, in GpuView view, in GpuConstants header)
     {
+        // Each table is filled over its texels, at the size the view's step asked for it.
+        TextureDescription transmittance = graph.GetDescription(view.SkyTransmittance);
+        TextureDescription multiScattering = graph.GetDescription(view.SkyMultiScattering);
+        TextureDescription sky = graph.GetDescription(view.SkyView);
         graph
             .Compute("Sky: transmittance", _transmittanceShader, header, RenderStage.Prepare)
             .Reads(view.Frame)
             .Writes(view.SkyTransmittance)
-            .DispatchOver(256, 64);
+            .DispatchOver(transmittance.Width, transmittance.Height);
         graph
             .Compute("Sky: multi-scattering", _multiScatteringShader, header, RenderStage.Prepare)
             .Reads(view.Frame, view.SkyTransmittance)
             .Writes(view.SkyMultiScattering)
-            .DispatchOver(32, 32);
+            .DispatchOver(multiScattering.Width, multiScattering.Height);
         graph
             .Compute("Sky: view", _viewShader, header, RenderStage.Prepare)
             .Reads(view.Frame, view.SkyTransmittance, view.SkyMultiScattering)
             .Writes(view.SkyView)
-            .DispatchOver(192, 108);
+            .DispatchOver(sky.Width, sky.Height);
     }
 }

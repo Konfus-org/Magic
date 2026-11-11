@@ -40,7 +40,10 @@ internal sealed class LightTiles(AssetManager assets)
 
     private readonly ShaderEntry _cullShader = PassShaders.GetEntry(assets, "CullLights", "CullLights");
 
-    private bool _isFullLogged;
+    /// <summary>
+    /// How many lights the last frame had, so the error shows each time the table fills, not each frame while it is.
+    /// </summary>
+    private int _lastTotal;
 
     public ImmutableArray<ShaderEntry> Shaders => [_cullShader];
 
@@ -69,11 +72,10 @@ internal sealed class LightTiles(AssetManager assets)
 
         int total = points.Count + spots.Count + rects.Count;
         LightBuffers lights = new(table.Value, tiles.Value, Math.Min(total, MaxLights));
-        if (total > MaxLights && !_isFullLogged)
-        {
-            _isFullLogged = true;
+        if (total > MaxLights && _lastTotal <= MaxLights)
             Log.Error($"Some lights are not drawn: the light table holds {MaxLights}.");
-        }
+
+        _lastTotal = total;
 
         if (lights.Count == 0)
             return Result.Success(lights);

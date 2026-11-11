@@ -71,11 +71,6 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
     private int _settledModels = -1;
 
     /// <summary>
-    /// The count of changes of the rows <see cref="Upload"/> last copied.
-    /// </summary>
-    private long _uploadedVersion;
-
-    /// <summary>
     /// How many times the rows have changed.
     /// </summary>
     private long _version;
@@ -99,15 +94,14 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
 
     /// <summary>
     /// The rows of <paramref name="renderers"/>, from what changed since the last fill: each its model's place in the
-    /// pools and the material rows of its slots, or an empty row while its model is being made. How many rows the cull
-    /// walks.
+    /// pools and the material rows of its slots, or an empty row while its model is being made.
     /// </summary>
-    public int Fill(EcsSnapshot<Transform, Renderer> renderers, uint frameIndex)
+    public void Fill(EcsSnapshot<Transform, Renderer> renderers, uint frameIndex)
     {
         // The same snapshot again, with the same models, makes the same rows.
         bool isRebuild = resources.SettledModels != _settledModels;
         if (renderers.Version == _filledAt && !isRebuild)
-            return Count;
+            return;
 
         // The error shows each time the table fills, not each fill while it is full.
         int lastCount = Count;
@@ -143,8 +137,6 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
         _filled.Clear();
         _filled.AddRange(chunks);
         _filledAt = renderers.Version;
-
-        return Count;
     }
 
     /// <summary>
@@ -182,27 +174,8 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
         }
 
         graph.Upload(materials.Value, _materialRows.AsSpan(0, _materialSlots.Count));
-        UploadChangedRows(graph, rows.Value);
 
-        return Result.Success((rows.Value, materials.Value));
-    }
-
-    /// <summary>
-    /// How many rows a table holds to hold <paramref name="rows"/>: the next power of two, from
-    /// <see cref="MinCapacity"/> up to <see cref="MaxCapacity"/>.
-    /// </summary>
-    private static int GetCapacity(int rows) =>
-        (int)Math.Min(BitOperations.RoundUpToPowerOf2((uint)Math.Max(rows, MinCapacity)), MaxCapacity);
-
-    /// <summary>
-    /// Copies the blocks of rows that changed into <paramref name="table"/>, each run of them in one copy.
-    /// </summary>
-    private void UploadChangedRows(RenderGraph graph, GpuBuffer table)
-    {
-        if (_version == _uploadedVersion)
-            return;
-
-        _uploadedVersion = _version;
+        // The blocks of rows that changed, each run of them in one copy.
         int blocks = (Count + BlockSize - 1) / BlockSize;
         int block = 0;
         while (block < blocks)
@@ -220,11 +193,20 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
                 runRows += Math.Min(BlockSize, Count - (block * BlockSize));
             }
 
-            graph.Upload(table, _rows.AsSpan(runStart, runRows), (ulong)runStart * GpuInstance.Bytes);
+            graph.Upload(rows.Value, _rows.AsSpan(runStart, runRows), (ulong)runStart * GpuInstance.Bytes);
         }
 
         Array.Clear(_isDirty);
+
+        return Result.Success((rows.Value, materials.Value));
     }
+
+    /// <summary>
+    /// How many rows a table holds to hold <paramref name="rows"/>: the next power of two, from
+    /// <see cref="MinCapacity"/> up to <see cref="MaxCapacity"/>.
+    /// </summary>
+    private static int GetCapacity(int rows) =>
+        (int)Math.Min(BitOperations.RoundUpToPowerOf2((uint)Math.Max(rows, MinCapacity)), MaxCapacity);
 
     /// <summary>
     /// The rows from <paramref name="start"/> built again from their renderers, each asking for its model. A renderer
@@ -243,7 +225,34 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
             Entity entity = renderers.Entities[index];
             Renderer renderer = renderers.Second[index];
             ResidentModel? resident = renderer.Model == Handle<Model>.None ? null : resources.Get(renderer.Model);
-            GpuInstance row = resident is { } model ? CreateRow(renderers.First[index], renderer, model) : default;
+
+            // A resident model's row: where it is, its bounds in the world and the material rows of its slots, every
+            // slot the failure's when the model failed.
+            GpuInstance row = default;
+            if (resident is { } model)
+            {
+                Transform transform = renderers.First[index];
+                Matrix4x4 worldMatrix = transform.Matrix;
+                Matrix4x4.Invert(worldMatrix, out Matrix4x4 inverseWorld);
+                Vector3 scale = transform.Scale;
+                float maxScale = Math.Max(Math.Abs(scale.X), Math.Max(Math.Abs(scale.Y), Math.Abs(scale.Z)));
+                row = new GpuInstance
+                {
+                    World = worldMatrix,
+                    InverseWorld = inverseWorld,
+                    PreviousWorld = worldMatrix,
+                    BoundsCenter = Vector3.Transform(model.BoundsCenter, worldMatrix),
+                    BoundsRadius = model.BoundsRadius * maxScale,
+                    Model = model.ModelIndex,
+                };
+                ImmutableArray<MaterialInstance> slots = renderer.Materials.All;
+                for (int slot = 0; slot < MaterialSet.Capacity; slot++)
+                {
+                    MaterialInstance held = slot < slots.Length ? slots[slot] : default;
+                    row.Materials[slot] = GetMaterialRow(model.IsFailure ? failure : held);
+                }
+            }
+
             bool wasDrawnHere = index < lastCount && _entities[index] == entity && _rows[index].Model != 0;
             if (wasDrawnHere && _rows[index].World != row.World)
             {
@@ -261,35 +270,6 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
         }
 
         _version++;
-    }
-
-    /// <summary>
-    /// A renderer's row, with its model resident: where it is, its bounds in the world and the material rows of its
-    /// slots, every slot the failure's when the model failed.
-    /// </summary>
-    private GpuInstance CreateRow(Transform transform, in Renderer renderer, ResidentModel resident)
-    {
-        Matrix4x4 worldMatrix = transform.Matrix;
-        Matrix4x4.Invert(worldMatrix, out Matrix4x4 inverseWorld);
-        Vector3 scale = transform.Scale;
-        float maxScale = Math.Max(Math.Abs(scale.X), Math.Max(Math.Abs(scale.Y), Math.Abs(scale.Z)));
-        GpuInstance row = new()
-        {
-            World = worldMatrix,
-            InverseWorld = inverseWorld,
-            PreviousWorld = worldMatrix,
-            BoundsCenter = Vector3.Transform(resident.BoundsCenter, worldMatrix),
-            BoundsRadius = resident.BoundsRadius * maxScale,
-            Model = resident.ModelIndex,
-        };
-        ImmutableArray<MaterialInstance> slots = renderer.Materials.All;
-        for (int slot = 0; slot < MaterialSet.Capacity; slot++)
-        {
-            MaterialInstance held = slot < slots.Length ? slots[slot] : default;
-            row.Materials[slot] = GetMaterialRow(resident.IsFailure ? failure : held);
-        }
-
-        return row;
     }
 
     /// <summary>

@@ -563,6 +563,15 @@ internal sealed class GpuResources(
         Result<long> translucent = await shaders
             .ReflectConstantAsync(type, "Translucent", CancellationToken.None)
             .ConfigureAwait(false);
+        Result<long> levels = await shaders
+            .ReflectConstantAsync(type, "Levels", CancellationToken.None)
+            .ConfigureAwait(false);
+        Result<long> history = await shaders
+            .ReflectConstantAsync(type, "History", CancellationToken.None)
+            .ConfigureAwait(false);
+        Result<long> jitters = await shaders
+            .ReflectConstantAsync(type, "Jitters", CancellationToken.None)
+            .ConfigureAwait(false);
         await threads.Enter(EngineThread.Render);
         int bytes = fields.Ok
             ? fields.Value.Select(field => (int)(field.Offset + field.Size)).DefaultIfEmpty().Max()
@@ -573,12 +582,21 @@ internal sealed class GpuResources(
                 ? $"its params are {bytes} bytes, over a row's {GpuMaterial.Bytes - 4}"
                 : fields.Error;
             Log.Error($"Materials drawn with {path} are drawn as the failure: {why}");
-            _layouts[shader.Id] = new MaterialLayout(default, type, false);
+            _layouts[shader.Id] = new MaterialLayout(default, type, false, default);
 
             return;
         }
 
-        _layouts[shader.Id] = new MaterialLayout(fields.Value, type, translucent.Ok && translucent.Value != 0);
+        _layouts[shader.Id] = new MaterialLayout(
+            fields.Value,
+            type,
+            translucent.Ok && translucent.Value != 0,
+            new EffectNeeds(
+                levels.Ok ? (int)levels.Value : 0,
+                history.Ok && history.Value != 0,
+                jitters.Ok && jitters.Value != 0
+            )
+        );
     }
 
     /// <summary>
@@ -673,12 +691,13 @@ internal sealed class GpuResources(
 
     /// <summary>
     /// A material shader's struct as its rows are packed: its fields as reflection lays them out, default when it could
-    /// not be, and the struct a pass is specialised to.
+    /// not be, the struct a pass is specialised to, and, for an effect's, what it declares it needs.
     /// </summary>
     public readonly record struct MaterialLayout(
         ImmutableArray<ShaderField> Fields,
         ShaderTypeArgument Shader,
-        bool IsTranslucent
+        bool IsTranslucent,
+        EffectNeeds Needs
     );
 
     /// <summary>

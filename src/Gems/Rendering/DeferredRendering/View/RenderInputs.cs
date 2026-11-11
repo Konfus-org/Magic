@@ -30,9 +30,4 @@ internal sealed class RenderInputs
     /// the first frame of another world.
     /// </summary>
     public int WorldNumber { get; set; }
-
-    /// <summary>
-    /// The settings the frame is drawn by.
-    /// </summary>
-    public DeferredRenderingSettings Settings { get; set; } = new();
 }

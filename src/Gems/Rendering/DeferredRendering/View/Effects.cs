@@ -2,7 +2,6 @@ using Magic.Assets;
 using Magic.DeferredRendering.World;
 using Magic.Ecs.Components;
 using Magic.Graphics;
-using Magic.Threading;
 using Magic.Utils;
 
 namespace Magic.DeferredRendering.View;
@@ -12,7 +11,7 @@ namespace Magic.DeferredRendering.View;
 /// material's is, the entries of its passes specialised to its shader, and what it declares it needs. An effect is
 /// ready once its material, its textures and its passes are, and failed when one of them failed.
 /// </summary>
-internal sealed class Effects(AssetManager assets, GpuResources resources, IShaderCompiler shaders, Threads threads)
+internal sealed class Effects(AssetManager assets, GpuResources resources)
 {
     /// <summary>
     /// The places in the list a frame runs, the post processing's.
@@ -27,11 +26,6 @@ internal sealed class Effects(AssetManager assets, GpuResources resources, IShad
     /// Each entry specialised to each effect shader, kept, so a frame makes none.
     /// </summary>
     private readonly Dictionary<(ShaderEntry Entry, ShaderTypeArgument Shader), ShaderEntry> _specialised = [];
-
-    /// <summary>
-    /// What each effect shader's struct declares it needs, by the shader's id, null while it is reflected.
-    /// </summary>
-    private readonly Dictionary<ulong, EffectNeeds?> _needs = [];
 
     /// <summary>
     /// The frame's effects and their material rows, by place, written again each frame.
@@ -81,23 +75,15 @@ internal sealed class Effects(AssetManager assets, GpuResources resources, IShad
         if (material != GpuState.Ready)
             return (new GpuEffect(slot.Handle.Id, material, default, default, default), row);
 
-        // What it needs is reflected on its first ask, and it waits for that.
-        ShaderTypeArgument shader = layout.Shader;
-        if (!_needs.TryGetValue(shader.Module.Id, out EffectNeeds? declared))
-        {
-            _needs[shader.Module.Id] = null;
-            ReflectNeedsAsync(shader).FireAndForget();
-        }
-
-        if (declared is not { } needs)
-            return (new GpuEffect(slot.Handle.Id, GpuState.Loading, default, default, default), row);
-
-        ShaderEntry apply = GetSpecialised(_applyShader, shader);
-        ShaderEntry level = GetSpecialised(_levelShader, shader);
+        ShaderEntry apply = GetSpecialised(_applyShader, layout.Shader);
+        ShaderEntry level = GetSpecialised(_levelShader, layout.Shader);
         GpuState applied = graph.GetState(apply);
-        GpuState levels = needs.Levels == 0 ? GpuState.Ready : graph.GetState(level);
+        GpuState levels = layout.Needs.Levels == 0 ? GpuState.Ready : graph.GetState(level);
 
-        return (new GpuEffect(slot.Handle.Id, applied == GpuState.Ready ? levels : applied, apply, level, needs), row);
+        return (
+            new GpuEffect(slot.Handle.Id, applied == GpuState.Ready ? levels : applied, apply, level, layout.Needs),
+            row
+        );
     }
 
     private ShaderEntry GetSpecialised(ShaderEntry entry, ShaderTypeArgument shader)
@@ -109,27 +95,5 @@ internal sealed class Effects(AssetManager assets, GpuResources resources, IShad
         }
 
         return specialised;
-    }
-
-    /// <summary>
-    /// Reflects what the effect shader's struct declares it needs, once: none of what it declares nothing of.
-    /// </summary>
-    private async Task ReflectNeedsAsync(ShaderTypeArgument shader)
-    {
-        Result<long> levels = await shaders
-            .ReflectConstantAsync(shader, "Levels", CancellationToken.None)
-            .ConfigureAwait(false);
-        Result<long> history = await shaders
-            .ReflectConstantAsync(shader, "History", CancellationToken.None)
-            .ConfigureAwait(false);
-        Result<long> jitters = await shaders
-            .ReflectConstantAsync(shader, "Jitters", CancellationToken.None)
-            .ConfigureAwait(false);
-        await threads.Enter(EngineThread.Render);
-        _needs[shader.Module.Id] = new EffectNeeds(
-            levels.Ok ? (int)levels.Value : 0,
-            history.Ok && history.Value != 0,
-            jitters.Ok && jitters.Value != 0
-        );
     }
 }
