@@ -101,13 +101,9 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
             return null;
         }
 
-        // The shaders are the GPU provider's to build, the first ask starting each, so each is asked.
-        bool isBuilt = graph.GetState(_traceShader) == GpuState.Ready;
-        isBuilt &= graph.GetState(_classifyShader) == GpuState.Ready;
-        isBuilt &= graph.GetState(_filterShader) == GpuState.Ready;
-        isBuilt &= graph.GetState(_blendShader) == GpuState.Ready;
-        isBuilt &= graph.GetState(_upsampleShader) == GpuState.Ready;
-        if (!isBuilt)
+        // The shaders are the GPU provider's to build, the first ask starting each.
+        GpuState state = graph.GetState(_traceShader, _classifyShader, _filterShader, _blendShader, _upsampleShader);
+        if (state != GpuState.Ready)
             return null;
 
         Result<ShadowBuffers> made = Prepare(graph, input.View, frame.Index);

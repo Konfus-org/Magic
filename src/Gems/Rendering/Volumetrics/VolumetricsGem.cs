@@ -120,8 +120,7 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
             _current = newest;
         }
 
-        bool isBuilt =
-            graph.GetState(_scatterShader) == GpuState.Ready && graph.GetState(_integrateShader) == GpuState.Ready;
+        bool isBuilt = graph.GetState(_scatterShader, _integrateShader) == GpuState.Ready;
         if (
             _current is not { Weather.Count: > 0 } inputs
             || inputs.Weather.First[0] is { FogDensity: <= 0, CloudCover: <= 0 }

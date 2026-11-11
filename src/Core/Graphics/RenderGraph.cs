@@ -99,6 +99,25 @@ public sealed class RenderGraph
     public GpuState GetState(in ShaderEntry shader) => Gpu?.GetState(shader) ?? GpuState.Failed;
 
     /// <summary>
+    /// Where <paramref name="shaders"/> are: failed if any failed, loading while any loads, else ready. Each is asked,
+    /// so the first ask starts them all.
+    /// </summary>
+    public GpuState GetState(params ReadOnlySpan<ShaderEntry> shaders)
+    {
+        GpuState all = GpuState.Ready;
+        foreach (ShaderEntry shader in shaders)
+        {
+            GpuState state = GetState(shader);
+            if (state == GpuState.Failed)
+                all = GpuState.Failed;
+            else if (state == GpuState.Loading && all == GpuState.Ready)
+                all = GpuState.Loading;
+        }
+
+        return all;
+    }
+
+    /// <summary>
     /// Begins a compute pass running <paramref name="shader"/> with <paramref name="constants"/> pushed to it: say what
     /// it reads and writes on what this returns, then dispatch, which ends it. The GPU provider leaves the pass out of a
     /// frame while the shader is not built.

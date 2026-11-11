@@ -86,7 +86,7 @@ public sealed class GlobalIlluminationGem
         }
 
         // The shaders are the GPU provider's to build, the first ask starting each; one that fails holds no domain back.
-        GpuState shaders = GetState(graph, _shaders.AsSpan());
+        GpuState shaders = graph.GetState(_shaders.AsSpan());
         if (shaders != GpuState.Loading)
             _built.TrySetResult();
 
@@ -204,23 +204,4 @@ public sealed class GlobalIlluminationGem
     /// A side of the picture at <paramref name="scale"/>, from 1 pixel up to the whole side.
     /// </summary>
     private static int Scale(int side, float scale) => Math.Clamp((int)MathF.Round(side * scale), 1, side);
-
-    /// <summary>
-    /// Where <paramref name="shaders"/> are: failed if any failed, loading while any loads, else ready. Each is asked,
-    /// so the first ask starts them all.
-    /// </summary>
-    private static GpuState GetState(RenderGraph graph, ReadOnlySpan<ShaderEntry> shaders)
-    {
-        GpuState all = GpuState.Ready;
-        foreach (ShaderEntry shader in shaders)
-        {
-            GpuState state = graph.GetState(shader);
-            if (state == GpuState.Failed)
-                all = GpuState.Failed;
-            else if (state == GpuState.Loading && all == GpuState.Ready)
-                all = GpuState.Loading;
-        }
-
-        return all;
-    }
 }

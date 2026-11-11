@@ -186,7 +186,7 @@ public sealed class GpuWorldGem
             return null;
 
         // The shaders are the GPU provider's to build, the first ask starting each; one that fails ends the start.
-        GpuState shaders = GetState(graph, _shaders.AsSpan());
+        GpuState shaders = graph.GetState(_shaders.AsSpan());
         if (shaders == GpuState.Failed)
             FailStart("a shader was not built.");
 
@@ -351,25 +351,6 @@ public sealed class GpuWorldGem
         );
         _preparing = preparing;
         await preparing.Done.Task.WaitAsync(cancel).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Where <paramref name="shaders"/> are: failed if any failed, loading while any loads, else ready. Each is asked,
-    /// so the first ask starts them all.
-    /// </summary>
-    private static GpuState GetState(RenderGraph graph, ReadOnlySpan<ShaderEntry> shaders)
-    {
-        GpuState all = GpuState.Ready;
-        foreach (ShaderEntry shader in shaders)
-        {
-            GpuState state = graph.GetState(shader);
-            if (state == GpuState.Failed)
-                all = GpuState.Failed;
-            else if (state == GpuState.Loading && all == GpuState.Ready)
-                all = GpuState.Loading;
-        }
-
-        return all;
     }
 
     /// <summary>
