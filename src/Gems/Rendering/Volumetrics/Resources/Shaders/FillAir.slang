@@ -25,8 +25,10 @@ static const float NewWeight = 0.03;
 // The directions over the sky a cell asks in turn whether its light gets through.
 static const uint SkyDirections = 16u;
 
-// The threads of a group along a side: the cells of one slice it fills.
+// The threads of a group along a side, and the slices it fills one after another with one list of the lights that
+// reach them: the gem's GroupSlices.
 static const uint Threads = 8u;
+static const uint GroupSlices = 4u;
 
 // How many of the group's local lights a cell weighs to pick the one it traces.
 static const uint Candidates = 8u;
@@ -35,8 +37,8 @@ static const uint Candidates = 8u;
 groupshared uint groupLightCount;
 groupshared uint groupLights[MaxLights];
 
-// A thread a cell: its haze, as the part of a metre's light it scatters, in alpha, and in rgb the light it scatters
-// towards the camera per part scattered.
+// A thread a column of its group's slices. Each cell: its haze, as the part of a metre's light it scatters, in alpha,
+// and in rgb the light it scatters towards the camera per part scattered.
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void ScatterAir(uint3 thread : SV_DispatchThreadID, uint3 group : SV_GroupID, uint index : SV_GroupIndex)
@@ -53,8 +55,10 @@ void ScatterAir(uint3 thread : SV_DispatchThreadID, uint3 group : SV_GroupID, ui
     if (index == 0u)
         groupLightCount = 0u;
 
-    float near = ToAirDistance(float(group.z) / float(size.z), air.distance);
-    float far = ToAirDistance(float(group.z + 1u) / float(size.z), air.distance);
+    uint firstSlice = group.z * GroupSlices;
+    uint endSlice = min(firstSlice + GroupSlices, size.z);
+    float near = ToAirDistance(float(firstSlice) / float(size.z), air.distance);
+    float far = ToAirDistance(float(endSlice) / float(size.z), air.distance);
     float3 low = float3(1e30);
     float3 high = float3(-1e30);
     for (uint c = 0u; c < 8u; c++)
@@ -79,86 +83,98 @@ void ScatterAir(uint3 thread : SV_DispatchThreadID, uint3 group : SV_GroupID, ui
     }
 
     GroupMemoryBarrierWithGroupSync();
-    if (any(thread >= size))
+    if (any(thread.xy >= size.xy))
         return;
 
     float2 uv = GetTexelCenterUv(thread.xy, size.xy);
-    float3 random = GetRandom(thread.xy, frame.frameIndex, thread.z);
-    float distance = ToAirDistance((float(thread.z) + random.x) / float(size.z), air.distance);
     float3 direction = NormalizeSafe(ReconstructRelative(frame, uv, 1.0), float3(0.0, 0.0, -1.0));
-    float3 world = frame.cameraPosition.xyz + direction * distance;
-
-    // The sun's light reaches the cell through what stands in its way, where rays see the world, and the sky's through
-    // the way out along a direction over it, as the open sky's light weighs it, so a room's air is lit only through
-    // its openings: one of 16 spread over the sky, a frame each, turned by the cell's own amount, new each 16 frames
-    // (Cranley and Patterson, "Randomization of Number Theoretic Methods for Multiple Integration", 1976).
-    float2 turn = GetRandom(thread.xy, frame.frameIndex / SkyDirections, thread.z).yz;
-    float2 spread = frac(GetHammersley(frame.frameIndex % SkyDirections, SkyDirections) + turn);
-    float3 up = ToWorld(CreateBasis(float3(0.0, 1.0, 0.0)), SampleCosineHemisphere(spread));
-    float3 sunThrough = GetTransmittance(world, lights.sunDirection.xyz, 1e6)
-        * GetCloudShadow(air, world, lights.sunDirection.xyz, frame.timeSec);
-    float3 skyThrough = GetTransmittance(world, up, 1e6);
-
-    // The light the local lights scatter towards the camera, per part scattered: one of the group's, picked among
-    // Candidates of them in a row from a random one by how much each would give unshadowed, with a ray towards a random
-    // point of it, weighted as all the group's lights would be (Talbot et al., "Importance Resampling for Global
-    // Illumination", 2005).
-    float2 pick = GetRandom(thread.xy, frame.frameIndex, thread.z + AirSlices).xy;
-    uint total = groupLightCount;
-    uint count = min(total, Candidates);
-    uint first = min(uint(pick.x * float(total)), total - 1u);
-    float weights[Candidates];
-    float sum = 0.0;
-    for (uint j = 0u; j < count; j++)
+    for (uint slice = firstSlice; slice < endSlice; slice++)
     {
-        GpuLight candidate = LoadLight(lights.table, groupLights[(first + j) % total]);
-        LightSample sample = SampleLight(candidate, world, float3(0.0));
-        weights[j] = GetLuminance(sample.irradiance) * GetAirPhase(air.anisotropy, dot(direction, sample.direction));
-        sum += weights[j];
-    }
+        float3 random = GetRandom(thread.xy, frame.frameIndex, slice);
+        float distance = ToAirDistance((float(slice) + random.x) / float(size.z), air.distance);
+        float3 world = frame.cameraPosition.xyz + direction * distance;
 
-    float3 localLight = float3(0.0);
-    if (sum > 0.0)
-    {
-        uint picked = 0u;
-        float target = pick.y * sum;
-        while (picked + 1u < count && target >= weights[picked])
+        // The sun's light reaches the cell through what stands in its way, where rays see the world, and the sky's
+        // through the way out along a direction over it, as the open sky's light weighs it, so a room's air is lit only
+        // through its openings: one of 16 spread over the sky, a frame each, turned by the cell's own amount, new each
+        // 16 frames (Cranley and Patterson, "Randomization of Number Theoretic Methods for Multiple Integration",
+        // 1976).
+        float2 turn = GetRandom(thread.xy, frame.frameIndex / SkyDirections, slice).yz;
+        float2 spread = frac(GetHammersley(frame.frameIndex % SkyDirections, SkyDirections) + turn);
+        float3 up = ToWorld(CreateBasis(float3(0.0, 1.0, 0.0)), SampleCosineHemisphere(spread));
+        float3 sunThrough = GetTransmittance(world, lights.sunDirection.xyz, 1e6)
+            * GetCloudShadow(air, world, lights.sunDirection.xyz, frame.timeSec);
+        float3 skyThrough = GetTransmittance(world, up, 1e6);
+
+        // The light the local lights scatter towards the camera, per part scattered: one of the group's, picked among
+        // Candidates of them in a row from a random one by how much each would give unshadowed, with a ray towards a
+        // random point of it, weighted as all the group's lights would be (Talbot et al., "Importance Resampling for
+        // Global Illumination", 2005).
+        float2 pick = GetRandom(thread.xy, frame.frameIndex, slice + AirSlices).xy;
+        uint total = groupLightCount;
+        uint count = min(total, Candidates);
+        uint first = min(uint(pick.x * float(total)), total - 1u);
+        float sum = 0.0;
+        float choice = pick.y;
+        GpuLight picked;
+        float3 pickedColor = float3(0.0);
+        for (uint j = 0u; j < count; j++)
         {
-            target -= weights[picked];
-            picked++;
+            GpuLight candidate = LoadLight(lights.table, groupLights[(first + j) % total]);
+            LightSample sample = SampleLight(candidate, world, float3(0.0));
+            float luminance = GetLuminance(sample.irradiance);
+            float weight = luminance * GetAirPhase(air.anisotropy, dot(direction, sample.direction));
+            if (weight <= 0.0)
+                continue;
+
+            // Each light takes the place of the one kept so far by its share of the weights so far, the one random
+            // number rescaled to stay even over what is left of it. The first is always kept: its share is 1.
+            sum += weight;
+            float share = weight / sum;
+            if (choice < share)
+            {
+                picked = candidate;
+                pickedColor = sample.irradiance / luminance;
+                choice /= share;
+            }
+            else
+            {
+                choice = (choice - share) / (1.0 - share);
+            }
         }
 
-        GpuLight light = LoadLight(lights.table, groupLights[(first + picked) % total]);
-        LightSample sample = SampleLight(light, world, float3(0.0));
-        LightRay ray = CreateLightRay(world, SampleLightPoint(light, world, random.yz));
-        float3 through = GetTransmittance(world, ray.direction, ray.distance);
-        float phase = GetAirPhase(air.anisotropy, dot(direction, sample.direction));
-        float weight = sum / max(weights[picked], 1e-12) * float(total) / float(count);
-        localLight = air.color * sample.irradiance * phase * through * weight;
-    }
-
-    float3 radiance = GetAirRadiance(air, lights, direction, skyThrough, sunThrough) + localLight;
-    float4 cell = float4(radiance, GetHazeDensity(air, world.y));
-
-    // Last frame's cell where this one's centre was then, unless that was off its view or past its reach: the centre,
-    // not this frame's point, so a still view reads its own cell rather than a different blend of its neighbours each
-    // frame.
-    if (header.z != 0u)
-    {
-        float3 center = frame.cameraPosition.xyz
-            + direction * ToAirDistance((float(thread.z) + 0.5) / float(size.z), air.distance);
-        float3 previous = center - frame.previousCameraPosition.xyz;
-        float3 screen = GetPreviousScreen(frame, previous);
-        float3 at = float3(screen.xy, ToAirDepth(length(previous), air.distance));
-        if (screen.z > 0.0 && all(at >= 0.0) && all(at <= 1.0))
+        // The picked light's light over its weight leaves its colour, and the sum stands for all the group's lights.
+        float3 localLight = float3(0.0);
+        if (sum > 0.0)
         {
-            VolumeRef history = { header.z };
-            SamplerRef sampler = { air.sampler };
-            cell = lerp(history.SampleLevel(sampler, at, 0.0), cell, NewWeight);
+            LightRay ray = CreateLightRay(world, SampleLightPoint(picked, world, random.yz));
+            float3 through = GetTransmittance(world, ray.direction, ray.distance);
+            localLight = air.color * pickedColor * through * (sum * float(total) / float(count));
         }
-    }
 
-    scattering.Store(thread, cell);
+        float3 radiance = GetAirRadiance(air, lights, direction, skyThrough, sunThrough) + localLight;
+        float4 cell = float4(radiance, GetHazeDensity(air, world.y));
+
+        // Last frame's cell where this one's centre was then, unless that was off its view or past its reach: the
+        // centre, not this frame's point, so a still view reads its own cell rather than a different blend of its
+        // neighbours each frame.
+        if (header.z != 0u)
+        {
+            float3 center = frame.cameraPosition.xyz
+                + direction * ToAirDistance((float(slice) + 0.5) / float(size.z), air.distance);
+            float3 previous = center - frame.previousCameraPosition.xyz;
+            float3 screen = GetPreviousScreen(frame, previous);
+            float3 at = float3(screen.xy, ToAirDepth(length(previous), air.distance));
+            if (screen.z > 0.0 && all(at >= 0.0) && all(at <= 1.0))
+            {
+                VolumeRef history = { header.z };
+                SamplerRef sampler = { air.sampler };
+                cell = lerp(history.SampleLevel(sampler, at, 0.0), cell, NewWeight);
+            }
+        }
+
+        scattering.Store(uint3(thread.xy, slice), cell);
+    }
 }
 
 // A thread a column of cells: the light scattered towards the camera from it up to each cell's far side, and how much
