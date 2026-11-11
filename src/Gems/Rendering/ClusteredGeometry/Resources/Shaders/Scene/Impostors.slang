@@ -55,7 +55,7 @@ public float GetImpostorFade(FrameConstants frame, GpuInstance instance)
 
     ClusterConstants clusters = GetClusters();
 
-    float3 center = Relative(frame, instance.boundsCenter);
+    float3 center = ToCameraRelative(frame, instance.boundsCenter);
     float fade = 0.0;
     float start = clusters.impostorPixels;
     if (start > 0.0)
@@ -98,7 +98,7 @@ ImpostorView GetView(uint2 cell) { return CreateViewFrame(DecodeOctahedral(float
 // it, on the plane through the box's nearest corner, so the depth it writes is never nearer than the quad.
 public float3 GetImpostorCorner(FrameConstants frame, GpuInstance instance, GpuImpostor impostor, float2 uv)
 {
-    float3 center = Relative(frame, instance.boundsCenter);
+    float3 center = ToCameraRelative(frame, instance.boundsCenter);
     float centerAlong = length(center);
     ImpostorView view = CreateViewFrame(center / max(centerAlong, 1e-3));
 
@@ -114,7 +114,7 @@ public float3 GetImpostorCorner(FrameConstants frame, GpuInstance instance, GpuI
             (i & 2u) != 0u ? impostor.boundsMax.y : impostor.boundsMin.y,
             (i & 4u) != 0u ? impostor.boundsMax.z : impostor.boundsMin.z
         );
-        float3 corner = Relative(frame, ToWorld(instance.world, local));
+        float3 corner = ToCameraRelative(frame, ToWorld(instance.world, local));
         float along = max(dot(corner, view.forward), 1e-3);
         float2 onPlane = float2(dot(corner, view.right), dot(corner, view.up)) * (centerAlong / along);
         low = min(low, onPlane);

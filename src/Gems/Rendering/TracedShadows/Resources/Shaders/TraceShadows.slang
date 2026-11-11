@@ -15,7 +15,7 @@ import Core.Color;
 import Core.Random;
 import Scene.Lights;
 import Scene.Shadows;
-import Light.Lights;
+import Light.LocalLights;
 import Trace.HitSurface;
 import Scene.Models;
 import Light.Indirect;

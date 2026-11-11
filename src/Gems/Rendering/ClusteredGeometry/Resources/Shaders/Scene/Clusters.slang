@@ -6,6 +6,7 @@ module "Scene/Clusters";
 import Core.Heap;
 import Core.Pack;
 import Core.Pass;
+import Core.Frame;
 import Light.Air;
 
 public static const uint MaxClusterTriangles = 128u;
@@ -51,11 +52,7 @@ public struct ClusterConstants
     public uint budget;
 }
 
-public ClusterConstants GetClusters()
-{
-    BufferRef constants = { GetPassHeader().x };
-    return constants.Load<ClusterConstants>(ClusterConstantsOffset);
-}
+public ClusterConstants GetClusters() { return LoadFrameRow<ClusterConstants>(ClusterConstantsOffset); }
 
 // A model's clusters in the cluster pool and its row of the impostor table, 0 for none: C#'s GpuClusterModel, the row
 // of the model table an instance's model index names.

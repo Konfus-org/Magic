@@ -66,8 +66,7 @@ void TraceDiffuse<S : ISky>(uint3 thread : SV_DispatchThreadID)
     float3 sum = float3(0.0);
     for (uint i = 0u; i < RayCount; i++)
     {
-        float pdf;
-        float3 direction = ToWorld(basis, SampleCosineHemisphere(GetRandom(thread.xy, frame.frameIndex, 1u + i).xy, pdf));
+        float3 direction = ToWorld(basis, SampleCosineHemisphere(GetRandom(thread.xy, frame.frameIndex, 1u + i).xy));
         RayHit hit = GetClosestHit(scene, origin, direction, RayRange, RAY_FLAG_CULL_BACK_FACING_TRIANGLES);
         if (!hit.isHit)
         {

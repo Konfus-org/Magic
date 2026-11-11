@@ -123,7 +123,7 @@ internal sealed class LightTiles(AssetManager assets)
             Direction = Vector3.UnitZ,
             Radius = light.Radius,
             Radiance = new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity,
-            Type = GpuLight.Point,
+            Type = LightType.Point,
         };
 
     private static GpuLight ToGpuLight(Transform at, SpotLight light) =>
@@ -134,7 +134,7 @@ internal sealed class LightTiles(AssetManager assets)
             Direction = Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, at.Rotation)),
             Radius = light.Radius,
             Radiance = new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity,
-            Type = GpuLight.Spot,
+            Type = LightType.Spot,
             CosOuter = MathF.Cos(light.OuterAngle * MathF.PI / 180),
             CosInner = MathF.Cos(light.FadeAngle * MathF.PI / 180),
         };
@@ -147,7 +147,7 @@ internal sealed class LightTiles(AssetManager assets)
             Direction = Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, at.Rotation)),
             Radius = 0.01f,
             Radiance = new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity,
-            Type = GpuLight.Rect,
+            Type = LightType.Rect,
             Width = light.Width * Math.Abs(at.Scale.X),
             Height = light.Height * Math.Abs(at.Scale.Y),
         };

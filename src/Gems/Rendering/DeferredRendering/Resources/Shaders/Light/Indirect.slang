@@ -25,11 +25,7 @@ public struct IndirectLight
 }
 
 // The frame's indirect light; every id 0 where nothing traced it.
-public IndirectLight GetIndirectLight()
-{
-    BufferRef frame = { GetPassHeader().x };
-    return frame.Load<IndirectLight>(IndirectLightOffset);
-}
+public IndirectLight GetIndirectLight() { return LoadFrameRow<IndirectLight>(IndirectLightOffset); }
 
 public ProbeGridConstants GetProbeGrid() { return GetIndirectLight().grid; }
 

@@ -7,7 +7,7 @@ import Core.Heap;
 import Core.Math;
 import Scene.Lights;
 import Light.Probes;
-import Light.Lights;
+import Light.LocalLights;
 import Sky.ISky;
 import Trace.HitSurface;
 

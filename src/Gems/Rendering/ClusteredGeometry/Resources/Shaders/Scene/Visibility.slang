@@ -125,9 +125,9 @@ public PixelTriangle LoadPixelTriangle(FrameConstants frame, VisibleTriangle vis
     result.v0 = LoadVertex(vertices, LoadIndex(clusters.indices, first));
     result.v1 = LoadVertex(vertices, LoadIndex(clusters.indices, first + 1u));
     result.v2 = LoadVertex(vertices, LoadIndex(clusters.indices, first + 2u));
-    result.p0 = Relative(frame, ToWorld(result.instance.world, result.v0.position));
-    result.p1 = Relative(frame, ToWorld(result.instance.world, result.v1.position));
-    result.p2 = Relative(frame, ToWorld(result.instance.world, result.v2.position));
+    result.p0 = ToCameraRelative(frame, ToWorld(result.instance.world, result.v0.position));
+    result.p1 = ToCameraRelative(frame, ToWorld(result.instance.world, result.v1.position));
+    result.p2 = ToCameraRelative(frame, ToWorld(result.instance.world, result.v2.position));
     result.bary = GetBarycentrics(
         mul(float4(result.p0, 1.0), frame.viewProjection),
         mul(float4(result.p1, 1.0), frame.viewProjection),

@@ -44,17 +44,9 @@ public struct GpuMesh
     public uint materialSlot;
 }
 
-public Models GetModels()
-{
-    BufferRef frame = { GetPassHeader().x };
-    return frame.Load<Models>(ModelsOffset);
-}
+public Models GetModels() { return LoadFrameRow<Models>(ModelsOffset); }
 
-public TracedWorld GetTracedWorld()
-{
-    BufferRef frame = { GetPassHeader().x };
-    return frame.Load<TracedWorld>(TracedWorldOffset);
-}
+public TracedWorld GetTracedWorld() { return LoadFrameRow<TracedWorld>(TracedWorldOffset); }
 
 // The world's top-level acceleration structure; only where GetTracedWorld's acceleration isn't 0.
 public RaytracingAccelerationStructure GetTracedAcceleration()

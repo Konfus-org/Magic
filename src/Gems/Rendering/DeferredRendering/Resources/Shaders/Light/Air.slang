@@ -42,11 +42,7 @@ public struct Air
 }
 
 // The frame's air; every id 0 where nothing filled it.
-public Air GetAir()
-{
-    BufferRef frame = { GetPassHeader().x };
-    return frame.Load<Air>(AirOffset);
-}
+public Air GetAir() { return LoadFrameRow<Air>(AirOffset); }
 
 // The volume's slices away from the camera.
 public static const uint AirSlices = 64u;

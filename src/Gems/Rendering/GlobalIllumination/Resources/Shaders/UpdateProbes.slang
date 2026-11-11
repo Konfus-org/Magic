@@ -155,7 +155,7 @@ void AskProbeRays(uint3 group : SV_GroupID, uint index : SV_GroupIndex)
 
     uint rayCount = uint(saturate(asfloat(groupInconsistency)) * float(MaxProbeRays));
     GpuProbe loaded = LoadProbe(grid, probe);
-    float3 position = Relative(frame, GetProbePosition(grid, GetProbeCoord(grid, probe), loaded));
+    float3 position = ToCameraRelative(frame, GetProbePosition(grid, GetProbeCoord(grid, probe), loaded));
     if (!IsSphereInFrustum(frame, position, Max3(grid.cellSize) * 2.0))
         rayCount /= 10u;
 
@@ -273,8 +273,7 @@ float3 GetFibonacciDirection(uint i, uint n)
 float3x3 GetRandomRotation(uint frameIndex)
 {
     float3 xi = GetRandom(uint2(0u), frameIndex, 0u);
-    float pdf;
-    float3 axis = SampleUniformSphere(xi.xy, pdf);
+    float3 axis = SampleUniformSphere(xi.xy);
     float angle = TwoPi * xi.z;
     float s = sin(angle);
     float c = cos(angle);

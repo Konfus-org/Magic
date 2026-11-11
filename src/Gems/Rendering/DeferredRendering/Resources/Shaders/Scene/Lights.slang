@@ -37,11 +37,7 @@ public struct Lights
     public uint tiles;
 }
 
-public Lights GetLights()
-{
-    BufferRef frame = { GetPassHeader().x };
-    return frame.Load<Lights>(LightsOffset);
-}
+public Lights GetLights() { return LoadFrameRow<Lights>(LightsOffset); }
 
 // PROTO: the open sky's light where no sky entity draws the sky, as the shading draws a missing sky, until the
 // sky's tables are handed on.
@@ -71,8 +67,13 @@ public SkyInputs CreateSkyInputs(Lights lights, float3 direction, bool hasSunDis
     return sky;
 }
 
-public static const uint LightSpot = 1u;
-public static const uint LightRect = 2u;
+// The shape of a GpuLight, C#'s LightType.
+public enum LightType : uint
+{
+    Point = 0,
+    Spot = 1,
+    Rect = 2,
+}
 
 // The most lights a frame draws, and the words of bits a tile keeps for them: C#'s LightTiles.
 public static const uint MaxLights = 1024u;
@@ -92,7 +93,7 @@ public struct GpuLight
     public float radius;
     // Colour times intensity: candela.
     public float3 radiance;
-    public uint type;
+    public LightType type;
     public float cosOuter;
     public float cosInner;
     public float width;
@@ -108,7 +109,7 @@ public GpuLight LoadLight(uint table, uint index)
 // The sphere around everything a light reaches: its range, and a rect light's half diagonal past it.
 public float GetLightReach(GpuLight light)
 {
-    return light.range + (light.type == LightRect ? 0.5 * length(float2(light.width, light.height)) : 0.0);
+    return light.range + (light.type == LightType.Rect ? 0.5 * length(float2(light.width, light.height)) : 0.0);
 }
 
 // The first of a tile's words of bits in the tile table, for a picture width pixels across.

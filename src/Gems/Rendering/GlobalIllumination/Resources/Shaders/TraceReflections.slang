@@ -168,8 +168,7 @@ float2 GetReflectedHistoryUv(FrameConstants frame, ReflectingSurface surface, fl
 {
     float3 reflected = surface.relative - surface.view * rayLength;
     float3 previous = reflected + frame.cameraPosition.xyz - frame.previousCameraPosition.xyz;
-    float4 clip = mul(float4(previous, 1.0), frame.previousViewProjection);
-    return ToUv(clip.xy / max(clip.w, Epsilon));
+    return GetPreviousScreen(frame, previous).xy;
 }
 
 // A thread a traced pixel: its resolved light blended with the history where the surface was last frame, or where what

@@ -1,7 +1,7 @@
 // What a local light gives a point: its direction, its irradiance there in the frame's units, nothing past its reach,
 // and a random point of the light for a shadow ray to aim at. A point light is a sphere, a spot light a cone of one, a rect light a rectangle lit from its nearest point
 // (Karis, "Real Shading in Unreal Engine 4", 2013).
-module "Light/Lights";
+module "Light/LocalLights";
 
 import Core.Math;
 import Core.Sampling;
@@ -15,7 +15,7 @@ public struct LightSample
 }
 
 // Light falls off with the square of the distance, and to nothing at the light's reach.
-float Falloff(float distance, float range)
+float GetFalloff(float distance, float range)
 {
     float ratio = distance / max(range, Epsilon);
     float window = saturate(1.0 - ratio * ratio * ratio * ratio);
@@ -33,7 +33,7 @@ public float3x3 GetLightBasis(GpuLight light)
 // the disc of a point or spot light's sphere that faces the receiver.
 public float3 SampleLightPoint(GpuLight light, float3 position, float2 xi)
 {
-    if (light.type == LightRect)
+    if (light.type == LightType.Rect)
     {
         float3x3 basis = GetLightBasis(light);
         float2 offset = (xi - 0.5) * float2(light.width, light.height);
@@ -73,7 +73,7 @@ public LightSample SampleLight(GpuLight light, float3 position, float3 normal)
     LightSample sample;
     float3 from = light.position;
     float3 along = light.direction;
-    if (light.type == LightRect)
+    if (light.type == LightType.Rect)
     {
         // The nearest point of the rectangle to the receiver, in the light's own axes.
         float3x3 basis = GetLightBasis(light);
@@ -86,20 +86,20 @@ public LightSample SampleLight(GpuLight light, float3 position, float3 normal)
     // A light is never nearer than its own size, a sphere's radius or a rectangle's as a disc of its area, so it gives
     // at most what its face could rather than growing without bound at its surface.
     float3 toLight = from - position;
-    float size = light.type == LightRect ? sqrt(light.width * light.height / Pi) : light.radius;
+    float size = light.type == LightType.Rect ? sqrt(light.width * light.height / Pi) : light.radius;
     float distance = max(length(toLight), size);
     sample.direction = toLight / max(length(toLight), Epsilon);
     float spread = 1.0;
-    if (light.type == LightSpot)
+    if (light.type == LightType.Spot)
     {
         float cosine = dot(-sample.direction, along);
         spread = smoothstep(light.cosOuter, light.cosInner, cosine);
     }
-    else if (light.type == LightRect)
+    else if (light.type == LightType.Rect)
     {
         spread = saturate(dot(-sample.direction, along));
     }
 
-    sample.irradiance = light.radiance * (Falloff(distance, light.range) * spread);
+    sample.irradiance = light.radiance * (GetFalloff(distance, light.range) * spread);
     return sample;
 }

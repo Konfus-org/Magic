@@ -74,6 +74,18 @@ public float3 GetTransmittance(RaytracingAccelerationStructure world, float3 ori
     return query.CommittedStatus() == COMMITTED_NOTHING ? through : float3(0.0);
 }
 
+// How much of the light along a ray from origin, in the world, up to a distance gets through the world, by colour:
+// all where nothing is in the way or no acceleration structure was built, none past what is opaque, and through
+// glass what its clarity and colour let through.
+public float3 GetTransmittance(float3 origin, float3 direction, float distance)
+{
+    TracedWorld traced = GetTracedWorld();
+    if (traced.acceleration == 0u)
+        return float3(1.0);
+
+    return GetTransmittance(GetTracedAcceleration(), origin, direction, distance);
+}
+
 // What a ray landed on first: whether it landed on anything, the instance's row, the mesh as its hit group offset plus
 // its geometry, the triangle in the mesh and the barycentrics of the hit in it, whether it faces the ray, and how far
 // along the ray it is.

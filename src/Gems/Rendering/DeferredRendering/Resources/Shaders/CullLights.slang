@@ -103,7 +103,7 @@ void CullLights(uint3 group : SV_GroupID, uint3 thread : SV_DispatchThreadID, ui
         for (uint l = index; l < count; l += Threads * Threads)
         {
             GpuLight light = LoadLight(lights.table, l);
-            float3 center = Relative(frame, light.position);
+            float3 center = ToCameraRelative(frame, light.position);
             float radius = GetLightReach(light);
             bool isOutside = false;
             for (uint s = 0u; s < 4u; s++)

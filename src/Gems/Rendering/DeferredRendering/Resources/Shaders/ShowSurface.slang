@@ -4,7 +4,7 @@
 // drawn, but for the velocity, which the sky has too; a depth view is also black from the metres the header's z holds.
 // A view of light alone first writes it into the picture in place of the lit one, so the effects finish it as they
 // would the picture: the traced diffuse light as shading reads it, which a white diffuse surface would reflect, or the
-// traced reflections' light, which it reads from the frame's GI constants, whose light ids are 0 where nothing is
+// traced reflections' light, which it reads from the frame's indirect light, whose ids are 0 where nothing is
 // traced.
 module "ShowSurface";
 

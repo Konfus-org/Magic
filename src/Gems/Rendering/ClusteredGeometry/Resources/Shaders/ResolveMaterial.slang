@@ -52,13 +52,6 @@ void ResolveMaterial<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
     ResolveTranslucent<M>(frame, thread.xy);
 }
 
-// Where the camera-relative point previous was on last frame's screen, as a texture coordinate, and its clip w.
-float3 GetPreviousScreen(FrameConstants frame, float3 previous)
-{
-    float4 clip = mul(float4(previous, 1.0), frame.previousViewProjection);
-    return float3(ToUv(clip.xy / max(clip.w, Epsilon)), clip.w);
-}
-
 // The pixel's opaque surface into the GBuffer, its emissive light into the picture and its velocity, or the sky's
 // velocity where nothing was drawn.
 void ResolveOpaque<M : IMaterial>(FrameConstants frame, uint2 pixel)
@@ -98,7 +91,7 @@ void ResolveOpaque<M : IMaterial>(FrameConstants frame, uint2 pixel)
         GpuImpostor impostor = LoadImpostor(LoadClusterModel(instance.model).impostor);
         ImpostorHit hit = TraceImpostor(instance, impostor, GetImpostorBlend(frame, instance), ray, 0.0);
         model = hit.position;
-        inputs.position = Relative(frame, ToWorld(instance.world, hit.position));
+        inputs.position = ToCameraRelative(frame, ToWorld(instance.world, hit.position));
         inputs.normal = ToWorldNormal(instance.world, hit.normal);
         float3 side = abs(inputs.normal.y) < 0.999 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0);
         inputs.tangent = normalize(cross(side, inputs.normal));

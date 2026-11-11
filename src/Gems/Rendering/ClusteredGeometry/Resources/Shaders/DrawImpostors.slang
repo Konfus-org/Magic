@@ -62,7 +62,8 @@ Targets DrawImpostorsPixel(Varyings input)
     if (!hit.isHit)
         discard;
 
-    float4 clip = mul(float4(Relative(frame, ToWorld(instance.world, hit.position)), 1.0), frame.viewProjection);
+    float3 relative = ToCameraRelative(frame, ToWorld(instance.world, hit.position));
+    float4 clip = mul(float4(relative, 1.0), frame.viewProjection);
     Targets output;
     output.id = EncodeImpostorId(input.instance, hit.slot);
     output.depth = min(clip.z / clip.w, input.position.z);

@@ -247,7 +247,7 @@ void RetestClusters(uint3 thread : SV_DispatchThreadID)
 // neither clusters nor impostor.
 bool IsInView(FrameConstants frame, GpuInstance instance)
 {
-    float3 center = Relative(frame, instance.boundsCenter);
+    float3 center = ToCameraRelative(frame, instance.boundsCenter);
     return instance.model != 0u
         && IsSphereInFrustum(frame, center, instance.boundsRadius)
         && GetPixelRadius(frame, center, instance.boundsRadius) >= MinPixelRadius;
@@ -256,7 +256,7 @@ bool IsInView(FrameConstants frame, GpuInstance instance)
 // The distance bin of the instance's nearest point.
 uint GetDemandBin(FrameConstants frame, GpuInstance instance)
 {
-    float distance = length(Relative(frame, instance.boundsCenter)) - instance.boundsRadius;
+    float distance = length(ToCameraRelative(frame, instance.boundsCenter)) - instance.boundsRadius;
     return min(uint(log2(max(distance, 1.0)) * 4.0), DemandBins - 1u);
 }
 
@@ -267,16 +267,16 @@ ClusterOutcome GetClusterOutcome(FrameConstants frame, GpuInstance instance, uin
     ClusterConstants clusters = GetClusters();
     GpuCluster cluster = LoadCluster(clusters.clusters, clusterIndex);
     float scale = GetMaxScale(instance.world);
-    float3 center = Relative(frame, ToWorld(instance.world, cluster.center));
+    float3 center = ToCameraRelative(frame, ToWorld(instance.world, cluster.center));
     float radius = cluster.radius * scale;
     if (!IsSphereInFrustum(frame, center, radius))
         return ClusterOutcome.Culled;
 
     // The cut: drawn where its parent group would show its error and this cluster's group would not, each error
     // projected over its group's sphere, so a cluster and its children decide the same way about the same group.
-    float3 parentCenter = Relative(frame, ToWorld(instance.world, cluster.parentCenter));
+    float3 parentCenter = ToCameraRelative(frame, ToWorld(instance.world, cluster.parentCenter));
     float parentError = ProjectError(frame, parentCenter, cluster.parentRadius * scale, cluster.parentError * scale);
-    float3 detailCenter = Relative(frame, ToWorld(instance.world, cluster.detailCenter));
+    float3 detailCenter = ToCameraRelative(frame, ToWorld(instance.world, cluster.detailCenter));
     float error = ProjectError(frame, detailCenter, cluster.detailRadius * scale, cluster.error * scale);
     if (!(parentError > clusters.errorThreshold && error <= clusters.errorThreshold))
         return ClusterOutcome.Culled;
@@ -331,7 +331,7 @@ void AddClusterDraw(GpuInstance instance, uint clusterIndex, uint row, DrawRegio
 void TestImpostor(FrameConstants frame, GpuInstance instance, uint firstInstance, DrawRegion region)
 {
     ClusterConstants clusters = GetClusters();
-    bool isHidden = clusters.hasDepthPyramid != 0u && IsOccluded(frame, Relative(frame, instance.boundsCenter), instance.boundsRadius);
+    bool isHidden = clusters.hasDepthPyramid != 0u && IsOccluded(frame, ToCameraRelative(frame, instance.boundsCenter), instance.boundsRadius);
     if (isHidden && (region == DrawRegion.RetestedImpostors || TryAddRetest(firstInstance, RetestImpostor)))
         return;
 

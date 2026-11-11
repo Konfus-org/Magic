@@ -79,18 +79,22 @@ public struct GpuMaterialRows : IEquatable<GpuMaterialRows>
 }
 
 /// <summary>
+/// The shape of a <see cref="GpuLight"/>, the twin of <c>Scene/Lights.slang</c>'s <c>LightType</c>.
+/// </summary>
+internal enum LightType : uint
+{
+    Point = 0,
+    Spot = 1,
+    Rect = 2,
+}
+
+/// <summary>
 /// A light as the GPU reads it from the light table, 64 bytes: the twin of <c>Scene/Lights.slang</c>'s.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct GpuLight
 {
     public const int Bytes = 64;
-
-    public const uint Point = 0;
-
-    public const uint Spot = 1;
-
-    public const uint Rect = 2;
 
     public Vector3 Position;
 
@@ -102,7 +106,7 @@ internal record struct GpuLight
 
     public Vector3 Radiance;
 
-    public uint Type;
+    public LightType Type;
 
     public float CosOuter;
 

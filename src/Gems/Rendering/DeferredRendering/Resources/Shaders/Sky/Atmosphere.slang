@@ -34,7 +34,7 @@ struct Medium
     float mie;
 }
 
-Medium SampleMedium(float radius)
+Medium GetMedium(float radius)
 {
     float height = max(radius - GroundRadius, 0.0);
     float rayleighDensity = exp(-height / RayleighHeight);
@@ -49,9 +49,9 @@ Medium SampleMedium(float radius)
     return medium;
 }
 
-float PhaseRayleigh(float cosine) { return 3.0 / (16.0 * Pi) * (1.0 + cosine * cosine); }
+float GetRayleighPhase(float cosine) { return 3.0 / (16.0 * Pi) * (1.0 + cosine * cosine); }
 
-float PhaseMie(float cosine)
+float GetMiePhase(float cosine)
 {
     float g = MieAnisotropy;
     float k = 3.0 / (8.0 * Pi) * (1.0 - g * g) / (2.0 + g * g);
@@ -59,7 +59,7 @@ float PhaseMie(float cosine)
 }
 
 // Where a ray from a point at radius r, at cosine mu to the zenith, leaves a sphere of radius R; negative for never.
-float DistanceToSphere(float r, float mu, float R)
+float GetDistanceToSphere(float r, float mu, float R)
 {
     float discriminant = r * r * (mu * mu - 1.0) + R * R;
     if (discriminant < 0.0)
@@ -72,58 +72,59 @@ float DistanceToSphere(float r, float mu, float R)
 }
 
 // How far a ray goes through the air before it leaves the top or hits the ground.
-float DistanceThroughAir(float r, float mu)
+float GetDistanceThroughAir(float r, float mu)
 {
-    float ground = DistanceToSphere(r, mu, GroundRadius);
-    float top = DistanceToSphere(r, mu, TopRadius);
+    float ground = GetDistanceToSphere(r, mu, GroundRadius);
+    float top = GetDistanceToSphere(r, mu, TopRadius);
     return ground > 0.0 ? ground : top;
 }
 
-bool HitsGround(float r, float mu) { return DistanceToSphere(r, mu, GroundRadius) > 0.0; }
+bool IsGroundHit(float r, float mu) { return GetDistanceToSphere(r, mu, GroundRadius) > 0.0; }
 
 // The transmittance table's coordinates from a radius and a cosine, spread so the horizon is sharp (Bruneton and
 // Neyret, "Precomputed Atmospheric Scattering", 2008).
-public float2 TransmittanceUv(float r, float mu)
+public float2 ToTransmittanceUv(float r, float mu)
 {
     float h = sqrt(TopRadius * TopRadius - GroundRadius * GroundRadius);
     float rho = sqrt(max(r * r - GroundRadius * GroundRadius, 0.0));
-    float d = DistanceToSphere(r, mu, TopRadius);
+    float d = GetDistanceToSphere(r, mu, TopRadius);
     float dMin = TopRadius - r;
     float dMax = rho + h;
     return float2((d - dMin) / max(dMax - dMin, Epsilon), rho / h);
 }
 
-public void TransmittanceParams(float2 uv, out float r, out float mu)
+// The radius and the cosine a point of the transmittance table stands for, in x and y: ToTransmittanceUv's inverse.
+public float2 ToRadiusAndCosine(float2 uv)
 {
     float h = sqrt(TopRadius * TopRadius - GroundRadius * GroundRadius);
     float rho = h * uv.y;
-    r = sqrt(rho * rho + GroundRadius * GroundRadius);
+    float r = sqrt(rho * rho + GroundRadius * GroundRadius);
     float dMin = TopRadius - r;
     float dMax = rho + h;
     float d = dMin + uv.x * (dMax - dMin);
-    mu = d == 0.0 ? 1.0 : (h * h - rho * rho - d * d) / (2.0 * r * d);
-    mu = clamp(mu, -1.0, 1.0);
+    float mu = d == 0.0 ? 1.0 : (h * h - rho * rho - d * d) / (2.0 * r * d);
+    return float2(r, clamp(mu, -1.0, 1.0));
 }
 
 // What is left of light that crossed the air from a point to its edge, integrated here: the table's entry.
-public float3 ComputeTransmittance(float r, float mu)
+public float3 GetAirTransmittance(float r, float mu)
 {
-    float distance = DistanceThroughAir(r, mu);
+    float distance = GetDistanceThroughAir(r, mu);
     const uint steps = 40u;
     float3 optical = float3(0.0);
     for (uint i = 0u; i < steps; i++)
     {
         float t = (float(i) + 0.5) / float(steps) * distance;
         float radius = sqrt(r * r + t * t + 2.0 * r * mu * t);
-        optical += SampleMedium(radius).extinction * (distance / float(steps));
+        optical += GetMedium(radius).extinction * (distance / float(steps));
     }
 
     return exp(-optical);
 }
 
-public float3 LookupTransmittance(TextureRef lut, SamplerRef sampler, float r, float mu)
+public float3 SampleTransmittance(TextureRef lut, SamplerRef sampler, float r, float mu)
 {
-    return lut.SampleLevel(sampler, TransmittanceUv(r, mu), 0.0).rgb;
+    return lut.SampleLevel(sampler, ToTransmittanceUv(r, mu), 0.0).rgb;
 }
 
 // Light from the sun scattered along a ray, and how much of it would go on to scatter again: for the
@@ -135,7 +136,7 @@ struct Scattered
     float3 transmittance;
 }
 
-Scattered Integrate(
+Scattered GetScattered(
     TextureRef transmittanceLut,
     TextureRef multiScatteringLut,
     SamplerRef sampler,
@@ -149,10 +150,10 @@ Scattered Integrate(
     float r = length(origin);
     float3 zenith = origin / r;
     float mu = dot(zenith, direction);
-    float distance = DistanceThroughAir(r, mu);
+    float distance = GetDistanceThroughAir(r, mu);
     float cosine = dot(direction, sunDirection);
-    float rayleighPhase = PhaseRayleigh(cosine);
-    float miePhase = PhaseMie(cosine);
+    float rayleighPhase = GetRayleighPhase(cosine);
+    float miePhase = GetMiePhase(cosine);
     Scattered result;
     result.luminance = float3(0.0);
     result.multiScatter = float3(0.0);
@@ -165,12 +166,12 @@ Scattered Integrate(
         previous = t;
         float3 point = origin + direction * t;
         float radius = length(point);
-        Medium medium = SampleMedium(radius);
+        Medium medium = GetMedium(radius);
         float3 stepTransmittance = exp(-medium.extinction * dt);
         float sunMu = dot(point / radius, sunDirection);
-        float3 sunTransmittance = HitsGround(radius, sunMu)
+        float3 sunTransmittance = IsGroundHit(radius, sunMu)
             ? float3(0.0)
-            : LookupTransmittance(transmittanceLut, sampler, radius, sunMu);
+            : SampleTransmittance(transmittanceLut, sampler, radius, sunMu);
         float3 multi = float3(0.0);
         if (usesMultiScattering)
         {
@@ -192,7 +193,7 @@ Scattered Integrate(
 
 // The multi-scattering table's entry for a height and a sun: what every direction scatters of the sun's light and
 // of itself, summed as a series.
-public float3 ComputeMultiScattering(TextureRef transmittanceLut, SamplerRef sampler, float2 uv)
+public float3 GetMultiScattering(TextureRef transmittanceLut, SamplerRef sampler, float2 uv)
 {
     float sunMu = uv.x * 2.0 - 1.0;
     float radius = GroundRadius + uv.y * (TopRadius - GroundRadius);
@@ -208,13 +209,13 @@ public float3 ComputeMultiScattering(TextureRef transmittanceLut, SamplerRef sam
         float ring = sqrt(saturate(1.0 - elevation * elevation));
         float angle = float(i) * 2.399963;
         float3 direction = float3(ring * cos(angle), elevation, ring * sin(angle));
-        Scattered scattered = Integrate(transmittanceLut, transmittanceLut, sampler, origin, direction, sunDirection, 20u, false);
+        Scattered scattered = GetScattered(transmittanceLut, transmittanceLut, sampler, origin, direction, sunDirection, 20u, false);
         float mu = dot(origin / radius, direction);
-        if (HitsGround(radius, mu))
+        if (IsGroundHit(radius, mu))
         {
-            float3 ground = origin + direction * DistanceToSphere(radius, mu, GroundRadius);
+            float3 ground = origin + direction * GetDistanceToSphere(radius, mu, GroundRadius);
             float groundMu = dot(ground / GroundRadius, sunDirection);
-            float3 sunAtGround = LookupTransmittance(transmittanceLut, sampler, GroundRadius, groundMu);
+            float3 sunAtGround = SampleTransmittance(transmittanceLut, sampler, GroundRadius, groundMu);
             scattered.luminance += scattered.transmittance * GroundAlbedo * InvPi * saturate(groundMu) * sunAtGround;
         }
 
@@ -229,7 +230,7 @@ public float3 ComputeMultiScattering(TextureRef transmittanceLut, SamplerRef sam
 
 // The sky-view table's direction for its coordinates: azimuth across, and elevation down with the horizon in the
 // middle and the sky pressed towards it, where the air changes fastest.
-public float3 SkyViewDirection(float2 uv, float altitude)
+public float3 ToSkyViewDirection(float2 uv, float altitude)
 {
     float r = GroundRadius + max(altitude, 0.001);
     float horizon = -acos(GroundRadius / r);
@@ -250,7 +251,7 @@ public float3 SkyViewDirection(float2 uv, float altitude)
     return float3(cosElevation * sin(azimuth), sin(elevation), -cosElevation * cos(azimuth));
 }
 
-public float2 SkyViewUv(float3 direction, float altitude)
+public float2 ToSkyViewUv(float3 direction, float altitude)
 {
     float r = GroundRadius + max(altitude, 0.001);
     float horizon = -acos(GroundRadius / r);
@@ -267,7 +268,7 @@ public float2 SkyViewUv(float3 direction, float altitude)
 
 // The sky-view table's entry: the sky along a direction, for a unit of the sun's illuminance, with the sun's light
 // turned by the azimuth so the table is centred on the sun.
-public float3 ComputeSkyView(
+public float3 GetSkyView(
     TextureRef transmittanceLut,
     TextureRef multiScatteringLut,
     SamplerRef sampler,
@@ -277,15 +278,15 @@ public float3 ComputeSkyView(
 )
 {
     float3 origin = float3(0.0, GroundRadius + max(altitude, 0.001), 0.0);
-    Scattered scattered = Integrate(transmittanceLut, multiScatteringLut, sampler, origin, direction, sunDirection, 32u, true);
+    Scattered scattered = GetScattered(transmittanceLut, multiScatteringLut, sampler, origin, direction, sunDirection, 32u, true);
     float r = length(origin);
     float mu = dot(origin / r, direction);
-    if (HitsGround(r, mu))
+    if (IsGroundHit(r, mu))
     {
         // The ground under the sky, lit by the sun through the air, where the view reaches it.
-        float3 ground = origin + direction * DistanceToSphere(r, mu, GroundRadius);
+        float3 ground = origin + direction * GetDistanceToSphere(r, mu, GroundRadius);
         float groundMu = dot(ground / GroundRadius, sunDirection);
-        float3 sunAtGround = LookupTransmittance(transmittanceLut, sampler, GroundRadius, groundMu);
+        float3 sunAtGround = SampleTransmittance(transmittanceLut, sampler, GroundRadius, groundMu);
         scattered.luminance += scattered.transmittance * GroundAlbedo * InvPi * saturate(groundMu) * sunAtGround;
     }
 
@@ -299,13 +300,13 @@ public struct Atmosphere : ISky
         TextureRef skyView = { inputs.skyViewLut };
         TextureRef transmittance = { inputs.transmittanceLut };
         SamplerRef sampler = { inputs.sampler };
-        float3 sky = skyView.SampleLevel(sampler, SkyViewUv(inputs.viewDirection, inputs.altitude * 0.001), 0.0).rgb;
+        float3 sky = skyView.SampleLevel(sampler, ToSkyViewUv(inputs.viewDirection, inputs.altitude * 0.001), 0.0).rgb;
         float3 color = sky * inputs.sunIlluminance;
         float r = GroundRadius + max(inputs.altitude * 0.001, 0.001);
-        if (inputs.hasSunDisc && dot(inputs.viewDirection, inputs.sunDirection) > SunCosRadius && !HitsGround(r, inputs.viewDirection.y))
+        if (inputs.hasSunDisc && dot(inputs.viewDirection, inputs.sunDirection) > SunCosRadius && !IsGroundHit(r, inputs.viewDirection.y))
         {
             // The disc: the sun's illuminance over its solid angle, dimmed by the air in the way.
-            float3 through = LookupTransmittance(transmittance, sampler, r, inputs.viewDirection.y);
+            float3 through = SampleTransmittance(transmittance, sampler, r, inputs.viewDirection.y);
             color += inputs.sunIlluminance * through / (Pi * (1.0 - SunCosRadius * SunCosRadius)) * 0.05;
         }
 
@@ -317,7 +318,7 @@ public struct Atmosphere : ISky
         TextureRef transmittance = { inputs.transmittanceLut };
         SamplerRef sampler = { inputs.sampler };
         float r = GroundRadius + max(inputs.altitude * 0.001, 0.001);
-        return inputs.sunIlluminance * LookupTransmittance(transmittance, sampler, r, inputs.sunDirection.y);
+        return inputs.sunIlluminance * SampleTransmittance(transmittance, sampler, r, inputs.sunDirection.y);
     }
 
     public static float3 GetAmbient(SkyInputs inputs, float3 normal)
@@ -347,7 +348,7 @@ public struct Atmosphere : ISky
             if (direction.y < 0.0)
                 continue;
 
-            sum += skyView.SampleLevel(sampler, SkyViewUv(direction, altitude), 0.0).rgb * cosine;
+            sum += skyView.SampleLevel(sampler, ToSkyViewUv(direction, altitude), 0.0).rgb * cosine;
             weight += cosine;
         }
 

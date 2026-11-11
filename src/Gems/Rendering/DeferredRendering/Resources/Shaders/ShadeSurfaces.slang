@@ -3,7 +3,7 @@
 // the light around it, traced on a GPU that traces rays and else the sky's, and what it reflects, traced where it is
 // smooth enough, its direct and indirect light summed over the shared BRDF and added to its own emissive light, which
 // the material resolve left in the picture; and the sky itself, with its clouds, where nothing was drawn. The pass
-// header's x is the frame's buffer, which holds the lights, the shadows, the GI constants, whose light ids are 0 where
+// header's x is the frame's buffer, which holds the lights, the shadows, the indirect light, whose ids are 0 where
 // nothing is traced, and the air.
 module "ShadeSurfaces";
 
@@ -15,7 +15,7 @@ import Scene.Lights;
 import Scene.Shadows;
 import Light.Air;
 import Light.Indirect;
-import Light.Lights;
+import Light.LocalLights;
 import Sky.ISky;
 import Surface.Brdf;
 

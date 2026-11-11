@@ -6,9 +6,8 @@ module "Scene/Shadows";
 
 import Core.Heap;
 import Core.Pass;
+import Core.Frame;
 import Scene.Lights;
-import Scene.Models;
-import Trace.HitSurface;
 
 // Where the shadows are in the frame's buffer, right after the lights, and their bytes: C#'s GpuShadows.
 public static const uint ShadowsOffset = LightsOffset + LightsBytes;
@@ -21,23 +20,7 @@ public struct Shadows
     public uint sunTint;
 }
 
-// How much of the light along a ray from origin, in the world, up to a distance gets through the world, by colour:
-// all where nothing is in the way or no acceleration structure was built, none past what is opaque, and through
-// glass what its clarity and colour let through.
-public float3 GetTransmittance(float3 origin, float3 direction, float distance)
-{
-    TracedWorld traced = GetTracedWorld();
-    if (traced.acceleration == 0u)
-        return float3(1.0);
-
-    return GetTransmittance(GetTracedAcceleration(), origin, direction, distance);
-}
-
-public Shadows GetShadows()
-{
-    BufferRef frame = { GetPassHeader().x };
-    return frame.Load<Shadows>(ShadowsOffset);
-}
+public Shadows GetShadows() { return LoadFrameRow<Shadows>(ShadowsOffset); }
 
 public static const uint ShadowSlots = 16u;
 
