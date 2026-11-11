@@ -12,14 +12,14 @@ import Core.Color;
 import Post.IPixelEffect;
 
 // How far in metres the surface the history saw may be from where the pixel's surface was before it is another.
-static const float SurfaceGapMetres = 1.0;
+public static const float SurfaceGapMetres = 1.0;
 
 // How far a pixel's surface moves across the screen in a frame, in texture coordinates, before the history can be of
 // another surface.
-static const float MovingDistance = 0.01;
+public static const float MovingDistance = 0.01;
 
-// The most a 16-bit float holds, which the picture is kept under.
-static const float HalfMax = 65504.0;
+// The most a 16-bit float holds, which the picture and view depth are kept under.
+public static const float HalfMax = 65504.0;
 
 // What the blend's exposure brings the 3 by 3 neighbours' average to.
 static const float MiddleGrey = 0.18;

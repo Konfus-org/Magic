@@ -81,18 +81,18 @@ public sealed class TaaUpscalingGem : IGem, IRenderInto<Upscaling>
             _resolved.Picture == first.Value ? (first.Value, second.Value) : (second.Value, first.Value);
         bool hasHistory = view.HasHistory && _resolved == (history, width, height);
         _resolved = (resolved, width, height);
-        ComputePass pass = graph
+        ReadOnlySpan<GpuResource> past = hasHistory ? [history] : [];
+        graph
             .Compute(
                 "Upscale picture",
                 _shader,
                 new GpuConstants(view.Frame.Id, hasHistory ? history.Id : resolved.Id, resolved.Id),
                 RenderStage.Post
             )
-            .Reads(view.Frame, view.Output, view.Depth, view.Velocity);
-        if (hasHistory)
-            pass.Reads(history);
-
-        pass.Writes(resolved).DispatchOver(width, height);
+            .Reads(view.Frame, view.Output, view.Depth, view.Velocity)
+            .Reads(past)
+            .Writes(resolved)
+            .DispatchOver(width, height);
 
         return resolved;
     }

@@ -15,20 +15,11 @@ import Core.Heap;
 import Core.Pass;
 import Core.Frame;
 import Core.Math;
+import Post.TemporalAntiAliasing;
 
 // How fast a sample's weight falls with its distance from the pixel, in pixels: a Gaussian close to the
 // Blackman-Harris window over a pixel, from Karis.
 static const float SampleFalloff = 2.29;
-
-// How far in metres the surface the history saw may be from where the pixel's surface was before it is another.
-static const float SurfaceGapMetres = 1.0;
-
-// How far a pixel's surface moves across the screen in a frame, in texture coordinates, before the history can be of
-// another surface.
-static const float MovingDistance = 0.01;
-
-// The most a 16-bit float holds, which the view depth is kept under.
-static const float HalfMax = 65504.0;
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
