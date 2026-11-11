@@ -1,5 +1,6 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
 using System.Text.Json.Serialization;
-using Magic.Ecs.Components;
 
 namespace Magic.Ecs;
 
@@ -13,3 +14,20 @@ namespace Magic.Ecs;
 /// the one in its slot now.</param>
 [JsonConverter(typeof(EntityJsonConverter))]
 public readonly record struct Entity(int Id, int EcsWorld, int Version);
+
+/// <summary>
+/// An entity as JSON: its id, which means nothing once the run that gave it ends, so it reads back as none.
+/// </summary>
+[SuppressMessage(
+    "Performance",
+    "CA1812:Avoid uninstantiated internal classes",
+    Justification = "The serializer makes it, as a [JsonConverter] names it."
+)]
+internal sealed class EntityJsonConverter : JsonConverter<Entity>
+{
+    public override Entity Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        default;
+
+    public override void Write(Utf8JsonWriter writer, Entity value, JsonSerializerOptions options) =>
+        writer.WriteNumberValue(value.Id);
+}
