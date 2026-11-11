@@ -4,11 +4,12 @@ using Magic.Assets;
 namespace Magic.Ecs.Components;
 
 /// <summary>
-/// The world's weather as it is now: the way the air moves and the haze in it. A world has one, on an entity of its
-/// own, which a script may change as it runs; whatever draws the air reads it, and so may anything the wind moves.
-/// Calm, clear air is no wind and no haze. A breeze and a light haze:
+/// The world's weather as it is now: the way the air moves, and the haze and the clouds in it. A world has one, on an
+/// entity of its own, which a script may change as it runs; whatever draws the air reads it, and so may anything the
+/// wind moves.
+/// Calm, clear air is no wind, no haze and no clouds. A breeze, a light haze and scattered clouds:
 /// <code>
-/// { "wind": { "x": 6, "y": 0, "z": 3 }, "fogDensity": 0.01 }
+/// { "wind": { "x": 6, "y": 0, "z": 3 }, "fogDensity": 0.01, "cloudCover": 0.4 }
 /// </code>
 /// A script thickens the haze as it runs: <c>weather.FogDensity = 0.03f;</c>.
 /// </summary>
@@ -42,6 +43,16 @@ public record struct Weather : IComponent
     /// mostly ahead, as mist does, so it glows towards the sun.
     /// </summary>
     public float FogAnisotropy = 0.3f;
+
+    /// <summary>
+    /// How much of the sky the clouds cover, from 0, clear, to 1, overcast. The wind carries them.
+    /// </summary>
+    public float CloudCover;
+
+    /// <summary>
+    /// The height in metres of the clouds' base; they reach 2 km above it.
+    /// </summary>
+    public float CloudHeight = 1500;
 
     public Weather() { }
 }

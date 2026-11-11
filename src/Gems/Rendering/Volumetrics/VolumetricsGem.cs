@@ -20,8 +20,8 @@ public readonly record struct VolumetricsInput(GpuView View, TracedWorld? Traced
 /// Fills the air between the camera and what it sees with the world's haze: each frame, a volume over the view, lit by
 /// the sky, the sun and the local lights where a ray through the world reaches it, blended over frames and summed away
 /// from the camera, recorded in the light stage, written into the frame's buffer and made as the frame's
-/// <see cref="Air"/>, which shading takes. Clear air makes none. It is public because nothing in its assembly makes it:
-/// Magic does, by reflection, when a project lists the gem.
+/// <see cref="Air"/>, which shading takes, with the clouds it draws over the sky. Clear air makes none. It
+/// is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
 public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IRender<VolumetricsInput, Air>
 {
@@ -30,12 +30,30 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
     /// </summary>
     private const int Slices = 64;
 
+    /// <summary>
+    /// The texels along each side of the clouds' picture of the sky, and along each side of the blocks of which a
+    /// frame draws one texel each: the <c>DrawClouds</c> shader's Block.
+    /// </summary>
+    private const int CloudTexels = 512;
+
+    private const int CloudBlock = 4;
+
+    private static readonly TextureDescription _cloudsDescription = new()
+    {
+        Width = CloudTexels,
+        Height = CloudTexels,
+        Format = GpuFormat.R16G16B16A16Sfloat,
+        Usage = TextureUsages.Storage | TextureUsages.Sampled,
+        Name = "Clouds",
+    };
+
     private static readonly string[] _scatteringNames = ["Air scattering 0", "Air scattering 1"];
 
     private readonly IEcs _ecs;
     private readonly Mailbox<AirInputs> _inputs = new();
     private readonly ShaderEntry _scatterShader;
     private readonly ShaderEntry _integrateShader;
+    private readonly ShaderEntry _cloudShader;
 
     /// <summary>
     /// The inputs <see cref="Render"/> fills the air from, taken from <see cref="_inputs"/>, until newer are. Render
@@ -48,6 +66,11 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
     /// </summary>
     private (int Width, int Height)? _filled;
 
+    /// <summary>
+    /// The clouds' picture as it was last drawn; none while it holds nothing. Render thread.
+    /// </summary>
+    private GpuTexture? _drawnClouds;
+
     public VolumetricsGem(VolumetricsSettings settings, AssetManager assets, IEcs ecs)
     {
         Settings = settings;
@@ -59,6 +82,12 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
             Stage = ShaderStage.Compute,
         };
         _integrateShader = _scatterShader with { Name = "IntegrateAir" };
+        _cloudShader = new ShaderEntry
+        {
+            Module = assets.Find<Shader>("Shaders/DrawClouds.slang"),
+            Name = "DrawClouds",
+            Stage = ShaderStage.Compute,
+        };
     }
 
     /// <summary>
@@ -79,7 +108,7 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
 
     /// <summary>
     /// The frame's air, while the passes' shaders are built, what they read and write is made, and the world's weather
-    /// holds a haze; none otherwise, and the air changes nothing.
+    /// holds a haze or clouds; none otherwise, and the air changes nothing.
     /// </summary>
     public Air? Render(in Frame frame, RenderGraph graph, in VolumetricsInput input)
     {
@@ -93,9 +122,14 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
 
         bool isBuilt =
             graph.GetState(_scatterShader) == GpuState.Ready && graph.GetState(_integrateShader) == GpuState.Ready;
-        if (_current is not { Weather.Count: > 0 } inputs || inputs.Weather.First[0].FogDensity <= 0 || !isBuilt)
+        if (
+            _current is not { Weather.Count: > 0 } inputs
+            || inputs.Weather.First[0] is { FogDensity: <= 0, CloudCover: <= 0 }
+            || !isBuilt
+        )
         {
             _filled = null;
+            _drawnClouds = null;
 
             return null;
         }
@@ -124,6 +158,16 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
         }
 
         Color color = weather.FogColor;
+        GpuTexture? cloudy = null;
+        if (weather.CloudCover > 0 && graph.GetState(_cloudShader) == GpuState.Ready)
+        {
+            Result<GpuTexture> clouds = graph.Texture(_cloudsDescription);
+            if (clouds.Ok)
+                cloudy = clouds.Value;
+            else
+                Log.Error($"The clouds are not drawn: {clouds.Error}");
+        }
+
         GpuAir row = new()
         {
             Volume = air.Value.Id,
@@ -134,6 +178,10 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
             HalfHeight = weather.FogHalfHeight,
             Anisotropy = weather.FogAnisotropy,
             Color = new Vector3(color.R, color.G, color.B),
+            Clouds = cloudy?.Id ?? 0,
+            CloudCover = weather.CloudCover,
+            CloudHeight = weather.CloudHeight,
+            Wind = new Vector2(weather.Wind.X, weather.Wind.Z),
         };
         graph.Upload(gpu.Frame, [row], GpuAir.Offset);
 
@@ -160,7 +208,27 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
             .Dispatch(groupsX, groupsY);
         _filled = size;
 
-        return new Air(air.Value);
+        // The clouds' picture of the sky: all of it when it holds nothing yet, else a sixteenth a frame, each texel the
+        // next of its 4 by 4 block. The pass header's z is the block's side.
+        if (cloudy is { } picture)
+        {
+            uint block = _drawnClouds == picture ? CloudBlock : 1u;
+            uint groups = CloudTexels / block / 8;
+            graph
+                .Compute(
+                    "Draw clouds",
+                    _cloudShader,
+                    new GpuConstants(gpu.Frame.Id, picture.Id, block, 0),
+                    RenderStage.Light
+                )
+                .Reads(gpu.Frame)
+                .Writes(picture)
+                .Dispatch(groups, groups);
+        }
+
+        _drawnClouds = cloudy;
+
+        return new Air(air.Value, cloudy);
     }
 
     /// <summary>

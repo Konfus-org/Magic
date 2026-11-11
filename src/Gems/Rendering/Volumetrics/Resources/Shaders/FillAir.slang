@@ -143,7 +143,8 @@ void ScatterAir(uint3 thread : SV_DispatchThreadID, uint3 group : SV_GroupID, ui
     float2 turn = GetRandom(thread.xy, frame.frameIndex / SkyDirections, thread.z).yz;
     float2 spread = frac(GetHammersley(frame.frameIndex % SkyDirections, SkyDirections) + turn);
     float3 up = ToWorld(CreateBasis(float3(0.0, 1.0, 0.0)), SampleCosineHemisphere(spread, pdf));
-    float3 sunThrough = GetTransmittance(world, lights.sunDirection.xyz, 1e6);
+    float3 sunThrough = GetTransmittance(world, lights.sunDirection.xyz, 1e6)
+        * GetCloudShadow(air, world, lights.sunDirection.xyz, frame.timeSec);
     float3 skyThrough = GetTransmittance(world, up, 1e6);
 
     float2 pick = GetRandom(thread.xy, frame.frameIndex, thread.z + AirSlices).xy;

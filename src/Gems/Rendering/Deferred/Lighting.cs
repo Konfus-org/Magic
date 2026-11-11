@@ -65,6 +65,9 @@ internal sealed class Lighting(AssetManager assets)
 
         shade.Reads(indirect);
 
+        if (air is { Clouds: { } clouds })
+            shade.Reads(clouds);
+
         shade.Writes(view.Gpu.Hdr).DispatchOver(view.Gpu.Width, view.Gpu.Height);
 
         // The nearest pane over the shaded picture, from what the resolve left in the glass targets.

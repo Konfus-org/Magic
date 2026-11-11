@@ -23,7 +23,7 @@
         {
             "name": "Weather",
             "components": {
-                "Weather": { "fogDensity": 0.002, "fogAnisotropy": 0.6 }
+                "Weather": { "wind": { "x": 15, "y": 0, "z": 5 }, "fogDensity": 0.002, "fogAnisotropy": 0.6, "cloudCover": 0.45 }
             }
         },
         {
