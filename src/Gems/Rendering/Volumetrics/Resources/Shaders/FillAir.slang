@@ -35,10 +35,21 @@ static const uint Candidates = 8u;
 groupshared uint groupLightCount;
 groupshared uint groupLights[MaxLights];
 
-// Lists in groupLights the local lights whose reach touches the box around a group's cells, in the camera-relative
-// world.
-void ListGroupLights(FrameConstants frame, Air air, Lights lights, uint3 group, uint3 size, uint index)
+// A thread a cell: its haze, as the part of a metre's light it scatters, in alpha, and in rgb the light it scatters
+// towards the camera per part scattered.
+[shader("compute")]
+[numthreads(8, 8, 1)]
+void ScatterAir(uint3 thread : SV_DispatchThreadID, uint3 group : SV_GroupID, uint index : SV_GroupIndex)
 {
+    PassHeader header = GetPassHeader();
+    StorageVolumeRef scattering = { header.y, 0u };
+    uint3 size = scattering.GetSize();
+    FrameConstants frame = GetFrame();
+    Air air = GetAir();
+    Lights lights = GetLights();
+
+    // The local lights whose reach touches the box around the group's cells, in the camera-relative world, listed in
+    // groupLights before any thread past the volume's edge leaves.
     if (index == 0u)
         groupLightCount = 0u;
 
@@ -71,65 +82,10 @@ void ListGroupLights(FrameConstants frame, Air air, Lights lights, uint3 group, 
     }
 
     GroupMemoryBarrierWithGroupSync();
-}
-
-// The light the local lights scatter towards the camera from a unit direction at a point, per part scattered: one of
-// the group's, picked among Candidates of them in a row from a random one by how much each would give unshadowed, by
-// random.y, with a ray towards a random point of it, by random.zw, weighted as all the group's lights would be (Talbot
-// et al., "Importance Resampling for Global Illumination", 2005).
-float3 GetLocalLightRadiance(Air air, Lights lights, float3 world, float3 direction, float4 random)
-{
-    uint total = groupLightCount;
-    uint count = min(total, Candidates);
-    uint first = min(uint(random.x * float(total)), total - 1u);
-    float weights[Candidates];
-    float sum = 0.0;
-    for (uint j = 0u; j < count; j++)
-    {
-        GpuLight candidate = LoadLight(lights.table, groupLights[(first + j) % total]);
-        LightSample sample = SampleLight(candidate, world, float3(0.0));
-        weights[j] = GetLuminance(sample.irradiance) * GetAirPhase(air.anisotropy, dot(direction, sample.direction));
-        sum += weights[j];
-    }
-
-    if (sum <= 0.0)
-        return float3(0.0);
-
-    uint picked = 0u;
-    float target = random.y * sum;
-    while (picked + 1u < count && target >= weights[picked])
-    {
-        target -= weights[picked];
-        picked++;
-    }
-
-    GpuLight light = LoadLight(lights.table, groupLights[(first + picked) % total]);
-    LightSample sample = SampleLight(light, world, float3(0.0));
-    float3 toPoint = SampleLightPoint(light, world, random.zw) - world;
-    float distance = length(toPoint);
-    float3 through = GetTransmittance(world, toPoint / max(distance, Epsilon), distance * 0.999);
-    float phase = GetAirPhase(air.anisotropy, dot(direction, sample.direction));
-    float weight = sum / max(weights[picked], 1e-12) * float(total) / float(count);
-    return air.color * sample.irradiance * phase * through * weight;
-}
-
-// A thread a cell: its haze, as the part of a metre's light it scatters, in alpha, and in rgb the light it scatters
-// towards the camera per part scattered.
-[shader("compute")]
-[numthreads(8, 8, 1)]
-void ScatterAir(uint3 thread : SV_DispatchThreadID, uint3 group : SV_GroupID, uint index : SV_GroupIndex)
-{
-    PassHeader header = GetPassHeader();
-    StorageVolumeRef scattering = { header.y, 0u };
-    uint3 size = scattering.GetSize();
-    FrameConstants frame = GetFrame();
-    Air air = GetAir();
-    Lights lights = GetLights();
-    ListGroupLights(frame, air, lights, group, size, index);
     if (any(thread >= size))
         return;
 
-    float2 uv = (float2(thread.xy) + 0.5) / float2(size.xy);
+    float2 uv = GetTexelCenterUv(thread.xy, size.xy);
     float3 random = GetRandom(thread.xy, frame.frameIndex, thread.z);
     float distance = ToAirDistance((float(thread.z) + random.x) / float(size.z), air.distance);
     float3 direction = NormalizeSafe(ReconstructRelative(frame, uv, 1.0), float3(0.0, 0.0, -1.0));
@@ -147,9 +103,46 @@ void ScatterAir(uint3 thread : SV_DispatchThreadID, uint3 group : SV_GroupID, ui
         * GetCloudShadow(air, world, lights.sunDirection.xyz, frame.timeSec);
     float3 skyThrough = GetTransmittance(world, up, 1e6);
 
+    // The light the local lights scatter towards the camera, per part scattered: one of the group's, picked among
+    // Candidates of them in a row from a random one by how much each would give unshadowed, with a ray towards a random
+    // point of it, weighted as all the group's lights would be (Talbot et al., "Importance Resampling for Global
+    // Illumination", 2005).
     float2 pick = GetRandom(thread.xy, frame.frameIndex, thread.z + AirSlices).xy;
-    float3 radiance = GetAirRadiance(air, lights, direction, skyThrough, sunThrough)
-        + GetLocalLightRadiance(air, lights, world, direction, float4(pick, random.yz));
+    uint total = groupLightCount;
+    uint count = min(total, Candidates);
+    uint first = min(uint(pick.x * float(total)), total - 1u);
+    float weights[Candidates];
+    float sum = 0.0;
+    for (uint j = 0u; j < count; j++)
+    {
+        GpuLight candidate = LoadLight(lights.table, groupLights[(first + j) % total]);
+        LightSample sample = SampleLight(candidate, world, float3(0.0));
+        weights[j] = GetLuminance(sample.irradiance) * GetAirPhase(air.anisotropy, dot(direction, sample.direction));
+        sum += weights[j];
+    }
+
+    float3 localLight = float3(0.0);
+    if (sum > 0.0)
+    {
+        uint picked = 0u;
+        float target = pick.y * sum;
+        while (picked + 1u < count && target >= weights[picked])
+        {
+            target -= weights[picked];
+            picked++;
+        }
+
+        GpuLight light = LoadLight(lights.table, groupLights[(first + picked) % total]);
+        LightSample sample = SampleLight(light, world, float3(0.0));
+        float3 toPoint = SampleLightPoint(light, world, random.yz) - world;
+        float apart = length(toPoint);
+        float3 through = GetTransmittance(world, toPoint / max(apart, Epsilon), apart * 0.999);
+        float phase = GetAirPhase(air.anisotropy, dot(direction, sample.direction));
+        float weight = sum / max(weights[picked], 1e-12) * float(total) / float(count);
+        localLight = air.color * sample.irradiance * phase * through * weight;
+    }
+
+    float3 radiance = GetAirRadiance(air, lights, direction, skyThrough, sunThrough) + localLight;
     float4 cell = float4(radiance, GetHazeDensity(air, world.y));
 
     // Last frame's cell where this one's centre was then, unless that was off its view or past its reach: the centre,
@@ -173,20 +166,6 @@ void ScatterAir(uint3 thread : SV_DispatchThreadID, uint3 group : SV_GroupID, ui
     scattering.Store(thread, cell);
 }
 
-// A cell as the mean of the 3 by 3 cells of its slice around it, so what few of a cell's rays found evens out over its
-// neighbours.
-float4 LoadAveraged(StorageVolumeRef scattering, uint3 size, uint3 cell)
-{
-    float4 sum = float4(0.0);
-    for (uint i = 0u; i < 9u; i++)
-    {
-        int2 at = clamp(int2(cell.xy) + int2(i % 3u, i / 3u) - 1, int2(0), int2(size.xy) - 1);
-        sum += scattering.Load(uint3(at, cell.z));
-    }
-
-    return sum / 9.0;
-}
-
 // A thread a column of cells: the light scattered towards the camera from it up to each cell's far side, and how much
 // of what is behind gets through, each cell's haze taken as even through its slice.
 [shader("compute")]
@@ -207,7 +186,17 @@ void IntegrateAir(uint3 thread : SV_DispatchThreadID)
     for (uint slice = 0u; slice < size.z; slice++)
     {
         float far = ToAirDistance(float(slice + 1u) / float(size.z), air.distance);
-        float4 cell = LoadAveraged(scattering, size, uint3(thread.xy, slice));
+
+        // The cell as the mean of the 3 by 3 cells of its slice around it, so what few of a cell's rays found evens out
+        // over its neighbours.
+        float4 cell = float4(0.0);
+        for (uint i = 0u; i < 9u; i++)
+        {
+            int2 at = clamp(int2(thread.xy) + int2(i % 3u, i / 3u) - 1, int2(0), int2(size.xy) - 1);
+            cell += scattering.Load(uint3(at, slice));
+        }
+
+        cell /= 9.0;
         float sliceThrough = exp(-cell.a * (far - near));
         lit += through * cell.rgb * (1.0 - sliceThrough);
         through *= sliceThrough;

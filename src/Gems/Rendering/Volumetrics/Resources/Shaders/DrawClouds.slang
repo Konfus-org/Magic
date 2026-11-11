@@ -31,9 +31,20 @@ static const float CloudExtinction = 0.03;
 // The metres across the noise that carves the clouds' edges.
 static const float DetailScale = 600.0;
 
-// Noise in [0, 1] that varies smoothly through space, a value a whole cell, blended between cells.
-float GetValueNoise(float3 at)
+// How much of the light a metre of the clouds takes at a point in the world: the coverage over it, rounded off at the
+// slab's bottom and top, its edges worn away by the finer noise.
+float GetCloudExtinction(Air air, float3 world, float time)
 {
+    float height = (world.y - air.cloudHeight) / CloudThickness;
+    if (height <= 0.0 || height >= 1.0)
+        return 0.0;
+
+    float coverage = GetCloudCoverage(air, world.xz, time) * saturate(height * 4.0) * saturate((1.0 - height) * 3.0);
+    if (coverage <= 0.0)
+        return 0.0;
+
+    // The finer noise, carried by the wind, in [0, 1]: a value a whole cell, blended between cells.
+    float3 at = (world - float3(air.wind.x, 0.0, air.wind.y) * time) / DetailScale;
     int3 cell = int3(floor(at));
     float3 f = smoothstep(0.0, 1.0, frac(at));
     float corners[8];
@@ -49,23 +60,7 @@ float GetValueNoise(float3 at)
         f.x
     );
     float2 alongY = lerp(alongX.xz, alongX.yw, f.y);
-    return lerp(alongY.x, alongY.y, f.z);
-}
-
-// How much of the light a metre of the clouds takes at a point in the world: the coverage over it, rounded off at the
-// slab's bottom and top, its edges worn away by the finer noise.
-float GetCloudExtinction(Air air, float3 world, float time)
-{
-    float height = (world.y - air.cloudHeight) / CloudThickness;
-    if (height <= 0.0 || height >= 1.0)
-        return 0.0;
-
-    float coverage = GetCloudCoverage(air, world.xz, time) * saturate(height * 4.0) * saturate((1.0 - height) * 3.0);
-    if (coverage <= 0.0)
-        return 0.0;
-
-    float3 carried = world - float3(air.wind.x, 0.0, air.wind.y) * time;
-    float detail = GetValueNoise(carried / DetailScale);
+    float detail = lerp(alongY.x, alongY.y, f.z);
     return CloudExtinction * saturate(coverage * 1.3 - detail * 0.3);
 }
 
@@ -87,7 +82,7 @@ void DrawClouds(uint3 thread : SV_DispatchThreadID)
 
     Air air = GetAir();
     Lights lights = GetLights();
-    float3 direction = FromCloudUv((float2(texel) + 0.5) / float2(size));
+    float3 direction = FromCloudUv(GetTexelCenterUv(texel, size));
     float3 camera = frame.cameraPosition.xyz;
     float base = air.cloudHeight;
     float top = base + CloudThickness;
