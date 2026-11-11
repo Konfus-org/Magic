@@ -17,14 +17,7 @@ public static class EcsExtensions
             where T1 : unmanaged, IComponent
         {
             ArgumentNullException.ThrowIfNull(snapshot);
-            EcsQuery<T1> query = ecs.Query<T1>();
-            snapshot.Start();
-            foreach (EcsChunk<T1> chunk in query)
-            {
-                snapshot.Add(chunk);
-            }
-
-            snapshot.End(query.Version);
+            snapshot.Fill(ecs.Query<T1>());
         }
 
         /// <summary>
@@ -35,14 +28,7 @@ public static class EcsExtensions
             where T2 : unmanaged, IComponent
         {
             ArgumentNullException.ThrowIfNull(snapshot);
-            EcsQuery<T1, T2> query = ecs.Query<T1, T2>();
-            snapshot.Start();
-            foreach (EcsChunk<T1, T2> chunk in query)
-            {
-                snapshot.Add(chunk);
-            }
-
-            snapshot.End(query.Version);
+            snapshot.Fill(ecs.Query<T1, T2>());
         }
     }
 }

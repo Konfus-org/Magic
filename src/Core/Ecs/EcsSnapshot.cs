@@ -21,20 +21,19 @@ public sealed class EcsSnapshot<T1>
 
     public ReadOnlySpan<T1> First => CollectionsMarshal.AsSpan(_first);
 
-    internal void Start() => _chunks.Start();
-
-    internal void Add(EcsChunk<T1> chunk)
+    internal void Fill(EcsQuery<T1> query)
     {
-        if (_chunks.IsHeld(chunk.Entities, chunk.Written, out int offset))
-            return;
+        _chunks.Start();
+        foreach (EcsChunk<T1> chunk in query)
+        {
+            if (_chunks.IsHeld(chunk.Entities, chunk.Written, out int offset))
+                continue;
 
-        EcsSnapshotChunks.Copy(_entities, offset, chunk.Entities);
-        EcsSnapshotChunks.Copy(_first, offset, chunk.First);
-    }
+            EcsSnapshotChunks.Copy(_entities, offset, chunk.Entities);
+            EcsSnapshotChunks.Copy(_first, offset, chunk.First);
+        }
 
-    internal void End(long version)
-    {
-        int count = _chunks.End(version);
+        int count = _chunks.End(query.Version);
         CollectionsMarshal.SetCount(_entities, count);
         CollectionsMarshal.SetCount(_first, count);
     }
@@ -71,21 +70,20 @@ public sealed class EcsSnapshot<T1, T2>
     /// </summary>
     public long Version => _chunks.Version;
 
-    internal void Start() => _chunks.Start();
-
-    internal void Add(EcsChunk<T1, T2> chunk)
+    internal void Fill(EcsQuery<T1, T2> query)
     {
-        if (_chunks.IsHeld(chunk.Entities, chunk.Written, out int offset))
-            return;
+        _chunks.Start();
+        foreach (EcsChunk<T1, T2> chunk in query)
+        {
+            if (_chunks.IsHeld(chunk.Entities, chunk.Written, out int offset))
+                continue;
 
-        EcsSnapshotChunks.Copy(_entities, offset, chunk.Entities);
-        EcsSnapshotChunks.Copy(_first, offset, chunk.First);
-        EcsSnapshotChunks.Copy(_second, offset, chunk.Second);
-    }
+            EcsSnapshotChunks.Copy(_entities, offset, chunk.Entities);
+            EcsSnapshotChunks.Copy(_first, offset, chunk.First);
+            EcsSnapshotChunks.Copy(_second, offset, chunk.Second);
+        }
 
-    internal void End(long version)
-    {
-        int count = _chunks.End(version);
+        int count = _chunks.End(query.Version);
         CollectionsMarshal.SetCount(_entities, count);
         CollectionsMarshal.SetCount(_first, count);
         CollectionsMarshal.SetCount(_second, count);
