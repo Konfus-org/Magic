@@ -45,10 +45,12 @@ internal readonly record struct Report(
 internal readonly record struct ShownReport(string Label, Color Color, Vector3 Position, string? Tooltip, long Order);
 
 /// <summary>
-/// What is reported to show for a while: lines on screen, and text at places in the world, each until its seconds after it
-/// was last reported are up. The same text at the same place again while it shows keeps it up rather than adding another.
-/// Any thread reports into a channel; the game thread drains it as it takes what shows each frame.
+/// Holds what is reported to show for a while: lines on screen, and text at places in the world.
 /// </summary>
+/// <remarks>
+/// A report shows until its seconds after it was last reported are up. The same text at the same place again keeps it
+/// up rather than adding another. Any thread reports. The game thread takes what shows each frame.
+/// </remarks>
 internal sealed class Reports
 {
     // What reports are written in, linear as Color is: white, an orange warning and a red error.
@@ -68,12 +70,14 @@ internal sealed class Reports
     internal void Add(in Report report) => _arrived.Writer.TryWrite(report);
 
     /// <summary>
-    /// Adds what shows at <paramref name="nowSec"/> to <paramref name="world"/>, what has a position, and to
-    /// <paramref name="lines"/>, what has none: first what is reported every frame, in the order it was last reported, then
-    /// the rest, in the order it was first reported. The rest, the lines logged, is left out unless
-    /// <paramref name="isLogShown"/>, but its time still runs. What has had its time, and was not reported again since the
-    /// last take, is gone after it. Game thread.
+    /// Adds what shows at <paramref name="nowSec"/> to <paramref name="world"/> when it has a position, else to
+    /// <paramref name="lines"/>. Game thread.
     /// </summary>
+    /// <remarks>
+    /// First comes what is reported every frame, in the order it was last reported, then the rest, in the order it was
+    /// first reported. The rest, the lines logged, is left out unless <paramref name="isLogShown"/>, but its time still
+    /// runs. A report whose time is up, and that was not reported again since the last take, is gone after this call.
+    /// </remarks>
     internal void Take(double nowSec, bool isLogShown, List<ShownReport> world, List<ShownReport> lines)
     {
         // What arrived keeps what shows the same up for its seconds from now, or starts showing.

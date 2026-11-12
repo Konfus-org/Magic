@@ -7,10 +7,13 @@ using Magic.Projects;
 namespace Magic.ImGuiDebugUI;
 
 /// <summary>
-/// The gem: the debug UI, drawn with Dear ImGui. <see cref="DebugUI"/> holds ImGui's frame from Update to LateUpdate, so
-/// the widgets gems made after this one call in their Update go into it; <see cref="Renderer"/> draws each frame ImGui
-/// ended over the window's image; and <see cref="LogSink"/> shows the lines logged to show on screen.
+/// The gem: the debug UI, drawn with Dear ImGui.
 /// </summary>
+/// <remarks>
+/// <see cref="DebugUI"/> holds ImGui's frame from Update to LateUpdate, so the widgets that gems after this one make in
+/// their Update go into it. <see cref="Renderer"/> draws each frame over the window's image.
+/// <see cref="LogSink"/> shows the lines logged to show on screen.
+/// </remarks>
 public sealed class EntryPoint : IGem, IDisposable
 {
     public EntryPoint(

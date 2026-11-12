@@ -4,9 +4,12 @@ using System.Runtime.CompilerServices;
 namespace Magic.ImGuiDebugUI;
 
 /// <summary>
-/// A copy of the frame ImGui ended, which the overlay draws without reading ImGui: every list's vertices in one run, their
-/// indices widened to the 32 bits a draw takes in another, and the draws counted from the start of both.
+/// A copy of the frame that ImGui ended, which the overlay draws without reading ImGui.
 /// </summary>
+/// <remarks>
+/// Every list's vertices are in one run, and their indices, widened to 32 bits, in another. Each draw counts from the
+/// start of both.
+/// </remarks>
 internal sealed class DebugUIFrame
 {
     /// <summary>
@@ -21,9 +24,11 @@ internal sealed class DebugUIFrame
     internal List<DebugUIDraw> Draws { get; } = [];
 
     /// <summary>
-    /// Holds <paramref name="data"/>, ended in frame <paramref name="index"/>, in place of what it held. A draw that calls
-    /// back or draws nothing is left out.
+    /// Holds <paramref name="data"/>, ended in frame <paramref name="index"/>, in place of what it held.
     /// </summary>
+    /// <remarks>
+    /// A draw that calls back or draws nothing is left out.
+    /// </remarks>
     internal unsafe void Copy(ImDrawData_t* data, uint index)
     {
         Index = index;
@@ -65,9 +70,12 @@ internal sealed class DebugUIFrame
 }
 
 /// <summary>
-/// One draw of a <see cref="DebugUIFrame"/>: its clip rectangle as left, top, right and bottom in target pixels, the
-/// texture by the id the UI gave it, and its indices and vertices from the start of the frame's.
+/// One draw of a <see cref="DebugUIFrame"/>.
 /// </summary>
+/// <remarks>
+/// The clip rectangle is left, top, right and bottom in target pixels. The texture is the id that the UI gave it. The
+/// indices and vertices count from the start of the frame's.
+/// </remarks>
 internal readonly record struct DebugUIDraw(
     Vector4 Clip,
     ulong Texture,
@@ -77,7 +85,10 @@ internal readonly record struct DebugUIDraw(
 );
 
 /// <summary>
-/// A change to one of ImGui's textures, queued in the frame it was asked for: the texture by the id the UI gave it, and
-/// its pixels whole as RGBA8, to make it or fill it again; none when ImGui let go of it.
+/// A change to one of ImGui's textures, queued in the frame that asked for it.
 /// </summary>
+/// <remarks>
+/// The texture is the id that the UI gave it. The pixels are the whole texture as RGBA8, to make it or fill it again,
+/// and null when ImGui let go of it.
+/// </remarks>
 internal readonly record struct DebugUITextureChange(ulong Texture, uint Frame, int Width, int Height, byte[]? Pixels);

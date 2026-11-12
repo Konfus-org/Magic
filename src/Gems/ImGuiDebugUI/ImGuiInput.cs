@@ -6,9 +6,11 @@ using static Magic.ImGuiDebugUI.ImGuiMouseButton_;
 namespace Magic.ImGuiDebugUI;
 
 /// <summary>
-/// The frame's input as ImGui takes it: each key Magic knows as ImGui's key, the mouse in window pixels, and what was
-/// typed. ImGui drops a key event that says what it already knows, so every key is told every frame.
+/// Gives ImGui the frame's input: each key that Magic knows, the mouse in window pixels, and the typed text.
 /// </summary>
+/// <remarks>
+/// Every key is told every frame, because ImGui drops a key event that says what it already knows.
+/// </remarks>
 internal static unsafe class ImGuiInput
 {
     /// <summary>
