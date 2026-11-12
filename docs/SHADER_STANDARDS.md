@@ -2,17 +2,17 @@
 
 The rules for Slang shaders in Magic. [Code Standards](CODE_STANDARDS.md) covers the C# that shares their structs.
 
-- Slang 2026, warnings as errors. One module a file, named by its path (`module "Core/Heap";`). The gem that provides
-  `IShaderCompiler` compiles shaders and loads their imports from the assets.
-- Read every resource through the heap's references in `Core/Heap.slang`; never declare one.
+- Slang 2026, warnings as errors. One module in each file, named by its path (`module "Core/Heap";`). The gem that
+  provides `IShaderCompiler` compiles shaders and loads their imports from the assets.
+- Read every resource through the heap's references in `Core/Heap.slang`. Never declare one.
 - Name a pass for its job, a verb and what it acts on (`CullClusters`, `ShadeLighting`), in its feature's module. Its
   constants are uniform parameters: the pass header, then one struct.
 - Names follow [Naming](CODE_STANDARDS.md#naming):
-  - A function returning a value starts with `Get` (`GetLuminance`), or `Load`/`Sample` for memory reads, `To` for
+  - A function that returns a value starts with `Get` (`GetLuminance`), or `Load`/`Sample` for memory reads, `To` for
     conversions, `Encode`/`Decode` for packing and `Create` for a struct it builds. A contract's work is `Evaluate`,
     `Shade` or `Apply`. `Pow2`, `Max3` and the like read as the intrinsics beside them.
   - A bool starts with `Is`, `Has` or `Can` (`IsHidden`, a field's in camel case: `isMirrored`).
-  - A contract is `I` plus a noun (`IMaterial`), and what it's handed is the noun plus `Inputs` (`SurfaceInputs`). A
+  - A contract is `I` plus a noun (`IMaterial`), and what it gets is the noun plus `Inputs` (`SurfaceInputs`). A
     struct shared with C# ends in `Constants`, or starts with `Gpu` for a table's row. A heap reference ends in `Ref`,
     stage-to-stage data in `Varyings`, a draw's outputs in `Targets`. A set of codes is an `enum`.
 - Put what a struct does on it as extensions (`instance.ToCameraRelative(position)`), so a struct shared with C# keeps
