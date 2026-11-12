@@ -1,137 +1,185 @@
 # Gems
 
-The plugins that come with Magic are in `src/Gems/`. A project runs one by listing its name in its `.magic` file. To
-add one, see [Templates](TOOLS.md#templates).
+A gem is a plugin: a part of the engine that a project adds or replaces. The gems that come with Magic are in
+`src/Gems/`. A project runs a gem when its `.magic` file lists the name of the gem. To make a gem, use the gem
+template ([Templates](TOOLS.md#templates)).
 
 ## Gems that use other gems
 
-A gem can use another gem's types. Reference its project with `Private="false"`, as with Core, so its assembly isn't
-copied beside yours, and list both gems in the project. Magic loads the referenced gem first and gives your gem its one
-copy, and refuses your gem, naming the other, when the project doesn't list it.
+A gem can use the types of another gem. To do this:
+
+1. In the csproj of your gem, reference the project of the other gem with `Private="false"`, as you do for Core.
+2. List both gems in the `.magic` file of the project.
+
+With `Private="false"`, the build does not copy the assembly of the other gem next to yours. Magic loads the other gem
+first and gives your gem that copy. If the project does not list the other gem, Magic refuses your gem and names the
+other gem.
 
 ## Native libraries
 
-A gem can call a C library. Declare it as a `NativeLibrary` item in the gem's project. The build fetches it, builds
-it with CMake and generates its C# API with [ClangSharpPInvokeGenerator](https://github.com/dotnet/ClangSharp), which
-the restore downloads. The item's metadata are documented in `Directory.Build.targets`.
+A gem can call a C library. Declare the library as a `NativeLibrary` item in the csproj of the gem. The build gets the
+library, builds it with CMake and generates its C# API with
+[ClangSharpPInvokeGenerator](https://github.com/dotnet/ClangSharp). `Directory.Build.targets` documents the metadata of
+the item.
 
-- Built libraries are shared by every checkout on the machine, under `Magic/NativeLibs/` in local app data. Set
-  `MagicNativeLibs` to move them and `MagicNativeCores` to limit the cores their build uses.
-- The headers are read with the machine's own C headers. Call only what every platform declares.
-- The API uses C's own names. Add `using static` for the library's class and the enums you use. Nothing is wrapped.
-- A library several gems call goes in a project of its own, which they reference and no `.magic` file lists.
-- A callback is an `[UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]` method.
-- List a declaration to leave out in the item's `Unbound`, with a comment saying why.
-- To run the generator by hand: `ClangSharpPInvokeGenerator @<library>.bindings.rsp`, with the file the build writes
-  in the project's intermediate folder.
+- All the checkouts on a machine share the built libraries, in `Magic/NativeLibs/` under the local application data
+  folder. Set `MagicNativeLibs` to move them. Set `MagicNativeCores` to limit the cores that their build uses.
+- The generator reads the headers with the C headers of the machine. Call only what each platform declares.
+- The API has the names of the C library. Nothing is wrapped. Add `using static` for the class of the library and the
+  enums that you use.
+- If more than one gem calls a library, put the library in a project of its own. The gems reference that project, and
+  no `.magic` file lists it.
+- Make a callback an `[UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]` method.
+- To leave out a declaration, list it in the `Unbound` metadata of the item, with a comment that tells why.
+- To run the generator by hand, run `ClangSharpPInvokeGenerator @<library>.bindings.rsp`. The build writes this file
+  in the intermediate folder of the project.
 
 ## AssimpModelImporter
 
-Reads FBX, glTF and OBJ files: provides `IAssetImporter<Model>`.
+Reads FBX, glTF and OBJ files into models. Provides `IAssetImporter<Model>`.
 
-- A file's nodes are flattened into one model in the engine's frame: left-handed, +Y up, a metre a unit, triangles
-  clockwise from outside, with normals and tangents made where the file has none.
-- One mesh per material slot, slots numbered as the file's materials are first used, up to the slots a renderer has.
-- The `.meta` file's `origin` is the point moved to the model's (0, 0, 0).
+- The importer puts all the nodes of a file into one model in the frame of the engine. This frame is left-handed, with
+  +Y up and one metre for each unit. Triangles are clockwise when seen from outside.
+- If a file has no normals or tangents, the importer makes them.
+- The model has one mesh for each material slot. The slots are numbered in the order that the file first uses its
+  materials. The number of slots stops at the number that a renderer has.
+- The `origin` in the `.meta` file is the point that the importer moves to (0, 0, 0) of the model.
 
 ## SdlBindings
 
-The C APIs of SDL3 and SDL_image, for the gems built on SDL, and `Sdl.Error`, SDL's reason for the last call that
-failed. No project lists it in its `.magic` file. A gem that needs SDL references it in its csproj. The build builds
-both libraries at the tags in the csproj ([Native libraries](#native-libraries)). Every gem that references it uses the
-same SDL.
+The C APIs of SDL3 and SDL_image, for the gems that use SDL. `Sdl.Error` gives the reason why the last SDL call
+failed.
+
+- A gem that needs SDL references this project in its csproj. No `.magic` file lists it.
+- The build builds both libraries at the tags in the csproj ([Native libraries](#native-libraries)).
+- All the gems that reference it use the same SDL.
 
 ## SdlPlatform
 
-The window, clipboard and input, through [SDL3](https://github.com/libsdl-org/SDL). Provides `IWindow`, `IClipboard`
-and `IInput`, and pumps the OS's events on the platform thread (`IPlatform`).
+Gives the window, the clipboard and the input, through [SDL3](https://github.com/libsdl-org/SDL). Provides `IWindow`,
+`IClipboard` and `IInput`. It also gets the events of the OS on the platform thread (`IPlatform`).
 
-- Keyboards, mice and gamepads can be plugged in and out while running.
-- Keys are physical keys (SDL scancodes), the same on every layout. Typed text follows the layout.
-- Mouse position and motion are in window pixels, the motion scaled and eased as the settings say. The wheel is in
+The settings of the gem are in `SdlPlatformSettings`. `get Window`, `get Input` and `get Simulation` list them.
+
+### Input
+
+- You can connect and disconnect keyboards, mice and gamepads while Magic runs.
+- Keys are physical keys (SDL scancodes). They are the same on each keyboard layout. Typed text follows the layout.
+- The mouse position and motion are in window pixels. The settings scale and smooth the motion. The wheel is in
   notches.
-- Gamepads use SDL's standard layout. Sticks go from -1 to 1 with up positive. Triggers go from 0 to 1.
-- The window opens as `Window.Mode` says: fullscreen without a border in a Release build, and maximized in any other
-  build, on the display `Window.Display` names. `set Window.Mode fullscreen|maximized|windowed` and
-  `set Window.Display 1` change them while it runs.
-- It paces the frames: `Window.MaxFrameRate` caps them while the window has the focus, and
-  `Window.BackgroundFrameRate` while it hasn't, 0 for no cap. With `Simulation.PauseWhenUnfocused`, losing the focus
-  pauses the world and getting it back resumes it. The wait shows as the gem's Update in the stats.
-- The gem's settings are `SdlPlatformSettings`; `get Window`, `get Input` and `get Simulation` list them.
-- The window's title is the project's name, and its icon the default one until `Icon` is set. Closing the window ends
-  the run.
-- The window and clipboard's members are the game thread's, and throw on any other; what is set reaches the OS on the
-  platform thread's next pump. The window's size is read from any.
-- Headless, it opens no window and needs no display. Only gamepads give input, and the clipboard's text stays in
-  the gem.
-- It publishes the RAM only this process holds, as `process.memory.usage` on its `Magic.Gems.SdlPlatform` meter: the
-  private working set on Windows, the anonymous resident pages (`RssAnon`) on Linux, and the physical footprint on
-  macOS, the numbers the OS's own tools show.
+- Gamepads use the standard layout of SDL. Sticks go from -1 to 1, with up positive. Triggers go from 0 to 1.
+
+### Window
+
+- `Window.Mode` sets how the window opens. By default, it is fullscreen without a border in a Release build, and
+  maximized in other builds. `Window.Display` sets the display.
+- `set Window.Mode fullscreen|maximized|windowed` and `set Window.Display 1` change the window while Magic runs.
+- `Window.MaxFrameRate` limits the frame rate while the window has the focus. `Window.BackgroundFrameRate` limits it
+  while the window does not have the focus. 0 is no limit. The wait shows as the `Update` of the gem in the stats.
+- With `Simulation.PauseWhenUnfocused`, the world pauses when the window loses the focus. It continues when the window
+  gets the focus again.
+- The title of the window is the name of the project. The icon is the default icon until you set `Icon`.
+- When you close the window, the run ends.
+
+### Threads
+
+- Use the members of the window and the clipboard only on the game thread. On other threads, they throw.
+- You can read the size of the window from any thread.
+- A change that you make reaches the OS when the platform thread next gets the events of the OS.
+
+### Headless runs
+
+Without a window, the gem needs no display. Only gamepads give input. The text of the clipboard stays in the gem.
+
+### Memory
+
+The gem publishes the RAM that only this process holds, as `process.memory.usage` on its `Magic.Gems.SdlPlatform`
+meter. This is the same number that the tools of the OS show:
+
+- On Windows, the private working set.
+- On Linux, the anonymous resident pages (`RssAnon`).
+- On macOS, the physical footprint.
 
 ## SdlTextureImporter
 
-Reads PNG, JPEG, TGA, BMP, SVG and ICO files into textures ready to upload, and keeps the result in the cache under the
-file's version: provides `IAssetImporter<Texture>`. Writes a plain RGBA8 texture as a PNG: provides
-`IAssetExporter<Texture>`.
+Reads PNG, JPEG, TGA, BMP, SVG and ICO files into textures. Provides `IAssetImporter<Texture>`. It also writes a plain
+RGBA8 texture as a PNG file, and provides `IAssetExporter<Texture>`.
 
-- A file decodes, gets its mip chain when its `.meta` asks for one, and every level is packed into BC7 blocks, sRGB for
-  colour and linear for a normal map or a mask, as the `.meta`'s usage says.
-- A `.meta` with `isCompressed` off keeps plain RGBA8, for an image the CPU reads. An `.icon` file's image needs it, as
-  a window's icon is plain pixels.
-- An `.svg` is drawn at the width its `.meta`'s `size` says.
+- The importer keeps each texture in the cache, under the version of the file.
+- If the `.meta` file asks for mips, the importer makes the mip chain.
+- The importer packs each level into BC7 blocks. The usage in the `.meta` file sets sRGB for colour, or linear for a
+  normal map or a mask.
+- A `.meta` file with `isCompressed` off keeps plain RGBA8, for an image that the CPU reads. The image of an `.icon`
+  file must have `isCompressed` off, because a window icon is plain pixels.
+- The `size` in the `.meta` file of an `.svg` file sets the width that the importer draws it at.
 
 ## SlangShaderCompiler
 
-Compiles Slang entries to SPIR-V for the GPU provider: provides `IShaderCompiler`.
+Compiles Slang entry points to SPIR-V for the GPU provider. Provides `IShaderCompiler`.
 
-- A shader is a `.slang` asset under `Shaders/`; `import A.B;` is the asset at `Shaders/A/B.slang`. An entry's
-  module and everything it imports load into one compile, so a change to any of them is a new compile.
-- What compiles is cached under a hash of every module's text, in the project's cache, so the second run of an
-  unchanged shader compiles nothing. What a struct's reflection finds is cached the same way. A change to the
-  compiler's options or tag is a new cache version, which compiles everything once more.
-- The setting `Debug.ShaderOptimization` sets how hard the compiler optimizes. Each level is cached apart, and a
-  change restarts the run, so a level not used before compiles every shader once.
-- The compiler starts with the first compile or reflection the cache doesn't hold, and stops after ten seconds with
-  none, giving its memory back. A run whose shaders are all cached never starts it.
+- A shader is a `.slang` asset under `Shaders/`. `import A.B;` imports the asset at `Shaders/A/B.slang`.
+- The compiler compiles an entry point with its module and all the modules that it imports. A change to one of these
+  modules compiles the entry point again.
+- The compiler keeps the results in the cache of the project. A second run of a shader that did not change compiles
+  nothing.
+- A change to the options or the tag of the compiler makes a new cache version. Then all the shaders compile again.
+- `Debug.ShaderOptimization` sets how much the compiler optimizes. A change restarts the run. The cache keeps each level
+  apart, so the first run at a new level compiles all the shaders.
 - Warnings are errors. Matrices are row-major. Entry points keep their names.
-- The compiler's API is C++ interfaces, which the bindings generator cannot bind, so `Slang.cs` binds by hand the few
-  calls the gem makes, by the indices `slang.h` gives them at the tag the project builds.
+
+> **Note:** The bindings generator cannot bind the C++ interfaces of the compiler. `Slang.cs` binds by hand the calls
+> that the gem makes, by their indices in `slang.h` at the tag that the project builds.
 
 ## VulkanGraphics
 
-The GPU through Vulkan 1.3: provides `IGraphicsApi`. Resources go into one bindless heap, which every shader reads by
-the id in a handle. A frame is one `GpuCommands` value, which the gems record into Core's graph and Core presents here;
-it puts in the barriers each pass's uses need, from what each resource was last used as.
+The GPU through Vulkan 1.3. Provides `IGraphicsApi`.
 
-List it in a project's `.magic` file after the gems that provide the window and the shader compiler.
+In the `.magic` file of a project, list it after the gems that provide the window and the shader compiler.
 
-- A texture, buffer or top-level acceleration structure the graph names, or a sampler it asks for by description, is
-  made on the first ask and kept while its name is asked for with the same description; another description makes it
-  again. A buffer asked for at another size alone keeps what it holds, as much as fits, copied before the frame's
-  passes. One no frame has asked for in a few frames is destroyed, so a gem asks every frame for what it reads.
-- A compute pass the graph records with a shader entry runs that entry, compiled through the shader compiler and built
-  on the first ask. A draw pass's vertex and pixel entries are compiled the same way, and built into a pipeline for the
-  formats of the targets it draws into on its first draw. The pass is left out of frames until then; a shader that
-  fails is logged, and its passes stay out.
-- The GPU is the fastest one with Vulkan 1.3, bindless descriptors and dynamic rendering that can show the window;
-  the log names it as the run starts. `Rendering.Gpu` picks another by a part of its name, and changing it restarts
-  the run. Ray queries are noted in `GpuFeatures` when the GPU has them. With ray queries, acceleration structures
-  join the heap: a bottom-level one over triangles of its buffers, a top-level one over instances of those, each built
-  by a command of the frame. Once a bottom-level one's build has run, the next frame copies it into one of the size it
-  compacts to, which its name then gives with a new id and address, and frees the built one with its scratch.
-- It draws into the window through a surface it makes from the window's OS handles, on Windows, X11, Wayland and macOS.
-  With `Window.IsVSyncOn` set, the window waits for the display, which caps the frame rate at the display's. It is
-  off by default: each frame shows as soon as it is drawn, so the frame rate is what the frame costs, in immediate
-  mode, which can tear, where the surface has it, else in mailbox mode. Setting it remakes the window's images. The
-  window has as few images as its surface takes, and two at least, with one more in mailbox mode.
-- Its resources and frames are the render thread's, and its members throw on any other.
-- It publishes each pass's and each frame's time on the GPU, and the memory it holds and the GPU has, on its
-  `Magic.Gems.VulkanGraphics` meter, whose tags name the Vulkan version, the GPU, its kind and its driver. The memory
-  in use is what the driver says the process holds in the GPU's own heaps, the window's images and the driver's own
-  memory included, where the driver has `VK_EXT_memory_budget`; elsewhere it is what the resources hold, and its
-  `source` tag says which. The allocated gauge is what the resources hold either way.
-- Each frame in flight uploads through a staging ring of host memory, which the allocated gauge counts. A ring grows for
-  a big upload, such as a world's models arriving, and shrinks back a few seconds after uploads are small again.
-- A Debug build turns on the Khronos validation layer when the Vulkan SDK is installed, and logs what it reports.
-- Headless, there is no window image: `WindowTarget` is none, and everything else works the same, on a software
-  device such as Mesa's lavapipe where there is no GPU.
+### Resources
+
+- A shader reads each resource by the id in its handle.
+- The gem makes a texture, buffer, top-level acceleration structure or sampler at the first frame that asks for it by
+  name. It keeps the resource while frames ask for that name with the same description. A different description makes
+  the resource again.
+- A buffer that a frame asks for at a different size keeps its contents, as much as fits.
+- The gem destroys a resource that no frame asked for in a few frames. A gem must ask each frame for all the resources
+  that it reads.
+- Use the resources and frames only on the render thread. On other threads, the members throw.
+
+### Passes
+
+- A frame is one `GpuCommands` value. The gems record their passes into the graph of Core, and Core gives the frame to
+  this gem.
+- The gem adds the barriers that each pass needs.
+- A compute pass runs its shader entry point. A draw pass runs its vertex and pixel entry points. The gem compiles them
+  through the shader compiler.
+- A pass is not in the frame until its shaders compile. If a shader fails, the gem logs the error and the pass stays
+  out.
+
+### GPU and ray queries
+
+- The gem uses the fastest GPU that has Vulkan 1.3, bindless descriptors and dynamic rendering, and can show the
+  window. The log names the GPU when the run starts.
+- `Rendering.Gpu` selects a different GPU by a part of its name. A change restarts the run.
+- If the GPU has ray queries, `GpuFeatures` says so. Then a frame can build a bottom-level acceleration structure over
+  triangles and a top-level one over instances.
+- After a bottom-level structure is built, the next frame compacts it. Its name then gives a new id and address.
+
+### Window
+
+- The gem draws into the window on Windows, X11, Wayland and macOS.
+- `Window.IsVSyncOn` makes each frame wait for the display. This limits the frame rate to the rate of the display.
+- By default, `Window.IsVSyncOn` is off. Each frame shows when it is drawn, and the picture can tear.
+- Headless, there is no window image, and `WindowTarget` is none. All the other features work. Without a GPU, the gem
+  uses a software device, such as Mesa's lavapipe.
+
+### Debug and measurements
+
+- In a Debug build, if the Vulkan SDK is installed, the gem turns on the Khronos validation layer. It logs what the
+  layer reports.
+- The gem publishes the GPU time of each pass and each frame, and the memory, on its `Magic.Gems.VulkanGraphics` meter.
+  The tags of the meter name the Vulkan version, the GPU, its kind and its driver.
+- The memory in use is what the driver says that the process holds on the GPU, if the driver has
+  `VK_EXT_memory_budget`. Otherwise, it is what the resources hold. The `source` tag says which.
+- The allocated gauge is what the resources and the upload memory hold.

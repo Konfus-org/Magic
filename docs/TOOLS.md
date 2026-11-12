@@ -1,130 +1,165 @@
 # Tools
 
-The scripts that build and check Magic are in `tools/Scripts/`, and the analyzer that checks the house rules is in
-`tools/Analyzers/` ([Analyzers](#analyzers)). Nothing in `tools/` ships.
+The scripts in `tools/Scripts/` build and check Magic. The analyzer in `tools/Analyzers/` checks the
+[Code Standards](CODE_STANDARDS.md) ([Analyzers](#analyzers)). Nothing in `tools/` ships.
 
-Each script is one PowerShell file that runs under both `pwsh` and Windows PowerShell 5.1, so don't use what 5.1
-lacks (`&&`, `?:`, `??`). A script runs from any folder and exits `0` when it passes. Its help comment lists its
-switches: `Get-Help ./tools/Scripts/Validate.ps1 -Full`.
+## Scripts
+
+Each script is one PowerShell file. It runs under `pwsh` and Windows PowerShell 5.1, from any folder. It exits `0`
+when it passes.
+
+The help comment of a script lists its parameters: `Get-Help ./tools/Scripts/Validate.ps1 -Full`.
+
+When you write a script, do not use `&&`, `?:` or `??`. Windows PowerShell 5.1 does not have them.
 
 ## Format.ps1
 
-Formats the `.cs`, `.csproj`, `.props` and `.targets` files that differ from the last commit, new files included.
-`-All` formats every file. It orders each type's members, applies the code style, then lays the code out with
-CSharpier. A local build formats too, and `Validate.ps1` checks. Last, it builds the solution and removes each project
-or package reference nothing compiled uses, which the build otherwise refuses.
+Formats the `.cs`, `.csproj`, `.props` and `.targets` files that are different from the last commit, and new files.
+`-All` formats all the files.
 
-- Fixes that would delete, invent or rename code are left to you. The build still reports them.
-- A reference needed by something other than the code, such as a package that only adds build steps, says
-  `TreatAsUsed="true"`, and is kept.
-- A project that fails its build holds back those built on it, so a reference only they leave unused is removed on
-  the next run.
-- After it moves statics, check that no static initializer reads a static declared below it, which would still be
-  unset.
+The script puts the members of each type in order, applies the code style and lays out the code with CSharpier. Then
+it builds the solution and removes each project or package reference that no code uses.
+
+- The script does not apply a fix that deletes, adds or renames code. The build still reports it.
+- If something other than the code needs a reference, mark the reference `TreatAsUsed="true"`. An example is a package
+  that only adds build steps. The script keeps it.
+- If a project does not build, the script does not check the projects that depend on it. The next run removes the
+  references that they do not use.
+- After the script moves static members, make sure that no static initializer reads a static that is declared below
+  it. That static is not set yet.
 
 ## Validate.ps1
 
-Runs the checks a change must pass, in order, and stops at the first failure:
+Runs the checks that a change must pass. It runs these steps in order, and stops at the first that fails:
 
-1. **Build:** builds `src/Magic.slnx`. Every warning is an error, and so is a file CSharpier would change.
+1. **Build:** builds `src/Magic.slnx`. Each warning is an error. A file that CSharpier would change is an error too.
 2. **Test:** runs the tests against that build ([Tests](#tests)).
-3. **Headless:** runs the sample project without a window under `--fail-on-error`, types `exit` into it and passes
-   when it exits `0`. A run still going after `-Seconds` is killed and fails.
-4. **Screenshot:** runs `Screenshot.ps1` on the sample project. Needs a display and a GPU.
+3. **Headless:** runs each sample project without a window under `--fail-on-error`, then types `exit`. The step passes
+   when the run exits `0`. A run that is not done after `-Seconds` fails.
+4. **Screenshot:** runs `Screenshot.ps1` on each sample project. This step needs a display and a GPU.
 
-`-Only` runs some steps, and `-Project` runs another project.
-
-## Profiling.ps1
-
-Takes, waits for or releases a profiling turn: the time in which one worktree alone builds and runs Magic, so that its
-profile is not disturbed. The turn is a file in the repository's git folder that every worktree shares, with the
-holder's worktree, its branch and the time the turn ends. `-Minutes`, at most 20, takes it. It first waits up to ten
-minutes for runs of Magic, builds and test runs from other worktrees to end. `-Release`, run from the holder's
-worktree, ends it, and it ends by itself at its time. `Format.ps1`, `Validate.ps1`, `Screenshot.ps1` and `Run.ps1`
-call `-Wait` first, so they wait while another worktree holds a turn.
-
-## Run.ps1
-
-Runs a project for an agent, the way an agent starts Magic itself; Screenshot.ps1 and Validate.ps1 run it in their own
-way. It names the window with the branch checked out where the script is, or `-Name`, sends `-Commands` as console
-lines, and kills a run still going after `-Seconds`. End `-Commands` with `exit` to end the run sooner. `-Headless` runs
-without a window and ends at the first error logged. It prints what Magic prints, and doesn't build.
-
-## Screenshot.ps1
-
-Runs a project with a window until its world has loaded, takes a screenshot and prints its path. It doesn't build.
-The window's title is the branch checked out where the script is, or `-Name`.
+`-Only` runs only the steps that you name. `-Project` runs other projects.
 
 ## AgentTaskComplete.ps1
 
-Runs `Format.ps1`, then the steps of `Validate.ps1` that `-Change` needs: `Docs` builds, `Code` adds Test and
-Headless, and `Visual` adds Test and Screenshot. If they pass, it stamps the checkout's exact files with the level,
-and a state already stamped returns at once. It also points git at the repository's [hooks](#git-hooks).
+Runs `Format.ps1`, then the steps of `Validate.ps1` that `-Change` needs:
+
+| `-Change` | Steps |
+| --- | --- |
+| `Docs` | Build |
+| `Code` | Build, Test, Headless |
+| `Visual` | Build, Test, Screenshot |
+
+If the steps pass, the script stamps the exact files of the checkout with the level. If the state already has a stamp
+at that level or higher, the script stops at once. The script also sets the [Git hooks](#git-hooks) if the clone has no
+hooks path.
+
+## Run.ps1
+
+Runs a project for an agent. Agents start Magic only with this script, `Screenshot.ps1` or `Validate.ps1`.
+
+- The script names the window with the branch of the worktree, or with `-Name`.
+- It sends `-Commands` as console lines. End `-Commands` with `exit` to end the run.
+- It kills a run that is not done after `-Seconds`.
+- `-Headless` runs without a window and ends the run at the first error that Magic logs.
+- The output of the script is what Magic prints. The script does not build.
+
+## Screenshot.ps1
+
+Runs a project with a window until its world loads. Then it takes a screenshot and prints the path of the image. The
+script does not build.
+
+The title of the window is the branch of the worktree, or `-Name`. `-Domains` opens more domains and takes a
+screenshot of each.
+
+## Profiling.ps1
+
+Takes, waits for or releases a profiling turn. In a profiling turn, only one worktree builds and runs Magic, so that
+nothing disturbs its measurements.
+
+- `-Minutes` takes the turn for at most 20 minutes. It first waits up to ten minutes for the runs of Magic, builds and
+  test runs of other worktrees to end.
+- `-Release` ends the turn. Run it from the worktree that holds the turn. The turn also ends at its time.
+- `-Wait` waits while another worktree holds a turn. `Format.ps1`, `Validate.ps1`, `Screenshot.ps1` and `Run.ps1` do
+  this first.
 
 ## Claim.ps1
 
-Claims the files and folders a slice will change, in the repository's git folder, which every worktree shares, and
-prints any other claim or worktree that touches them; it exits `1` when one does. `-Release` takes the claim back.
-The SessionStart agent hook lists the claims, and the edit agent hook refuses an edit inside another session's claim
-([AGENTS.md](../AGENTS.md#worktrees)).
+Claims the files and folders that a slice will change. All the worktrees see the claim.
+
+- The script prints each other claim or worktree that touches the same paths. If there is one, it exits `1`.
+- `-Release` removes the claim.
+- An agent hook refuses an edit inside the claim of another session ([Worktrees](../AGENTS.md#worktrees)).
 
 ## Templates
 
-`tools/VS Templates/` holds the `dotnet new` templates for a gem and a sample project, and `InstallTemplates.ps1`
-installs them. Run it once, and again after a template changes. Each template is a project in the solution's
-`Tools/VS Templates` folder and builds where it is, so a template that no longer compiles fails the build.
+`tools/VS Templates/` holds the `dotnet new` templates for a gem and a sample project. Each template is a project in
+the solution, so a template that does not compile fails the build.
 
-To add a gem:
+To install the templates, run `tools/VS Templates/InstallTemplates.ps1`. Run it again after a template changes.
 
-- **Visual Studio:** right-click the solution, choose Add > New Project > Magic Gem, give it a name and set its
-  location to `src/Gems`.
-- **Command line:** `Magic new gem Foo -o src/Gems/Foo` from the repository's root, which runs
-  `dotnet new magic-gem -n Foo -o src/Gems/Foo` and adds it to the solution's `Gems` folder.
+### Make a gem
 
-Either makes `src/Gems/Foo/Foo.csproj` and `FooGem.cs`. It builds to `Gems/Foo/` beside Magic, and a project
-runs it by listing `Foo` in its `.magic` file. Its csproj states its `Description`, `Version` and `Authors`.
+From the root of the repository, run `Magic new gem Foo -o src/Gems/Foo`. Or, in Visual Studio:
 
-To add a sample project:
+1. Right-click the solution.
+2. Select Add > New Project > Magic Gem.
+3. Give the gem a name.
+4. Set its location to `src/Gems`.
 
-- **Visual Studio:** right-click the `Samples` solution folder, choose Add > New Project > Magic Project, give it a
-  name and set its location to the repository's `samples` folder.
-- **Command line:** `Magic new project Foo -o samples/Foo` from the repository's root, then
-  `dotnet sln src/Magic.slnx add samples/Foo/Samples.Foo.csproj --solution-folder Samples`.
+The template makes `src/Gems/Foo/Foo.csproj` and `FooGem.cs`, and adds the project to the `Gems` folder of the
+solution. The gem builds to `Gems/Foo/` next to Magic. A project runs the gem when its `.magic` file lists `Foo`. The
+csproj of the gem states its `Description`, `Version` and `Authors`.
 
-Either makes `samples/Foo/Foo.magic`, listing no gems, and `Samples.Foo.csproj`, whose Run builds Magic and opens the
-project ([Samples](../README.md#samples)).
+`Magic new <template> <name>` runs `dotnet new magic-<template>`. It passes on each option that Magic does not know,
+such as `-o`.
+
+### Make a sample project
+
+1. From the root of the repository, run `Magic new project Foo -o samples/Foo`.
+2. Run `dotnet sln src/Magic.slnx add samples/Foo/Samples.Foo.csproj --solution-folder Samples`.
+
+In Visual Studio, right-click the `Samples` solution folder and select Add > New Project > Magic Project. Set its
+location to the `samples` folder of the repository.
+
+The template makes `samples/Foo/Foo.magic`, which lists no gems, and `Samples.Foo.csproj`. When you run the csproj, it
+builds Magic and opens the project ([Samples](../README.md#samples)).
 
 ## Analyzers
 
-`tools/Analyzers/` holds the rules of the [Code Standards](CODE_STANDARDS.md) that no built-in rule checks, as a Roslyn
-analyzer every other project in the solution runs through `Directory.Build.props`. A rule's id is `MG` and a number;
-each is one class whose summary says what it checks and names the standard, and the build and the editor report it
-like any other rule. `.editorconfig` sets the severities.
+`tools/Analyzers/` holds a Roslyn analyzer with the rules of the [Code Standards](CODE_STANDARDS.md) that no built-in
+rule checks. Each other project in the solution runs it, through `Directory.Build.props`.
 
-Every rule has a code fix, in a class beside it named for the rule with `CodeFix` in place of `Analyzer`, so the
-editor offers it and `tools/Scripts/Format.ps1` can apply it. A rule whose fix would need a decision the author must
-make still has one: it does the mechanical part and leaves the decision visible.
+- The id of a rule is `MG` and a number. The summary of the rule class tells what it checks and names the standard.
+- The build and the editor report the rules as they report other rules. `.editorconfig` sets their severities.
+- Each rule has a code fix in a class next to it. The class has the name of the rule, with `CodeFix` in place of
+  `Analyzer`. The editor offers the fix, and `Format.ps1` can apply it.
+- If a fix needs a decision from the author, the fix does the mechanical part and leaves the decision visible.
 
-To add a rule: the analyzer and its fix, a line in `AnalyzerReleases.Unshipped.md`, the severity in `.editorconfig`,
-and the standard it enforces named in its summary. Visual Studio keeps the analyzer it loaded; restart it after a
-change here.
+To add a rule:
+
+1. Write the analyzer and its code fix.
+2. Name the standard that the rule checks in the summary of the analyzer.
+3. Add a line to `AnalyzerReleases.Unshipped.md`.
+4. Set the severity in `.editorconfig`.
+5. Restart Visual Studio. It keeps the analyzer that it loaded first.
 
 ## Git hooks
 
-Git runs the hooks in `.githooks/` once `core.hooksPath` names that folder: `git config core.hooksPath .githooks`,
-once per clone, which `tools/Scripts/AgentTaskComplete.ps1` also sets ([Commits](../AGENTS.md#commits)).
+Git runs the hooks in `.githooks/` when `core.hooksPath` names that folder. Run `git config core.hooksPath .githooks`
+once for each clone. `AgentTaskComplete.ps1` also sets it ([Commits](../AGENTS.md#commits)).
 
-- `prepare-commit-msg` starts a commit's subject with `type: `, such as `feat: `. The type comes from the branch's
-  name, or from the staged files when they are all Markdown, CI, build or test files.
-- `commit-msg` refuses a commit whose subject still doesn't start with `type: `, or has a scope such as
+- `prepare-commit-msg` starts the subject of a commit with `type: `, such as `feat: `. The type comes from the name of
+  the branch. If all the staged files are Markdown, CI, build or test files, the type comes from them.
+- `commit-msg` refuses a commit if its subject does not start with `type: `, or if it has a scope such as
   `feat(core): `.
 
 ## Tests
 
-The unit tests are in `tests/`, one project per gem or library under test, named `<Gem>.Tests`. They run on xunit
-through the Microsoft testing platform, which `global.json` selects.
+The unit tests are in `tests/`. There is one project for each gem or library under test, with the name
+`<Gem>.Tests`. The tests use xunit on the Microsoft testing platform, which `global.json` selects.
 
-- **Run them all:** `dotnet test --solution src/Magic.slnx`.
-- **Run one project:** `dotnet test --project tests/<Gem>.Tests/<Gem>.Tests.csproj`.
-- A test project sees the gem's internal members through `InternalsVisibleTo` in the gem's project file.
-- A test builds what it checks from small data in the test itself, never from an asset on disk.
+- To run all the tests, run `dotnet test --solution src/Magic.slnx`.
+- To run one project, run `dotnet test --project tests/<Gem>.Tests/<Gem>.Tests.csproj`.
+- A test project sees the internal members of its gem through `InternalsVisibleTo` in the csproj of the gem.
+- A test makes the data that it checks in the test itself. It never reads an asset from disk.
