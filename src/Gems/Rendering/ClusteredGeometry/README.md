@@ -36,7 +36,7 @@ when a model draws as its impostor.
 
 ## Changing it
 
-`ClusteredGeometryGem.Render` is the frame in order, top to bottom.
+`Renderer.Render` is the frame in order, top to bottom.
 
 - `ClusterResources` keeps a row for each row of the view's model table: when a row's model changes, it reads the new
   model's clusters from the cache and copies them into its own pools, and gives the old one's ranges back. A pool
