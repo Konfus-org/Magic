@@ -141,6 +141,13 @@ public sealed class Renderer
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
     );
 
+    /// <summary>
+    /// The ids of the assets read again, heard on the game thread, which the view's step lets go of on the render thread.
+    /// </summary>
+    private readonly Channel<ulong> _reloaded = Channel.CreateUnbounded<ulong>(
+        new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
+    );
+
     private readonly Subscription _preprocessing;
 
     /// <summary>
@@ -239,6 +246,13 @@ public sealed class Renderer
 
         if (shaders != GpuState.Ready)
             return null;
+
+        // What was made from an asset read again is let go, so the next ask loads it anew and its failure is found again.
+        while (_reloaded.Reader.TryRead(out ulong asset))
+        {
+            _resources.Forget(asset);
+            _instances.Forget(asset);
+        }
 
         // The pools, with the models made since the last frame settled into them, before any renderer's row is built.
         // Every model asked for from here on is asked at or after the frame's start, which eviction keeps.
@@ -777,8 +791,8 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// Copies what the frame draws out of the entities and publishes it for the view's step, and hands the shading's
-    /// step the screenshots asked for.
+    /// Copies what the frame draws out of the entities and publishes it for the view's step, hands the view's step the
+    /// assets read again, and the shading's step the screenshots asked for.
     /// </summary>
     internal void PublishInputs(in Frame frame)
     {
@@ -793,6 +807,11 @@ public sealed class Renderer
         back.PostProcessing.Fill(_ecs);
         back.WorldNumber = _worldNumber;
         _inputs.Publish();
+
+        foreach (AssetReloaded reloaded in frame.Events.Get<AssetReloaded>())
+        {
+            _reloaded.Writer.TryWrite(reloaded.Id);
+        }
 
         foreach (ScreenshotRequested asked in frame.Events.Get<ScreenshotRequested>())
         {

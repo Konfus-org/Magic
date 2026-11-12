@@ -511,6 +511,28 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
+    /// Lets go of what was made from asset <paramref name="id"/>, read again, so the next ask loads it anew: a material, a
+    /// texture, a material shader's struct, which is reflected again now, and a model that failed. A model in the pools
+    /// stays as it was made until it is evicted.
+    /// </summary>
+    public void Forget(ulong id)
+    {
+        _materials.Remove(id);
+        _textures.Remove(id);
+        if (_layouts.ContainsKey(id))
+        {
+            _layouts[id] = null;
+            ReflectAsync(new Handle<Shader>(id)).FireAndForget();
+        }
+
+        if (HasFailed(new Handle<Model>(id)))
+        {
+            _modelEntries.Remove(id);
+            SettledModels++;
+        }
+    }
+
+    /// <summary>
     /// Whether the model is in the pools, copied up in this frame's transfers at the latest, or could not be made and the
     /// failure cube it is drawn as has arrived in its place, or could not be made either.
     /// </summary>

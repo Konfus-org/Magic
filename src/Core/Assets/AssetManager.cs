@@ -762,9 +762,9 @@ public sealed class AssetManager : IDisposable
                 if (entry.Stage == AssetStage.Wanted)
                     continue;
 
-                // One loaded that nothing holds, or that failed, is let go rather than read again: the next ask reads the
-                // file as it is.
-                if (entry.Stage == AssetStage.Loaded && entry.GetValue() is null)
+                // One loaded that nothing holds is let go rather than read again: the next ask reads the file as it is. One
+                // that failed is read again, so its asker hears when it loads.
+                if (entry.Stage == AssetStage.Loaded && entry.GetValue() is null && entry.Error.Length == 0)
                 {
                     loaded = loaded with { Entries = loaded.Entries.Remove(id) };
 
@@ -1324,7 +1324,8 @@ public sealed class AssetManager : IDisposable
     /// <summary>
     /// Takes in what a worker's read of asset <paramref name="id"/> made: it is loaded, its waiters are told, what it
     /// depends on goes in the database and, for a type a gem reads, the cache, by its file's version, so finding that
-    /// later doesn't load it; and one that had loaded and is still held is published as <see cref="AssetReloaded"/>. One
+    /// later doesn't load it; and one that had loaded and is still held, or had failed, is published as
+    /// <see cref="AssetReloaded"/>. One
     /// that failed while what it made before is still held leaves that in use, and says so. One whose file changed
     /// meanwhile is read again instead; one gone meanwhile was told as it went, and one landing after the run is dropped.
     /// </summary>
@@ -1381,7 +1382,7 @@ public sealed class AssetManager : IDisposable
             waiter.TrySetResult(outcome);
         }
 
-        if (before is not null && made.Value is { Ok: true, Value: { } asset })
+        if ((before is not null || entry.Error.Length > 0) && made.Value is { Ok: true, Value: { } asset })
             _events.Publish(new AssetReloaded(id, asset));
 
         // What a gem-read asset depends on is kept by its file's version, so finding that later doesn't load it.
