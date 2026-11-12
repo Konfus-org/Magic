@@ -44,6 +44,19 @@ internal sealed class PixelEffects
     /// </summary>
     public void Record(RenderGraph graph, in GpuView gpu, uint frameIndex)
     {
+        // With no effect ready, none runs and the picture stays in the HDR target, so nothing is asked for.
+        ReadOnlySpan<GpuEffect> effects = gpu.Effects.Span;
+        bool isAnyReady = false;
+        foreach (GpuEffect effect in effects)
+            isAnyReady |= effect.State == GpuState.Ready;
+
+        if (!isAnyReady)
+        {
+            _lastFrame.AsSpan(0, effects.Length).Clear();
+
+            return;
+        }
+
         Result<GpuBuffer> passTable = graph.Buffer(
             new("Effect passes", MaterialSlots.Capacity * (MostLevels + 1) * Unsafe.SizeOf<GpuEffectPass>())
         );
@@ -83,7 +96,6 @@ internal sealed class PixelEffects
         Span<GpuEffectPass> passes = stackalloc GpuEffectPass[MaterialSlots.Capacity * (MostLevels + 1)];
         int pass = 0;
         (GpuTexture picture, GpuTexture other) = (gpu.Hdr, otherPicture.Value);
-        ReadOnlySpan<GpuEffect> effects = gpu.Effects.Span;
         for (int place = 0; place < effects.Length; place++)
         {
             (ulong material, GpuState state, ShaderEntry apply, ShaderEntry levelEntry, EffectNeeds needs) = effects[
