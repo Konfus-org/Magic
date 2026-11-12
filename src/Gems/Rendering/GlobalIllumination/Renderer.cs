@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Magic.Assets;
-using Magic.Debugging;
 using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
 using Magic.Ecs;
@@ -89,6 +88,15 @@ public sealed class Renderer : IRender<TracedInput, IndirectLight>, IHookIntoDom
         if (shaders != GpuState.Loading)
             _built.TrySetResult();
 
+        if (shaders == GpuState.Failed)
+        {
+            graph.Fail(
+                RenderFailure.Shader,
+                "Indirect light is not traced",
+                "a shader of the indirect light was not built."
+            );
+        }
+
         if (shaders != GpuState.Ready)
             return null;
 
@@ -139,7 +147,7 @@ public sealed class Renderer : IRender<TracedInput, IndirectLight>, IHookIntoDom
         Result asked = Result.FindFailure(constants, probes, diffuse, reflections, depth, depthHistory, sampler);
         if (!asked.Ok)
         {
-            Log.Error($"The indirect light is not traced: {asked.Error}");
+            graph.Fail(RenderFailure.Resource, "Indirect light is not traced", asked.Error);
 
             return null;
         }

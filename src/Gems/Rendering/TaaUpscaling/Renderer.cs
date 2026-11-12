@@ -1,5 +1,4 @@
 using Magic.Assets;
-using Magic.Debugging;
 using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
 using Magic.Graphics;
@@ -39,8 +38,14 @@ public sealed class Renderer : IRenderInto<Upscaling>
     /// <summary>
     /// The frame's upscaling; none while the shader builds.
     /// </summary>
-    public Upscaling? Render(in Frame frame, RenderGraph graph) =>
-        graph.GetState(_shader) != GpuState.Ready ? null : _upscaling;
+    public Upscaling? Render(in Frame frame, RenderGraph graph)
+    {
+        GpuState state = graph.GetState(_shader);
+        if (state == GpuState.Failed)
+            graph.Fail(RenderFailure.Shader, "Picture is not upscaled", "the upscaling's shader was not built.");
+
+        return state == GpuState.Ready ? _upscaling : null;
+    }
 
     private static TextureDescription GetResolved(string name, int width, int height) =>
         new(
@@ -65,7 +70,7 @@ public sealed class Renderer : IRenderInto<Upscaling>
         );
         if (Result.FindFailure(first, second, sampler) is { Ok: false } failed)
         {
-            Log.Error($"The picture is not upscaled: {failed.Error}");
+            graph.Fail(RenderFailure.Resource, "Picture is not upscaled", failed.Error);
 
             return GpuTexture.None;
         }

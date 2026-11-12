@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Assets;
-using Magic.Debugging;
 using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
 using Magic.Graphics;
@@ -72,6 +71,9 @@ public sealed class Renderer(TracedShadowsSettings settings, AssetManager assets
             _lastFilterShader,
             _upsampleShader
         );
+        if (state == GpuState.Failed)
+            graph.Fail(RenderFailure.Shader, "Shadows are not traced", "a shader of the shadows was not built.");
+
         if (state != GpuState.Ready)
             return null;
 
@@ -127,7 +129,7 @@ public sealed class Renderer(TracedShadowsSettings settings, AssetManager assets
         );
         if (!asked.Ok)
         {
-            Log.Error($"The shadows are not traced: {asked.Error}");
+            graph.Fail(RenderFailure.Resource, "Shadows are not traced", asked.Error);
 
             return null;
         }

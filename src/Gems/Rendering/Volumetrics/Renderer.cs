@@ -1,6 +1,5 @@
 using System.Numerics;
 using Magic.Assets;
-using Magic.Debugging;
 using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
 using Magic.Ecs;
@@ -73,11 +72,14 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
     /// </summary>
     public Air? Render(in Frame frame, RenderGraph graph, in VolumetricsInput input)
     {
-        bool isBuilt = graph.GetState(_scatterShader, _integrateShader) == GpuState.Ready;
+        GpuState shaders = graph.GetState(_scatterShader, _integrateShader);
+        if (shaders == GpuState.Failed)
+            graph.Fail(RenderFailure.Shader, "Air is not filled", "a shader of the air was not built.");
+
         if (
             _weather.TakeNewest() is not { First: [var weather, ..] }
             || weather is { FogDensity: <= 0, CloudCover: <= 0 }
-            || !isBuilt
+            || shaders != GpuState.Ready
         )
         {
             _filled = null;
@@ -96,19 +98,27 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
         Result<GpuSampler> sampler = graph.Sampler(new SamplerDescription { Wrap = TextureWrap.Clamp });
         if (Result.FindFailure(scattering, history, air, sampler) is { Ok: false } failed)
         {
-            Log.Error($"The air is not filled: {failed.Error}");
+            graph.Fail(RenderFailure.Resource, "Air is not filled", failed.Error);
 
             return null;
         }
 
         GpuTexture? cloudy = null;
-        if (weather.CloudCover > 0 && graph.GetState(_cloudShader) == GpuState.Ready)
+        if (weather.CloudCover > 0)
         {
-            Result<GpuTexture> clouds = graph.Texture(_cloudsDescription);
-            if (clouds.Ok)
-                cloudy = clouds.Value;
-            else
-                Log.Error($"The clouds are not drawn: {clouds.Error}");
+            GpuState cloudShader = graph.GetState(_cloudShader);
+            if (cloudShader == GpuState.Failed)
+            {
+                graph.Fail(RenderFailure.Weather, "Clouds are not drawn", "the clouds' shader was not built.");
+            }
+            else if (cloudShader == GpuState.Ready)
+            {
+                Result<GpuTexture> clouds = graph.Texture(_cloudsDescription);
+                if (clouds.Ok)
+                    cloudy = clouds.Value;
+                else
+                    graph.Fail(RenderFailure.Weather, "Clouds are not drawn", clouds.Error);
+            }
         }
 
         GpuAir row = new()

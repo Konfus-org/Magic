@@ -152,7 +152,7 @@ public sealed class Renderer(AssetManager assets) : IRender<AccelerationStructur
             : Result.Failure(instances.Error);
         if (Result.FindFailure(hitMaterials, instances, topLevel) is { Ok: false } failed)
         {
-            Log.Error($"The world's acceleration structure is not made: {failed.Error}");
+            graph.Fail(RenderFailure.Resource, "Ray structure is not made", failed.Error);
 
             return null;
         }
