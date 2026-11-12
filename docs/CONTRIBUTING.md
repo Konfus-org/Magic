@@ -1,7 +1,5 @@
 # Contributing
 
-This doc tells you how to make a change to Magic and get it merged into `dev`.
-
 Follow the [Code of Conduct](CODE_OF_CONDUCT.md) in every space of the project.
 
 ## Make a change

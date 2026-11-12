@@ -25,7 +25,7 @@ public interface IInput
     /// The characters typed in this frame, in order, for a text field.
     /// </summary>
     /// <remarks>
-    /// The keyboard layout and the input method make these characters. The text is empty if nothing was typed.
+    /// The keyboard layout and the input method make these characters.
     /// </remarks>
     string Text { get; }
 

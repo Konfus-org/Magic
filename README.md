@@ -64,9 +64,9 @@ Magic keeps the saved settings and the saves of a project under the local applic
 | Folder | Holds |
 | --- | --- |
 | `src/Core/` | The engine: the `Magic` program and all the parts that it is made from |
-| `src/Gems/` | The gems that come with Magic. Each gem builds to `Gems/<Name>/` next to Magic. |
+| `src/Gems/` | The gems that come with Magic ([Gems](docs/GEMS.md)) |
 | `samples/` | The sample projects |
-| `tools/` | The scripts and the analyzers. Nothing in this folder ships. |
+| `tools/` | The scripts, the templates and the analyzer ([Tools](docs/TOOLS.md)) |
 | `docs/` | The docs for contributors |
 | `Build/` | The build output. It is not in git. |
 

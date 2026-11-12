@@ -22,8 +22,7 @@ public readonly record struct FrameEvents
     /// Gets each <typeparamref name="T"/> published in the last frame that no earlier gem handled, in publish order.
     /// </summary>
     /// <remarks>
-    /// The span is empty if there are none. To keep a message from the gems after this one, set
-    /// <see cref="IEvent.IsHandled"/> through a <c>ref</c>.
+    /// To keep a message from the gems after this one, set <see cref="IEvent.IsHandled"/> through a <c>ref</c>.
     /// </remarks>
     public Span<T> Get<T>()
         where T : struct, IEvent => _events is null ? [] : _events.GetTaken<T>();

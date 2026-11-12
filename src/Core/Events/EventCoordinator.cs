@@ -52,7 +52,7 @@ public sealed class EventCoordinator
     /// Gets the messages of type <typeparamref name="T"/> from the last take that no gem has handled.
     /// </summary>
     /// <remarks>
-    /// Call it only on the game thread. The span is empty if no message of the type was ever published.
+    /// Call it only on the game thread.
     /// </remarks>
     internal Span<T> GetTaken<T>()
         where T : struct, IEvent =>

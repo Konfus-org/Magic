@@ -1,9 +1,9 @@
 # Gems
 
 A gem is a plugin: a part of the engine that a project adds or replaces. The gems that come with Magic are in
-`src/Gems/`. A project runs a gem when its `.magic` file lists the name of the gem. To make a gem, use the gem
-template ([Templates](TOOLS.md#templates)).
-The debug gems, ImGuiDebugUI and DebugTools, are in [Debugging](DEBUGGING.md).
+`src/Gems/`. Each gem builds to `Gems/<Name>/` next to Magic. A project runs a gem when its `.magic` file lists the
+name of the gem. To make a gem, use the gem template ([Templates](TOOLS.md#templates)). The debug gems, ImGuiDebugUI
+and DebugTools, are in [Debugging](DEBUGGING.md).
 
 ## Gems that use other gems
 
@@ -49,11 +49,8 @@ Reads FBX, glTF and OBJ files into models. Provides `IAssetImporter<Model>`.
 ## SdlBindings
 
 The C APIs of SDL3 and SDL_image, for the gems that use SDL. `Sdl.Error` gives the reason why the last SDL call
-failed.
-
-- A gem that needs SDL references this project in its csproj. No `.magic` file lists it.
-- The build builds both libraries at the tags in the csproj ([Native libraries](#native-libraries)).
-- All the gems that reference it use the same SDL.
+failed. A gem that needs SDL references this project, and the csproj sets the tag of each library
+([Native libraries](#native-libraries)).
 
 ## SdlPlatform
 
@@ -72,13 +69,7 @@ The settings of the gem are in `SdlPlatformSettings`. `get Window`, `get Input` 
 
 ### Window
 
-- `Window.Mode` sets how the window opens. By default, it is fullscreen without a border in a Release build, and
-  maximized in other builds. `Window.Display` sets the display.
-- `set Window.Mode fullscreen|maximized|windowed` and `set Window.Display 1` change the window while Magic runs.
-- `Window.MaxFrameRate` limits the frame rate while the window has the focus. `Window.BackgroundFrameRate` limits it
-  while the window does not have the focus. 0 is no limit. The wait shows as the `Update` of the gem in the stats.
-- With `Simulation.PauseWhenUnfocused`, the world pauses when the window loses the focus. It continues when the window
-  gets the focus again.
+- The wait for a frame rate limit shows as the `Update` of the gem in the stats.
 - The title of the window is the name of the project. The icon is the default icon until you set `Icon`.
 - When you close the window, the run ends.
 
@@ -124,8 +115,7 @@ Compiles Slang entry points to SPIR-V for the GPU provider. Provides `IShaderCom
 - The compiler keeps the results in the cache of the project. A second run of a shader that did not change compiles
   nothing.
 - A change to the options or the tag of the compiler makes a new cache version. Then all the shaders compile again.
-- `Debug.ShaderOptimization` sets how much the compiler optimizes. A change restarts the run. The cache keeps each level
-  apart, so the first run at a new level compiles all the shaders.
+- The settings of the gem are in `SlangShaderCompilerSettings`. `get Debug` lists them.
 - Warnings are errors. Matrices are row-major. Entry points keep their names.
 
 > **Note:** The bindings generator cannot bind the C++ interfaces of the compiler. `Slang.cs` binds by hand the calls
@@ -135,7 +125,8 @@ Compiles Slang entry points to SPIR-V for the GPU provider. Provides `IShaderCom
 
 The GPU through Vulkan 1.3. Provides `IGraphicsApi`.
 
-In the `.magic` file of a project, list it after the gems that provide the window and the shader compiler.
+In the `.magic` file of a project, list it after the gems that provide the window and the shader compiler. The
+settings of the gem are in `VulkanGraphicsSettings`. `get Window` and `get Rendering` list them.
 
 ### Resources
 
@@ -162,7 +153,6 @@ In the `.magic` file of a project, list it after the gems that provide the windo
 
 - The gem uses the fastest GPU that has Vulkan 1.3, bindless descriptors and dynamic rendering, and can show the
   window. The log names the GPU when the run starts.
-- `Rendering.Gpu` selects a different GPU by a part of its name. A change restarts the run.
 - If the GPU has ray queries, `GpuFeatures` says so. Then a frame can build a bottom-level acceleration structure over
   triangles and a top-level one over instances.
 - After a bottom-level structure is built, the next frame compacts it. Its name then gives a new id and address.
@@ -170,8 +160,6 @@ In the `.magic` file of a project, list it after the gems that provide the windo
 ### Window
 
 - The gem draws into the window on Windows, X11, Wayland and macOS.
-- `Window.IsVSyncOn` makes each frame wait for the display. This limits the frame rate to the rate of the display.
-- By default, `Window.IsVSyncOn` is off. Each frame shows when it is drawn, and the picture can tear.
 - Headless, there is no window image, and `WindowTarget` is none. All the other features work. Without a GPU, the gem
   uses a software device, such as Mesa's lavapipe.
 

@@ -1,7 +1,5 @@
 # Debugging
 
-This doc tells you how to use the debug UI and the debug windows, and how a gem publishes its measurements.
-
 ## ImGuiDebugUI
 
 Draws the debug UI with [Dear ImGui](https://github.com/ocornut/imgui). Provides `IDebugUI`.
@@ -19,14 +17,9 @@ that takes `IDebugUI` after this gem.
 - Lines logged with `onScreen` show while a debug window is open. The settings can make them show at all times. In a
   Debug build, they show at all times by default.
 - The settings of the gem are in `ImGuiDebugUISettings`, in the `Debug` category. `get Debug` lists them.
-- The UI scales with the display until you set `Debug.UiScale`.
 - Without a gem that provides `IInput`, you cannot click or type in the UI. Without a gem that provides `IClipboard`,
   you cannot copy or paste.
 - The UI draws nothing until its shaders compile.
-- The text uses the font of ImGui.
-
-Dear ImGui is a native library. The gem calls it through the C API that
-[dear_bindings](https://github.com/dearimgui/dear_bindings) generates ([Native libraries](GEMS.md#native-libraries)).
 
 ## DebugTools
 
@@ -58,9 +51,6 @@ A histogram shows its mean, its count each second and its maximum. A counter sho
 second. A gauge shows its last value.
 
 ### Settings
-
-The settings window has a header for each category. Each setting has a control for its type, and its summary as a
-tooltip.
 
 - A change applies at once.
 - A setting marked `(restarts)` applies when you click its button. This restarts the run.

@@ -1,7 +1,6 @@
 # Tools
 
-The scripts in `tools/Scripts/` build and check Magic. The analyzer in `tools/Analyzers/` checks the
-[Code Standards](CODE_STANDARDS.md) ([Analyzers](#analyzers)). Nothing in `tools/` ships.
+The scripts in `tools/Scripts/` build and check Magic. Nothing in `tools/` ships.
 
 ## Scripts
 
@@ -42,54 +41,30 @@ Runs the checks that a change must pass. It runs these steps in order, and stops
 
 ## AgentTaskComplete.ps1
 
-Runs `Format.ps1`, then the steps of `Validate.ps1` that `-Change` needs:
-
-| `-Change` | Steps |
-| --- | --- |
-| `Docs` | Build |
-| `Code` | Build, Test, Headless |
-| `Visual` | Build, Test, Screenshot |
+Runs `Format.ps1`, then the steps of `Validate.ps1` that the `-Change` level needs ([Commands](../AGENTS.md#commands)).
 
 If the steps pass, the script stamps the exact files of the checkout with the level. If the state already has a stamp
-at that level or higher, the script stops at once. The script also sets the [Git hooks](#git-hooks) if the clone has no
-hooks path.
+at that level or higher, the script stops at once.
 
 ## Run.ps1
 
-Runs a project for an agent. Agents start Magic only with this script, `Screenshot.ps1` or `Validate.ps1`.
-
-- The script names the window with the branch of the worktree, or with `-Name`.
-- It sends `-Commands` as console lines. End `-Commands` with `exit` to end the run.
-- It kills a run that is not done after `-Seconds`.
-- `-Headless` runs without a window and ends the run at the first error that Magic logs.
-- The output of the script is what Magic prints. The script does not build.
+Runs a project for an agent, and names the window with the branch of the worktree. End `-Commands` with `exit` to end
+the run. The script does not build.
 
 ## Screenshot.ps1
 
 Runs a project with a window until its world loads. Then it takes a screenshot and prints the path of the image. The
 script does not build.
 
-The title of the window is the branch of the worktree, or `-Name`. `-Domains` opens more domains and takes a
-screenshot of each.
-
 ## Profiling.ps1
 
 Takes, waits for or releases a profiling turn. In a profiling turn, only one worktree builds and runs Magic, so that
-nothing disturbs its measurements.
-
-- `-Minutes` takes the turn for at most 20 minutes. It first waits up to ten minutes for the runs of Magic, builds and
-  test runs of other worktrees to end.
-- `-Release` ends the turn. Run it from the worktree that holds the turn. The turn also ends at its time.
-- `-Wait` waits while another worktree holds a turn. `Format.ps1`, `Validate.ps1`, `Screenshot.ps1` and `Run.ps1` do
-  this first.
+nothing disturbs its measurements. The scripts that build or run Magic wait while another worktree holds a turn.
 
 ## Claim.ps1
 
-Claims the files and folders that a slice will change. All the worktrees see the claim.
-
-- The script prints each other claim or worktree that touches the same paths. If there is one, it exits `1`.
-- `-Release` removes the claim.
-- An agent hook refuses an edit inside the claim of another session ([Worktrees](../AGENTS.md#worktrees)).
+Claims the files and folders that a slice will change. All the worktrees see the claim. An agent hook refuses an edit
+inside the claim of another session ([Worktrees](../AGENTS.md#worktrees)).
 
 ## Templates
 
@@ -108,8 +83,7 @@ From the root of the repository, run `Magic new gem Foo -o src/Gems/Foo`. Or, in
 4. Set its location to `src/Gems`.
 
 The template makes `src/Gems/Foo/Foo.csproj` and `FooGem.cs`, and adds the project to the `Gems` folder of the
-solution. The gem builds to `Gems/Foo/` next to Magic. A project runs the gem when its `.magic` file lists `Foo`. The
-csproj of the gem states its `Description`, `Version` and `Authors`.
+solution. The csproj of the gem states its `Description`, `Version` and `Authors`.
 
 `Magic new <template> <name>` runs `dotnet new magic-<template>`. It passes on each option that Magic does not know,
 such as `-o`.
