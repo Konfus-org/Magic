@@ -1,10 +1,12 @@
 // The frame's render failures over the top of the window, one line each: a bar in the flashing colour of the failure's
 // kind and its text, white with a black shadow a pixel down and right, in a 5 by 7 font held here, 2 window pixels a
-// dot. The module imports nothing, so it builds with no other module: it declares the one heap binding it reads and
-// the pass header itself.
+// dot. A post effect's failure is a frame in its colour round the window and its line along the window's bottom. The
+// module imports nothing, so it builds with no other module: it declares the one heap binding it reads and the pass
+// header itself.
 //
-// The pass header: x the banner's buffer, y the time in seconds as a float's bits, z the lines drawn. The buffer, C#'s
-// FailureBanner writes it, holds a line every 128 bytes:
+// The pass header: x the banner's buffer, y the time in seconds as a float's bits, z the lines over the top, w the
+// window's width in bits 0 to 15 and its height in bits 16 to 31 while the post effect's line follows them, else 0.
+// The buffer, C#'s FailureBanner writes it, holds a line every 128 bytes:
 //   bytes 0 to 3    bits 0 to 7 the kind (C#'s RenderFailure), bits 8 to 15 the length of the text in characters
 //   bytes 4 to 127  the text: 124 one-byte character codes, 4 in each uint, the first in the lowest byte
 module "FailureBanner";
@@ -16,7 +18,7 @@ struct BannerHeader
     uint buffer;
     uint timeBits;
     uint lines;
-    uint unused;
+    uint window;
 };
 
 [[vk::push_constant]] ConstantBuffer<BannerHeader> banner;
@@ -32,6 +34,9 @@ static const uint DotPixels = 2u;
 static const uint CellWidth = 6u;
 static const uint LineHeight = 11u;
 static const uint2 TextStart = uint2(4u, 2u);
+
+// How wide the post effect's frame is, in window pixels.
+static const int FramePixels = 10;
 
 static const float TwoPi = 6.28318530717959;
 static const float PulsesPerSecond = 1.5;
@@ -83,29 +88,24 @@ uint LoadWord(uint offset)
     return bannerBuffers[NonUniformResourceIndex(min(banner.buffer, HeapBuffers - 1u))].Load(offset);
 }
 
-// The header word of the line under a window pixel's row.
+// The header word of a line.
 uint LoadLine(uint line)
 {
     return LoadWord(line * LineBytes);
 }
 
-// Whether a window pixel lies on a dot of its line's text; a pixel left of or above the window, or below the lines,
-// does not.
-bool IsTextPixel(int2 pixel)
+// Whether a pixel, in window pixels from its line's top left, lies on a dot of the line's text; a pixel left of or
+// above the line does not.
+bool IsTextPixel(uint line, int2 pixel)
 {
     if (pixel.x < 0 || pixel.y < 0)
         return false;
 
     uint2 dot = uint2(pixel) / DotPixels;
-    uint line = dot.y / LineHeight;
-    if (line >= banner.lines)
+    if (dot.x < TextStart.x || dot.y < TextStart.y)
         return false;
 
-    uint2 inLine = uint2(dot.x, dot.y % LineHeight);
-    if (inLine.x < TextStart.x || inLine.y < TextStart.y)
-        return false;
-
-    uint2 inText = inLine - TextStart;
+    uint2 inText = dot - TextStart;
     uint index = inText.x / CellWidth;
     uint2 inCell = uint2(inText.x % CellWidth, inText.y);
     uint length = (LoadLine(line) >> 8u) & 0xFFu;
@@ -122,7 +122,8 @@ bool IsTextPixel(int2 pixel)
     return (((bit < 32u) ? (glyph.x >> bit) : (glyph.y >> (bit - 32u))) & 1u) != 0u;
 }
 
-// One triangle over the whole window; the pass's scissor keeps it to the banner's lines.
+// One triangle over the whole window; the pass's scissor keeps it to the banner's lines, or to the whole window while
+// the post effect's line follows them.
 [shader("vertex")]
 float4 DrawFailureBannerVertex(uint index : SV_VertexID) : SV_Position
 {
@@ -134,13 +135,27 @@ float4 DrawFailureBannerVertex(uint index : SV_VertexID) : SV_Position
 float4 DrawFailureBannerPixel(float4 position : SV_Position) : SV_Target0
 {
     int2 pixel = int2(position.xy);
-    if (IsTextPixel(pixel))
+    int lineHeight = int(DotPixels * LineHeight);
+    uint line = uint(pixel.y / lineHeight);
+    int2 inLine = int2(pixel.x, pixel.y - int(line) * lineHeight);
+
+    // Below the top lines: the post effect's frame round the window and its line along the bottom, nothing between.
+    if (line >= banner.lines)
+    {
+        int2 window = int2(int(banner.window & 0xFFFFu), int(banner.window >> 16u));
+        line = banner.lines;
+        inLine = int2(pixel.x, pixel.y - (window.y - lineHeight));
+        bool isInside = pixel.x >= FramePixels && pixel.y >= FramePixels && pixel.x < window.x - FramePixels;
+        if (inLine.y < 0 && isInside)
+            discard;
+    }
+
+    if (IsTextPixel(line, inLine))
         return float4(1.0, 1.0, 1.0, 1.0);
 
-    if (IsTextPixel(pixel - 1))
+    if (IsTextPixel(line, inLine - 1))
         return float4(0.0, 0.0, 0.0, 1.0);
 
-    uint line = uint(pixel.y) / (DotPixels * LineHeight);
     uint kind = min(LoadLine(line) & 0xFFu, 5u);
     float pulse = 0.55 + 0.45 * sin(TwoPi * PulsesPerSecond * asfloat(banner.timeBits));
     return float4(KindColors[kind] * pulse, 1.0);

@@ -10,10 +10,10 @@ using Magic.Utils;
 namespace Magic.DeferredRendering;
 
 /// <summary>
-/// The frame's render failures over the top of the window, one line each, as "Shader failed Surfaces are not shaded":
-/// it uploads each line's kind and text as character codes, and draws them in one pass in the overlay stage, after the
-/// picture is on the window. It draws nothing while nothing failed, and nothing while its own shaders are not built.
-/// Render thread.
+/// The frame's render failures over the top of the window, one line each, as "Shader failed Surfaces are not shaded",
+/// but a post effect's, which shows as a frame round the window and a line along its bottom: it uploads each line's
+/// kind and text as character codes, and draws them in one pass in the overlay stage, after the picture is on the
+/// window. It draws nothing while nothing failed, and nothing while its own shaders are not built. Render thread.
 /// </summary>
 internal sealed class FailureBanner(AssetManager assets)
 {
@@ -61,25 +61,55 @@ internal sealed class FailureBanner(AssetManager assets)
         if (failures.IsEmpty || target.IsNone)
             return;
 
-        Result<GpuBuffer> lines = graph.Buffer(new("Failure banner", MaxLines * LineWords * sizeof(uint)));
+        Result<GpuBuffer> lines = graph.Buffer(new("Failure banner", (MaxLines + 1) * LineWords * sizeof(uint)));
         Result<GpuBuffer> indices = graph.Buffer(new("Failure banner indices", 3 * sizeof(uint), BufferUsages.Index));
         if (!lines.Ok || !indices.Ok)
             return;
 
-        int count = Math.Min(failures.Length, MaxLines);
-        Span<uint> words = graph.Upload<uint>(lines.Value, count * LineWords);
-        for (int i = 0; i < count; i++)
+        // The lines over the top, and after them the first post effect's line, when one failed.
+        int top = 0;
+        int post = -1;
+        for (int i = 0; i < failures.Length; i++)
         {
-            Span<uint> line = words.Slice(i * LineWords, LineWords);
-            if (i == MaxLines - 1 && failures.Length > MaxLines)
-                WriteMore(line, failures[i].Kind, failures.Length - i);
-            else
-                WriteLine(line, failures[i].Kind, failures[i].What);
+            if (failures[i].Kind != RenderFailure.PostEffect)
+                top++;
+            else if (post < 0)
+                post = i;
         }
 
+        int count = Math.Min(top, MaxLines);
+        Span<uint> words = graph.Upload<uint>(lines.Value, (count + (post < 0 ? 0 : 1)) * LineWords);
+        int written = 0;
+        for (int i = 0; written < count; i++)
+        {
+            if (failures[i].Kind == RenderFailure.PostEffect)
+                continue;
+
+            Span<uint> line = words.Slice(written * LineWords, LineWords);
+            if (written == MaxLines - 1 && top > MaxLines)
+                WriteMore(line, failures[i].Kind, top - written);
+            else
+                WriteLine(line, failures[i].Kind, failures[i].What);
+
+            written++;
+        }
+
+        if (post >= 0)
+            WriteLine(words.Slice(count * LineWords, LineWords), RenderFailure.PostEffect, failures[post].What);
+
+        // The scissor keeps the draw to the top lines, or, with a post effect's line, the shader to its frame and line.
         graph.Upload<uint>(indices.Value, [0, 1, 2]);
         TextureDescription window = graph.GetDescription(target);
-        GpuConstants constants = new(lines.Value.Id, BitConverter.SingleToUInt32Bits((float)frame.AppSec), (uint)count);
+        Rectangle drawn =
+            post < 0
+                ? new Rectangle(0, 0, window.Width, Math.Min(count * LinePixels, window.Height))
+                : new Rectangle(0, 0, window.Width, window.Height);
+        GpuConstants constants = new(
+            lines.Value.Id,
+            BitConverter.SingleToUInt32Bits((float)frame.AppSec),
+            (uint)count,
+            post < 0 ? 0 : (uint)window.Width | ((uint)window.Height << 16)
+        );
         graph
             .Draw(
                 "Failure banner",
@@ -94,7 +124,7 @@ internal sealed class FailureBanner(AssetManager assets)
                 [
                     new IndexedDraw
                     {
-                        Scissor = new Rectangle(0, 0, window.Width, Math.Min(count * LinePixels, window.Height)),
+                        Scissor = drawn,
                         Constants = constants,
                         IndexCount = 3,
                     },

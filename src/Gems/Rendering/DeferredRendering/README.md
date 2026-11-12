@@ -77,6 +77,10 @@ the texture reader, with a gem that draws its geometry.
 - Each failure that a gem or Core tells `RenderGraph.Fail` in a frame is a line of a banner across the top of the
   window, over the picture: a bar that flashes in the colour of its kind, and its text. The banner
   shows eight lines at most, and the last then counts the rest. It draws also when the view was not made.
+- A failed post effect is not a line of the banner: a frame flashes blue round the window, with its line along the
+  bottom, and the other effects run. Where the sky failed, the sky flashes coral with "Sky failed" across it; where
+  the clouds failed, a band of the sky above the horizon flashes green with "Weather failed". These two stay in the
+  banner too.
 
 ## Settings
 

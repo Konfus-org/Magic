@@ -123,7 +123,7 @@ uint LoadCode(FailureRow failure, uint index)
 }
 
 // Whether a dot of a character's cell, counted from the cell's top left, is set; a code outside the font has none.
-bool IsGlyphDot(uint code, uint2 dot)
+public bool IsGlyphDot(uint code, uint2 dot)
 {
     if (dot.x >= 5u || dot.y >= 7u || code < FirstCode || code > LastCode)
         return false;

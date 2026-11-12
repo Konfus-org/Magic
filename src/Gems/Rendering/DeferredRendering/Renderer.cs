@@ -549,9 +549,14 @@ public sealed class Renderer
             : [];
 
         // Every pixel's surface shaded from the sky's tables, its tile's lights, the shadows where there are any and the
-        // indirect light, or the sky where nothing traced it.
+        // indirect light, or the sky where nothing traced it, or the failure of the sky or its clouds where they failed.
         ComputePass shade = graph
-            .Compute("Shade surfaces", _shadeShader, new GpuConstants(gpu.Frame.Id), RenderStages.Shade)
+            .Compute(
+                "Shade surfaces",
+                _shadeShader,
+                new GpuConstants(gpu.Frame.Id, GetSkyFailures(graph.Failures)),
+                RenderStages.Shade
+            )
             .Reads(
                 gpu.Frame,
                 gpu.SkyTransmittance,
@@ -778,6 +783,23 @@ public sealed class Renderer
         {
             _screenshots.Writer.TryWrite(asked);
         }
+    }
+
+    /// <summary>
+    /// The failure bits of <c>ShadeSurfaces.slang</c>'s pass header: 1 while the sky failed, 2 while its clouds failed.
+    /// </summary>
+    private static uint GetSkyFailures(ReadOnlySpan<(RenderFailure Kind, string What)> failures)
+    {
+        uint bits = 0;
+        foreach ((RenderFailure kind, _) in failures)
+        {
+            if (kind == RenderFailure.Sky)
+                bits |= 1;
+            else if (kind == RenderFailure.Weather)
+                bits |= 2;
+        }
+
+        return bits;
     }
 
     /// <summary>
