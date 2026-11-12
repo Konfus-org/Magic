@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
@@ -821,22 +822,20 @@ public sealed class SdlPlatformGem
         }
 
         TextureLevel top = texture.Levels[0];
+        using MemoryHandle pixels = texture.Pixels.Pin();
         unsafe
         {
-            fixed (byte* pixels = texture.Pixels.Span)
-            {
-                SDL_Surface* surface = SDL_CreateSurfaceFrom(
-                    top.Width,
-                    top.Height,
-                    SDL_PIXELFORMAT_RGBA32,
-                    pixels,
-                    top.Width * 4
-                );
-                if (surface == null || !SDL_SetWindowIcon(_window, surface))
-                    Log.Warn($"The window's icon is not shown: {Sdl.Error}");
+            SDL_Surface* surface = SDL_CreateSurfaceFrom(
+                top.Width,
+                top.Height,
+                SDL_PIXELFORMAT_RGBA32,
+                pixels.Pointer,
+                top.Width * 4
+            );
+            if (surface == null || !SDL_SetWindowIcon(_window, surface))
+                Log.Warn($"The window's icon is not shown: {Sdl.Error}");
 
-                SDL_DestroySurface(surface);
-            }
+            SDL_DestroySurface(surface);
         }
     }
 
