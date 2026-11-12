@@ -7,10 +7,8 @@ using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.Assets.Pipeline;
 using Magic.Files;
-using Magic.Projects;
 using Magic.SdlBindings;
 using Magic.Utils;
-using static Magic.SdlBindings.SDL_IOWhence;
 using static Magic.SdlBindings.SDL_PixelFormat;
 using static Magic.SdlBindings.SDL_ScaleMode;
 using static Magic.SdlBindings.SDL3;
@@ -22,17 +20,18 @@ namespace Magic.SdlTextureImporter;
 /// <summary>
 /// Reads image files into textures ready to upload, through SDL_image: decoded, their mip chain made by halving each level
 /// with SDL's linear scaling, and every level packed into BC7 blocks unless its <c>.meta</c> says otherwise, in sRGB for
-/// colour and linear for normals and masks. As an <see cref="ICache{T}"/> an image is made once per change. It also writes
-/// a plain texture as a PNG, through SDL. SDL_image needs no SDL started, so files load on any worker, several at once.
+/// colour and linear for normals and masks. As an <see cref="ICache{T}"/> an image is made once per change. SDL_image
+/// needs no SDL started, so files load on any worker, several at once.
 /// </summary>
-public sealed unsafe class SdlTextureImporterGem
-    : IGem,
-        IAssetImporter<Texture>,
-        IAssetExporter<Texture>,
-        ICache<Texture>
+public sealed unsafe class Importer : IAssetImporter<Texture>, ICache<Texture>
 {
     private const int HeaderBytes = 16;
-    private const int TexelBytes = 4;
+
+    /// <summary>
+    /// The bytes of one RGBA8 texel.
+    /// </summary>
+    internal const int TexelBytes = 4;
+
     private const int BlockTexels = 4;
     private const int BlockBytes = 16;
 
@@ -44,8 +43,6 @@ public sealed unsafe class SdlTextureImporterGem
 
     public ImmutableArray<string> Extensions { get; } = [".png", ".jpg", ".jpeg", ".tga", ".bmp", ".svg", ".ico"];
 
-    public string Extension => ".png";
-
     /// <summary>
     /// Raised when the bytes written change shape, or the levels are encoded otherwise.
     /// </summary>
@@ -56,12 +53,6 @@ public sealed unsafe class SdlTextureImporterGem
         IProgress<LoadProgress>? progress,
         CancellationToken cancel
     ) => Task.FromResult(Import(file));
-
-    public Task<Result<ReadOnlyMemory<byte>>> ExportAsync(
-        Texture asset,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    ) => Task.FromResult(Export(asset));
 
     public void Write(Texture value, IBufferWriter<byte> bytes)
     {
@@ -258,58 +249,6 @@ public sealed unsafe class SdlTextureImporterGem
                 Size = size,
             }
         );
-    }
-
-    /// <summary>
-    /// The top level of <paramref name="texture"/> as a PNG file's bytes; why not for a block-compressed one, whose texels
-    /// are not there to write.
-    /// </summary>
-    private static Result<ReadOnlyMemory<byte>> Export(Texture texture)
-    {
-        if (texture.IsCompressed)
-            return Result.Failure("A block-compressed texture is not written as a PNG.");
-
-        // Written to a stream in memory, then read back out of it.
-        SDL_IOStream* io = SDL_IOFromDynamicMem();
-        if (io == null)
-            return Result.Failure($"No memory stream was made: {Sdl.Error}");
-
-        TextureLevel top = texture.Levels[0];
-        bool saved;
-        fixed (byte* pixels = texture.Pixels.Span)
-        {
-            SDL_Surface* surface = SDL_CreateSurfaceFrom(
-                top.Width,
-                top.Height,
-                SDL_PIXELFORMAT_RGBA32,
-                pixels + top.Offset,
-                top.Width * TexelBytes
-            );
-            saved = surface != null && SDL_SavePNG_IO(surface, io, closeio: false);
-            SDL_DestroySurface(surface);
-        }
-
-        if (!saved)
-        {
-            string error = Sdl.Error;
-            SDL_CloseIO(io);
-
-            return Result.Failure($"The PNG was not written: {error}");
-        }
-
-        byte[] file = GC.AllocateUninitializedArray<byte>((int)SDL_GetIOSize(io));
-        SDL_SeekIO(io, 0, SDL_IO_SEEK_SET);
-        nuint read;
-        fixed (byte* to = file)
-        {
-            read = SDL_ReadIO(io, to, (nuint)file.Length);
-        }
-
-        SDL_CloseIO(io);
-
-        return (int)read == file.Length
-            ? Result.Success<ReadOnlyMemory<byte>>(file)
-            : Result.Failure($"{read} of the PNG's {file.Length} bytes were read back.");
     }
 
     /// <summary>
