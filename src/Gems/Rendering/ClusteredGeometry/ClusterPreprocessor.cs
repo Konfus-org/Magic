@@ -76,19 +76,26 @@ internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClust
         )
             return Result.Failure("its impostor is not the size of an atlas.");
 
-        return Result.Success(
-            new ModelClusters
-            {
-                ModelVertexCount = header.ModelVertexCount,
-                Vertices = Packing.Read<GpuVertex>(ref bytes, header.VertexCount),
-                Indices = Packing.Read<uint>(ref bytes, header.IndexCount),
-                Clusters = Packing.Read<GpuCluster>(ref bytes, header.ClusterCount),
-                Impostor = Packing.Read<Half>(ref bytes, header.ImpostorHalves),
-                ImpostorUv = Packing.Read<Half>(ref bytes, header.ImpostorUvHalves),
-                BoundsMin = header.BoundsMin,
-                BoundsMax = header.BoundsMax,
-            }
-        );
+        ModelClusters clusters = new()
+        {
+            ModelVertexCount = header.ModelVertexCount,
+            Vertices = Packing.Read<GpuVertex>(ref bytes, header.VertexCount),
+            Indices = Packing.Read<uint>(ref bytes, header.IndexCount),
+            Clusters = Packing.Read<GpuCluster>(ref bytes, header.ClusterCount),
+            Impostor = Packing.Read<Half>(ref bytes, header.ImpostorHalves),
+            ImpostorUv = Packing.Read<Half>(ref bytes, header.ImpostorUvHalves),
+            BoundsMin = header.BoundsMin,
+            BoundsMax = header.BoundsMax,
+        };
+
+        // A cluster's triangles are read from the indices as its model settles, and drawn from them.
+        foreach (GpuCluster cluster in clusters.Clusters)
+        {
+            if (cluster.TriangleCount > 0 && cluster.IndexOffset + (cluster.TriangleCount * 3L) > header.IndexCount)
+                return Result.Failure("a cluster's triangles are past its indices.");
+        }
+
+        return Result.Success(clusters);
     }
 
     /// <summary>
