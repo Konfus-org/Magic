@@ -23,6 +23,6 @@ To use it, list `TracedShadows` in a project's `.magic` file with a gem that bui
 ## How it works
 
 - Its `Render` records the passes in the frame's light stage, writes the shadows' ids into the frame's buffer as the
-  library's `Scene/Shadows`, which shading reads, and hands the frame's `ShadowMask` to the gems that take it.
+  renderer's `Scene/Shadows`, which shading reads, and hands the frame's `ShadowMask` to the gems that take it.
 - The shaders are the `Shaders/` modules in this gem's `Resources`: `TraceShadows` traces, `DenoiseShadows` classifies
   the sun's tiles, filters them, blends with the frame before and brings the mask to the picture's size.

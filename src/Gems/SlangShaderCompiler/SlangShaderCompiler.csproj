@@ -12,7 +12,8 @@
   </PropertyGroup>
   <!-- The compiler alone, built from source: no tools, tests, examples, language server, interpreter, runtime or
        GPU layer, and no glslang or LLVM, as SPIR-V is emitted directly. Its API is C++ interfaces, which the generator
-       cannot bind, so it is bound by hand (README) and the item declares the binary alone. -->
+       cannot bind, so it is bound by hand (docs/GEMS.md, SlangShaderCompiler) and the item declares the binary
+       alone. -->
   <ItemGroup>
     <NativeLibrary
       Include="slang-compiler"

@@ -1,5 +1,5 @@
 # The notes of a GitHub release: the commits since the previous release, grouped by their type
-# (.github/workflows/README.md, Releases). A group's name starts with a hidden number that orders the groups.
+# (docs/CI.md, Releases). A group's name starts with a hidden number that orders the groups.
 [changelog]
 body = """
 {% for group, commits in commits | group_by(attribute="group") %}

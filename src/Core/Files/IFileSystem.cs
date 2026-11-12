@@ -3,8 +3,8 @@ using Magic.Utils;
 namespace Magic.Files;
 
 /// <summary>
-/// Abstraction over the file system so services that touch disk can be tested with a mock. Work the disk can refuse
-/// returns a <see cref="Result"/> with the reason.
+/// The disk, as the one way the engine and its gems reach it. Work the disk can refuse returns a
+/// <see cref="Result"/> with the reason.
 /// </summary>
 public interface IFileSystem
 {

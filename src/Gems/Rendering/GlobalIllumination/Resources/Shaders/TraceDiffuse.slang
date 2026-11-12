@@ -17,7 +17,6 @@ import Light.Indirect;
 import Traced;
 import Sky.ISky;
 import Trace.HitSurface;
-import Trace.HitLight;
 import Scene.Models;
 
 // The rays a traced pixel sends, and how far each reaches before the probes' light stands for what lies beyond.
@@ -44,7 +43,7 @@ void TraceDiffuse<S : ISky>(uint3 thread : SV_DispatchThreadID)
     if (any(thread.xy >= gi.tracedSize))
         return;
 
-    uint2 pixel = GetTracedPixel(frame, thread.xy);
+    uint2 pixel = GetTracedPixel(frame, thread.xy, gi.tracedSize);
     StorageRef traced = { diffuse.traced, 0u };
     TextureRef depthTexture = { frame.depth };
     float depth = depthTexture.Load(pixel, 0u).x;
@@ -66,8 +65,7 @@ void TraceDiffuse<S : ISky>(uint3 thread : SV_DispatchThreadID)
     float3 sum = float3(0.0);
     for (uint i = 0u; i < RayCount; i++)
     {
-        float pdf;
-        float3 direction = ToWorld(basis, SampleCosineHemisphere(GetRandom(thread.xy, frame.frameIndex, 1u + i).xy, pdf));
+        float3 direction = ToWorld(basis, SampleCosineHemisphere(GetRandom(thread.xy, frame.frameIndex, 1u + i).xy));
         RayHit hit = GetClosestHit(scene, origin, direction, RayRange, RAY_FLAG_CULL_BACK_FACING_TRIANGLES);
         if (!hit.isHit)
         {
@@ -147,7 +145,10 @@ void BlendDiffuse(uint3 thread : SV_DispatchThreadID)
     StorageRef light = { blend.light, 0u };
     float depth = depthTexture.Load(pixel, 0u).x;
     float4 current = filtered.Load(thread.xy, 0u);
-    StoreViewDepth(frame, blend, thread.xy, depth);
+
+    // The view depth kept for the next frame's history of both blends: 0 where nothing was drawn.
+    StorageRef viewDepth = { gi.depth, 0u };
+    viewDepth.Store(thread.xy, float4(depth > 0.0 ? ToViewDepth(depth, frame.near) : 0.0, 0.0, 0.0, 0.0));
     if (blend.hasHistory == 0u || depth == 0.0)
     {
         light.Store(thread.xy, current);
@@ -155,11 +156,10 @@ void BlendDiffuse(uint3 thread : SV_DispatchThreadID)
     }
 
     Neighbourhood neighbourhood = GetNeighbourhood(filtered, thread.xy, size);
-    TracedHistory history = CreateHistory(gi, blend, size);
     TextureRef velocityTexture = { frame.velocity };
     float3 velocity = velocityTexture.Load(pixel, 0u).xyz;
     float2 uv = GetTexelCenterUv(thread.xy, size) + velocity.xy;
     light.Store(
         thread.xy,
-        BlendHistory(history, current, neighbourhood, velocity.z, uv, HistoryBlend, HistorySpread, VarianceBlend));
+        BlendHistory(gi, blend, current, neighbourhood, velocity.z, uv, HistoryBlend, HistorySpread, VarianceBlend));
 }

@@ -6,6 +6,7 @@ module "Scene/Clusters";
 import Core.Heap;
 import Core.Pack;
 import Core.Pass;
+import Core.Frame;
 import Light.Air;
 
 public static const uint MaxClusterTriangles = 128u;
@@ -14,13 +15,13 @@ public static const uint MaxClusterTriangles = 128u;
 // rays see it, the lights, the shadows, the indirect light and the air.
 public static const uint ClusterConstantsOffset = AirOffset + AirBytes;
 
-// What the cluster passes read beyond the frame, C#'s ClusterConstants, written once a frame after the air;
+// What the cluster passes read beyond the frame, C#'s ClusterConstants, 84 bytes, written once a frame after the air;
 // the cluster budget sets the handoff and the error threshold at the start of the frame.
 public struct ClusterConstants
 {
-    public uint hzbLevels;
+    public uint depthPyramidLevels;
     // Whether the depth pyramid holds last frame, so a cluster may be tested against it.
-    public uint hasHzb;
+    public uint hasDepthPyramid;
     // Pixels of projected error a drawn cluster may have, as the cluster budget raises it.
     public float errorThreshold;
     // The pixel radius on screen under which an instance hands off to its impostor, as the cluster budget raises it;
@@ -31,7 +32,8 @@ public struct ClusterConstants
     public float impostorDistance;
     public uint maxVisibleClusters;
     // The heap ids of the cluster pool, its index pool and its vertex copies, of each model's row of clusters and
-    // impostor, by the instances' model index, and of what the cull leaves for the draw and the resolve.
+    // impostor, by the instances' model index, of what the cull leaves for the draw and the resolve, of the impostor
+    // table, of each instance's count of visible rows, and of the budget buffer, which holds the cluster budget's level.
     public uint clusters;
     public uint indices;
     public uint vertices;
@@ -41,17 +43,16 @@ public struct ClusterConstants
     public uint counts;
     public uint retestList;
     public uint retestArguments;
-    public uint hzb;
+    public uint depthPyramid;
     public uint visibility;
     // The nearest translucent surface in front of the opaque ones: its visibility id, 0 where there is none.
     public uint glassVisibility;
+    public uint impostors;
+    public uint instanceRows;
+    public uint budget;
 }
 
-public ClusterConstants GetClusters()
-{
-    BufferRef constants = { GetPassHeader().x };
-    return constants.Load<ClusterConstants>(ClusterConstantsOffset);
-}
+public ClusterConstants GetClusters() { return LoadFrameRow<ClusterConstants>(ClusterConstantsOffset); }
 
 // A model's clusters in the cluster pool and its row of the impostor table, 0 for none: C#'s GpuClusterModel, the row
 // of the model table an instance's model index names.

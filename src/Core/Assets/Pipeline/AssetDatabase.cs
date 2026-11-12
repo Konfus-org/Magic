@@ -67,14 +67,14 @@ internal sealed record AssetDatabase
     /// own, <see cref="AssetManager.AllLevels"/> for everything under it.
     /// </summary>
     public HashSet<ulong> GetDependencies(ulong asset, int levels) =>
-        Walk([asset], levels, id => GetOrEmpty(Dependencies, id));
+        Walk([asset], levels, id => Dependencies.GetValueOrDefault(id, []));
 
     /// <summary>
     /// What depends on <paramref name="asset"/>, as far as is known, up to <paramref name="levels"/> levels: 1 for what
     /// names it itself, <see cref="AssetManager.AllLevels"/> for everything above it.
     /// </summary>
     public HashSet<ulong> GetDependents(ulong asset, int levels) =>
-        Walk([asset], levels, id => GetOrEmpty(Dependents, id));
+        Walk([asset], levels, id => Dependents.GetValueOrDefault(id, []));
 
     /// <summary>
     /// This database with <paramref name="dependencies"/> being all <paramref name="asset"/> depends on.
@@ -85,7 +85,7 @@ internal sealed record AssetDatabase
         ImmutableDictionary<ulong, ImmutableArray<ulong>> dependents = without.Dependents;
         foreach (ulong dependency in dependencies)
         {
-            dependents = dependents.SetItem(dependency, GetOrEmpty(dependents, dependency).Add(asset));
+            dependents = dependents.SetItem(dependency, dependents.GetValueOrDefault(dependency, []).Add(asset));
         }
 
         return without with
@@ -101,9 +101,9 @@ internal sealed record AssetDatabase
     public AssetDatabase RemoveDependencies(ulong asset)
     {
         ImmutableDictionary<ulong, ImmutableArray<ulong>> dependents = Dependents;
-        foreach (ulong dependency in GetOrEmpty(Dependencies, asset))
+        foreach (ulong dependency in Dependencies.GetValueOrDefault(asset, []))
         {
-            ImmutableArray<ulong> left = GetOrEmpty(dependents, dependency).Remove(asset);
+            ImmutableArray<ulong> left = dependents.GetValueOrDefault(dependency, []).Remove(asset);
             dependents = left.IsEmpty ? dependents.Remove(dependency) : dependents.SetItem(dependency, left);
         }
 
@@ -113,9 +113,4 @@ internal sealed record AssetDatabase
             Dependents = dependents,
         };
     }
-
-    private static ImmutableArray<ulong> GetOrEmpty(
-        ImmutableDictionary<ulong, ImmutableArray<ulong>> map,
-        ulong asset
-    ) => map.TryGetValue(asset, out ImmutableArray<ulong> ids) ? ids : [];
 }

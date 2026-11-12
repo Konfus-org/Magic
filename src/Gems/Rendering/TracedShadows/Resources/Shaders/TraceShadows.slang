@@ -15,7 +15,7 @@ import Core.Color;
 import Core.Random;
 import Scene.Lights;
 import Scene.Shadows;
-import Light.Lights;
+import Light.LocalLights;
 import Trace.HitSurface;
 import Scene.Models;
 import Light.Indirect;
@@ -26,14 +26,23 @@ groupshared uint groupSunTiles[2];
 
 // A pixel's words, all lit for the sky and where there is nothing to hit, and the sun's tint, white unless its ray
 // went through glass.
-uint4 Trace(FrameConstants frame, Lights lights, uint2 pixel, out float3 sunTint)
+struct PixelShadows
+{
+    uint4 words;
+    float3 sunTint;
+};
+
+PixelShadows Trace(FrameConstants frame, Lights lights, uint2 pixel)
 {
     TracedWorld traced = GetTracedWorld();
-    sunTint = float3(1.0);
+    PixelShadows shadows = { uint4(0u), float3(1.0) };
     TextureRef depthTexture = { frame.depth };
     float depth = depthTexture.Load(pixel, 0u).x;
     if (depth == 0.0 || traced.acceleration == 0u)
-        return uint4(0xFFFFFFFFu);
+    {
+        shadows.words = uint4(0xFFFFFFFFu);
+        return shadows;
+    }
 
     // The point lifted off its flat triangle towards the curve its vertex normals describe, as the resolve found it,
     // so that a ray from the lit side of a curve doesn't shadow it a facet at a time.
@@ -47,17 +56,16 @@ uint4 Trace(FrameConstants frame, Lights lights, uint2 pixel, out float3 sunTint
 
     // The sun, through a random point of its disc, lit as often as its light gets through, its colour over its
     // brightness the tint.
-    uint4 words = uint4(0u);
     float3 toSun = lights.sunDirection.xyz;
     float3 xi = GetRandom(pixel, frame.frameIndex, 0u);
     float3 sunRay = SampleSunDirection(toSun, xi.xy);
     float3 sunThrough = dot(normal, toSun) > 0.0 ? GetTransmittance(scene, origin, sunRay, 1e6) : float3(0.0);
     float sunBrightness = GetLuminance(sunThrough);
     if (sunBrightness > xi.z)
-        words = EncodeShadow(words, 0u, 1.0);
+        shadows.words = EncodeShadow(shadows.words, 0u, 1.0);
 
     if (sunBrightness > 0.0)
-        sunTint = sunThrough / sunBrightness;
+        shadows.sunTint = sunThrough / sunBrightness;
 
     // The tile's lights in the order shading reads them, until the slots run out.
     ArrayRef<uint> tiles = { lights.tiles };
@@ -77,14 +85,14 @@ uint4 Trace(FrameConstants frame, Lights lights, uint2 pixel, out float3 sunTint
             if (dot(normal, ray.direction) > 0.0)
             {
                 float through = GetLuminance(GetTransmittance(scene, origin, ray.direction, ray.distance));
-                words = EncodeShadow(words, slot, through);
+                shadows.words = EncodeShadow(shadows.words, slot, through);
             }
 
             slot++;
         }
     }
 
-    return words;
+    return shadows;
 }
 
 [shader("compute")]
@@ -102,16 +110,15 @@ void TraceShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupThre
     bool isInside = all(thread.xy < size);
     if (isInside)
     {
-        float3 sunTint;
-        uint4 words = Trace(frame, lights, GetPicturePixel(frame, thread.xy, size, float2(0.0)), sunTint);
-        StoreShadowMask(denoise.mask, thread.xy, size.x, words);
+        PixelShadows shadows = Trace(frame, lights, GetPicturePixel(frame, thread.xy, size, float2(0.0)));
+        StoreShadowMask(denoise.mask, thread.xy, size.x, shadows.words);
         if (denoise.sunTint != 0u)
         {
             StorageRef tints = { denoise.sunTint, 0u };
-            tints.Store(thread.xy, float4(sunTint, 1.0));
+            tints.Store(thread.xy, float4(shadows.sunTint, 1.0));
         }
 
-        if (GetShadow(words, 0u) > 0.5)
+        if (GetShadow(shadows.words, 0u) > 0.5)
             InterlockedOr(groupSunTiles[local.y / SunTileSize.y], GetSunTileBit(thread.xy));
     }
 

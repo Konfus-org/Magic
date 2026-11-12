@@ -15,9 +15,9 @@ import Core.Color;
 import Core.Random;
 import Core.Sampling;
 import Scene.Lights;
-import Scene.Shadows;
+import Trace.HitSurface;
 import Light.Air;
-import Light.Lights;
+import Light.LocalLights;
 
 // How much of each frame's cell the blend over frames takes in.
 static const float NewWeight = 0.03;
@@ -70,7 +70,7 @@ void ScatterAir(uint3 thread : SV_DispatchThreadID, uint3 group : SV_GroupID, ui
     for (uint i = index; i < min(lights.count, MaxLights); i += Threads * Threads)
     {
         GpuLight light = LoadLight(lights.table, i);
-        if (IsSphereTouchingBox(Relative(frame, light.position), GetLightReach(light), low, high))
+        if (IsSphereTouchingBox(ToCameraRelative(frame, light.position), GetLightReach(light), low, high))
         {
             uint slot;
             InterlockedAdd(groupLightCount, 1u, slot);
@@ -92,10 +92,9 @@ void ScatterAir(uint3 thread : SV_DispatchThreadID, uint3 group : SV_GroupID, ui
     // the way out along a direction over it, as the open sky's light weighs it, so a room's air is lit only through
     // its openings: one of 16 spread over the sky, a frame each, turned by the cell's own amount, new each 16 frames
     // (Cranley and Patterson, "Randomization of Number Theoretic Methods for Multiple Integration", 1976).
-    float pdf;
     float2 turn = GetRandom(thread.xy, frame.frameIndex / SkyDirections, thread.z).yz;
     float2 spread = frac(GetHammersley(frame.frameIndex % SkyDirections, SkyDirections) + turn);
-    float3 up = ToWorld(CreateBasis(float3(0.0, 1.0, 0.0)), SampleCosineHemisphere(spread, pdf));
+    float3 up = ToWorld(CreateBasis(float3(0.0, 1.0, 0.0)), SampleCosineHemisphere(spread));
     float3 sunThrough = GetTransmittance(world, lights.sunDirection.xyz, 1e6)
         * GetCloudShadow(air, world, lights.sunDirection.xyz, frame.timeSec);
     float3 skyThrough = GetTransmittance(world, up, 1e6);
@@ -149,9 +148,9 @@ void ScatterAir(uint3 thread : SV_DispatchThreadID, uint3 group : SV_GroupID, ui
         float3 center = frame.cameraPosition.xyz
             + direction * ToAirDistance((float(thread.z) + 0.5) / float(size.z), air.distance);
         float3 previous = center - frame.previousCameraPosition.xyz;
-        float4 clip = mul(float4(previous, 1.0), frame.previousViewProjection);
-        float3 at = float3(ToUv(clip.xy / max(clip.w, Epsilon)), ToAirDepth(length(previous), air.distance));
-        if (clip.w > 0.0 && all(at >= 0.0) && all(at <= 1.0))
+        float3 screen = GetPreviousScreen(frame, previous);
+        float3 at = float3(screen.xy, ToAirDepth(length(previous), air.distance));
+        if (screen.z > 0.0 && all(at >= 0.0) && all(at <= 1.0))
         {
             VolumeRef history = { header.z };
             SamplerRef sampler = { air.sampler };

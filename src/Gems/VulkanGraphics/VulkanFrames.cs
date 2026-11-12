@@ -367,12 +367,7 @@ internal sealed unsafe class VulkanFrames : IDisposable
         public void Restage(long bytes)
         {
             Result<GpuBuffer> made = _resources.CreateBuffer(
-                new BufferDescription
-                {
-                    Bytes = bytes,
-                    Usage = BufferUsages.Upload,
-                    Name = $"Staging {Index}",
-                }
+                new BufferDescription($"Staging {Index}", bytes, BufferUsages.Upload)
             );
             if (!made.Ok)
                 throw new InvalidOperationException($"The staging ring of {bytes} bytes was not made: {made.Error}");

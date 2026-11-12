@@ -5,10 +5,10 @@ using Magic.Debugging;
 namespace Magic.Threading;
 
 /// <summary>
-/// The engine's threads, as somewhere work can be posted (<see cref="Post"/>) or an awaited flow can step onto:
-/// <c>await threads.Enter(EngineThread.Game)</c> goes on there, as that thread next pumps. For a flow whose steps must be
-/// there, such as an awaited pipeline. It makes and ends the engine's threads but the platform thread
-/// (<see cref="Start"/>). Any thread, but where a member says otherwise.
+/// The engine's threads, as somewhere an awaited flow can step onto: <c>await threads.Enter(EngineThread.Game)</c> goes
+/// on there, as that thread next pumps. For a flow whose steps must be there, such as an awaited pipeline. It makes and
+/// ends the engine's threads but the platform thread (<see cref="Start"/>). Any thread, but where a member says
+/// otherwise.
 /// </summary>
 public sealed class Threads
 {
@@ -53,7 +53,7 @@ public sealed class Threads
     /// <summary>
     /// Has <paramref name="work"/> run on <paramref name="thread"/> as it next pumps. Any thread.
     /// </summary>
-    public void Post(EngineThread thread, Action work) => _posted[(int)thread].Writer.TryWrite(work);
+    internal void Post(EngineThread thread, Action work) => _posted[(int)thread].Writer.TryWrite(work);
 
     /// <summary>
     /// Makes <paramref name="thread"/> a thread of its own, which runs what was posted to it, then
@@ -61,7 +61,19 @@ public sealed class Threads
     /// </summary>
     internal void Start(EngineThread thread, Action frame)
     {
-        Thread made = new(() => Run(thread, frame)) { Name = thread.ToString(), IsBackground = true };
+        // The thread's loop, for as long as it is still the one running `thread`: Stop takes that away.
+        Thread made = new(() =>
+        {
+            while (Volatile.Read(ref _running[(int)thread]) == Thread.CurrentThread)
+            {
+                Pump(thread);
+                frame();
+            }
+        })
+        {
+            Name = thread.ToString(),
+            IsBackground = true,
+        };
         Volatile.Write(ref _threadIds[(int)thread], made.ManagedThreadId);
         Volatile.Write(ref _running[(int)thread], made);
         made.Start();
@@ -103,18 +115,6 @@ public sealed class Threads
             {
                 Log.Error($"What was posted to the {thread} thread threw: {ex}");
             }
-        }
-    }
-
-    /// <summary>
-    /// The loop of a thread <see cref="Start"/> made, for as long as it is still the one running <paramref name="thread"/>.
-    /// </summary>
-    private void Run(EngineThread thread, Action frame)
-    {
-        while (Volatile.Read(ref _running[(int)thread]) == Thread.CurrentThread)
-        {
-            Pump(thread);
-            frame();
         }
     }
 }

@@ -8,7 +8,7 @@
 
   <!-- Native libraries. A project declares each C library it binds with a NativeLibrary item, and the item says all of
        it: where the library comes from, how CMake builds it, and what is bound of it, its headers and what is left
-       out of them (src/Gems/README.md#native-libraries). The build writes the project's items as one CMake
+       out of them (docs/GEMS.md#native-libraries). The build writes the project's items as one CMake
        superbuild, an ExternalProject each, and builds what is not built yet into one folder per machine
        (MagicNativeLibs), shared by every checkout. From there it generates the C# API from the headers with
        Microsoft's ClangSharpPInvokeGenerator, reading them with this machine's own C headers, into the intermediate

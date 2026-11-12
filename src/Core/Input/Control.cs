@@ -1,15 +1,17 @@
 namespace Magic.Input;
 
 /// <summary>
-/// Every control Magic knows, on every kind of device, read through <see cref="IInput"/>. Each
-/// <see cref="DeviceKind"/> has a block of 256 values, so a control's value says its device kind and its number
-/// within it (<see cref="ControlExtensions"/>). A file names a control as it names any enum's value, in snake case:
-/// "key_space", "gamepad_south".
+/// A control on any kind of input device, read through <see cref="IInput"/>.
 /// </summary>
+/// <remarks>
+/// Each <see cref="DeviceKind"/> has a block of 256 values. Thus the value of a control gives its device kind and its
+/// number in that kind (<see cref="ControlExtensions"/>). A file names a control in snake case, as it names the value
+/// of any enum: "key_space", "gamepad_south".
+/// </remarks>
 public enum Control
 {
-    // Keyboard: physical keys, named for where they sit on a US layout, whatever a layout prints on them, so WASD is
-    // the same four keys on every keyboard.
+    // Keyboard: physical keys, named for their position on a US layout and not for what a layout prints on them. Thus
+    // WASD is the same four keys on every keyboard.
     KeyA = 0x000,
     KeyB,
     KeyC,
@@ -191,7 +193,7 @@ public enum Control
     /// </summary>
     MouseWheelY,
 
-    // Gamepad: buttons by position, the same on every pad whatever it prints on them.
+    // Gamepad: buttons named for their position, the same on every pad, whatever the pad prints on them.
 
     /// <summary>
     /// The bottom face button: Xbox A, PlayStation Cross, Nintendo B.
@@ -217,12 +219,12 @@ public enum Control
     GamepadStart,
 
     /// <summary>
-    /// Pressing the left stick in.
+    /// The left stick, pushed in.
     /// </summary>
     GamepadLeftStick,
 
     /// <summary>
-    /// Pressing the right stick in.
+    /// The right stick, pushed in.
     /// </summary>
     GamepadRightStick,
     GamepadLeftShoulder,
@@ -247,7 +249,7 @@ public enum Control
     GamepadRightPaddle2,
 
     /// <summary>
-    /// Pressing a PlayStation pad's touchpad.
+    /// The touchpad of a PlayStation pad, pushed down.
     /// </summary>
     GamepadTouchpad,
 
@@ -283,11 +285,14 @@ public enum Control
 }
 
 /// <summary>
-/// One control this frame. Every control has a value: a key or button is 0 or 1, a trigger 0 to 1, a stick axis -1
-/// to 1, and the mouse's position, motion and wheel are pixels and notches. A key, button, trigger or stick is down
-/// while its value is at least half way, and pressed or released when that changed this frame, so a tap that starts
-/// and ends between two frames still shows as both.
+/// The state of one control in this frame.
 /// </summary>
+/// <remarks>
+/// Every control has a value. A key or button is 0 or 1, a trigger is 0 to 1, and a stick axis is -1 to 1. The
+/// position, motion and wheel of the mouse are in pixels and notches. A key, button, trigger or stick is down while its
+/// value is at least half way. It is pressed or released in the frame when that changes. A tap that starts and ends
+/// between two frames shows as both.
+/// </remarks>
 /// <param name="Value">How far, how much, or where.</param>
 /// <param name="IsDown">Held now.</param>
 /// <param name="WasPressed">Went down this frame.</param>

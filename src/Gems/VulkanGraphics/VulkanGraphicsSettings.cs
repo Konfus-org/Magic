@@ -7,13 +7,13 @@ namespace Magic.VulkanGraphics;
 /// How frames reach the window, and the GPU that draws them.
 /// </summary>
 [Category("Window")]
-public sealed record VulkanGraphicsSettings
+public sealed class VulkanGraphicsSettings : ISettings
 {
     /// <summary>
     /// Whether a frame waits for the display to show it, which caps the frame rate at the display's and never tears.
     /// Off, frames show as fast as they are drawn, and can tear.
     /// </summary>
-    public bool IsVSyncOn { get; init; }
+    public bool IsVSyncOn { get; set; }
 
     /// <summary>
     /// The GPU that draws, by a part of its name as the log gives it, such as RTX or Intel; empty for the fastest. A
@@ -21,5 +21,5 @@ public sealed record VulkanGraphicsSettings
     /// </summary>
     [Category("Rendering")]
     [RequireRestart]
-    public string Gpu { get; init; } = string.Empty;
+    public string Gpu { get; set; } = string.Empty;
 }

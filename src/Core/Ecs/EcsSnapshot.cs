@@ -3,10 +3,9 @@ using System.Runtime.InteropServices;
 namespace Magic.Ecs;
 
 /// <summary>
-/// A copy of the entities that have a <typeparamref name="T1"/> and their components, as
-/// <see cref="EcsExtensions"/>' <c>Snapshot</c> took them: one list each, at the same indexes, that a reader keeps and
-/// reads on any thread while the ECS goes on changing. Taking it again copies, into the same lists, only the chunks
-/// written since or that moved.
+/// A copy of the entities that have a <typeparamref name="T1"/> and their components, as <see cref="Fill"/> took them:
+/// one list each, at the same indexes, that a reader keeps and reads on any thread while the ECS goes on changing.
+/// Taking it again copies, into the same lists, only the chunks written since or that moved.
 /// </summary>
 public sealed class EcsSnapshot<T1>
     where T1 : unmanaged, IComponent
@@ -21,20 +20,28 @@ public sealed class EcsSnapshot<T1>
 
     public ReadOnlySpan<T1> First => CollectionsMarshal.AsSpan(_first);
 
-    internal void Start() => _chunks.Start();
-
-    internal void Add(EcsChunk<T1> chunk)
+    /// <summary>
+    /// Fills this with a copy of the entities of <paramref name="ecs"/> that have a <typeparamref name="T1"/> and their
+    /// components, in query order, replacing what it held: a bulk copy of each chunk written since it was last filled,
+    /// on this thread, so a still world copies nothing. What reads it then needs nothing of the ECS, so it can on
+    /// another thread.
+    /// </summary>
+    public void Fill(IEcs ecs)
     {
-        if (_chunks.IsHeld(chunk.Entities, chunk.Written, out int offset))
-            return;
+        ArgumentNullException.ThrowIfNull(ecs);
+        EcsQuery<T1> query = ecs.Query<T1>();
 
-        EcsSnapshotChunks.Copy(_entities, offset, chunk.Entities);
-        EcsSnapshotChunks.Copy(_first, offset, chunk.First);
-    }
+        _chunks.Start();
+        foreach (EcsChunk<T1> chunk in query)
+        {
+            if (_chunks.IsHeld(chunk.Entities, chunk.Written, out int offset))
+                continue;
 
-    internal void End(long version)
-    {
-        int count = _chunks.End(version);
+            EcsSnapshotChunks.Copy(_entities, offset, chunk.Entities);
+            EcsSnapshotChunks.Copy(_first, offset, chunk.First);
+        }
+
+        int count = _chunks.End(query.Version);
         CollectionsMarshal.SetCount(_entities, count);
         CollectionsMarshal.SetCount(_first, count);
     }
@@ -71,21 +78,26 @@ public sealed class EcsSnapshot<T1, T2>
     /// </summary>
     public long Version => _chunks.Version;
 
-    internal void Start() => _chunks.Start();
-
-    internal void Add(EcsChunk<T1, T2> chunk)
+    /// <summary>
+    /// <see cref="EcsSnapshot{T1}.Fill"/> with the entities that have both components.
+    /// </summary>
+    public void Fill(IEcs ecs)
     {
-        if (_chunks.IsHeld(chunk.Entities, chunk.Written, out int offset))
-            return;
+        ArgumentNullException.ThrowIfNull(ecs);
+        EcsQuery<T1, T2> query = ecs.Query<T1, T2>();
 
-        EcsSnapshotChunks.Copy(_entities, offset, chunk.Entities);
-        EcsSnapshotChunks.Copy(_first, offset, chunk.First);
-        EcsSnapshotChunks.Copy(_second, offset, chunk.Second);
-    }
+        _chunks.Start();
+        foreach (EcsChunk<T1, T2> chunk in query)
+        {
+            if (_chunks.IsHeld(chunk.Entities, chunk.Written, out int offset))
+                continue;
 
-    internal void End(long version)
-    {
-        int count = _chunks.End(version);
+            EcsSnapshotChunks.Copy(_entities, offset, chunk.Entities);
+            EcsSnapshotChunks.Copy(_first, offset, chunk.First);
+            EcsSnapshotChunks.Copy(_second, offset, chunk.Second);
+        }
+
+        int count = _chunks.End(query.Version);
         CollectionsMarshal.SetCount(_entities, count);
         CollectionsMarshal.SetCount(_first, count);
         CollectionsMarshal.SetCount(_second, count);

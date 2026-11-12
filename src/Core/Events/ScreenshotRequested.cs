@@ -1,10 +1,12 @@
 namespace Magic.Events;
 
 /// <summary>
-/// The console's <c>screenshot</c> command, as a message: whatever draws the frame saves what it drew as a PNG at
-/// <paramref name="Path"/>, under <c>Screenshots/</c> beside Magic, and prints the path as the command's result once
-/// the file is there.
+/// Asks the renderer to save the frame that it drew as a PNG file at <paramref name="Path"/>.
 /// </summary>
+/// <remarks>
+/// The path is in the <c>Screenshots/</c> folder beside Magic. When the file exists, the renderer prints the path as
+/// the result of the <c>screenshot</c> console command.
+/// </remarks>
 public record struct ScreenshotRequested(string Path) : IEvent
 {
     public bool IsHandled { get; set; }

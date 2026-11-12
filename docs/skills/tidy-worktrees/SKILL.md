@@ -6,8 +6,7 @@ description: Removes finished worktrees, branches and sessions, and reports the 
 # Tidy worktrees
 
 1. Run `git worktree list` and `git branch --no-merged <merge target>`, and look at the repository's sessions.
-2. Look at the claims in the repository's git folder (`agent-claims/` under `git rev-parse --git-common-dir`).
-   Delete each one whose worktree is gone.
+2. Look at the claims, if the project has them ([PROJECT.md](../PROJECT.md)). Delete each one whose worktree is gone.
 3. Remove each worktree and branch whose session is gone and whose commits are all merged, into the merge target or
    a remote branch: `git worktree remove`, then `git branch -d` (never `-D`). A branch cut from a remote branch goes
    with `-d` once its upstream is set to that remote branch.

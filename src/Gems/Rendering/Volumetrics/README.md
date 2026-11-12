@@ -25,7 +25,7 @@ all of it.
 ## How it works
 
 - Its `Render` takes the view and, where a gem makes it, the world as rays see it. It records its passes in the
-  frame's light stage, writes the air into the frame's buffer as the library's `Light/Air`, and hands the frame's
+  frame's light stage, writes the air into the frame's buffer as the renderer's `Light/Air`, and hands the frame's
   `Air` to the gems that take it, which read it through `ApplyAir`.
 - The shader is the `Shaders/FillAir` module in this gem's `Resources`, built on the shader library
   ([Shaders](../../../Resources/Shaders/README.md)). `ScatterAir` lists the local lights that reach each group of

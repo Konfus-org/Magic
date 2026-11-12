@@ -71,6 +71,13 @@ public struct FrameConstants
 
 public FrameConstants GetFrame() { return LoadConstants<FrameConstants>(); }
 
+// A row C# wrote after the frame in the same buffer, at its offset there: the models, the lights or a renderer's own.
+public T LoadFrameRow<T>(uint offset)
+{
+    BufferRef frame = { GetPassHeader().x };
+    return frame.Load<T>(offset);
+}
+
 // Whether a sphere in the camera-relative world is at least partly inside the frustum.
 public bool IsSphereInFrustum(FrameConstants frame, float3 center, float radius)
 {
@@ -104,7 +111,10 @@ public float DecodeLift(FrameConstants frame, float3 relative, float encoded)
 }
 
 // A world position relative to the camera.
-public float3 Relative(FrameConstants frame, float3 worldPosition) { return worldPosition - frame.cameraPosition.xyz; }
+public float3 ToCameraRelative(FrameConstants frame, float3 worldPosition)
+{
+    return worldPosition - frame.cameraPosition.xyz;
+}
 
 // The camera-relative position a pixel's reversed depth puts it at, from its texture coordinates.
 public float3 ReconstructRelative(FrameConstants frame, float2 uv, float depth)
@@ -118,6 +128,13 @@ public float3 ReconstructRelative(FrameConstants frame, float2 uv, float depth)
 public float3 ReconstructPixel(FrameConstants frame, uint2 pixel, float depth)
 {
     return ReconstructRelative(frame, GetTexelCenterUv(pixel, uint2(frame.width, frame.height)), depth);
+}
+
+// Where a point, relative to last frame's camera, was on last frame's screen, as a texture coordinate, and its clip w.
+public float3 GetPreviousScreen(FrameConstants frame, float3 previous)
+{
+    float4 clip = mul(float4(previous, 1.0), frame.previousViewProjection);
+    return float3(ToUv(clip.xy / max(clip.w, Epsilon)), clip.w);
 }
 
 // The reversed depth a pixel with nothing drawn is put at along its ray: far, but short of infinity.

@@ -20,28 +20,31 @@ more code than it adds.
 - Few methods. A method is for reuse. Keep one flow in one long method, and split it into sections with short
   comments. Do not split it into methods that have one caller each.
 - Names that tell what a thing is and does. A long name is fine when it is clear. Use the words that the code base
-  already uses ([Naming](../../CODE_STANDARDS.md#naming)).
+  already uses (Naming, in [PROJECT.md](../PROJECT.md)).
 - A simple organization: each thing is where a reader looks for it first.
-- The best practices of C# and .NET, as Code Standards applies them. Use a current language or library feature where
-  it makes the code simpler.
+- The best practices of the language and its framework, as the code standards apply them. Use a current language or
+  library feature where it makes the code simpler.
 
 ## Steps
 
 1. **Find the target.** Name the files and members that the user means. If the target is bigger than one slice, use
    the [simplify-review skill](../simplify-review/SKILL.md) first. Then do each of its slices with this skill.
-2. **Read before you change.** Read the target, its callers and the README of its area. Write down what the target
-   does now, and the check that shows it.
+2. **Read before you change.** Read the target, its callers and the doc in `docs/` for its area. For a rendering gem
+   or the shader library, read the `README.md` in its folder too. Write down what the target does now, and the check
+   that shows it.
 3. **Find the changes,** in this order:
    1. Remove what nothing needs: code that nothing calls, members, parameters and overloads without a caller, flags
       and mode fields, state that you can compute, and guards for cases that cannot happen.
    2. Merge what repeats. Use an existing method, type or library feature in place of new code.
    3. Remove layers: types that only forward, interfaces with one implementation, and helpers with one caller.
-   4. Put a method with one caller back into its caller, as a section with a short comment.
+   4. Put a method with one caller back into its caller, as a section with a short comment. When you put a method
+      into a constructor, build the result. An analyzer can then report an error in the code that calls the
+      constructor.
    5. Find a better data shape or a reframing, so that the special cases disappear.
    6. Flatten deep nesting with guard clauses and early returns.
-   7. Use the API shape that fits each call site ([API shape](../../CODE_STANDARDS.md#api-shape)).
+   7. Use the API shape that fits each call site (API shape, in [PROJECT.md](../PROJECT.md)).
    8. Make the names and the folders say what each thing is and does.
-   9. Fix what breaks a best practice of C# or .NET.
+   9. Fix what breaks a best practice of the language or its framework.
 4. **Do not add** a new abstraction, base type, option, setting or generic system, or anything for a later need. If
    the simple version does not fit, stop and tell the user why.
 5. **Write the cleanup plan.** Get the user's yes before you edit. Use the proposal of the
@@ -52,12 +55,12 @@ more code than it adds.
    - When the change moves types, layers or calls, a graph of the architecture before and after, as a Mermaid diagram
      in a `mermaid` code block. Do not draw a graph with ASCII characters.
    - The number of lines that it will remove, as an estimate.
-   - The decisions that need the user's yes: a change to public API, a file format or a gem's interface, or the
+   - The decisions that need the user's yes: a change to public API, a file format or a plugin interface, or the
      removal of a feature that a user can see.
    - If the target is `spike` or `prototype` code that nothing depends on yet, a note that says so
-     ([Modes](../../../AGENTS.md#modes)).
-6. **Do the plan, and keep the behaviour the same.** Validate at the `Code` level, or at `Visual` when the target can
-   change what is drawn. In a swarm, build only, and skip the check from step 2 (the parallelize skill). Run the check from step 2 before and after the change.
+     (Modes, in [PROJECT.md](../PROJECT.md)).
+6. **Do the plan, and keep the behaviour the same.** Validate at the lowest level that covers the target, or at the
+   visual level when the target can change what is drawn ([PROJECT.md](../PROJECT.md)). In a swarm, build only, and skip the check from step 2 (the parallelize skill). Run the check from step 2 before and after the change.
 7. **Report:**
    - The net change in lines, as measured.
    - What you removed, merged, flattened and renamed, one line each.

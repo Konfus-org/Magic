@@ -79,9 +79,6 @@ internal static class AssetScan
             return;
 
         Type type = value.GetType();
-        if (type.IsPrimitive || type.IsEnum || type == typeof(decimal) || type.IsPointer)
-            return;
-
         if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Handle<>))
         {
             if (type.GetProperty(nameof(Handle<>.Id))?.GetValue(value) is ulong id and not 0)

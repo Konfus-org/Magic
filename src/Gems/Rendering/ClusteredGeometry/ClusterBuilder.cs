@@ -4,7 +4,7 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.Debugging;
-using Magic.GpuWorld;
+using Magic.DeferredRendering.World;
 using static Magic.ClusteredGeometry.meshoptimizer;
 
 namespace Magic.ClusteredGeometry;
@@ -152,10 +152,38 @@ internal static unsafe class ClusterBuilder
             scale = meshopt_simplifyScale((float*)p, (nuint)positions.Length, (nuint)sizeof(Vector3));
         }
 
-        uint[] canonical = GetCanonicalVertices(mesh, positions);
+        // For each vertex, the first vertex at the same position: what the simplifier joins the mesh by, so vertices
+        // split for a hard edge or a texture seam still make one surface.
+        ReadOnlySpan<uint> meshIndices = mesh.Indices.Span;
+        uint[] shadow = new uint[meshIndices.Length];
+        fixed (uint* d = shadow)
+        fixed (uint* i = meshIndices)
+        fixed (Vector3* p = positions)
+        {
+            meshopt_generateShadowIndexBuffer(
+                d,
+                i,
+                (nuint)meshIndices.Length,
+                p,
+                (nuint)positions.Length,
+                (nuint)sizeof(Vector3),
+                (nuint)sizeof(Vector3)
+            );
+        }
+
+        uint[] canonical = new uint[positions.Length];
+        for (int v = 0; v < canonical.Length; v++)
+        {
+            canonical[v] = (uint)v;
+        }
+
+        for (int i = 0; i < meshIndices.Length; i++)
+        {
+            canonical[meshIndices[i]] = shadow[i];
+        }
 
         // Each level is a list of clusters, each a list of mesh-local indices; the leaves are the mesh itself.
-        List<Cluster> level = Clusterize(mesh.Indices.ToArray(), positions, error: 0, materialSlot: mesh.MaterialSlot);
+        List<Cluster> level = Clusterize(meshIndices.ToArray(), positions, error: 0, materialSlot: mesh.MaterialSlot);
         foreach (Cluster leaf in level)
         {
             leaf.PoolIndices = new uint[leaf.Indices.Length];
@@ -168,7 +196,57 @@ internal static unsafe class ClusterBuilder
         Emit(level, indices, clusters);
         for (int depth = 0; depth < MaxLevels && level.Count > 1; depth++)
         {
-            List<Cluster> parents = BuildParents(level, mesh, positions, canonical, scale, vertices, clusters);
+            // Which group each cluster of the level is in, neighbours together.
+            uint[] all = [.. level.SelectMany(cluster => cluster.Indices)];
+            uint[] counts = [.. level.Select(cluster => (uint)cluster.Indices.Length)];
+            uint[] groups = new uint[level.Count];
+            fixed (uint* d = groups)
+            fixed (uint* a = all)
+            fixed (uint* c = counts)
+            fixed (Vector3* p = positions)
+            {
+                meshopt_partitionClusters(
+                    d,
+                    a,
+                    (nuint)all.Length,
+                    c,
+                    (nuint)level.Count,
+                    (float*)p,
+                    (nuint)positions.Length,
+                    (nuint)sizeof(Vector3),
+                    GroupSize
+                );
+            }
+
+            // Every group simplified first, so the level's vertex copies take their normals from the whole level: a
+            // vertex on the border of two groups then shades the same on both sides. A group that won't simplify
+            // leaves its children roots.
+            uint groupCount = groups.Max() + 1;
+            Span<GpuCluster> emitted = CollectionsMarshal.AsSpan(clusters)[^level.Count..];
+            List<Group> made = [];
+            for (uint group = 0; group < groupCount; group++)
+            {
+                int[] members = [.. Enumerable.Range(0, level.Count).Where(i => groups[i] == group)];
+                if (members.Length < 2)
+                    continue;
+
+                uint[] merged = [.. members.SelectMany(i => level[i].Indices)];
+                (uint[] simplified, float error) = Simplify(
+                    merged,
+                    positions,
+                    canonical,
+                    scale,
+                    merged.Length / 2 / 3 * 3,
+                    isSloppy: false
+                );
+                if (simplified.Length > merged.Length * MinReduction)
+                    continue;
+
+                float childError = members.Max(i => level[i].Gpu.Error);
+                made.Add(SetParent(members, Math.Max(error, childError), simplified, emitted));
+            }
+
+            List<Cluster> parents = made.Count == 0 ? [] : AddLevel(made);
             Log.Verbose($"Level {depth}: {level.Count} clusters grouped into {parents.Count} above them.");
             if (parents.Count == 0)
                 break;
@@ -177,183 +255,105 @@ internal static unsafe class ClusterBuilder
             level = parents;
         }
 
-        List<Cluster> root = BuildRoot(level, mesh, positions, canonical, scale, vertices, clusters);
-        if (root.Count > 0)
-            Emit(root, indices, clusters);
-    }
+        // The root above the last level: the level's triangles simplified without regard to their topology down to
+        // RootTriangles, clustered, with the level's clusters as its children; none when the level is already that
+        // small.
+        uint[] levelIndices = [.. level.SelectMany(cluster => cluster.Indices)];
+        if (levelIndices.Length <= RootTriangles * 3)
+            return;
 
-    /// <summary>
-    /// The root above the last level: the level's triangles simplified without regard to their topology down to
-    /// <see cref="RootTriangles"/>, clustered, with the level's clusters as its children; none when the level is
-    /// already that small.
-    /// </summary>
-    private static List<Cluster> BuildRoot(
-        List<Cluster> level,
-        Mesh mesh,
-        Vector3[] positions,
-        uint[] canonical,
-        float scale,
-        ImmutableArray<GpuVertex>.Builder vertices,
-        List<GpuCluster> clusters
-    )
-    {
-        int[] members = [.. Enumerable.Range(0, level.Count)];
-        uint[] merged = [.. level.SelectMany(cluster => cluster.Indices)];
-        if (merged.Length <= RootTriangles * 3)
-            return [];
-
-        (uint[] simplified, float error) = Simplify(
-            merged,
+        (uint[] rootIndices, float rootError) = Simplify(
+            levelIndices,
             positions,
             canonical,
             scale,
             RootTriangles * 3,
             isSloppy: true
         );
-        if (simplified.Length == 0 || simplified.Length >= merged.Length)
-            return [];
+        if (rootIndices.Length == 0 || rootIndices.Length >= levelIndices.Length)
+            return;
 
-        float childError = level.Max(cluster => cluster.Gpu.Error);
-        Span<GpuCluster> emitted = CollectionsMarshal.AsSpan(clusters)[^level.Count..];
-        Group root = SetParent(members, Math.Max(error, childError), simplified, emitted);
+        float levelError = level.Max(cluster => cluster.Gpu.Error);
+        Span<GpuCluster> roots = CollectionsMarshal.AsSpan(clusters)[^level.Count..];
+        Group root = SetParent(
+            [.. Enumerable.Range(0, level.Count)],
+            Math.Max(rootError, levelError),
+            rootIndices,
+            roots
+        );
+        Emit(AddLevel([root]), indices, clusters);
 
-        return AddLevel([root], mesh, positions, canonical, vertices);
-    }
-
-    /// <summary>
-    /// Groups the level's clusters, simplifies each group and clusters the result: the level above. Each child's
-    /// parent error and sphere are written into <paramref name="clusters"/> as its group is made; a group that
-    /// won't simplify leaves its children roots.
-    /// </summary>
-    private static List<Cluster> BuildParents(
-        List<Cluster> level,
-        Mesh mesh,
-        Vector3[] positions,
-        uint[] canonical,
-        float scale,
-        ImmutableArray<GpuVertex>.Builder vertices,
-        List<GpuCluster> clusters
-    )
-    {
-        uint[] groups = Partition(level, positions);
-        uint groupCount = groups.Max() + 1;
-        Span<GpuCluster> emitted = CollectionsMarshal.AsSpan(clusters)[^level.Count..];
-
-        // Every group simplified first, so the level's vertex copies take their normals from the whole level: a
-        // vertex on the border of two groups then shades the same on both sides.
-        List<Group> made = [];
-        for (uint group = 0; group < groupCount; group++)
+        // Writes a group's parent error and sphere, the sphere around its clusters' detail spheres, into its members,
+        // and makes the group. A parent's error is never below its children's, and its sphere holds theirs, so the cut
+        // never jumps back to finer detail as the camera moves.
+        static Group SetParent(int[] members, float error, uint[] simplified, Span<GpuCluster> emitted)
         {
-            int[] members = [.. Enumerable.Range(0, level.Count).Where(i => groups[i] == group)];
-            if (members.Length < 2)
-                continue;
+            Vector3[] centers = new Vector3[members.Length];
+            float[] radii = new float[members.Length];
+            for (int i = 0; i < members.Length; i++)
+            {
+                centers[i] = emitted[members[i]].DetailCenter;
+                radii[i] = emitted[members[i]].DetailRadius;
+            }
 
-            uint[] merged = [.. members.SelectMany(i => level[i].Indices)];
-            (uint[] simplified, float error) = Simplify(
-                merged,
+            meshopt_Bounds bounds;
+            fixed (Vector3* c = centers)
+            fixed (float* r = radii)
+            {
+                bounds = meshopt_computeSphereBounds(
+                    (float*)c,
+                    (nuint)members.Length,
+                    (nuint)sizeof(Vector3),
+                    r,
+                    sizeof(float)
+                );
+            }
+
+            Vector3 center = new(bounds.center[0], bounds.center[1], bounds.center[2]);
+            foreach (int member in members)
+            {
+                ref GpuCluster child = ref emitted[member];
+                child.ParentError = error;
+                child.ParentCenter = center;
+                child.ParentRadius = bounds.radius;
+            }
+
+            return new Group(simplified, error, center, bounds.radius);
+        }
+
+        // The level the groups make: each group's triangles clustered, every cluster with the group's error and
+        // sphere, and the level's vertices copied into the pool, once for the whole level, every cluster's triangles
+        // in the pool.
+        List<Cluster> AddLevel(List<Group> made)
+        {
+            List<Cluster> parents = [];
+            foreach (Group group in made)
+            {
+                foreach (Cluster parent in Clusterize(group.Simplified, positions, group.Error, mesh.MaterialSlot))
+                {
+                    parent.Gpu.DetailCenter = group.Center;
+                    parent.Gpu.DetailRadius = group.Radius;
+                    parents.Add(parent);
+                }
+            }
+
+            uint[] pool = CopyVertices(
+                mesh,
+                [.. made.SelectMany(group => group.Simplified)],
+                [.. parents.SelectMany(parent => parent.Indices)],
                 positions,
                 canonical,
-                scale,
-                merged.Length / 2 / 3 * 3,
-                isSloppy: false
+                vertices
             );
-            if (simplified.Length > merged.Length * MinReduction)
-                continue;
-
-            float childError = members.Max(i => level[i].Gpu.Error);
-            made.Add(SetParent(members, Math.Max(error, childError), simplified, emitted));
-        }
-
-        return made.Count == 0 ? [] : AddLevel(made, mesh, positions, canonical, vertices);
-    }
-
-    /// <summary>
-    /// Writes a group's parent error and sphere into its members, and makes the group. A parent's error is never
-    /// below its children's, and its sphere holds theirs, so the cut never jumps back to finer detail as the camera
-    /// moves.
-    /// </summary>
-    private static Group SetParent(int[] members, float error, uint[] simplified, Span<GpuCluster> emitted)
-    {
-        (Vector3 center, float radius) = GetGroupSphere(members, emitted);
-        foreach (int member in members)
-        {
-            ref GpuCluster child = ref emitted[member];
-            child.ParentError = error;
-            child.ParentCenter = center;
-            child.ParentRadius = radius;
-        }
-
-        return new Group(simplified, error, center, radius);
-    }
-
-    /// <summary>
-    /// The level the groups make: each group's triangles clustered, every cluster with the group's error and sphere,
-    /// and the level's vertices copied into the pool, once for the whole level, every cluster's triangles in the pool.
-    /// </summary>
-    private static List<Cluster> AddLevel(
-        List<Group> made,
-        Mesh mesh,
-        Vector3[] positions,
-        uint[] canonical,
-        ImmutableArray<GpuVertex>.Builder vertices
-    )
-    {
-        List<Cluster> parents = [];
-        foreach (Group group in made)
-        {
-            foreach (Cluster parent in Clusterize(group.Simplified, positions, group.Error, mesh.MaterialSlot))
+            int first = 0;
+            foreach (Cluster parent in parents)
             {
-                parent.Gpu.DetailCenter = group.Center;
-                parent.Gpu.DetailRadius = group.Radius;
-                parents.Add(parent);
+                parent.PoolIndices = pool[first..(first + parent.Indices.Length)];
+                first += parent.Indices.Length;
             }
+
+            return parents;
         }
-
-        uint[] pool = CopyVertices(
-            mesh,
-            [.. made.SelectMany(group => group.Simplified)],
-            [.. parents.SelectMany(parent => parent.Indices)],
-            positions,
-            canonical,
-            vertices
-        );
-        int first = 0;
-        foreach (Cluster parent in parents)
-        {
-            parent.PoolIndices = pool[first..(first + parent.Indices.Length)];
-            first += parent.Indices.Length;
-        }
-
-        return parents;
-    }
-
-    /// <summary>
-    /// Which group each cluster of the level is in, neighbours together.
-    /// </summary>
-    private static uint[] Partition(List<Cluster> level, Vector3[] positions)
-    {
-        uint[] all = [.. level.SelectMany(cluster => cluster.Indices)];
-        uint[] counts = [.. level.Select(cluster => (uint)cluster.Indices.Length)];
-        uint[] destination = new uint[level.Count];
-        fixed (uint* d = destination)
-        fixed (uint* a = all)
-        fixed (uint* c = counts)
-        fixed (Vector3* p = positions)
-        {
-            meshopt_partitionClusters(
-                d,
-                a,
-                (nuint)all.Length,
-                c,
-                (nuint)level.Count,
-                (float*)p,
-                (nuint)positions.Length,
-                (nuint)sizeof(Vector3),
-                GroupSize
-            );
-        }
-
-        return destination;
     }
 
     /// <summary>
@@ -412,43 +412,6 @@ internal static unsafe class ClusterBuilder
         }
 
         return (destination.AsSpan(0, (int)count).ToArray(), error * scale);
-    }
-
-    /// <summary>
-    /// For each vertex, the first vertex at the same position: what the simplifier joins the mesh by, so vertices
-    /// split for a hard edge or a texture seam still make one surface.
-    /// </summary>
-    private static uint[] GetCanonicalVertices(Mesh mesh, Vector3[] positions)
-    {
-        ReadOnlySpan<uint> indices = mesh.Indices.Span;
-        uint[] shadow = new uint[indices.Length];
-        fixed (uint* d = shadow)
-        fixed (uint* i = indices)
-        fixed (Vector3* p = positions)
-        {
-            meshopt_generateShadowIndexBuffer(
-                d,
-                i,
-                (nuint)indices.Length,
-                p,
-                (nuint)positions.Length,
-                (nuint)sizeof(Vector3),
-                (nuint)sizeof(Vector3)
-            );
-        }
-
-        uint[] canonical = new uint[positions.Length];
-        for (int v = 0; v < canonical.Length; v++)
-        {
-            canonical[v] = (uint)v;
-        }
-
-        for (int i = 0; i < indices.Length; i++)
-        {
-            canonical[indices[i]] = shadow[i];
-        }
-
-        return canonical;
     }
 
     /// <summary>
@@ -628,35 +591,6 @@ internal static unsafe class ClusterBuilder
             clusters.Add(cluster.Gpu with { IndexOffset = (uint)indices.Count, ParentError = float.PositiveInfinity });
             indices.AddRange(cluster.PoolIndices);
         }
-    }
-
-    /// <summary>
-    /// The sphere around the group's clusters' detail spheres.
-    /// </summary>
-    private static (Vector3 Center, float Radius) GetGroupSphere(int[] members, ReadOnlySpan<GpuCluster> emitted)
-    {
-        Vector3[] centers = new Vector3[members.Length];
-        float[] radii = new float[members.Length];
-        for (int i = 0; i < members.Length; i++)
-        {
-            centers[i] = emitted[members[i]].DetailCenter;
-            radii[i] = emitted[members[i]].DetailRadius;
-        }
-
-        meshopt_Bounds bounds;
-        fixed (Vector3* c = centers)
-        fixed (float* r = radii)
-        {
-            bounds = meshopt_computeSphereBounds(
-                (float*)c,
-                (nuint)members.Length,
-                (nuint)sizeof(Vector3),
-                r,
-                sizeof(float)
-            );
-        }
-
-        return (new Vector3(bounds.center[0], bounds.center[1], bounds.center[2]), bounds.radius);
     }
 
     /// <summary>

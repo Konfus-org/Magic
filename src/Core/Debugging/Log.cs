@@ -1,12 +1,14 @@
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Runtime.CompilerServices;
+using Magic.Projects;
 using Magic.Utils;
 
 namespace Magic.Debugging;
 
 /// <summary>
-/// Provides static methods and utilities for logging messages at various severity levels and managing log sinks.
+/// Logs from any thread: each line goes to the terminal and to each sink a gem registers. The last lines are kept, so
+/// a sink that registers late and a crash file get them too.
 /// </summary>
 public static class Log
 {
@@ -139,7 +141,7 @@ public static class Log
                 {
                     ILogSink sink = _sinks[i];
                     _sinks.RemoveAt(i);
-                    Error($"Log sink {sink.GetType().Name} threw and was removed: {ex}");
+                    Error($"The log sink of {GemRegistry.GetGemName(sink.GetType())} threw and was removed: {ex}");
                 }
             }
         }
@@ -227,7 +229,7 @@ public static class Log
         {
             // Removed before the error is logged, so the sink isn't given the line about itself.
             _sinks.Remove(sink);
-            Error($"Log sink {sink.GetType().Name} threw and was removed: {ex}");
+            Error($"The log sink of {GemRegistry.GetGemName(sink.GetType())} threw and was removed: {ex}");
             return false;
         }
     }

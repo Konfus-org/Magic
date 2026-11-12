@@ -5,8 +5,8 @@ using Xunit;
 namespace Magic.Tests.Graphics;
 
 /// <summary>
-/// The gems that render: ordered as they register from what each takes and makes, refused when two make one type or
-/// they form a cycle, and pumped so each takes what the gems before it made this frame.
+/// The gems' parts that render: ordered as they register from what each takes and makes, refused when two make one
+/// type or they form a cycle, and pumped so each takes what the parts before it made this frame.
 /// </summary>
 public sealed class RenderingTests
 {
@@ -105,18 +105,18 @@ public sealed class RenderingTests
         Assert.Equal(new ShadeInput(new View(3), new Light(4)), shade.Taken);
     }
 
-    private static Rendering Register(params IGem[] gems)
+    private static Rendering Register(params object[] parts)
     {
         Rendering rendering = new();
-        foreach (IGem gem in gems)
+        foreach (object part in parts)
         {
-            rendering.Register(gem);
+            rendering.Register(part);
         }
 
         return rendering;
     }
 
-    private static void Pump(params IGem[] gems) => Register(gems).Pump(_frame, new RenderGraph());
+    private static void Pump(params object[] parts) => Register(parts).Pump(_frame, new RenderGraph());
 
     private readonly record struct View(int Id);
 
@@ -130,9 +130,9 @@ public sealed class RenderingTests
 
     private readonly record struct HenInput(View View);
 
-    private sealed class Plain : IGem;
+    private sealed class Plain;
 
-    private sealed class World(List<string> calls, View? made) : IGem, IRenderInto<View>
+    private sealed class World(List<string> calls, View? made) : IRenderInto<View>
     {
         public View? Render(in Frame frame, RenderGraph graph)
         {
@@ -142,7 +142,7 @@ public sealed class RenderingTests
         }
     }
 
-    private sealed class Trace(List<string> calls) : IGem, IRender<TraceInput, Light>
+    private sealed class Trace(List<string> calls) : IRender<TraceInput, Light>
     {
         public Light? Render(in Frame frame, RenderGraph graph, in TraceInput input)
         {
@@ -152,7 +152,7 @@ public sealed class RenderingTests
         }
     }
 
-    private sealed class Shade(List<string> calls) : IGem, IRenderFrom<ShadeInput>
+    private sealed class Shade(List<string> calls) : IRenderFrom<ShadeInput>
     {
         public ShadeInput? Taken { get; private set; }
 
@@ -163,27 +163,27 @@ public sealed class RenderingTests
         }
     }
 
-    private sealed class Lost(List<string> calls) : IGem, IRenderFrom<EggInput>
+    private sealed class Lost(List<string> calls) : IRenderFrom<EggInput>
     {
         public void Render(in Frame frame, RenderGraph graph, in EggInput input) => calls.Add(nameof(Lost));
     }
 
-    private sealed class Overlay(List<string> calls) : IGem, IRender
+    private sealed class Overlay(List<string> calls) : IRender
     {
         public void Render(in Frame frame, RenderGraph graph) => calls.Add(nameof(Overlay));
     }
 
-    private sealed class Sun : IGem, IRenderInto<(View, Light)>
+    private sealed class Sun : IRenderInto<(View, Light)>
     {
         public (View, Light)? Render(in Frame frame, RenderGraph graph) => (new View(3), new Light(4));
     }
 
-    private sealed class Egg : IGem, IRender<EggInput, View>
+    private sealed class Egg : IRender<EggInput, View>
     {
         public View? Render(in Frame frame, RenderGraph graph, in EggInput input) => new View(input.Light.Id);
     }
 
-    private sealed class Hen : IGem, IRender<HenInput, Light>
+    private sealed class Hen : IRender<HenInput, Light>
     {
         public Light? Render(in Frame frame, RenderGraph graph, in HenInput input) => new Light(input.View.Id);
     }

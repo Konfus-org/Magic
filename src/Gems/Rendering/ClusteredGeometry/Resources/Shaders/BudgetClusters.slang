@@ -3,7 +3,7 @@
 // still in between. The level pushes the impostor handoff out, its pixel radius up and its distance in, so what is
 // smallest on screen and farthest goes to its impostor first, and past that raises the error a cluster may show. The
 // cluster constants take the handoff and the error it gives, so every pass after reads the same, and the counts are
-// zeroed for the cull. The pass header's z is the budget buffer, which holds the level.
+// zeroed for the cull.
 module "BudgetClusters";
 
 import Core.Heap;
@@ -28,11 +28,10 @@ static const float MaxLevel = 6.0;
 [numthreads(1, 1, 1)]
 void BudgetClusters()
 {
-    PassHeader header = GetPassHeader();
-    BufferRef constants = { header.x };
+    BufferRef constants = { GetPassHeader().x };
     ClusterConstants clusters = constants.Load<ClusterConstants>(ClusterConstantsOffset);
     BufferRef counts = { clusters.counts };
-    BufferRef budget = { header.z };
+    BufferRef budget = { clusters.budget };
 
     // A level that is not a number in range is a buffer never written: none.
     float level = budget.Load<float>(0u);

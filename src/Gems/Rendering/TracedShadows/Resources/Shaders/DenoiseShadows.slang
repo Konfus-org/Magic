@@ -2,13 +2,13 @@
 // every pixel, is denoised in time, then in space: ClassifyShadows skips each 8 by 8 pixels whose neighbourhood the
 // sun's rays found all lit or all dark, and blends every other pixel with where it was last frame, clamped to its
 // neighbours, keeping a running mean and variance of it; FilterShadows then blurs that once or twice, 1 and 2 pixels
-// apart, and BlendShadows a last time, 4 apart, by how alike neighbours' depths, normals and shadows are, into the mask. A
-// tile light's slot may hold another light in the next tile or the next frame, so BlendShadows only blends those with
-// last frame.
+// apart, and FilterLastAndBlendShadows a last time, 4 apart, by how alike neighbours' depths, normals and shadows are,
+// into the mask. A tile light's slot may hold another light in the next tile or the next frame, so
+// FilterLastAndBlendShadows only blends those with last frame.
 // All of it runs at the traced size, each traced pixel reading the picture's pixel at its footprint's corner; then
 // UpsampleShadows brings the mask and the sun's tint to the picture's size, which shading reads. The pass header's x is
-// the frame's buffer, which holds the shadows, y the denoiser's constants and w the filter's pass, or for BlendShadows the
-// target the last filter pass wrote.
+// the frame's buffer, which holds the shadows, y the denoiser's constants and w the filter's pass, or for
+// FilterLastAndBlendShadows the target the last filter pass wrote.
 module "DenoiseShadows";
 
 import Core.Heap;
@@ -384,7 +384,11 @@ void FilterShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupThr
 // contrast the blur took where the variance is low, into the mask.
 [shader("compute")]
 [numthreads(8, 8, 1)]
-void BlendShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupThreadID, uint3 group : SV_GroupID)
+void FilterLastAndBlendShadows(
+    uint3 thread : SV_DispatchThreadID,
+    uint3 local : SV_GroupThreadID,
+    uint3 group : SV_GroupID
+)
 {
     FrameConstants frame = GetFrame();
     ShadowDenoiseConstants denoise = GetDenoise();

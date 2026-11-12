@@ -1,12 +1,19 @@
 namespace Magic.Input;
 
 /// <summary>
-/// Every input device the player uses, read one way. A device is a set of controls, and every control has a value and
-/// is down, pressed or released like a button, so a key, a trigger and a stick axis are read alike and an action can
-/// be bound to any of them by name. The provider updates it in its <see cref="Projects.IGem.Update"/>, before the gems
-/// that take it, as they are made after it; it stays fixed for the rest of the frame. The game thread's: read it in
-/// Update, FixedUpdate or LateUpdate, and copy what Render needs.
+/// Reads every input device that the player uses in one way.
 /// </summary>
+/// <remarks>
+/// <para>
+/// A device is a set of controls. Every control has a value and is down, pressed or released like a button. Thus a
+/// key, a trigger and a stick axis read the same, and an action can bind to any of them by name.
+/// </para>
+/// <para>
+/// The provider updates it in its <see cref="Projects.IGem.Update"/>, before the gems that use it, because they are
+/// made after it. It does not change for the rest of the frame. Read it only on the game thread, in Update, FixedUpdate
+/// or LateUpdate. Copy what Render needs.
+/// </para>
+/// </remarks>
 public interface IInput
 {
     /// <summary>
@@ -15,18 +22,23 @@ public interface IInput
     ReadOnlySpan<InputDevice> Devices { get; }
 
     /// <summary>
-    /// What was typed this frame, in order, as the keyboard layout and input method made it: characters rather than
-    /// keys, for a text field. Empty when nothing was.
+    /// The characters typed in this frame, in order, for a text field.
     /// </summary>
+    /// <remarks>
+    /// The keyboard layout and the input method make these characters.
+    /// </remarks>
     string Text { get; }
 
     /// <summary>
-    /// A control on every device that has it, combined: down while down on any, with the value of largest magnitude.
+    /// The state of a control, combined over every device that has it.
     /// </summary>
+    /// <remarks>
+    /// It is down while it is down on any device. Its value is the one with the largest magnitude.
+    /// </remarks>
     ControlState this[Control control] { get; }
 
     /// <summary>
-    /// A control on one device; all zero for a device that is gone or does not have it.
+    /// The state of a control on one device, or all zero if the device is gone or does not have the control.
     /// </summary>
     ControlState this[InputDevice device, Control control] { get; }
 }

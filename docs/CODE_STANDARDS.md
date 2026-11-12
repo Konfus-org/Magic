@@ -35,34 +35,45 @@ Write the engine as data flowing through functions, not objects calling each oth
   across the code base.
 - Managed dependencies come from NuGet. A package with a known vulnerability, direct or transitive, fails the restore.
 - Native libraries are built from source or downloaded as their author publishes them. No third-party wrapper, package,
-  binary or copied code. Hand-write a binding only where the generator can't, and say so in the gem's README.
+  binary or copied code. Hand-write a binding only where the generator can't, and say so in the gem's docs.
 - No keys, tokens or passwords in code, configuration or workflows. CI reads its own from the repository's secrets.
 
 ## Gems, hooks and services
 
 - A gem is a plugin: a decoupled, hot-reloadable, modular piece of logic that a project adds or replaces to meet its
-  needs. It is a `public sealed` class implementing `IGem` and the Core interfaces it provides.
-- A gem's constructor takes everything it depends on and starts what the gem is; `Dispose` ends it. Only code that
-  builds objects from constructors takes `IServiceProvider`. Gems are made in dependency order, then in the order the
-  project lists them, and disposed in reverse.
+  needs. It is a `public sealed class EntryPoint` at the gem's root, and its parts.
+- `EntryPoint` implements only `IGem` and `IDisposable`. Its only state is its parts. It makes each part with `new` in
+  its constructor and exports it as a public get-only property. A private field or an `internal` class is not
+  exported. Its hooks call its parts, and `Dispose` ends them. A gem without hooks still has an `EntryPoint`.
+- A part is a class that does one job. Core sets up each exported part by the Core interfaces it implements: it
+  provides them to the gems made after it, renders, reads assets, or is a window, platform, ECS or log sink. Name a
+  part for its interface: `Renderer`, `Ecs`, `Window`, `Input`, `Clipboard`, `Platform`, `GraphicsApi`,
+  `ShaderCompiler`, `DebugUI`, `Importer`, `Exporter`. Declare its property as its class, not as an interface. Parts
+  that share native state take one shared object from `EntryPoint`.
+- `EntryPoint`'s constructor takes everything the gem depends on: Core's services and other gems' parts. Only code
+  that builds objects from constructors takes `IServiceProvider`. Gems are made in dependency order, then in the order
+  the project lists them, and disposed in reverse.
 - A hook is what the engine calls on a gem each frame: `IGem`'s `Update`, `FixedUpdate` and `LateUpdate`, in that order
   over the gems, on the game thread, then the `Render` of each gem that renders, on the render thread, which owns the
   GPU. The platform thread, the process's first, pumps the OS's window and events through
-  the gem that implements `IPlatform`, which hands the game thread the input they make as data.
+  the part that implements `IPlatform`, which hands the game thread the input they make as data.
   `Render` records into the frame's `RenderGraph`, each pass in its `RenderStage`, and Core hands it to the GPU provider
-  once every gem has. A gem renders through the form that fits it: `IRender` takes and makes nothing for other gems,
-  `IRenderFrom<TInput>` takes their output, `IRenderInto<TOutput>` makes its own, and `IRender<TInput, TOutput>` does
-  both. An input is a record of other gems' outputs, and an output one type or a tuple of types, each made for the gems
+  once every gem has. A gem's `Renderer` renders through the form that fits it: `IRender` takes and makes nothing for
+  other gems, `IRenderFrom<TInput>` takes their output, `IRenderInto<TOutput>` makes its own, and
+  `IRender<TInput, TOutput>` does both. A `Renderer` with more than one step in the frame implements a form for each,
+  and Core runs each as its own step. An
+  input is a record of other gems' outputs, and an output one type or a tuple of types, each made for the gems
   that take it. Core runs each gem after the gems whose output it takes; gems pass what they draw from one another
   that way, as data, never through a gem in a constructor.
-  `LateUpdate` hands `Render` what it draws as data, the newest through a `Mailbox<T>` and what must not be lost
-  through a `Channel<T>`. `Render` reads a gem's settings record directly: it is immutable and written whole. A gem implements the ones it needs. One that throws in a hook is logged
-  and leaves every hook.
-- Where Core needs something from a gem, the gem implements an interface and Core calls it, as with `IEcs` and
+  `EntryPoint.LateUpdate` calls a method of `Renderer` that publishes what `Render` draws, as data. `Renderer` owns
+  the hand-off: the newest through a `Mailbox<T>`, and what must not be lost through a `Channel<T>`. `Render` reads
+  the gem's settings directly. Core writes them one member at a time, so a frame can see one old and one new member.
+  A gem implements the hooks it needs. One that throws in a hook is logged and leaves every hook.
+- Where Core needs something from a gem, a part implements an interface and Core calls it, as with `IEcs` and
   `IAssetImporter<T>`. Add one when a gem first needs it.
 - A gem that keeps something for each entity compares what it holds with the entities each frame, adding what came and
   dropping what went, as the renderer does. One that must also drop what it built up when the world is replaced, or ready
-  what comes before it shows, implements `IHookIntoDomainLoading`; the world awaits it while the loading screen shows.
+  what comes before it shows, has a part that implements `IHookIntoDomainLoading`; the world awaits it while the loading screen shows.
 - `Program` sets a run up and owns its loop, calling each service's `Pump` in turn. `App` lasts the whole process; what a
   run makes is new for it, and a restart keeps only the world, as JSON, and the gems' settings. A service starts in its constructor
   and ends in `Dispose`, not with paired start and stop calls. A step is a method. A class of its own is for a substantial piece of work.
@@ -71,13 +82,15 @@ Write the engine as data flowing through functions, not objects calling each oth
   `await threads.Enter(EngineThread.Game)`; nothing hops threads for it.
 - Gems talk through message structs, each an `IEvent`. Publish one from any thread and every gem reads it the next
   frame, from `frame.Events`, in load order. A gem that sets `IsHandled` on one takes it from the gems after it.
-- Async work a hook starts arrives in a later frame: by a message, or by work posted with `Threads.Post`. A gem that
-  needs slow setup starts it in its constructor and reads what came of it in a hook.
+- Async work a hook starts arrives in a later frame, by a message. A gem that needs slow setup starts it in its
+  constructor and reads what came of it in a hook.
 - `Dispose` frees what the gem started, once none of its work still runs on a worker.
 - A gem's csproj states its `Description`, `Version` and `Authors`. Nothing else does.
-- A value a player, game or developer would tune is a member of its gem's settings record, never a const, a
-  `#if DEBUG` choice, a key-only toggle or a console string. The gem implements `IHasSettings<TSettings>`, and the
-  record is a `sealed record` of init properties with a `[Category]`, each with its default and a doc comment.
+- A value a player, game or developer would tune is a member of its gem's settings, never a const, a
+  `#if DEBUG` choice, a key-only toggle or a console string. The settings are a `sealed class` that implements
+  `ISettings`, with settable properties, a `[Category]`, and a default and a doc comment for each property.
+  `EntryPoint` takes the settings in its constructor, exports them as a public property, and gives them to the parts
+  that read them. Core changes a member on that same object.
   Game code reads and sets it through `Settings` by type; the console and tools by key, as `Rendering.Resolution`.
 - Gems may depend on each other and reference one another. A gem throws when a dependency it needs isn't there.
 - A component is an unmanaged struct with public fields that implements `IComponent`, and members for what follows from
@@ -108,8 +121,8 @@ Write the engine as data flowing through functions, not objects calling each oth
   could hold up has ended, and Core's game thread waiting at the end of a frame until the render thread has drawn the
   frame before. The render thread never waits for the game thread. The platform thread waits on the OS for its next
   event.
-- A worker hands an engine thread data (a message, a `Channel<T>`, a value written whole) or work
-  (`Threads.Post`). No locks on collections two threads share.
+- A worker hands an engine thread data: a message, a `Channel<T>` or a value written whole. No locks on collections
+  two threads share.
 - Background work is a task. `Threads` is for the engine's own threads.
 - A timeout is the caller's, through a linked token source.
 
@@ -156,7 +169,8 @@ Write the engine as data flowing through functions, not objects calling each oth
   goes in the folder of its area, such as `Files` or `Plugins`. A new area is a new folder, never a new project.
 - A folder exists only once it holds something. Split a big one into a subfolder per area, never named like a type in
   it.
-- A gem is flat: every file at its root, in `Magic.<Gem>`. Its `Resources/` holds the assets and scripts only it uses.
+- A gem's files are in `Magic.<Gem>`, and the files in a folder of it in `Magic.<Gem>.<Folder>`. Its `Resources/`
+  holds the assets and scripts only it uses.
 - Built-in assets every project can use go in `src/Resources/`.
 - Name a file for its main type. Small types that belong with it may share the file.
 - Extension members are for a type the project doesn't own, or an interface; anything else is a member of its type.
@@ -185,9 +199,9 @@ Write the engine as data flowing through functions, not objects calling each oth
 
 CSharpier decides layout, every line break, indent and blank line, from `.editorconfig`'s `[*]` block: the editor's
 extension prints a file on save, `tools/Scripts/Format.ps1` the files a change touches
-([Format.ps1](../tools/README.md#formatps1)), a local build what is left, and `Validate.ps1` refuses a file it would
+([Format.ps1](TOOLS.md#formatps1)), a local build what is left, and `Validate.ps1` refuses a file it would
 change. The rules below that no
-built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
+built-in rule checks are [tools/Analyzers](TOOLS.md#analyzers).
 
 ### Type layout
 
@@ -222,6 +236,8 @@ what the caller does:
 | Says what it wants in one sentence, such as a query or a chain of setup | Fluent | Each method returns its receiver, or a struct's new value, so the chain reads as `subject.Verb(x).Verb(y)`. |
 | Builds what is valid only once complete, over many calls or across members | Builder | Calls collect into the builder, and `Build()` checks them and returns the finished, immutable value. Only where an initializer with `required` can't express it. |
 
+- A description whose few values are always given takes them in a constructor, as `new("Shadow mask", bytes)`. An
+  initializer sets the rest: `new("Fog", width, height, format) { Depth = slices }`.
 - No `Pipe`, `Cascade`, `Then` or other method that only calls the function it is given. Assign each step, and set
   members in an initializer or as statements:
 
@@ -261,6 +277,8 @@ what the caller does:
   lines.
 - Put a `//` comment above a block whose purpose isn't obvious at a glance (a loop doing two things, a calculation, an
   order that matters, a workaround). It covers the block down to the next blank line. Never restate the line.
+- Code that has its shape for a tool's sake, such as a method kept apart so that an analyzer gives no false report,
+  says so in a comment that names the tool.
 - No divider comments and no `#region`.
 
 ## Cross platform

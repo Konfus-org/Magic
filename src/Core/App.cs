@@ -5,13 +5,17 @@ using Magic.Projects;
 namespace Magic;
 
 /// <summary>
-/// The app: which project it runs and how, and whether it goes on. Commands change it, at launch and while it runs. It lasts
-/// the whole process, so what they set stays set across runs.
+/// Holds the project that the process runs, how it runs it, and whether the process goes on.
 /// </summary>
+/// <remarks>
+/// Commands change it at launch and while it runs. It lasts for the whole process, so a value that a command sets stays
+/// set across runs.
+/// </remarks>
 public sealed class App : IDisposable
 {
     /// <summary>
-    /// Cancelled once the process is to end, by <see cref="Exit"/>. Every run's <see cref="Lifetime"/> is linked to it.
+    /// Cancelled by <see cref="Exit"/> when the process must end, which also cancels the <see cref="Lifetime"/> of
+    /// each run.
     /// </summary>
     private readonly CancellationTokenSource _exiting = new();
 
@@ -20,9 +24,12 @@ public sealed class App : IDisposable
     internal App() => _lifetime = CancellationTokenSource.CreateLinkedTokenSource(_exiting.Token);
 
     /// <summary>
-    /// The project to run, as read from its <c>.magic</c> file; none until one is opened. Opening another ends the run,
-    /// and Magic runs the new project next; opening the same file again changes nothing.
+    /// The project to run, as read from its <c>.magic</c> file, or null until a project is opened.
     /// </summary>
+    /// <remarks>
+    /// If you set a different project, the run ends and Magic runs the new project next. If you set the same file
+    /// again, nothing changes.
+    /// </remarks>
     public Project? Project
     {
         get;
@@ -37,13 +44,19 @@ public sealed class App : IDisposable
     }
 
     /// <summary>
-    /// The window the run draws into: the gem's that provides one, for as long as the run lasts; none when headless.
+    /// The window that the run draws into, or null when the run is headless.
     /// </summary>
+    /// <remarks>
+    /// The gem that provides the window owns it. The window is valid only while the run lasts.
+    /// </remarks>
     public IWindow? Window { get; internal set; }
 
     /// <summary>
-    /// Whether the run has no window. Changing it ends the run, and Magic runs it again in the new mode.
+    /// Whether the run has no window.
     /// </summary>
+    /// <remarks>
+    /// If you change it, the run ends and Magic runs it again in the new mode.
+    /// </remarks>
     public bool IsHeadless
     {
         get;
@@ -68,18 +81,21 @@ public sealed class App : IDisposable
     public bool IsExiting => _exiting.IsCancellationRequested;
 
     /// <summary>
-    /// The run's token, cancelled when the run ends: on <see cref="Exit"/>, a restart, a new project, a new mode or an
-    /// error under --fail-on-error. Work that belongs to the run stops with it.
+    /// A token that is cancelled when the run ends.
     /// </summary>
+    /// <remarks>
+    /// The run ends on <see cref="Exit"/>, a restart, a new project, a new mode, or an error under
+    /// <c>--fail-on-error</c>. Work that belongs to the run must stop with this token.
+    /// </remarks>
     public CancellationToken Lifetime => _lifetime.Token;
 
     /// <summary>
-    /// What pumps the OS's events on the platform thread: the gem's that provides it, for as long as the run lasts.
+    /// Pumps the OS events on the platform thread while the run lasts. The gem that provides it owns it.
     /// </summary>
     internal IPlatform? Platform { get; set; }
 
     /// <summary>
-    /// Whether --fail-on-error has seen its error.
+    /// Whether an error was logged while <see cref="ShouldExitOnError"/> is set.
     /// </summary>
     internal bool HasFailed => ShouldExitOnError && Log.ErrorCount > 0;
 
@@ -92,7 +108,7 @@ public sealed class App : IDisposable
     public void Exit() => _exiting.Cancel();
 
     /// <summary>
-    /// Ends the run, and Magic runs the project again with everything made anew.
+    /// Ends the run, and Magic then runs the project again from the start.
     /// </summary>
     internal void Restart() => _lifetime.Cancel();
 

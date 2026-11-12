@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Linq;
 using System.Text.Json;
 using Magic.Utils;
 
@@ -195,26 +196,11 @@ internal sealed record LoadedAssets
     /// </summary>
     public HashSet<ulong> GetMadeFromThese(IEnumerable<ulong> changed)
     {
-        Dictionary<ulong, List<ulong>> madeInto = [];
-        foreach ((ulong id, AssetEntry entry) in Entries)
-        {
-            foreach (ulong source in entry.MadeFrom)
-            {
-                if (!madeInto.TryGetValue(source, out List<ulong>? of))
-                {
-                    of = [];
-                    madeInto.Add(source, of);
-                }
+        ILookup<ulong, ulong> madeInto = Entries
+            .SelectMany(pair => pair.Value.MadeFrom, (pair, source) => (Source: source, Id: pair.Key))
+            .ToLookup(made => made.Source, made => made.Id);
 
-                of.Add(id);
-            }
-        }
-
-        return AssetDatabase.Walk(
-            changed,
-            AssetManager.AllLevels,
-            id => madeInto.TryGetValue(id, out List<ulong>? of) ? of : []
-        );
+        return AssetDatabase.Walk(changed, AssetManager.AllLevels, id => madeInto[id]);
     }
 
     /// <summary>
@@ -222,12 +208,7 @@ internal sealed record LoadedAssets
     /// </summary>
     public IEnumerable<ulong> GetListersOf(IReadOnlySet<string> touched)
     {
-        HashSet<string> folders = new(StringComparer.OrdinalIgnoreCase);
-        foreach (string path in touched)
-        {
-            int slash = path.LastIndexOf('/');
-            folders.Add(slash < 0 ? string.Empty : path[..slash]);
-        }
+        HashSet<string> folders = new(touched.Select(AssetIndex.GetFolder), StringComparer.OrdinalIgnoreCase);
 
         foreach ((ulong id, AssetEntry entry) in Entries)
         {

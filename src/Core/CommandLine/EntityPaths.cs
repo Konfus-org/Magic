@@ -2,7 +2,6 @@ using System.Collections.Immutable;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
-using System.Text;
 using System.Text.Json;
 using Magic.Ecs;
 using Magic.Ecs.Components;
@@ -15,7 +14,7 @@ namespace Magic.CommandLine;
 /// A value of an entity's, named by a path as the console takes it: <c>entity.component.member</c> and on to any depth,
 /// such as <c>player.transform.rotation.y</c>. The entity is a tag's name, which is every entity tagged so, or an id. A
 /// component or member is its name in any case, or its capitals' initials (<c>fov</c> for <c>FieldOfView</c>). The console's
-/// get reads one; its set writes one through the lookups here.
+/// get reads one; its set writes one.
 /// </summary>
 internal static class EntityPaths
 {
@@ -48,9 +47,35 @@ internal static class EntityPaths
     }
 
     /// <summary>
+    /// Writes <paramref name="values"/> at <paramref name="path"/> on each entity it names that has the component: how
+    /// many it wrote, or why none.
+    /// </summary>
+    public static Result<int> Write(IEcs ecs, string path, ReadOnlySpan<string> values)
+    {
+        Result<ImmutableArray<(Entity Entity, IComponent Component)>> found = FindComponents(ecs, path);
+        if (!found.Ok)
+            return Result.Failure(found.Error);
+
+        string[] members = path.Split('.')[2..];
+        if (members.Length == 0)
+            return Result.Failure($"{path} names a component; name one of its members to set.");
+
+        foreach ((Entity entity, IComponent component) in found.Value)
+        {
+            Result written = WriteMembers(component, members, values);
+            if (!written.Ok)
+                return Result.Failure(written.Error);
+
+            ecs.Set(entity, [component]);
+        }
+
+        return Result.Success(found.Value.Length);
+    }
+
+    /// <summary>
     /// The component <paramref name="path"/> names on each entity it names that has one, boxed copies to read or write.
     /// </summary>
-    public static Result<ImmutableArray<(Entity Entity, IComponent Component)>> FindComponents(IEcs ecs, string path)
+    private static Result<ImmutableArray<(Entity Entity, IComponent Component)>> FindComponents(IEcs ecs, string path)
     {
         string[] parts = path.Split('.');
         if (parts.Length < 2 || parts[0].Length == 0)
@@ -63,8 +88,10 @@ internal static class EntityPaths
         ImmutableArray<(Entity, IComponent)>.Builder found = ImmutableArray.CreateBuilder<(Entity, IComponent)>();
         foreach (Entity entity in entities)
         {
-            if (FindComponent(ecs.GetComponents(entity), parts[1]) is { } component)
-                found.Add((entity, component));
+            IComponent[] components = ecs.GetComponents(entity);
+            int index = FindName([.. components.Select(component => component.GetType().Name)], parts[1]);
+            if (index >= 0)
+                found.Add((entity, components[index]));
         }
 
         return found.Count == 0
@@ -75,19 +102,20 @@ internal static class EntityPaths
     /// <summary>
     /// The public field or property of <paramref name="type"/> that <paramref name="name"/> names.
     /// </summary>
-    public static MemberInfo? FindMember(Type type, string name)
+    private static MemberInfo? FindMember(Type type, string name)
     {
-        MemberInfo[] members = [.. type.GetMembers(BindingFlags.Public | BindingFlags.Instance).Where(IsValue)];
+        MemberInfo[] members =
+        [
+            .. type.GetMembers(BindingFlags.Public | BindingFlags.Instance)
+                .Where(member =>
+                    member is FieldInfo
+                    || (member is PropertyInfo { CanRead: true } property && property.GetIndexParameters().Length == 0)
+                ),
+        ];
         int index = FindName([.. members.Select(member => member.Name)], name);
 
         return index < 0 ? null : members[index];
     }
-
-    public static Type GetValueType(MemberInfo member) =>
-        member is FieldInfo field ? field.FieldType : ((PropertyInfo)member).PropertyType;
-
-    public static object? GetValue(MemberInfo member, object owner) =>
-        member is FieldInfo field ? field.GetValue(owner) : ((PropertyInfo)member).GetValue(owner);
 
     /// <summary>
     /// The entity numbered <paramref name="selector"/>, or every entity tagged it.
@@ -128,16 +156,9 @@ internal static class EntityPaths
         return [];
     }
 
-    private static IComponent? FindComponent(IComponent[] components, string name)
-    {
-        int index = FindName([.. components.Select(component => component.GetType().Name)], name);
-
-        return index < 0 ? null : components[index];
-    }
-
     /// <summary>
     /// Where in <paramref name="names"/> the one <paramref name="name"/> names is: by its name in any case first, then by
-    /// its initials; -1 for none.
+    /// its initials, its first letter and each capital after it; -1 for none.
     /// </summary>
     private static int FindName(string[] names, string name)
     {
@@ -147,7 +168,12 @@ internal static class EntityPaths
             ? index
             : Array.FindIndex(
                 names,
-                named => string.Equals(GetInitials(named), name, StringComparison.OrdinalIgnoreCase)
+                named =>
+                    string.Equals(
+                        string.Concat(named.Where((letter, i) => i == 0 || char.IsUpper(letter))),
+                        name,
+                        StringComparison.OrdinalIgnoreCase
+                    )
             );
     }
 
@@ -162,28 +188,44 @@ internal static class EntityPaths
         if (FindMember(owner.GetType(), members[0]) is not { } member)
             return Result.Failure($"{owner.GetType().Name} has no {members[0]}.");
 
-        if (GetValue(member, owner) is not { } value)
+        if (ValueText.GetValue(member, owner) is not { } value)
             return Result.Failure($"{owner.GetType().Name}.{member.Name} is null.");
 
         return ReadMembers(value, members[1..]);
     }
 
     /// <summary>
-    /// The first letter of <paramref name="name"/> and each capital after it.
+    /// Writes <paramref name="values"/> at <paramref name="members"/> under <paramref name="owner"/>, a box, which it
+    /// changes: each value type on the way is a copy, written into the copy above it once changed.
     /// </summary>
-    private static string GetInitials(string name)
+    private static Result WriteMembers(object owner, ReadOnlySpan<string> members, ReadOnlySpan<string> values)
     {
-        StringBuilder initials = new();
-        for (int i = 0; i < name.Length; i++)
+        if (FindMember(owner.GetType(), members[0]) is not { } member)
+            return Result.Failure($"{owner.GetType().Name} has no {members[0]}.");
+
+        if (member is PropertyInfo { CanWrite: false })
+            return Result.Failure($"{owner.GetType().Name}.{member.Name} follows from other values; set those.");
+
+        if (members.Length == 1)
         {
-            if (i == 0 || char.IsUpper(name[i]))
-                initials.Append(name[i]);
+            Result<object> parsed = ValueText.Parse(ValueText.GetValueType(member), values);
+            if (!parsed.Ok)
+                return Result.Failure(parsed.Error);
+
+            ValueText.SetMember(member, owner, parsed.Value);
+
+            return Result.Success();
         }
 
-        return initials.ToString();
-    }
+        if (ValueText.GetValue(member, owner) is not { } child)
+            return Result.Failure($"{owner.GetType().Name}.{member.Name} is null.");
 
-    private static bool IsValue(MemberInfo member) =>
-        member is FieldInfo
-        || (member is PropertyInfo { CanRead: true } property && property.GetIndexParameters().Length == 0);
+        Result written = WriteMembers(child, members[1..], values);
+        if (!written.Ok)
+            return written;
+
+        ValueText.SetMember(member, owner, child);
+
+        return Result.Success();
+    }
 }

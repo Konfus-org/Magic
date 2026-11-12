@@ -16,7 +16,7 @@ public enum WindowSystem : byte
 }
 
 /// <summary>
-/// What the OS knows a window by, as plain values, for whatever draws into it to make what its graphics API needs.
+/// The OS handle of a window as plain values, which a renderer uses to make a surface for its graphics API.
 /// </summary>
 /// <param name="System">The window system, which says what the others are.</param>
 /// <param name="Display">The Win32 module, the X11 display or the Wayland display; 0 on Cocoa.</param>

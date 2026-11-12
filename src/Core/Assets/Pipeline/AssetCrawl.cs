@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Linq;
 using System.Reflection;
 using Magic.Utils;
 
@@ -107,21 +108,11 @@ internal static class AssetCrawl
         CancellationToken cancel
     )
     {
-        Task<Result<object>>[] loading = new Task<Result<object>>[ids.Length];
-        for (int i = 0; i < ids.Length; i++)
-        {
-            loading[i] = LoadAnyAsync(assets, ids[i], progress, cancel);
-        }
+        Result<object>[] loaded = await Task.WhenAll(ids.Select(id => LoadAnyAsync(assets, id, progress, cancel)))
+            .ConfigureAwait(false);
+        string[] errors = [.. loaded.Where(one => !one.Ok).Select(one => one.Error)];
 
-        Result<object>[] loaded = await Task.WhenAll(loading).ConfigureAwait(false);
-        List<string> errors = [];
-        foreach (Result<object> one in loaded)
-        {
-            if (!one.Ok)
-                errors.Add(one.Error);
-        }
-
-        return errors.Count == 0 ? Result.Success(ids) : Result.Failure(string.Join(" ", errors));
+        return errors.Length == 0 ? Result.Success(ids) : Result.Failure(string.Join(" ", errors));
     }
 
     /// <summary>
@@ -172,37 +163,25 @@ internal static class AssetCrawl
         if (!loaded.Importers.ContainsKey(type.Type))
             return Result.Success<ImmutableArray<ulong>>([]);
 
-        Result<AssetDependencies> kept = await ReadKeptAsync(assets, file, cancel).ConfigureAwait(false);
-        if (kept.Ok)
+        // What it came to depend on when it was last imported, while its file is the same.
+        Result<byte[]> unchanged = await assets.Files.ReadBytesAsync(file.File, cancel).ConfigureAwait(false);
+        if (unchanged.Ok)
         {
-            assets.SetDependencies(id, kept.Value.Ids);
+            ulong version = AssetIndex.ComputeVersion(unchanged.Value, file.Settings);
+            Result<AssetDependencies> kept = await assets
+                .Caches.ReadAsync(id, version, AssetDependencyCache.Instance, cancel)
+                .ConfigureAwait(false);
+            if (kept.Ok)
+            {
+                assets.SetDependencies(id, kept.Value.Ids);
 
-            return Result.Success(kept.Value.Ids);
+                return Result.Success(kept.Value.Ids);
+            }
         }
 
         Made made = await assets.RequestAsync(id, 0, type.Type, type.Import, null, cancel).ConfigureAwait(false);
 
         return made.Value.Ok ? Result.Success(made.Handles) : Result.Failure(made.Value.Error);
-    }
-
-    /// <summary>
-    /// What <paramref name="file"/> came to depend on when it was last imported, while it is the same; why not otherwise.
-    /// </summary>
-    private static async Task<Result<AssetDependencies>> ReadKeptAsync(
-        AssetManager assets,
-        IndexedFile file,
-        CancellationToken cancel
-    )
-    {
-        Result<byte[]> bytes = await assets.Files.ReadBytesAsync(file.File, cancel).ConfigureAwait(false);
-        if (!bytes.Ok)
-            return Result.Failure(bytes.Error);
-
-        ulong version = AssetIndex.ComputeVersion(bytes.Value, file.Settings);
-
-        return await assets
-            .Caches.ReadAsync(file.Id, version, AssetDependencyCache.Instance, cancel)
-            .ConfigureAwait(false);
     }
 
     /// <summary>

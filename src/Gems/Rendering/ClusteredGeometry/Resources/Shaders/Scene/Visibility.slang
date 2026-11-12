@@ -1,5 +1,5 @@
-// What the cluster cull leaves for the draw and the resolve: the visible-cluster list, the draw arguments, the counts
-// buffer's words and the ids the visibility buffer holds (Burns and Hunt, "The Visibility Buffer", 2013), and the
+// What the cluster cull leaves for the draw and the resolve: the visible-cluster list, the counts buffer's word the
+// cluster budget reads and the ids the visibility buffer holds (Burns and Hunt, "The Visibility Buffer", 2013), and the
 // barycentrics of a pixel in its triangle with their screen derivatives (Schied and Dachsbacher, "Deferred Attribute
 // Interpolation for Memory-Efficient Deferred Shading", 2015), and the triangle a pixel shows, which the passes after
 // the draw read their surface from.
@@ -20,55 +20,34 @@ public struct VisibleCluster
     public uint cluster;
 }
 
-// One draw's arguments, as the GPU reads them: a cluster's triangles three vertices each, its visible row the first
-// instance. The draw is not indexed, so a vertex's id is its place in the cluster and names its triangle, which a
-// pixel shader cannot ask for on every GPU.
-public struct DrawArguments
-{
-    public uint vertexCount;
-    public uint instanceCount;
-    public uint firstVertex;
-    public uint firstInstance;
-}
-
-// The draw arguments' regions, each as many draws as the visible list has rows and counted at word region * 4 of the
-// counts buffer: the clusters the old depth pyramid shows, then those the retest finds the new one shows; the same two
-// of the clusters in the impostor handoff, which draw with the dither; the translucent clusters from both; and the
-// impostors of both, C#'s DrawRegion.
-public static const uint FadingRegion = 2u;
-public static const uint GlassRegion = 4u;
-public static const uint ImpostorRegion = 5u;
-
-// The counts buffer's other words, as byte offsets: the retest list's length, the visible list's, the rows of it the
-// frame's instances asked for, which the cluster budget reads next frame, and the first distance bin with no room
-// left: instances in it and past it draw as their impostors.
-public static const uint CountRetest = 28u;
-public static const uint CountVisibleList = 32u;
+// The counts buffer's word, as a byte offset, that holds the rows of the visible list the frame's instances asked
+// for, which the cluster budget reads next frame.
 public static const uint CountWantedRows = 36u;
-public static const uint CountFitBins = 40u;
-
-// The counts buffer's distance bins from DemandBinsOffset, a word each: the rows asked for by the instances whose
-// nearest point is that far from the camera, four bins to each doubling of the distance in metres.
-public static const uint DemandBinsOffset = 64u;
-public static const uint DemandBins = 64u;
-
-public uint GetDemandBin(float distance) { return min(uint(log2(max(distance, 1.0)) * 4.0), DemandBins - 1u); }
-
-// The retest arguments buffer: the groups of the retest dispatch, then 1 and 1.
-public static const uint RetestGroups = 0u;
-public static const uint RetestThreads = 64u;
-
-// The instance cull's groups go along x up to this many and then down y, as a GPU takes no more along one axis.
-public static const uint CullGroupsPerRow = 65535u;
 
 // A visibility id: the visible list's row and the triangle in it; 0 is no surface.
-public uint EncodeVisibilityId(uint visibleIndex, uint triangle) { return ((visibleIndex + 1u) << 7u) | (triangle & 127u); }
-
-public bool DecodeVisibilityId(uint id, out uint visibleIndex, out uint triangle)
+public uint EncodeVisibilityId(uint visibleIndex, uint triangle)
 {
-    triangle = id & 127u;
-    visibleIndex = (id >> 7u) - 1u;
-    return id != 0u;
+    return ((visibleIndex + 1u) * MaxClusterTriangles) | (triangle % MaxClusterTriangles);
+}
+
+// The instance, cluster and triangle a visibility id other than 0 names.
+public struct VisibleTriangle
+{
+    public GpuInstance instance;
+    public GpuCluster cluster;
+    public uint triangle;
+}
+
+public VisibleTriangle LoadVisibleTriangle(uint id)
+{
+    ClusterConstants clusters = GetClusters();
+    ArrayRef<VisibleCluster> visible = { clusters.visibleClusters };
+    VisibleCluster entry = visible[id / MaxClusterTriangles - 1u];
+    VisibleTriangle result;
+    result.instance = LoadInstance(GetModels().instances, entry.instance);
+    result.cluster = LoadCluster(clusters.clusters, entry.cluster);
+    result.triangle = id % MaxClusterTriangles;
+    return result;
 }
 
 // A pixel's barycentrics in its triangle, perspective-correct, and how they change over a pixel across and down.
@@ -132,26 +111,23 @@ public struct PixelTriangle
     public Barycentrics bary;
 }
 
-// The triangle a decoded visibility id names, with the barycentrics of the pixel at pixelNdc, clip-space xy in
-// [-1, 1] with y up.
-public PixelTriangle LoadPixelTriangle(FrameConstants frame, uint visibleIndex, uint triangle, float2 pixelNdc)
+// The visible triangle's vertices and the barycentrics of the pixel at pixelNdc, clip-space xy in [-1, 1] with y up.
+public PixelTriangle LoadPixelTriangle(FrameConstants frame, VisibleTriangle visible, float2 pixelNdc)
 {
     Models models = GetModels();
     ClusterConstants clusters = GetClusters();
-    ArrayRef<VisibleCluster> visible = { clusters.visibleClusters };
-    VisibleCluster entry = visible[visibleIndex];
     PixelTriangle result;
-    result.instance = LoadInstance(models.instances, entry.instance);
-    result.cluster = LoadCluster(clusters.clusters, entry.cluster);
+    result.instance = visible.instance;
+    result.cluster = visible.cluster;
 
-    uint first = result.cluster.indexOffset + triangle * 3u;
+    uint first = result.cluster.indexOffset + visible.triangle * 3u;
     uint vertices = GetVertexPool(result.cluster, clusters, models.vertices);
     result.v0 = LoadVertex(vertices, LoadIndex(clusters.indices, first));
     result.v1 = LoadVertex(vertices, LoadIndex(clusters.indices, first + 1u));
     result.v2 = LoadVertex(vertices, LoadIndex(clusters.indices, first + 2u));
-    result.p0 = Relative(frame, ToWorld(result.instance.world, result.v0.position));
-    result.p1 = Relative(frame, ToWorld(result.instance.world, result.v1.position));
-    result.p2 = Relative(frame, ToWorld(result.instance.world, result.v2.position));
+    result.p0 = ToCameraRelative(frame, ToWorld(result.instance.world, result.v0.position));
+    result.p1 = ToCameraRelative(frame, ToWorld(result.instance.world, result.v1.position));
+    result.p2 = ToCameraRelative(frame, ToWorld(result.instance.world, result.v2.position));
     result.bary = GetBarycentrics(
         mul(float4(result.p0, 1.0), frame.viewProjection),
         mul(float4(result.p1, 1.0), frame.viewProjection),

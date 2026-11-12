@@ -1,14 +1,19 @@
 namespace Magic.Platform;
 
 /// <summary>
-/// The OS's events, as a platform gem takes them: the platform thread pumps them again and again for the whole run,
-/// apart from the frames, so the window answers the OS whatever the game is doing. The gem hands the game thread what
-/// they make as data.
+/// Takes the OS events for a platform gem.
 /// </summary>
+/// <remarks>
+/// The platform thread pumps the events again and again for the whole run, apart from the frames. Thus the window
+/// answers the OS whatever the game does. The gem gives the result to the game thread as data.
+/// </remarks>
 public interface IPlatform
 {
     /// <summary>
-    /// Takes the OS's events since the last pump, waiting a little for one when there are none. Platform thread.
+    /// Takes the OS events since the last pump, and waits a short time for one if there are none.
     /// </summary>
+    /// <remarks>
+    /// Call it only on the platform thread.
+    /// </remarks>
     void Pump();
 }

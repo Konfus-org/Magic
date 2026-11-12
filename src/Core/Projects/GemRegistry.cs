@@ -17,19 +17,43 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Magic.Projects;
 
 /// <summary>
-/// The gems a project lists, found and registered with the services as their class and every interface they provide,
-/// but not yet made. A gem that can't be found or registered is logged, and the others go on without it.
+/// The gems a project lists, found and registered with the services as their class, their parts and every interface
+/// their parts provide, but not yet made. A gem that can't be found or registered is logged, and the others go on
+/// without it.
 /// </summary>
 internal static class GemRegistry
 {
     /// <summary>
+    /// What the host takes itself and so no gem provides: any number of gems can be sinks or hook into domain loading,
+    /// and the assets say which gem reads or writes a type. A generic contract is held by its definition.
+    /// </summary>
+    private static readonly HashSet<Type> _hostContracts =
+    [
+        typeof(IGem),
+        typeof(IDisposable),
+        typeof(ILogSink),
+        typeof(IHookIntoDomainLoading),
+        typeof(IRender),
+        typeof(IAssetImporter<>),
+        typeof(IAssetExporter<>),
+        typeof(ISettings),
+        typeof(IRender<,>),
+        typeof(IRenderFrom<>),
+        typeof(IRenderInto<>),
+    ];
+
+    /// <summary>
     /// Finds the gems <paramref name="listed"/> beside Magic and registers each with <paramref name="services"/>, which
-    /// already holds what the host provides: the gems to make, each after the gems its code references and its
-    /// constructor takes. A name listed twice, the wrong version, a referenced gem not listed, an interface already
+    /// already holds what the host provides: the gems to make, each after the gems its code references and whose parts
+    /// its constructor takes. A name listed twice, the wrong version, a referenced gem not listed, an interface already
     /// provided or a cycle is refused. Each gem is made by the provider
     /// built from <paramref name="services"/>, once: asked for again after it failed, it throws.
     /// </summary>
-    public static List<GemInfo> Register(IFileSystem files, ImmutableArray<string> listed, ServiceCollection services)
+    public static List<RegisteredGem> Register(
+        IFileSystem files,
+        ImmutableArray<string> listed,
+        ServiceCollection services
+    )
     {
         if (listed.Any())
             Log.Info($"Loading {string.Join(", ", listed)}.");
@@ -61,32 +85,27 @@ internal static class GemRegistry
             named.Add((name, at < 0 ? string.Empty : listing[(at + 1)..]));
         }
 
-        // Load each and look at what it holds.
-        List<GemInfo> found = [];
+        // Load each, look at what it holds, and register it with the services as its class, its parts and every
+        // interface they provide.
+        List<RegisteredGem> registered = [];
+        Dictionary<Type, RegisteredGem> providers = [];
         foreach ((string name, string wanted) in named)
         {
-            Result<GemInfo> gem = Find(files, name, contexts);
-            if (!gem.Ok)
+            Result<RegisteredGem> found = Find(files, name, contexts);
+            if (!found.Ok)
             {
-                Log.Error(gem.Error);
+                Log.Error(found.Error);
                 continue;
             }
 
-            if (wanted.Length > 0 && !IsVersion(gem.Value.Version, wanted))
+            RegisteredGem gem = found.Value;
+            if (wanted.Length > 0 && !IsVersion(gem.Version, wanted))
             {
-                Log.Error($"Gem {name} is {gem.Value.Version.ToString(3)}, but the project asks for {wanted}.");
+                Log.Error($"Gem {name} is {gem.Version.ToString(3)}, but the project asks for {wanted}.");
                 continue;
             }
 
-            found.Add(gem.Value);
-        }
-
-        // Register each with the services as its class and every interface it provides.
-        List<GemInfo> registered = [];
-        Dictionary<Type, GemInfo> providers = [];
-        foreach (GemInfo gem in found)
-        {
-            if (FindClash(services, gem) is { } clash)
+            if (FindClash(services, providers, gem) is { } clash)
             {
                 Log.Error(clash);
                 continue;
@@ -105,15 +124,32 @@ internal static class GemRegistry
                     return ActivatorUtilities.CreateInstance(provider, gem.Type);
                 }
             );
-            providers[gem.Type] = gem;
 
-            // A gem's settings are what was set before over their defaults, for its constructor.
-            if (Settings.GetSettingsContract(gem.Type)?.GetGenericArguments()[0] is { } settings)
-                services.AddTransient(settings, provider => provider.GetRequiredService<Settings>().Get(settings));
+            // Each part is the value of its property on the made gem, but settings, which the gem is made with: what
+            // was set before over their defaults.
+            foreach (PropertyInfo part in gem.Parts)
+            {
+                Type type = part.PropertyType;
+                providers[type] = gem;
+                if (type.IsAssignableTo(typeof(ISettings)))
+                {
+                    services.AddTransient(type, provider => provider.GetRequiredService<Settings>().Get(type));
+                    continue;
+                }
 
+                services.AddSingleton(
+                    type,
+                    provider =>
+                        part.GetValue(provider.GetRequiredService(gem.Type))
+                        ?? throw new InvalidOperationException($"{gem.Name}'s {part.Name} is null.")
+                );
+            }
+
+            // Each interface is the part that implements it.
             foreach (Type contract in gem.Provides)
             {
-                services.AddSingleton(contract, provider => provider.GetRequiredService(gem.Type));
+                Type type = gem.PartTypes.First(part => part.IsAssignableTo(contract));
+                services.AddSingleton(contract, provider => provider.GetRequiredService(type));
                 providers[contract] = gem;
             }
 
@@ -121,25 +157,28 @@ internal static class GemRegistry
         }
 
         // A gem that takes the world needs what the world is made from.
-        if (providers.TryGetValue(typeof(IEcs), out GemInfo? ecs))
+        if (providers.TryGetValue(typeof(IEcs), out RegisteredGem? ecs))
             providers[typeof(World)] = ecs;
 
-        // Sort each after the gems it needs: those its code references, and those its constructor takes, by their class or
-        // an interface they provide. A gem in a cycle, or one that needs it, is logged and left out, since the provider
-        // hangs making a cycle.
-        Dictionary<string, GemInfo> byName = registered.ToDictionary(gem => gem.Name, StringComparer.OrdinalIgnoreCase);
-        List<GemInfo> sorted = [];
-        HashSet<GemInfo> placed = [];
-        HashSet<GemInfo> refused = [];
-        HashSet<GemInfo> visiting = [];
-        foreach (GemInfo gem in registered)
+        // Sort each after the gems it needs: those its code references, and those whose part its constructor takes, by
+        // the part's class or an interface it provides. A gem in a cycle, or one that needs it, is logged and left out,
+        // since the provider hangs making a cycle.
+        Dictionary<string, RegisteredGem> byName = registered.ToDictionary(
+            gem => gem.Name,
+            StringComparer.OrdinalIgnoreCase
+        );
+        List<RegisteredGem> sorted = [];
+        HashSet<RegisteredGem> placed = [];
+        HashSet<RegisteredGem> refused = [];
+        HashSet<RegisteredGem> visiting = [];
+        foreach (RegisteredGem gem in registered)
         {
             Place(gem);
         }
 
         return sorted;
 
-        bool Place(GemInfo gem)
+        bool Place(RegisteredGem gem)
         {
             if (placed.Contains(gem))
                 return true;
@@ -151,13 +190,13 @@ internal static class GemRegistry
             List<string> needs = [.. gem.References];
             foreach (ParameterInfo parameter in gem.Type.GetConstructors()[0].GetParameters())
             {
-                if (providers.TryGetValue(parameter.ParameterType, out GemInfo? provider))
+                if (providers.TryGetValue(parameter.ParameterType, out RegisteredGem? provider))
                     needs.Add(provider.Name);
             }
 
             foreach (string name in needs)
             {
-                GemInfo? need = byName.GetValueOrDefault(name);
+                RegisteredGem? need = byName.GetValueOrDefault(name);
                 if (need == gem || (need is not null && Place(need)))
                     continue;
 
@@ -183,16 +222,36 @@ internal static class GemRegistry
         files.Combine(AppContext.BaseDirectory, "Gems", name, name + ".dll");
 
     /// <summary>
-    /// The listed gem <paramref name="name"/>, loaded into its context of <paramref name="contexts"/>, or why it can't be
-    /// made: it must hold one <see cref="IGem"/> class with one public constructor, and the project must list every gem
-    /// it references.
+    /// The name of the gem that declares <paramref name="type"/>, which is its assembly's name; the type's own name when
+    /// the assembly has none.
     /// </summary>
-    private static Result<GemInfo> Find(IFileSystem files, string name, Dictionary<string, GemLoadContext> contexts)
+    internal static string GetGemName(Type type) => type.Assembly.GetName().Name ?? type.Name;
+
+    /// <summary>
+    /// The listed gem <paramref name="name"/>, loaded into its context of <paramref name="contexts"/>, or why it can't
+    /// be made: it must hold one <see cref="IGem"/> class with one public constructor, and the project must list every
+    /// gem it references. The class's public instance properties are the gem's parts, and what they implement is what
+    /// the gem provides; the class itself provides nothing.
+    /// </summary>
+    private static Result<RegisteredGem> Find(
+        IFileSystem files,
+        string name,
+        Dictionary<string, GemLoadContext> contexts
+    )
     {
         string path = GetPath(files, name);
-        Result<Assembly> loaded = LoadAssembly(contexts[name], path, name);
+        Result<Assembly> loaded;
+        try
+        {
+            loaded = contexts[name].LoadGem();
+        }
+        catch (Exception ex) when (ex is BadImageFormatException or FileLoadException or IOException)
+        {
+            loaded = Result.Failure(ex.Message);
+        }
+
         if (!loaded.Ok)
-            return Result.Failure(loaded.Error);
+            return Result.Failure($"Gem {name} could not be loaded from {path}: {loaded.Error}");
 
         // An assembly it references named like a listed gem is that gem; one named like a gem beside Magic that it doesn't
         // carry in its folder is a gem the project must list.
@@ -228,21 +287,11 @@ internal static class GemRegistry
         if (constructors != 1)
             return Result.Failure($"Gem {name}: {gem.Name} must have one public constructor; it has {constructors}.");
 
-        // What the host takes itself isn't provided, so any number of gems can be sinks or hook into domain loading, and
-        // the assets say which gem reads or writes a type.
+        List<PropertyInfo> parts = [.. gem.GetProperties(BindingFlags.Public | BindingFlags.Instance)];
         List<Type> provides = [];
-        foreach (Type contract in gem.GetInterfaces())
+        foreach (Type contract in parts.SelectMany(part => part.PropertyType.GetInterfaces()))
         {
-            if (contract.IsGenericType && IsHostContract(contract.GetGenericTypeDefinition()))
-                continue;
-
-            bool isHostTaken =
-                contract == typeof(IGem)
-                || contract == typeof(IDisposable)
-                || contract == typeof(ILogSink)
-                || contract == typeof(IHookIntoDomainLoading)
-                || contract == typeof(IRender);
-            if (!isHostTaken)
+            if (!_hostContracts.Contains(contract.IsGenericType ? contract.GetGenericTypeDefinition() : contract))
                 provides.Add(contract);
         }
 
@@ -254,12 +303,13 @@ internal static class GemRegistry
         bool hasResources = files.DirectoryExists(resources);
 
         return Result.Success(
-            new GemInfo(
+            new RegisteredGem(
                 name,
                 author,
                 description,
                 version,
                 gem,
+                parts,
                 provides,
                 references,
                 hasResources ? resources : null,
@@ -267,34 +317,6 @@ internal static class GemRegistry
                 contexts[name]
             )
         );
-    }
-
-    /// <summary>
-    /// Whether a gem implementing <paramref name="contract"/> hands it to the host, rather than provide it to other gems.
-    /// </summary>
-    private static bool IsHostContract(Type contract) =>
-        contract == typeof(IAssetImporter<>)
-        || contract == typeof(IHasSettings<>)
-        || contract == typeof(IAssetExporter<>)
-        || contract == typeof(IRender<,>)
-        || contract == typeof(IRenderFrom<>)
-        || contract == typeof(IRenderInto<>);
-
-    /// <summary>
-    /// The assembly at <paramref name="path"/>, loaded from its file into <paramref name="context"/>.
-    /// </summary>
-    private static Result<Assembly> LoadAssembly(GemLoadContext context, string path, string name)
-    {
-        try
-        {
-            Result<Assembly> loaded = context.LoadGem();
-
-            return loaded.Ok ? loaded : Result.Failure($"Gem {name} could not be loaded from {path}: {loaded.Error}");
-        }
-        catch (Exception ex) when (ex is BadImageFormatException or FileLoadException or IOException)
-        {
-            return Result.Failure($"Gem {name} could not be loaded from {path}: {ex.Message}");
-        }
     }
 
     /// <summary>
@@ -319,10 +341,14 @@ internal static class GemRegistry
     }
 
     /// <summary>
-    /// Why <paramref name="gem"/> is refused when <paramref name="services"/> already provides an interface it does;
-    /// null when none.
+    /// Why <paramref name="gem"/> is refused when <paramref name="services"/> already provides an interface it does,
+    /// named by the gem of <paramref name="providers"/> whose part it is, or by the host's class; null when none.
     /// </summary>
-    private static string? FindClash(ServiceCollection services, GemInfo gem)
+    private static string? FindClash(
+        ServiceCollection services,
+        Dictionary<Type, RegisteredGem> providers,
+        RegisteredGem gem
+    )
     {
         foreach (Type contract in gem.Provides)
         {
@@ -332,10 +358,15 @@ internal static class GemRegistry
                 if (service.ImplementationInstance is World)
                     continue;
 
-                // A gem is registered as its class before its interfaces, so the class is what is found.
+                // A part is registered as its class before its interfaces, so the class is what is found.
                 Type provider = service.ImplementationInstance?.GetType() ?? service.ServiceType;
-                if (provider.IsAssignableTo(contract))
-                    return $"Gem {gem.Name} provides {GetName(contract)}, which {provider.Name} already provides.";
+                if (!provider.IsAssignableTo(contract))
+                    continue;
+
+                string owner = providers.TryGetValue(provider, out RegisteredGem? other)
+                    ? $"gem {other.Name}"
+                    : provider.Name;
+                return $"Gem {gem.Name} provides {GetName(contract)}, which {owner} already provides.";
             }
         }
 

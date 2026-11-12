@@ -3,7 +3,8 @@
 // them in turn while they fit in a budget for all of them; each ray is traced into the world and lit where it lands by
 // one light picked at random and by the probes themselves, and each probe given rays blends them into its light's
 // harmonics and its map of distances, moving away from a surface it is near. The pass header's x is the frame's
-// buffer, which holds the lights and IndirectLight, which holds the grid.
+// buffer, which holds the lights and IndirectLight, which holds the grid; its y is the GI buffer, which holds the
+// update's own buffers.
 module "UpdateProbes";
 
 import Core.Heap;
@@ -15,9 +16,9 @@ import Core.Sampling;
 import Scene.Lights;
 import Light.Probes;
 import Light.Indirect;
+import Traced;
 import Sky.ISky;
 import Trace.HitSurface;
-import Trace.HitLight;
 import Scene.Models;
 
 // The rays the trace runs a group of.
@@ -25,6 +26,32 @@ static const uint TraceGroupSize = 64u;
 
 // The rays all the probes trace in a frame, C#'s Probes.RayBudget: at least the most one probe traces.
 static const uint ProbeRayBudget = 131072u;
+
+// The most rays a probe traces in a frame, and the step its count of rays moves in, also the fewest it asks for.
+static const uint MaxProbeRays = 256u;
+static const uint ProbeRayStep = 4u;
+
+// The directions a probe blends its light in, a side of its octahedral map, C#'s Probes.IrradianceTexels.
+static const uint IrradianceTexels = 8u;
+
+// How far a probe moves from a surface it is near, as a part of its depth's reach.
+static const float KeepDistance = 0.1;
+
+// The ray counts buffer's words: the rays the probes were given this frame in all at 0, then each probe's count, none
+// while it waits its turn, and where its rays start among the frame's.
+uint GetProbeRayCountOffset(uint probe) { return 4u + probe * 8u; }
+uint GetProbeRayStartOffset(uint probe) { return 8u + probe * 8u; }
+
+// The harmonics of a value seen along a unit direction.
+ProbeSh ProjectOntoSh(float3 direction, float3 value)
+{
+    ProbeSh sh;
+    sh.c[0] = ShBasis0 * value;
+    sh.c[1] = ShBasis1 * direction.y * value;
+    sh.c[2] = ShBasis1 * direction.z * value;
+    sh.c[3] = ShBasis1 * direction.x * value;
+    return sh;
+}
 
 static const uint IrradianceTexelCount = IrradianceTexels * IrradianceTexels;
 static const uint DepthTexelCount = DepthTexels * DepthTexels;
@@ -135,12 +162,13 @@ void AskProbeRays(uint3 group : SV_GroupID, uint index : SV_GroupIndex)
 {
     FrameConstants frame = GetFrame();
     ProbeGridConstants grid = GetProbeGrid();
+    ProbeUpdateConstants update = GetGIConstants().probes;
     uint probe = group.x;
     if (index == 0u)
         groupInconsistency = 0u;
 
     GroupMemoryBarrierWithGroupSync();
-    ArrayRef<uint4> variance = { grid.variance };
+    ArrayRef<uint4> variance = { update.variance };
     float inconsistency = 0.0;
     for (uint texel = index; texel < IrradianceTexelCount; texel += 32u)
     {
@@ -155,7 +183,7 @@ void AskProbeRays(uint3 group : SV_GroupID, uint index : SV_GroupIndex)
 
     uint rayCount = uint(saturate(asfloat(groupInconsistency)) * float(MaxProbeRays));
     GpuProbe loaded = LoadProbe(grid, probe);
-    float3 position = Relative(frame, GetProbePosition(grid, GetProbeCoord(grid, probe), loaded));
+    float3 position = ToCameraRelative(frame, GetProbePosition(grid, GetProbeCoord(grid, probe), loaded));
     if (!IsSphereInFrustum(frame, position, Max3(grid.cellSize) * 2.0))
         rayCount /= 10u;
 
@@ -163,7 +191,7 @@ void AskProbeRays(uint3 group : SV_GroupID, uint index : SV_GroupIndex)
     if (!HasBlended(loaded))
         rayCount = MaxProbeRays;
 
-    BufferRef counts = { grid.rayCounts };
+    BufferRef counts = { update.rayCounts };
     counts.Store(GetProbeRayCountOffset(probe), rayCount);
 }
 
@@ -182,8 +210,9 @@ groupshared uint groupTraced;
 void PlanProbeRays(uint index : SV_GroupIndex)
 {
     ProbeGridConstants grid = GetProbeGrid();
-    BufferRef counts = { grid.rayCounts };
-    BufferRef arguments = { grid.rayArguments };
+    ProbeUpdateConstants update = GetGIConstants().probes;
+    BufferRef counts = { update.rayCounts };
+    BufferRef arguments = { update.rayArguments };
     uint probeCount = grid.dimensions.x * grid.dimensions.y * grid.dimensions.z;
     uint cursor = arguments.Load<uint>(12u) % probeCount;
     uint perThread = (probeCount + PlanGroupSize - 1u) / PlanGroupSize;
@@ -246,12 +275,12 @@ void PlanProbeRays(uint index : SV_GroupIndex)
 [numthreads(32, 1, 1)]
 void ListProbeRays(uint3 group : SV_GroupID, uint index : SV_GroupIndex)
 {
-    ProbeGridConstants grid = GetProbeGrid();
+    ProbeUpdateConstants update = GetGIConstants().probes;
     uint probe = group.x;
-    BufferRef counts = { grid.rayCounts };
+    BufferRef counts = { update.rayCounts };
     uint rayCount = counts.Load<uint>(GetProbeRayCountOffset(probe));
     uint start = counts.Load<uint>(GetProbeRayStartOffset(probe));
-    ArrayRef<uint> list = { grid.rayList };
+    ArrayRef<uint> list = { update.rayList };
     for (uint ray = index; ray < rayCount; ray += 32u)
     {
         list[start + ray] = probe | (ray << 20u);
@@ -273,8 +302,7 @@ float3 GetFibonacciDirection(uint i, uint n)
 float3x3 GetRandomRotation(uint frameIndex)
 {
     float3 xi = GetRandom(uint2(0u), frameIndex, 0u);
-    float pdf;
-    float3 axis = SampleUniformSphere(xi.xy, pdf);
+    float3 axis = SampleUniformSphere(xi.xy);
     float angle = TwoPi * xi.z;
     float s = sin(angle);
     float c = cos(angle);
@@ -295,11 +323,12 @@ void TraceProbes<S : ISky>(uint3 thread : SV_DispatchThreadID)
     FrameConstants frame = GetFrame();
     Lights lights = GetLights();
     ProbeGridConstants grid = GetProbeGrid();
-    BufferRef counts = { grid.rayCounts };
+    ProbeUpdateConstants update = GetGIConstants().probes;
+    BufferRef counts = { update.rayCounts };
     if (thread.x >= counts.Load<uint>(0u))
         return;
 
-    ArrayRef<uint> list = { grid.rayList };
+    ArrayRef<uint> list = { update.rayList };
     uint entry = list[thread.x];
     uint probe = entry & 0xFFFFFu;
     uint rayIndex = entry >> 20u;
@@ -329,7 +358,7 @@ void TraceProbes<S : ISky>(uint3 thread : SV_DispatchThreadID)
         ray.radiance = light * surface.diffuse + surface.emissive;
     }
 
-    ArrayRef<uint4> rays = { grid.rays };
+    ArrayRef<uint4> rays = { update.rays };
     rays[thread.x] = EncodeProbeRay(ray);
 }
 
@@ -343,16 +372,22 @@ groupshared float2 groupMoments[DepthTexelCount];
 // copies the mirrored texel of the row or column inside it, and a corner the opposite inner corner.
 uint4 GetDepthBorder(uint border)
 {
-    uint i = border % 16u;
-    switch (border / 16u)
+    // The last texel inside the tile, and the far border's.
+    uint inner = DepthTexels;
+    uint outer = DepthTile - 1u;
+    uint i = border % DepthTexels;
+    switch (border / DepthTexels)
     {
-    case 0u: return uint4(16u - i, 1u, 1u + i, 0u);
-    case 1u: return uint4(16u - i, 16u, 1u + i, 17u);
-    case 2u: return uint4(1u, 16u - i, 0u, 1u + i);
-    case 3u: return uint4(16u, 16u - i, 17u, 1u + i);
-    default: return uint4(16u - (i & 1u) * 15u, 16u - (i >> 1u) * 15u, (i & 1u) * 17u, (i >> 1u) * 17u);
+    case 0u: return uint4(inner - i, 1u, 1u + i, 0u);
+    case 1u: return uint4(inner - i, inner, 1u + i, outer);
+    case 2u: return uint4(1u, inner - i, 0u, 1u + i);
+    case 3u: return uint4(inner, inner - i, outer, 1u + i);
+    default: return uint4(inner - (i & 1u) * (inner - 1u), inner - (i >> 1u) * (inner - 1u), (i & 1u) * outer, (i >> 1u) * outer);
     }
 }
+
+// The texels of a tile's border: four sides and four corners.
+static const uint DepthBorderTexels = 4u * DepthTexels + 4u;
 
 // A group a probe, a thread a ray and a direction of its 16 by 16 map of distances, the first 64 threads also one of
 // its 8 by 8 map of light. The light: the probe's rays weighted by how near each is to the direction, followed by the
@@ -364,9 +399,10 @@ uint4 GetDepthBorder(uint border)
 void BlendProbes(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID, uint index : SV_GroupIndex)
 {
     ProbeGridConstants grid = GetProbeGrid();
+    ProbeUpdateConstants update = GetGIConstants().probes;
     uint probe = group.x;
-    BufferRef counts = { grid.rayCounts };
-    ArrayRef<uint4> rays = { grid.rays };
+    BufferRef counts = { update.rayCounts };
+    ArrayRef<uint4> rays = { update.rays };
     uint rayCount = min(counts.Load<uint>(GetProbeRayCountOffset(probe)), MaxProbeRays);
     if (rayCount == 0u)
         return;
@@ -402,7 +438,7 @@ void BlendProbes(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID, uint 
         if (totalWeight > WeightEpsilon)
             sum /= totalWeight;
 
-        ArrayRef<uint4> variance = { grid.variance };
+        ArrayRef<uint4> variance = { update.variance };
         uint texel = probe * IrradianceTexelCount + index;
         ProbeVariance data = DecodeProbeVariance(variance[texel]);
         if (!hasBlended)
@@ -420,7 +456,7 @@ void BlendProbes(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID, uint 
     }
 
     // The distances of every thread's direction, and the push away from what is too near.
-    float maxDistance = grid.maxDistance;
+    float maxDistance = update.maxDistance;
     float keep = maxDistance * KeepDistance;
     float3 texelDirection = DecodeUnitVectorUnorm((float2(local.xy) + 0.5) / float(DepthTexels));
     float2 moments = float2(0.0);
@@ -452,7 +488,7 @@ void BlendProbes(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID, uint 
     groupMoments[index] = moments;
     depthTarget.Store(corner + 1u + local.xy, float4(moments, 0.0, 0.0));
     GroupMemoryBarrierWithGroupSync();
-    if (index < 68u)
+    if (index < DepthBorderTexels)
     {
         uint4 border = GetDepthBorder(index);
         uint2 from = border.xy - 1u;

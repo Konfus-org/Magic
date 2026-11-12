@@ -192,14 +192,13 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
         device.Api.vkGetSwapchainImagesKHR(_swapchain, images);
         _textures = new GpuTexture[imageCount];
         _rendered = new VkSemaphore[imageCount];
-        TextureDescription description = new()
-        {
-            Width = (int)width,
-            Height = (int)height,
-            Format = format.format.ToGpu(),
-            Usage = TextureUsages.ColorTarget | TextureUsages.CopyDestination | TextureUsages.CopySource,
-            Name = "Window",
-        };
+        TextureDescription description = new(
+            "Window",
+            (int)width,
+            (int)height,
+            format.format.ToGpu(),
+            TextureUsages.ColorTarget | TextureUsages.CopyDestination | TextureUsages.CopySource
+        );
         for (int i = 0; i < imageCount; i++)
         {
             Result<GpuTexture> texture = resources.AddWindowTexture(images[i], description);

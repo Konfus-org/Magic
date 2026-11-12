@@ -216,9 +216,7 @@ public sealed class AssetManager : IDisposable
     /// </summary>
     public ImmutableArray<string> GetNeighbors(AssetFile file)
     {
-        string path = file.Path;
-        int slash = path.LastIndexOf('/');
-        string folder = slash < 0 ? string.Empty : path[..slash];
+        string folder = AssetIndex.GetFolder(file.Path);
         lock (_gate)
         {
             LoadedAssets loaded = Loaded;
@@ -282,10 +280,7 @@ public sealed class AssetManager : IDisposable
     /// remembered until its file changes. <paramref name="cancel"/> only stops this caller's wait.
     /// </summary>
     public Task<Result<T>> LoadAsync<T>(Handle<T> asset, IProgress<LoadProgress>? progress, CancellationToken cancel)
-        where T : IAsset<T> =>
-        asset == Handle<T>.None
-            ? Task.FromResult<Result<T>>(Result.Failure($"No {typeof(T).Name} was asked for: the handle is none."))
-            : LoadIdAsync<T>(asset.Id, 0, progress, cancel);
+        where T : IAsset<T> => LoadAsync(asset, 0, progress, cancel);
 
     /// <summary>
     /// <paramref name="asset"/>, loaded by an <see cref="IAssetImporter{T}"/> as it makes asset
@@ -294,16 +289,22 @@ public sealed class AssetManager : IDisposable
     /// <paramref name="asset"/> is <paramref name="dependent"/> or is made from it, as each would wait for the other for
     /// ever.
     /// </summary>
-    public Task<Result<T>> LoadAsync<T>(
+    public async Task<Result<T>> LoadAsync<T>(
         Handle<T> asset,
         ulong dependent,
         IProgress<LoadProgress>? progress,
         CancellationToken cancel
     )
-        where T : IAsset<T> =>
-        asset == Handle<T>.None
-            ? LoadAsync(asset, progress, cancel)
-            : LoadIdAsync<T>(asset.Id, dependent, progress, cancel);
+        where T : IAsset<T>
+    {
+        if (asset == Handle<T>.None)
+            return Result.Failure($"No {typeof(T).Name} was asked for: the handle is none.");
+
+        Made made = await RequestAsync(asset.Id, dependent, typeof(T), RunImportAsync<T>, progress, cancel)
+            .ConfigureAwait(false);
+
+        return made.Value.Ok ? Result.Success((T)made.Value.Value) : Result.Failure(made.Value.Error);
+    }
 
     /// <summary>
     /// The ids of what <paramref name="asset"/> depends on, as its file and theirs name them, down to
@@ -515,11 +516,8 @@ public sealed class AssetManager : IDisposable
         if (!Files.DirectoryExists(directory))
             return;
 
-        foreach (string added in Database.Directories)
-        {
-            if (string.Equals(added, directory, StringComparison.OrdinalIgnoreCase))
-                return;
-        }
+        if (Database.Directories.Contains(directory, StringComparer.OrdinalIgnoreCase))
+            return;
 
         // Watched before it is read, so nothing written meanwhile is missed.
         _watches.Add(directory);
@@ -547,7 +545,7 @@ public sealed class AssetManager : IDisposable
 
     /// <summary>
     /// Adds the asset types <paramref name="assembly"/> declares, Magic's or a gem's, so a <c>.meta</c> can name them and the
-    /// assets can be crawled without knowing them. A name another type has already stays that one's, and is an error. Main
+    /// assets can be crawled without knowing them. A name another type has already stays that one's, and is an error. Game
     /// thread.
     /// </summary>
     internal void Register(Assembly assembly)
@@ -590,15 +588,15 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Has a load of an asset type one of <paramref name="gems"/> reads, as its <see cref="IAssetImporter{T}"/>s say,
-    /// wait for that gem until it registers (<see cref="Register(object)"/>) or is not made (<see cref="Drop"/>), as a
-    /// gem made before it may load one. Game thread.
+    /// Has a load of an asset type one of <paramref name="parts"/>, the types of the gems' parts, reads, as its
+    /// <see cref="IAssetImporter{T}"/>s say, wait for that part until it registers (<see cref="Register(object)"/>) or
+    /// its gem stops the wait (<see cref="Drop"/>), as a gem made before it may load one. Game thread.
     /// </summary>
-    internal void Expect(IEnumerable<Type> gems)
+    internal void Expect(IEnumerable<Type> parts)
     {
         List<KeyValuePair<Type, ImmutableArray<Type>>> expected =
         [
-            .. gems.Select(gem => KeyValuePair.Create(gem, GetAssetTypes(gem, typeof(IAssetImporter<>)))),
+            .. parts.Select(part => KeyValuePair.Create(part, GetAssetTypes(part, typeof(IAssetImporter<>)))),
         ];
         lock (_gate)
         {
@@ -607,42 +605,42 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Stops waiting for <paramref name="gem"/>, which was not made: what was asked for as a type only it would read is
-    /// read now, and fails as a type no gem reads. Game thread.
+    /// Stops waiting for <paramref name="parts"/>, as their gem is made and its parts registered, or was not made: what
+    /// was asked for as a type only they would read and no part registered reads is read now, and fails as a type no gem
+    /// reads. Game thread.
     /// </summary>
-    internal void Drop(Type gem)
+    internal void Drop(IEnumerable<Type> parts)
     {
         lock (_gate)
         {
-            Loaded = StartWanted(Database, Loaded with { Expected = Loaded.Expected.Remove(gem) });
+            Loaded = StartWanted(Database, Loaded with { Expected = Loaded.Expected.RemoveRange(parts) });
         }
     }
 
     /// <summary>
-    /// Has <paramref name="gem"/> read each asset type it implements an <see cref="IAssetImporter{T}"/> of, and write each
-    /// it implements an <see cref="IAssetExporter{T}"/> of, until the subscription is disposed, as the gem ends. A type
-    /// another gem reads or writes already stays that one's, and is an error. What was asked for as a type it reads
-    /// before anything read it starts now.
+    /// Has <paramref name="part"/>, a gem's part, read each asset type it implements an <see cref="IAssetImporter{T}"/>
+    /// of, and write each it implements an <see cref="IAssetExporter{T}"/> of, until the subscription is disposed, as
+    /// the gem ends. A type another part reads or writes already stays that one's, and is an error. What was asked for
+    /// as a type it reads before anything read it starts now.
     /// </summary>
-    internal Subscription Register(object gem)
+    internal Subscription Register(object part)
     {
-        ImmutableArray<Type> reads = GetAssetTypes(gem.GetType(), typeof(IAssetImporter<>));
-        ImmutableArray<Type> writes = GetAssetTypes(gem.GetType(), typeof(IAssetExporter<>));
+        ImmutableArray<Type> reads = GetAssetTypes(part.GetType(), typeof(IAssetImporter<>));
+        ImmutableArray<Type> writes = GetAssetTypes(part.GetType(), typeof(IAssetExporter<>));
         LoadedAssets claimed;
         lock (_gate)
         {
             LoadedAssets loaded = Loaded;
             claimed = loaded with
             {
-                Importers = Claim(loaded.Importers, reads, gem),
-                Exporters = Claim(loaded.Exporters, writes, gem),
-                Expected = loaded.Expected.Remove(gem.GetType()),
+                Importers = Claim(loaded.Importers, reads, part),
+                Exporters = Claim(loaded.Exporters, writes, part),
             };
             Loaded = StartWanted(Database, claimed);
         }
 
-        LogClaimedByOthers(claimed.Importers, reads, gem, "reads");
-        LogClaimedByOthers(claimed.Exporters, writes, gem, "writes");
+        LogClaimedByOthers(claimed.Importers, reads, part, "reads");
+        LogClaimedByOthers(claimed.Exporters, writes, part, "writes");
 
         return new Subscription(() =>
         {
@@ -651,8 +649,8 @@ public sealed class AssetManager : IDisposable
                 LoadedAssets loaded = Loaded;
                 Loaded = loaded with
                 {
-                    Importers = Release(loaded.Importers, reads, gem),
-                    Exporters = Release(loaded.Exporters, writes, gem),
+                    Importers = Release(loaded.Importers, reads, part),
+                    Exporters = Release(loaded.Exporters, writes, part),
                 };
             }
         });
@@ -811,12 +809,12 @@ public sealed class AssetManager : IDisposable
         {
             string extensions = string.Join(", ", reader.Extensions);
 
-            return new Made(Result.Failure($"{notAsset}a {typeof(T).Name}'s file ends in {extensions}."), 0);
+            return Fail($"{notAsset}a {typeof(T).Name}'s file ends in {extensions}.");
         }
 
         Result<byte[]> bytes = await Files.ReadBytesAsync(file.File, cancel).ConfigureAwait(false);
         if (!bytes.Ok)
-            return new Made(Result.Failure($"{file.Path} could not be read: {bytes.Error}"), 0);
+            return Fail($"{file.Path} could not be read: {bytes.Error}");
 
         ulong version = AssetIndex.ComputeVersion(bytes.Value, file.Settings);
         Result<AssetMetadata> metadata = ReadSettings<T>(file.Settings);
@@ -1069,7 +1067,7 @@ public sealed class AssetManager : IDisposable
             if (!ReferenceEquals(other, gem))
             {
                 Log.Error(
-                    $"{gem.GetType().Name} {verb} {type.Name}s, which {other.GetType().Name} {verb} already, so it "
+                    $"{GemRegistry.GetGemName(gem.GetType())} {verb} {type.Name}s, which {GemRegistry.GetGemName(other.GetType())} {verb} already, so it "
                         + "does not."
                 );
             }
@@ -1089,24 +1087,6 @@ public sealed class AssetManager : IDisposable
         }
 
         return new Made(Result.Success<object>(asset), version, AssetScan.FindHandles(asset));
-    }
-
-    /// <summary>
-    /// Asset <paramref name="id"/>, at once when it has loaded, else once it has been imported; asked for by asset
-    /// <paramref name="dependent"/>'s importer when that is not 0.
-    /// </summary>
-    private async Task<Result<T>> LoadIdAsync<T>(
-        ulong id,
-        ulong dependent,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    )
-        where T : IAsset<T>
-    {
-        Made made = await RequestAsync(id, dependent, typeof(T), RunImportAsync<T>, progress, cancel)
-            .ConfigureAwait(false);
-
-        return made.Value.Ok ? Result.Success((T)made.Value.Value) : Result.Failure(made.Value.Error);
     }
 
     /// <summary>
@@ -1343,7 +1323,7 @@ public sealed class AssetManager : IDisposable
             done = done with { Stage = AssetStage.Loaded, Waiting = [] };
             LoadedAssets loaded = Loaded with { Entries = Loaded.Entries.SetItem(id, done) };
             AssetDatabase database = Database;
-            if (made.Value.Ok && !made.Handles.IsDefault)
+            if (made.Value.Ok)
             {
                 dependencies = [.. made.Handles.Union(entry.MadeFrom)];
                 database = database.SetDependencies(id, dependencies);

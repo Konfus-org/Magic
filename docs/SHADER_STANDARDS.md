@@ -22,14 +22,14 @@ The rules for Slang shaders in Magic. [Code Standards](CODE_STANDARDS.md) covers
   reference as its handle (`GpuTexture`, `GpuSampler`). Nothing checks that the two match, so change them together.
 - A contract between shaders is an interface (`IMaterial`, `ISky`, `IPixelEffect`), and a pass that works with any is
   generic over it.
-- Totals across a dispatch run in its last group (`IsLastGroup`), not in a one-group pass after it.
+- Totals across a dispatch run in a one-thread pass after it (`FitClusters`).
 - Use wave intrinsics only where the result can't depend on wave size (32 or 64) or the order is already arbitrary. No
   16-bit types, and no runtime-indexed resource arrays but the heap's.
-- Guard values where they go wrong: clamp roughness with the library's helper, keep n·v above 0, normalise with the
+- Guard values where they go wrong: clamp roughness where the BRDF takes it, keep n·v above 0, normalise with the
   helper that allows zero, and use `SampleGrad` or `SampleLevel` inside a branch.
 - A compute pass has no implicit derivatives. Code it may run takes them as inputs, as `SurfaceInputs` and
   `SkyInputs` do.
 - Few variants: a generic for what changes the pipeline, a `[branch]` on a draw-wide value for the rest.
-- The BRDF, the material contract and the shading models live once in the shared shader library in
-  `src/Resources/Shaders/`. Every renderer shades with them. A renderer's own tables and techniques go in its gem.
+- The material contract and the shading models live once in the shared shader library in `src/Resources/Shaders/`.
+  Every renderer shades with them. A renderer's own tables and techniques, its BRDF included, go in its gem.
 - Write a technique from its paper and name the paper in a comment. No third-party shader code.

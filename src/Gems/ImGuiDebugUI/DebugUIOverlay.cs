@@ -21,7 +21,6 @@ namespace Magic.ImGuiDebugUI;
 /// </summary>
 internal sealed class DebugUIOverlay
 {
-    private const string ShaderPath = "Shaders/DrawDebugUI.slang";
     private const int MinBufferBytes = 16 * 1024;
 
     private readonly Mailbox<DebugUIFrame> _frames;
@@ -41,20 +40,9 @@ internal sealed class DebugUIOverlay
     {
         _frames = frames;
         _textureChanges = textureChanges;
-        Handle<Shader> shader = assets.Find<Shader>(ShaderPath);
         _shaders = new DrawShaders(
-            new ShaderEntry
-            {
-                Module = shader,
-                Name = "DrawDebugUIVertex",
-                Stage = ShaderStage.Vertex,
-            },
-            new ShaderEntry
-            {
-                Module = shader,
-                Name = "DrawDebugUIPixel",
-                Stage = ShaderStage.Pixel,
-            }
+            PassShaders.GetEntry(assets, "DrawDebugUI", "DrawDebugUIVertex", ShaderStage.Vertex),
+            PassShaders.GetEntry(assets, "DrawDebugUI", "DrawDebugUIPixel", ShaderStage.Pixel)
         )
         {
             Blend = BlendMode.Alpha,
@@ -87,22 +75,11 @@ internal sealed class DebugUIOverlay
         Result<GpuBuffer> indices = graph.Buffer(
             GetDescription("Debug UI indices", indexRows.Length * sizeof(uint), BufferUsages.Index)
         );
-        Result<GpuBuffer> constants = graph.Buffer(
-            new BufferDescription
-            {
-                Bytes = DebugUIConstants.Bytes,
-                Usage = BufferUsages.Storage,
-                Name = "Debug UI constants",
-            }
-        );
+        Result<GpuBuffer> constants = graph.Buffer(new BufferDescription("Debug UI constants", DebugUIConstants.Bytes));
         Result<GpuSampler> sampler = graph.Sampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
-        Result made =
-            !vertices.Ok ? vertices
-            : !indices.Ok ? indices
-            : !constants.Ok ? constants
-            : sampler;
+        Result made = Result.FindFailure(vertices, indices, constants, sampler);
         if (!made.Ok)
         {
             Log.Error($"The debug UI is not drawn: {made.Error}");
@@ -131,12 +108,7 @@ internal sealed class DebugUIOverlay
     /// A buffer of the power of two that holds <paramref name="bytes"/>, so it is seldom made again as the UI changes.
     /// </summary>
     private static BufferDescription GetDescription(string name, int bytes, BufferUsages usage) =>
-        new()
-        {
-            Bytes = BitOperations.RoundUpToPowerOf2((uint)Math.Max(bytes, MinBufferBytes)),
-            Usage = usage,
-            Name = name,
-        };
+        new(name, BitOperations.RoundUpToPowerOf2((uint)Math.Max(bytes, MinBufferBytes)), usage);
 
     /// <summary>
     /// Every texture the UI holds asked for, so the GPU provider keeps it: each was made to its description when it was
@@ -172,14 +144,13 @@ internal sealed class DebugUIOverlay
     /// </summary>
     private void FillTexture(in DebugUITextureChange change, byte[] pixels, RenderGraph graph)
     {
-        TextureDescription description = new()
-        {
-            Width = change.Width,
-            Height = change.Height,
-            Format = GpuFormat.R8G8B8A8Unorm,
-            Usage = TextureUsages.Sampled | TextureUsages.CopyDestination,
-            Name = $"Debug UI texture {change.Texture}",
-        };
+        TextureDescription description = new(
+            $"Debug UI texture {change.Texture}",
+            change.Width,
+            change.Height,
+            GpuFormat.R8G8B8A8Unorm,
+            TextureUsages.Sampled | TextureUsages.CopyDestination
+        );
         Result<GpuTexture> made = graph.Texture(description);
         if (!made.Ok)
         {

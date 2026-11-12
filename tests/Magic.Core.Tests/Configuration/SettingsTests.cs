@@ -9,7 +9,8 @@ using Xunit;
 namespace Magic.Tests.Configuration;
 
 /// <summary>
-/// A gem's settings set by key: the gem runs by them, and the gem made again, as after a rebuild, starts with them.
+/// A gem's settings set by key: the gem runs by them, changed in place, and the gem made again, as after a rebuild,
+/// starts with them.
 /// </summary>
 public sealed class SettingsTests
 {
@@ -18,17 +19,31 @@ public sealed class SettingsTests
     {
         using App app = new();
         Settings settings = new(app, new FileSystem());
-        DrawGem first = new(new DrawSettings());
-        Subscription registered = settings.Register(first);
+        EntryPoint first = new(new DrawSettings());
+        Subscription registered = settings.Register(first.Settings);
 
         Assert.True(settings.Set("Rendering.Resolution", new Size(2560, 1440)).Ok);
         Assert.Equal(new Size(2560, 1440), first.Settings.Resolution);
 
         registered.Dispose();
-        DrawGem second = new(settings.Get<DrawSettings>());
-        settings.Register(second).Dispose();
+        EntryPoint second = new(settings.Get<DrawSettings>());
+        settings.Register(second.Settings).Dispose();
 
         Assert.Equal(new Size(2560, 1440), second.Settings.Resolution);
+    }
+
+    [Fact]
+    public void SetByKeyChangesTheSettingsInPlace()
+    {
+        using App app = new();
+        Settings settings = new(app, new FileSystem());
+        EntryPoint gem = new(settings.Get<DrawSettings>());
+        using Subscription registered = settings.Register(gem.Settings);
+
+        Assert.True(settings.Set("Rendering.Resolution", new Size(1280, 720)).Ok);
+
+        Assert.Equal(new Size(1280, 720), gem.Settings.Resolution);
+        Assert.Same(gem.Settings, settings.Get<DrawSettings>());
     }
 
     [Fact]
@@ -47,7 +62,7 @@ public sealed class SettingsTests
         try
         {
             Settings saving = new(app, files);
-            using Subscription registered = saving.Register(new DrawGem(saving.Get<DrawSettings>()));
+            using Subscription registered = saving.Register(saving.Get<DrawSettings>());
             Assert.True(saving.Set("Rendering.Resolution", new Size(1280, 720)).Ok);
             Assert.True((await saving.SaveAsync(TestContext.Current.CancellationToken)).Ok);
 
@@ -62,13 +77,13 @@ public sealed class SettingsTests
     }
 
     [Category("Rendering")]
-    private sealed record DrawSettings
+    private sealed class DrawSettings : ISettings
     {
-        public Size Resolution { get; init; } = new(1920, 1080);
+        public Size Resolution { get; set; } = new(1920, 1080);
     }
 
-    private sealed class DrawGem(DrawSettings settings) : IGem, IHasSettings<DrawSettings>
+    private sealed class EntryPoint(DrawSettings settings) : IGem
     {
-        public DrawSettings Settings { get; set; } = settings;
+        public DrawSettings Settings { get; } = settings;
     }
 }
