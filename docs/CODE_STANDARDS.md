@@ -157,7 +157,8 @@ Write the engine as data flowing through functions, not objects calling each oth
   goes in the folder of its area, such as `Files` or `Plugins`. A new area is a new folder, never a new project.
 - A folder exists only once it holds something. Split a big one into a subfolder per area, never named like a type in
   it.
-- A gem is flat: every file at its root, in `Magic.<Gem>`. Its `Resources/` holds the assets and scripts only it uses.
+- A gem's files are in `Magic.<Gem>`, and the files in a folder of it in `Magic.<Gem>.<Folder>`. Its `Resources/`
+  holds the assets and scripts only it uses.
 - Built-in assets every project can use go in `src/Resources/`.
 - Name a file for its main type. Small types that belong with it may share the file.
 - Extension members are for a type the project doesn't own, or an interface; anything else is a member of its type.
