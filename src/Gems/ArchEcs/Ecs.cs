@@ -4,7 +4,6 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Arch.Core;
 using Magic.Ecs;
-using Magic.Projects;
 using Magic.Threading;
 using ArchEntity = Arch.Core.Entity;
 using ArchWorld = Arch.Core.World;
@@ -15,10 +14,10 @@ namespace Magic.ArchEcs;
 /// <summary>
 /// The entity world, in one Arch world, on the game thread. Entities are Arch's, bit for bit, and
 /// components live in Arch's chunks, so a query hands out spans straight over them and allocates nothing. Arch trusts
-/// its caller, so this gem checks what Arch would let go wrong silently (a dead entity, a structural change during a
+/// its caller, so this part checks what Arch would let go wrong silently (a dead entity, a structural change during a
 /// loop, a call from another thread) and throws instead.
 /// </summary>
-public sealed class ArchEcsGem : IGem, IEcs, IDisposable
+public sealed class Ecs : IEcs, IDisposable
 {
     private readonly ArchWorld _world;
 
@@ -49,7 +48,7 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     /// </summary>
     private long _version = 1;
 
-    public ArchEcsGem(Threads threads)
+    public Ecs(Threads threads)
     {
         // An entity becomes Arch's and back by reinterpreting its bits, so an Arch that laid its own out differently
         // would scramble every handle.
@@ -373,7 +372,7 @@ public sealed class ArchEcsGem : IGem, IEcs, IDisposable
     /// until the loop ends. One per query and reused, so a loop allocates nothing; a loop over the same query started
     /// inside one gets a walk of its own.
     /// </summary>
-    private sealed class Walk<TChunk>(ArchEcsGem ecs, QueryDescription description, Func<Chunk, long, TChunk> cut)
+    private sealed class Walk<TChunk>(Ecs ecs, QueryDescription description, Func<Chunk, long, TChunk> cut)
         : IEnumerable<TChunk>,
             IEnumerator<TChunk>
         where TChunk : allows ref struct
