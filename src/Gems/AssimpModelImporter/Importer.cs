@@ -5,7 +5,6 @@ using System.Numerics;
 using Magic.Assets;
 using Magic.Assets.Pipeline;
 using Magic.Ecs.Components;
-using Magic.Projects;
 using Magic.Utils;
 using static Magic.AssimpModelImporter.aiPostProcessSteps;
 using static Magic.AssimpModelImporter.assimp;
@@ -17,7 +16,7 @@ namespace Magic.AssimpModelImporter;
 /// model's frame, triangulated, with normals and tangents, one mesh per material slot in the order the file's
 /// materials are first used.
 /// </summary>
-public sealed unsafe class AssimpModelImporterGem : IGem, IAssetImporter<Model>
+public sealed unsafe class Importer : IAssetImporter<Model>
 {
     /// <summary>
     /// How a file is brought into the engine's frame: left-handed with clockwise triangles, in metres, every node's

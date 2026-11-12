@@ -17,7 +17,7 @@ namespace Magic.PrefabImporter;
 /// name, its tags as a <see cref="Tags"/>, and the entities under it, a prefab it places among them. What it loads as it
 /// reads one is what that one is made from, so it is read again when one of them changes.
 /// </summary>
-public sealed class PrefabImporterGem(AssetManager assets) : IGem, IAssetImporter<Prefab>
+public sealed class Importer(AssetManager assets) : IAssetImporter<Prefab>
 {
     public ImmutableArray<string> Extensions { get; } = [".prefab"];
 

@@ -3,7 +3,6 @@ using System.Globalization;
 using System.IO;
 using Magic.Assets;
 using Magic.Assets.Pipeline;
-using Magic.Projects;
 using Magic.Utils;
 
 namespace Magic.DomainImporter;
@@ -13,7 +12,7 @@ namespace Magic.DomainImporter;
 /// folder named <c>x_y_z</c> a chunk, and any other at the domain's origin. The file itself holds nothing, so <c>{}</c>
 /// does.
 /// </summary>
-public sealed class DomainImporterGem(AssetManager assets) : IGem, IAssetImporter<Domain>
+public sealed class Importer(AssetManager assets) : IAssetImporter<Domain>
 {
     public ImmutableArray<string> Extensions { get; } = [".domain"];
 
