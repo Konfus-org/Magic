@@ -23,7 +23,7 @@ public static class Json
     /// <summary>
     /// The dialect written indented, for a file a person reads and edits. It cannot be changed.
     /// </summary>
-    internal static JsonSerializerOptions Indented { get; } = new(Options) { WriteIndented = true };
+    internal static JsonSerializerOptions Indented { get; } = CreateIndented();
 
     /// <summary>
     /// <paramref name="utf8"/> as a <typeparamref name="T"/>, or why it is not one. A byte order mark, which editors on
@@ -93,6 +93,14 @@ public static class Json
             Converters = { new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower) },
         };
         options.MakeReadOnly(populateMissingResolver: true);
+
+        return options;
+    }
+
+    private static JsonSerializerOptions CreateIndented()
+    {
+        JsonSerializerOptions options = new(Options) { WriteIndented = true };
+        options.MakeReadOnly();
 
         return options;
     }

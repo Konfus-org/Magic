@@ -3,7 +3,6 @@ using System.Globalization;
 using System.IO;
 using Magic.Assets;
 using Magic.Assets.Pipeline;
-using Magic.Projects;
 using Magic.Utils;
 
 namespace Magic.DomainImporter;
@@ -11,11 +10,11 @@ namespace Magic.DomainImporter;
 /// <summary>
 /// Reads <c>.domain</c> files into <see cref="Domain"/>s, each in a folder of its own beside its prefabs: every one in the
 /// folder named <c>x_y_z</c> a chunk, and any other at the domain's origin. The file itself holds nothing, so <c>{}</c>
-/// does. It is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
+/// does.
 /// </summary>
-public sealed class DomainImporterGem(AssetManager assets) : IGem, IAssetImporter<Domain>
+public sealed class Importer(AssetManager assets) : IAssetImporter<Domain>
 {
-    public ImmutableArray<string> Extensions => [".domain"];
+    public ImmutableArray<string> Extensions { get; } = [".domain"];
 
     public Task<Result<Domain>> ImportAsync(AssetFile file, IProgress<LoadProgress>? progress, CancellationToken cancel)
     {

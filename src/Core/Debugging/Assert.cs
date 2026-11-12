@@ -50,7 +50,7 @@ public static class Assert
 
     /// <summary>
     /// Logs <paramref name="message"/> as <see cref="Log.Critical"/>, writes it, the stack it was called from and the
-    /// lines no sink has printed to Logs/&lt;time&gt;.crash beside Magic, tells the terminal where, breaks an attached
+    /// last lines logged to Logs/&lt;time&gt;.crash beside Magic, tells the terminal where, breaks an attached
     /// debugger and ends the process. Nothing else runs: no gem is disposed.
     /// </summary>
     [DoesNotReturn]

@@ -5,10 +5,11 @@ namespace Magic.Graphics;
 /// <summary>
 /// A gem's part of the frame on the GPU that takes nothing from other gems and makes nothing for them, on the render
 /// thread, from what <c>LateUpdate</c> last handed it: as often as the GPU draws, more or less often than the game
-/// thread's frames. Core calls <see cref="Render"/> once a frame; the gem records its passes into the frame's graph,
-/// each in its <see cref="RenderStage"/>, and once every gem has, the GPU provider presents it. A gem that takes or makes
-/// what other gems draw from implements <see cref="IRenderFrom{TInput}"/>, <see cref="IRenderInto{TOutput}"/> or
-/// <see cref="IRender{TInput, TOutput}"/> instead. A gem with more than one part of the frame implements a form for each.
+/// thread's frames. A gem's <c>Renderer</c> part implements it. Core calls <see cref="Render"/> once a frame; the part
+/// records its passes into the frame's graph, each in its <see cref="RenderStage"/>, and once every gem has, the GPU
+/// provider presents it. A part that takes or makes what other gems draw from implements
+/// <see cref="IRenderFrom{TInput}"/>, <see cref="IRenderInto{TOutput}"/> or <see cref="IRender{TInput, TOutput}"/>
+/// instead. A part with more than one step in the frame implements a form for each.
 /// </summary>
 public interface IRender
 {

@@ -285,7 +285,7 @@ internal sealed class GpuResources(
     /// Renderers not written since their rows were built ask for nothing, so once a model looks unused each model
     /// <paramref name="drawn"/> holds is asked for first.
     /// </summary>
-    public void EvictUnusedModels(ReadOnlySpan<Renderer> drawn, long frameStart, int keepSec)
+    public void EvictUnusedModels(ReadOnlySpan<Ecs.Components.Renderer> drawn, long frameStart, int keepSec)
     {
         long before = frameStart - (keepSec * 1000L);
         bool hasUnused = false;
@@ -297,7 +297,7 @@ internal sealed class GpuResources(
         if (!hasUnused)
             return;
 
-        foreach (Renderer renderer in drawn)
+        foreach (Ecs.Components.Renderer renderer in drawn)
         {
             if (renderer.Model != Handle<Model>.None)
                 Get(renderer.Model);

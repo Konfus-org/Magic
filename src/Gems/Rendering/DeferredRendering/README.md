@@ -87,7 +87,7 @@ without what other gems draw over it.
 
 ## Changing it
 
-`DeferredRenderingGem` has a `Render` for each step, each the step in order, top to bottom: start there. The first
+`Renderer` has a `Render` for each step, each the step in order, top to bottom: start there. The first
 ends in the view it hands on; the second takes it with what the other gems made.
 
 - A texture, material or model asset comes from `GpuResources`, which reads it on the first ask. It asks the graph

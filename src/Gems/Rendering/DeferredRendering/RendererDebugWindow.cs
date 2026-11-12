@@ -4,8 +4,8 @@ using Magic.Input;
 namespace Magic.DeferredRendering;
 
 /// <summary>
-/// The renderer's debug window, drawn with the debug UI's widgets: it takes the settings now and hands back the ones
-/// chosen next. Its key (F2) opens it, two more (F5 and F6) step through the views, and a line on screen names any view
+/// The renderer's debug window, drawn with the debug UI's widgets: it writes the view and whether it is open, as chosen
+/// this frame, into the settings. Its key (F2) opens it, two more (F5 and F6) step through the views, and a line on screen names any view
 /// but the finished frame.
 /// </summary>
 internal sealed class RendererDebugWindow(IDebugUI ui, IInput? input)
@@ -18,9 +18,10 @@ internal sealed class RendererDebugWindow(IDebugUI ui, IInput? input)
     private static readonly string[] _viewLines = Array.ConvertAll(_viewNames, name => $"View: {name}");
 
     /// <summary>
-    /// <paramref name="current"/>, or a copy with the view and whether the window is open as chosen this frame.
+    /// Draws the window and writes the view and whether the window is open, as chosen this frame, into
+    /// <paramref name="current"/>.
     /// </summary>
-    public DeferredRenderingSettings Update(DeferredRenderingSettings current)
+    public void Update(DeferredRenderingSettings current)
     {
         DebugView view = current.RenderView;
         bool isOpen = current.IsRenderWindowOpen;
@@ -48,14 +49,8 @@ internal sealed class RendererDebugWindow(IDebugUI ui, IInput? input)
         if (view != DebugView.Final)
             ui.Text(_viewLines[(int)view]);
 
-        if (view == current.RenderView && isOpen == current.IsRenderWindowOpen)
-            return current;
-
-        return current with
-        {
-            RenderView = view,
-            IsRenderWindowOpen = isOpen,
-        };
+        current.RenderView = view;
+        current.IsRenderWindowOpen = isOpen;
     }
 
     private static DebugView Step(DebugView view, int by) =>

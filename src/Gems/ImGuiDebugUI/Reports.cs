@@ -51,6 +51,11 @@ internal readonly record struct ShownReport(string Label, Color Color, Vector3 P
 /// </summary>
 internal sealed class Reports
 {
+    // What reports are written in, linear as Color is: white, an orange warning and a red error.
+    internal static readonly Color White = new(1, 1, 1);
+    internal static readonly Color Warning = new(1, 0.376f, 0);
+    internal static readonly Color Error = new(1, 0, 0);
+
     private readonly Channel<Report> _arrived = Channel.CreateUnbounded<Report>(
         new UnboundedChannelOptions { SingleReader = true }
     );

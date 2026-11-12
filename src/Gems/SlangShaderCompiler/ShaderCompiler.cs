@@ -7,10 +7,8 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using Magic.Assets;
-using Magic.Configuration;
 using Magic.Files;
 using Magic.Graphics;
-using Magic.Projects;
 using Magic.Utils;
 
 namespace Magic.SlangShaderCompiler;
@@ -29,16 +27,9 @@ internal readonly record struct Reflection(ImmutableArray<ShaderField> Fields, l
 /// <summary>
 /// Compiles Slang entries to SPIR-V: the entry's module and every module it imports, found as <see cref="Shader"/>
 /// assets, go into a session in dependency order, and the entry comes out compiled and cached under a hash of the
-/// sources, so an unchanged entry never compiles twice. It is public because nothing in its assembly makes it: Magic
-/// does, by reflection, when a project lists the gem.
+/// sources, so an unchanged entry never compiles twice.
 /// </summary>
-public sealed partial class SlangShaderCompilerGem
-    : IGem,
-        IShaderCompiler,
-        ICache<CompiledShader>,
-        ICache<Reflection>,
-        IHasSettings<SlangShaderCompilerSettings>,
-        IDisposable
+public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledShader>, ICache<Reflection>, IDisposable
 {
     private const string ShadersFolder = "Shaders";
 
@@ -53,6 +44,8 @@ public sealed partial class SlangShaderCompilerGem
     private readonly AssetManager _assets;
 
     private readonly Caches _caches;
+
+    private readonly SlangShaderCompilerSettings _settings;
 
     /// <summary>
     /// One compile at a time: the compiler's global session is not for several threads at once.
@@ -82,21 +75,27 @@ public sealed partial class SlangShaderCompilerGem
     /// </summary>
     private unsafe void* _globalSession;
 
-    public SlangShaderCompilerGem(App app, AssetManager assets, Caches caches, SlangShaderCompilerSettings settings)
+    public ShaderCompiler(App app, AssetManager assets, Caches caches, SlangShaderCompilerSettings settings)
     {
         _assets = assets;
         _caches = caches;
+        _settings = settings;
         _lifetime = app.Lifetime;
-        _idle = new Timer(_ => ReleaseWhenIdle());
-        Settings = settings;
+        _idle = new Timer(_ =>
+        {
+            // A compile that holds the session sets the timer off again as it ends.
+            if (!_compiling.Wait(0))
+                return;
+
+            ReleaseGlobalSession();
+            _compiling.Release();
+        });
     }
 
     /// <summary>
     /// Raised when the bytes written change shape, and when the compiler's options or tag change.
     /// </summary>
     public int Version => 4;
-
-    public SlangShaderCompilerSettings Settings { get; set; }
 
     public void Dispose()
     {
@@ -136,7 +135,7 @@ public sealed partial class SlangShaderCompilerGem
             return Result.Failure(modules.Error);
 
         // Read once, so the compile is made and cached at the same level.
-        ShaderOptimization optimization = Settings.ShaderOptimization;
+        ShaderOptimization optimization = _settings.ShaderOptimization;
         ulong key = GetKey(entryPath, entry, typeArguments, optimization);
         ulong version = GetVersion(modules.Value);
         Result<CompiledShader> cached = await _caches
@@ -222,21 +221,6 @@ public sealed partial class SlangShaderCompilerGem
         );
     }
 
-    /// <summary>
-    /// <c>Shaders/Core/Heap.slang</c> as the compiler names it, <c>Core/Heap</c>, which is what <c>import Core.Heap;</c>
-    /// asks for.
-    /// </summary>
-    private static string ToModuleName(string path)
-    {
-        string relative = path.StartsWith(ShadersFolder + "/", StringComparison.Ordinal)
-            ? path[(ShadersFolder.Length + 1)..]
-            : path;
-        if (relative.EndsWith(Extension, StringComparison.OrdinalIgnoreCase))
-            relative = relative[..^Extension.Length];
-
-        return relative;
-    }
-
     [GeneratedRegex(@"^\s*(?:__exported\s+)?import\s+([A-Za-z_][\w.]*)\s*;", RegexOptions.Multiline)]
     private static partial Regex ImportLine();
 
@@ -303,11 +287,18 @@ public sealed partial class SlangShaderCompilerGem
         return hash.GetCurrentHashAsUInt64();
     }
 
-    private static Slang.CompilerOptionEntry Int(int name, int value) =>
+    private static Slang.CompilerOptionEntry CreateOption(int name, int value) =>
         new()
         {
             Name = name,
             Value = new Slang.CompilerOptionValue { Kind = Slang.Target.OptionKindInt, IntValue0 = value },
+        };
+
+    private static unsafe Slang.CompilerOptionEntry CreateOption(int name, byte* value) =>
+        new()
+        {
+            Name = name,
+            Value = new Slang.CompilerOptionValue { Kind = Slang.Target.OptionKindString, StringValue0 = value },
         };
 
     /// <summary>
@@ -626,27 +617,15 @@ public sealed partial class SlangShaderCompilerGem
                 return Result.Failure("the compiler has no spirv_1_6 profile.");
 
             Slang.CompilerOptionEntry* options = stackalloc Slang.CompilerOptionEntry[7];
-            options[0] = Int(Slang.Option.EmitSpirvDirectly, 1);
-            options[1] = Int(Slang.Option.VulkanUseEntryPointName, 1);
-            options[2] = Int(Slang.Option.MatrixLayoutRow, 1);
-            options[3] = Int(Slang.Option.DefaultImageFormatUnknown, 1);
-            options[4] = Int(Slang.Option.Optimization, (int)optimization);
-            options[5] = new Slang.CompilerOptionEntry
-            {
-                Name = Slang.Option.WarningsAsErrors,
-                Value = new Slang.CompilerOptionValue { Kind = Slang.Target.OptionKindString, StringValue0 = all },
-            };
+            options[0] = CreateOption(Slang.Option.EmitSpirvDirectly, 1);
+            options[1] = CreateOption(Slang.Option.VulkanUseEntryPointName, 1);
+            options[2] = CreateOption(Slang.Option.MatrixLayoutRow, 1);
+            options[3] = CreateOption(Slang.Option.DefaultImageFormatUnknown, 1);
+            options[4] = CreateOption(Slang.Option.Optimization, (int)optimization);
+            options[5] = CreateOption(Slang.Option.WarningsAsErrors, all);
             // The heap's image queries need capabilities past the bare profile, which the compiler adds per entry:
             // a warning on every entry that every GPU Magic runs on has no need of.
-            options[6] = new Slang.CompilerOptionEntry
-            {
-                Name = Slang.Option.DisableWarning,
-                Value = new Slang.CompilerOptionValue
-                {
-                    Kind = Slang.Target.OptionKindString,
-                    StringValue0 = profileUpgrade,
-                },
-            };
+            options[6] = CreateOption(Slang.Option.DisableWarning, profileUpgrade);
             Slang.TargetDesc target = new()
             {
                 StructureSize = (nuint)sizeof(Slang.TargetDesc),
@@ -780,19 +759,6 @@ public sealed partial class SlangShaderCompilerGem
     }
 
     /// <summary>
-    /// <see cref="_idle"/>'s work: the global session released, unless a compile holds it, which sets the timer off
-    /// again as it ends.
-    /// </summary>
-    private void ReleaseWhenIdle()
-    {
-        if (!_compiling.Wait(0))
-            return;
-
-        ReleaseGlobalSession();
-        _compiling.Release();
-    }
-
-    /// <summary>
     /// The compiler stopped, its memory given back, for the next compile to start again; called holding
     /// <see cref="_compiling"/>.
     /// </summary>
@@ -847,7 +813,14 @@ public sealed partial class SlangShaderCompilerGem
                     return Result.Failure($"{path} imports {importedName}: {visitedImport.Error}");
             }
 
-            ordered.Add(new SlangModule(ToModuleName(path), path, loaded.Value.Text));
+            // Shaders/Core/Heap.slang as the compiler names it, Core/Heap, which is what import Core.Heap; asks for.
+            string name = path.StartsWith(ShadersFolder + "/", StringComparison.Ordinal)
+                ? path[(ShadersFolder.Length + 1)..]
+                : path;
+            if (name.EndsWith(Extension, StringComparison.OrdinalIgnoreCase))
+                name = name[..^Extension.Length];
+
+            ordered.Add(new SlangModule(name, path, loaded.Value.Text));
 
             return Result.Success();
         }

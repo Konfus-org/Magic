@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using Magic.Assets;
-using Magic.Configuration;
 using Magic.Debugging;
 using Magic.DeferredRendering.View;
 using Magic.Ecs;
@@ -22,23 +21,21 @@ public readonly record struct ClusteredGeometryInput(GpuView View);
 /// frame its clusters culled, drawn into a visibility buffer and resolved by material into the view's GBuffer and glass
 /// targets, with its depth. As a model loads, its preprocessor clusters it once per change to its file and bakes its
 /// impostor. As a domain loads, it holds the loading screen until the models it draws are clustered on the GPU and
-/// their resolve passes are built. It is public because nothing in its assembly makes it: Magic does, by reflection,
-/// when a project lists the gem.
+/// their resolve passes are built.
 /// </summary>
-public sealed class ClusteredGeometryGem
-    : IGem,
-        IHasSettings<ClusteredGeometrySettings>,
-        IRenderFrom<ClusteredGeometryInput>,
-        IHookIntoDomainLoading,
-        IDisposable
+public sealed class Renderer : IRenderFrom<ClusteredGeometryInput>, IHookIntoDomainLoading, IDisposable
 {
+    /// <summary>
+    /// When a model draws as its impostor. The game thread writes it, and <see cref="Render"/> reads it.
+    /// </summary>
+    private readonly ClusteredGeometrySettings _settings;
     private readonly Threads _threads;
     private readonly Subscription _preprocessing;
     private readonly ClusterResources _resources;
     private readonly ClusterPasses _passes;
 
     /// <summary>
-    /// Whether the gem draws: not once a shader, a pool or a frame's passes are not made. Render thread.
+    /// Whether the renderer draws: not once a shader, a pool or a frame's passes are not made. Render thread.
     /// </summary>
     private bool _isRunning = true;
 
@@ -49,21 +46,15 @@ public sealed class ClusteredGeometryGem
     private int _domainsLoaded;
     private TaskCompletionSource? _loading;
 
-    public ClusteredGeometryGem(ClusteredGeometrySettings settings, AssetManager assets, Threads threads)
+    public Renderer(ClusteredGeometrySettings settings, AssetManager assets, Threads threads)
     {
-        Settings = settings;
+        _settings = settings;
         _threads = threads;
         ClusterPreprocessor clusters = new();
         _preprocessing = assets.Register(clusters);
         _resources = new ClusterResources(clusters, assets, threads);
         _passes = new ClusterPasses(assets);
     }
-
-    /// <summary>
-    /// When a model draws as its impostor. The game thread sets it whole, and <see cref="Render"/> reads the record it
-    /// finds, which never changes.
-    /// </summary>
-    public ClusteredGeometrySettings Settings { get; set; }
 
     public void Dispose()
     {
@@ -110,7 +101,7 @@ public sealed class ClusteredGeometryGem
             _loading = null;
         }
 
-        Result recorded = _passes.Record(graph, gpu, pools.Value, Settings);
+        Result recorded = _passes.Record(graph, gpu, pools.Value, _settings);
         if (!recorded.Ok)
             FailStart(recorded.Error);
     }
@@ -138,7 +129,7 @@ public sealed class ClusteredGeometryGem
     }
 
     /// <summary>
-    /// Ends the start as failed: the gem draws nothing, and holds no domain back.
+    /// Ends the start as failed: the renderer draws nothing, and holds no domain back.
     /// </summary>
     private void FailStart(string error)
     {

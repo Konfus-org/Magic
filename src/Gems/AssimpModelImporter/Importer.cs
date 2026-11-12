@@ -5,7 +5,6 @@ using System.Numerics;
 using Magic.Assets;
 using Magic.Assets.Pipeline;
 using Magic.Ecs.Components;
-using Magic.Projects;
 using Magic.Utils;
 using static Magic.AssimpModelImporter.aiPostProcessSteps;
 using static Magic.AssimpModelImporter.assimp;
@@ -15,10 +14,9 @@ namespace Magic.AssimpModelImporter;
 /// <summary>
 /// Reads FBX, glTF and OBJ files through assimp into <see cref="Model"/>s: every node's meshes flattened into the
 /// model's frame, triangulated, with normals and tangents, one mesh per material slot in the order the file's
-/// materials are first used. It is public because nothing in its assembly makes it: Magic does, by reflection, when
-/// a project lists the gem.
+/// materials are first used.
 /// </summary>
-public sealed unsafe class AssimpModelImporterGem : IGem, IAssetImporter<Model>
+public sealed unsafe class Importer : IAssetImporter<Model>
 {
     /// <summary>
     /// How a file is brought into the engine's frame: left-handed with clockwise triangles, in metres, every node's

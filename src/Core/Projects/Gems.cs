@@ -2,6 +2,8 @@ using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
+using System.Linq;
+using System.Reflection;
 using Magic.Assets;
 using Magic.Configuration;
 using Magic.Debugging;
@@ -97,6 +99,11 @@ internal sealed class Gems : IDisposable
     private readonly AutoResetEvent _drawn = new(initialState: false);
 
     /// <summary>
+    /// The gem whose part is the GPU provider, which presents the frame; null when no gem provides one.
+    /// </summary>
+    private readonly LoadedGem? _gpuProvider;
+
+    /// <summary>
     /// When a watch last saw a build write a gem's files, 0 when none has: written whole from the watches' threads.
     /// </summary>
     private long _buildTimestamp;
@@ -163,7 +170,7 @@ internal sealed class Gems : IDisposable
         IServiceProvider provider = services.BuildServiceProvider();
 
         // A constructor may load an asset of a type a gem made after it reads.
-        assets.Expect(registered.ConvertAll(gem => gem.Type));
+        assets.Expect(registered.SelectMany(gem => gem.PartTypes));
         foreach (RegisteredGem gem in registered)
         {
             // A build writes the gem's assemblies; the run restarts once it has settled.
@@ -193,63 +200,32 @@ internal sealed class Gems : IDisposable
                 // anything else is a bug in the gem, and its stack says where.
                 string why = ex is InvalidOperationException ? ex.Message : ex.ToString();
                 Log.Error($"Gem {gem.Name} was not made: {why}");
-                assets.Drop(gem.Type);
+                assets.Drop(gem.PartTypes);
                 code.Dispose();
                 continue;
             }
 
             LoadedGem loaded = new(
                 made,
+                [],
                 gem.Name,
-                [
-                    new Subscription(gem.Context.Unload),
-                    new Subscription(() => (made as IDisposable)?.Dispose()),
-                    code,
-                    assets.Register(made),
-                ]
+                [new Subscription(gem.Context.Unload), new Subscription(() => (made as IDisposable)?.Dispose()), code]
             );
             _loaded.Add(loaded);
-
-            // The gem is an IWindow in any mode, but a headless run has no window.
-            if (made is IWindow window && !_app.IsHeadless)
+            foreach (PropertyInfo property in gem.Parts)
             {
-                _app.Window = window;
+                if (property.GetValue(made) is not { } part)
+                {
+                    Log.Error($"Gem {gem.Name}'s part {property.Name} is null, so nothing it would do is set up.");
+                    continue;
+                }
 
-                // The window is the gem, which can't unload while the app holds it.
-                loaded.Ends.Add(new Subscription(() => _app.Window = null));
+                loaded.Parts.Add(part);
+                SetUp(gem, part, loaded.Ends, settings, assets);
             }
 
-            if (made is IPlatform platform)
-            {
-                _app.Platform = platform;
-                loaded.Ends.Add(new Subscription(() => _app.Platform = null));
-            }
-
-            // A gem whose settings can't be listed still runs by them; only the console and tools can't reach them.
-            try
-            {
-                loaded.Ends.Add(settings.Register(made));
-            }
-            catch (InvalidOperationException ex)
-            {
-                Log.Error($"Gem {gem.Name}'s settings can't be reached: {ex.Message}");
-            }
-
-            if (made is ILogSink sink)
-                loaded.Ends.Add(Log.Register(sink));
-
-            if (made is IEcs ecs)
-                loaded.Ends.Add(_world.Register(ecs));
-
-            // A gem that makes what another makes, or closes a cycle, renders nothing; the others go on.
-            try
-            {
-                loaded.Ends.Add(_rendering.Register(made));
-            }
-            catch (InvalidOperationException ex)
-            {
-                Log.Error($"Gem {gem.Name} renders nothing: {ex.Message}");
-            }
+            // What a part reads was expected by its property's type, which can be a base of the part's class.
+            assets.Drop(gem.PartTypes);
 
             string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
             Log.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");
@@ -259,11 +235,17 @@ internal sealed class Gems : IDisposable
         // loading back either.
         foreach (LoadedGem loaded in _loaded)
         {
-            if (loaded.Instance is IHookIntoDomainLoading hooks && !_rendering.HasMissingInput(loaded.Instance))
+            if (loaded.Parts.Exists(_rendering.HasMissingInput))
+                continue;
+
+            foreach (IHookIntoDomainLoading hooks in loaded.Parts.OfType<IHookIntoDomainLoading>())
+            {
                 loaded.Ends.Add(_world.Register(hooks));
+            }
         }
 
-        _graph.Gpu = _loaded.Find(static gem => gem.Instance is IGraphicsApi)?.Instance as IGraphicsApi;
+        _gpuProvider = _loaded.Find(static gem => gem.Parts.OfType<IGraphicsApi>().Any());
+        _graph.Gpu = _gpuProvider?.Parts.OfType<IGraphicsApi>().First();
         _threads.Start(EngineThread.Render, Render);
     }
 
@@ -377,8 +359,8 @@ internal sealed class Gems : IDisposable
     }
 
     /// <summary>
-    /// Calls <paramref name="hook"/> on <paramref name="gem"/>, which leaves the frame if it throws. Present is the GPU
-    /// provider's alone.
+    /// Calls <paramref name="hook"/> on <paramref name="gem"/>, timed, unless it left the frame; it leaves the frame if it
+    /// throws. Present is the GPU provider's alone.
     /// </summary>
     [SuppressMessage(
         "Design",
@@ -387,6 +369,10 @@ internal sealed class Gems : IDisposable
     )]
     private void RunHook(Hook hook, in Frame frame, LoadedGem gem)
     {
+        if (gem.HasFailed)
+            return;
+
+        long start = Metrics.HookDurations.Start();
         try
         {
             switch (hook)
@@ -401,9 +387,7 @@ internal sealed class Gems : IDisposable
                     gem.Instance.LateUpdate(in frame);
                     break;
                 case Hook.Present:
-                    if (gem.Instance is IGraphicsApi gpu)
-                        gpu.Present(_graph.Finish());
-
+                    _graph.Gpu?.Present(_graph.Finish());
                     break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(hook), hook, "There is no such hook.");
@@ -414,6 +398,12 @@ internal sealed class Gems : IDisposable
             Log.Error($"Gem {gem.Name} failed in {hook} and stops running: {ex}");
             gem.HasFailed = true;
         }
+
+        Metrics.HookDurations.RecordSince(
+            start,
+            new KeyValuePair<string, object?>(Metrics.GemNameTag, gem.Name),
+            new KeyValuePair<string, object?>(Metrics.HookTag, _hookNames[(int)hook])
+        );
     }
 
     /// <summary>
@@ -431,7 +421,8 @@ internal sealed class Gems : IDisposable
             _renderFrameDuration.Record(frame.AppDeltaSec);
 
         _rendering.Pump(frame, _graph);
-        RunHook(Hook.Present, frame);
+        if (_gpuProvider is not null)
+            RunHook(Hook.Present, frame, _gpuProvider);
 
         // Without a GPU provider, nothing presents what the gems recorded, so it goes.
         _graph.Finish();
@@ -446,16 +437,61 @@ internal sealed class Gems : IDisposable
     {
         foreach (LoadedGem gem in _loaded)
         {
-            if (gem.HasFailed)
-                continue;
-
-            long start = Metrics.HookDurations.Start();
             RunHook(hook, frame, gem);
-            Metrics.HookDurations.RecordSince(
-                start,
-                new KeyValuePair<string, object?>(Metrics.GemNameTag, gem.Name),
-                new KeyValuePair<string, object?>(Metrics.HookTag, _hookNames[(int)hook])
-            );
+        }
+    }
+
+    /// <summary>
+    /// Sets up <paramref name="part"/>, a part the made <paramref name="gem"/> exports, until
+    /// <paramref name="ends"/> end: the app's window and platform when it provides them, its settings, its place on the
+    /// log when it is a sink, the world's ECS, the asset types it reads and writes, and its part of the frame.
+    /// </summary>
+    private void SetUp(RegisteredGem gem, object part, Subscriptions ends, Settings settings, AssetManager assets)
+    {
+        ends.Add(assets.Register(part));
+
+        // The part is an IWindow in any mode, but a headless run has no window.
+        if (part is IWindow window && !_app.IsHeadless)
+        {
+            _app.Window = window;
+
+            // The window is the gem's, which can't unload while the app holds it.
+            ends.Add(new Subscription(() => _app.Window = null));
+        }
+
+        if (part is IPlatform platform)
+        {
+            _app.Platform = platform;
+            ends.Add(new Subscription(() => _app.Platform = null));
+        }
+
+        // A gem whose settings can't be listed still runs by them; only the console and tools can't reach them.
+        if (part is ISettings partSettings)
+        {
+            try
+            {
+                ends.Add(settings.Register(partSettings));
+            }
+            catch (InvalidOperationException ex)
+            {
+                Log.Error($"Gem {gem.Name}'s settings can't be reached: {ex.Message}");
+            }
+        }
+
+        if (part is ILogSink sink)
+            ends.Add(Log.Register(sink));
+
+        if (part is IEcs ecs)
+            ends.Add(_world.Register(ecs));
+
+        // A gem that makes what another makes, or closes a cycle, renders nothing; the others go on.
+        try
+        {
+            ends.Add(_rendering.Register(part));
+        }
+        catch (InvalidOperationException ex)
+        {
+            Log.Error($"Gem {gem.Name} renders nothing: {ex.Message}");
         }
     }
 
@@ -473,9 +509,10 @@ internal sealed class Gems : IDisposable
     /// <summary>
     /// A gem as made, and what ends with it, last added first: its subscriptions (its place on the log when it is a
     /// sink, the asset types it reads, the hooks it joined), then the gem itself, then its load context, which frees its
-    /// assemblies once nothing refers to the gem.
+    /// assemblies once nothing refers to the gem. Its parts are what it exports, which Core sets up; the gem itself has
+    /// only its hooks.
     /// </summary>
-    private sealed record LoadedGem(IGem Instance, string Name, Subscriptions Ends)
+    private sealed record LoadedGem(IGem Instance, List<object> Parts, string Name, Subscriptions Ends)
     {
         /// <summary>
         /// Whether the gem threw in a hook, so it no longer runs: it is still ended with the others.

@@ -1,6 +1,5 @@
 using System.Numerics;
 using Magic.Assets;
-using Magic.Configuration;
 using Magic.Debugging;
 using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
@@ -22,13 +21,10 @@ public readonly record struct VolumetricsInput(GpuView View, TracedWorld? Traced
 /// Fills the air between the camera and what it sees with the world's haze: each frame, a volume over the view, lit by
 /// the sky, the sun and the local lights where a ray through the world reaches it, blended over frames and summed away
 /// from the camera, recorded in the light stage, written into the frame's buffer and made as the frame's
-/// <see cref="Air"/>, which shading takes, with the clouds it draws over the sky. Clear air makes none. It
-/// is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
+/// <see cref="Air"/>, which shading takes, with the clouds it draws over the sky. Clear air makes none.
 /// </summary>
-public sealed class VolumetricsGem(VolumetricsSettings settings, AssetManager assets, IEcs ecs)
-    : IGem,
-        IHasSettings<VolumetricsSettings>,
-        IRender<VolumetricsInput, Air>
+public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, IEcs ecs)
+    : IRender<VolumetricsInput, Air>
 {
     /// <summary>
     /// The volume's slices away from the camera, the twin of <c>AirSlices</c> in the renderer's <c>Light/Air.slang</c>.
@@ -52,9 +48,13 @@ public sealed class VolumetricsGem(VolumetricsSettings settings, AssetManager as
     private static readonly string[] _scatteringNames = ["Air scattering 0", "Air scattering 1"];
 
     private readonly IEcs _ecs = ecs;
+
     private readonly Mailbox<EcsSnapshot<Weather>> _weather = new();
+
     private readonly ShaderEntry _scatterShader = PassShaders.GetEntry(assets, "FillAir", "ScatterAir");
+
     private readonly ShaderEntry _integrateShader = PassShaders.GetEntry(assets, "FillAir", "IntegrateAir");
+
     private readonly ShaderEntry _cloudShader = PassShaders.GetEntry(assets, "DrawClouds", "DrawClouds");
 
     /// <summary>
@@ -68,26 +68,11 @@ public sealed class VolumetricsGem(VolumetricsSettings settings, AssetManager as
     private GpuTexture? _drawnClouds;
 
     /// <summary>
-    /// How finely the air is filled, which <see cref="Render"/> reads whole each frame. Game thread.
-    /// </summary>
-    public VolumetricsSettings Settings { get; set; } = settings;
-
-    /// <summary>
-    /// Publishes the world's weather for <see cref="Render"/>.
-    /// </summary>
-    public void LateUpdate(in Frame frame)
-    {
-        _ecs.Snapshot(_weather.Back);
-        _weather.Publish();
-    }
-
-    /// <summary>
     /// The frame's air, while the passes' shaders are built, what they read and write is made, and the world's weather
     /// holds a haze or clouds; none otherwise, and the air changes nothing.
     /// </summary>
     public Air? Render(in Frame frame, RenderGraph graph, in VolumetricsInput input)
     {
-        VolumetricsSettings settings = Settings;
         bool isBuilt = graph.GetState(_scatterShader, _integrateShader) == GpuState.Ready;
         if (
             _weather.TakeNewest() is not { First: [var weather, ..] }
@@ -184,6 +169,15 @@ public sealed class VolumetricsGem(VolumetricsSettings settings, AssetManager as
         _drawnClouds = cloudy;
 
         return new Air(air.Value, cloudy);
+    }
+
+    /// <summary>
+    /// Publishes the world's weather for <see cref="Render"/>.
+    /// </summary>
+    internal void PublishWeather()
+    {
+        _weather.Back.Fill(_ecs);
+        _weather.Publish();
     }
 
     /// <summary>

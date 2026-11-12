@@ -24,12 +24,9 @@ public readonly record struct AccelerationStructuresInput(GpuView View, GpuInsta
 /// each material row averaged by a pass of its material shader each frame, what a ray hit reads its surface from. Each
 /// frame it writes them into the frame's buffer and makes the frame's <see cref="TracedWorld"/>; on a GPU that doesn't
 /// trace rays it makes none. The models, the instances and the material rows are the renderer's, taken as its
-/// <see cref="GpuView"/> and <see cref="GpuInstances"/>. It is public because nothing in its assembly makes it: Magic
-/// does, by reflection, when a project lists the gem.
+/// <see cref="GpuView"/> and <see cref="GpuInstances"/>.
 /// </summary>
-public sealed class AccelerationStructuresGem(AssetManager assets)
-    : IGem,
-        IRender<AccelerationStructuresInput, TracedWorld>
+public sealed class Renderer(AssetManager assets) : IRender<AccelerationStructuresInput, TracedWorld>
 {
     /// <summary>
     /// A hit materials row, a <c>GpuHitMaterial</c> as the renderer's <c>Trace/HitSurface.slang</c> lays it out.

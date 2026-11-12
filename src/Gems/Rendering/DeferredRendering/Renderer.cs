@@ -5,7 +5,6 @@ using System.Linq;
 using System.Numerics;
 using System.Threading.Channels;
 using Magic.Assets;
-using Magic.Configuration;
 using Magic.Debugging;
 using Magic.DeferredRendering.Post;
 using Magic.DeferredRendering.View;
@@ -14,7 +13,6 @@ using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Events;
 using Magic.Graphics;
-using Magic.Input;
 using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
@@ -43,7 +41,7 @@ public readonly record struct ShadingInput(
 
 /// <summary>
 /// The renderer, in two steps a frame. The view's step keeps the world on the GPU for the gems that draw it:
-/// <c>LateUpdate</c> copies what the frame draws out of the entities and publishes it; on the render thread the step
+/// <see cref="PublishInputs"/> copies what the frame draws out of the entities and publishes it; on the render thread the step
 /// takes the newest published, puts the models, materials, textures, instances, lights and sky's tables on the GPU,
 /// uploads the frame's rows, and makes the frame's <see cref="GpuView"/> and its <see cref="GpuInstances"/>. The
 /// shading's step lights that world, deferred: from the view and the GBuffer a geometry gem drew into it, the shading,
@@ -51,13 +49,10 @@ public readonly record struct ShadingInput(
 /// one is asked for, and the output into the window and any screenshot asked for. Where nothing made the world as rays
 /// see it, the shadows, the indirect light or the air, their rows of the frame's buffer are 0. As a domain replaces the
 /// world, it forgets the view's history and holds the loading screen until what comes is on the GPU and the shading's
-/// shaders are built. It is public because nothing in its assembly makes it: Magic does, by reflection, when a project
-/// lists the gem.
+/// shaders are built.
 /// </summary>
-public sealed class DeferredRenderingGem
-    : IGem,
-        IHasSettings<DeferredRenderingSettings>,
-        IRender<ViewInput, (GpuView, GpuInstances)>,
+public sealed class Renderer
+    : IRender<ViewInput, (GpuView, GpuInstances)>,
         IRenderFrom<ShadingInput>,
         IHookIntoDomainLoading,
         IDisposable
@@ -69,6 +64,12 @@ public sealed class DeferredRenderingGem
     private const int AutoRenderWidth = 1920;
 
     private const int AutoRenderHeight = 1080;
+
+    /// <summary>
+    /// How the world is drawn and what the renderer shows, which the debug window also sets on the game thread. Both
+    /// steps read it on the render thread.
+    /// </summary>
+    private readonly DeferredRenderingSettings _settings;
 
     private readonly IEcs _ecs;
 
@@ -120,8 +121,6 @@ public sealed class DeferredRenderingGem
 
     private readonly PixelEffects _pixelEffects = new();
 
-    private readonly RendererDebugWindow? _debugWindow;
-
     private readonly IGraphicsApi _gpu;
 
     private readonly EventCoordinator _events;
@@ -136,7 +135,7 @@ public sealed class DeferredRenderingGem
     private readonly Subscription _preprocessing;
 
     /// <summary>
-    /// The number of the world the frames <see cref="LateUpdate"/> publishes are of, a new one each time a domain
+    /// The number of the world the frames <see cref="PublishInputs"/> publishes are of, a new one each time a domain
     /// replaces it, so the view's step forgets the view's history at the first frame of what comes. Game thread.
     /// </summary>
     private int _worldNumber;
@@ -147,7 +146,7 @@ public sealed class DeferredRenderingGem
     private int? _drawnWorldNumber;
 
     /// <summary>
-    /// Whether the gem makes views: not once a shader or a pool is not made. Render thread.
+    /// Whether the renderer makes views: not once a shader or a pool is not made. Render thread.
     /// </summary>
     private bool _isRunning = true;
 
@@ -165,19 +164,17 @@ public sealed class DeferredRenderingGem
 
     private bool _hasDrawn;
 
-    public DeferredRenderingGem(
+    public Renderer(
         DeferredRenderingSettings settings,
         IShaderCompiler shaders,
         IGraphicsApi gpu,
         AssetManager assets,
         IEcs ecs,
         Threads threads,
-        EventCoordinator events,
-        IDebugUI? debugUI = null,
-        IInput? input = null
+        EventCoordinator events
     )
     {
-        Settings = settings;
+        _settings = settings;
         _ecs = ecs;
         _assets = assets;
         _threads = threads;
@@ -201,7 +198,6 @@ public sealed class DeferredRenderingGem
         _effects = new Effects(assets, _resources);
         _viewShaders = [.. _sky.Shaders, .. _lightTiles.Shaders];
 
-        _debugWindow = debugUI is null ? null : new RendererDebugWindow(debugUI, input);
         _gpu = gpu;
         _events = events;
         ImmutableArray<ShaderTypeArgument> atmosphere = [GpuView.GetAtmosphere(assets)];
@@ -218,49 +214,10 @@ public sealed class DeferredRenderingGem
         _shadingShaders = [_shadeShader, _translucentShader, _lightViewShader, _showShader];
     }
 
-    /// <summary>
-    /// How the world is drawn and what the renderer shows, which the debug window also sets on the game thread.
-    /// Both steps read it once a frame on the render thread: a record, written whole, which no one changes.
-    /// </summary>
-    public DeferredRenderingSettings Settings { get; set; }
-
     public void Dispose()
     {
         _preprocessing.Dispose();
         EndPreparing();
-    }
-
-    /// <summary>
-    /// Draws the debug window, which sets the settings.
-    /// </summary>
-    public void Update(in Frame frame)
-    {
-        if (_debugWindow is not null)
-            Settings = _debugWindow.Update(Settings);
-    }
-
-    /// <summary>
-    /// Copies what the frame draws out of the entities and publishes it for the view's step, and hands the shading's
-    /// step the screenshots asked for.
-    /// </summary>
-    public void LateUpdate(in Frame frame)
-    {
-        RenderInputs back = _inputs.Back;
-        _ecs.Snapshot(back.Renderers);
-        _ecs.Snapshot(back.Cameras);
-        _ecs.Snapshot(back.DirectionalLights);
-        _ecs.Snapshot(back.PointLights);
-        _ecs.Snapshot(back.SpotLights);
-        _ecs.Snapshot(back.RectLights);
-        _ecs.Snapshot(back.Skies);
-        _ecs.Snapshot(back.PostProcessing);
-        back.WorldNumber = _worldNumber;
-        _inputs.Publish();
-
-        foreach (ScreenshotRequested asked in frame.Events.Get<ScreenshotRequested>())
-        {
-            _screenshots.Writer.TryWrite(asked);
-        }
     }
 
     /// <summary>
@@ -294,7 +251,10 @@ public sealed class DeferredRenderingGem
         if (_inputs.TakeNewest() is not { } inputs)
             return null;
 
-        DeferredRenderingSettings settings = Settings;
+        DeferredRenderingSettings settings = _settings;
+        Size resolution = settings.Resolution;
+        float renderScale = settings.RenderScale;
+        float fieldOfView = settings.FieldOfView;
 
         // The first frame of another world forgets last frame's camera and size, so nothing drawn before carries
         // into it.
@@ -374,7 +334,7 @@ public sealed class DeferredRenderingGem
         // The finished picture at the resolution, or at the window's size when it has no side, and 1280 by 720 with no
         // window; the world drawn at the render scale of it, or when that is auto at the most that fits 1920 by 1080,
         // never more than all of it.
-        Size shown = settings.Resolution;
+        Size shown = resolution;
         if (shown.Width <= 0 || shown.Height <= 0)
         {
             TextureDescription window = graph.WindowTarget.IsNone ? default : graph.GetDescription(graph.WindowTarget);
@@ -383,8 +343,8 @@ public sealed class DeferredRenderingGem
 
         float scale = MathF.Min(
             1,
-            settings.RenderScale > 0
-                ? settings.RenderScale
+            renderScale > 0
+                ? renderScale
                 : MathF.Min((float)AutoRenderWidth / shown.Width, (float)AutoRenderHeight / shown.Height)
         );
         int width = Math.Max(1, (int)MathF.Round(shown.Width * scale));
@@ -521,8 +481,8 @@ public sealed class DeferredRenderingGem
             break;
         }
 
-        if (settings.FieldOfView > 0)
-            camera.Camera = camera.Camera with { FieldOfView = settings.FieldOfView };
+        if (fieldOfView > 0)
+            camera.Camera = camera.Camera with { FieldOfView = fieldOfView };
 
         // The camera jitters while one of the effects asks for it, or while a gem upscales.
         bool isJittered = input.Upscaling is not null;
@@ -576,7 +536,9 @@ public sealed class DeferredRenderingGem
             return;
 
         GpuView gpu = input.View;
-        DeferredRenderingSettings settings = Settings;
+        DeferredRenderingSettings settings = _settings;
+        DebugView renderView = settings.RenderView;
+        TextureFilter upscaleFilter = settings.UpscaleFilter;
 
         ReadOnlySpan<GpuResource> indirect = input.Light is { } light
             ? [light.Diffuse, light.Reflections, light.Probes, light.ProbeDepth]
@@ -635,13 +597,13 @@ public sealed class DeferredRenderingGem
 
         // A debug view of light draws it into the picture in place of the lit one, black where none was traced, so the
         // effects finish it as they do the picture.
-        if (settings.RenderView is DebugView.IndirectDiffuse or DebugView.Reflections)
+        if (renderView is DebugView.IndirectDiffuse or DebugView.Reflections)
         {
             graph
                 .Compute(
                     "Show light",
                     _lightViewShader,
-                    new GpuConstants(gpu.Frame.Id, (uint)settings.RenderView),
+                    new GpuConstants(gpu.Frame.Id, (uint)renderView),
                     RenderStages.Shade
                 )
                 .Reads(gpu.Frame, gpu.Depth, gpu.GBufferNormal)
@@ -660,7 +622,7 @@ public sealed class DeferredRenderingGem
                 _showShader,
                 new GpuConstants(
                     gpu.Frame.Id,
-                    (uint)settings.RenderView,
+                    (uint)renderView,
                     BitConverter.SingleToUInt32Bits(settings.DepthViewFar),
                     BitConverter.SingleToUInt32Bits(Math.Clamp(settings.Gamma, 0.5f, 2f))
                 ),
@@ -676,7 +638,7 @@ public sealed class DeferredRenderingGem
         GpuTexture shown = upscaled.IsNone ? gpu.Output : upscaled;
         GpuTexture target = graph.WindowTarget;
         if (!target.IsNone)
-            graph.Blit(shown, target, RenderStages.Post, settings.UpscaleFilter);
+            graph.Blit(shown, target, RenderStages.Post, upscaleFilter);
 
         // One readback buffer, so one screenshot a frame: the last asked for, read back at the size it is shown at, and
         // through a copy stretched to it with the upscale filter, of 8 bits a channel, where the shown picture is
@@ -711,7 +673,7 @@ public sealed class DeferredRenderingGem
             else
             {
                 if (read.Value != shown)
-                    graph.Blit(shown, read.Value, RenderStages.Post, settings.UpscaleFilter);
+                    graph.Blit(shown, read.Value, RenderStages.Post, upscaleFilter);
 
                 graph.ReadBack(read.Value, readback.Value, RenderStages.Post);
                 SaveScreenshotAsync(readback.Value, saved.Path, width, height).FireAndForget();
@@ -756,10 +718,10 @@ public sealed class DeferredRenderingGem
         }
         else
         {
-            Renderer[] renderers =
+            Ecs.Components.Renderer[] renderers =
             [
                 .. entities
-                    .SelectMany(entity => entity.OfType<Renderer>())
+                    .SelectMany(entity => entity.OfType<Ecs.Components.Renderer>())
                     .Where(renderer => renderer.Model != Handle<Model>.None),
             ];
             ImmutableArray<Handle<Material>> materials =
@@ -789,6 +751,30 @@ public sealed class DeferredRenderingGem
             );
             _preparing = preparing;
             await preparing.Done.Task.WaitAsync(cancel).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Copies what the frame draws out of the entities and publishes it for the view's step, and hands the shading's
+    /// step the screenshots asked for.
+    /// </summary>
+    internal void PublishInputs(in Frame frame)
+    {
+        RenderInputs back = _inputs.Back;
+        back.Renderers.Fill(_ecs);
+        back.Cameras.Fill(_ecs);
+        back.DirectionalLights.Fill(_ecs);
+        back.PointLights.Fill(_ecs);
+        back.SpotLights.Fill(_ecs);
+        back.RectLights.Fill(_ecs);
+        back.Skies.Fill(_ecs);
+        back.PostProcessing.Fill(_ecs);
+        back.WorldNumber = _worldNumber;
+        _inputs.Publish();
+
+        foreach (ScreenshotRequested asked in frame.Events.Get<ScreenshotRequested>())
+        {
+            _screenshots.Writer.TryWrite(asked);
         }
     }
 
@@ -837,7 +823,7 @@ public sealed class DeferredRenderingGem
     }
 
     /// <summary>
-    /// Ends the start as failed: the gem makes no view, and holds no domain back.
+    /// Ends the start as failed: the renderer makes no view, and holds no domain back.
     /// </summary>
     private void FailStart(string error)
     {

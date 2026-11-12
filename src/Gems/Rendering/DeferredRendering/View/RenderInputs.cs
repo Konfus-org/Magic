@@ -9,7 +9,7 @@ namespace Magic.DeferredRendering.View;
 /// </summary>
 internal sealed class RenderInputs
 {
-    public EcsSnapshot<Transform, Renderer> Renderers { get; } = new();
+    public EcsSnapshot<Transform, Ecs.Components.Renderer> Renderers { get; } = new();
 
     public EcsSnapshot<Transform, Camera> Cameras { get; } = new();
 
