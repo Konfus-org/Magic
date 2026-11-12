@@ -43,6 +43,21 @@ public sealed class AssetManagerTests
     }
 
     [Fact]
+    public void DisposingAnEarlierRegisterOfAPathKeepsTheLaterAsset()
+    {
+        using App app = new();
+        FileSystem files = new();
+        using AssetManager assets = new(files, new Caches(files, app), new EventCoordinator(), app);
+        string path = "Shaders/Tests/FromMemory.slang";
+
+        Subscription first = assets.Register(path, new Shader { Text = "// first" });
+        using Subscription second = assets.Register(path, new Shader { Text = "// second" });
+        first.Dispose();
+
+        Assert.NotEqual(Handle<Shader>.None, assets.Find<Shader>(path));
+    }
+
+    [Fact]
     public async Task AFileWithTheIdOfARegisteredAssetWins()
     {
         FileSystem files = new();

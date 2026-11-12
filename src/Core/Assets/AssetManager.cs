@@ -190,6 +190,13 @@ public sealed class AssetManager : IDisposable
         {
             lock (_gate)
             {
+                // A later Register of the path replaced this asset, and its own subscription removes it.
+                if (
+                    Loaded.Registered.TryGetValue(id, out (string Path, object Asset) held)
+                    && held.Asset != (object)asset
+                )
+                    return;
+
                 Loaded = Loaded with { Registered = Loaded.Registered.Remove(id) };
             }
         });
