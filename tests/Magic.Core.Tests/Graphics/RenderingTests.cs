@@ -38,7 +38,7 @@ public sealed class RenderingTests
     }
 
     [Fact]
-    public void PumpDropsAGemWhoseRequiredInputNoGemMakes()
+    public void PumpSkipsAGemWhoseRequiredInputNoGemMakes()
     {
         List<string> calls = [];
         Pump(new Lost(calls), new World(calls, new View(1)));
@@ -88,12 +88,12 @@ public sealed class RenderingTests
     }
 
     [Fact]
-    public void PumpCallsAGemThatTakesAndMakesNothingInItsOrder()
+    public void PumpCallsAGemThatTakesAndMakesNothingAfterTheOthers()
     {
         List<string> calls = [];
         Pump(new Overlay(calls), new World(calls, new View(1)));
 
-        Assert.Equal(["Overlay", "World"], calls);
+        Assert.Equal(["World", "Overlay"], calls);
     }
 
     [Fact]
