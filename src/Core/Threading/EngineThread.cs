@@ -1,9 +1,11 @@
 namespace Magic.Threading;
 
 /// <summary>
-/// The engine's own threads, each of which runs for the whole run and is named for its member, as a profiler or
-/// debugger shows it. Background work is a task, not one of these.
+/// The engine's own threads, which each run for the whole run, named for their member in a profiler or debugger.
 /// </summary>
+/// <remarks>
+/// Background work is a task, not one of these.
+/// </remarks>
 public enum EngineThread : byte
 {
     /// <summary>
@@ -13,7 +15,7 @@ public enum EngineThread : byte
     Platform,
 
     /// <summary>
-    /// What the frames run on, and where the ECS and the gems' hooks but Render are.
+    /// Where the frames, the ECS and every gem hook except Render run.
     /// </summary>
     Game,
 

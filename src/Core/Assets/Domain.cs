@@ -5,9 +5,11 @@ using Magic.Ecs.Components;
 namespace Magic.Assets;
 
 /// <summary>
-/// A piece of the world that opens as one: its chunks, evenly sized and placed by where they are, and any other prefabs. A
-/// gem reads its files.
+/// A piece of the world that opens as one: its chunks, evenly sized and placed by where they are, and other prefabs.
 /// </summary>
+/// <remarks>
+/// A gem reads its files.
+/// </remarks>
 public sealed class Domain : IAsset<Domain>
 {
     /// <summary>

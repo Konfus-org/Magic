@@ -3,12 +3,13 @@ using Magic.Utils;
 namespace Magic.Assets.Pipeline;
 
 /// <summary>
-/// Writes the files of one asset type, turning what the engine works with into its file format on disk, as <see
-/// cref="IAssetImporter{T}"/> turns the format back. A gem provides one for its format by an exported part that
-/// implements it; the host hands it to <see cref="AssetManager"/> as the gem is made, and takes it back as the gem
-/// ends. One exporter writes a type. It makes the bytes alone: Core puts them on disk (<see
-/// cref="AssetManager.ExportAsync{T}"/>).
+/// Writes the files of one asset type, from what the engine works with into its file format on disk.
 /// </summary>
+/// <remarks>
+/// A gem gives one for its format as an exported part that implements it. The host gives it to
+/// <see cref="AssetManager"/> when the gem is made, and removes it when the gem ends. One exporter writes a type. It
+/// makes only the bytes: Core puts them on disk (<see cref="AssetManager.ExportAsync{T}"/>).
+/// </remarks>
 public interface IAssetExporter<T>
     where T : IAsset<T>
 {
@@ -18,8 +19,11 @@ public interface IAssetExporter<T>
     string Extension { get; }
 
     /// <summary>
-    /// The file that holds <paramref name="asset"/>, or why it can't be written. On a worker.
+    /// Makes the file that holds <paramref name="asset"/>, or tells why it cannot.
     /// </summary>
+    /// <remarks>
+    /// It runs on a worker thread.
+    /// </remarks>
     Task<Result<ReadOnlyMemory<byte>>> ExportAsync(
         T asset,
         IProgress<LoadProgress>? progress,

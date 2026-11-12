@@ -27,9 +27,11 @@ internal enum AssetStage : byte
 }
 
 /// <summary>
-/// Imports asset <paramref name="id"/> as its type, by <paramref name="importer"/>, the gem that
-/// reads the type, or by Core itself when there is none: what a load of the type runs on a worker.
+/// Imports asset <paramref name="id"/> as its type, with <paramref name="importer"/>, or with Core when there is none.
 /// </summary>
+/// <remarks>
+/// A load of the type runs it on a worker thread.
+/// </remarks>
 internal delegate Task<Made> AssetImportRun(
     ulong id,
     IndexedFile file,
@@ -39,9 +41,12 @@ internal delegate Task<Made> AssetImportRun(
 );
 
 /// <summary>
-/// Keeps what one preprocessor makes of asset <paramref name="id"/>, made from <paramref name="version"/> of its file, in
-/// the cache, unless it is there already. On a worker.
+/// Puts what one preprocessor makes of asset <paramref name="id"/> at <paramref name="version"/> in the cache, unless
+/// the cache has it already.
 /// </summary>
+/// <remarks>
+/// It runs on a worker thread.
+/// </remarks>
 internal delegate Task AssetPreprocessRun(ulong id, ulong version, object asset, CancellationToken cancel);
 
 /// <summary>
@@ -55,14 +60,16 @@ internal delegate Result<object> AssetBuiltInReader(ReadOnlyMemory<byte> bytes, 
 internal sealed record AssetType(Type Type, AssetImportRun Import, AssetBuiltInReader ReadBuiltIn);
 
 /// <summary>
-/// What a load of an asset gave: the asset, of its type, or why there is none; its version, a hash of its file and
-/// <c>.meta</c>; and the ids of the handles it holds, when they were looked for.
+/// What a load of an asset gave: the asset or why there is none, its version, and the ids of the handles it holds.
 /// </summary>
+/// <remarks>
+/// The version is a hash of the file and its <c>.meta</c>. The handles are there only when they were looked for.
+/// </remarks>
 internal readonly record struct Made(Result<object> Value, ulong Version, ImmutableArray<ulong> Handles = default);
 
 /// <summary>
-/// What a load of an asset made, held only as long as something else holds it, so the GC frees it once nothing does; and,
-/// as <see cref="Made"/> has them, its version and the ids of the handles it holds.
+/// What a load of an asset made, held weakly so the GC frees it when nothing else holds it, with its version and
+/// handles.
 /// </summary>
 internal sealed record KeptAsset(WeakReference<object> Value, ulong Version, ImmutableArray<ulong> Handles);
 
@@ -92,14 +99,14 @@ internal sealed record AssetEntry
     public string Error { get; init; } = string.Empty;
 
     /// <summary>
-    /// The ids of what its importer loaded as it was made last, or has so far as it is made now: when one of them is made
-    /// again, so is it.
+    /// The ids of what its importer loaded as it was made last, or has so far as it is made now: when one of them is
+    /// made again, so is it.
     /// </summary>
     public ImmutableArray<ulong> MadeFrom { get; init; } = [];
 
     /// <summary>
-    /// The folders its importer listed as it was made last, or has so far as it is made now: when one of them changes, it
-    /// is made again.
+    /// The folders its importer listed as it was made last, or has so far as it is made now: when one of them changes,
+    /// it is made again.
     /// </summary>
     public ImmutableArray<string> Folders { get; init; } = [];
 
@@ -124,8 +131,8 @@ internal sealed record AssetEntry
     public object? GetValue() => Current is { } kept && kept.Value.TryGetTarget(out object? value) ? value : null;
 
     /// <summary>
-    /// What a caller gets once it has loaded: what it made, or why it failed; null when what it made was let go, so it is
-    /// read again.
+    /// What a caller gets once it has loaded: what it made, or why it failed; null when what it made was let go, so it
+    /// is read again.
     /// </summary>
     public Made? GetOutcome()
     {
@@ -139,9 +146,12 @@ internal sealed record AssetEntry
 }
 
 /// <summary>
-/// What has been asked for and made, and what makes it: which assets there are is <see cref="AssetDatabase"/>'s. A value,
-/// replaced whole under the assets' lock, and read by any thread as it is.
+/// What has been asked for and made, and what makes it.
 /// </summary>
+/// <remarks>
+/// <see cref="AssetDatabase"/> knows which assets there are. It is a value: it is replaced whole under the assets'
+/// lock, and any thread can read it.
+/// </remarks>
 internal sealed record LoadedAssets
 {
     public static LoadedAssets Empty { get; } = new();

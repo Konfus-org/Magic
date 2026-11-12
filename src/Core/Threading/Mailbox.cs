@@ -4,11 +4,13 @@ using System.Diagnostics.CodeAnalysis;
 namespace Magic.Threading;
 
 /// <summary>
-/// The newest of what one thread fills, for another to take without either waiting: the writer fills <see cref="Back"/>
-/// and publishes it, and the reader takes the newest published and returns it once done with it. A value published and
-/// not yet taken becomes the next back, so the newest wins. Values are reused, as a pool's are, so each is filled whole.
-/// One writer and one reader.
+/// Gives one reader thread the newest value that one writer thread fills, and neither thread waits.
 /// </summary>
+/// <remarks>
+/// The writer fills <see cref="Back"/> and publishes it. The reader takes the newest published value and returns it
+/// when done with it. A value published and not yet taken becomes the next back, so the newest wins. Values are reused,
+/// as in a pool, so fill each value whole. Use one writer and one reader.
+/// </remarks>
 public sealed class Mailbox<T>
     where T : class, new()
 {
@@ -26,15 +28,18 @@ public sealed class Mailbox<T>
     public T Back { get; private set; } = new();
 
     /// <summary>
-    /// Hands <see cref="Back"/> to the reader, in place of one it hasn't taken, which becomes the next back; or one it
-    /// returned, or a new one. The writer's thread.
+    /// Gives <see cref="Back"/> to the reader. The writer's thread.
     /// </summary>
+    /// <remarks>
+    /// It replaces a value that the reader has not taken, and that value becomes the next back. Else the next back is a
+    /// returned value or a new one.
+    /// </remarks>
     public void Publish() =>
         Back = Interlocked.Exchange(ref _published, Back) ?? (_returned.TryDequeue(out T? value) ? value : new T());
 
     /// <summary>
-    /// Whether a value was published since the last take, with the newest in <paramref name="value"/>, the reader's until
-    /// it is returned. The reader's thread.
+    /// Whether a value was published since the last take, with the newest in <paramref name="value"/>, the reader's
+    /// until it is returned. The reader's thread.
     /// </summary>
     public bool TryTake([NotNullWhen(true)] out T? value)
     {
@@ -44,10 +49,13 @@ public sealed class Mailbox<T>
     }
 
     /// <summary>
-    /// The newest value published, or the one taken before while none is newer; null until one is published. The value
-    /// it replaces is returned for the writer to fill again. For a reader that keeps using the newest, in place of
-    /// <see cref="TryTake"/> and <see cref="Return"/>. The reader's thread.
+    /// The newest published value, or the one taken before when none is newer; null until one is published. The
+    /// reader's thread.
     /// </summary>
+    /// <remarks>
+    /// The value that it replaces goes back to the writer to fill again. Use it in place of <see cref="TryTake"/> and
+    /// <see cref="Return"/> when the reader keeps using the newest value.
+    /// </remarks>
     public T? TakeNewest()
     {
         if (TryTake(out T? newest))

@@ -1,10 +1,11 @@
 namespace Magic.Assets;
 
 /// <summary>
-/// A recorded sound, decoded whole: its samples as 32-bit floats, interleaved by channel, at the rate and with the
-/// channels its file has. Whatever plays it converts it to its device's rate and channels as it plays, so a file is
-/// never resampled on load and plays at its own quality.
+/// A recorded sound, decoded whole: 32-bit float samples, interleaved by channel, at the rate and channels of its file.
 /// </summary>
+/// <remarks>
+/// The player converts it to the rate and channels of its device as it plays, so a load never resamples a file.
+/// </remarks>
 public sealed class Audio : IAsset<Audio>
 {
     /// <summary>
