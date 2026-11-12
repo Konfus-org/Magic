@@ -174,8 +174,8 @@ public sealed class AssetManager : IDisposable
 
     /// <summary>
     /// Has <paramref name="asset"/>, made in memory, found, named and loaded as the asset at <paramref name="path"/>
-    /// while no file has that path, until the subscription is disposed. Nothing reads or writes a disk for it. Any
-    /// thread.
+    /// while no file has that path or its id, until the subscription is disposed. Nothing reads or writes a disk for it.
+    /// Any thread.
     /// </summary>
     public Subscription Register<T>(string path, T asset)
         where T : IAsset<T>
@@ -346,7 +346,8 @@ public sealed class AssetManager : IDisposable
             return Result.Failure($"No {typeof(T).Name} was asked for: the handle is none.");
 
         if (
-            Loaded.Registered.TryGetValue(asset.Id, out (string Path, object Asset) registered)
+            !Database.Index.ById.ContainsKey(asset.Id)
+            && Loaded.Registered.TryGetValue(asset.Id, out (string Path, object Asset) registered)
             && registered.Asset is T kept
         )
             return Result.Success(kept);
@@ -1060,11 +1061,10 @@ public sealed class AssetManager : IDisposable
     private static Made Fail(string error) => new(Result.Failure(error), 0);
 
     /// <summary>
-    /// The id of the asset registered at <paramref name="path"/>: a hash of it, in any case, with
-    /// <see cref="AssetIndex.RegisteredBit"/>, which no file's id has.
+    /// The id of the asset registered at <paramref name="path"/>: a hash of it, in any case. A file with that id wins.
     /// </summary>
     private static ulong GetRegisteredId(string path) =>
-        XxHash64.HashToUInt64(Encoding.UTF8.GetBytes(path.ToUpperInvariant())) | AssetIndex.RegisteredBit;
+        XxHash64.HashToUInt64(Encoding.UTF8.GetBytes(path.ToUpperInvariant()));
 
     /// <summary>
     /// Whether a load of <paramref name="type"/> waits for a gem: nothing reads it yet, and a gem not made yet will.

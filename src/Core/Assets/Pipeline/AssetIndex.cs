@@ -21,11 +21,6 @@ internal sealed record AssetIndex
     /// </summary>
     public const string Sidecar = ".meta";
 
-    /// <summary>
-    /// The bit only the id of an asset registered from memory has, so no file's id is one: a sidecar's id is below it.
-    /// </summary>
-    public const ulong RegisteredBit = 1UL << 63;
-
     public static AssetIndex Empty { get; } =
         new()
         {
@@ -246,10 +241,10 @@ internal sealed record AssetIndex
             !read.Value.Remove("id", out JsonElement id)
             || id.ValueKind != JsonValueKind.Number
             || !id.TryGetUInt64(out ulong value)
-            || value is 0 or >= RegisteredBit
+            || value == 0
         )
         {
-            return Result.Failure("it needs an \"id\", a whole number above 0 and below 2^63.");
+            return Result.Failure("it needs an \"id\", a whole number above 0.");
         }
 
         if (
