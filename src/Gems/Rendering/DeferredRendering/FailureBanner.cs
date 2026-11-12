@@ -92,6 +92,10 @@ internal sealed class FailureBanner(AssetManager assets) : IDisposable
 
         int count = Math.Min(top, MaxLines);
         Span<uint> words = graph.Upload<uint>(lines.Value, (count + (post < 0 ? 0 : 1)) * LineWords);
+
+        // Lines not staged draw no banner in this frame; the next frame writes its own.
+        if (words.IsEmpty)
+            return;
         int written = 0;
         for (int i = 0; written < count; i++)
         {
@@ -111,7 +115,9 @@ internal sealed class FailureBanner(AssetManager assets) : IDisposable
             WriteLine(words.Slice(count * LineWords, LineWords), RenderFailure.PostEffect, failures[post].What);
 
         // The scissor keeps the draw to the top lines, or, with a post effect's line, the shader to its frame and line.
-        graph.Upload<uint>(indices.Value, [0, 1, 2]);
+        if (!graph.Upload<uint>(indices.Value, [0, 1, 2]))
+            return;
+
         TextureDescription window = graph.GetDescription(target);
         Rectangle drawn =
             post < 0

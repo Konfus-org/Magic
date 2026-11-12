@@ -47,7 +47,8 @@ internal sealed class Effects(AssetManager assets, GpuResources resources)
             (_resolved[place], _rows[place]) = Resolve(graph, list[place]);
         }
 
-        graph.Upload(rows.Value, _rows.AsSpan());
+        if (!graph.Upload(rows.Value, _rows.AsSpan()))
+            return Result.Failure("the effect rows were not staged.");
 
         return Result.Success<(ReadOnlyMemory<GpuEffect>, GpuBuffer)>((_resolved, rows.Value));
     }

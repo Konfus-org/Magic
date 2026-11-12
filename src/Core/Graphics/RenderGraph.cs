@@ -30,11 +30,6 @@ public sealed class RenderGraph
     private List<(RenderFailure Kind, string What)> _failedBefore = [];
 
     /// <summary>
-    /// Where a span upload that could not be staged is written, kept so a frame of dropped uploads allocates nothing.
-    /// </summary>
-    private byte[] _dropped = [];
-
-    /// <summary>
     /// What failed in this frame, each once, in the order first told to <see cref="Fail"/>: for a gem that draws them
     /// late in the frame.
     /// </summary>
@@ -237,16 +232,26 @@ public sealed class RenderGraph
 
     /// <summary>
     /// Copies <paramref name="rows"/> into <paramref name="to"/> from <paramref name="offset"/> bytes on, staged through
-    /// the frame's upload ring, in a transfer pass.
+    /// the frame's upload ring, in a transfer pass; false, and nothing copied, when the ring has no room for them: the
+    /// caller keeps them as not sent.
     /// </summary>
-    public void Upload<T>(GpuBuffer to, ReadOnlySpan<T> rows, ulong offset = 0)
-        where T : unmanaged => rows.CopyTo(Upload<T>(to, rows.Length, offset));
+    public bool Upload<T>(GpuBuffer to, ReadOnlySpan<T> rows, ulong offset = 0)
+        where T : unmanaged
+    {
+        Span<T> into = Upload<T>(to, rows.Length, offset);
+        if (into.Length < rows.Length)
+            return false;
+
+        rows.CopyTo(into);
+
+        return true;
+    }
 
     /// <summary>
     /// <paramref name="rows"/> rows of the frame's upload ring to write into, copied into <paramref name="to"/> from
     /// <paramref name="offset"/> bytes on in a transfer pass: write them before the frame is presented. No rows record
-    /// nothing. Rows the ring has no room for are written into scratch and dropped, and the upload fails
-    /// (<see cref="Fail"/>).
+    /// nothing. None when the ring has no room for them: the upload fails (<see cref="Fail"/>), and the caller keeps them
+    /// as not sent.
     /// </summary>
     public Span<T> Upload<T>(GpuBuffer to, int rows, ulong offset = 0)
         where T : unmanaged
@@ -257,13 +262,7 @@ public sealed class RenderGraph
         int bytes = rows * Unsafe.SizeOf<T>();
         GpuUpload upload = BeginUpload(bytes);
         if (upload.Buffer.IsNone)
-        {
-            // The caller still writes its rows: into scratch room that no copy reads.
-            if (_dropped.Length < bytes)
-                _dropped = new byte[bytes];
-
-            return MemoryMarshal.Cast<byte, T>(_dropped.AsSpan(0, bytes));
-        }
+            return [];
 
         UseInTransfer(GetUse(to, GpuAccess.CopyDestination), RenderStage.Prepare);
         Add(
@@ -284,13 +283,14 @@ public sealed class RenderGraph
     /// <summary>
     /// Copies <paramref name="pixels"/>, a whole level of the first layer tightly packed, into <paramref name="to"/>'s
     /// <paramref name="level"/>, staged as <see cref="Upload{T}(GpuBuffer, ReadOnlySpan{T}, ulong)"/> stages, in a
-    /// transfer pass. The same level filled twice in a frame gets a pass each.
+    /// transfer pass. The same level filled twice in a frame gets a pass each. False, and nothing copied, when the ring
+    /// has no room for them: the caller keeps them as not sent.
     /// </summary>
-    public void Upload(GpuTexture to, ReadOnlySpan<byte> pixels, int level = 0)
+    public bool Upload(GpuTexture to, ReadOnlySpan<byte> pixels, int level = 0)
     {
         GpuUpload upload = BeginUpload(pixels.Length);
         if (upload.Buffer.IsNone)
-            return;
+            return false;
 
         UseInTransfer(GetUse(to, GpuAccess.CopyDestination, level), RenderStage.Prepare);
         pixels.CopyTo(upload.Bytes);
@@ -304,6 +304,7 @@ public sealed class RenderGraph
                 X = (uint)level,
             }
         );
+        return true;
     }
 
     /// <summary>

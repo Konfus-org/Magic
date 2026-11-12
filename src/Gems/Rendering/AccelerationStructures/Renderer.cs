@@ -179,6 +179,14 @@ public sealed class Renderer(AssetManager assets) : IRender<AccelerationStructur
             if (count > 0)
             {
                 Span<GpuAccelerationInstance> written = graph.Upload<GpuAccelerationInstance>(instances.Value, count);
+
+                // Rows not staged: built for no version, so a later frame builds it, and no ray is traced in this one.
+                if (written.IsEmpty)
+                {
+                    _built = (-1, 0, default);
+
+                    return null;
+                }
                 int next = 0;
                 for (int i = 0; i < rows.Length; i++)
                 {
@@ -227,13 +235,14 @@ public sealed class Renderer(AssetManager assets) : IRender<AccelerationStructur
         }
 
         GpuAcceleration acceleration = _built.Count == 0 ? GpuAcceleration.None : topLevel.Value;
-        graph.Upload(
+        bool isSent = graph.Upload(
             view.Frame,
             [new GpuTracedWorld { Acceleration = acceleration.Id, HitMaterials = hitMaterials.Value.Id }],
             GpuTracedWorld.Offset
         );
 
-        return new TracedWorld(acceleration, hitMaterials.Value, _built.Box);
+        // The frame's row of the traced world not staged: no ray is traced in this frame.
+        return !isSent ? null : new TracedWorld(acceleration, hitMaterials.Value, _built.Box);
     }
 
     /// <summary>

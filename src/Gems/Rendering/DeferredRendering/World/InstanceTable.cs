@@ -235,16 +235,20 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
             }
         }
 
-        graph.Upload(materials.Value, _materialRows.AsSpan(0, _materialSlots.Count));
+        if (!graph.Upload(materials.Value, _materialRows.AsSpan(0, _materialSlots.Count)))
+            return Result.Failure("the material table was not staged.");
 
         // The failure table, asked for after the material rows made its rows, so each row they name is in it.
         Result<GpuBuffer> failures = graph.Buffer(new("Failure table", (long)_failureRows.Length * GpuFailure.Bytes));
         if (!failures.Ok)
             return Result.Failure(failures.Error);
 
-        graph.Upload(failures.Value, _failureRows.AsSpan(0, _failureRowOf.Count + 1));
+        if (!graph.Upload(failures.Value, _failureRows.AsSpan(0, _failureRowOf.Count + 1)))
+            return Result.Failure("the failure table was not staged.");
 
-        // The blocks of rows that changed, each run of them in one copy.
+        // The blocks of rows that changed, each run of them in one copy; a run not staged stays changed for the next
+        // frame, and nothing draws from the table in this one.
+        bool isSent = true;
         int blocks = (Count + BlockSize - 1) / BlockSize;
         int block = 0;
         while (block < blocks)
@@ -255,6 +259,7 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
                 continue;
             }
 
+            int runBlock = block;
             int runStart = block * BlockSize;
             int runRows = 0;
             for (; block < blocks && _isDirty[block]; block++)
@@ -262,12 +267,15 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
                 runRows += Math.Min(BlockSize, Count - (block * BlockSize));
             }
 
-            graph.Upload(rows.Value, _rows.AsSpan(runStart, runRows), (ulong)runStart * GpuInstance.Bytes);
+            if (graph.Upload(rows.Value, _rows.AsSpan(runStart, runRows), (ulong)runStart * GpuInstance.Bytes))
+                Array.Clear(_isDirty, runBlock, block - runBlock);
+            else
+                isSent = false;
         }
 
-        Array.Clear(_isDirty);
-
-        return Result.Success((rows.Value, materials.Value, failures.Value));
+        return isSent
+            ? Result.Success((rows.Value, materials.Value, failures.Value))
+            : Result.Failure("the instance table was not staged.");
     }
 
     /// <summary>

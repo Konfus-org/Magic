@@ -171,16 +171,16 @@ internal sealed class GpuResources(
         Get(FailureCube.Handle);
 
         // Each model made takes ranges of the pools, which grow to hold it, and of the mesh table, an index and its row
-        // of the model table; it fails when the model table is full. One placed in a frame whose pools failed is placed
-        // already.
+        // of the model table; it fails when the model table is full. One placed in an earlier frame, whose copies were
+        // not staged, is placed already: its place names a row of the model table, and row 0 is none.
         foreach ((ulong model, string name, MeshDerived made, ModelEntry entry) in _madeModels)
         {
-            if (entry.State != GpuState.Loading)
+            if (entry.State != GpuState.Loading || entry.Where.ModelIndex != 0)
                 continue;
 
-            SettledModels++;
             if (!_modelRows.CanAllocate(1))
             {
+                SettledModels++;
                 Log.Error($"Model {name} is not on the GPU: the model table is full.");
                 entry.State = GpuState.Failed;
 
@@ -219,7 +219,6 @@ internal sealed class GpuResources(
             // can be evicted.
             entry.Asked = Environment.TickCount64;
             entry.Where = where;
-            entry.State = GpuState.Ready;
             _models[where.ModelIndex] = new ModelPlace(
                 new Handle<Model>(model),
                 where.VertexOffset,
@@ -245,13 +244,15 @@ internal sealed class GpuResources(
 
         // Each placed model copied up, now that the pools are asked for at their size, with its meshes into the mesh
         // table where it has a range of it.
+        // A model is ready once all its copies are staged; one whose copies were not stays placed for the next frame.
         foreach ((_, _, MeshDerived made, ModelEntry entry) in _madeModels)
         {
-            if (entry.State != GpuState.Ready)
+            if (entry.State != GpuState.Loading || entry.Where.ModelIndex == 0)
                 continue;
 
             ResidentModel where = entry.Where;
-            graph.Upload(VertexPool, made.Vertices.AsSpan(), (ulong)where.VertexOffset * GpuVertex.Bytes);
+            if (!graph.Upload(VertexPool, made.Vertices.AsSpan(), (ulong)where.VertexOffset * GpuVertex.Bytes))
+                continue;
 
             // Indices point into the whole pool.
             Span<uint> rebased = graph.Upload<uint>(
@@ -259,27 +260,33 @@ internal sealed class GpuResources(
                 made.Indices.Length,
                 (ulong)where.IndexOffset * sizeof(uint)
             );
+            if (rebased.Length < made.Indices.Length)
+                continue;
+
             for (int i = 0; i < made.Indices.Length; i++)
             {
                 rebased[i] = made.Indices[i] + where.VertexOffset;
             }
 
             ModelPlace place = _models[where.ModelIndex];
-            if (place.Meshes.IsEmpty)
-                continue;
-
             Span<GpuMesh> rows = graph.Upload<GpuMesh>(
                 Meshes,
                 place.Meshes.Length,
                 (ulong)place.MeshOffset * GpuMesh.Bytes
             );
+            if (rows.Length < place.Meshes.Length)
+                continue;
+
             for (int i = 0; i < rows.Length; i++)
             {
                 rows[i] = place.Meshes[i].Mesh;
             }
+
+            entry.State = GpuState.Ready;
+            SettledModels++;
         }
 
-        _madeModels.Clear();
+        _madeModels.RemoveAll(static made => made.Entry.State != GpuState.Loading);
 
         return Result.Success();
     }
@@ -584,19 +591,33 @@ internal sealed class GpuResources(
             entry.State = GpuState.Ready;
         }
 
-        foreach ((Texture asset, int first, TextureEntry entry) in _arrivedTextures)
+        // A texture whose levels were not all staged loads on, unread, and is copied again in the next frame.
+        for (int i = _arrivedTextures.Count - 1; i >= 0; i--)
         {
-            if (entry.State != GpuState.Ready)
-                continue;
-
-            for (int level = first; level < asset.Levels.Length; level++)
+            (Texture asset, int first, TextureEntry entry) = _arrivedTextures[i];
+            if (entry.State == GpuState.Ready)
             {
-                TextureLevel source = asset.Levels[level];
-                graph.Upload(entry.Texture, asset.Pixels.Span.Slice(source.Offset, source.Size), level - first);
-            }
-        }
+                bool isSent = true;
+                for (int level = first; level < asset.Levels.Length; level++)
+                {
+                    TextureLevel source = asset.Levels[level];
+                    isSent &= graph.Upload(
+                        entry.Texture,
+                        asset.Pixels.Span.Slice(source.Offset, source.Size),
+                        level - first
+                    );
+                }
 
-        _arrivedTextures.Clear();
+                if (!isSent)
+                {
+                    entry.State = GpuState.Loading;
+
+                    continue;
+                }
+            }
+
+            _arrivedTextures.RemoveAt(i);
+        }
     }
 
     private static Result<GpuFormat> ToGpu(TextureFormat format) =>

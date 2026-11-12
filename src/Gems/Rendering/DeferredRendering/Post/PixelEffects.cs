@@ -183,7 +183,11 @@ internal sealed class PixelEffects
             (picture, other) = (other, picture);
         }
 
-        graph.Upload(passTable.Value, passes[..pass]);
+        // A table not staged leaves the picture without the effects where the passes wrote elsewhere; where the last pass
+        // wrote the picture itself, it read the table of the frame before.
+        if (!graph.Upload(passTable.Value, passes[..pass]))
+            return;
+
         if (picture != gpu.Hdr)
             graph.Blit(picture, gpu.Hdr, RenderStages.Post, TextureFilter.Linear);
     }

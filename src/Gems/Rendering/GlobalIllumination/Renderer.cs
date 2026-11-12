@@ -187,7 +187,10 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
             TracedWidth = (uint)tracedSize.Width,
             TracedHeight = (uint)tracedSize.Height,
         };
-        graph.Upload(view.Constants, [gi]);
+        // Not staged: nothing is recorded, and the frame's row stays the view's default, which the shaders read as none.
+        if (!graph.Upload(view.Constants, [gi]))
+            return null;
+
         ProbeGridConstants grid = probes.Value.Grid;
         GpuIndirectLight row = new()
         {
@@ -195,7 +198,9 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
             Reflections = gi.Reflections.Blend.Light.Id,
             Grid = grid,
         };
-        graph.Upload(gpu.Frame, [row], GpuIndirectLight.Offset);
+        if (!graph.Upload(gpu.Frame, [row], GpuIndirectLight.Offset))
+            return null;
+
         _probes.Record(view, grid, gi.Probes);
         _diffuse.Record(view, grid, gi);
         if (isReflectionsOn)

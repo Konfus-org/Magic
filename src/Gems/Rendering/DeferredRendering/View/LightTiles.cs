@@ -96,7 +96,8 @@ internal sealed class LightTiles(AssetManager assets)
             _lights[row++] = ToGpuLight(rects.First[i], rects.Second[i]);
         }
 
-        graph.Upload(lights.Table, _lights.AsSpan(0, lights.Count));
+        if (!graph.Upload(lights.Table, _lights.AsSpan(0, lights.Count)))
+            return Result.Failure("the light table was not staged.");
 
         return Result.Success(lights);
     }

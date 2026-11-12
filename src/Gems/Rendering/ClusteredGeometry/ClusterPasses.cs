@@ -183,7 +183,7 @@ internal sealed class ClusterPasses
             return asked;
 
         // The retest dispatch at no groups, until the cull adds to it.
-        graph.Upload(retestArguments.Value, [0u, 1u, 1u]);
+        bool isSent = graph.Upload(retestArguments.Value, [0u, 1u, 1u]);
         ClusterConstants clusters = new()
         {
             DepthPyramidLevels = (uint)depthPyramidLevels,
@@ -208,7 +208,9 @@ internal sealed class ClusterPasses
             InstanceRows = instanceRows.Value.Id,
             Budget = budget.Value.Id,
         };
-        graph.Upload(gpu.Frame, [clusters], ClusterConstants.Offset);
+        isSent &= graph.Upload(gpu.Frame, [clusters], ClusterConstants.Offset);
+        if (!isSent)
+            return Result.Failure("the frame's cluster constants were not staged.");
 
         // Budget: last frame's count steers the frame's handoff and error threshold, then the counts start again.
         graph

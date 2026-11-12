@@ -136,7 +136,9 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
             CloudHeight = weather.CloudHeight,
             Wind = new Vector2(weather.Wind.X, weather.Wind.Z),
         };
-        graph.Upload(gpu.Frame, [row], GpuAir.Offset);
+        // Not staged: nothing is recorded, and the frame's row stays the view's default, which the shaders read as none.
+        if (!graph.Upload(gpu.Frame, [row], GpuAir.Offset))
+            return null;
 
         // Each cell's light and haze, blended with last frame's where the cell was then, then summed along each column
         // away from the camera. The pass header's x is the frame's buffer, y the scattering written, z last frame's, 0

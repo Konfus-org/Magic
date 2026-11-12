@@ -152,9 +152,10 @@ public sealed class Renderer(TracedShadowsSettings settings, AssetManager assets
             Width = (uint)width,
             Height = (uint)height,
         };
-        graph.Upload(constants.Value, [denoise]);
+        // Not staged: nothing is recorded, and the frame's row stays the view's default, which the shaders read as none.
         GpuShadows row = new() { Mask = mask.Value.Id, SunTint = sunTint.Value.Id };
-        graph.Upload(view.Frame, [row], GpuShadows.Offset);
+        if (!graph.Upload(constants.Value, [denoise]) || !graph.Upload(view.Frame, [row], GpuShadows.Offset))
+            return null;
 
         // Trace each traced pixel's shadows from the view's surfaces.
         GpuConstants header = new(view.Frame.Id, constants.Value.Id);

@@ -146,18 +146,18 @@ internal sealed class FrameView
                 ? (last.ViewProjection, last.CameraPosition)
                 : (unjittered, constants.CameraPosition);
         _previous = (unjittered, constants.CameraPosition, width, height);
-        graph.Upload(view.Frame, [constants]);
-        graph.Upload(view.Frame, [models], GpuModels.Offset);
-        graph.Upload(view.Frame, [frameLights], GpuLights.Offset);
+        bool isSent = graph.Upload(view.Frame, [constants]);
+        isSent &= graph.Upload(view.Frame, [models], GpuModels.Offset);
+        isSent &= graph.Upload(view.Frame, [frameLights], GpuLights.Offset);
 
         // The rows the gems after the view write, 0 until one does, so the shaders that read them trace, shadow and
         // light nothing indirectly, the sky lights the surfaces, and the air changes nothing.
-        graph.Upload(view.Frame, [default(GpuTracedWorld)], GpuTracedWorld.Offset);
-        graph.Upload(view.Frame, [default(GpuShadows)], GpuShadows.Offset);
-        graph.Upload(view.Frame, [default(GpuIndirectLight)], GpuIndirectLight.Offset);
-        graph.Upload(view.Frame, [default(GpuAir)], GpuAir.Offset);
+        isSent &= graph.Upload(view.Frame, [default(GpuTracedWorld)], GpuTracedWorld.Offset);
+        isSent &= graph.Upload(view.Frame, [default(GpuShadows)], GpuShadows.Offset);
+        isSent &= graph.Upload(view.Frame, [default(GpuIndirectLight)], GpuIndirectLight.Offset);
+        isSent &= graph.Upload(view.Frame, [default(GpuAir)], GpuAir.Offset);
 
-        return Result.Success();
+        return isSent ? Result.Success() : Result.Failure("the frame's constants were not staged.");
     }
 
     /// <summary>
