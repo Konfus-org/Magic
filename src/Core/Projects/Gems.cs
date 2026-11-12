@@ -287,7 +287,8 @@ internal sealed class Gems : IDisposable
     /// </summary>
     public void Pump()
     {
-        // A build writes each gem and its dependencies in turn, so the run restarts once it left the files alone a while.
+        // A build writes each gem and its dependencies in turn, so the run restarts once it left the files alone a
+        // while.
         long built = Volatile.Read(ref _buildTimestamp);
         if (built != 0 && Stopwatch.GetElapsedTime(built) >= _settleTime)
         {

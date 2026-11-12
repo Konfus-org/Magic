@@ -93,7 +93,7 @@ public static class Assert
                 text.Append(logged.ToString()).Append('\n');
         }
 
-        // To Logs/<time>.crash beside Magic; a crash can come before any file system exists.
+        // To Logs/<time>.crash beside Magic.
         string folder = Path.Join(AppContext.BaseDirectory, "Logs");
         string path = Path.Join(
             folder,

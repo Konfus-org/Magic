@@ -68,11 +68,14 @@ internal static class Program
         }
     }
 
-    // Kept out of Run's loop, where CA2000 falsely reports the world as not disposed (dotnet/roslyn-analyzers#7047).
     /// <summary>
     /// Runs one pass, all new for it: the command line first when it is given, then the project until its run ends.
     /// Gives Run's exit code, or null and the world as this run saved it when the next run must start.
     /// </summary>
+    /// <remarks>
+    /// It is a method of its own because, in Run's loop, CA2000 falsely reports the world as not disposed
+    /// (dotnet/roslyn-analyzers#7047).
+    /// </remarks>
     private static (int? ExitCode, Task<Result<byte[]>>? WorldRestorePoint) RunPass(
         App app,
         Settings settings,
@@ -159,13 +162,10 @@ internal static class Program
 
         // The world is saved while the gems are still whole, for a restart of this same project; they end as this pass
         // does, last made first.
-        worldRestorePoint = app.IsExiting || app.Project != project ? null : world.SaveAsync();
-
+        Task<Result<byte[]>>? saved = app.IsExiting || app.Project != project ? null : world.SaveAsync();
         Log.Info($"Closing {project.Name} and {(app.IsExiting ? "exiting" : "restarting")}.");
-        if (app.IsExiting)
-            return (0, null);
 
-        return (null, worldRestorePoint);
+        return (app.IsExiting ? 0 : null, saved);
 
         // One frame on the game thread, after what was posted to it: Core's own steps are timed for whatever listens, and
         // the gems' pump times its hooks itself. Under --fail-on-error, the first error logged ends the run; the exit

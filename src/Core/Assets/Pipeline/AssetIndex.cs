@@ -156,7 +156,7 @@ internal sealed record AssetIndex
 
     /// <summary>
     /// The folder <paramref name="path"/> is in: <c>Materials</c> for <c>Materials/Default.mat</c>, empty at the top.
-    /// The index's folders, an importer's listed folders and a touched file's folder all come from it, so they match.
+    /// Each place that needs the folder of a path gets it here, so the folders match.
     /// </summary>
     public static string GetFolder(string path)
     {

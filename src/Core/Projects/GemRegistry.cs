@@ -84,7 +84,8 @@ internal static class GemRegistry
             named.Add((name, at < 0 ? string.Empty : listing[(at + 1)..]));
         }
 
-        // Load each, look at what it holds, and register it with the services as its class and every interface it provides.
+        // Load each, look at what it holds, and register it with the services as its class and every interface it
+        // provides.
         List<RegisteredGem> registered = [];
         Dictionary<Type, RegisteredGem> providers = [];
         foreach ((string name, string wanted) in named)
