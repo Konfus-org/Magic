@@ -30,6 +30,11 @@ public sealed class RenderGraph
     private List<(RenderFailure Kind, string What)> _failedBefore = [];
 
     /// <summary>
+    /// Where a span upload that could not be staged is written, kept so a frame of dropped uploads allocates nothing.
+    /// </summary>
+    private byte[] _dropped = [];
+
+    /// <summary>
     /// What failed in this frame, each once, in the order first told to <see cref="Fail"/>: for a gem that draws them
     /// late in the frame.
     /// </summary>
@@ -240,7 +245,8 @@ public sealed class RenderGraph
     /// <summary>
     /// <paramref name="rows"/> rows of the frame's upload ring to write into, copied into <paramref name="to"/> from
     /// <paramref name="offset"/> bytes on in a transfer pass: write them before the frame is presented. No rows record
-    /// nothing.
+    /// nothing. Rows the ring has no room for are written into scratch and dropped, and the upload fails
+    /// (<see cref="Fail"/>).
     /// </summary>
     public Span<T> Upload<T>(GpuBuffer to, int rows, ulong offset = 0)
         where T : unmanaged
@@ -248,9 +254,18 @@ public sealed class RenderGraph
         if (rows == 0)
             return [];
 
-        UseInTransfer(GetUse(to, GpuAccess.CopyDestination), RenderStage.Prepare);
         int bytes = rows * Unsafe.SizeOf<T>();
         GpuUpload upload = BeginUpload(bytes);
+        if (upload.Buffer.IsNone)
+        {
+            // The caller still writes its rows: into scratch room that no copy reads.
+            if (_dropped.Length < bytes)
+                _dropped = new byte[bytes];
+
+            return MemoryMarshal.Cast<byte, T>(_dropped.AsSpan(0, bytes));
+        }
+
+        UseInTransfer(GetUse(to, GpuAccess.CopyDestination), RenderStage.Prepare);
         Add(
             new()
             {
@@ -273,8 +288,11 @@ public sealed class RenderGraph
     /// </summary>
     public void Upload(GpuTexture to, ReadOnlySpan<byte> pixels, int level = 0)
     {
-        UseInTransfer(GetUse(to, GpuAccess.CopyDestination, level), RenderStage.Prepare);
         GpuUpload upload = BeginUpload(pixels.Length);
+        if (upload.Buffer.IsNone)
+            return;
+
+        UseInTransfer(GetUse(to, GpuAccess.CopyDestination, level), RenderStage.Prepare);
         pixels.CopyTo(upload.Bytes);
         Add(
             new()
@@ -408,8 +426,18 @@ public sealed class RenderGraph
             Level = level,
         };
 
-    private GpuUpload BeginUpload(int bytes) =>
-        (Gpu ?? throw new InvalidOperationException("There is no GPU provider to upload through.")).BeginUpload(bytes);
+    /// <summary>
+    /// Room for <paramref name="bytes"/> in the frame's upload ring; none, and the upload told as failed, when the GPU
+    /// provider has no room or there is no provider.
+    /// </summary>
+    private GpuUpload BeginUpload(int bytes)
+    {
+        GpuUpload upload = Gpu is { } gpu ? gpu.BeginUpload(bytes) : default;
+        if (upload.Buffer.IsNone)
+            Fail(RenderFailure.Resource, "Uploads are dropped", $"there is no room to stage {bytes} bytes.");
+
+        return upload;
+    }
 
     private void Begin(in GpuPass pass)
     {

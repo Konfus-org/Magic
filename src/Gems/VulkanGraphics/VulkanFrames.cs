@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using Magic.Debugging;
 using Magic.Graphics;
@@ -112,8 +111,9 @@ internal sealed unsafe class VulkanFrames : IDisposable
             && Stopwatch.GetElapsedTime(_stagingNeededTimestamp).TotalSeconds > StagingKeptSec
         )
         {
-            _resources.Free(new Trash(frame.StagingId, frame.Staging));
-            frame.Restage(StagingBytes);
+            Trash grown = new(frame.StagingId, frame.Staging);
+            if (frame.Restage(StagingBytes).Ok)
+                _resources.Free(grown);
         }
 
         _device.Api.vkResetFences(frame.Fence);
@@ -143,7 +143,8 @@ internal sealed unsafe class VulkanFrames : IDisposable
 
     /// <summary>
     /// Room in the current frame's staging ring, grown when a frame needs more than it had. A grown ring shrinks back
-    /// in <see cref="Begin"/> once no frame has needed more than <see cref="StagingBytes"/> for a while.
+    /// in <see cref="Begin"/> once no frame has needed more than <see cref="StagingBytes"/> for a while. <c>default</c>
+    /// when the ring cannot grow; the render graph tells that failure.
     /// </summary>
     public GpuUpload Upload(int bytes, int alignment)
     {
@@ -156,8 +157,11 @@ internal sealed unsafe class VulkanFrames : IDisposable
         {
             // The old ring stays in the heap until the frame has run: the copies recorded so far name it by its id
             // when the frame's commands are translated at submit.
-            frame.Trash.Add(new(frame.StagingId, frame.Staging));
-            frame.Restage(Math.Max(frame.Staging.Description.Bytes * 2, offset + bytes));
+            Trash old = new(frame.StagingId, frame.Staging);
+            if (!frame.Restage(Math.Max(frame.Staging.Description.Bytes * 2, offset + bytes)).Ok)
+                return default;
+
+            frame.Trash.Add(old);
             offset = 0;
         }
 
@@ -301,7 +305,9 @@ internal sealed unsafe class VulkanFrames : IDisposable
                 CompactedSizes = sizes;
             }
 
-            Restage(StagingBytes);
+            Result staged = Restage(StagingBytes);
+            if (Staging is null)
+                throw new InvalidOperationException($"Frame {index} has no staging ring: {staged.Error}");
         }
 
         public int Index { get; }
@@ -361,20 +367,23 @@ internal sealed unsafe class VulkanFrames : IDisposable
         }
 
         /// <summary>
-        /// A new staging ring of <paramref name="bytes"/>, in the heap; the old one, if any, is the caller's to free.
+        /// A new staging ring of <paramref name="bytes"/>, in the heap; the old one, if any, is the caller's to free. A
+        /// ring that is not made keeps the old one, so only the first ring, which the constructor makes or throws, can
+        /// be missing.
         /// </summary>
-        [MemberNotNull(nameof(Staging))]
-        public void Restage(long bytes)
+        public Result Restage(long bytes)
         {
             Result<GpuBuffer> made = _resources.CreateBuffer(
                 new BufferDescription($"Staging {Index}", bytes, BufferUsages.Upload)
             );
             if (!made.Ok)
-                throw new InvalidOperationException($"The staging ring of {bytes} bytes was not made: {made.Error}");
+                return Result.Failure($"the staging ring of {bytes} bytes was not made: {made.Error}");
 
             StagingId = made.Value.Id;
             Staging =
                 _resources.Buffers[StagingId] ?? throw new InvalidOperationException("The staging ring left the heap.");
+
+            return Result.Success();
         }
 
         /// <summary>

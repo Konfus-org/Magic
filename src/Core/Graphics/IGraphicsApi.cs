@@ -66,7 +66,8 @@ public interface IGraphicsApi
     GpuState GetState(in ShaderEntry shader);
 
     /// <summary>
-    /// Room for <paramref name="bytes"/> in this frame's staging ring, to fill and copy from in this frame's commands.
+    /// Room for <paramref name="bytes"/> in this frame's staging ring, to fill and copy from in this frame's commands;
+    /// <c>default</c>, with <see cref="GpuBuffer.None"/> and no bytes, when the ring cannot grow to hold them.
     /// </summary>
     GpuUpload BeginUpload(int bytes);
 
