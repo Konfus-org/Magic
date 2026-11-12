@@ -38,7 +38,7 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
     /// </summary>
     private (GpuTexture Picture, int Width, int Height) _resolved;
 
-    public Renderer(AssetManager assets)
+    internal Renderer(AssetManager assets)
     {
         _shader = PassShaders.GetEntry(assets, "TaaUpscaling", "UpscalePicture");
         _upscaling = new Upscaling(Record);

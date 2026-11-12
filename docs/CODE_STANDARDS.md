@@ -48,8 +48,8 @@ Write the engine as data flowing through functions, not objects calling each oth
 - A part is a class that does one job. Core sets up each exported part by the Core interfaces it implements: it
   provides them to the gems made after it, renders, reads assets, or is a window, platform, ECS or log sink. Name a
   part for its interface: `Renderer`, `Ecs`, `Window`, `Input`, `Clipboard`, `Platform`, `GraphicsApi`,
-  `ShaderCompiler`, `DebugUI`, `Importer`, `Exporter`. Declare its property as its class, not as an interface. Parts
-  that share native state take one shared object from `EntryPoint`.
+  `ShaderCompiler`, `DebugUI`, `Importer`, `Exporter`. Declare its property as its class, not as an interface. Its
+  constructor is `internal`. Parts that share native state take one shared object from `EntryPoint`.
 - `EntryPoint`'s constructor takes everything the gem depends on: Core's services and other gems' parts. Only code
   that builds objects from constructors takes `IServiceProvider`. Gems are made in dependency order, then in the order
   the project lists them, and disposed in reverse.

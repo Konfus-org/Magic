@@ -40,7 +40,7 @@ public sealed class Renderer : IRenderFrom<ClusteredGeometryInput>, IHookIntoDom
     private int _domainsLoaded;
     private TaskCompletionSource? _loading;
 
-    public Renderer(ClusteredGeometrySettings settings, AssetManager assets, Threads threads)
+    internal Renderer(ClusteredGeometrySettings settings, AssetManager assets, Threads threads)
     {
         _settings = settings;
         _threads = threads;

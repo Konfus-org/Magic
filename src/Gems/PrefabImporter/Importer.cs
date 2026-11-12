@@ -17,8 +17,12 @@ namespace Magic.PrefabImporter;
 /// name, its tags as a <see cref="Tags"/>, and the entities under it, a prefab it places among them. What it loads as it
 /// reads one is what that one is made from, so it is read again when one of them changes.
 /// </summary>
-public sealed class Importer(AssetManager assets) : IAssetImporter<Prefab>
+public sealed class Importer : IAssetImporter<Prefab>
 {
+    private readonly AssetManager _assets;
+
+    internal Importer(AssetManager assets) => _assets = assets;
+
     public ImmutableArray<string> Extensions { get; } = [".prefab"];
 
     public async Task<Result<Prefab>> ImportAsync(
@@ -98,7 +102,7 @@ public sealed class Importer(AssetManager assets) : IAssetImporter<Prefab>
         {
             if (!placed.TryGetValue(entity.Prefab.Id, out Prefab? prefab))
             {
-                Result<Prefab> loaded = await assets
+                Result<Prefab> loaded = await _assets
                     .LoadAsync(entity.Prefab, file.Id, progress, cancel)
                     .ConfigureAwait(false);
                 if (!loaded.Ok)

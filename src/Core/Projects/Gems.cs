@@ -222,7 +222,53 @@ internal sealed class Gems : IDisposable
                 }
 
                 loaded.Parts.Add(part);
-                SetUp(gem, part, loaded.Ends, settings, assets);
+
+                // Set the part up, until the gem ends, as each thing it is.
+                loaded.Ends.Add(assets.Register(part));
+
+                // The part is an IWindow in any mode, but a headless run has no window.
+                if (part is IWindow window && !_app.IsHeadless)
+                {
+                    _app.Window = window;
+
+                    // The window is the gem's, which can't unload while the app holds it.
+                    loaded.Ends.Add(new Subscription(() => _app.Window = null));
+                }
+
+                if (part is IPlatform platform)
+                {
+                    _app.Platform = platform;
+                    loaded.Ends.Add(new Subscription(() => _app.Platform = null));
+                }
+
+                // A gem whose settings can't be listed still runs by them; only the console and tools can't reach them.
+                if (part is ISettings partSettings)
+                {
+                    try
+                    {
+                        loaded.Ends.Add(settings.Register(partSettings));
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        Log.Error($"Gem {gem.Name}'s settings can't be reached: {ex.Message}");
+                    }
+                }
+
+                if (part is ILogSink sink)
+                    loaded.Ends.Add(Log.Register(sink));
+
+                if (part is IEcs ecs)
+                    loaded.Ends.Add(_world.Register(ecs));
+
+                // A gem that makes what another makes, or closes a cycle, renders nothing; the others go on.
+                try
+                {
+                    loaded.Ends.Add(_rendering.Register(part));
+                }
+                catch (InvalidOperationException ex)
+                {
+                    Log.Error($"Gem {gem.Name} renders nothing: {ex.Message}");
+                }
             }
 
             // What a part reads was expected by its property's type, which can be a base of the part's class.
@@ -440,60 +486,6 @@ internal sealed class Gems : IDisposable
         foreach (LoadedGem gem in _loaded)
         {
             RunHook(hook, frame, gem);
-        }
-    }
-
-    /// <summary>
-    /// Sets up <paramref name="part"/>, a part the made <paramref name="gem"/> exports, until
-    /// <paramref name="ends"/> end: the app's window and platform when it provides them, its settings, its place on the
-    /// log when it is a sink, the world's ECS, the asset types it reads and writes, and its part of the frame.
-    /// </summary>
-    private void SetUp(RegisteredGem gem, object part, Subscriptions ends, Settings settings, AssetManager assets)
-    {
-        ends.Add(assets.Register(part));
-
-        // The part is an IWindow in any mode, but a headless run has no window.
-        if (part is IWindow window && !_app.IsHeadless)
-        {
-            _app.Window = window;
-
-            // The window is the gem's, which can't unload while the app holds it.
-            ends.Add(new Subscription(() => _app.Window = null));
-        }
-
-        if (part is IPlatform platform)
-        {
-            _app.Platform = platform;
-            ends.Add(new Subscription(() => _app.Platform = null));
-        }
-
-        // A gem whose settings can't be listed still runs by them; only the console and tools can't reach them.
-        if (part is ISettings partSettings)
-        {
-            try
-            {
-                ends.Add(settings.Register(partSettings));
-            }
-            catch (InvalidOperationException ex)
-            {
-                Log.Error($"Gem {gem.Name}'s settings can't be reached: {ex.Message}");
-            }
-        }
-
-        if (part is ILogSink sink)
-            ends.Add(Log.Register(sink));
-
-        if (part is IEcs ecs)
-            ends.Add(_world.Register(ecs));
-
-        // A gem that makes what another makes, or closes a cycle, renders nothing; the others go on.
-        try
-        {
-            ends.Add(_rendering.Register(part));
-        }
-        catch (InvalidOperationException ex)
-        {
-            Log.Error($"Gem {gem.Name} renders nothing: {ex.Message}");
         }
     }
 

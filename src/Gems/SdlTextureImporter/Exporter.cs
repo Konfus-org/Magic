@@ -13,6 +13,8 @@ namespace Magic.SdlTextureImporter;
 /// </summary>
 public sealed unsafe class Exporter : IAssetExporter<Texture>
 {
+    internal Exporter() { }
+
     public string Extension => ".png";
 
     public Task<Result<ReadOnlyMemory<byte>>> ExportAsync(

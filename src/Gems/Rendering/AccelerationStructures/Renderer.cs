@@ -26,14 +26,16 @@ public readonly record struct AccelerationStructuresInput(GpuView View, GpuInsta
 /// trace rays it makes none. The models, the instances and the material rows are the renderer's, taken as its
 /// <see cref="GpuView"/> and <see cref="GpuInstances"/>.
 /// </summary>
-public sealed class Renderer(AssetManager assets) : IRender<AccelerationStructuresInput, TracedWorld>
+public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
 {
     /// <summary>
     /// A hit materials row, a <c>GpuHitMaterial</c> as the renderer's <c>Trace/HitSurface.slang</c> lays it out.
     /// </summary>
     private const int HitMaterialBytes = 32;
 
-    private readonly ShaderEntry _averageShader = PassShaders.GetEntry(assets, "AverageMaterials", "AverageMaterials");
+    private readonly AssetManager _assets;
+
+    private readonly ShaderEntry _averageShader;
 
     /// <summary>
     /// The average entry for each material shader the renderer has numbered, in their order.
@@ -52,6 +54,12 @@ public sealed class Renderer(AssetManager assets) : IRender<AccelerationStructur
     /// triangles' structure, and the box over their world boxes, min over max where none do.
     /// </summary>
     private (long Version, int Count, (Vector3 Min, Vector3 Max) Box) _built;
+
+    internal Renderer(AssetManager assets)
+    {
+        _assets = assets;
+        _averageShader = PassShaders.GetEntry(assets, "AverageMaterials", "AverageMaterials");
+    }
 
     /// <summary>
     /// The world as rays see it this frame, built again when the instances or the models' structures changed, written
@@ -106,7 +114,7 @@ public sealed class Renderer(AssetManager assets) : IRender<AccelerationStructur
                             )),
                         ],
                         Name =
-                            $"{assets.GetPath(place.Model) ?? $"model {place.Model.Id}"} acceleration {place.VertexOffset}",
+                            $"{_assets.GetPath(place.Model) ?? $"model {place.Model.Id}"} acceleration {place.VertexOffset}",
                     };
                 }
             }

@@ -24,10 +24,7 @@ public readonly record struct VolumetricsInput(GpuView View, TracedWorld? Traced
 /// from the camera, recorded in the light stage, written into the frame's buffer and made as the frame's
 /// <see cref="Air"/>, which shading takes, with the clouds it draws over the sky. Clear air makes none.
 /// </summary>
-public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, IEcs ecs)
-    : IRender<VolumetricsInput, Air>,
-        IRender,
-        IHookIntoDomainLoading
+public sealed class Renderer : IRender<VolumetricsInput, Air>, IRender, IHookIntoDomainLoading
 {
     /// <summary>
     /// The volume's slices away from the camera, the twin of <c>AirSlices</c> in the renderer's <c>Light/Air.slang</c>.
@@ -56,15 +53,17 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
     /// </summary>
     private readonly TaskCompletionSource _built = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    private readonly IEcs _ecs = ecs;
+    private readonly VolumetricsSettings _settings;
+
+    private readonly IEcs _ecs;
 
     private readonly Mailbox<EcsSnapshot<Weather>> _weather = new();
 
-    private readonly ShaderEntry _scatterShader = PassShaders.GetEntry(assets, "FillAir", "ScatterAir");
+    private readonly ShaderEntry _scatterShader;
 
-    private readonly ShaderEntry _integrateShader = PassShaders.GetEntry(assets, "FillAir", "IntegrateAir");
+    private readonly ShaderEntry _integrateShader;
 
-    private readonly ShaderEntry _cloudShader = PassShaders.GetEntry(assets, "DrawClouds", "DrawClouds");
+    private readonly ShaderEntry _cloudShader;
 
     /// <summary>
     /// The volume's size when it was last filled; none while its history holds nothing. Render thread.
@@ -75,6 +74,15 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
     /// The clouds' picture as it was last drawn; none while it holds nothing. Render thread.
     /// </summary>
     private GpuTexture? _drawnClouds;
+
+    internal Renderer(VolumetricsSettings settings, AssetManager assets, IEcs ecs)
+    {
+        _settings = settings;
+        _ecs = ecs;
+        _scatterShader = PassShaders.GetEntry(assets, "FillAir", "ScatterAir");
+        _integrateShader = PassShaders.GetEntry(assets, "FillAir", "IntegrateAir");
+        _cloudShader = PassShaders.GetEntry(assets, "DrawClouds", "DrawClouds");
+    }
 
     /// <summary>
     /// The frame's air, while the passes' shaders are built, what they read and write is made, and the world's weather
@@ -100,7 +108,7 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
 
         // Two scattering volumes swap every frame, the other holding last frame's, which this frame's blends with.
         GpuView gpu = input.View;
-        (int Width, int Height) size = gpu.Scaled(settings.VolumetricsScale);
+        (int Width, int Height) size = gpu.Scaled(_settings.VolumetricsScale);
         int written = (int)(frame.Index % 2);
         Result<GpuTexture> scattering = graph.Texture(GetVolume(_scatteringNames[written], size));
         Result<GpuTexture> history = graph.Texture(GetVolume(_scatteringNames[1 - written], size));
@@ -135,7 +143,7 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
         {
             Volume = air.Value.Id,
             Sampler = sampler.Value.Id,
-            Distance = settings.VolumetricsDistance,
+            Distance = _settings.VolumetricsDistance,
             Density = weather.FogDensity,
             Height = weather.FogHeight,
             HalfHeight = weather.FogHalfHeight,

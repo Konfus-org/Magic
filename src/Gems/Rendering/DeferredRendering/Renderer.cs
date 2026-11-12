@@ -170,7 +170,7 @@ public sealed class Renderer
 
     private bool _hasDrawn;
 
-    public Renderer(
+    internal Renderer(
         DeferredRenderingSettings settings,
         IShaderCompiler shaders,
         IGraphicsApi gpu,
@@ -263,10 +263,9 @@ public sealed class Renderer
         if (_inputs.TakeNewest() is not { } inputs)
             return null;
 
-        DeferredRenderingSettings settings = _settings;
-        Size resolution = settings.Resolution;
-        float renderScale = settings.RenderScale;
-        float fieldOfView = settings.FieldOfView;
+        Size resolution = _settings.Resolution;
+        float renderScale = _settings.RenderScale;
+        float fieldOfView = _settings.FieldOfView;
 
         // The first frame of another world forgets last frame's camera and size, so nothing drawn before carries
         // into it.
@@ -312,7 +311,7 @@ public sealed class Renderer
 
         // A model no renderer drawn holds, and nothing asked for this frame, leaves once it is kept long enough; the
         // loading domain's models were just asked for, so they stay while it waits.
-        _resources.EvictUnusedModels(inputs.Renderers.Second[.._instances.Count], frameStart, settings.ModelKeepSec);
+        _resources.EvictUnusedModels(inputs.Renderers.Second[.._instances.Count], frameStart, _settings.ModelKeepSec);
         _resources.Upload(graph);
 
         // The picture's effects: the first post processing's, or the engine's, exposed by the exposure compensation;
@@ -323,10 +322,10 @@ public sealed class Renderer
         else
         {
             post = _defaultPost.Effects;
-            post[0].Overrides["compensation"] = settings.ExposureCompensation;
+            post[0].Overrides["compensation"] = _settings.ExposureCompensation;
         }
 
-        ImmutableArray<string> disabled = settings.DisabledEffects;
+        ImmutableArray<string> disabled = _settings.DisabledEffects;
         for (int place = 0; place < MaterialSlots.Capacity && !disabled.IsEmpty; place++)
         {
             if (
@@ -515,7 +514,7 @@ public sealed class Renderer
             isJittered ? FrameView.GetJitter(frame.Index) : Vector2.Zero,
             GetSun(inputs.DirectionalLights),
             hasSky,
-            settings.SkyBrightness
+            _settings.SkyBrightness
         );
         if (!uploaded.Ok)
         {
@@ -555,9 +554,8 @@ public sealed class Renderer
             return;
 
         GpuView gpu = input.View;
-        DeferredRenderingSettings settings = _settings;
-        DebugView renderView = settings.RenderView;
-        TextureFilter upscaleFilter = settings.UpscaleFilter;
+        DebugView renderView = _settings.RenderView;
+        TextureFilter upscaleFilter = _settings.UpscaleFilter;
 
         ReadOnlySpan<GpuResource> indirect = input.Light is { } light
             ? [light.Diffuse, light.Reflections, light.Probes, light.ProbeDepth]
@@ -648,8 +646,8 @@ public sealed class Renderer
                 new GpuConstants(
                     gpu.Frame.Id,
                     (uint)renderView,
-                    BitConverter.SingleToUInt32Bits(settings.DepthViewFar),
-                    BitConverter.SingleToUInt32Bits(Math.Clamp(settings.Gamma, 0.5f, 2f))
+                    BitConverter.SingleToUInt32Bits(_settings.DepthViewFar),
+                    BitConverter.SingleToUInt32Bits(Math.Clamp(_settings.Gamma, 0.5f, 2f))
                 ),
                 RenderStages.Post
             )

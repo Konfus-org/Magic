@@ -41,6 +41,8 @@ public sealed unsafe class Importer : IAssetImporter<Texture>, ICache<Texture>
     /// </summary>
     private static readonly bc7enc_compress_block_params _blockOptions = CreateBlockOptions();
 
+    internal Importer() { }
+
     public ImmutableArray<string> Extensions { get; } = [".png", ".jpg", ".jpeg", ".tga", ".bmp", ".svg", ".ico"];
 
     /// <summary>

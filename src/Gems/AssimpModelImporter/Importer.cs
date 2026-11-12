@@ -37,6 +37,8 @@ public sealed unsafe class Importer : IAssetImporter<Model>
         | aiProcess_FlipUVs
     );
 
+    internal Importer() { }
+
     public ImmutableArray<string> Extensions { get; } = [".fbx", ".glb", ".gltf", ".obj"];
 
     public Task<Result<Model>> ImportAsync(

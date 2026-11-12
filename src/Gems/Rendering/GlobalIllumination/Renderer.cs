@@ -56,7 +56,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
     /// </summary>
     private (int Width, int Height)? _reflected;
 
-    public Renderer(GlobalIlluminationSettings settings, AssetManager assets, Threads threads, IGraphicsApi gpu)
+    internal Renderer(GlobalIlluminationSettings settings, AssetManager assets, Threads threads, IGraphicsApi gpu)
     {
         _settings = settings;
         _threads = threads;
@@ -76,11 +76,10 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
     /// </summary>
     public IndirectLight? Render(in Frame frame, RenderGraph graph, in GlobalIlluminationInput input)
     {
-        GlobalIlluminationSettings settings = _settings;
-        bool isReflectionsOn = settings.IsReflectionsOn;
+        bool isReflectionsOn = _settings.IsReflectionsOn;
 
         // Off, no domain waits for the passes, and the probes start afresh once it is back on.
-        if (!settings.IsIndirectLightOn)
+        if (!_settings.IsIndirectLightOn)
         {
             _built.TrySetResult();
             _traced = null;
@@ -134,7 +133,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         }
 
         Result<GpuBuffer> constants = graph.Buffer(new("GI constants", Unsafe.SizeOf<GIConstants>()));
-        (int Width, int Height) tracedSize = gpu.Scaled(settings.IndirectScale);
+        (int Width, int Height) tracedSize = gpu.Scaled(_settings.IndirectScale);
         bool hasHistory = _traced == tracedSize;
         GIView view = new(
             graph,
@@ -156,7 +155,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
             graph,
             _traced is not null,
             traced.Box,
-            (settings.ProbesAcross, settings.ProbesUp)
+            (_settings.ProbesAcross, _settings.ProbesUp)
         );
         Result<TracedDiffuseConstants> diffuse = TracedDiffuse.Prepare(view, frame.Index, hasHistory);
         Result<TracedReflectionConstants> reflections = isReflectionsOn

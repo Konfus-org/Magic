@@ -75,7 +75,7 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     /// </summary>
     private unsafe void* _globalSession;
 
-    public ShaderCompiler(App app, AssetManager assets, Caches caches, SlangShaderCompilerSettings settings)
+    internal ShaderCompiler(App app, AssetManager assets, Caches caches, SlangShaderCompilerSettings settings)
     {
         _assets = assets;
         _caches = caches;
