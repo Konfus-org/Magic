@@ -374,7 +374,7 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
                 FailureKind.Model => assets.GetPath(new Handle<Model>(id)),
                 FailureKind.Shader => assets.GetPath(new Handle<Shader>(id)),
                 FailureKind.Texture => assets.GetPath(new Handle<Texture>(id)),
-                FailureKind.Material or FailureKind.Uniform => assets.GetPath(new Handle<Material>(id)),
+                FailureKind.Material or FailureKind.Param => assets.GetPath(new Handle<Material>(id)),
                 _ => null,
             } ?? $"id {id}";
         if (param is not null)
@@ -387,14 +387,11 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
 
         string text = $"{kind} failed ";
         int kept = Math.Min(path.Length, GpuFailureText.Length - text.Length);
-        FailurePattern pattern = kind is FailureKind.Texture or FailureKind.Uniform
-            ? FailurePattern.Stripes
-            : FailurePattern.Solid;
         row = (uint)_failureRowOf.Count + 1;
         if (row == _failureRows.Length)
             Array.Resize(ref _failureRows, _failureRows.Length * 2);
 
-        _failureRows[row] = GpuFailure.Create(kind, pattern, text + path[^kept..]);
+        _failureRows[row] = GpuFailure.Create(kind, text + path[^kept..]);
         _failureRowOf[failure] = row;
 
         return row;

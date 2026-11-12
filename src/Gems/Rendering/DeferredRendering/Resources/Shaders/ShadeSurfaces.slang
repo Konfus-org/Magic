@@ -24,20 +24,10 @@ import Surface.Brdf;
 static const uint SkyFailed = 1u;
 static const uint WeatherFailed = 2u;
 
-// The colours of the failures, linear, from the failure mockup's sRGB colours: coral #D85A30, green #639922; how often
-// they flash, in pulses a second; and how bright the colour and the text glow.
+// The colours of the failures, linear, from the failure mockup's sRGB colours: coral #D85A30, green #639922. Their
+// flash, their glow and their text's sizes are Scene/Failures'.
 static const float3 Coral = float3(0.687, 0.102, 0.030);
 static const float3 Green = float3(0.125, 0.319, 0.016);
-static const float PulsesPerSecond = 1.5;
-static const float ColorGlow = 2.0;
-static const float TextGlow = 3.0;
-
-// The render pixels a dot of the font covers, a character's cell and a text row's height in dots, and the characters
-// of space after each copy of the text.
-static const uint DotPixels = 2u;
-static const uint CellWidth = 6u;
-static const uint RowHeight = 10u;
-static const uint CopyGap = 3u;
 
 // The band of the sky where clouds draw, as the sine of the elevation, from its bottom to its top.
 static const float2 CloudBand = float2(0.05, 0.35);
@@ -50,13 +40,13 @@ static const uint WeatherText[14] = { 87u, 101u, 97u, 116u, 104u, 101u, 114u, 32
 bool IsFailureTextPixel(uint2 pixel, bool isWeather)
 {
     uint length = isWeather ? 14u : 10u;
-    uint2 dot = pixel / DotPixels;
-    uint index = (dot.x / CellWidth) % (length + CopyGap);
+    uint2 dot = pixel / uint(FailureDotPixels);
+    uint index = (dot.x / FailureCellWidth) % (length + FailureCopyGap);
     if (index >= length)
         return false;
 
     uint code = isWeather ? WeatherText[index] : SkyText[index];
-    return IsGlyphDot(code, uint2(dot.x % CellWidth, dot.y % RowHeight));
+    return IsGlyphDot(code, uint2(dot.x % FailureCellWidth, dot.y % FailureRowHeight));
 }
 
 // The failure at a pixel where the sky or its clouds would draw: the band of the clouds in flashing green while they
@@ -64,13 +54,12 @@ bool IsFailureTextPixel(uint2 pixel, bool isWeather)
 float3 ShowSkyFailure(bool isWeather, uint2 pixel, float timeSec)
 {
     if (IsFailureTextPixel(pixel, isWeather))
-        return float3(TextGlow);
+        return float3(FailureTextGlow);
 
     if (pixel.x > 0u && pixel.y > 0u && IsFailureTextPixel(pixel - 1u, isWeather))
         return float3(0.0);
 
-    float pulse = 0.55 + 0.45 * sin(TwoPi * PulsesPerSecond * timeSec);
-    return (isWeather ? Green : Coral) * pulse * ColorGlow;
+    return (isWeather ? Green : Coral) * GetFailurePulse(timeSec) * FailureColorGlow;
 }
 
 // The light a surface at a pixel reflects of what reaches it indirectly. The diffuse is what a white diffuse surface

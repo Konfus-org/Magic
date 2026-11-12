@@ -42,7 +42,8 @@ static const float TwoPi = 6.28318530717959;
 static const float PulsesPerSecond = 1.5;
 
 // The colours of the kinds, linear, from the failure mockup's sRGB colours: red #E24B4A, coral #D85A30, green #639922,
-// blue #378ADD.
+// blue #378ADD. Coral and green are copies of ShadeSurfaces.slang's, and the flash and the dot's size of
+// Scene/Failures.slang's, as this module imports nothing.
 static const float3 Red = float3(0.761, 0.070, 0.068);
 static const float3 Coral = float3(0.687, 0.102, 0.030);
 static const float3 Green = float3(0.125, 0.319, 0.016);

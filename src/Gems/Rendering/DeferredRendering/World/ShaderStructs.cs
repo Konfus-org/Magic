@@ -198,31 +198,22 @@ internal struct GpuMaterialParams
 }
 
 /// <summary>
-/// What failed, the twin of <c>Scene/Failures.slang</c>'s <c>FailureKind</c>.
+/// What failed, the twin of <c>Scene/Failures.slang</c>'s <c>FailureKind</c>. The shader draws a part of a material, a
+/// param or a texture, in stripes over the real surface, and each other kind solid.
 /// </summary>
 internal enum FailureKind : uint
 {
     Model = 0,
     Material = 1,
     Shader = 2,
-    Uniform = 3,
+    Param = 3,
     Texture = 4,
 }
 
 /// <summary>
-/// How much of the thing failed, the twin of <c>Scene/Failures.slang</c>'s <c>FailurePattern</c>: all of it, drawn
-/// solid, or a part, drawn in stripes over the real surface.
-/// </summary>
-internal enum FailurePattern : uint
-{
-    Solid = 0,
-    Stripes = 1,
-}
-
-/// <summary>
-/// A row of the failure table, 64 bytes, the twin of the layout <c>Scene/Failures.slang</c> writes: the header, with the
-/// kind in bits 0 to 7, the pattern in bits 8 to 15 and the text's length in bits 16 to 23; the text, a one-byte
-/// character code each, 4 in each word, the first in the lowest byte; and a spare word.
+/// A row of the failure table, 64 bytes, the twin of the layout <c>Scene/Failures.slang</c> writes: the header, with
+/// the kind in bits 0 to 7 and the text's length in bits 16 to 23; the text, a one-byte character code each, 4 in each
+/// word, the first in the lowest byte; and a spare word.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal struct GpuFailure
@@ -236,14 +227,13 @@ internal struct GpuFailure
     public uint Spare;
 
     /// <summary>
-    /// The row of a failure of <paramref name="kind"/>, drawn in <paramref name="pattern"/>, with the first
-    /// <see cref="GpuFailureText.Length"/> characters of <paramref name="text"/>; a character that is not printable
-    /// ASCII becomes '?'.
+    /// The row of a failure of <paramref name="kind"/>, with the first <see cref="GpuFailureText.Length"/> characters
+    /// of <paramref name="text"/>; a character that is not printable ASCII becomes '?'.
     /// </summary>
-    public static GpuFailure Create(FailureKind kind, FailurePattern pattern, string text)
+    public static GpuFailure Create(FailureKind kind, string text)
     {
         int length = Math.Min(text.Length, GpuFailureText.Length);
-        GpuFailure row = new() { Header = (uint)kind | ((uint)pattern << 8) | ((uint)length << 16) };
+        GpuFailure row = new() { Header = (uint)kind | ((uint)length << 16) };
         for (int i = 0; i < length; i++)
         {
             char c = text[i];

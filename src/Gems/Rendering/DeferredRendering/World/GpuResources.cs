@@ -499,7 +499,7 @@ internal sealed class GpuResources(
         if (failedTexture != Handle<Texture>.None)
             failure = (FailureKind.Texture, failedTexture.Id, null);
         else if (misfit is not null)
-            failure = (FailureKind.Uniform, slot.Handle.Id, misfit);
+            failure = (FailureKind.Param, slot.Handle.Id, misfit);
 
         return state;
 
