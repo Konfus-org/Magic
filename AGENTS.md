@@ -124,9 +124,11 @@ Work moves one slice at a time, and the conversation holds the plan. A swarm dif
   big: say so plainly and propose the split.
 - **Check for drift.** Before each slice, check it against the goal and decisions agreed in the conversation. Say so
   if it doesn't serve them.
-- **Stop after each slice.** Once it merges, propose the next slice and wait. Never start it on your own.
-- **One slice per session.** When compacting, keep the
-  slice list, the current slice, its worktree path, the files it changed and its `-Change` level.
+- **Go on through the approved list.** Once a slice merges, start the next slice of the list that the user approved.
+  When no approved slice is left, propose the next slice and wait. Never start a slice that the user did not approve.
+- **Keep the context small.** Start the next slice in the same session while the context is less than half full.
+  Otherwise give its brief to paste after `/clear`, and stop. When compacting, keep the slice list, the current
+  slice, its worktree path, the files it changed and its `-Change` level.
 
 ### Kickoff
 

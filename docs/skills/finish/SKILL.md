@@ -44,5 +44,7 @@ The commands and rules in this skill are in [PROJECT.md](../PROJECT.md).
       that the app made for the session. For a branch that you made from a remote branch, set its upstream to that
       branch first. Then `-d` removes it.
    7. Delete the side sessions that you started and that are done ([tidy-worktrees skill](../tidy-worktrees/SKILL.md)).
-8. Stop. Propose the next slice. Suggest that the user starts it with a clear context (`/clear`). Give its brief in one
-   or two lines to paste. Do not start it yourself.
+8. Go on to the next slice:
+   - If a slice of the list that the user approved is left, start it with the [slice skill](../slice/SKILL.md). If
+     the context is more than half full, give its brief in one or two lines to paste after `/clear`, and stop.
+   - If no approved slice is left, propose the next slice and stop. Do not start it yourself.
