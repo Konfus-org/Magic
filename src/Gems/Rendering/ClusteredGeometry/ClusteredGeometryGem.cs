@@ -68,7 +68,8 @@ public sealed class ClusteredGeometryGem
     public void Dispose()
     {
         _preprocessing.Dispose();
-        Interlocked.Exchange(ref _loading, null)?.TrySetResult();
+        _loading?.TrySetResult();
+        _loading = null;
     }
 
     /// <summary>
@@ -105,7 +106,8 @@ public sealed class ClusteredGeometryGem
             && graph.GetState(_passes.GetResolveShaders(gpu.MaterialShaders)) != GpuState.Loading
         )
         {
-            Interlocked.Exchange(ref _loading, null)?.TrySetResult();
+            _loading.TrySetResult();
+            _loading = null;
         }
 
         Result recorded = _passes.Record(graph, gpu, pools.Value, Settings);
@@ -125,7 +127,8 @@ public sealed class ClusteredGeometryGem
     {
         await _threads.Enter(EngineThread.Render);
         _domainsLoaded++;
-        Interlocked.Exchange(ref _loading, null)?.TrySetResult();
+        _loading?.TrySetResult();
+        _loading = null;
         if (!_isRunning)
             return;
 
@@ -140,7 +143,8 @@ public sealed class ClusteredGeometryGem
     private void FailStart(string error)
     {
         Log.Error($"The clusters are not drawn: {error}");
-        Interlocked.Exchange(ref _loading, null)?.TrySetResult();
+        _loading?.TrySetResult();
+        _loading = null;
         _isRunning = false;
     }
 }

@@ -73,11 +73,6 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
     /// </summary>
     public Result<ClusterPools> Prepare(RenderGraph graph, ReadOnlySpan<ModelPlace> models)
     {
-        Result<GpuBuffer> table = graph.Buffer(new("Cluster model table", (long)models.Length * GpuClusterModel.Bytes));
-        Result<GpuBuffer> impostors = graph.Buffer(new("Impostor table", (long)ImpostorCapacity * GpuImpostor.Bytes));
-        if (Result.FindFailure(table, impostors) is { Ok: false } failedTable)
-            return Result.Failure(failedTable.Error);
-
         // A row past the view's last row in use has lost its model: its ranges given back, and the row dropped.
         for (int index = models.Length; index < _rows.Count; index++)
         {
@@ -91,6 +86,15 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
         {
             _rows.Add(default);
         }
+
+        // The GPU table is as long as the row list's capacity, which doubles as rows come and never shrinks, so it is
+        // not made again each time a model arrives or leaves.
+        Result<GpuBuffer> table = graph.Buffer(
+            new("Cluster model table", (long)_rows.Capacity * GpuClusterModel.Bytes)
+        );
+        Result<GpuBuffer> impostors = graph.Buffer(new("Impostor table", (long)ImpostorCapacity * GpuImpostor.Bytes));
+        if (Result.FindFailure(table, impostors) is { Ok: false } failedTable)
+            return Result.Failure(failedTable.Error);
 
         // A row whose model changed draws nothing until what it holds now arrives.
         for (int index = 0; index < models.Length; index++)
