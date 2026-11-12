@@ -2,8 +2,7 @@
 
 A gem is a plugin: a part of the engine that a project adds or replaces. The gems that come with Magic are in
 `src/Gems/`. Each gem builds to `Gems/<Name>/` next to Magic. A project runs a gem when its `.magic` file lists the
-name of the gem. To make a gem, use the gem template ([Templates](TOOLS.md#templates)). The debug gems, ImGuiDebugUI
-and DebugTools, are in [Debugging](DEBUGGING.md).
+name of the gem. To make a gem, use the gem template ([Templates](TOOLS.md#templates)).
 
 ## Gems that use other gems
 
@@ -35,7 +34,11 @@ the item.
 - To run the generator by hand, run `ClangSharpPInvokeGenerator @<library>.bindings.rsp`. The build writes this file
   in the intermediate folder of the project.
 
-## AssimpModelImporter
+## Bundled gems
+
+The debug gems, ImGuiDebugUI and DebugTools, are in [Debugging](DEBUGGING.md).
+
+### AssimpModelImporter
 
 Reads FBX, glTF and OBJ files into models. Provides `IAssetImporter<Model>`.
 
@@ -46,20 +49,20 @@ Reads FBX, glTF and OBJ files into models. Provides `IAssetImporter<Model>`.
   materials. The number of slots stops at the number that a renderer has.
 - The `origin` in the `.meta` file is the point that the importer moves to (0, 0, 0) of the model.
 
-## SdlBindings
+### SdlBindings
 
 The C APIs of SDL3 and SDL_image, for the gems that use SDL. `Sdl.Error` gives the reason why the last SDL call
 failed. A gem that needs SDL references this project, and the csproj sets the tag of each library
 ([Native libraries](#native-libraries)).
 
-## SdlPlatform
+### SdlPlatform
 
 Gives the window, the clipboard and the input, through [SDL3](https://github.com/libsdl-org/SDL). Provides `IWindow`,
 `IClipboard` and `IInput`. It also gets the events of the OS on the platform thread (`IPlatform`).
 
 The settings of the gem are in `SdlPlatformSettings`. `get Window`, `get Input` and `get Simulation` list them.
 
-### Input
+#### Input
 
 - You can connect and disconnect keyboards, mice and gamepads while Magic runs.
 - Keys are physical keys (SDL scancodes). They are the same on each keyboard layout. Typed text follows the layout.
@@ -67,23 +70,23 @@ The settings of the gem are in `SdlPlatformSettings`. `get Window`, `get Input` 
   notches.
 - Gamepads use the standard layout of SDL. Sticks go from -1 to 1, with up positive. Triggers go from 0 to 1.
 
-### Window
+#### Window
 
 - The wait for a frame rate limit shows as the `Update` of the gem in the stats.
 - The title of the window is the name of the project. The icon is the default icon until you set `Icon`.
 - When you close the window, the run ends.
 
-### Threads
+#### Threads
 
 - Use the members of the window and the clipboard only on the game thread. On other threads, a set throws.
 - You can read the size of the window from any thread.
 - A change that you make reaches the OS when the platform thread next gets the events of the OS.
 
-### Headless runs
+#### Headless runs
 
 Without a window, the gem needs no display. Only gamepads give input. The text of the clipboard stays in the gem.
 
-### Memory
+#### Memory
 
 The gem publishes the RAM that only this process holds, as `process.memory.usage` on its `Magic.Gems.SdlPlatform`
 meter. This is the same number that the tools of the OS show:
@@ -92,7 +95,7 @@ meter. This is the same number that the tools of the OS show:
 - On Linux, the anonymous resident pages (`RssAnon`).
 - On macOS, the physical footprint.
 
-## SdlTextureImporter
+### SdlTextureImporter
 
 Reads PNG, JPEG, TGA, BMP, SVG and ICO files into textures. Provides `IAssetImporter<Texture>`. It also writes a plain
 RGBA8 texture as a PNG file, and provides `IAssetExporter<Texture>`.
@@ -105,7 +108,7 @@ RGBA8 texture as a PNG file, and provides `IAssetExporter<Texture>`.
   file must have `isCompressed` off, because a window icon is plain pixels.
 - The `size` in the `.meta` file of an `.svg` file sets the width that the importer draws it at.
 
-## SlangShaderCompiler
+### SlangShaderCompiler
 
 Compiles Slang entry points to SPIR-V for the GPU provider. Provides `IShaderCompiler`.
 
@@ -121,14 +124,14 @@ Compiles Slang entry points to SPIR-V for the GPU provider. Provides `IShaderCom
 > **Note:** The bindings generator cannot bind the C++ interfaces of the compiler. `Slang.cs` binds by hand the calls
 > that the gem makes, by their indices in `slang.h` at the tag that the project builds.
 
-## VulkanGraphics
+### VulkanGraphics
 
 The GPU through Vulkan 1.3. Provides `IGraphicsApi`.
 
 In the `.magic` file of a project, list it after the gems that provide the window and the shader compiler. The
 settings of the gem are in `VulkanGraphicsSettings`. `get Window` and `get Rendering` list them.
 
-### Resources
+#### Resources
 
 - A shader reads each resource by the id in its handle.
 - The gem makes a texture, buffer, top-level acceleration structure or sampler at the first frame that asks for it by
@@ -139,7 +142,7 @@ settings of the gem are in `VulkanGraphicsSettings`. `get Window` and `get Rende
   that it reads.
 - Use the resources and frames only on the render thread. On other threads, the members throw.
 
-### Passes
+#### Passes
 
 - A frame is one `GpuCommands` value. The gems record their passes into the graph of Core, and Core gives the frame to
   this gem.
@@ -149,7 +152,7 @@ settings of the gem are in `VulkanGraphicsSettings`. `get Window` and `get Rende
 - A pass is not in the frame until its shaders compile. If a shader fails, the gem logs the error and the pass stays
   out.
 
-### GPU and ray queries
+#### GPU and ray queries
 
 - The gem uses the fastest GPU that has Vulkan 1.3, bindless descriptors and dynamic rendering, and can show the
   window. The log names the GPU when the run starts.
@@ -157,13 +160,13 @@ settings of the gem are in `VulkanGraphicsSettings`. `get Window` and `get Rende
   triangles and a top-level one over instances.
 - After a bottom-level structure is built, the next frame compacts it. Its name then gives a new id and address.
 
-### Window
+#### Window
 
 - The gem draws into the window on Windows, X11, Wayland and macOS.
 - Headless, there is no window image, and `WindowTarget` is none. All the other features work. Without a GPU, the gem
   uses a software device, such as Mesa's lavapipe.
 
-### Debug and measurements
+#### Debug and measurements
 
 - In a Debug build, if the Vulkan SDK is installed, the gem turns on the Khronos validation layer. It logs what the
   layer reports.
