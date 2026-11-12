@@ -3,10 +3,12 @@ using System.Numerics;
 namespace Magic.Ecs.Components;
 
 /// <summary>
-/// Where an entity is, which way it faces and how big it is, in metres. +Y is up, +X right and +Z forward, left-handed:
-/// a camera looks, and a directional light shines, along its entity's +Z. A new one is at the origin, unrotated, at
-/// unit scale.
+/// Where an entity is, which way it faces and how big it is, in metres.
 /// </summary>
+/// <remarks>
+/// +Y is up, +X right and +Z forward, left-handed: a camera looks, and a directional light shines, along the +Z of its
+/// entity. A new one is at the origin, not rotated, at unit scale.
+/// </remarks>
 public record struct Transform : IComponent
 {
     public Vector3 Position;
@@ -24,9 +26,11 @@ public record struct Transform : IComponent
         Matrix4x4.CreateScale(Scale) * Matrix4x4.CreateFromQuaternion(Rotation) * Matrix4x4.CreateTranslation(Position);
 
     /// <summary>
-    /// This transform, a child's, relative to <paramref name="parent"/>, as the world sees it: scaled, turned, then
-    /// moved by the parent's.
+    /// Returns this transform of a child, relative to <paramref name="parent"/>, as the world sees it.
     /// </summary>
+    /// <remarks>
+    /// The parent scales it, turns it, then moves it.
+    /// </remarks>
     public readonly Transform Under(Transform parent) =>
         new()
         {

@@ -1,10 +1,12 @@
 namespace Magic.Ecs.Components;
 
 /// <summary>
-/// A label with no data: a hash of its name, so comparing two costs nothing and a file can name one no code declares.
-/// Made from a name with <see cref="From"/>, the same on every run and machine. An entity holds its tags in a
-/// <see cref="Tags"/>.
+/// A label with no data: a hash of its name, so a compare costs nothing and a file can name a tag no code declares.
 /// </summary>
+/// <remarks>
+/// <see cref="From"/> makes one from a name, the same on each run and machine. An entity holds its tags in a
+/// <see cref="Tags"/>.
+/// </remarks>
 public readonly record struct Tag(int Id)
 {
     public static Tag None => default;
@@ -27,9 +29,11 @@ public readonly record struct Tag(int Id)
     public bool IsValid => Id != 0;
 
     /// <summary>
-    /// The tag named <paramref name="name"/>: FNV-1a over its UTF-16 code units, and 1 for a name that hashes to 0,
-    /// which is <see cref="None"/>.
+    /// Returns the tag named <paramref name="name"/>.
     /// </summary>
+    /// <remarks>
+    /// It is FNV-1a over the UTF-16 code units of the name. A name that hashes to 0, <see cref="None"/>, gets 1.
+    /// </remarks>
     public static Tag From(string name)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);

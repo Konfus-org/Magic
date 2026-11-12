@@ -26,9 +26,12 @@ public enum Playback : byte
 public enum SoundSpace : byte
 {
     /// <summary>
-    /// From its entity's place in the world: from the side it is on, quieter the farther it is, muffled by what is
-    /// solid between it and the listener and echoed by what is around them. Played mono, as one point sounds.
+    /// From the place of its entity in the world, from its side and quieter with distance.
     /// </summary>
+    /// <remarks>
+    /// Solid things between it and the listener muffle it, and things around them echo it. It plays mono, as one point
+    /// sounds.
+    /// </remarks>
     World,
 
     /// <summary>
@@ -39,15 +42,24 @@ public enum SoundSpace : byte
 }
 
 /// <summary>
-/// Plays an <see cref="Assets.Audio"/>: in the world at its entity's <see cref="Transform"/>, heard from the
-/// player's camera, fading with distance and muffled and echoed by what is solid around it, or everywhere alike, for
-/// music and ambience. A new one, <c>{ "audio": { "id": 800 } }</c> in a file, plays the sound once, at full volume,
-/// in the world, heard at full volume within a metre and not at all past 25; <c>"isLooping": true</c> plays it without
-/// end, and <c>"space": "everywhere"</c> plays it as music is. The gem that plays sounds writes back how far in
-/// it is (<see cref="TimeSec"/>) and when a sound that does not loop has ended (<see cref="Playback"/>), and follows
-/// what a script writes: <see cref="Playback"/> to play, pause or stop it, <see cref="TimeSec"/> to seek, and every
-/// other value as it changes.
+/// Plays an <see cref="Assets.Audio"/>, in the world at the <see cref="Transform"/> of its entity, or everywhere alike.
 /// </summary>
+/// <remarks>
+/// <para>
+/// In the world, the camera of the player hears it. It fades with distance, and solid things around it muffle and
+/// echo it. Everywhere alike is for music and ambience.
+/// </para>
+/// <para>
+/// A new one, <c>{ "audio": { "id": 800 } }</c> in a file, plays the sound once, at full volume, in the world. It is
+/// heard at full volume within a metre and not at all past 25 m. <c>"isLooping": true</c> plays it without end, and
+/// <c>"space": "everywhere"</c> plays it as music.
+/// </para>
+/// <para>
+/// The gem that plays sounds writes back how far in it is (<see cref="TimeSec"/>) and when a sound that does not loop
+/// ended (<see cref="Playback"/>). It follows what a script writes: <see cref="Playback"/> to play, pause or stop it,
+/// <see cref="TimeSec"/> to seek, and each other value when it changes.
+/// </para>
+/// </remarks>
 public record struct Sound : IComponent
 {
     /// <summary>
@@ -56,9 +68,11 @@ public record struct Sound : IComponent
     public Handle<Audio> Audio;
 
     /// <summary>
-    /// Whether it plays: playing by default, so a sound placed in the world is heard as it spawns. Set to playing again
-    /// after it stopped, it plays from <see cref="TimeSec"/>, which stopping put back to the start.
+    /// Whether it plays: playing by default, so a sound placed in the world is heard when it spawns.
     /// </summary>
+    /// <remarks>
+    /// Set to playing after a stop, it plays from <see cref="TimeSec"/>, which the stop put back to the start.
+    /// </remarks>
     public Playback Playback;
 
     /// <summary>
@@ -72,15 +86,19 @@ public record struct Sound : IComponent
     public SoundSpace Space;
 
     /// <summary>
-    /// How much it is heard only ahead of it, along its entity's +Z: 0 every way alike, 1 ahead alone, as a
-    /// loudspeaker or a voice is, from 0.3 or so.
+    /// How much it is heard only ahead, along the +Z of its entity: 0 in all directions alike, 1 only ahead.
     /// </summary>
+    /// <remarks>
+    /// A loudspeaker or a voice is about 0.3.
+    /// </remarks>
     public float Focus;
 
     /// <summary>
-    /// What is solid between it and the listener does not muffle it, which costs nothing to trace: for a sound meant
-    /// to be heard whatever is in the way.
+    /// Whether solid things between it and the listener do not muffle it, which costs no trace.
     /// </summary>
+    /// <remarks>
+    /// Use it for a sound that must be heard through anything in the way.
+    /// </remarks>
     public bool IsUnoccluded;
 
     /// <summary>
@@ -99,9 +117,11 @@ public record struct Sound : IComponent
     public float Volume = 1;
 
     /// <summary>
-    /// How fast it plays, raising its pitch as it goes faster: 2 is an octave up and twice as fast, 0.5 an octave down.
-    /// Held between the two.
+    /// How fast it plays, which raises its pitch as it goes faster: 2 is an octave up, 0.5 an octave down.
     /// </summary>
+    /// <remarks>
+    /// The value is held between 0.5 and 2.
+    /// </remarks>
     public float Pitch = 1;
 
     /// <summary>

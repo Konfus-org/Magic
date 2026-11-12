@@ -6,10 +6,12 @@ using Magic.Threading;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>stats [category] [seconds]</c>: prints what the meters measure over the next second, all of it or each
-/// instrument with the category as a part of its name, such as gpu; with seconds, logs it every so many seconds
-/// instead, 0 to stop.
+/// <c>stats [category] [seconds]</c>: prints what the meters measure over the next second.
 /// </summary>
+/// <remarks>
+/// With a category, such as gpu, it prints only each instrument whose name has the category in it. With seconds, it
+/// logs the values each so many seconds instead, and 0 stops it.
+/// </remarks>
 internal static class StatsCommand
 {
     /// <summary>

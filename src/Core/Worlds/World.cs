@@ -33,12 +33,22 @@ internal readonly record struct PlacedPrefab(DomainPlace Place, Prefab Prefab);
 internal readonly record struct DomainRead(Handle<Domain> Domain, Domain Asset, ImmutableArray<PlacedPrefab> Prefabs);
 
 /// <summary>
-/// The game world: what is in it, the one place to load content into it, and the way to its entities. Every entity call
-/// goes to the ECS a gem provides. What comes and goes
-/// does so one at a time, and each entity a domain placed has its <see cref="Owner"/>, for saves and for when the domain opens again. As the run starts it puts
-/// back the world the last run kept, or opens the entry point, without waiting for it, as frames run while it loads; as the
-/// run ends for a restart it keeps the world for the next; and it changes for what the assets say changed. Entity calls are for the game thread; the others, any.
+/// The game world: what is in it, the one place to load content into it, and the way to its entities.
 /// </summary>
+/// <remarks>
+/// <para>
+/// Each entity call goes to the ECS that a gem gives. Content comes and goes one load at a time. Each entity that a
+/// domain placed has its <see cref="Owner"/>, for saves and for when the domain opens again.
+/// </para>
+/// <para>
+/// When the run starts, the world puts back the world that the last run kept, or opens the entry point. It does not
+/// wait for the load, because frames run while it loads. When the run ends for a restart, it keeps the world for the
+/// next run. It changes when the assets say that something changed.
+/// </para>
+/// <para>
+/// Make entity calls on the game thread. Make the other calls on any thread.
+/// </para>
+/// </remarks>
 public sealed class World : IEcs, IDisposable
 {
     private readonly AssetManager _assets;
@@ -57,9 +67,12 @@ public sealed class World : IEcs, IDisposable
     private readonly SemaphoreSlim _turn = new(1, 1);
 
     /// <summary>
-    /// Each open domain and the prefabs it placed, as they were read: what its entities are compared with, by a save and as
-    /// the domain opens again; held, so the assets read them again when their files change. Game thread.
+    /// Each open domain and the prefabs it placed, as they were read. Game thread.
     /// </summary>
+    /// <remarks>
+    /// A save, and a domain that opens again, compare the entities with them. They are held, so the assets read them
+    /// again when their files change.
+    /// </remarks>
     private readonly Dictionary<Handle<Domain>, DomainRead> _read = [];
 
     /// <summary>
@@ -68,9 +81,11 @@ public sealed class World : IEcs, IDisposable
     private IEcs? _ecs;
 
     /// <summary>
-    /// Completed as the next frame starts, and replaced for the one after, by <see cref="Pump"/>: what a replace waits on
-    /// frame by frame. Game thread.
+    /// What a replace waits on frame by frame. Game thread.
     /// </summary>
+    /// <remarks>
+    /// <see cref="Pump"/> completes it when the next frame starts, and replaces it for the frame after.
+    /// </remarks>
     private TaskCompletionSource _frameStarting = new();
 
     /// <summary>
@@ -93,20 +108,27 @@ public sealed class World : IEcs, IDisposable
     public ImmutableArray<Handle<Domain>> Domains { get; private set; } = [];
 
     /// <summary>
-    /// Whether a domain or a saved world is replacing what is in the world: from when the loading screen shows until a
-    /// frame has drawn what replaced it.
+    /// Whether a domain or a saved world replaces what is in the world.
     /// </summary>
+    /// <remarks>
+    /// It is true from when the loading screen shows until a frame drew what replaced the world.
+    /// </remarks>
     public bool IsLoading { get; private set; }
 
     /// <summary>
-    /// Whether the world's time stands still, from the next frame, with no fixed steps. Ignored while it loads, as the
-    /// gems may need steps to get ready.
+    /// Whether the time of the world stands still, with no fixed steps, from the next frame.
     /// </summary>
+    /// <remarks>
+    /// It is ignored during a load, because the gems can need steps to get ready.
+    /// </remarks>
     public bool IsPaused { get; set; }
 
     /// <summary>
-    /// How fast the world's time runs against real time, from the next frame; below 0 is 0. Ignored while it loads.
+    /// How fast the time of the world runs against real time, from the next frame.
     /// </summary>
+    /// <remarks>
+    /// A value below 0 is 0. It is ignored during a load.
+    /// </remarks>
     public float TimeScale
     {
         get;
@@ -114,15 +136,19 @@ public sealed class World : IEcs, IDisposable
     } = 1;
 
     /// <summary>
-    /// Whether the loading screen is what the world holds, until what replaces it comes: while it is, the world's own pause
-    /// and time scale wait for it.
+    /// Whether the world holds the loading screen, until what replaces it comes.
     /// </summary>
+    /// <remarks>
+    /// While it does, the pause and the time scale of the world wait.
+    /// </remarks>
     internal bool IsShowingLoadingScreen { get; private set; }
 
     /// <summary>
-    /// The last frame whose hooks before Render have run, so what it made of the world is published for the render thread.
-    /// Set on the game thread, read on any.
+    /// The last frame whose hooks before Render ran, so that what it made of the world is ready for the render thread.
     /// </summary>
+    /// <remarks>
+    /// Set it on the game thread. Read it on any thread.
+    /// </remarks>
     internal uint PublishedFrame
     {
         get => Volatile.Read(ref field);
@@ -130,8 +156,11 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// The newest published frame the render thread has drawn, or one after it. Set on the render thread, read on any.
+    /// The newest published frame that the render thread drew, or one after it.
     /// </summary>
+    /// <remarks>
+    /// Set it on the render thread. Read it on any thread.
+    /// </remarks>
     internal uint DrawnFrame
     {
         get => Volatile.Read(ref field);
@@ -155,10 +184,12 @@ public sealed class World : IEcs, IDisposable
     public void Dispose() => _turn.Dispose();
 
     /// <summary>
-    /// Opens <paramref name="domain"/> in place of what is in the world, all but its globals, with the loading screen shown
-    /// until it is there and the project's player at its spawn. It is read first on workers, so one that doesn't load leaves
-    /// the world as it was. Why not, when it doesn't load or no gem provides the ECS.
+    /// Opens <paramref name="domain"/> in place of what is in the world but the globals, with the player at its spawn.
     /// </summary>
+    /// <remarks>
+    /// The loading screen shows until the domain is there. Workers read the domain first, so a domain that does not
+    /// load leaves the world as it was. It returns why not when the domain does not load or no gem gives the ECS.
+    /// </remarks>
     public async Task<Result> OpenAsync(
         Handle<Domain> domain,
         IProgress<LoadProgress>? progress,
@@ -172,10 +203,13 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Puts <paramref name="prefab"/>, loaded first, in the world at <paramref name="at"/>: the entities it made, which are
-    /// the caller's to destroy, and go when a domain replaces the world if they are still there. Why not, when it doesn't load
-    /// or no gem provides the ECS. Single entities need none of this: make them with <see cref="Create"/>.
+    /// Loads <paramref name="prefab"/>, puts it in the world at <paramref name="at"/>, and returns its entities.
     /// </summary>
+    /// <remarks>
+    /// The caller destroys the entities. When a domain replaces the world, the entities that are still there go. It
+    /// returns why not when the prefab does not load or no gem gives the ECS. For a single entity, use
+    /// <see cref="Create"/>.
+    /// </remarks>
     public async Task<Result<ImmutableArray<Entity>>> SpawnAsync(
         Handle<Prefab> prefab,
         Transform at,
@@ -198,16 +232,21 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// A new entity with <paramref name="components"/>, made now. One whose <see cref="Tags"/> hold <see cref="Tag.Global"/>
-    /// outlives every domain that replaces the world.
+    /// Creates an entity with <paramref name="components"/> now.
     /// </summary>
+    /// <remarks>
+    /// An entity whose <see cref="Tags"/> hold <see cref="Tag.Global"/> outlives each domain that replaces the world.
+    /// </remarks>
     public Entity Create(ReadOnlySpan<IComponent> components) => Ecs.Create(components);
 
     /// <summary>
-    /// The game as a save holds it, as UTF-8 JSON: the domains open, and how the world, with its pause and time scale,
-    /// differs from their files. The world is taken now, and the diff found on a worker. Why not, while the world is
-    /// loading or has no domain open, or when JSON can't hold it. Game thread.
+    /// Returns the game as a save holds it, in UTF-8 JSON: the open domains, and how the world differs from them.
     /// </summary>
+    /// <remarks>
+    /// The difference includes the pause and the time scale. It takes the world now and finds the diff on a worker. It
+    /// returns why not while the world loads or has no open domain, or when JSON cannot hold it. Call it on the game
+    /// thread.
+    /// </remarks>
     public Task<Result<byte[]>> SaveAsync()
     {
         if (IsLoading || Domains.IsEmpty)
@@ -228,9 +267,12 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Saves the game as <c>Magic/&lt;project&gt;/Saves/<paramref name="name"/>.save</c> under the user's local
-    /// application data, as <see cref="SaveAsync()"/> holds it, once no other work on the world runs. Why not, when that has none or it can't be written.
+    /// Saves the game, as <see cref="SaveAsync()"/> gives it, when no other work on the world runs.
     /// </summary>
+    /// <remarks>
+    /// The file is <c>Magic/&lt;project&gt;/Saves/<paramref name="name"/>.save</c> in the local application data of the
+    /// user. It returns why not when <see cref="SaveAsync()"/> fails or the file cannot be written.
+    /// </remarks>
     public async Task<Result> SaveAsync(string name, CancellationToken cancel)
     {
         Task<Result<byte[]>> saving = await RunInTurnAsync(() => Task.FromResult(SaveAsync()), cancel)
@@ -243,10 +285,12 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Puts the game back as the save <paramref name="name"/> holds it, in place of everything in the world,
-    /// globals too: its domains as their files make them, with its changes made on them. Why not, when there is no such save, it
-    /// doesn't read, or one of its domains doesn't open, which leaves the world as it was.
+    /// Puts the game back as the save <paramref name="name"/> holds it, in place of all of the world, globals too.
     /// </summary>
+    /// <remarks>
+    /// Its domains open as their files make them, with its changes made on them. It returns why not when there is no
+    /// such save, the save does not read, or one of its domains does not open. Then the world stays as it was.
+    /// </remarks>
     public async Task<Result> RestoreAsync(string name, IProgress<LoadProgress>? progress, CancellationToken cancel)
     {
         Result<byte[]> bytes = await _files.ReadBytesAsync(GetSavePath(name), cancel).ConfigureAwait(false);
@@ -310,10 +354,13 @@ public sealed class World : IEcs, IDisposable
         where T2 : unmanaged, IComponent => Ecs.Mutate<T1, T2>();
 
     /// <summary>
-    /// Changes the world for the prefabs and domains the assets read again, as the last frame's take heard it, frees the
-    /// material sets no renderer holds any more, and lets a replace waiting for this frame go on. Game thread, as each
-    /// frame starts, before the gems' hooks.
+    /// Changes the world for the assets read again, frees the material sets that no renderer holds, and lets a waiting
+    /// replace continue.
     /// </summary>
+    /// <remarks>
+    /// The assets read again are the prefabs and domains that the take of the last frame heard. Call it on the game
+    /// thread when each frame starts, before the hooks of the gems.
+    /// </remarks>
     internal void Pump()
     {
         // Open again what places a prefab or domain the assets read again.
@@ -351,8 +398,11 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Has <paramref name="hooks"/> take part as domains replace the world, until the subscription is disposed. Game thread.
+    /// Has <paramref name="hooks"/> take part as domains replace the world, until the subscription is disposed.
     /// </summary>
+    /// <remarks>
+    /// Call it on the game thread.
+    /// </remarks>
     internal Subscription Register(IHookIntoDomainLoading hooks)
     {
         _hooks = _hooks.Add(hooks);
@@ -361,7 +411,7 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Every entity with a <see cref="Spin"/> turned on by <paramref name="deltaSec"/> of the world's time. Game thread.
+    /// Turns each entity with a <see cref="Spin"/> by <paramref name="deltaSec"/> of world time. Game thread.
     /// </summary>
     internal void TurnSpins(float deltaSec)
     {
@@ -378,11 +428,13 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Puts back the world as the last run saved it, <paramref name="restorePoint"/>, once that is done. The entry point opens
-    /// when there is none, when the save failed, which is warned about, or when it doesn't open, which is an error: the
-    /// project's, or the default one when it names none or that doesn't open. With no ECS, nothing opens, which is warned
-    /// about.
+    /// Puts back the world as the last run saved it, <paramref name="restorePoint"/>, when that save is done.
     /// </summary>
+    /// <remarks>
+    /// The entry point opens when there is no save, when the save failed, with a warning, or when the save does not
+    /// open, with an error. The entry point is that of the project, or the default when the project names none or its
+    /// own does not open. With no ECS, nothing opens, with a warning.
+    /// </remarks>
     internal async Task StartAsync(
         Task<Result<byte[]>>? restorePoint,
         IProgress<LoadProgress>? progress,
@@ -438,8 +490,8 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// How <paramref name="to"/> differs from <paramref name="from"/>, as a JSON diff; none when it doesn't, and why not,
-    /// when JSON can't hold either.
+    /// How <paramref name="to"/> differs from <paramref name="from"/>, as a JSON diff; none when it does not, and why
+    /// not, when JSON cannot hold either.
     /// </summary>
     private static Result<JsonNode?> Diff(WorldState from, WorldState to)
     {
@@ -452,10 +504,12 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// <paramref name="state"/> with <paramref name="changes"/>, a JSON diff, made on it: a change to an entity or a
-    /// component <paramref name="state"/> doesn't hold, as its files no longer make it, is skipped. Why not, when the result
-    /// doesn't read as a world.
+    /// Returns <paramref name="state"/> with the JSON diff <paramref name="changes"/> made on it.
     /// </summary>
+    /// <remarks>
+    /// A change to an entity or a component that <paramref name="state"/> does not hold, because its files no longer
+    /// make it, is skipped. It returns why not when the result does not read as a world.
+    /// </remarks>
     private static Result<WorldState> Patch(WorldState state, JsonNode? changes)
     {
         if (changes is null)
@@ -485,7 +539,8 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Takes out of <paramref name="changes"/> each change, but an add, to what <paramref name="has"/> says isn't there.
+    /// Removes from <paramref name="changes"/> each change, but an add, to what <paramref name="has"/> says is not
+    /// there.
     /// </summary>
     private static void RemoveMissing(JsonObject changes, Func<string, bool> has)
     {
@@ -528,9 +583,12 @@ public sealed class World : IEcs, IDisposable
         [.. state.Placed.Values.Concat(state.Made).Select(entity => entity.Values.ToImmutableArray())];
 
     /// <summary>
-    /// A prefab's parts as the entities it spawns as: one for each part, a part before the parts under it, its transform
-    /// placed under its parent's, and the top parts' under where it is put.
+    /// The entities that the parts of a prefab spawn as: one for each part, and a part before the parts under it.
     /// </summary>
+    /// <remarks>
+    /// Each transform is placed under that of its parent, and the transforms of the top parts under
+    /// <paramref name="at"/>.
+    /// </remarks>
     private static ImmutableArray<ImmutableArray<IComponent>> GetEntities(Prefab prefab, Transform at)
     {
         ImmutableArray<ImmutableArray<IComponent>>.Builder entities = ImmutableArray.CreateBuilder<
@@ -671,9 +729,12 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Puts the world back as the JSON <paramref name="bytes"/> hold it, in place of everything in the world. Why not,
-    /// when it doesn't read or one of its domains doesn't open, which leaves the world as it was.
+    /// Puts the world back as the JSON <paramref name="bytes"/> hold it, in place of everything in the world.
     /// </summary>
+    /// <remarks>
+    /// It returns why not when the JSON does not read or one of its domains does not open. Then the world stays as it
+    /// was.
+    /// </remarks>
     private async Task<Result> RestoreAsync(byte[] bytes, IProgress<LoadProgress>? progress, CancellationToken cancel)
     {
         Result<SaveFile> saved = Json.Read<SaveFile>(bytes);
@@ -710,9 +771,12 @@ public sealed class World : IEcs, IDisposable
     private string GetName(Handle<Domain> domain) => _assets.GetPath(domain) ?? "a domain";
 
     /// <summary>
-    /// Reads the domain on workers, so one that doesn't load leaves the world as it was, then puts it in place of the world
-    /// with the project's player, through the loading screen (<see cref="ReplaceAsync"/>).
+    /// Reads the domain on workers, then puts it in place of the world with the player of the project.
     /// </summary>
+    /// <remarks>
+    /// A domain that does not load leaves the world as it was. The replace goes through the loading screen
+    /// (<see cref="ReplaceAsync"/>).
+    /// </remarks>
     private async Task<Result> OpenDomainAsync(
         Handle<Domain> domain,
         IProgress<LoadProgress>? progress,
@@ -749,12 +813,14 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Puts <paramref name="arriving"/> in place of the world with nothing of it shown half ready, nor anything of what was
-    /// there before: what is there leaves, globals too with <paramref name="isClearingGlobals"/>, the gems clean up after it,
-    /// and the loading screen shows while they prepare what comes. Once they have and no asset is on its way, the loading
-    /// screen leaves, the gems clean up after it, <paramref name="arrive"/> makes what comes, and the replace ends after a
-    /// frame has drawn it. <see cref="IsLoading"/> is set while it runs.
+    /// Puts <paramref name="arriving"/> in place of the world, and shows nothing half ready or left from the old world.
     /// </summary>
+    /// <remarks>
+    /// What is there leaves, the globals too when <paramref name="isClearingGlobals"/> is true. The gems clean up after
+    /// it, and the loading screen shows while they prepare what comes. When they are ready and no asset is in load, the
+    /// loading screen leaves and the gems clean up after it. Then <paramref name="arrive"/> makes what comes, and the
+    /// replace ends after a frame drew it. <see cref="IsLoading"/> is true while it runs.
+    /// </remarks>
     private async Task ReplaceAsync(
         ImmutableArray<ImmutableArray<IComponent>> arriving,
         bool isClearingGlobals,
@@ -765,8 +831,8 @@ public sealed class World : IEcs, IDisposable
         IsLoading = true;
         try
         {
-            // The project's loading screen, else the engine's, a black void: the entities it is; none, which is warned
-            // about, when it doesn't load.
+            // The loading screen of the project, else that of the engine, a black void. When it does not load, there is
+            // none, with a warning.
             Handle<Domain> project = _app.Project?.LoadingScreen ?? Handle<Domain>.None;
             Handle<Domain> screenDomain =
                 project == Handle<Domain>.None ? _assets.Find<Domain>("Domains/Loading/Loading.domain") : project;
@@ -849,9 +915,11 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Runs <paramref name="hook"/> on every gem that hooks into domain loading, all at once, and waits for them. One that
-    /// fails is logged as failing at <paramref name="doing"/>, and the replace goes on without it.
+    /// Runs <paramref name="hook"/> on each gem that hooks into domain loading, all at once, and waits for them.
     /// </summary>
+    /// <remarks>
+    /// A hook that fails is logged as failing at <paramref name="doing"/>, and the replace continues without it.
+    /// </remarks>
     [SuppressMessage(
         "Design",
         "CA1031:Do not catch general exception types",
@@ -886,9 +954,12 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Everything leaves, globals too, and <paramref name="saved"/> comes: its domains as their files make them, read
-    /// first on workers, so one that doesn't open leaves the world as it was, with its changes made on them.
+    /// Replaces everything, globals too, with <paramref name="saved"/>: its domains as their files make them, with its
+    /// changes made on them.
     /// </summary>
+    /// <remarks>
+    /// Workers read the domains first, so a domain that does not open leaves the world as it was.
+    /// </remarks>
     private async Task<Result> OpenSaveAsync(
         SaveFile saved,
         IProgress<LoadProgress>? progress,
@@ -949,9 +1020,12 @@ public sealed class World : IEcs, IDisposable
         );
 
     /// <summary>
-    /// Each open domain that is or places one of <paramref name="changed"/> makes its entities again as its files now say,
-    /// keeping what happened to them; one that no longer loads stays as it was, which is an error.
+    /// Makes again the entities of each open domain that is or places one of <paramref name="changed"/>, as its files
+    /// now say.
     /// </summary>
+    /// <remarks>
+    /// What happened to the entities stays. A domain that no longer loads stays as it was, which is an error.
+    /// </remarks>
     private Task ReopenAsync(HashSet<ulong> changed, CancellationToken cancel) =>
         RunInTurnAsync(
             async () =>
@@ -969,10 +1043,12 @@ public sealed class World : IEcs, IDisposable
         );
 
     /// <summary>
-    /// <paramref name="domain"/>'s entities made again from its files as they are now, with what the game changed in them
-    /// against its files as they were made on top: a value the game changed keeps it, one it didn't takes the file's, and a
-    /// destroyed entity stays destroyed.
+    /// Makes the entities of <paramref name="domain"/> again from its files, with the changes of the game on top.
     /// </summary>
+    /// <remarks>
+    /// The changes are against the files as they were. A value that the game changed keeps that change, a value that it
+    /// did not change takes the value of the file, and a destroyed entity stays destroyed.
+    /// </remarks>
     private async Task ReopenAsync(Handle<Domain> domain, CancellationToken cancel)
     {
         Result<DomainRead> read = await ReadDomainAsync(domain, null, cancel).ConfigureAwait(false);
@@ -1020,9 +1096,12 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// <paramref name="handle"/>, loaded, with the prefabs it places, loaded, and where. A prefab that doesn't load is an
-    /// error, and it is left out; why not, when the domain doesn't load or no gem reads prefabs.
+    /// Loads <paramref name="handle"/> and the prefabs that it places, with where it places them.
     /// </summary>
+    /// <remarks>
+    /// A prefab that does not load is an error, and is left out. It returns why not when the domain does not load or no
+    /// gem reads prefabs.
+    /// </remarks>
     private async Task<Result<DomainRead>> ReadDomainAsync(
         Handle<Domain> handle,
         IProgress<LoadProgress>? progress,
@@ -1069,10 +1148,12 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// The entities of the project's player, at the first of <paramref name="placed"/> tagged spawn: <paramref name="domain"/>
-    /// doesn't own them, so they stay as it opens again, and go when another replaces it. None when the project has no player,
-    /// or it doesn't load, which is an error.
+    /// Returns the entities of the player of the project, at the first of <paramref name="placed"/> tagged spawn.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="domain"/> does not own them, so they stay when it opens again, and go when another domain
+    /// replaces it. There are none when the project has no player, or when the player does not load, which is an error.
+    /// </remarks>
     private async Task<ImmutableArray<ImmutableArray<IComponent>>> ReadPlayerAsync(
         Handle<Domain> domain,
         ImmutableArray<ImmutableArray<IComponent>> placed,
@@ -1092,8 +1173,8 @@ public sealed class World : IEcs, IDisposable
             return [];
         }
 
-        // Where the player goes: the first of the placed tagged spawn, so a domain's globals before its chunks; else the
-        // origin, which is warned about.
+        // Where the player goes: the first of the placed tagged spawn, so the globals of a domain before its chunks;
+        // else the origin, with a warning.
         Transform? spawn = null;
         foreach (ImmutableArray<IComponent> entity in placed)
         {

@@ -27,14 +27,24 @@ public enum ContactPhase : byte
 }
 
 /// <summary>
-/// What an entity's body touched, for gameplay: an entity with a <see cref="Physics"/> and this hears, after every
-/// step, each body in contact with it as an entry, inline so the component stays plain unmanaged data, up to
-/// <see cref="Capacity"/> of them and the rest dropped. An entry is <see cref="ContactPhase.Enter"/> the step the two
-/// begin to touch, <see cref="ContactPhase.Stay"/> each step after while they do, and <see cref="ContactPhase.Exit"/>
-/// for the one step after they part, with the point and normal as last seen; then it goes. A file opts an entity in
-/// with <c>"Contacts": {}</c>; the entries are the step's, so a saved world holds none. Read it in a gem's Tick, where
-/// it holds what the last step found.
+/// The bodies that the body of an entity touches, for gameplay.
 /// </summary>
+/// <remarks>
+/// <para>
+/// An entity with a <see cref="Physics"/> and this component gets, after each step, one entry for each body that
+/// touches it. The entries are inline, so the component stays plain unmanaged data. It holds up to
+/// <see cref="Capacity"/> entries and drops the rest.
+/// </para>
+/// <para>
+/// An entry is <see cref="ContactPhase.Enter"/> in the step that the two begin to touch, and
+/// <see cref="ContactPhase.Stay"/> in each step after while they touch. It is <see cref="ContactPhase.Exit"/> for the
+/// one step after they part, with the last point and normal. Then it goes.
+/// </para>
+/// <para>
+/// A file adds it to an entity with <c>"Contacts": {}</c>. The entries are those of one step, so a saved world holds
+/// none. Read it in the Tick of a gem, where it holds what the last step found.
+/// </para>
+/// </remarks>
 [InlineArray(Capacity)]
 public struct Contacts : IComponent, IEquatable<Contacts>
 {
@@ -66,9 +76,12 @@ public struct Contacts : IComponent, IEquatable<Contacts>
 }
 
 /// <summary>
-/// One body touching another: the other entity, the point and the normal, pointing away from the other body, in the
-/// world, the impulse the step applied along the normal, in newton-seconds, and which phase the touch is in.
+/// One body that touches another: the other entity, the point, the normal, the impulse and the phase of the touch.
 /// </summary>
+/// <remarks>
+/// The point and the normal are in the world, and the normal points away from the other body. The impulse is the one
+/// that the step applied along the normal, in newton-seconds.
+/// </remarks>
 public record struct Contact
 {
     public Entity Other;

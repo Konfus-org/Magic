@@ -13,9 +13,12 @@ using Magic.Worlds;
 namespace Magic.CommandLine;
 
 /// <summary>
-/// Magic's commands, run against the <see cref="App"/>: the command line Magic was launched with is the first of
-/// them, and each line typed into the terminal runs the same commands.
+/// The commands of Magic, run against the <see cref="App"/>.
 /// </summary>
+/// <remarks>
+/// The command line that Magic started with is the first command, and each line typed into the terminal runs the same
+/// commands.
+/// </remarks>
 internal sealed class Cli
 {
     private readonly CommandQueue _queue;
@@ -89,9 +92,11 @@ internal sealed class Cli
     }
 
     /// <summary>
-    /// Executes the commands Magic was launched with, or says why they didn't run. Only open runs a project; any other
-    /// command does its job, and Magic exits after it.
+    /// Executes the commands that Magic started with, or returns why they did not run.
     /// </summary>
+    /// <remarks>
+    /// Only open runs a project. Each other command does its job, and then Magic exits.
+    /// </remarks>
     public Result Execute(string[] commands)
     {
         ParseResult parsed = _cliCommands.Parse(commands);
@@ -104,9 +109,12 @@ internal sealed class Cli
     }
 
     /// <summary>
-    /// Executes one typed command, or says why it didn't run. One that doesn't start with a verb is options, which may
-    /// leave out the leading --, or the - of a one-letter option.
+    /// Executes one typed command, or returns why it did not run.
     /// </summary>
+    /// <remarks>
+    /// A command that does not start with a verb is options, which can leave out the leading --, or the - of a
+    /// one-letter option.
+    /// </remarks>
     public Result Execute(string command)
     {
         if (string.IsNullOrWhiteSpace(command))
@@ -135,9 +143,12 @@ internal sealed class Cli
     }
 
     /// <summary>
-    /// Runs <paramref name="parsed"/>, or says why it doesn't. What it prints, such as help, goes through the terminal,
-    /// so the prompt comes back under it; what it throws is logged.
+    /// Runs <paramref name="parsed"/>, or returns why it does not run.
     /// </summary>
+    /// <remarks>
+    /// What it prints, such as help, goes through the terminal, so the prompt comes back under it. What it throws is
+    /// logged.
+    /// </remarks>
     private static Result Invoke(ParseResult parsed)
     {
         if (parsed.Errors.Count > 0)

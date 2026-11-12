@@ -8,10 +8,11 @@ using Magic.Worlds;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>set</c>: a gem's setting, by its key, to a value as <see cref="ValueText"/> reads it; or an entity's value, named by
-/// a path as <see cref="EntityPaths"/> reads it, to a value as <see cref="ValueText"/> reads it (<c>1 2 3</c> for a
-/// position).
+/// <c>set</c>: sets a setting of a gem, by its key, or a value of an entity, named by a path, to a value.
 /// </summary>
+/// <remarks>
+/// <see cref="ValueText"/> reads the value (<c>1 2 3</c> for a position), and <see cref="EntityPaths"/> reads the path.
+/// </remarks>
 internal static class SetCommand
 {
     public static Command Create(App app, Settings settings, World world)

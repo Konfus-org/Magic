@@ -8,10 +8,11 @@ using Magic.Worlds;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>save</c>: saves the game as <c>Magic/&lt;project&gt;/Saves/&lt;name&gt;.save</c> under the user's local application
-/// data, holding <c>wait loaded</c> meanwhile;
-/// <c>save settings</c> saves the settings instead.
+/// <c>save</c>: saves the game and holds <c>wait loaded</c> meanwhile; <c>save settings</c> saves the settings instead.
 /// </summary>
+/// <remarks>
+/// The file is <c>Magic/&lt;project&gt;/Saves/&lt;name&gt;.save</c> in the local application data of the user.
+/// </remarks>
 internal static class SaveCommand
 {
     public static Command Create(App app, Settings settings, World world, CommandQueue queue)

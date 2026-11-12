@@ -16,17 +16,22 @@ using Magic.Utils;
 namespace Magic.Configuration;
 
 /// <summary>
-/// Every gem's settings in one place: the <see cref="ISettings"/> part of each gem that has one, which it changes in
-/// place. A key is the settings class's or the member's <see cref="CategoryAttribute"/>, then the member's name, or its
-/// <see cref="JsonPropertyNameAttribute"/>, as <c>Rendering.Resolution</c>. Game thread, or while no frame runs.
-/// <para>
-/// A gem is first made with its settings' defaults, then what <see cref="SaveAsync"/> saved for this user and project,
-/// then what <c>--configure</c> gave at launch; made again, after a restart or a rebuild of its code, it runs by what
-/// it last ran by. Each holds only the members that differ from the defaults, as JSON; what is saved is in
-/// <c>Magic/&lt;project&gt;/Settings/&lt;class&gt;.json</c> under the user's local application data, never in the
-/// project.
-/// </para>
+/// The settings of each gem in one place: the <see cref="ISettings"/> part of each gem that has one, changed in place.
 /// </summary>
+/// <remarks>
+/// <para>
+/// A key is the <see cref="CategoryAttribute"/> of the settings class or of the member, then the name of the member or
+/// its <see cref="JsonPropertyNameAttribute"/>, as <c>Rendering.Resolution</c>. Use it on the game thread, or while no
+/// frame runs.
+/// </para>
+/// <para>
+/// A gem is first made with the defaults of its settings, then what <see cref="SaveAsync"/> saved for this user and
+/// project, then what <c>--configure</c> gave at launch. When it is made again, after a restart or a rebuild of its
+/// code, it runs with what it last ran with. Each holds only the members that differ from the defaults, as JSON. The
+/// saved settings are in <c>Magic/&lt;project&gt;/Settings/&lt;class&gt;.json</c> in the local application data of
+/// the user, never in the project.
+/// </para>
+/// </remarks>
 public sealed class Settings
 {
     private readonly App _app;
@@ -39,10 +44,13 @@ public sealed class Settings
     private ImmutableArray<RegisteredSettings> _registered = [];
 
     /// <summary>
-    /// What each settings class last ran by in this process, by its project and name, as <c>Forest/PlayerSettings</c>:
-    /// a JSON object of the members that differ from its defaults, which outlasts the class's types and, once there,
-    /// stands in for what was saved or given at launch.
+    /// What each settings class last ran with in this process, by its project and name, as
+    /// <c>Forest/PlayerSettings</c>.
     /// </summary>
+    /// <remarks>
+    /// It is a JSON object of the members that differ from the defaults. It outlasts the types of the class and, when
+    /// it is there, it replaces what was saved or given at launch.
+    /// </remarks>
     private ImmutableDictionary<string, JsonElement> _live = [];
 
     /// <summary>
@@ -77,17 +85,19 @@ public sealed class Settings
     }
 
     /// <summary>
-    /// The settings the gem with <typeparamref name="TSettings"/> runs by; with no such gem, what it would be made with.
+    /// The settings that the gem with <typeparamref name="TSettings"/> runs with; with no such gem, what it would get.
     /// </summary>
     public TSettings Get<TSettings>()
         where TSettings : ISettings => (TSettings)Get(typeof(TSettings));
 
     /// <summary>
-    /// Writes each member of <paramref name="settings"/> on the settings the gem with <typeparamref name="TSettings"/>
-    /// runs by, and keeps them for when it is made again. <paramref name="settings"/> may be that same object, after a
-    /// change to it. A member with <see cref="RequireRestartAttribute"/> that differs from what the gem was made with
-    /// restarts the run.
+    /// Writes each member of <paramref name="settings"/> on the settings of the gem with
+    /// <typeparamref name="TSettings"/>, and keeps them for when the gem is made again.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="settings"/> can be that same object, after a change to it. A member with
+    /// <see cref="RequireRestartAttribute"/> that differs from what the gem was made with restarts the run.
+    /// </remarks>
     public void Set<TSettings>(TSettings settings)
         where TSettings : ISettings
     {
@@ -99,12 +109,15 @@ public sealed class Settings
     }
 
     /// <summary>
-    /// Sets the member <paramref name="key"/> names, as <c>Rendering.Resolution</c>, to <paramref name="value"/> in a
-    /// copy of its gem's settings, which it then sets as <see cref="Set{TSettings}(TSettings)"/> does; or says why not:
-    /// no gem has the key, or the member doesn't take the value. For tools that reach a setting by its key, such as the
-    /// console; game code that knows the settings class uses <see cref="Get{TSettings}"/> and
-    /// <see cref="Set{TSettings}(TSettings)"/>.
+    /// Sets the member that <paramref name="key"/> names, as <c>Rendering.Resolution</c>, to <paramref name="value"/>,
+    /// or returns why not.
     /// </summary>
+    /// <remarks>
+    /// It sets the value in a copy of the settings of the gem, then sets the copy as
+    /// <see cref="Set{TSettings}(TSettings)"/> does. It fails when no gem has the key, or the member does not take the
+    /// value. Use it in tools that reach a setting by its key, such as the console. Game code that knows the settings
+    /// class uses <see cref="Get{TSettings}"/> and <see cref="Set{TSettings}(TSettings)"/>.
+    /// </remarks>
     public Result Set<T>(string key, T value)
     {
         foreach (RegisteredSettings registered in _registered)
@@ -135,10 +148,13 @@ public sealed class Settings
     }
 
     /// <summary>
-    /// Writes each registered gem's members that differ from their defaults to this user's file for its settings in the
-    /// open project, which the gem is made with from then on; settings with none have their file removed. Or says why
-    /// not.
+    /// Writes the members of each registered gem that differ from their defaults to the settings file of this user in
+    /// the open project.
     /// </summary>
+    /// <remarks>
+    /// The gem is made with them from then on. A settings file with no such members is removed. It returns why not when
+    /// it fails.
+    /// </remarks>
     public async Task<Result> SaveAsync(CancellationToken cancel)
     {
         if (_app.Project is not { } project)
@@ -179,10 +195,13 @@ public sealed class Settings
     internal object Get(Type type) => Find(type)?.Value ?? CreateSettings(type);
 
     /// <summary>
-    /// Sets each of <paramref name="pairs"/>, written <c>Key=value</c> with the value as <see cref="ValueText"/> reads
-    /// it, and logs each that isn't set: the settings given with <c>--configure</c>. Before a project opens no gem is
-    /// made, so each waits for its gem, over what was saved.
+    /// Sets each of <paramref name="pairs"/>, written <c>Key=value</c>, and logs each that is not set: the settings
+    /// given with <c>--configure</c>.
     /// </summary>
+    /// <remarks>
+    /// <see cref="ValueText"/> reads the value. Before a project opens, no gem is made, so each pair waits for its gem,
+    /// over what was saved.
+    /// </remarks>
     internal void Configure(string[] pairs)
     {
         foreach (string pair in pairs)
@@ -225,10 +244,12 @@ public sealed class Settings
     }
 
     /// <summary>
-    /// Lists <paramref name="settings"/>, a gem's part, until the subscription is disposed, as the gem ends; then what
-    /// it last ran by is kept for when it is made again. Throws, naming the gem, for settings without a category or a
-    /// key another gem has.
+    /// Lists <paramref name="settings"/>, a part of a gem, until the gem ends and disposes the subscription.
     /// </summary>
+    /// <remarks>
+    /// Then it keeps what the gem last ran with for when the gem is made again. It throws, with the name of the gem,
+    /// for settings without a category or with a key that another gem has.
+    /// </remarks>
     internal Subscription Register(ISettings settings)
     {
         Type type = settings.GetType();
@@ -327,10 +348,13 @@ public sealed class Settings
         _files.Combine(UserFolders.GetProjectFolder(_files, project), "Settings", $"{type.Name}.json");
 
     /// <summary>
-    /// <paramref name="type"/> as it last ran in this process, or else as it was saved, with what was given at launch
-    /// over either; a member it no longer has is left out, and what can't be read leaves it at its defaults, each with a
-    /// warning.
+    /// Makes <paramref name="type"/> as it last ran in this process, else as it was saved, with what was given at
+    /// launch over either.
     /// </summary>
+    /// <remarks>
+    /// A member that it no longer has is left out, and a value that cannot be read stays at its default. Each gets a
+    /// warning.
+    /// </remarks>
     private object CreateSettings(Type type)
     {
         ImmutableArray<SettingMember> members = GetMembers(type);
@@ -372,9 +396,11 @@ public sealed class Settings
     }
 
     /// <summary>
-    /// What this user saved for <paramref name="type"/> in the open project; nothing when no project is open, nothing
-    /// was saved, or, with a warning, the file can't be read.
+    /// What this user saved for <paramref name="type"/> in the open project.
     /// </summary>
+    /// <remarks>
+    /// It is empty when no project is open, nothing was saved, or the file cannot be read, with a warning.
+    /// </remarks>
     private JsonObject ReadSaved(Type type)
     {
         if (_app.Project is not { } project)
@@ -413,9 +439,12 @@ public sealed class Settings
     }
 
     /// <summary>
-    /// Keeps the members of <paramref name="settings"/> that differ from its defaults as what its class last ran by,
-    /// under <paramref name="key"/>: none, when it is back at its defaults, is kept too.
+    /// Keeps the members of <paramref name="settings"/> that differ from its defaults as what its class last ran with,
+    /// under <paramref name="key"/>.
     /// </summary>
+    /// <remarks>
+    /// When the settings are back at their defaults, it keeps an empty object.
+    /// </remarks>
     private void Keep(string key, object settings)
     {
         JsonObject changed = ToJson(settings);
@@ -470,9 +499,12 @@ public sealed class Settings
     );
 
     /// <summary>
-    /// A gem's settings: <paramref name="Value"/>, which its parts hold, and <paramref name="MadeWith"/>, a copy of
-    /// what the gem was made with, which a change to a member with <see cref="RequireRestartAttribute"/> compares with.
+    /// The settings of a gem: <paramref name="Value"/>, which its parts hold, and <paramref name="MadeWith"/>, a copy
+    /// of what the gem was made with.
     /// </summary>
+    /// <remarks>
+    /// A change to a member with <see cref="RequireRestartAttribute"/> is compared with <paramref name="MadeWith"/>.
+    /// </remarks>
     private sealed record RegisteredSettings(
         ISettings Value,
         object MadeWith,

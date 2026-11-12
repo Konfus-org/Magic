@@ -13,9 +13,11 @@ using Magic.Worlds;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>spawn</c>: puts a prefab, by its path or name, in the world at x y z, or a few metres in front of the player,
-/// holding <c>wait loaded</c> while it comes, and logs the entities it made.
+/// <c>spawn</c>: puts a prefab, by its path or name, in the world at x y z, or a few metres in front of the player.
 /// </summary>
+/// <remarks>
+/// It holds <c>wait loaded</c> while the prefab comes, and logs the entities that it made.
+/// </remarks>
 internal static class SpawnCommand
 {
     /// <summary>
