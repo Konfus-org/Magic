@@ -12,7 +12,8 @@ namespace Magic.Graphics;
 /// dispatches or draws, and transfers (uploads, clears, blits, readbacks and builds), which the graph gathers into
 /// passes of their own; take the frame with <see cref="Finish"/>. Core holds one, every gem's Render records into it,
 /// and Core hands what it finishes to <see cref="IGraphicsApi.Present"/>, which puts in the barriers the uses need.
-/// Each method's parameters say which of a <see cref="GpuCommand"/>'s fields its kind reads. Render thread.
+/// Each method's parameters say which of a <see cref="GpuCommand"/>'s fields its kind reads. A gem that cannot record
+/// a part of its frame tells <see cref="Fail"/> and goes on. Render thread.
 /// </summary>
 public sealed class RenderGraph
 {
@@ -23,6 +24,16 @@ public sealed class RenderGraph
     private readonly ImmutableArray<GpuCommand>.Builder _commands = ImmutableArray.CreateBuilder<GpuCommand>();
 
     private GpuPass? _pass;
+
+    private List<(RenderFailure Kind, string What)> _failures = [];
+
+    private List<(RenderFailure Kind, string What)> _failedBefore = [];
+
+    /// <summary>
+    /// What failed in this frame, each once, in the order first told to <see cref="Fail"/>: for a gem that draws them
+    /// late in the frame.
+    /// </summary>
+    public ReadOnlySpan<(RenderFailure Kind, string What)> Failures => CollectionsMarshal.AsSpan(_failures);
 
     /// <summary>
     /// What the GPU has beyond the baseline; nothing while there is no provider.
@@ -112,6 +123,23 @@ public sealed class RenderGraph
         }
 
         return all;
+    }
+
+    /// <summary>
+    /// Tells that <paramref name="what"/> failed in this frame, so it shows in the picture: a short constant text, as
+    /// "Shadows are not traced". The first frame it fails in after one it didn't logs it once, with
+    /// <paramref name="reason"/>, the full error. A gem that fails tells it every frame it fails in, and tries again
+    /// in the next.
+    /// </summary>
+    public void Fail(RenderFailure kind, string what, string reason)
+    {
+        (RenderFailure, string) failure = (kind, what);
+        if (_failures.Contains(failure))
+            return;
+
+        _failures.Add(failure);
+        if (!_failedBefore.Contains(failure))
+            Log.Error($"{kind} failed: {what}. {reason}");
     }
 
     /// <summary>
@@ -326,6 +354,15 @@ public sealed class RenderGraph
                 X = instanceCount,
             }
         );
+    }
+
+    /// <summary>
+    /// Empties <see cref="Failures"/> for a new frame, and keeps the last frame's to tell which failures are new.
+    /// </summary>
+    internal void StartFailures()
+    {
+        (_failedBefore, _failures) = (_failures, _failedBefore);
+        _failures.Clear();
     }
 
     internal void EndPass()

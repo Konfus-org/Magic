@@ -10,6 +10,7 @@ namespace Magic.Graphics;
 /// provider presents it. A part that takes or makes what other gems draw from implements
 /// <see cref="IRenderFrom{TInput}"/>, <see cref="IRenderInto{TOutput}"/> or <see cref="IRender{TInput, TOutput}"/>
 /// instead. A part with more than one step in the frame implements a form for each.
+/// What it cannot record it tells <see cref="RenderGraph.Fail"/>, and goes on; a gem that throws renders no more.
 /// </summary>
 public interface IRender
 {

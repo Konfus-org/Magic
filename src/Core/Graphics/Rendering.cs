@@ -22,6 +22,8 @@ internal sealed class Rendering
 
     private readonly List<Step> _steps = [];
 
+    private readonly List<(string What, string Reason)> _removed = [];
+
     /// <summary>
     /// <paramref name="part"/>'s steps of the frame, one for each render form it implements, while it renders, until
     /// the subscription ends; nothing when it doesn't. Throws, naming the gems and the type, when it makes what another gem
@@ -55,22 +57,31 @@ internal sealed class Rendering
     public bool HasMissingInput(object part) => _steps.Exists(step => step.Part == part && step.Missing is not null);
 
     /// <summary>
-    /// Every gem's parts of the frame, in order, each gem timed once for all its parts; a gem that throws is logged and renders no more, and what
-    /// it would have made stays unmade, so every gem that must take it renders no more either.
+    /// Every gem's parts of the frame, in order, each gem timed once for all its parts, into <paramref name="graph"/>
+    /// emptied of the last frame's failures. A part that takes what no gem makes, or whose gem throws, renders no more,
+    /// and what it would have made stays unmade, so every part that must take it renders no more either; each such part
+    /// is a <see cref="RenderFailure.Pass"/> failure in every frame after.
     /// </summary>
     [SuppressMessage(
         "Design",
         "CA1031:Do not catch general exception types",
-        Justification = "Whatever a gem throws, it is logged and the gem leaves the frame; the others go on."
+        Justification = "Whatever a gem throws, it is a failure of the frame and the gem leaves it; the others go on."
     )]
     public void Pump(in Frame frame, RenderGraph graph)
     {
+        graph.StartFailures();
+        foreach ((string what, string reason) in _removed)
+        {
+            graph.Fail(RenderFailure.Pass, what, reason);
+        }
+
         for (int i = 0; i < _steps.Count; i++)
         {
             Step step = _steps[i];
             if (step.Missing is { } missing)
             {
-                Log.Error($"Gem {step.Gem} takes {missing.Name}, which no listed gem makes, so it renders nothing.");
+                _removed.Add(($"{step.Gem} lacks an input", $"It takes {missing.Name}, which no listed gem makes."));
+                graph.Fail(RenderFailure.Pass, _removed[^1].What, _removed[^1].Reason);
                 _steps.RemoveAt(i--);
                 continue;
             }
@@ -82,7 +93,8 @@ internal sealed class Rendering
             }
             catch (Exception ex)
             {
-                Log.Error($"Gem {step.Gem} failed in Render and stops rendering: {ex}");
+                _removed.Add(($"{step.Gem} stopped rendering", $"It threw in Render: {ex}"));
+                graph.Fail(RenderFailure.Pass, _removed[^1].What, _removed[^1].Reason);
                 _steps.RemoveAt(i--);
             }
 
