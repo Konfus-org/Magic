@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Numerics;
 using Magic.Assets;
 using Magic.DeferredRendering;
@@ -8,6 +9,7 @@ using Magic.Graphics;
 using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
+using Magic.Worlds;
 
 namespace Magic.Volumetrics;
 
@@ -23,7 +25,9 @@ public readonly record struct VolumetricsInput(GpuView View, TracedWorld? Traced
 /// <see cref="Air"/>, which shading takes, with the clouds it draws over the sky. Clear air makes none.
 /// </summary>
 public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, IEcs ecs)
-    : IRender<VolumetricsInput, Air>
+    : IRender<VolumetricsInput, Air>,
+        IRender,
+        IHookIntoDomainLoading
 {
     /// <summary>
     /// The volume's slices away from the camera, the twin of <c>AirSlices</c> in the renderer's <c>Light/Air.slang</c>.
@@ -45,6 +49,12 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
     );
 
     private static readonly string[] _scatteringNames = ["Air scattering 0", "Air scattering 1"];
+
+    /// <summary>
+    /// Done once the air's and the clouds' shaders are built or failed, which a domain loading waits for, so a shader that fails is told and logged
+    /// before the world shows.
+    /// </summary>
+    private readonly TaskCompletionSource _built = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private readonly IEcs _ecs = ecs;
 
@@ -104,9 +114,9 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
         }
 
         GpuTexture? cloudy = null;
+        GpuState cloudShader = graph.GetState(_cloudShader);
         if (weather.CloudCover > 0)
         {
-            GpuState cloudShader = graph.GetState(_cloudShader);
             if (cloudShader == GpuState.Failed)
             {
                 graph.Fail(RenderFailure.Weather, "Clouds are not drawn", "the clouds' shader was not built.");
@@ -184,7 +194,25 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
     }
 
     /// <summary>
-    /// Publishes the world's weather for <see cref="Render"/>.
+    /// Asks for every shader of the air and the clouds each frame, from the first and whatever the weather, so each is
+    /// built, or failed, before a domain shows.
+    /// </summary>
+    public void Render(in Frame frame, RenderGraph graph)
+    {
+        // Each alone, as one that failed makes them all failed while another still builds.
+        if (
+            graph.GetState(_scatterShader) != GpuState.Loading
+            && graph.GetState(_integrateShader) != GpuState.Loading
+            && graph.GetState(_cloudShader) != GpuState.Loading
+        )
+            _built.TrySetResult();
+    }
+
+    public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel) =>
+        _built.Task.WaitAsync(cancel);
+
+    /// <summary>
+    /// Publishes the world's weather for the frame's air.
     /// </summary>
     internal void PublishWeather()
     {

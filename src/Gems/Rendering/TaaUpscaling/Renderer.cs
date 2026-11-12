@@ -1,9 +1,12 @@
+using System.Collections.Immutable;
 using Magic.Assets;
 using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
+using Magic.Ecs;
 using Magic.Graphics;
 using Magic.Projects;
 using Magic.Utils;
+using Magic.Worlds;
 
 namespace Magic.TaaUpscaling;
 
@@ -15,8 +18,14 @@ namespace Magic.TaaUpscaling;
 /// with no history on the first frame at a size or of a world; the newer is what the window shows. It makes nothing
 /// while its shader builds.
 /// </summary>
-public sealed class Renderer : IRenderInto<Upscaling>
+public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
 {
+    /// <summary>
+    /// Done once the shader is built or failed, which a domain loading waits for, so a shader that fails is told and logged before the world
+    /// shows.
+    /// </summary>
+    private readonly TaskCompletionSource _built = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     private readonly ShaderEntry _shader;
 
     /// <summary>
@@ -44,8 +53,14 @@ public sealed class Renderer : IRenderInto<Upscaling>
         if (state == GpuState.Failed)
             graph.Fail(RenderFailure.Shader, "Picture is not upscaled", "the upscaling's shader was not built.");
 
+        if (state != GpuState.Loading)
+            _built.TrySetResult();
+
         return state == GpuState.Ready ? _upscaling : null;
     }
+
+    public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel) =>
+        _built.Task.WaitAsync(cancel);
 
     private static TextureDescription GetResolved(string name, int width, int height) =>
         new(
