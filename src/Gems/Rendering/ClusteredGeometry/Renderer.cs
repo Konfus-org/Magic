@@ -62,11 +62,11 @@ public sealed class Renderer : IRenderFrom<ClusteredGeometryInput>, IHookIntoDom
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph, in ClusteredGeometryInput input)
     {
-        // A frame without a view while something failed lets the loading domain show: the failure is already told.
-        // Without a failure, the view is still loading, and the domain keeps waiting for the clusters.
+        // A frame without a view because its maker is out lets the loading domain show: the failure is already told.
+        // Otherwise the view is still loading, and the domain keeps waiting for the clusters.
         if (input.View is not { } gpu)
         {
-            if (!graph.Failures.IsEmpty)
+            if (graph.IsMakerOut<GpuView>())
             {
                 _loading?.TrySetResult();
                 _loading = null;

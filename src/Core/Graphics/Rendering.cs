@@ -28,6 +28,11 @@ internal sealed class Rendering
     private readonly List<Step> _steps = [];
 
     /// <summary>
+    /// The step that makes each type, as the steps were last ordered.
+    /// </summary>
+    private Dictionary<Type, Maker> _makers = [];
+
+    /// <summary>
     /// <paramref name="part"/>'s steps of the frame, one for each render form it implements, while it renders, until
     /// the subscription ends; nothing when it doesn't. Throws, naming the gems and the type, when it makes what another gem
     /// makes, or when it and others take what the others make round a cycle; the gems registered before go on as they
@@ -60,6 +65,12 @@ internal sealed class Rendering
     public bool HasMissingInput(object part) => _steps.Exists(step => step.Part == part && step.Missing is not null);
 
     /// <summary>
+    /// Whether no gem makes <paramref name="type"/>, or the step that makes it is out this frame, as
+    /// <see cref="RenderGraph.IsMakerOut{T}"/> tells.
+    /// </summary>
+    public bool IsMakerOut(Type type) => !_makers.TryGetValue(type, out Maker maker) || maker.Step.IsOut;
+
+    /// <summary>
     /// Every gem's parts of the frame, in order, each gem timed once for all its parts, into <paramref name="graph"/>
     /// emptied of the last frame's failures. A part that takes what no gem makes, or whose gem threw less than
     /// <see cref="RetryPauseSec"/> ago, is skipped and is a <see cref="RenderFailure.Pass"/> failure in that frame; what
@@ -77,6 +88,7 @@ internal sealed class Rendering
         foreach (Step step in _steps)
         {
             long start = Metrics.HookDurations.Start();
+            int told = graph.Failures.Length;
             if (step.Missing is null && (step.RetrySec is not { } retry || frame.AppSec >= retry))
             {
                 try
@@ -97,8 +109,11 @@ internal sealed class Rendering
 
             // Told each frame it is out, so the failure is logged once: when it first failed, or failed again after a
             // frame it rendered in.
-            if (step.Missing is not null || step.RetrySec is not null)
+            bool isSkipped = step.Missing is not null || step.RetrySec is not null;
+            if (isSkipped)
                 graph.Fail(RenderFailure.Pass, step.Failure.What, step.Failure.Reason);
+
+            step.IsOut = isSkipped || (!step.HasMade && graph.Failures.Length > told);
 
             // A gem with several steps is timed once, by its last step, for the time of all of them.
             long since = start == 0 ? 0 : start - step.Earlier;
@@ -194,6 +209,7 @@ internal sealed class Rendering
 
         _steps.Clear();
         _steps.AddRange(ordered);
+        _makers = makers;
     }
 
     /// <summary>
@@ -241,6 +257,16 @@ internal sealed class Rendering
         /// nothing for the texts.
         /// </summary>
         public (string What, string Reason) Failure { get; set; }
+
+        /// <summary>
+        /// Whether it made nothing this frame and the frame was told why: it was skipped, or it told a failure itself.
+        /// </summary>
+        public bool IsOut { get; set; }
+
+        /// <summary>
+        /// Whether its last run made what it makes.
+        /// </summary>
+        public abstract bool HasMade { get; }
 
         /// <summary>
         /// The gem's next step in the order, which is timed for both; null for its last.
@@ -306,6 +332,8 @@ internal sealed class Rendering
         /// What it made at its last run; null when it made nothing, wasn't run or threw.
         /// </summary>
         public TOutput? Made { get; private set; }
+
+        public override bool HasMade => Made.HasValue;
 
         public override ImmutableArray<Maker> Outputs =>
             typeof(TOutput) == typeof(None) ? []

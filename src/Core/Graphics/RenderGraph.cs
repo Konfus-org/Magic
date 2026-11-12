@@ -53,6 +53,19 @@ public sealed class RenderGraph
     internal IGraphicsApi? Gpu { get; set; }
 
     /// <summary>
+    /// The gems' steps that record into the graph, set by Core once the gems are loaded.
+    /// </summary>
+    internal Rendering? Rendering { get; set; }
+
+    /// <summary>
+    /// Whether <typeparamref name="T"/> will not come this frame because its maker is out: no gem makes it, or the
+    /// step that makes it threw and waits for its retry, lacks an input, or told a failure and made nothing. A gem
+    /// that waits for <typeparamref name="T"/> to let a loading domain show asks it, late in the frame.
+    /// </summary>
+    public bool IsMakerOut<T>()
+        where T : struct => Rendering?.IsMakerOut(typeof(T)) ?? true;
+
+    /// <summary>
     /// What <paramref name="texture"/> was made to, the window's image included.
     /// </summary>
     public TextureDescription GetDescription(GpuTexture texture) =>

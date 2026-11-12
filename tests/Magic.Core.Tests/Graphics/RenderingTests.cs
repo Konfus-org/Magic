@@ -105,6 +105,18 @@ public sealed class RenderingTests
         Assert.Equal(new ShadeInput(new View(3), new Light(4)), shade.Taken);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void IsMakerOutTellsOnlyWhenTheMakerFailedAndMadeNothing(bool fails)
+    {
+        Watch watch = new();
+        Rendering rendering = Register(new Broken(fails), new Lost([]), watch);
+        rendering.Pump(_frame, new RenderGraph { Rendering = rendering });
+
+        Assert.Equal(fails, watch.IsViewOut);
+    }
+
     private static Rendering Register(params object[] parts)
     {
         Rendering rendering = new();
@@ -171,6 +183,24 @@ public sealed class RenderingTests
     private sealed class Overlay(List<string> calls) : IRender
     {
         public void Render(in Frame frame, RenderGraph graph) => calls.Add(nameof(Overlay));
+    }
+
+    private sealed class Broken(bool fails) : IRenderInto<View>
+    {
+        public View? Render(in Frame frame, RenderGraph graph)
+        {
+            if (fails)
+                graph.Fail(RenderFailure.Pass, "View is not made", "it broke.");
+
+            return null;
+        }
+    }
+
+    private sealed class Watch : IRender
+    {
+        public bool IsViewOut { get; private set; }
+
+        public void Render(in Frame frame, RenderGraph graph) => IsViewOut = graph.IsMakerOut<View>();
     }
 
     private sealed class Sun : IRenderInto<(View, Light)>

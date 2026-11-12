@@ -246,6 +246,7 @@ internal sealed class Gems : IDisposable
 
         _gpuProvider = _loaded.Find(static gem => gem.Parts.OfType<IGraphicsApi>().Any());
         _graph.Gpu = _gpuProvider?.Parts.OfType<IGraphicsApi>().First();
+        _graph.Rendering = _rendering;
         _threads.Start(EngineThread.Render, Render);
     }
 

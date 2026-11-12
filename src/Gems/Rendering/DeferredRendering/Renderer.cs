@@ -68,11 +68,6 @@ public sealed class Renderer
     private const int AutoRenderHeight = 1080;
 
     /// <summary>
-    /// The failure Core tells, as a pass, each frame while a step of this gem is out because it threw.
-    /// </summary>
-    private static readonly string _stoppedRendering = $"{typeof(Renderer).Assembly.GetName().Name} stopped rendering";
-
-    /// <summary>
     /// How the world is drawn and what the renderer shows, which the debug window also sets on the game thread. Both
     /// steps read it on the render thread.
     /// </summary>
@@ -718,14 +713,14 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// Lets the loading domain show when a step of the renderer threw, and draws the frame's render failures over the
+    /// Lets the loading domain show when the view's step is out, and draws the frame's render failures over the
     /// window; nothing when none failed.
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph)
     {
-        // A view step that threw never reaches its own release. Core tells a step that threw as this failure, by the
-        // gem's assembly; any other failure leaves the view step to release when it is ready, so nothing pops in.
-        if (graph.Failures.Contains((RenderFailure.Pass, _stoppedRendering)))
+        // A view step that threw never reaches its own release; while it renders, it releases when it is ready, so
+        // nothing pops in.
+        if (graph.IsMakerOut<GpuView>())
             EndPreparing();
 
         _banner.Record(graph, frame);

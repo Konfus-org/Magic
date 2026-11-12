@@ -88,11 +88,11 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
             return null;
         }
 
-        // A frame without a view while something failed lets the loading domain show: the failure is already told.
-        // Without a failure, the view is still loading, and the domain keeps waiting for the passes.
+        // A frame without a view because its maker is out lets the loading domain show: the failure is already told.
+        // Otherwise the view is still loading, and the domain keeps waiting for the passes.
         if (input.View is not { } gpu)
         {
-            if (!graph.Failures.IsEmpty)
+            if (graph.IsMakerOut<GpuView>())
                 _built.TrySetResult();
 
             return null;
