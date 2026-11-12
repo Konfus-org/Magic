@@ -3,17 +3,13 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Unicode;
-using System.Threading.Channels;
 using Magic.Assets;
-using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
-using Magic.Graphics;
 using Magic.Input;
 using Magic.Platform;
 using Magic.Projects;
-using Magic.Threading;
 using Magic.Utils;
 using static Magic.ImGuiDebugUI.ImDrawFlags_;
 using static Magic.ImGuiDebugUI.ImGui;
@@ -34,22 +30,19 @@ using static Magic.ImGuiDebugUI.ImGuiTableColumnFlags_;
 using static Magic.ImGuiDebugUI.ImGuiTableFlags_;
 using static Magic.ImGuiDebugUI.ImGuiTreeNodeFlags_;
 using static Magic.ImGuiDebugUI.ImGuiWindowFlags_;
-using static Magic.ImGuiDebugUI.ImTextureStatus;
 
 namespace Magic.ImGuiDebugUI;
 
 /// <summary>
-/// The debug UI, drawn with Dear ImGui: what gems and scripts report, and the lines they log to show on screen, as lines
-/// down the left of the picture and text in the world, and the windows gems draw with its widgets (<see cref="IDebugUI"/>).
+/// The debug UI's widgets and ImGui's frame, over the one ImGui context: what gems and scripts report, as lines down the
+/// left of the picture and text in the world, and the windows gems draw with its widgets (<see cref="IDebugUI"/>).
 /// <para>
-/// ImGui's frame is the game thread's. <see cref="Update"/> hands ImGui the frame's input and starts its frame, so the
-/// widgets gems made after this one call in their Update go into it; <see cref="LateUpdate"/> draws what is reported, ends
-/// the frame and publishes a copy of it, whether anything draws it or not; and <see cref="Render"/> records the newest
-/// copy over the window's image, in the overlay layer, so it shows over whatever drew the world. Reports come from any thread (<see cref="Reports"/>). It is public because
-/// nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
+/// ImGui's frame is the game thread's. <see cref="BeginFrame"/> hands ImGui the frame's input and starts its frame, so the
+/// widgets gems made after this one call in their Update go into it; <see cref="EndFrame"/> draws what is reported and
+/// ends the frame, which <see cref="Renderer"/> then publishes. Reports come from any thread (<see cref="Reports"/>).
 /// </para>
 /// </summary>
-public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IHasSettings<ImGuiDebugUISettings>, IDisposable
+public sealed class DebugUI : IDebugUI, IDisposable
 {
     private const int InputBytes = 256;
 
@@ -82,31 +75,18 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IHasSet
     private static readonly Vector2 _platePadding = new(4, 2);
     private static readonly Vector2 _linesMargin = new(8, 8);
 
-    // What reports are written in, linear as Color is: white, an orange warning and a red error.
-    private static readonly Color _white = new(1, 1, 1);
-    private static readonly Color _warning = new(1, 0.376f, 0);
-    private static readonly Color _error = new(1, 0, 0);
-
+    private readonly ImGuiDebugUISettings _settings;
     private readonly App _app;
     private readonly IEcs _ecs;
+    private readonly Reports _reports;
     private readonly IInput? _input;
     private readonly IClipboard? _clipboard;
     private readonly unsafe ImGuiContext_t* _context;
-    private readonly DebugUIOverlay _overlay;
-    private readonly Reports _reports = new();
 
     /// <summary>
     /// The engine's look at a scale of 1, which each change of the UI's scale starts again from.
     /// </summary>
     private readonly ImGuiStyle_t _look;
-
-    /// <summary>
-    /// Each frame ImGui ends, copied for the overlay, and what ImGui asks of its textures, in the order it asks.
-    /// </summary>
-    private readonly Mailbox<DebugUIFrame> _frames = new();
-    private readonly Channel<DebugUITextureChange> _textureChanges = Channel.CreateUnbounded<DebugUITextureChange>(
-        new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
-    );
 
     /// <summary>
     /// What ImGui is told this frame, as the C strings it reads: labels, the text of fields and lines.
@@ -146,14 +126,9 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IHasSet
     private readonly Dictionary<string, (string Shown, string Id)> _fields = [];
 
     /// <summary>
-    /// This gem, for ImGui's clipboard callbacks.
+    /// This UI, for ImGui's clipboard callbacks.
     /// </summary>
-    private readonly GCHandle<ImGuiDebugUIGem> _self;
-
-    /// <summary>
-    /// The id the last of ImGui's textures was given, which the overlay knows it by.
-    /// </summary>
-    private ulong _lastTextureId;
+    private readonly GCHandle<DebugUI> _self;
 
     /// <summary>
     /// Where the next new window's left edge goes, in font sizes.
@@ -167,21 +142,21 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IHasSet
     /// </summary>
     private bool _isTableShown;
 
-    public unsafe ImGuiDebugUIGem(
+    internal unsafe DebugUI(
         ImGuiDebugUISettings settings,
         App app,
-        AssetManager assets,
         IEcs ecs,
-        IInput? input = null,
-        IClipboard? clipboard = null
+        Reports reports,
+        IInput? input,
+        IClipboard? clipboard
     )
     {
-        Settings = settings;
+        _settings = settings;
         _app = app;
         _ecs = ecs;
+        _reports = reports;
         _input = input;
         _clipboard = clipboard;
-        _overlay = new DebugUIOverlay(assets, _frames, _textureChanges.Reader);
 
         // ImGui writes no ini file, and is told the overlay takes the textures it makes and changes, and draws by vertex
         // offset; it takes the engine's look, scaled each frame (Update).
@@ -195,17 +170,15 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IHasSet
         Look.Apply(style);
         _look = *style;
 
-        // ImGui's clipboard is the platform's, through callbacks that find this gem by the handle in the user data.
-        _self = new GCHandle<ImGuiDebugUIGem>(this);
+        // ImGui's clipboard is the platform's, through callbacks that find this UI by the handle in the user data.
+        _self = new GCHandle<DebugUI>(this);
         ImGuiPlatformIO_t* platform = ImGui_GetPlatformIO();
-        platform->Platform_ClipboardUserData = (void*)GCHandle<ImGuiDebugUIGem>.ToIntPtr(_self);
+        platform->Platform_ClipboardUserData = (void*)GCHandle<DebugUI>.ToIntPtr(_self);
         platform->Platform_SetClipboardTextFn = &SetClipboard;
         platform->Platform_GetClipboardTextFn = &GetClipboard;
     }
 
     public bool IsEnabled => true;
-
-    public ImGuiDebugUISettings Settings { get; set; }
 
     public unsafe void Dispose()
     {
@@ -217,7 +190,7 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IHasSet
     /// <summary>
     /// Hands ImGui the frame's input and starts its frame, which the widgets called in Update go into.
     /// </summary>
-    public unsafe void Update(in Frame frame)
+    public unsafe void BeginFrame(in Frame frame)
     {
         _text.Reset();
         ImGuiIO_t* io = ImGui_GetIO();
@@ -227,12 +200,12 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IHasSet
         // The look at the UI's scale and font size, made again from scale 1 only when either changed. ImGui scales the font
         // by FontScaleMain itself, and its spacing only by ScaleAllSizes.
         ImGuiStyle_t* style = ImGui_GetStyle();
-        float scale = Settings.UiScale > 0 ? Settings.UiScale : (_app.Window?.DisplayScale ?? 1);
-        if (style->FontScaleMain != scale || style->FontSizeBase != Settings.FontSize)
+        float scale = _settings.UiScale > 0 ? _settings.UiScale : (_app.Window?.DisplayScale ?? 1);
+        if (style->FontScaleMain != scale || style->FontSizeBase != _settings.FontSize)
         {
             *style = _look;
             ImGuiStyle_ScaleAllSizes(style, scale);
-            style->FontSizeBase = Settings.FontSize;
+            style->FontSizeBase = _settings.FontSize;
             style->FontScaleMain = scale;
         }
 
@@ -245,12 +218,12 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IHasSet
 
     /// <summary>
     /// Draws what is reported under the frame's windows, the last of the frame's widgets, then ends ImGui's frame, which
-    /// it needs before the next begins, and publishes a copy of it for the overlay.
+    /// it needs before the next begins, whether or not anything draws it.
     /// </summary>
-    public unsafe void LateUpdate(in Frame frame)
+    public void EndFrame(in Frame frame)
     {
         if (_depth > 0)
-            Text("A debug UI window was begun and not ended; it is ended for it.", _error);
+            Text("A debug UI window was begun and not ended; it is ended for it.", Reports.Error);
 
         while (_depth > 0)
         {
@@ -261,50 +234,16 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IHasSet
         // always when the settings say so. Everything is taken either way, so what has had its time goes.
         _worldTexts.Clear();
         _screenLines.Clear();
-        _reports.Take(frame.AppSec, Settings.IsLogAlwaysShown || _isWindowDrawn, _worldTexts, _screenLines);
+        _reports.Take(frame.AppSec, _settings.IsLogAlwaysShown || _isWindowDrawn, _worldTexts, _screenLines);
         DrawReports();
-
-        // Ended whether or not anything draws it. Its textures get their ids before the copy, which reads them.
         ImGui_Render();
-        QueueTextureChanges(frame.Index);
-        _frames.Back.Copy(ImGui_GetDrawData(), frame.Index);
-        _frames.Publish();
     }
-
-    /// <summary>
-    /// The newest frame ImGui ended, over the window's image.
-    /// </summary>
-    public void Render(in Frame frame, RenderGraph graph) => _overlay.Record(graph);
 
     public void Text(Vector3 position, string text, Color? color = null, string? tooltip = null) =>
-        _reports.Add(new Report(text, ReportKind.Plain, color ?? _white, position, tooltip, 0));
+        _reports.Add(new Report(text, ReportKind.Plain, color ?? Reports.White, position, tooltip, 0));
 
     public void Text(string text, Color? color = null) =>
-        _reports.Add(new Report(text, ReportKind.Plain, color ?? _white, null, null, 0));
-
-    /// <summary>
-    /// Shows a line logged to show on screen for a while: information counted while it shows, and a warning or an error
-    /// between <c>!!!</c>s. Any thread.
-    /// </summary>
-    public void Write(in Log.Line line)
-    {
-        if (!line.IsOnScreen)
-            return;
-
-        (ReportKind kind, Color color) = line.Level switch
-        {
-            Log.LoggingLevel.Verbose or Log.LoggingLevel.Info => (ReportKind.Counted, _white),
-            Log.LoggingLevel.Warn => (ReportKind.Alarm, _warning),
-            Log.LoggingLevel.Error or Log.LoggingLevel.Critical => (ReportKind.Alarm, _error),
-            _ => (ReportKind.Counted, _white),
-        };
-        _reports.Add(new Report(line.Message, kind, color, null, null, Settings.ReportSec));
-    }
-
-    /// <summary>
-    /// Nothing: a line shows with the next frame drawn.
-    /// </summary>
-    public void Flush() { }
+        _reports.Add(new Report(text, ReportKind.Plain, color ?? Reports.White, null, null, 0));
 
     public unsafe void Begin(string title, bool scrollable = false) => Begin(title, null, scrollable);
 
@@ -656,10 +595,10 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IHasSet
         (byte*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(utf8));
 
     /// <summary>
-    /// The gem ImGui's clipboard callbacks are for: the one the platform's user data names, set as the context is made.
+    /// The UI ImGui's clipboard callbacks are for: the one the platform's user data names, set as the context is made.
     /// </summary>
-    private static unsafe ImGuiDebugUIGem GetSelf() =>
-        GCHandle<ImGuiDebugUIGem>.FromIntPtr((nint)ImGui_GetPlatformIO()->Platform_ClipboardUserData).Target;
+    private static unsafe DebugUI GetSelf() =>
+        GCHandle<DebugUI>.FromIntPtr((nint)ImGui_GetPlatformIO()->Platform_ClipboardUserData).Target;
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static unsafe void SetClipboard(ImGuiContext_t* context, byte* text)
@@ -674,9 +613,9 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IHasSet
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static unsafe byte* GetClipboard(ImGuiContext_t* context)
     {
-        ImGuiDebugUIGem gem = GetSelf();
+        DebugUI ui = GetSelf();
 
-        return gem._clipboard is { } clipboard ? gem._text.Add(clipboard.Text) : null;
+        return ui._clipboard is { } clipboard ? ui._text.Add(clipboard.Text) : null;
     }
 
     /// <summary>
@@ -684,38 +623,6 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IHasSet
     /// </summary>
     private Vector2 GetDisplaySize() =>
         _app.Window is { Width: > 0, Height: > 0 } window ? new Vector2(window.Width, window.Height) : _windowlessSize;
-
-    /// <summary>
-    /// What ImGui asks of its textures, queued for the overlay with <paramref name="frame"/> and done as far as ImGui
-    /// knows: a new one given an id and filled, a changed one filled again, and one it let go of dropped once the frame
-    /// just ended draws nothing with it.
-    /// </summary>
-    private unsafe void QueueTextureChanges(uint frame)
-    {
-        ImVector_ImTextureDataPtr_t* textures = ImGui_GetDrawData()->Textures;
-        for (int i = 0; textures != null && i < textures->Size; i++)
-        {
-            ImTextureData_t* texture = textures->Data[i];
-            if (texture->Status == ImTextureStatus_WantCreate)
-                ImTextureData_SetTexID(texture, ++_lastTextureId);
-
-            // RGBA8 whole, which is how ImGui's atlas holds it.
-            if (texture->Status is ImTextureStatus_WantCreate or ImTextureStatus_WantUpdates)
-            {
-                byte[] pixels = new ReadOnlySpan<byte>(texture->Pixels, texture->Width * texture->Height * 4).ToArray();
-                _textureChanges.Writer.TryWrite(
-                    new DebugUITextureChange(texture->TexID, frame, texture->Width, texture->Height, pixels)
-                );
-                ImTextureData_SetStatus(texture, ImTextureStatus_OK);
-            }
-            else if (texture->Status == ImTextureStatus_WantDestroy && texture->UnusedFrames > 0)
-            {
-                _textureChanges.Writer.TryWrite(new DebugUITextureChange(texture->TexID, frame, 0, 0, null));
-                ImTextureData_SetTexID(texture, 0);
-                ImTextureData_SetStatus(texture, ImTextureStatus_Destroyed);
-            }
-        }
-    }
 
     /// <summary>
     /// Lays out a field: its label, up to any <c>##</c>, on the left, then the field stretched to the right edge. Returns
@@ -822,8 +729,8 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IHasSet
     }
 
     /// <summary>
-    /// Widgets go into ImGui's frame, which is open from this gem's Update to its LateUpdate; called outside it, ImGui
-    /// would stop the process.
+    /// Widgets go into ImGui's frame, which is open from <see cref="BeginFrame"/> to <see cref="EndFrame"/>; called
+    /// outside it, ImGui would stop the process.
     /// </summary>
     private unsafe void ThrowIfOutsideFrame()
     {
@@ -846,10 +753,10 @@ public sealed class ImGuiDebugUIGem : IGem, IRender, IDebugUI, ILogSink, IHasSet
         ImDrawList_t* under = ImGui_GetBackgroundDrawList();
         bool canHover = !ImGui_IsWindowHovered((int)ImGuiHoveredFlags_AnyWindow);
         Vector2 size = GetDisplaySize();
-        float reach = Settings.TextDistance;
+        float reach = _settings.TextDistance;
 
         // Plates are black at the set opacity, as ImGui packs a colour, and as big as the UI's scale makes them.
-        uint plate = (uint)(Math.Clamp(Settings.OverlayOpacity, 0, 1) * 255) << 24;
+        uint plate = (uint)(Math.Clamp(_settings.OverlayOpacity, 0, 1) * 255) << 24;
         float scale = ImGui_GetStyle()->FontScaleMain;
         Vector2 padding = _platePadding * scale;
         Vector2 margin = _linesMargin * scale;
