@@ -13,11 +13,16 @@ using Magic.Worlds;
 namespace Magic.GlobalIllumination;
 
 /// <summary>
+/// What the indirect light takes each frame: the view and the world as rays see it, each null in a frame that lacks it.
+/// </summary>
+public readonly record struct GlobalIlluminationInput(GpuView? View, TracedWorld? Traced);
+
+/// <summary>
 /// Lights the view's surfaces indirectly, through the world as rays see it: the probe grid, the traced diffuse light and
 /// the traced reflections, recorded in the light stage, written into the frame's buffer and made as the frame's
 /// <see cref="IndirectLight"/>, which shading takes.
 /// </summary>
-public sealed class Renderer : IRender<TracedInput, IndirectLight>, IHookIntoDomainLoading
+public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, IHookIntoDomainLoading
 {
     /// <summary>
     /// The view depth's two textures: the even frames write the first and the odd the second, the other being the
@@ -36,8 +41,8 @@ public sealed class Renderer : IRender<TracedInput, IndirectLight>, IHookIntoDom
     private readonly ImmutableArray<ShaderEntry> _shaders;
 
     /// <summary>
-    /// Ends once the passes' shaders are built or failed, or on a GPU that doesn't trace rays: what a domain loading
-    /// waits for, so its first frame is lit as the ones after.
+    /// Ends once the passes' shaders are built or failed, once a frame with a view has no world as rays see it, or on
+    /// a GPU that doesn't trace rays: what a domain loading waits for, so its first frame is lit as the ones after.
     /// </summary>
     private readonly TaskCompletionSource _built = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -60,7 +65,7 @@ public sealed class Renderer : IRender<TracedInput, IndirectLight>, IHookIntoDom
         _reflections = new TracedReflections(assets);
         _shaders = [.. _probes.Shaders, .. _diffuse.Shaders, .. _reflections.Shaders];
 
-        // Without rays nothing is traced and the renderer is never called, so it holds no domain back.
+        // Without rays nothing is traced, so the renderer holds no domain back.
         if (!gpu.Features.HasRayQuery)
             _built.TrySetResult();
     }
@@ -69,13 +74,33 @@ public sealed class Renderer : IRender<TracedInput, IndirectLight>, IHookIntoDom
     /// The frame's indirect light, while it is on, the passes' shaders are built, what they read and write is made,
     /// and rays see an instance; none otherwise, and the surfaces take the sky's light.
     /// </summary>
-    public IndirectLight? Render(in Frame frame, RenderGraph graph, in TracedInput input)
+    public IndirectLight? Render(in Frame frame, RenderGraph graph, in GlobalIlluminationInput input)
     {
         GlobalIlluminationSettings settings = _settings;
         bool isReflectionsOn = settings.IsReflectionsOn;
 
         // Off, no domain waits for the passes, and the probes start afresh once it is back on.
         if (!settings.IsIndirectLightOn)
+        {
+            _built.TrySetResult();
+            _traced = null;
+
+            return null;
+        }
+
+        // A frame without a view while something failed lets the loading domain show: the failure is already told.
+        // Without a failure, the view is still loading, and the domain keeps waiting for the passes.
+        if (input.View is not { } gpu)
+        {
+            if (!graph.Failures.IsEmpty)
+                _built.TrySetResult();
+
+            return null;
+        }
+
+        // With a view, the world as rays see it is lacking only where no gem makes it, rays are not traced, or its
+        // maker failed and told so: nothing is traced, no domain waits, and the probes start afresh once it is back.
+        if (input.Traced is not { } traced)
         {
             _built.TrySetResult();
             _traced = null;
@@ -101,14 +126,13 @@ public sealed class Renderer : IRender<TracedInput, IndirectLight>, IHookIntoDom
             return null;
 
         // Where rays see no instance, the probes start afresh once they do.
-        if (input.Traced.Structure.IsNone)
+        if (traced.Structure.IsNone)
         {
             _traced = null;
 
             return null;
         }
 
-        GpuView gpu = input.View;
         Result<GpuBuffer> constants = graph.Buffer(new("GI constants", Unsafe.SizeOf<GIConstants>()));
         (int Width, int Height) tracedSize = gpu.Scaled(settings.IndirectScale);
         bool hasHistory = _traced == tracedSize;
@@ -125,13 +149,13 @@ public sealed class Renderer : IRender<TracedInput, IndirectLight>, IHookIntoDom
                 gpu.Vertices,
                 gpu.Indices,
                 gpu.Meshes,
-                input.Traced.HitMaterials,
+                traced.HitMaterials,
             ]
         );
         Result<(ProbeGridConstants Grid, ProbeUpdateConstants Update)> probes = _probes.Prepare(
             graph,
             _traced is not null,
-            input.Traced.Box,
+            traced.Box,
             (settings.ProbesAcross, settings.ProbesUp)
         );
         Result<TracedDiffuseConstants> diffuse = TracedDiffuse.Prepare(view, frame.Index, hasHistory);
