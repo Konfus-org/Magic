@@ -16,7 +16,7 @@ asked, when its trigger fits: read its `SKILL.md` and follow it. Claude Code als
 | [slice](docs/skills/slice/SKILL.md) | Any change to code, docs or tools, and the next agreed slice |
 | [finish](docs/skills/finish/SKILL.md) | A slice's code is written, or the user's review comments are addressed |
 | [review-slice](docs/skills/review-slice/SKILL.md) | Reviewing a validated slice from a context that didn't write it |
-| [tidy-worktrees](docs/skills/tidy-worktrees/SKILL.md) | The start of every session |
+| [tidy-worktrees](docs/skills/tidy-worktrees/SKILL.md) | The SessionStart note lists finished worktrees or stale claims |
 | [investigate](docs/skills/investigate/SKILL.md) | Something is broken, logs an error or draws wrong |
 | [new-gem](docs/skills/new-gem/SKILL.md) | A slice needs a new gem |
 | [cleanup](docs/skills/cleanup/SKILL.md) | The user asks to clean up, refactor or simplify code |
@@ -93,7 +93,7 @@ In Claude Code, the agent hooks in `.claude/settings.json` hold the workflow wit
 | Document | Read |
 | --- | --- |
 | [README](README.md) | Once per session |
-| [Code Standards](docs/CODE_STANDARDS.md) | Before editing any `.cs` file |
+| [Code Standards](docs/CODE_STANDARDS.md) | Before editing any `.cs` file: "How we write code" and "Ground rules", then each other section the change needs |
 | [Shader Standards](docs/SHADER_STANDARDS.md) | Before editing any `.slang` file, or a C# struct that a shader shares |
 | [Tests](docs/TOOLS.md#tests) | Before running or touching tests |
 | [Tools](docs/TOOLS.md) | Before running a tool script |
@@ -305,9 +305,9 @@ Every task runs in its own worktree. Never edit or commit in the main checkout.
   without that yes. Release the claim with `-Release` once the slice merges, is answered or is dropped.
 - **Finish** and merge as the finish skill says, once the user approves.
 - **Abandoned work:** if the user drops the task, release its claim, leave the worktree and branch and say so.
-- **Start of every session:** remove what is finished, stale claims included, and report the rest (the
-  tidy-worktrees skill). Never remove a
-  worktree or branch with work found nowhere else.
+- **Start of a session:** when the SessionStart note lists finished worktrees or stale claims, remove what is
+  finished and report the rest (the tidy-worktrees skill). Never remove a worktree or branch with work found nowhere
+  else.
 
 ### Sessions
 
