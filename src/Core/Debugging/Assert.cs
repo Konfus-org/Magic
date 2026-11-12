@@ -15,9 +15,12 @@ public static class Assert
     private static int _crashing;
 
     /// <summary>
-    /// State that cannot be: when <paramref name="condition"/> is false, the run crashes <see cref="Now"/>, with the
-    /// condition's source as the message, and <paramref name="message"/> after it. On in every build.
+    /// Crashes the run <see cref="Now"/> when <paramref name="condition"/> is false, a state that cannot be. Active in
+    /// each build.
     /// </summary>
+    /// <remarks>
+    /// The message is the condition's source, then <paramref name="message"/>.
+    /// </remarks>
     public static void True(
         [DoesNotReturnIf(false)] bool condition,
         string message = "",
@@ -32,9 +35,12 @@ public static class Assert
     }
 
     /// <summary>
-    /// State that cannot be: when <paramref name="condition"/> is true, the run crashes <see cref="Now"/>, with the
-    /// condition's source as the message, and <paramref name="message"/> after it. On in every build.
+    /// Crashes the run <see cref="Now"/> when <paramref name="condition"/> is true, a state that cannot be. Active in
+    /// each build.
     /// </summary>
+    /// <remarks>
+    /// The message is the condition's source, then <paramref name="message"/>.
+    /// </remarks>
     public static void False(
         [DoesNotReturnIf(true)] bool condition,
         string message = "",
@@ -49,10 +55,13 @@ public static class Assert
     }
 
     /// <summary>
-    /// Logs <paramref name="message"/> as <see cref="Log.Critical"/>, writes it, the stack it was called from and the
-    /// last lines logged to Logs/&lt;time&gt;.crash beside Magic, tells the terminal where, breaks an attached
-    /// debugger and ends the process. Nothing else runs: no gem is disposed.
+    /// Logs <paramref name="message"/> as <see cref="Log.Critical"/>, writes a crash file and ends the process. No gem
+    /// is disposed.
     /// </summary>
+    /// <remarks>
+    /// The crash file is Logs/&lt;time&gt;.crash beside Magic, with the message, the calling stack and the last lines
+    /// logged. The terminal shows its path. An attached debugger breaks first.
+    /// </remarks>
     [DoesNotReturn]
     [SuppressMessage(
         "ApiDesign",
@@ -93,7 +102,6 @@ public static class Assert
                 text.Append(logged.ToString()).Append('\n');
         }
 
-        // To Logs/<time>.crash beside Magic.
         string folder = Path.Join(AppContext.BaseDirectory, "Logs");
         string path = Path.Join(
             folder,

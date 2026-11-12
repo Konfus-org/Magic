@@ -3,8 +3,8 @@ using System.Drawing;
 namespace Magic.Graphics;
 
 /// <summary>
-/// One indexed draw of a <see cref="DrawPass"/>: <see cref="IndexCount"/> indices from <see cref="FirstIndex"/> on,
-/// drawn only inside <see cref="Scissor"/>'s pixels of the target, with <see cref="Constants"/> pushed over the pass's.
+/// One indexed draw of a <see cref="DrawPass"/>: <see cref="IndexCount"/> indices from <see cref="FirstIndex"/>,
+/// clipped to <see cref="Scissor"/>, with <see cref="Constants"/> pushed over the pass's.
 /// </summary>
 public readonly record struct IndexedDraw
 {
@@ -18,9 +18,11 @@ public readonly record struct IndexedDraw
 }
 
 /// <summary>
-/// A draw pass being recorded, begun by <see cref="RenderGraph.Draw"/>: say what it reads, which the GPU provider puts
-/// the barriers in for, then end it with what it draws.
+/// A draw pass that <see cref="RenderGraph.Draw"/> begins: declare what it reads, then end it with what it draws.
 /// </summary>
+/// <remarks>
+/// The GPU provider puts in the barriers from these declarations.
+/// </remarks>
 public readonly ref struct DrawPass
 {
     private readonly RenderGraph _graph;
@@ -32,11 +34,14 @@ public readonly ref struct DrawPass
     public DrawPass Indirect(params ReadOnlySpan<GpuResource> resources) => Use(resources, GpuAccess.Indirect);
 
     /// <summary>
-    /// As many draws as the unsigned count at <paramref name="countOffset"/> in <paramref name="count"/>, up to
-    /// <paramref name="maxDraws"/>, their arguments <paramref name="stride"/> bytes apart from
-    /// <paramref name="argumentsOffset"/> in <paramref name="arguments"/>, each four unsigned integers: vertices,
-    /// instances, first vertex, first instance.
+    /// Draws as many times as the unsigned count at <paramref name="countOffset"/> in <paramref name="count"/>, up to
+    /// <paramref name="maxDraws"/>.
     /// </summary>
+    /// <remarks>
+    /// The arguments start at <paramref name="argumentsOffset"/> in <paramref name="arguments"/>,
+    /// <paramref name="stride"/> bytes apart. Each is four unsigned integers: vertices, instances, first vertex, first
+    /// instance.
+    /// </remarks>
     public void DrawIndirectCount(
         GpuBuffer arguments,
         ulong argumentsOffset,
@@ -62,8 +67,8 @@ public readonly ref struct DrawPass
     }
 
     /// <summary>
-    /// Each of <paramref name="draws"/> in order, clipped to its scissor with its constants pushed, their 32-bit
-    /// indices read from <paramref name="indices"/>.
+    /// Draws each of <paramref name="draws"/> in order with 32-bit indices from <paramref name="indices"/>, each
+    /// clipped to its scissor with its constants pushed.
     /// </summary>
     public void DrawIndexed(GpuBuffer indices, scoped ReadOnlySpan<IndexedDraw> draws)
     {

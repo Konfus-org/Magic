@@ -3,10 +3,11 @@ using System.Diagnostics.Metrics;
 namespace Magic.Debugging;
 
 /// <summary>
-/// Core's meter, <c>Magic.Core</c>, which Core's parts record on for whatever listens, and the names of its
-/// instruments and tag keys for whoever reads them. Instruments are named <c>magic.core.*</c>, and their time is in
-/// seconds.
+/// Core's meter, <c>Magic.Core</c>, and the names of its instruments and tag keys.
 /// </summary>
+/// <remarks>
+/// Instruments are named <c>magic.core.*</c>, and their time is in seconds.
+/// </remarks>
 public static class Metrics
 {
     public const string FrameDuration = "magic.core.frame.duration";
@@ -21,7 +22,7 @@ public static class Metrics
     public const string HookDuration = "magic.core.gem.hook.duration";
 
     /// <summary>
-    /// One step of Core's own in the run's loop, tagged with <see cref="StepTag"/>.
+    /// One of Core's own steps in the run's loop, tagged with <see cref="StepTag"/>.
     /// </summary>
     public const string StepDuration = "magic.core.step.duration";
 
@@ -31,12 +32,12 @@ public static class Metrics
     public const string GemNameTag = "magic.core.gem.name";
 
     /// <summary>
-    /// The hook a gem ran: <c>Update</c>, <c>Render</c>.
+    /// The hook a gem ran, such as <c>Update</c> or <c>Render</c>.
     /// </summary>
     public const string HookTag = "magic.core.gem.hook";
 
     /// <summary>
-    /// A step of Core's own in the run's loop.
+    /// One of Core's own steps in the run's loop.
     /// </summary>
     public const string StepTag = "magic.core.step";
 

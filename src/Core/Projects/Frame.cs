@@ -3,7 +3,7 @@ using Magic.Events;
 namespace Magic.Projects;
 
 /// <summary>
-/// One frame's clocks and messages, handed to every hook the frame runs.
+/// One frame's clocks and messages, given to each hook that the frame runs.
 /// </summary>
 public readonly record struct Frame
 {
@@ -32,8 +32,7 @@ public readonly record struct Frame
     public bool IsPaused { get; init; }
 
     /// <summary>
-    /// The messages published during the last frame. None in a fixed step, which takes what it needs from what
-    /// <see cref="IGem.Update"/> read.
+    /// The messages published during the last frame. None in a fixed step: take them in <see cref="IGem.Update"/>.
     /// </summary>
     public FrameEvents Events { get; init; }
 }

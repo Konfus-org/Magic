@@ -18,8 +18,7 @@ namespace Magic.Projects;
 /// <param name="Resources">The folder of its own assets; null when it has none.</param>
 /// <param name="Folder">The folder its assemblies load from.</param>
 /// <param name="Context">
-/// Where its assemblies load, held from the moment they do: nothing else keeps it alive, and once collected it would start
-/// unloading the gem.
+/// Where its assemblies load. Only this reference keeps it alive; if it is collected, the gem starts to unload.
 /// </param>
 internal sealed record RegisteredGem(
     string Name,

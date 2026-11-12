@@ -4,15 +4,14 @@ using System.Diagnostics.Metrics;
 namespace Magic.Debugging;
 
 /// <summary>
-/// Timing something into a histogram of seconds, only while something listens.
+/// Records timings into a histogram of seconds, only while something listens.
 /// </summary>
 public static class HistogramExtensions
 {
     extension(Histogram<double> timer)
     {
         /// <summary>
-        /// The moment a timing starts, to hand to <see cref="RecordSince"/>: 0 while nothing listens, so nothing is
-        /// recorded.
+        /// Gets the start time to give to <see cref="RecordSince"/>: 0 while nothing listens, so nothing is recorded.
         /// </summary>
         public long Start() => timer.Enabled ? Stopwatch.GetTimestamp() : 0;
 

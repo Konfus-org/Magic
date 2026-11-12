@@ -4,28 +4,35 @@ using Magic.Utils;
 namespace Magic.Graphics;
 
 /// <summary>
-/// Compiles Slang entries to SPIR-V, as a gem provides it: the entry's module and the modules it imports come from the
-/// assets, so a change to any of them is a new version and a new compile, and the result is cached under what it was
-/// made from. Any thread; the work runs on a worker.
+/// Compiles Slang entries to SPIR-V.
 /// </summary>
+/// <remarks>
+/// The modules come from the assets, so a change to the entry's module or to a module it imports makes a new compile.
+/// Results are cached. Any thread.
+/// </remarks>
 public interface IShaderCompiler
 {
     /// <summary>
-    /// <paramref name="entry"/> compiled, or why not: a message with the file and line of each error, logged once by
-    /// the caller as it decides what to draw instead.
+    /// Compiles <paramref name="entry"/>, or gives a message with the file and line of each error.
     /// </summary>
+    /// <remarks>
+    /// The caller logs the message one time, as it decides what to draw instead.
+    /// </remarks>
     Task<Result<CompiledShader>> CompileAsync(ShaderEntry entry, CancellationToken cancel);
 
     /// <summary>
-    /// The fields of the struct <paramref name="type"/> names, as a buffer lays them out, the heap reading it so: how a
-    /// renderer packs a material's params into the struct its shader reads them as. Or why not.
+    /// Gets the fields of the struct that <paramref name="type"/> names, as a heap buffer lays them out, or why not.
     /// </summary>
+    /// <remarks>
+    /// A renderer uses them to pack a material's params into the struct that its shader reads.
+    /// </remarks>
     Task<Result<ImmutableArray<ShaderField>>> ReflectAsync(ShaderTypeArgument type, CancellationToken cancel);
 
     /// <summary>
-    /// The integer constant <paramref name="name"/> that the struct <paramref name="type"/> names declares, as
-    /// <c>static const uint Levels = 2;</c> does: how a shader tells a renderer what it needs beyond its params. Or why
-    /// not, as when the struct declares none.
+    /// Gets the integer constant <paramref name="name"/> of the struct that <paramref name="type"/> names, or why not.
     /// </summary>
+    /// <remarks>
+    /// A constant such as <c>static const uint Levels = 2;</c> tells a renderer what a shader needs beyond its params.
+    /// </remarks>
     Task<Result<long>> ReflectConstantAsync(ShaderTypeArgument type, string name, CancellationToken cancel);
 }

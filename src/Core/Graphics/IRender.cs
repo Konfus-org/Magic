@@ -3,62 +3,74 @@ using Magic.Projects;
 namespace Magic.Graphics;
 
 /// <summary>
-/// A gem's part of the frame on the GPU that takes nothing from other gems and makes nothing for them, on the render
-/// thread, from what <c>LateUpdate</c> last handed it: as often as the GPU draws, more or less often than the game
-/// thread's frames. A gem's <c>Renderer</c> part implements it. Core calls <see cref="Render"/> once a frame, after
-/// every other form; the part records its passes into the frame's graph, each in its <see cref="RenderStage"/>, and
-/// once every gem has, the GPU provider presents it. A part that takes or makes what other gems draw from implements
-/// <see cref="IRenderFrom{TInput}"/>, <see cref="IRenderInto{TOutput}"/> or <see cref="IRender{TInput, TOutput}"/>
-/// instead. A part with more than one step in the frame implements a form for each. What it cannot record it tells
-/// <see cref="RenderGraph.Fail"/>, and goes on; a step that throws is a failure of the frame, and Core runs it again
-/// after a pause.
+/// A gem's step of the GPU frame that takes nothing from other gems and makes nothing for them.
 /// </summary>
+/// <remarks>
+/// <para>
+/// Core calls <see cref="Render"/> on the render thread once a frame, after every other form, from what
+/// <c>LateUpdate</c> last gave. The GPU frame can run more or less often than the game thread's frames.
+/// </para>
+/// <para>
+/// A step that takes or makes what other gems draw from implements <see cref="IRenderFrom{TInput}"/>,
+/// <see cref="IRenderInto{TOutput}"/> or <see cref="IRender{TInput, TOutput}"/> instead. A part with more than one
+/// step implements a form for each.
+/// </para>
+/// <para>
+/// Tell <see cref="RenderGraph.Fail"/> what cannot be recorded, and go on. A step that throws fails the frame, and
+/// Core runs it again after a pause.
+/// </para>
+/// </remarks>
 public interface IRender
 {
     /// <summary>
-    /// The gem's passes, recorded into <paramref name="graph"/>.
+    /// Records the gem's passes into <paramref name="graph"/>, each in its <see cref="RenderStage"/>.
     /// </summary>
     void Render(in Frame frame, RenderGraph graph);
 }
 
 /// <summary>
-/// A gem's part of the frame, as <see cref="IRender"/>'s, drawn from what other gems made: Core calls it after every gem
-/// whose output it takes.
+/// A gem's step of the GPU frame, as <see cref="IRender"/>, that draws from what other gems made.
 /// </summary>
+/// <remarks>
+/// Core calls it after each gem whose output it takes.
+/// </remarks>
 /// <typeparam name="TInput">
-/// What it takes, a record of other gems' outputs, one property each: a gem must make each non-nullable one, else it
-/// renders nothing, and a nullable one is null while no listed gem makes it.
+/// A record of other gems' outputs, one property each. Without each non-nullable one the step does not run. A
+/// nullable one is null while no gem makes it.
 /// </typeparam>
 public interface IRenderFrom<TInput>
     where TInput : struct
 {
     /// <summary>
-    /// The gem's passes, recorded into <paramref name="graph"/>. It isn't called on a frame a non-nullable input wasn't
-    /// made in.
+    /// Records the gem's passes into <paramref name="graph"/>. Core does not call it in a frame that lacks a
+    /// non-nullable input.
     /// </summary>
     void Render(in Frame frame, RenderGraph graph, in TInput input);
 }
 
 /// <summary>
-/// A gem's part of the frame, as <see cref="IRender"/>'s, which makes what other gems take: Core hands what it returns
-/// to every gem that takes it.
+/// A gem's step of the GPU frame, as <see cref="IRender"/>, that makes what other gems take.
 /// </summary>
+/// <remarks>
+/// Core gives what it returns to each gem that takes it.
+/// </remarks>
 /// <typeparam name="TOutput">
-/// What it makes for other gems to take: one type, or a tuple of types, each made for the gems that take it.
+/// What it makes for other gems: one type, or a tuple of types, each given to the gems that take it.
 /// </typeparam>
 public interface IRenderInto<TOutput>
     where TOutput : struct
 {
     /// <summary>
-    /// The gem's passes, recorded into <paramref name="graph"/>, and what it made this frame: null when it made
-    /// nothing, and every gem that needs it renders nothing this frame.
+    /// Records the gem's passes into <paramref name="graph"/> and returns what it made this frame.
     /// </summary>
+    /// <remarks>
+    /// Return null when it made nothing. Then no gem that needs it renders this frame.
+    /// </remarks>
     TOutput? Render(in Frame frame, RenderGraph graph);
 }
 
 /// <summary>
-/// A gem's part of the frame, as <see cref="IRender"/>'s, drawn from what other gems made and making what others take:
-/// <see cref="IRenderFrom{TInput}"/> and <see cref="IRenderInto{TOutput}"/> in one.
+/// A gem's step of the GPU frame: <see cref="IRenderFrom{TInput}"/> and <see cref="IRenderInto{TOutput}"/> in one.
 /// </summary>
 /// <typeparam name="TInput">As <see cref="IRenderFrom{TInput}"/>'s.</typeparam>
 /// <typeparam name="TOutput">As <see cref="IRenderInto{TOutput}"/>'s.</typeparam>
@@ -67,9 +79,11 @@ public interface IRender<TInput, TOutput>
     where TOutput : struct
 {
     /// <summary>
-    /// The gem's passes, recorded into <paramref name="graph"/>, and what it made this frame: null when it made
-    /// nothing, and every gem that needs it renders nothing this frame. It isn't called on a frame a non-nullable
-    /// input wasn't made in.
+    /// Records the gem's passes into <paramref name="graph"/> and returns what it made this frame.
     /// </summary>
+    /// <remarks>
+    /// Return null when it made nothing. Then no gem that needs it renders this frame. Core does not call it in a frame
+    /// that lacks a non-nullable input.
+    /// </remarks>
     TOutput? Render(in Frame frame, RenderGraph graph, in TInput input);
 }
