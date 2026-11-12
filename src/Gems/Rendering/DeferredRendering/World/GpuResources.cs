@@ -606,7 +606,7 @@ internal sealed class GpuResources(
     /// </summary>
     private async Task ReflectAsync(Handle<Shader> shader)
     {
-        string path = assets.GetPath(shader) ?? $"shader {shader.Id}";
+        string path = assets.GetPath(shader) ?? $"id {shader.Id}";
         ShaderTypeArgument type = new(shader, Path.GetFileNameWithoutExtension(path));
         Result<MaterialLayout> layout;
         try
@@ -688,7 +688,7 @@ internal sealed class GpuResources(
         _materials[handle.Id] = loaded;
         if (!loaded.Ok)
         {
-            Log.Error($"{assets.GetPath(handle)} is drawn as a failure: {loaded.Error}");
+            Log.Error($"{assets.GetPath(handle) ?? $"id {handle.Id}"} is drawn as a failure: {loaded.Error}");
 
             return;
         }
@@ -711,7 +711,7 @@ internal sealed class GpuResources(
     {
         Result<Texture> loaded = await assets.LoadAsync(handle, null, CancellationToken.None).ConfigureAwait(false);
         await threads.Enter(EngineThread.Render);
-        string name = assets.GetPath(handle) ?? $"texture {handle.Id}";
+        string name = assets.GetPath(handle) ?? $"id {handle.Id}";
         Result<GpuFormat> format = loaded.Ok ? ToGpu(loaded.Value.Format) : Result.Failure(loaded.Error);
         if (!loaded.Ok || !format.Ok)
         {
@@ -754,7 +754,7 @@ internal sealed class GpuResources(
         }
 
         await threads.Enter(EngineThread.Render);
-        string name = assets.GetPath(model) ?? $"model {model.Id}";
+        string name = assets.GetPath(model) ?? $"id {model.Id}";
         if (!derived.Ok)
         {
             Log.Error($"{name} is drawn as the failure cube: {derived.Error}");

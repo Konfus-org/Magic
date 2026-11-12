@@ -50,8 +50,10 @@ static const float PulsesPerSecond = 1.5;
 static const float ColorGlow = 2.0;
 static const float TextGlow = 3.0;
 
-// The width of a stripe and its gap together, in pixels across the diagonal.
+// The width of a stripe, its dark edge and its gap together, in pixels across the diagonal; the stripe takes the first
+// half of it, and the edge ends at this part of it.
 static const float StripePeriod = 32.0;
+static const float StripeEdgeEnd = 0.625;
 
 // The render pixels a dot of the font covers, and a character's cell and a text row's height, in dots; and the
 // characters of space after each copy of the text.
@@ -192,7 +194,8 @@ FailureAnchor GetFailureAnchor(FrameConstants frame, GpuInstance instance, Failu
     return anchor;
 }
 
-// Draws the failure over a pixel's surface: its kind's colour, pulsing, over all of it or in diagonal stripes, then its
+// Draws the failure over a pixel's surface: its kind's colour, pulsing, over all of it or in diagonal stripes, each with
+// a black edge after it, then its
 // text, white with a black shadow a pixel down and right. Hands back the pixel's velocity: the anchor's, so the
 // history follows the text, not the surface under it.
 public float2 ApplyFailure(
@@ -205,10 +208,17 @@ public float2 ApplyFailure(
 {
     FailureAnchor anchor = GetFailureAnchor(frame, instance, failure);
     float2 offset = float2(pixel) + 0.5 - anchor.uv * float2(frame.width, frame.height);
-    if (failure.pattern == FailurePattern.Solid || frac((offset.x + offset.y) / StripePeriod) < 0.5)
+    float stripe = 0.0;
+    if (failure.pattern == FailurePattern.Stripes)
+        stripe = frac((offset.x + offset.y) / StripePeriod);
+
+    if (stripe < StripeEdgeEnd)
     {
         float pulse = 0.55 + 0.45 * sin(TwoPi * PulsesPerSecond * frame.timeSec);
-        float3 color = KindColors[(uint)failure.kind] * pulse;
+        float3 color = float3(0.0);
+        if (stripe < 0.5)
+            color = KindColors[(uint)failure.kind] * pulse;
+
         surface.baseColor = color;
         surface.emissive = color * ColorGlow;
         surface.metalness = 0.0;

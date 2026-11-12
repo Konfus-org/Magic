@@ -34,9 +34,9 @@ internal sealed class FailureBanner(AssetManager assets)
     private const int LinePixels = 22;
 
     /// <summary>
-    /// The name of each kind, by its value.
+    /// The words of each kind, by its value.
     /// </summary>
-    private static readonly string[] _kinds = Enum.GetNames<RenderFailure>();
+    private static readonly string[] _kinds = ["Pass", "Resource", "Shader", "Sky", "Weather", "Post effect"];
 
     private readonly DrawShaders _shaders = new(
         PassShaders.GetEntry(assets, "FailureBanner", "DrawFailureBannerVertex", ShaderStage.Vertex),
