@@ -347,19 +347,23 @@ internal sealed class GpuResources(
     /// Whether the material, its shader's struct and the textures it names are on the GPU, or one of them failed; the
     /// first ask starts loading it.
     /// </summary>
-    public GpuState Get(Handle<Material> handle) => Get(new MaterialInstance { Handle = handle }, out _);
+    public GpuState Get(Handle<Material> handle) => Get(new MaterialInstance { Handle = handle }, out _, out _);
 
     /// <summary>
-    /// Whether the slot's material, its shader's struct and the textures it names are on the GPU, and the row the slot's
-    /// params over the material's make: each field of the struct by its name, a texture's heap id in a <c>TextureRef</c>
-    /// and its sampler's in the <c>SamplerRef</c> named for it with "Sampler" after, and 0 where neither sets one. Failed
-    /// when the material, its shader's struct or a texture did not load. The first ask
-    /// starts loading the material. The row names its shader by its place in <see cref="MaterialShaders"/>, which it
-    /// takes on the first row that names it.
+    /// Whether the slot's material, its shader's struct and the textures it names are on the GPU, the row the slot's
+    /// params over the material's make, and its most severe failure, as <see cref="Pack"/> finds it: each field of the
+    /// struct by its name, a texture's heap id in a <c>TextureRef</c> and its sampler's in the <c>SamplerRef</c> named
+    /// for it with "Sampler" after, and 0 where neither sets one or the texture failed. Failed when the material or its
+    /// shader's struct did not load. The first ask starts loading the material. The row names its shader by its place in
+    /// <see cref="MaterialShaders"/>, which it takes on the first row that names it.
     /// </summary>
-    public GpuState Get(in MaterialInstance slot, out GpuMaterial row)
+    public GpuState Get(
+        in MaterialInstance slot,
+        out GpuMaterial row,
+        out (FailureKind Kind, ulong Asset, string? Param)? failure
+    )
     {
-        GpuState state = Pack(slot, out row, out MaterialLayout layout);
+        GpuState state = Pack(slot, out row, out MaterialLayout layout, out failure);
         if (!layout.Fields.IsDefault)
             row.Shader = GetMaterialShader(layout.Shader) | (layout.IsTranslucent ? GpuMaterial.TranslucentBit : 0);
 
@@ -368,12 +372,20 @@ internal sealed class GpuResources(
 
     /// <summary>
     /// Whether the slot's material, its shader's struct and the textures it names are on the GPU, its params packed into
-    /// the row, and its shader's struct as reflection laid it out; the default struct while it loads.
+    /// the row, its shader's struct as reflection laid it out, the default struct while it loads, and the most severe of
+    /// its failures: its shader's or its own, which make it Failed; else a texture that failed, which packs as no
+    /// texture, or a param of the material that fits no field of the struct, which leaves the field its default.
     /// </summary>
-    public GpuState Pack(in MaterialInstance slot, out GpuMaterial row, out MaterialLayout layout)
+    public GpuState Pack(
+        in MaterialInstance slot,
+        out GpuMaterial row,
+        out MaterialLayout layout,
+        out (FailureKind Kind, ulong Asset, string? Param)? failure
+    )
     {
         row = default;
         layout = default;
+        failure = null;
         if (!_materials.TryGetValue(slot.Handle.Id, out Result<Material>? asked))
         {
             _materials[slot.Handle.Id] = null;
@@ -386,7 +398,11 @@ internal sealed class GpuResources(
             return GpuState.Loading;
 
         if (!loaded.Ok)
+        {
+            failure = (FailureKind.Material, slot.Handle.Id, null);
+
             return GpuState.Failed;
+        }
 
         Material material = loaded.Value;
         if (_layouts.GetValueOrDefault(material.Shader.Id) is not { } reflected)
@@ -394,28 +410,48 @@ internal sealed class GpuResources(
 
         layout = reflected;
         if (layout.Fields.IsDefault)
+        {
+            failure = (FailureKind.Shader, material.Shader.Id, null);
+
             return GpuState.Failed;
+        }
 
         MaterialOverrides overrides = slot.Overrides;
         GpuState state = GpuState.Ready;
+        Handle<Texture> failedTexture = default;
+        string? misfit = null;
+        int fitted = 0;
         Span<uint> words = row.Params;
         foreach (ShaderField field in layout.Fields)
         {
+            fitted += material.Params.ContainsKey(field.Name) ? 1 : 0;
             if (!TryGetParam(field.Name, out MaterialParam? param))
                 continue;
 
+            // A texture given to a field that is no texture, or numbers to one that is, fits nothing.
+            bool isTexture = field.Struct == "TextureRef";
+            bool hasNumbers = param.X != 0 || param.Y != 0 || param.Z != 0 || param.W != 0 || IsColor(param);
+            if (isTexture ? param.Texture == Handle<Texture>.None && hasNumbers : param.Texture != Handle<Texture>.None)
+            {
+                misfit ??= field.Name;
+
+                continue;
+            }
+
             Span<uint> into = words.Slice((int)field.Offset / 4, (int)field.Size / 4);
-            if (field.Struct == "TextureRef")
+            if (isTexture)
             {
                 GpuState texture = PackTexture(layout, field.Name, param.Texture, words);
-                state = texture == GpuState.Ready || state == GpuState.Failed ? state : texture;
+                if (texture == GpuState.Failed && failedTexture == Handle<Texture>.None)
+                    failedTexture = param.Texture;
+                else if (texture == GpuState.Loading)
+                    state = GpuState.Loading;
 
                 continue;
             }
 
             // PROTO: a param that sets a colour fills the field from it, and one that sets none from its vector.
-            bool isColor = param.R != 0 || param.G != 0 || param.B != 0 || param.A != 0;
-            ReadOnlySpan<float> values = isColor
+            ReadOnlySpan<float> values = IsColor(param)
                 ? [param.R, param.G, param.B, param.A]
                 : [param.X, param.Y, param.Z, param.W];
             for (int i = 0; i < into.Length && i < values.Length; i++)
@@ -424,10 +460,24 @@ internal sealed class GpuResources(
             }
         }
 
+        // A param of the material that names no field, looked for only when fewer fields than params had one.
+        if (misfit is null && fitted < material.Params.Count)
+        {
+            ImmutableArray<ShaderField> fields = layout.Fields;
+            misfit = material.Params.Keys.First(name => !fields.Any(field => field.Name == name));
+        }
+
+        if (failedTexture != Handle<Texture>.None)
+            failure = (FailureKind.Texture, failedTexture.Id, null);
+        else if (misfit is not null)
+            failure = (FailureKind.Uniform, slot.Handle.Id, misfit);
+
         return state;
 
         bool TryGetParam(string name, [MaybeNullWhen(false)] out MaterialParam param) =>
             overrides.TryGet(name, out param) || material.Params.TryGetValue(name, out param);
+
+        static bool IsColor(MaterialParam param) => param.R != 0 || param.G != 0 || param.B != 0 || param.A != 0;
     }
 
     /// <summary>

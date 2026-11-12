@@ -16,8 +16,9 @@ namespace Magic.DeferredRendering.World;
 /// of rows that changed are uploaded in runs; a still scene uploads none. Beside it, the material table: a row per
 /// distinct <see cref="MaterialInstance"/> drawn, which every slot holding it shares, made again each frame from what
 /// <paramref name="resources"/> has then, and uploaded whole. Row 0 is the default material, which an empty slot and a
-/// material still loading are drawn with; a material that failed is drawn with row 0's params and shader, and the
-/// index of its row in the failure table, which names it. A model that failed is drawn as the failure cube, every slot
+/// material still loading are drawn with; a material that failed, or whose shader did, is drawn with row 0's params and
+/// shader, and the index of its row in the failure table, which names it; a material with a texture that failed, or a
+/// param that fits no field, is drawn as itself with that failure's index. A model that failed is drawn as the failure cube, every slot
 /// with row 0's params and shader and the index of the model's row in the failure table.
 /// </summary>
 internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
@@ -72,15 +73,16 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
     private readonly Dictionary<(MaterialInstance Slot, uint Failure), uint> _materialRowOf = [];
 
     /// <summary>
-    /// The failure table's rows, a row for each model or material that failed, made once when it fails; row 0 is never
-    /// read, as a failure index of 0 means no failure.
+    /// The failure table's rows, a row for each failure drawn, made once when it is first drawn; row 0 is never read, as
+    /// a failure index of 0 means no failure.
     /// </summary>
     private GpuFailure[] _failureRows = new GpuFailure[16];
 
     /// <summary>
-    /// The row of each model or material that failed in the failure table, by the asset's id.
+    /// The row of each failure drawn in the failure table, by its kind, the asset that failed and the param that fits no
+    /// field.
     /// </summary>
-    private readonly Dictionary<ulong, uint> _failureRowOf = [];
+    private readonly Dictionary<(FailureKind Kind, ulong Asset, string? Param), uint> _failureRowOf = [];
 
     private long _filledAt;
 
@@ -177,22 +179,27 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
             return Result.Failure(materials.Error);
 
         // Every material row made again, so a material or texture that arrived shows with no renderer written: one still
-        // loading as the default, row 0, and one that failed, or that a model that failed is drawn with, as the default
-        // with its failure.
+        // loading as the default, row 0; one that failed, or its shader did, as the default with its failure; one that a
+        // model that failed is drawn with, the default, with the model's; and one with a part that failed, a texture or
+        // a param, as itself with that part's failure.
         for (int row = 0; row < _materialSlots.Count; row++)
         {
             (MaterialInstance slot, uint failed) = _materialSlots[row];
-            GpuState state = resources.Get(slot, out _materialRows[row]);
-            if (state == GpuState.Failed)
-                failed = GetFailureRow(slot.Handle, FailureKind.Material);
+            GpuState state = resources.Get(
+                slot,
+                out _materialRows[row],
+                out (FailureKind Kind, ulong Asset, string? Param)? failure
+            );
+            if (failed == 0 && failure is { } part)
+                failed = GetFailureRow(part);
 
-            if (state == GpuState.Loading)
+            if (state != GpuState.Ready)
                 _materialRows[row] = _materialRows[0];
-            else if (failed != 0)
+
+            if (failed != 0)
             {
-                _materialRows[row] = _materialRows[0];
                 _materialRows[row].Shader =
-                    (_materialRows[0].Shader & ~(GpuMaterial.FailureMask << GpuMaterial.FailureShift))
+                    (_materialRows[row].Shader & ~(GpuMaterial.FailureMask << GpuMaterial.FailureShift))
                     | (failed << GpuMaterial.FailureShift);
             }
         }
@@ -278,7 +285,7 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
                 };
                 ImmutableArray<MaterialInstance> slots = renderer.Materials.All;
                 (MaterialInstance Slot, uint Failure) failure = model.IsFailure
-                    ? (_materialSlots[0].Slot, GetFailureRow(renderer.Model, FailureKind.Model))
+                    ? (_materialSlots[0].Slot, GetFailureRow((FailureKind.Model, renderer.Model.Id, null)))
                     : default;
                 for (int slot = 0; slot < MaterialSet.Capacity; slot++)
                 {
@@ -307,25 +314,46 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
     }
 
     /// <summary>
-    /// The row of <paramref name="asset"/>, a model or material that failed, in the failure table; the first ask makes
-    /// it, drawn solid, its text the kind, " failed " and the asset's path, cut from the left to fit, so the file's name
-    /// stays.
+    /// The row of <paramref name="failure"/> in the failure table: the asset of its kind that failed, and for a param
+    /// that fits no field of its material's shader, the param's name. The first ask makes it, drawn in stripes when a
+    /// part failed, a texture or a param, else solid; its text the kind, " failed ", the asset's path and the param's
+    /// name, cut from the left to fit, so the name stays. A param's first ask logs it too; each other kind is logged
+    /// where it fails, with why.
     /// </summary>
-    private uint GetFailureRow<T>(Handle<T> asset, FailureKind kind)
-        where T : IAsset<T>
+    private uint GetFailureRow((FailureKind Kind, ulong Asset, string? Param) failure)
     {
-        if (_failureRowOf.TryGetValue(asset.Id, out uint row))
+        if (_failureRowOf.TryGetValue(failure, out uint row))
             return row;
 
+        (FailureKind kind, ulong id, string? param) = failure;
+        string path =
+            kind switch
+            {
+                FailureKind.Model => assets.GetPath(new Handle<Model>(id)),
+                FailureKind.Shader => assets.GetPath(new Handle<Shader>(id)),
+                FailureKind.Texture => assets.GetPath(new Handle<Texture>(id)),
+                FailureKind.Material or FailureKind.Uniform => assets.GetPath(new Handle<Material>(id)),
+                _ => null,
+            } ?? $"id {id}";
+        if (param is not null)
+        {
+            Log.Error(
+                $"{path} draws {param} as its shader's default: the shader has no field of that name, or of its type."
+            );
+            path += $" {param}";
+        }
+
         string text = $"{kind} failed ";
-        string path = assets.GetPath(asset) ?? $"id {asset.Id}";
         int kept = Math.Min(path.Length, GpuFailureText.Length - text.Length);
+        FailurePattern pattern = kind is FailureKind.Texture or FailureKind.Uniform
+            ? FailurePattern.Stripes
+            : FailurePattern.Solid;
         row = (uint)_failureRowOf.Count + 1;
         if (row == _failureRows.Length)
             Array.Resize(ref _failureRows, _failureRows.Length * 2);
 
-        _failureRows[row] = GpuFailure.Create(kind, FailurePattern.Solid, text + path[^kept..]);
-        _failureRowOf[asset.Id] = row;
+        _failureRows[row] = GpuFailure.Create(kind, pattern, text + path[^kept..]);
+        _failureRowOf[failure] = row;
 
         return row;
     }

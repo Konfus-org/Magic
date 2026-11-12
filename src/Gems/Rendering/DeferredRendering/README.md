@@ -16,8 +16,10 @@ the texture reader, with a gem that draws its geometry.
   its vertices as the GPU reads them and each mesh's triangles, which rays and every renderer draw.
 - A model shows once it is on the GPU. One that doesn't load draws a cube of one metre in its place, in flashing teal,
   with the text "Model failed" and the model's path over it. The gem makes the cube in code at the start.
-- A material that fails, or whose shader or texture fails, draws on its entity's own mesh in flashing magenta, with
-  the text "Material failed" and the material's path over it.
+- A failure shows on its entity's own mesh in a flashing colour, with the kind, "failed" and the path over it. A solid
+  colour means the whole thing failed: magenta for a material, purple for its shader. Stripes over the real surface
+  mean one part failed: amber for a texture, which reads as no texture, and magenta for a param that fits no field of
+  the shader, which takes the shader's default. Each failure is logged once.
 - The view names each model on the GPU by its model index, the one its instances name, so a renderer keeps a row of
   its own for each.
 - A model nothing has drawn or waited for in `Rendering.ModelKeepSec` leaves the GPU, and loads again when it is next

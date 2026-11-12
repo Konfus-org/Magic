@@ -71,7 +71,7 @@ internal sealed class Effects(AssetManager assets, GpuResources resources)
         if (slot.Handle == Handle<Material>.None)
             return (new GpuEffect(0, GpuState.Failed, default, default, default), default);
 
-        GpuState material = resources.Pack(slot, out GpuMaterial row, out GpuResources.MaterialLayout layout);
+        GpuState material = resources.Pack(slot, out GpuMaterial row, out GpuResources.MaterialLayout layout, out _);
         if (material != GpuState.Ready)
             return (new GpuEffect(slot.Handle.Id, material, default, default, default), row);
 
