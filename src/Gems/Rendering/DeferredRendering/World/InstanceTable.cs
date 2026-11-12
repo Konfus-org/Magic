@@ -300,7 +300,11 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
             GpuInstance row = default;
             if (resident is { } model)
             {
+                // The failure cube keeps its size, whatever the entity's scale, so it shows; it keeps the place and turn.
                 Transform transform = renderers.First[index];
+                if (model.IsFailure)
+                    transform.Scale = Vector3.One;
+
                 Matrix4x4 worldMatrix = transform.Matrix;
                 Matrix4x4.Invert(worldMatrix, out Matrix4x4 inverseWorld);
                 Vector3 scale = transform.Scale;
