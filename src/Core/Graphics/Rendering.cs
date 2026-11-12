@@ -12,9 +12,9 @@ using Magic.Utils;
 namespace Magic.Graphics;
 
 /// <summary>
-/// The gems that render, each render form after every form whose output it takes: register each gem as it is made, then
-/// pump them once a frame on the render thread. A gem's class or one of its parts renders. A gem is named in what is logged and timed by its assembly,
-/// as the project lists it.
+/// The gems that render, each render form after every form whose output it takes: register each gem's parts as the gem
+/// is made, then pump them once a frame on the render thread. A gem is named in what is logged and timed by its
+/// assembly, as the project lists it.
 /// </summary>
 internal sealed class Rendering
 {

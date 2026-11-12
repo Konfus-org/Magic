@@ -16,15 +16,14 @@ using Magic.Utils;
 namespace Magic.Configuration;
 
 /// <summary>
-/// Every gem's settings in one place. It holds the gems, not the values: each gem's settings are a part of it
-/// (<see cref="ISettings"/>), or a record it keeps (<see cref="IHasSettings{TSettings}"/>). A key is the record's or
-/// the member's <see cref="CategoryAttribute"/>, then the member's name, or its
+/// Every gem's settings in one place: the <see cref="ISettings"/> part of each gem that has one, which it changes in
+/// place. A key is the settings class's or the member's <see cref="CategoryAttribute"/>, then the member's name, or its
 /// <see cref="JsonPropertyNameAttribute"/>, as <c>Rendering.Resolution</c>. Game thread, or while no frame runs.
 /// <para>
-/// A gem is first made with its record's defaults, then what <see cref="SaveAsync"/> saved for this user and project,
-/// then what <c>--configure</c> gave at launch; made again, after a restart or a rebuild of its code, it runs by what it
-/// last ran by. Each holds only the members that differ from the defaults, as JSON; what is saved is in
-/// <c>Magic/&lt;project&gt;/Settings/&lt;record&gt;.json</c> under the user's local application data, never in the
+/// A gem is first made with its settings' defaults, then what <see cref="SaveAsync"/> saved for this user and project,
+/// then what <c>--configure</c> gave at launch; made again, after a restart or a rebuild of its code, it runs by what
+/// it last ran by. Each holds only the members that differ from the defaults, as JSON; what is saved is in
+/// <c>Magic/&lt;project&gt;/Settings/&lt;class&gt;.json</c> under the user's local application data, never in the
 /// project.
 /// </para>
 /// </summary>
@@ -35,19 +34,19 @@ public sealed class Settings
     private readonly IFileSystem _files;
 
     /// <summary>
-    /// The gems registered, in the order they were made.
+    /// The settings registered, in the order their gems were made.
     /// </summary>
-    private ImmutableArray<RegisteredGem> _gems = [];
+    private ImmutableArray<RegisteredSettings> _gems = [];
 
     /// <summary>
-    /// What each record last ran by in this process, by its project and name, as <c>Forest/PlayerSettings</c>: a JSON
-    /// object of the members that differ from its defaults, which outlasts the record's types and, once there, stands
-    /// in for what was saved or given at launch.
+    /// What each settings class last ran by in this process, by its project and name, as <c>Forest/PlayerSettings</c>:
+    /// a JSON object of the members that differ from its defaults, which outlasts the class's types and, once there,
+    /// stands in for what was saved or given at launch.
     /// </summary>
     private ImmutableDictionary<string, JsonElement> _live = [];
 
     /// <summary>
-    /// Each member given at launch, by key, as text until its record is made and says what it is.
+    /// Each member given at launch, by key, as text until its settings are made and says what it is.
     /// </summary>
     private ImmutableDictionary<string, string> _given = [];
 
@@ -65,7 +64,7 @@ public sealed class Settings
         get
         {
             ImmutableArray<Setting>.Builder options = ImmutableArray.CreateBuilder<Setting>();
-            foreach (RegisteredGem gem in _gems)
+            foreach (RegisteredSettings gem in _gems)
             {
                 foreach (SettingMember member in gem.Members)
                 {
@@ -81,14 +80,16 @@ public sealed class Settings
     /// The settings the gem with <typeparamref name="TSettings"/> runs by; with no such gem, what it would be made with.
     /// </summary>
     public TSettings Get<TSettings>()
-        where TSettings : class => (TSettings)Get(typeof(TSettings));
+        where TSettings : ISettings => (TSettings)Get(typeof(TSettings));
 
     /// <summary>
-    /// Gives the gem with <typeparamref name="TSettings"/> <paramref name="settings"/>, and keeps them for when it is
-    /// made again. A changed member with <see cref="RequireRestartAttribute"/> restarts the run.
+    /// Writes each member of <paramref name="settings"/> on the settings the gem with <typeparamref name="TSettings"/>
+    /// runs by, and keeps them for when it is made again. <paramref name="settings"/> may be that same object, after a
+    /// change to it. A member with <see cref="RequireRestartAttribute"/> that differs from what the gem was made with
+    /// restarts the run.
     /// </summary>
     public void Set<TSettings>(TSettings settings)
-        where TSettings : class
+        where TSettings : ISettings
     {
         ArgumentNullException.ThrowIfNull(settings);
         if (Find(typeof(TSettings)) is { } gem)
@@ -101,12 +102,12 @@ public sealed class Settings
     /// Sets the member <paramref name="key"/> names, as <c>Rendering.Resolution</c>, to <paramref name="value"/> in a
     /// copy of its gem's settings, which it then sets as <see cref="Set{TSettings}(TSettings)"/> does; or says why not:
     /// no gem has the key, or the member doesn't take the value. For tools that reach a setting by its key, such as the
-    /// console; game code that knows the record uses <see cref="Get{TSettings}"/> and
+    /// console; game code that knows the settings class uses <see cref="Get{TSettings}"/> and
     /// <see cref="Set{TSettings}(TSettings)"/>.
     /// </summary>
     public Result Set<T>(string key, T value)
     {
-        foreach (RegisteredGem gem in _gems)
+        foreach (RegisteredSettings gem in _gems)
         {
             if (gem.Members.FirstOrDefault(member => member.Key == key) is not { } member)
                 continue;
@@ -115,7 +116,7 @@ public sealed class Settings
             if (!written.Ok)
                 return Result.Failure(written.Error);
 
-            object settings = gem.Read();
+            object settings = gem.Value;
             JsonObject json = ToJson(settings);
             json[member.JsonName] = JsonNode.Parse(written.Value.GetRawText());
             Result<object> changed = Json.Read(
@@ -134,8 +135,9 @@ public sealed class Settings
     }
 
     /// <summary>
-    /// Writes each registered gem's members that differ from their defaults to this user's file for its record in the
-    /// open project, which the gem is made with from then on; a record with none has its file removed. Or says why not.
+    /// Writes each registered gem's members that differ from their defaults to this user's file for its settings in the
+    /// open project, which the gem is made with from then on; settings with none have their file removed. Or says why
+    /// not.
     /// </summary>
     public async Task<Result> SaveAsync(CancellationToken cancel)
     {
@@ -144,9 +146,9 @@ public sealed class Settings
 
         // What each gem runs by now, which it may have set itself, taken before the writes leave the game thread.
         List<(string File, JsonElement Changed)> saves = [];
-        foreach (RegisteredGem gem in _gems)
+        foreach (RegisteredSettings gem in _gems)
         {
-            object settings = gem.Read();
+            object settings = gem.Value;
             Keep(gem.LiveKey, settings);
             saves.Add((GetFile(project, settings.GetType()), _live[gem.LiveKey]));
         }
@@ -172,22 +174,9 @@ public sealed class Settings
     }
 
     /// <summary>
-    /// The settings <paramref name="type"/> is, as an <see cref="ISettings"/>, or keeps, as an
-    /// <see cref="IHasSettings{TSettings}"/>; null when it has none.
-    /// </summary>
-    internal static Type? GetSettingsType(Type type) =>
-        type.IsAssignableTo(typeof(ISettings))
-            ? type
-            : type.GetInterfaces()
-                .FirstOrDefault(contract =>
-                    contract.IsGenericType && contract.GetGenericTypeDefinition() == typeof(IHasSettings<>)
-                )
-                ?.GetGenericArguments()[0];
-
-    /// <summary>
     /// <see cref="Get{TSettings}"/> of a type known only at run time, as the services hand it to a gem's constructor.
     /// </summary>
-    internal object Get(Type type) => Find(type)?.Read() ?? CreateSettings(type);
+    internal object Get(Type type) => Find(type)?.Value ?? CreateSettings(type);
 
     /// <summary>
     /// Sets each of <paramref name="pairs"/>, written <c>Key=value</c> with the value as <see cref="ValueText"/> reads
@@ -234,35 +223,42 @@ public sealed class Settings
     }
 
     /// <summary>
-    /// Lists <paramref name="gem"/>'s settings until the subscription is disposed, as the gem ends; then what it last
-    /// ran by is kept for when it is made again. A gem without settings changes nothing. Throws, naming the gem, for a
-    /// record without a category or a key another gem has.
+    /// Lists <paramref name="part"/>, a gem's part, until the subscription is disposed, as the gem ends; then what it
+    /// last ran by is kept for when it is made again. A part that is not an <see cref="ISettings"/> changes nothing.
+    /// Throws, naming the gem, for settings without a category or a key another gem has.
     /// </summary>
-    internal Subscription Register(object gem)
+    internal Subscription Register(object part)
     {
-        if (GetSettingsType(gem.GetType()) is not { } type)
+        if (part is not ISettings settings)
             return new Subscription(static () => { });
 
+        Type type = settings.GetType();
         ImmutableArray<SettingMember> members = GetMembers(type);
         HashSet<string> keys = [.. members.Select(member => member.Key)];
-        foreach (RegisteredGem other in _gems)
+        foreach (RegisteredSettings other in _gems)
         {
             string? clash = other.Members.Select(member => member.Key).FirstOrDefault(keys.Contains);
             if (clash is not null)
             {
                 throw new InvalidOperationException(
-                    $"{GetName(other.Gem.GetType())} and {GetName(gem.GetType())} both have the setting {clash}."
+                    $"{GetName(other.Value.GetType())} and {GetName(type)} both have the setting {clash}."
                 );
             }
         }
 
         // The key is taken now, as the project may change before the gem ends.
-        RegisteredGem registered = new(gem, type, members, ReadSummaries(type), GetLiveKey(type));
+        RegisteredSettings registered = new(
+            settings,
+            Copy(settings, members),
+            members,
+            ReadSummaries(type),
+            GetLiveKey(type)
+        );
         _gems = _gems.Add(registered);
 
         return new Subscription(() =>
         {
-            Keep(registered.LiveKey, registered.Read());
+            Keep(registered.LiveKey, registered.Value);
             _gems = _gems.Remove(registered);
         });
     }
@@ -271,6 +267,19 @@ public sealed class Settings
 
     private static object CreateDefaults(Type type) =>
         Activator.CreateInstance(type) ?? throw new InvalidOperationException($"{type.Name} could not be made.");
+
+    /// <summary>
+    /// A copy of <paramref name="settings"/>: a new object of its class, with each of <paramref name="members"/> set
+    /// to the same value.
+    /// </summary>
+    private static object Copy(object settings, ImmutableArray<SettingMember> members)
+    {
+        object copy = CreateDefaults(settings.GetType());
+        foreach (SettingMember member in members)
+            member.Set(copy, member.Get(settings));
+
+        return copy;
+    }
 
     private static JsonObject ToJson(object settings) =>
         JsonSerializer.SerializeToNode(settings, settings.GetType(), Json.Options) as JsonObject
@@ -289,7 +298,7 @@ public sealed class Settings
     }
 
     /// <summary>
-    /// The members of <paramref name="type"/>'s records that settings list, as JSON reads them.
+    /// The members of <paramref name="type"/> that settings list, as JSON reads them.
     /// </summary>
     private static ImmutableArray<SettingMember> GetMembers(Type type)
     {
@@ -326,7 +335,7 @@ public sealed class Settings
         return [.. members];
     }
 
-    private RegisteredGem? Find(Type type) => _gems.FirstOrDefault(gem => gem.Type == type);
+    private RegisteredSettings? Find(Type type) => _gems.FirstOrDefault(gem => gem.Value.GetType() == type);
 
     private string GetLiveKey(Type type) => $"{_app.Project?.Name}/{type.Name}";
 
@@ -403,14 +412,14 @@ public sealed class Settings
         return [];
     }
 
-    private void Set(RegisteredGem gem, object settings)
+    private void Set(RegisteredSettings gem, object settings)
     {
-        // Compared before the write, which may change the object the gem holds.
-        object old = gem.Read();
         SettingMember? restart = gem.Members.FirstOrDefault(member =>
-            member.RequiresRestart && !Equals(member.Get(old), member.Get(settings))
+            member.RequiresRestart && !Equals(member.Get(gem.MadeWith), member.Get(settings))
         );
-        gem.Write(settings);
+        foreach (SettingMember member in gem.Members)
+            member.Set(gem.Value, member.Get(settings));
+
         Keep(gem.LiveKey, settings);
         if (restart is null)
             return;
@@ -420,7 +429,7 @@ public sealed class Settings
     }
 
     /// <summary>
-    /// Keeps the members of <paramref name="settings"/> that differ from its defaults as what its record last ran by,
+    /// Keeps the members of <paramref name="settings"/> that differ from its defaults as what its class last ran by,
     /// under <paramref name="key"/>: none, when it is back at its defaults, is kept too.
     /// </summary>
     private void Keep(string key, object settings)
@@ -475,48 +484,22 @@ public sealed class Settings
     );
 
     /// <summary>
-    /// A gem class or part with settings, of <paramref name="Type"/>: an <see cref="ISettings"/> is its own settings,
-    /// and an <see cref="IHasSettings{TSettings}"/> keeps them.
+    /// A gem's settings: <paramref name="Value"/>, which its parts hold, and <paramref name="MadeWith"/>, a copy of
+    /// what the gem was made with, which a change to a member with <see cref="RequireRestartAttribute"/> compares with.
     /// </summary>
-    private sealed record RegisteredGem(
-        object Gem,
-        Type Type,
+    private sealed record RegisteredSettings(
+        ISettings Value,
+        object MadeWith,
         ImmutableArray<SettingMember> Members,
         ImmutableDictionary<string, string> Summaries,
         string LiveKey
     )
     {
-        private PropertyInfo Holder =>
-            typeof(IHasSettings<>).MakeGenericType(Type).GetProperty(nameof(IHasSettings<>.Settings))
-            ?? throw new InvalidOperationException($"{Type.Name} has no Settings.");
-
-        public object Read() =>
-            Gem is ISettings
-                ? Gem
-                : Holder.GetValue(Gem)
-                    ?? throw new InvalidOperationException($"{Gem.GetType().Name}.Settings is null.");
-
-        /// <summary>
-        /// Writes each member of <paramref name="settings"/> on an <see cref="ISettings"/>, which stays the object its
-        /// parts hold, or gives an <see cref="IHasSettings{TSettings}"/> the new record whole.
-        /// </summary>
-        public void Write(object settings)
-        {
-            if (Gem is not ISettings)
-            {
-                Holder.SetValue(Gem, settings);
-                return;
-            }
-
-            foreach (SettingMember member in Members)
-                member.Set(Gem, member.Get(settings));
-        }
-
         public Setting ToSetting(SettingMember member) =>
             new(
                 member.Key,
                 member.Category,
-                member.Get(Read()),
+                member.Get(Value),
                 member.Type,
                 Summaries.GetValueOrDefault(member.Name, string.Empty),
                 member.RequiresRestart

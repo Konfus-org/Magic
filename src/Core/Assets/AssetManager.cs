@@ -588,15 +588,15 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Has a load of an asset type one of <paramref name="gems"/> reads, as its <see cref="IAssetImporter{T}"/>s say,
-    /// wait for that gem until it registers (<see cref="Register(object)"/>) or is not made (<see cref="Drop"/>), as a
-    /// gem made before it may load one. Game thread.
+    /// Has a load of an asset type one of <paramref name="parts"/>, the classes of the gems' parts, reads, as its
+    /// <see cref="IAssetImporter{T}"/>s say, wait for that part until it registers (<see cref="Register(object)"/>) or
+    /// its gem is not made (<see cref="Drop"/>), as a gem made before it may load one. Game thread.
     /// </summary>
-    internal void Expect(IEnumerable<Type> gems)
+    internal void Expect(IEnumerable<Type> parts)
     {
         List<KeyValuePair<Type, ImmutableArray<Type>>> expected =
         [
-            .. gems.Select(gem => KeyValuePair.Create(gem, GetAssetTypes(gem, typeof(IAssetImporter<>)))),
+            .. parts.Select(part => KeyValuePair.Create(part, GetAssetTypes(part, typeof(IAssetImporter<>)))),
         ];
         lock (_gate)
         {
@@ -605,42 +605,42 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Stops waiting for <paramref name="gem"/>, which was not made: what was asked for as a type only it would read is
-    /// read now, and fails as a type no gem reads. Game thread.
+    /// Stops waiting for <paramref name="part"/>, as its gem was not made: what was asked for as a type only it would
+    /// read is read now, and fails as a type no gem reads. Game thread.
     /// </summary>
-    internal void Drop(Type gem)
+    internal void Drop(Type part)
     {
         lock (_gate)
         {
-            Loaded = StartWanted(Database, Loaded with { Expected = Loaded.Expected.Remove(gem) });
+            Loaded = StartWanted(Database, Loaded with { Expected = Loaded.Expected.Remove(part) });
         }
     }
 
     /// <summary>
-    /// Has <paramref name="gem"/> read each asset type it implements an <see cref="IAssetImporter{T}"/> of, and write each
-    /// it implements an <see cref="IAssetExporter{T}"/> of, until the subscription is disposed, as the gem ends. A type
-    /// another gem reads or writes already stays that one's, and is an error. What was asked for as a type it reads
-    /// before anything read it starts now.
+    /// Has <paramref name="part"/>, a gem's part, read each asset type it implements an <see cref="IAssetImporter{T}"/>
+    /// of, and write each it implements an <see cref="IAssetExporter{T}"/> of, until the subscription is disposed, as
+    /// the gem ends. A type another part reads or writes already stays that one's, and is an error. What was asked for
+    /// as a type it reads before anything read it starts now.
     /// </summary>
-    internal Subscription Register(object gem)
+    internal Subscription Register(object part)
     {
-        ImmutableArray<Type> reads = GetAssetTypes(gem.GetType(), typeof(IAssetImporter<>));
-        ImmutableArray<Type> writes = GetAssetTypes(gem.GetType(), typeof(IAssetExporter<>));
+        ImmutableArray<Type> reads = GetAssetTypes(part.GetType(), typeof(IAssetImporter<>));
+        ImmutableArray<Type> writes = GetAssetTypes(part.GetType(), typeof(IAssetExporter<>));
         LoadedAssets claimed;
         lock (_gate)
         {
             LoadedAssets loaded = Loaded;
             claimed = loaded with
             {
-                Importers = Claim(loaded.Importers, reads, gem),
-                Exporters = Claim(loaded.Exporters, writes, gem),
-                Expected = loaded.Expected.Remove(gem.GetType()),
+                Importers = Claim(loaded.Importers, reads, part),
+                Exporters = Claim(loaded.Exporters, writes, part),
+                Expected = loaded.Expected.Remove(part.GetType()),
             };
             Loaded = StartWanted(Database, claimed);
         }
 
-        LogClaimedByOthers(claimed.Importers, reads, gem, "reads");
-        LogClaimedByOthers(claimed.Exporters, writes, gem, "writes");
+        LogClaimedByOthers(claimed.Importers, reads, part, "reads");
+        LogClaimedByOthers(claimed.Exporters, writes, part, "writes");
 
         return new Subscription(() =>
         {
@@ -649,8 +649,8 @@ public sealed class AssetManager : IDisposable
                 LoadedAssets loaded = Loaded;
                 Loaded = loaded with
                 {
-                    Importers = Release(loaded.Importers, reads, gem),
-                    Exporters = Release(loaded.Exporters, writes, gem),
+                    Importers = Release(loaded.Importers, reads, part),
+                    Exporters = Release(loaded.Exporters, writes, part),
                 };
             }
         });

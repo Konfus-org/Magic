@@ -12,10 +12,8 @@ namespace Magic.Projects;
 /// <param name="Description">What it is, in a sentence; empty when its project says nothing.</param>
 /// <param name="Version">Its version; 1.0.0 when its project says nothing.</param>
 /// <param name="Type">Its one <see cref="IGem"/> class.</param>
-/// <param name="Parts">
-/// The public properties of its <c>EntryPoint</c> class, each a part the class makes; none for another class.
-/// </param>
-/// <param name="Provides">The interfaces it provides to other gems, by its class or a part.</param>
+/// <param name="Parts">The public instance properties of its class, each a part the class makes.</param>
+/// <param name="Provides">The interfaces it provides to other gems, by its parts.</param>
 /// <param name="References">The listed gems its code references, which it loads after.</param>
 /// <param name="Resources">The folder of its own assets; null when it has none.</param>
 /// <param name="Folder">The folder its assemblies load from.</param>
@@ -38,7 +36,7 @@ internal sealed record RegisteredGem(
 )
 {
     /// <summary>
-    /// Its class, then each part's type.
+    /// Each part's class.
     /// </summary>
-    public IEnumerable<Type> Types => [Type, .. Parts.Select(part => part.PropertyType)];
+    public IEnumerable<Type> PartTypes => Parts.Select(part => part.PropertyType);
 }

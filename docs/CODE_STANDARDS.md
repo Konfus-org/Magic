@@ -41,34 +41,39 @@ Write the engine as data flowing through functions, not objects calling each oth
 ## Gems, hooks and services
 
 - A gem is a plugin: a decoupled, hot-reloadable, modular piece of logic that a project adds or replaces to meet its
-  needs. It is one of two shapes, for now:
-  - An `EntryPoint` class at the gem's root that implements only `IGem` and `IDisposable`. It makes its parts with
-    `new` and exports each as a public property. Its hooks call its parts. `Dispose` ends the parts. Core does to each
-    part what it does to a gem class: a part provides the Core interfaces it implements, renders, and has settings.
-  - One `public sealed` class that implements `IGem` and the Core interfaces it provides.
-- A gem's constructor takes everything it depends on and starts what the gem is; `Dispose` ends it. Only code that
-  builds objects from constructors takes `IServiceProvider`. Gems are made in dependency order, then in the order the
-  project lists them, and disposed in reverse.
+  needs. It is a `public sealed class EntryPoint` at the gem's root, and its parts.
+- `EntryPoint` implements only `IGem` and `IDisposable`. Its only state is its parts. It makes each part with `new` in
+  its constructor and exports it as a public get-only property. A private field or an `internal` class is not
+  exported. Its hooks call its parts, and `Dispose` ends them. A gem without hooks still has an `EntryPoint`.
+- A part is a class that does one job. Core sets up each exported part by the Core interfaces it implements: it
+  provides them to the gems made after it, renders, reads assets, or is a window, platform, ECS or log sink. Name a
+  part for its interface: `Renderer`, `Ecs`, `Window`, `Input`, `Clipboard`, `Platform`, `GraphicsApi`,
+  `ShaderCompiler`, `DebugUI`, `Importer`, `Exporter`. Declare its property as its class, not as an interface. Parts
+  that share native state take one shared object from `EntryPoint`.
+- `EntryPoint`'s constructor takes everything the gem depends on: Core's services and other gems' parts. Only code
+  that builds objects from constructors takes `IServiceProvider`. Gems are made in dependency order, then in the order
+  the project lists them, and disposed in reverse.
 - A hook is what the engine calls on a gem each frame: `IGem`'s `Update`, `FixedUpdate` and `LateUpdate`, in that order
   over the gems, on the game thread, then the `Render` of each gem that renders, on the render thread, which owns the
   GPU. The platform thread, the process's first, pumps the OS's window and events through
-  the gem that implements `IPlatform`, which hands the game thread the input they make as data.
+  the part that implements `IPlatform`, which hands the game thread the input they make as data.
   `Render` records into the frame's `RenderGraph`, each pass in its `RenderStage`, and Core hands it to the GPU provider
-  once every gem has. A gem renders through the form that fits it: `IRender` takes and makes nothing for other gems,
-  `IRenderFrom<TInput>` takes their output, `IRenderInto<TOutput>` makes its own, and `IRender<TInput, TOutput>` does
-  both. A gem with more than one part of the frame implements a form for each, and Core runs each as its own step. An
+  once every gem has. A gem's `Renderer` renders through the form that fits it: `IRender` takes and makes nothing for
+  other gems, `IRenderFrom<TInput>` takes their output, `IRenderInto<TOutput>` makes its own, and
+  `IRender<TInput, TOutput>` does both. A `Renderer` with more than one step in the frame implements a form for each,
+  and Core runs each as its own step. An
   input is a record of other gems' outputs, and an output one type or a tuple of types, each made for the gems
   that take it. Core runs each gem after the gems whose output it takes; gems pass what they draw from one another
   that way, as data, never through a gem in a constructor.
-  `LateUpdate` hands `Render` what it draws as data, the newest through a `Mailbox<T>` and what must not be lost
-  through a `Channel<T>`. `Render` reads a gem's settings directly. A settings record is written whole; an
-  `ISettings` object is written one member at a time, so a frame can see one old and one new member. A gem implements
-  the ones it needs. One that throws in a hook is logged and leaves every hook.
-- Where Core needs something from a gem, the gem implements an interface and Core calls it, as with `IEcs` and
+  `EntryPoint.LateUpdate` calls a method of `Renderer` that publishes what `Render` draws, as data. `Renderer` owns
+  the hand-off: the newest through a `Mailbox<T>`, and what must not be lost through a `Channel<T>`. `Render` reads
+  the gem's settings directly. Core writes them one member at a time, so a frame can see one old and one new member.
+  A gem implements the hooks it needs. One that throws in a hook is logged and leaves every hook.
+- Where Core needs something from a gem, a part implements an interface and Core calls it, as with `IEcs` and
   `IAssetImporter<T>`. Add one when a gem first needs it.
 - A gem that keeps something for each entity compares what it holds with the entities each frame, adding what came and
   dropping what went, as the renderer does. One that must also drop what it built up when the world is replaced, or ready
-  what comes before it shows, implements `IHookIntoDomainLoading`; the world awaits it while the loading screen shows.
+  what comes before it shows, has a part that implements `IHookIntoDomainLoading`; the world awaits it while the loading screen shows.
 - `Program` sets a run up and owns its loop, calling each service's `Pump` in turn. `App` lasts the whole process; what a
   run makes is new for it, and a restart keeps only the world, as JSON, and the gems' settings. A service starts in its constructor
   and ends in `Dispose`, not with paired start and stop calls. A step is a method. A class of its own is for a substantial piece of work.
@@ -85,8 +90,7 @@ Write the engine as data flowing through functions, not objects calling each oth
   `#if DEBUG` choice, a key-only toggle or a console string. The settings are a `sealed class` that implements
   `ISettings`, with settable properties, a `[Category]`, and a default and a doc comment for each property.
   `EntryPoint` takes the settings in its constructor, exports them as a public property, and gives them to the parts
-  that read them. Core changes a member on that same object. A gem that is not yet an `EntryPoint` implements
-  `IHasSettings<TSettings>` and keeps a `sealed record` of init properties instead.
+  that read them. Core changes a member on that same object.
   Game code reads and sets it through `Settings` by type; the console and tools by key, as `Rendering.Resolution`.
 - Gems may depend on each other and reference one another. A gem throws when a dependency it needs isn't there.
 - A component is an unmanaged struct with public fields that implements `IComponent`, and members for what follows from

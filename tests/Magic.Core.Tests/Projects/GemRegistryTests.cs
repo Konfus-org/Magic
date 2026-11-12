@@ -14,22 +14,33 @@ namespace Magic.Tests.Projects;
 
 /// <summary>
 /// A gem whose code references another gem: it shares that gem's one copy of its types, loads after it, and is refused
-/// when the project doesn't list it; and a gem whose part provides an interface. Each gem is compiled here and written where Magic finds gems, beside the tests.
+/// when the project doesn't list it; and a gem whose part provides an interface. Each gem is compiled here and written
+/// where Magic finds gems, beside the tests.
 /// </summary>
 public sealed class GemRegistryTests
 {
     private const string LenderSource = """
         namespace Lender;
 
-        public sealed class LenderGem : Magic.Projects.IGem { }
+        public sealed class Loan { }
+
+        public sealed class EntryPoint : Magic.Projects.IGem
+        {
+            public Loan Loan { get; } = new();
+        }
         """;
 
     private const string BorrowerSource = """
         namespace Borrower;
 
-        public sealed class BorrowerGem(Lender.LenderGem lender) : Magic.Projects.IGem
+        public sealed class Borrowing(Lender.Loan loan)
         {
-            public Lender.LenderGem Lender { get; } = lender;
+            public Lender.Loan Loan { get; } = loan;
+        }
+
+        public sealed class EntryPoint(Lender.Loan loan) : Magic.Projects.IGem
+        {
+            public Borrowing Borrowing { get; } = new(loan);
         }
         """;
 
@@ -55,7 +66,7 @@ public sealed class GemRegistryTests
 
         List<RegisteredGem> gems = GemRegistry.Register(_files, ["Lender", "Borrower"], []);
 
-        Type lender = gems.Single(gem => gem.Name == "Lender").Type;
+        Type lender = Assert.Single(gems.Single(gem => gem.Name == "Lender").PartTypes);
         Type borrower = gems.Single(gem => gem.Name == "Borrower").Type;
         Assert.Same(lender, borrower.GetConstructors()[0].GetParameters()[0].ParameterType);
     }

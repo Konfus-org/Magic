@@ -164,7 +164,7 @@ internal sealed class Gems : IDisposable
         IServiceProvider provider = services.BuildServiceProvider();
 
         // A constructor may load an asset of a type a gem made after it reads.
-        assets.Expect(registered.SelectMany(gem => gem.Types));
+        assets.Expect(registered.SelectMany(gem => gem.PartTypes));
         foreach (RegisteredGem gem in registered)
         {
             // A build writes the gem's assemblies; the run restarts once it has settled.
@@ -194,7 +194,7 @@ internal sealed class Gems : IDisposable
                 // anything else is a bug in the gem, and its stack says where.
                 string why = ex is InvalidOperationException ? ex.Message : ex.ToString();
                 Log.Error($"Gem {gem.Name} was not made: {why}");
-                foreach (Type type in gem.Types)
+                foreach (Type type in gem.PartTypes)
                 {
                     assets.Drop(type);
                 }
@@ -205,7 +205,7 @@ internal sealed class Gems : IDisposable
 
             LoadedGem loaded = new(
                 made,
-                [made, .. gem.Parts.Select(part => part.GetValue(made)).OfType<object>()],
+                [.. gem.Parts.Select(part => part.GetValue(made)).OfType<object>()],
                 gem.Name,
                 [new Subscription(gem.Context.Unload), new Subscription(() => (made as IDisposable)?.Dispose()), code]
             );
@@ -429,7 +429,7 @@ internal sealed class Gems : IDisposable
     }
 
     /// <summary>
-    /// Sets up <paramref name="part"/>, the made <paramref name="gem"/> or a part it exports, until
+    /// Sets up <paramref name="part"/>, a part the made <paramref name="gem"/> exports, until
     /// <paramref name="ends"/> end: the app's window and platform when it provides them, its settings, its place on the
     /// log when it is a sink, the world's ECS, the asset types it reads and writes, and its part of the frame.
     /// </summary>
@@ -437,7 +437,7 @@ internal sealed class Gems : IDisposable
     {
         ends.Add(assets.Register(part));
 
-        // The gem is an IWindow in any mode, but a headless run has no window.
+        // The part is an IWindow in any mode, but a headless run has no window.
         if (part is IWindow window && !_app.IsHeadless)
         {
             _app.Window = window;
@@ -493,8 +493,8 @@ internal sealed class Gems : IDisposable
     /// <summary>
     /// A gem as made, and what ends with it, last added first: its subscriptions (its place on the log when it is a
     /// sink, the asset types it reads, the hooks it joined), then the gem itself, then its load context, which frees its
-    /// assemblies once nothing refers to the gem. Its parts are the gem itself and each part it exports, which Core sets
-    /// up alike.
+    /// assemblies once nothing refers to the gem. Its parts are what it exports, which Core sets up; the gem itself has
+    /// only its hooks.
     /// </summary>
     private sealed record LoadedGem(IGem Instance, List<object> Parts, string Name, Subscriptions Ends)
     {
