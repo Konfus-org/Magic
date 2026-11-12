@@ -31,8 +31,7 @@ namespace Magic.SdlPlatform;
 /// SDL's events (<see cref="Pump"/>), handing them to the game thread as they came. <see cref="Update"/> applies them to
 /// the controls there, before any gem that takes the input runs, as they are made after this one, so input stays fixed
 /// for the rest of a frame. What the game thread sets on the window and clipboard is handed to the platform thread
-/// the same way. It is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists
-/// the gem.
+/// the same way.
 /// </para>
 /// <para>
 /// It also paces the frames: <see cref="Update"/> first waits out the frame rate its settings cap the frames at, one cap
@@ -274,13 +273,13 @@ public sealed class SdlPlatformGem
     /// </summary>
     public unsafe Handle<Icon> Icon
     {
-        get => field;
+        get;
         set
         {
             ThrowIfNotOnGame();
             field = value;
             if (_window != null)
-                ShowAsync(value).FireAndForget();
+                ShowIconAsync(value).FireAndForget();
         }
     }
 
@@ -400,7 +399,18 @@ public sealed class SdlPlatformGem
     /// </summary>
     public unsafe void Update(in Frame frame)
     {
-        WaitForFrameCap();
+        // The frame is held back until a frame at the cap's rate is due after the last one held back, so frames start no
+        // faster than the cap; a frame already late is let go at once, and the next is due a whole frame after it.
+        int framesPerSecond = _isFocused ? _settings.MaxFrameRate : _settings.BackgroundFrameRate;
+        if (framesPerSecond > 0)
+        {
+            long now = Stopwatch.GetTimestamp();
+            long due = _pacedTimestamp + (Stopwatch.Frequency / framesPerSecond);
+            if (due > now)
+                SDL_DelayPrecise((ulong)Stopwatch.GetElapsedTime(now, due).Ticks * 100);
+
+            _pacedTimestamp = Math.Max(due, now);
+        }
 
         // What happened last frame is over: pressed and released clear, and a mouse's wheel goes back to 0. Its motion
         // eases: it keeps what the frame's share of new motion leaves of last frame's, all of it gone with no smoothing.
@@ -433,13 +443,20 @@ public sealed class SdlPlatformGem
         _text = string.Empty;
         ApplyEvents(motionShare);
 
-        // Sticks and triggers as they stand now, rather than added up from events.
+        // Sticks and triggers as they stand now, rather than added up from events. SDL's -32768 to 32767 becomes -1 to
+        // 1: 0 inside the dead zone, and past it growing from 0 to 1 at full deflection along the stick's curve, so the
+        // zone's edge is no step. Triggers only reach the positive half.
+        float deadZone = _settings.StickDeadZone;
         foreach ((uint id, nint gamepad) in _gamepads)
         {
             ControlState[] states = _controls[FindIndex(DeviceKind.Gamepad, id)];
             foreach ((Control control, SDL_GamepadAxis axis, float sign) in _axes)
             {
-                SetState(states, control, sign * ToStick(SDL_GetGamepadAxis((SDL_Gamepad*)gamepad, axis)));
+                float raw = Math.Max(SDL_GetGamepadAxis((SDL_Gamepad*)gamepad, axis) / 32767f, -1f);
+                float past = MathF.Abs(raw) - deadZone;
+                float stick =
+                    past <= 0 ? 0 : MathF.CopySign(MathF.Pow(past / (1 - deadZone), _settings.StickCurve), raw);
+                SetState(states, control, sign * stick);
             }
         }
     }
@@ -557,37 +574,6 @@ public sealed class SdlPlatformGem
             state.WasPressed || (isDown && !state.IsDown),
             state.WasReleased || (!isDown && state.IsDown)
         );
-    }
-
-    /// <summary>
-    /// Holds the frame back until a frame at the cap's rate is due after the last one held back, so frames start no
-    /// faster than the cap; a frame already late is let go at once, and the next is due a whole frame after it.
-    /// </summary>
-    private void WaitForFrameCap()
-    {
-        int framesPerSecond = _isFocused ? _settings.MaxFrameRate : _settings.BackgroundFrameRate;
-        if (framesPerSecond <= 0)
-            return;
-
-        long now = Stopwatch.GetTimestamp();
-        long due = _pacedTimestamp + (Stopwatch.Frequency / framesPerSecond);
-        if (due > now)
-            SDL_DelayPrecise((ulong)Stopwatch.GetElapsedTime(now, due).Ticks * 100);
-
-        _pacedTimestamp = Math.Max(due, now);
-    }
-
-    /// <summary>
-    /// An SDL axis, -32768 to 32767, as -1 to 1: 0 inside the dead zone, and past it growing from 0 to 1 at full
-    /// deflection along the stick's curve, so the zone's edge is no step. Triggers only reach the positive half.
-    /// </summary>
-    private float ToStick(short value)
-    {
-        float deadZone = _settings.StickDeadZone;
-        float raw = Math.Max(value / 32767f, -1f);
-        float past = MathF.Abs(raw) - deadZone;
-
-        return past <= 0 ? 0 : MathF.CopySign(MathF.Pow(past / (1 - deadZone), _settings.StickCurve), raw);
     }
 
     /// <summary>
@@ -801,11 +787,11 @@ public sealed class SdlPlatformGem
     }
 
     /// <summary>
-    /// Loads <paramref name="icon"/> and its image on workers, then gives the image to the window on the platform thread,
-    /// unless the run ended or another icon was set meanwhile. One that does not load is a warning, and the window keeps
-    /// what it shows.
+    /// Loads <paramref name="icon"/> and its image on workers, then gives the image's first level, which SDL copies, to
+    /// the window on the platform thread, unless the run ended or another icon was set meanwhile. One that does not load
+    /// or is compressed is a warning, and the window keeps what it shows.
     /// </summary>
-    private async Task ShowAsync(Handle<Icon> icon)
+    private async Task ShowIconAsync(Handle<Icon> icon)
     {
         if (icon == Handle<Icon>.None)
             return;
@@ -823,72 +809,67 @@ public sealed class SdlPlatformGem
         }
 
         await _threads.Enter(EngineThread.Platform);
-        if (!lifetime.IsCancellationRequested && Icon == icon)
-            SetIcon(image.Value);
-    }
+        if (lifetime.IsCancellationRequested || Icon != icon)
+            return;
 
-    /// <summary>
-    /// Gives the window <paramref name="image"/>'s first level, which SDL copies.
-    /// </summary>
-    private unsafe void SetIcon(Texture image)
-    {
-        if (image.Format is not (TextureFormat.Rgba8Srgb or TextureFormat.Rgba8Unorm))
+        Texture texture = image.Value;
+        if (texture.Format is not (TextureFormat.Rgba8Srgb or TextureFormat.Rgba8Unorm))
         {
-            Log.Warn($"The window's icon is not shown: its image is {image.Format}, not uncompressed.");
+            Log.Warn($"The window's icon is not shown: its image is {texture.Format}, not uncompressed.");
 
             return;
         }
 
-        TextureLevel top = image.Levels[0];
-        fixed (byte* pixels = image.Pixels.Span)
+        TextureLevel top = texture.Levels[0];
+        unsafe
         {
-            SDL_Surface* surface = SDL_CreateSurfaceFrom(
-                top.Width,
-                top.Height,
-                SDL_PIXELFORMAT_RGBA32,
-                pixels,
-                top.Width * 4
-            );
-            if (surface == null || !SDL_SetWindowIcon(_window, surface))
-                Log.Warn($"The window's icon is not shown: {Sdl.Error}");
+            fixed (byte* pixels = texture.Pixels.Span)
+            {
+                SDL_Surface* surface = SDL_CreateSurfaceFrom(
+                    top.Width,
+                    top.Height,
+                    SDL_PIXELFORMAT_RGBA32,
+                    pixels,
+                    top.Width * 4
+                );
+                if (surface == null || !SDL_SetWindowIcon(_window, surface))
+                    Log.Warn($"The window's icon is not shown: {Sdl.Error}");
 
-            SDL_DestroySurface(surface);
+                SDL_DestroySurface(surface);
+            }
         }
     }
 
     /// <summary>
-    /// Shows the window as <paramref name="settings"/> say where they differ from <paramref name="old"/>, on the platform
-    /// thread, unless the run ended meanwhile.
+    /// Gives the window the display, mode and resizability <paramref name="settings"/> change from <paramref name="old"/>,
+    /// on the platform thread, unless the run ended meanwhile.
     /// </summary>
     private async Task ShowWindowAsync(SdlPlatformSettings old, SdlPlatformSettings settings)
     {
         CancellationToken lifetime = _app.Lifetime;
         await _threads.Enter(EngineThread.Platform);
-        if (!lifetime.IsCancellationRequested)
-            SetWindow(old, settings);
-    }
+        if (lifetime.IsCancellationRequested)
+            return;
 
-    /// <summary>
-    /// Gives the window the display, mode and resizability <paramref name="settings"/> change from <paramref name="old"/>.
-    /// It moves to another display as a window, as one fullscreen or maximized can't be moved: once it is a window,
-    /// which some systems finish later, centred there, then back in its mode.
-    /// </summary>
-    private unsafe void SetWindow(SdlPlatformSettings old, SdlPlatformSettings settings)
-    {
+        // It moves to another display as a window, as one fullscreen or maximized can't be moved: once it is a window,
+        // which some systems finish later, centred there, then back in its mode.
         bool isMoving = settings.Display != old.Display;
-        if (isMoving)
+        unsafe
         {
-            SetMode(WindowMode.Windowed);
-            SDL_SyncWindow(_window);
-            int centered = (int)(SDL_WINDOWPOS_CENTERED_MASK | FindDisplay(settings.Display));
-            SDL_SetWindowPosition(_window, centered, centered);
+            if (isMoving)
+            {
+                SetMode(WindowMode.Windowed);
+                SDL_SyncWindow(_window);
+                int centered = (int)(SDL_WINDOWPOS_CENTERED_MASK | FindDisplay(settings.Display));
+                SDL_SetWindowPosition(_window, centered, centered);
+            }
+
+            if (isMoving || settings.Mode != old.Mode)
+                SetMode(settings.Mode);
+
+            if (settings.IsResizable != old.IsResizable)
+                SDL_SetWindowResizable(_window, settings.IsResizable);
         }
-
-        if (isMoving || settings.Mode != old.Mode)
-            SetMode(settings.Mode);
-
-        if (settings.IsResizable != old.IsResizable)
-            SDL_SetWindowResizable(_window, settings.IsResizable);
     }
 
     /// <summary>

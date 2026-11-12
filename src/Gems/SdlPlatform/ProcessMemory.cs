@@ -54,18 +54,8 @@ internal static unsafe partial class ProcessMemory
                 : null;
         }
 
-        if (OperatingSystem.IsLinux())
-            return ReadLinuxAnonymousResident(files);
-
-        return null;
-    }
-
-    /// <summary>
-    /// RssAnon in <c>/proc/self/status</c>, a line such as <c>RssAnon:	  123456 kB</c>.
-    /// </summary>
-    private static long? ReadLinuxAnonymousResident(IFileSystem files)
-    {
-        if (files.ReadLines(LinuxStatus) is not { Ok: true, Value: { } lines })
+        // RssAnon in /proc/self/status, a line such as "RssAnon:	  123456 kB".
+        if (!OperatingSystem.IsLinux() || files.ReadLines(LinuxStatus) is not { Ok: true, Value: { } lines })
             return null;
 
         foreach (string line in lines)
