@@ -76,9 +76,16 @@ internal sealed class GpuResources(
     private readonly Dictionary<ulong, ModelEntry> _modelEntries = [];
 
     /// <summary>
-    /// The models made since the last frame, by their id with their name, which the next <see cref="Prepare"/> settles.
+    /// The models made since the last frame, by their id with their name, which the next <see cref="Prepare"/> settles,
+    /// and each one's place once it has one, written into the model table once its copies are staged.
     /// </summary>
-    private readonly List<(ulong Model, string Name, MeshDerived Made, ModelEntry Entry)> _madeModels = [];
+    private readonly List<(
+        ulong Model,
+        string Name,
+        MeshDerived Made,
+        ModelEntry Entry,
+        ModelPlace Place
+    )> _madeModels = [];
 
     // 2 MiB of vertices and 1 MiB of indices at the start; each grows with the scene.
     private readonly BufferPool _vertices = new(new("Vertex pool", 0), GpuVertex.Bytes, 1 << 16);
@@ -173,8 +180,9 @@ internal sealed class GpuResources(
         // Each model made takes ranges of the pools, which grow to hold it, and of the mesh table, an index and its row
         // of the model table; it fails when the model table is full. One placed in an earlier frame, whose copies were
         // not staged, is placed already: its place names a row of the model table, and row 0 is none.
-        foreach ((ulong model, string name, MeshDerived made, ModelEntry entry) in _madeModels)
+        for (int index = 0; index < _madeModels.Count; index++)
         {
+            (ulong model, string name, MeshDerived made, ModelEntry entry, _) = _madeModels[index];
             if (entry.State != GpuState.Loading || entry.Where.ModelIndex != 0)
                 continue;
 
@@ -219,14 +227,20 @@ internal sealed class GpuResources(
             // can be evicted.
             entry.Asked = Environment.TickCount64;
             entry.Where = where;
-            _models[where.ModelIndex] = new ModelPlace(
-                new Handle<Model>(model),
-                where.VertexOffset,
-                where.VertexCount,
-                made.BoundsMin,
-                made.BoundsMax,
-                meshes.Count == 0 ? 0 : (uint)_meshRanges.Allocate(meshes.Count),
-                meshes.ToImmutable()
+            _madeModels[index] = (
+                model,
+                name,
+                made,
+                entry,
+                new ModelPlace(
+                    new Handle<Model>(model),
+                    where.VertexOffset,
+                    where.VertexCount,
+                    made.BoundsMin,
+                    made.BoundsMax,
+                    meshes.Count == 0 ? 0 : (uint)_meshRanges.Allocate(meshes.Count),
+                    meshes.ToImmutable()
+                )
             );
             Log.Info($"{name}: {made.Vertices.Length} vertices, {made.Indices.Length / 3} triangles.");
         }
@@ -244,8 +258,9 @@ internal sealed class GpuResources(
 
         // Each placed model copied up, now that the pools are asked for at their size, with its meshes into the mesh
         // table where it has a range of it.
-        // A model is ready once all its copies are staged; one whose copies were not stays placed for the next frame.
-        foreach ((_, _, MeshDerived made, ModelEntry entry) in _madeModels)
+        // A model is ready, and in the model table, once all its copies are staged; one whose copies were not stays placed
+        // for the next frame, out of the table, so nothing reads its vertices before they are there.
+        foreach ((_, _, MeshDerived made, ModelEntry entry, ModelPlace place) in _madeModels)
         {
             if (entry.State != GpuState.Loading || entry.Where.ModelIndex == 0)
                 continue;
@@ -268,7 +283,6 @@ internal sealed class GpuResources(
                 rebased[i] = made.Indices[i] + where.VertexOffset;
             }
 
-            ModelPlace place = _models[where.ModelIndex];
             Span<GpuMesh> rows = graph.Upload<GpuMesh>(
                 Meshes,
                 place.Meshes.Length,
@@ -282,6 +296,7 @@ internal sealed class GpuResources(
                 rows[i] = place.Meshes[i].Mesh;
             }
 
+            _models[where.ModelIndex] = place;
             entry.State = GpuState.Ready;
             SettledModels++;
         }
@@ -514,7 +529,7 @@ internal sealed class GpuResources(
             entry = new ModelEntry();
             _modelEntries[model.Id] = entry;
             if (model == FailureCube.Handle)
-                _madeModels.Add((model.Id, "The failure cube", models.Preprocess(FailureCube.Model), entry));
+                _madeModels.Add((model.Id, "The failure cube", models.Preprocess(FailureCube.Model), entry, default));
             else
                 LoadAsync(model, entry).FireAndForget();
         }
@@ -834,7 +849,7 @@ internal sealed class GpuResources(
             return;
         }
 
-        _madeModels.Add((model.Id, name, derived.Value, entry));
+        _madeModels.Add((model.Id, name, derived.Value, entry, default));
     }
 
     /// <summary>
