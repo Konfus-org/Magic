@@ -112,7 +112,7 @@ internal static class Program
         // The project's folder comes first, as the first winning a path two directories have.
         assets.Register(files.GetParent(project.Path));
 
-        // The services, then the gems the project lists, which join them.
+        // The services, which the gems the project lists join as they are made.
         ServiceCollection services = [];
         services.AddSingleton(app);
         services.AddSingleton(settings);
@@ -122,16 +122,11 @@ internal static class Program
         services.AddSingleton(caches);
         services.AddSingleton(assets);
         services.AddSingleton(world);
-        List<RegisteredGem> registered = GemRegistry.Register(files, project.Gems, services);
-
-        // Never disposed, since its singletons are the gems, which Gems ends.
-        services.MakeReadOnly();
-        IServiceProvider provider = services.BuildServiceProvider();
 
         Log.Info($"Running {project.Name} in {(app.IsHeadless ? "headless" : "GUI")} mode.");
 
         app.StartRun();
-        using Gems gems = new(registered, provider, app, settings, files, assets, world, events, threads);
+        using Gems gems = new(project.Gems, services, app, settings, files, assets, world, events, threads);
         settings.ReportUnknownKeys();
         world.StartAsync(worldRestorePoint?.WaitAsync(app.Lifetime), Terminal.Progress, app.Lifetime).FireAndForget();
 

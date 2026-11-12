@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
@@ -126,8 +127,8 @@ internal sealed class Gems : IDisposable
     private Frame _renderFrame;
 
     /// <summary>
-    /// Makes the gems <paramref name="registered"/> through <paramref name="provider"/>, which was built from the
-    /// services they were registered with, and starts the render thread. Each gem's folder is watched for a build, and
+    /// Registers the gems <paramref name="listed"/> with <paramref name="services"/>, makes them through the provider
+    /// built from those, and starts the render thread. Each gem's folder is watched for a build, and
     /// what it brings is registered before it is made, so its constructor can find it: its folder of assets, its asset
     /// types and its code, which goes when it does. Then the gem is set up: the app's window for as long as it lasts
     /// when it provides one, the world's ECS, its settings, its place on the log when it is a sink, the asset types it
@@ -140,8 +141,8 @@ internal sealed class Gems : IDisposable
         Justification = "Whatever a gem's constructor throws, it is logged and the gem is not made; the others go on."
     )]
     public Gems(
-        List<RegisteredGem> registered,
-        IServiceProvider provider,
+        ImmutableArray<string> listed,
+        ServiceCollection services,
         App app,
         Settings settings,
         IFileSystem files,
@@ -155,6 +156,11 @@ internal sealed class Gems : IDisposable
         _world = world;
         _events = events;
         _threads = threads;
+        List<RegisteredGem> registered = GemRegistry.Register(files, listed, services);
+
+        // Never disposed, since its singletons are the gems, which Dispose ends.
+        services.MakeReadOnly();
+        IServiceProvider provider = services.BuildServiceProvider();
 
         // A constructor may load an asset of a type a gem made after it reads.
         assets.Expect(registered.ConvertAll(gem => gem.Type));
