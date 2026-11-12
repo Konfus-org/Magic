@@ -82,7 +82,7 @@ From the root of the repository, run `Magic new gem Foo -o src/Gems/Foo`. Or, in
 3. Give the gem a name.
 4. Set its location to `src/Gems`.
 
-The template makes `src/Gems/Foo/Foo.csproj` and `FooGem.cs`, and adds the project to the `Gems` folder of the
+The template makes `src/Gems/Foo/Foo.csproj` and `EntryPoint.cs`, and adds the project to the `Gems` folder of the
 solution. The csproj of the gem states its `Description`, `Version` and `Authors`.
 
 `Magic new <template> <name>` runs `dotnet new magic-<template>`. It passes on each option that Magic does not know,
