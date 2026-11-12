@@ -59,15 +59,10 @@ bool IsFailureTextPixel(uint2 pixel, bool isWeather)
     return IsGlyphDot(code, uint2(dot.x % CellWidth, dot.y % RowHeight));
 }
 
-// The sky at a pixel, or the failure where the sky or its clouds would draw: the band of the clouds in flashing green
-// while they failed, else the whole sky in flashing coral while it failed, with its text over it, white with a black
-// shadow a pixel down and right.
-float3 ShowSkyFailure(float3 sky, uint failed, uint2 pixel, float3 direction, float timeSec)
+// The failure at a pixel where the sky or its clouds would draw: the band of the clouds in flashing green while they
+// failed, else the whole sky in flashing coral, with its text over it, white with a black shadow a pixel down and right.
+float3 ShowSkyFailure(bool isWeather, uint2 pixel, float timeSec)
 {
-    bool isWeather = (failed & WeatherFailed) != 0u && direction.y >= CloudBand.x && direction.y <= CloudBand.y;
-    if (!isWeather && (failed & SkyFailed) == 0u)
-        return sky;
-
     if (IsFailureTextPixel(pixel, isWeather))
         return float3(TextGlow);
 
@@ -147,8 +142,15 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
             : GetOpenSkyRadiance(lights) * lerp(0.6, 1.4, 1.0 - uv.y);
         float3 color = ApplyClouds(sky, -view);
         uint failed = GetPassHeader().y;
-        if (failed != 0u)
-            color = ShowSkyFailure(color, failed, thread.xy, -view, frame.timeSec);
+        bool isWeather = (failed & WeatherFailed) != 0u && -view.y >= CloudBand.x && -view.y <= CloudBand.y;
+        if (isWeather || (failed & SkyFailed) != 0u)
+        {
+            color = ShowSkyFailure(isWeather, thread.xy, frame.timeSec);
+
+            // The text is fixed to the screen, so the pixel does not move, and the upscaling's history keeps it sharp.
+            StorageRef velocity = { frame.velocity, 0u };
+            velocity.Store(thread.xy, float4(0.0, 0.0, 0.0, 0.0));
+        }
 
         hdr.Store(thread.xy, float4(color, 1.0));
         return;

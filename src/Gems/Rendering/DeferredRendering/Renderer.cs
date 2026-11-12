@@ -595,7 +595,8 @@ public sealed class Renderer
         if (input.Air is { Clouds: { } clouds })
             shade.Reads(clouds);
 
-        shade.Writes(gpu.Hdr).DispatchOver(gpu.Width, gpu.Height);
+        // The velocity where a failure of the sky or its clouds draws, which does not move on the screen.
+        shade.Writes(gpu.Hdr, gpu.Velocity).DispatchOver(gpu.Width, gpu.Height);
 
         // The nearest pane over the shaded picture, from what the resolve left in the glass targets, with its rays
         // through the traced world where there is one, and the air in front of it or of the opaque surface; nothing to
