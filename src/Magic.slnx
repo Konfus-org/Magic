@@ -31,6 +31,8 @@
     <File Path="../docs/CONTRIBUTING.md" />
     <File Path="../docs/DEBUGGING.md" />
     <File Path="../docs/GEMS.md" />
+    <File Path="../docs/RENDERING.md" />
+    <File Path="../docs/SHADERS.md" />
     <File Path="../docs/TOOLS.md" />
   </Folder>
   <Folder Name="/Tests/">

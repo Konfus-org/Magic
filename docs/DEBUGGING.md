@@ -28,8 +28,8 @@ The colour tells the kind of thing that failed. The pattern tells how much of it
   frame lacks, as `Shadows are not traced`.
 - A failed param takes the default of its shader field. A failed texture reads as no texture.
 - The sky and the weather also show as lines of the banner.
-- The README of the renderer tells more about each one, and how a project replaces the shader of the banner
-  ([DeferredRendering](../src/Gems/Rendering/DeferredRendering/README.md)).
+- The doc of the renderer tells more about each one, and how a project replaces the shader of the banner
+  ([Failures](RENDERING.md#failures)).
 
 ### What stays true
 

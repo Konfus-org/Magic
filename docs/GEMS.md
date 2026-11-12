@@ -36,7 +36,35 @@ the item.
 
 ## Bundled gems
 
-The debug gems, ImGuiDebugUI and DebugTools, are in [Debugging](DEBUGGING.md).
+The debug gems, ImGuiDebugUI and DebugTools, are in [Debugging](DEBUGGING.md). The rendering gems are in
+[Rendering](RENDERING.md).
+
+### ArchEcs
+
+The entity world, through [Arch](https://github.com/genaray/Arch). Provides `IEcs`.
+
+- Change the world only on the game thread. On other threads, a change throws.
+- A query gives spans over the components and allocates nothing.
+- A use of a dead entity, or a structural change inside a query loop, throws.
+
+### DomainImporter
+
+Reads `.domain` files into domains. Provides `IAssetImporter<Domain>`.
+
+- A domain is a folder with its `.domain` file and its prefabs. The file holds nothing, so `{}` is a full file.
+- Each prefab in a folder named `x_y_z` is a chunk at that place. Each other prefab is at the origin of the domain.
+
+### PrefabImporter
+
+Reads `.prefab` files into prefabs. Provides `IAssetImporter<Prefab>`.
+
+- A file is `{ "entities": [ ... ] }`. Each entity has a name, tags, components and the entities under it.
+- A component is the name of its type and its values as JSON.
+- An entity can name a prefab. The parts of that prefab then go under it.
+- If a component has no type in the code, or its values do not fit the type, the importer logs an error. The entity
+  goes without that component.
+- If a prefab that a file names does not load, the file fails.
+- When a prefab that a file names changes, the importer reads the file again.
 
 ### AssimpModelImporter
 
