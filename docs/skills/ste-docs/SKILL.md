@@ -1,11 +1,11 @@
 ---
 name: ste-docs
-description: Writes docs, summaries and code comments in ASD-STE100 Simplified Technical English. Use it on your own, without being asked, each time you write or rewrite a README, guide, design note, skill, plan, XML doc comment, inline comment, or a summary of work or changes.
+description: Writes docs, summaries, replies and code comments in ASD-STE100 Simplified Technical English, with diagrams where they help. Use it on your own, without being asked, each time you write a reply to the user, or write or rewrite a README, guide, design note, skill, plan, XML doc comment, inline comment, or a summary of work or changes.
 ---
 
 # STE docs
 
-Write documentation, summaries and comments in ASD-STE100 Simplified Technical English (STE). The goal: short text
+Write documentation, summaries, replies and comments in ASD-STE100 Simplified Technical English (STE). The goal: short text
 that a reader who is not a native speaker understands on the first read.
 
 Use this skill each time you write text for a reader, also when the user does not ask for it:
@@ -13,6 +13,7 @@ Use this skill each time you write text for a reader, also when the user does no
 - Docs: README, guide, design note, changelog, API doc, skill, plan.
 - Code comments: XML doc comments (`/// <summary>`) and inline comments (`//`).
 - Summaries: summaries of work, changes, code reviews, files or discussions.
+- Replies to the user: answers, plans, status updates and questions.
 - Rewrites and reviews of docs, comments or summaries.
 
 Do not apply it to code, identifiers, quoted text or quoted error messages.
@@ -27,7 +28,7 @@ from the real code.
    - **Procedure:** steps that the reader does, for example install, build or add a dependency.
    - **Description:** what a thing does and how to use it.
 3. Write the text with the rules in section 2.
-4. Do the checklist in section 6 on each paragraph.
+4. Do the checklist in section 8 on each paragraph.
 5. When you rewrite a text, keep each fact that the reader needs. Remove the words and facts that the reader does not
    need.
 
@@ -159,7 +160,40 @@ simple and common word that has the correct meaning.
 - Keep only the facts that the reader needs. Do not tell the steps that you did, unless the reader asks.
 - Use the same name for each thing as the code and the docs.
 
-## 6. Checklist
+## 6. Replies
+
+1. Write the answer or the result first, in one sentence.
+2. Then give only the details that the user needs:
+   - Use a short list for separate items.
+   - Use a table to compare items on the same attributes.
+   - Use a diagram for a flow, a sequence, states or a structure (section 7).
+3. Write a plan as numbered steps, with one action in each step.
+4. Use headings only when the reply has more than three parts.
+5. To give the reason for a decision, use short sentences in the active voice. The other rules can relax there.
+6. Do not repeat what the user can see, such as tool output or a file that you sent.
+7. Do not tell the steps that you did, unless the user asks.
+8. End with one question or one next step, if there is one. Do not end with a list of offers.
+
+## 7. Diagrams
+
+Use a diagram when it shows a flow, a sequence, states or a structure better than text.
+
+- Write it as Mermaid in a `mermaid` code block. Do not draw a diagram with ASCII characters.
+- Use `flowchart` for a flow or a structure, `sequenceDiagram` for messages between parts, and `stateDiagram-v2` for
+  states.
+- Keep each label to a few words in STE. Use the names from the code.
+- Keep a diagram to about 12 nodes. Split a larger one.
+- Write one sentence before the diagram that says what it shows.
+
+Example:
+
+```mermaid
+flowchart LR
+    Brief --> Build --> Validate --> Review --> Merge
+    Review -- findings --> Build
+```
+
+## 8. Checklist
 
 Do this on each paragraph before you finish:
 
@@ -177,7 +211,7 @@ Do this on each paragraph before you finish:
 - [ ] No words from the left column of the word table.
 - [ ] Each technical name is in backticks and matches the code.
 
-## 7. Example
+## 9. Example
 
 This example uses a generic ASP.NET Core app. `IOrderValidator` and `MyValidator` are example names only.
 
@@ -200,7 +234,7 @@ After:
 > > **Warning:** If you do not register the class, the application cannot make the validator. The application throws
 > > an `InvalidOperationException`.
 
-## 8. When to break a rule
+## 10. When to break a rule
 
 Break a rule only if the STE text is wrong or not clear, for example a quoted error message or a code identifier with
 "-ing" in it. Do not break a rule only to make the text sound more natural.

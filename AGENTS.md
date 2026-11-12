@@ -25,7 +25,7 @@ asked, when its trigger fits: read its `SKILL.md` and follow it. Claude Code als
 | [profiling](docs/skills/profiling/SKILL.md) | Profiling, or any mention of performance, frame time, stutter, allocations, memory, VRAM or GPU time |
 | [qa](docs/skills/qa/SKILL.md) | A swarm's QA worker, or the user asks for QA of a branch |
 | [retro](docs/skills/retro/SKILL.md) | A swarm finishes, a slice went badly, or the user corrects the workflow |
-| [ste-docs](docs/skills/ste-docs/SKILL.md) | Writing docs, skills, plans, comments or summaries |
+| [ste-docs](docs/skills/ste-docs/SKILL.md) | Each reply to the user, and each doc, skill, plan, comment or summary |
 
 ## Commands
 
@@ -252,13 +252,8 @@ Agents tend to over-build. Less is more: the best change often removes more code
 ## Writing
 
 Write docs, skills, plans, comments, summaries and replies to the user with the
-[ste-docs skill](docs/skills/ste-docs/SKILL.md). Use the words in the glossary only with their meanings there.
-
-When you reply to the user:
-
-- Write a plan of actions in a reply as numbered steps, with one action in each step.
-- Write a status update or a summary with the rules above.
-- To tell the reason for a decision, use short sentences in the active voice. The other rules can relax there.
+[ste-docs skill](docs/skills/ste-docs/SKILL.md), diagrams included. Use the words in the glossary only with their
+meanings there.
 
 ### Glossary
 
