@@ -515,14 +515,14 @@ internal sealed class GpuResources(
         _arrivedTextures.Clear();
     }
 
-    private static GpuFormat ToGpu(TextureFormat format) =>
+    private static Result<GpuFormat> ToGpu(TextureFormat format) =>
         format switch
         {
-            TextureFormat.Rgba8Unorm => GpuFormat.R8G8B8A8Unorm,
-            TextureFormat.Rgba8Srgb => GpuFormat.R8G8B8A8Srgb,
-            TextureFormat.Bc7Unorm => GpuFormat.Bc7Unorm,
-            TextureFormat.Bc7Srgb => GpuFormat.Bc7Srgb,
-            _ => throw new ArgumentOutOfRangeException(nameof(format), format, "not a texture format"),
+            TextureFormat.Rgba8Unorm => Result.Success(GpuFormat.R8G8B8A8Unorm),
+            TextureFormat.Rgba8Srgb => Result.Success(GpuFormat.R8G8B8A8Srgb),
+            TextureFormat.Bc7Unorm => Result.Success(GpuFormat.Bc7Unorm),
+            TextureFormat.Bc7Srgb => Result.Success(GpuFormat.Bc7Srgb),
+            _ => Result.Failure($"{format} is not a texture format."),
         };
 
     /// <summary>
@@ -556,6 +556,29 @@ internal sealed class GpuResources(
     {
         string path = assets.GetPath(shader) ?? $"shader {shader.Id}";
         ShaderTypeArgument type = new(shader, Path.GetFileNameWithoutExtension(path));
+        Result<MaterialLayout> layout;
+        try
+        {
+            layout = await ReflectLayoutAsync(type).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            layout = Result.Failure($"its reflection threw: {ex}");
+        }
+
+        await threads.Enter(EngineThread.Render);
+        if (!layout.Ok)
+            Log.Error($"Materials drawn with {path} are drawn as the failure: {layout.Error}");
+
+        _layouts[shader.Id] = layout.Ok ? layout.Value : new MaterialLayout(default, type, false, default);
+    }
+
+    /// <summary>
+    /// The struct <paramref name="type"/> names, as a material's row lays it out, with what it declares it needs; or why
+    /// not, as when it is more than a row holds.
+    /// </summary>
+    private async Task<Result<MaterialLayout>> ReflectLayoutAsync(ShaderTypeArgument type)
+    {
         Result<ImmutableArray<ShaderField>> fields = await shaders
             .ReflectAsync(type, CancellationToken.None)
             .ConfigureAwait(false);
@@ -571,29 +594,23 @@ internal sealed class GpuResources(
         Result<long> jitters = await shaders
             .ReflectConstantAsync(type, "Jitters", CancellationToken.None)
             .ConfigureAwait(false);
-        await threads.Enter(EngineThread.Render);
-        int bytes = fields.Ok
-            ? fields.Value.Select(field => (int)(field.Offset + field.Size)).DefaultIfEmpty().Max()
-            : 0;
-        if (!fields.Ok || bytes > GpuMaterial.Bytes - 4)
-        {
-            string why = fields.Ok
-                ? $"its params are {bytes} bytes, over a row's {GpuMaterial.Bytes - 4}"
-                : fields.Error;
-            Log.Error($"Materials drawn with {path} are drawn as the failure: {why}");
-            _layouts[shader.Id] = new MaterialLayout(default, type, false, default);
+        if (!fields.Ok)
+            return Result.Failure(fields.Error);
 
-            return;
-        }
+        int bytes = fields.Value.Select(field => (int)(field.Offset + field.Size)).DefaultIfEmpty().Max();
+        if (bytes > GpuMaterial.Bytes - 4)
+            return Result.Failure($"its params are {bytes} bytes, over a row's {GpuMaterial.Bytes - 4}");
 
-        _layouts[shader.Id] = new MaterialLayout(
-            fields.Value,
-            type,
-            translucent.Ok && translucent.Value != 0,
-            new EffectNeeds(
-                levels.Ok ? (int)levels.Value : 0,
-                history.Ok && history.Value != 0,
-                jitters.Ok && jitters.Value != 0
+        return Result.Success(
+            new MaterialLayout(
+                fields.Value,
+                type,
+                translucent.Ok && translucent.Value != 0,
+                new EffectNeeds(
+                    levels.Ok ? (int)levels.Value : 0,
+                    history.Ok && history.Value != 0,
+                    jitters.Ok && jitters.Value != 0
+                )
             )
         );
     }
@@ -639,9 +656,10 @@ internal sealed class GpuResources(
         Result<Texture> loaded = await assets.LoadAsync(handle, null, CancellationToken.None).ConfigureAwait(false);
         await threads.Enter(EngineThread.Render);
         string name = assets.GetPath(handle) ?? $"texture {handle.Id}";
-        if (!loaded.Ok)
+        Result<GpuFormat> format = loaded.Ok ? ToGpu(loaded.Value.Format) : Result.Failure(loaded.Error);
+        if (!loaded.Ok || !format.Ok)
         {
-            Log.Error($"{name} is drawn as a failure: {loaded.Error}");
+            Log.Error($"{name} is drawn as a failure: {format.Error}");
             entry.State = GpuState.Failed;
 
             return;
@@ -654,7 +672,7 @@ internal sealed class GpuResources(
             name,
             asset.Levels[first].Width,
             asset.Levels[first].Height,
-            ToGpu(asset.Format),
+            format.Value,
             TextureUsages.Sampled | TextureUsages.CopyDestination,
             asset.Levels.Length - first
         );
@@ -669,9 +687,15 @@ internal sealed class GpuResources(
 
     private async Task LoadAsync(Handle<Model> model, ModelEntry entry)
     {
-        Result<MeshDerived> derived = await assets
-            .LoadPreprocessedAsync(model, models, CancellationToken.None)
-            .ConfigureAwait(false);
+        Result<MeshDerived> derived;
+        try
+        {
+            derived = await assets.LoadPreprocessedAsync(model, models, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            derived = Result.Failure($"making it threw: {ex}");
+        }
 
         await threads.Enter(EngineThread.Render);
         string name = assets.GetPath(model) ?? $"model {model.Id}";

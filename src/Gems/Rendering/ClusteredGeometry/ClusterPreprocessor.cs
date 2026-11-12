@@ -69,6 +69,13 @@ internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClust
         )
             return Result.Failure("the entry is cut short.");
 
+        // Each atlas is copied up whole, so an impostor of another size would leave texels of it unwritten.
+        if (
+            header.ImpostorHalves != ImpostorBuilder.Size * ImpostorBuilder.Size * 4
+            || header.ImpostorUvHalves != ImpostorBuilder.Size * ImpostorBuilder.Size * 2
+        )
+            return Result.Failure("its impostor is not the size of an atlas.");
+
         return Result.Success(
             new ModelClusters
             {

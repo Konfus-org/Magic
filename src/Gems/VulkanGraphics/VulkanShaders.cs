@@ -128,8 +128,16 @@ internal sealed class VulkanShaders(IShaderCompiler compiler, VulkanResources re
 
         // On a worker from the start: a compile runs inline up to its first wait, and its first ask is on the render
         // thread.
-        Result<CompiledShader> compiled = await Task.Run(() => compiler.CompileAsync(entry, stopping), stopping)
-            .ConfigureAwait(false);
+        Result<CompiledShader> compiled;
+        try
+        {
+            compiled = await Task.Run(() => compiler.CompileAsync(entry, stopping), stopping).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            compiled = Result.Failure($"{entry.Name} did not compile: the compiler threw: {ex}");
+        }
+
         await threads.Enter(EngineThread.Render);
         if (stopping.IsCancellationRequested)
             return;

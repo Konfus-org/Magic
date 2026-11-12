@@ -211,9 +211,18 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
     /// </summary>
     private async Task LoadAsync(int index, ModelPlace place)
     {
-        Result<ModelClusters> made = await assets
-            .LoadPreprocessedAsync(place.Model, clusters, CancellationToken.None)
-            .ConfigureAwait(false);
+        Result<ModelClusters> made;
+        try
+        {
+            made = await assets
+                .LoadPreprocessedAsync(place.Model, clusters, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            made = Result.Failure($"making them threw: {ex}");
+        }
+
         await threads.Enter(EngineThread.Render);
         _madeModels.Add((index, place, made));
     }
