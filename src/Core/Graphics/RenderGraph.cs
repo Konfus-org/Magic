@@ -417,6 +417,19 @@ public sealed class RenderGraph
         }
     }
 
+    /// <summary>
+    /// Leaves out the compute or draw pass open, with no word: for a gem that threw in it, whose failure is told.
+    /// </summary>
+    internal void LeaveOutOpenPass()
+    {
+        if (_pass is not { Kind: not GpuPassKind.Transfer })
+            return;
+
+        _uses.Clear();
+        _commands.Clear();
+        _pass = null;
+    }
+
     private static GpuUse GetUse(GpuResource resource, GpuAccess access, int level = -1) =>
         new()
         {
@@ -459,11 +472,9 @@ public sealed class RenderGraph
             return;
         }
 
-        // The gem threw in its Render or forgot to end the pass: the other gems' passes still draw.
+        // The gem forgot to end the pass: the other gems' passes still draw.
         Log.Error($"The pass {open.Name} was never ended, so it is left out of the frame.");
-        _uses.Clear();
-        _commands.Clear();
-        _pass = null;
+        LeaveOutOpenPass();
     }
 
     /// <summary>

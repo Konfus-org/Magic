@@ -77,31 +77,28 @@ internal sealed class Rendering
         foreach (Step step in _steps)
         {
             long start = Metrics.HookDurations.Start();
-            if (step.Missing is { } missing)
-            {
-                graph.Fail(
-                    RenderFailure.Pass,
-                    $"{step.Gem} lacks an input",
-                    $"It takes {missing.Name}, which no listed gem makes."
-                );
-            }
-            else if (step.Thrown is not { } thrown || frame.AppSec >= thrown.RetrySec)
+            if (step.Missing is null && (step.RetrySec is not { } retry || frame.AppSec >= retry))
             {
                 try
                 {
                     step.Run(frame, graph);
-                    step.Thrown = null;
+                    step.RetrySec = null;
                 }
                 catch (Exception ex)
                 {
-                    step.Thrown = (ex, frame.AppSec + RetryPauseSec);
+                    // A step that throws again at a retry keeps the first throw's texts: only a new failure is logged.
+                    if (step.RetrySec is null)
+                        step.Failure = ($"{step.Gem} stopped rendering", $"It threw in Render: {ex}");
+
+                    step.RetrySec = frame.AppSec + RetryPauseSec;
+                    graph.LeaveOutOpenPass();
                 }
             }
 
-            // Told each frame it is out, so the failure is logged once: when it first threw, or threw again after a frame
-            // it rendered in.
-            if (step.Thrown is { } failure)
-                graph.Fail(RenderFailure.Pass, $"{step.Gem} stopped rendering", $"It threw in Render: {failure.Error}");
+            // Told each frame it is out, so the failure is logged once: when it first failed, or failed again after a
+            // frame it rendered in.
+            if (step.Missing is not null || step.RetrySec is not null)
+                graph.Fail(RenderFailure.Pass, step.Failure.What, step.Failure.Reason);
 
             // A gem with several steps is timed once, by its last step, for the time of all of them.
             long since = start == 0 ? 0 : start - step.Earlier;
@@ -235,10 +232,15 @@ internal sealed class Rendering
         public Type? Missing { get; protected set; }
 
         /// <summary>
-        /// What the gem last threw in this step, and the <see cref="Frame.AppSec"/> from which it is tried again; null
-        /// while it renders.
+        /// The <see cref="Frame.AppSec"/> from which a step that threw is tried again; null while it renders.
         /// </summary>
-        public (Exception Error, double RetrySec)? Thrown { get; set; }
+        public double? RetrySec { get; set; }
+
+        /// <summary>
+        /// Why it doesn't render, made once when its input is missing or it throws, so a frame it is out in allocates
+        /// nothing for the texts.
+        /// </summary>
+        public (string What, string Reason) Failure { get; set; }
 
         /// <summary>
         /// The gem's next step in the order, which is timed for both; null for its last.
@@ -351,7 +353,12 @@ internal sealed class Rendering
                 Type type = Nullable.GetUnderlyingType(parameter.ParameterType) ?? parameter.ParameterType;
                 if (!makers.TryGetValue(type, out Maker maker))
                 {
-                    Missing ??= parameter.ParameterType == type ? type : null;
+                    if (Missing is null && parameter.ParameterType == type)
+                    {
+                        Missing = type;
+                        Failure = ($"{Gem} lacks an input", $"It takes {type.Name}, which no listed gem makes.");
+                    }
+
                     arguments.Add(Expression.Default(parameter.ParameterType));
                     continue;
                 }
