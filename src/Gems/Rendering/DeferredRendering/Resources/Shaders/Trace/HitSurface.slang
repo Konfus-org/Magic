@@ -12,7 +12,7 @@ import Scene.Instances;
 import Scene.Models;
 import Scene.Vertices;
 
-// A material row as a ray sees it, C#'s AccelerationStructuresGem.HitMaterialBytes long: its surface averaged over its whole texture.
+// A material row as a ray sees it, C#'s acceleration structures Renderer.HitMaterialBytes long: its surface averaged over its whole texture.
 public struct GpuHitMaterial
 {
     // The base colour a surface reflects diffusely: none of it where it is metal.

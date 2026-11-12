@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Assets;
-using Magic.Configuration;
 using Magic.Debugging;
 using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
@@ -14,13 +13,9 @@ namespace Magic.TracedShadows;
 /// <summary>
 /// How much of each light reaches each pixel, traced through the world as rays see it at the size its settings scale
 /// the picture to, then denoised, as <c>DenoiseShadows.slang</c> says. Each frame it writes the ids of the mask and the
-/// sun's tint into the frame's buffer and makes the frame's <see cref="ShadowMask"/>. It is public
-/// because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
+/// sun's tint into the frame's buffer and makes the frame's <see cref="ShadowMask"/>.
 /// </summary>
-public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManager assets)
-    : IGem,
-        IHasSettings<TracedShadowsSettings>,
-        IRender<TracedInput, ShadowMask>
+public sealed class Renderer(TracedShadowsSettings settings, AssetManager assets) : IRender<TracedInput, ShadowMask>
 {
     private const int BytesPerPixel = 16;
     private const int SunTileWidth = 8;
@@ -56,18 +51,11 @@ public sealed class TracedShadowsGem(TracedShadowsSettings settings, AssetManage
     private (int Width, int Height) _traced;
 
     /// <summary>
-    /// How the shadows are traced, which <see cref="Render"/> reads whole each frame. Game thread.
-    /// </summary>
-    public TracedShadowsSettings Settings { get; set; } = settings;
-
-    /// <summary>
     /// The frame's shadows, traced and denoised, their ids written into the frame's buffer; none while it is off,
     /// the passes' shaders build, or what they write is not made.
     /// </summary>
     public ShadowMask? Render(in Frame frame, RenderGraph graph, in TracedInput input)
     {
-        TracedShadowsSettings settings = Settings;
-
         // Off, the history starts afresh once it is back on.
         if (!settings.IsTracedShadowsOn)
         {

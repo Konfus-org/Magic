@@ -12,12 +12,11 @@ namespace Magic.TaaUpscaling;
 /// Takes the finished picture to the size it is shown at with temporal anti-aliasing: each frame it makes the
 /// <see cref="Upscaling"/>, so the camera jitters, and the renderer has it record one pass once the view's output is
 /// drawn. The pass builds each shown pixel from the output's jittered texels around it and blends it with last
-/// frame's resolved picture where its surface was, so the gem keeps two resolved pictures and swaps them every frame,
+/// frame's resolved picture where its surface was, so it keeps two resolved pictures and swaps them every frame,
 /// with no history on the first frame at a size or of a world; the newer is what the window shows. It makes nothing
-/// while its shader builds. It is public because nothing in its assembly makes it: Magic does, by
-/// reflection, when a project lists the gem.
+/// while its shader builds.
 /// </summary>
-public sealed class TaaUpscalingGem : IGem, IRenderInto<Upscaling>
+public sealed class Renderer : IRenderInto<Upscaling>
 {
     private readonly ShaderEntry _shader;
 
@@ -31,7 +30,7 @@ public sealed class TaaUpscalingGem : IGem, IRenderInto<Upscaling>
     /// </summary>
     private (GpuTexture Picture, int Width, int Height) _resolved;
 
-    public TaaUpscalingGem(AssetManager assets)
+    public Renderer(AssetManager assets)
     {
         _shader = PassShaders.GetEntry(assets, "TaaUpscaling", "UpscalePicture");
         _upscaling = new Upscaling(Record);

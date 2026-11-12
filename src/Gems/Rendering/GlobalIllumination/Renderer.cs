@@ -1,7 +1,6 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Magic.Assets;
-using Magic.Configuration;
 using Magic.Debugging;
 using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
@@ -17,14 +16,9 @@ namespace Magic.GlobalIllumination;
 /// <summary>
 /// Lights the view's surfaces indirectly, through the world as rays see it: the probe grid, the traced diffuse light and
 /// the traced reflections, recorded in the light stage, written into the frame's buffer and made as the frame's
-/// <see cref="IndirectLight"/>, which shading takes. It is public because nothing in its assembly makes it: Magic does,
-/// by reflection, when a project lists the gem.
+/// <see cref="IndirectLight"/>, which shading takes.
 /// </summary>
-public sealed class GlobalIlluminationGem
-    : IGem,
-        IHasSettings<GlobalIlluminationSettings>,
-        IRender<TracedInput, IndirectLight>,
-        IHookIntoDomainLoading
+public sealed class Renderer : IRender<TracedInput, IndirectLight>, IHookIntoDomainLoading
 {
     /// <summary>
     /// The view depth's two textures: the even frames write the first and the odd the second, the other being the
@@ -32,6 +26,10 @@ public sealed class GlobalIlluminationGem
     /// </summary>
     private static readonly string[] _depthNames = ["Traced depth 0", "Traced depth 1"];
 
+    /// <summary>
+    /// How the light is traced, which <see cref="Render"/> reads each frame.
+    /// </summary>
+    private readonly GlobalIlluminationSettings _settings;
     private readonly Threads _threads;
     private readonly Probes _probes;
     private readonly TracedDiffuse _diffuse;
@@ -54,29 +52,19 @@ public sealed class GlobalIlluminationGem
     /// </summary>
     private (int Width, int Height)? _reflected;
 
-    public GlobalIlluminationGem(
-        GlobalIlluminationSettings settings,
-        AssetManager assets,
-        Threads threads,
-        IGraphicsApi gpu
-    )
+    public Renderer(GlobalIlluminationSettings settings, AssetManager assets, Threads threads, IGraphicsApi gpu)
     {
-        Settings = settings;
+        _settings = settings;
         _threads = threads;
         _probes = new Probes(assets);
         _diffuse = new TracedDiffuse(assets);
         _reflections = new TracedReflections(assets);
         _shaders = [.. _probes.Shaders, .. _diffuse.Shaders, .. _reflections.Shaders];
 
-        // Without rays nothing is traced and the gem is never called, so it holds no domain back.
+        // Without rays nothing is traced and the renderer is never called, so it holds no domain back.
         if (!gpu.Features.HasRayQuery)
             _built.TrySetResult();
     }
-
-    /// <summary>
-    /// How the light is traced, which <see cref="Render"/> reads whole each frame. Game thread.
-    /// </summary>
-    public GlobalIlluminationSettings Settings { get; set; }
 
     /// <summary>
     /// The frame's indirect light, while it is on, the passes' shaders are built, what they read and write is made,
@@ -84,7 +72,8 @@ public sealed class GlobalIlluminationGem
     /// </summary>
     public IndirectLight? Render(in Frame frame, RenderGraph graph, in TracedInput input)
     {
-        GlobalIlluminationSettings settings = Settings;
+        GlobalIlluminationSettings settings = _settings;
+        bool isReflectionsOn = settings.IsReflectionsOn;
 
         // Off, no domain waits for the passes, and the probes start afresh once it is back on.
         if (!settings.IsIndirectLightOn)
@@ -138,7 +127,7 @@ public sealed class GlobalIlluminationGem
             (settings.ProbesAcross, settings.ProbesUp)
         );
         Result<TracedDiffuseConstants> diffuse = TracedDiffuse.Prepare(view, frame.Index, hasHistory);
-        Result<TracedReflectionConstants> reflections = settings.IsReflectionsOn
+        Result<TracedReflectionConstants> reflections = isReflectionsOn
             ? TracedReflections.Prepare(view, frame.Index, hasHistory && _reflected == tracedSize)
             : Result.Success(default(TracedReflectionConstants));
         int written = (int)(frame.Index % 2);
@@ -177,11 +166,11 @@ public sealed class GlobalIlluminationGem
         graph.Upload(gpu.Frame, [row], GpuIndirectLight.Offset);
         _probes.Record(view, grid, gi.Probes);
         _diffuse.Record(view, grid, gi);
-        if (settings.IsReflectionsOn)
+        if (isReflectionsOn)
             _reflections.Record(view, grid, gi);
 
         _traced = tracedSize;
-        _reflected = settings.IsReflectionsOn ? tracedSize : null;
+        _reflected = isReflectionsOn ? tracedSize : null;
 
         return new IndirectLight(gi.Diffuse.Blend.Light, gi.Reflections.Blend.Light, grid.Probes, grid.Depth);
     }
