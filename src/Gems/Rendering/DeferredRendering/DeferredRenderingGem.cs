@@ -246,14 +246,14 @@ public sealed class DeferredRenderingGem
     public void LateUpdate(in Frame frame)
     {
         RenderInputs back = _inputs.Back;
-        _ecs.Snapshot(back.Renderers);
-        _ecs.Snapshot(back.Cameras);
-        _ecs.Snapshot(back.DirectionalLights);
-        _ecs.Snapshot(back.PointLights);
-        _ecs.Snapshot(back.SpotLights);
-        _ecs.Snapshot(back.RectLights);
-        _ecs.Snapshot(back.Skies);
-        _ecs.Snapshot(back.PostProcessing);
+        back.Renderers.Fill(_ecs);
+        back.Cameras.Fill(_ecs);
+        back.DirectionalLights.Fill(_ecs);
+        back.PointLights.Fill(_ecs);
+        back.SpotLights.Fill(_ecs);
+        back.RectLights.Fill(_ecs);
+        back.Skies.Fill(_ecs);
+        back.PostProcessing.Fill(_ecs);
         back.WorldNumber = _worldNumber;
         _inputs.Publish();
 

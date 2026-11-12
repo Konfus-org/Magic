@@ -72,8 +72,8 @@ Write the engine as data flowing through functions, not objects calling each oth
   `await threads.Enter(EngineThread.Game)`; nothing hops threads for it.
 - Gems talk through message structs, each an `IEvent`. Publish one from any thread and every gem reads it the next
   frame, from `frame.Events`, in load order. A gem that sets `IsHandled` on one takes it from the gems after it.
-- Async work a hook starts arrives in a later frame: by a message, or by work posted with `Threads.Post`. A gem that
-  needs slow setup starts it in its constructor and reads what came of it in a hook.
+- Async work a hook starts arrives in a later frame, by a message. A gem that needs slow setup starts it in its
+  constructor and reads what came of it in a hook.
 - `Dispose` frees what the gem started, once none of its work still runs on a worker.
 - A gem's csproj states its `Description`, `Version` and `Authors`. Nothing else does.
 - A value a player, game or developer would tune is a member of its gem's settings record, never a const, a
@@ -109,8 +109,8 @@ Write the engine as data flowing through functions, not objects calling each oth
   could hold up has ended, and Core's game thread waiting at the end of a frame until the render thread has drawn the
   frame before. The render thread never waits for the game thread. The platform thread waits on the OS for its next
   event.
-- A worker hands an engine thread data (a message, a `Channel<T>`, a value written whole) or work
-  (`Threads.Post`). No locks on collections two threads share.
+- A worker hands an engine thread data: a message, a `Channel<T>` or a value written whole. No locks on collections
+  two threads share.
 - Background work is a task. `Threads` is for the engine's own threads.
 - A timeout is the caller's, through a linked token source.
 

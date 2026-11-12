@@ -5,10 +5,10 @@ using Magic.Debugging;
 namespace Magic.Threading;
 
 /// <summary>
-/// The engine's threads, as somewhere work can be posted (<see cref="Post"/>) or an awaited flow can step onto:
-/// <c>await threads.Enter(EngineThread.Game)</c> goes on there, as that thread next pumps. For a flow whose steps must be
-/// there, such as an awaited pipeline. It makes and ends the engine's threads but the platform thread
-/// (<see cref="Start"/>). Any thread, but where a member says otherwise.
+/// The engine's threads, as somewhere an awaited flow can step onto: <c>await threads.Enter(EngineThread.Game)</c> goes
+/// on there, as that thread next pumps. For a flow whose steps must be there, such as an awaited pipeline. It makes and
+/// ends the engine's threads but the platform thread (<see cref="Start"/>). Any thread, but where a member says
+/// otherwise.
 /// </summary>
 public sealed class Threads
 {
@@ -53,7 +53,7 @@ public sealed class Threads
     /// <summary>
     /// Has <paramref name="work"/> run on <paramref name="thread"/> as it next pumps. Any thread.
     /// </summary>
-    public void Post(EngineThread thread, Action work) => _posted[(int)thread].Writer.TryWrite(work);
+    internal void Post(EngineThread thread, Action work) => _posted[(int)thread].Writer.TryWrite(work);
 
     /// <summary>
     /// Makes <paramref name="thread"/> a thread of its own, which runs what was posted to it, then

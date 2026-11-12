@@ -77,7 +77,7 @@ public sealed class VolumetricsGem(VolumetricsSettings settings, AssetManager as
     /// </summary>
     public void LateUpdate(in Frame frame)
     {
-        _ecs.Snapshot(_weather.Back);
+        _weather.Back.Fill(_ecs);
         _weather.Publish();
     }
 
