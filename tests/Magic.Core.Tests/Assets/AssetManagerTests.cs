@@ -1,4 +1,6 @@
+using System.Collections.Immutable;
 using Magic.Assets;
+using Magic.Assets.Pipeline;
 using Magic.Events;
 using Magic.Files;
 using Magic.Utils;
@@ -87,6 +89,57 @@ public sealed class AssetManagerTests
         finally
         {
             files.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public async Task AnIdNoFileHadIsReloadedOnceAFileWithItIsAdded()
+    {
+        FileSystem files = new();
+        string directory = files.Combine(System.IO.Path.GetTempPath(), $"Magic-{Guid.NewGuid():N}");
+        try
+        {
+            using App app = new();
+            EventCoordinator events = new();
+            using AssetManager assets = new(files, new Caches(files, app), events, app);
+            files.CreateDirectory(files.Combine(directory, "Shaders"));
+            assets.Register(directory);
+            Handle<Shader> missing = new(0x5EED_0000_0000_0001);
+            Result<Shader> failed = await assets.LoadAsync(missing, null, TestContext.Current.CancellationToken);
+
+            files.Write(files.Combine(directory, "Shaders", "Added.slang"), "// added");
+            files.Write(
+                files.Combine(directory, "Shaders", "Added.slang.meta"),
+                $$"""{ "id": {{missing.Id}}, "type": "Shader" }"""
+            );
+            ImmutableArray<string> directories = assets.Database.Directories;
+            assets.Reindex(directories, AssetIndex.Create(files, directories, assets.BuiltIn), []);
+
+            Assert.False(failed.Ok);
+            Assert.Equal("// added", ((Shader)(await TakeReloadedAsync(events, missing.Id)).Asset).Text);
+        }
+        finally
+        {
+            files.Delete(directory, true);
+        }
+    }
+
+    /// <summary>
+    /// The first <see cref="AssetReloaded"/> of asset <paramref name="id"/>, taken as a frame takes it.
+    /// </summary>
+    private static async Task<AssetReloaded> TakeReloadedAsync(EventCoordinator events, ulong id)
+    {
+        using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));
+        while (true)
+        {
+            events.Take();
+            foreach (AssetReloaded reloaded in events.GetTaken<AssetReloaded>())
+            {
+                if (reloaded.Id == id)
+                    return reloaded;
+            }
+
+            await Task.Delay(10, timeout.Token).ConfigureAwait(false);
         }
     }
 }

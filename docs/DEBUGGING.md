@@ -38,9 +38,11 @@ The colour tells the kind of thing that failed. The pattern tells how much of it
   back logs again.
 - A run with `--fail-on-error`, as `Validate.ps1` starts, exits with code `2` at that error.
 - A failure that goes away leaves the picture in the next frame.
-- A failed material, texture or model loads again when its file changes, and its failure leaves the picture. A
-  material shader that fails stays failed until Magic restarts. A file that worked and then fails keeps what loaded
-  before, and the log says so.
+- A failed material, texture or model loads again when its file changes, and its failure leaves the picture. This is
+  also true when no file had its id and a file with that id is added. A material shader that fails stays failed until
+  Magic restarts. A file that worked and then fails keeps what loaded before, and the log says so.
+- A file that is removed while Magic runs keeps what loaded from it in the picture, and the log says nothing. Its
+  failure shows after the next restart.
 - A failure reads nothing from disk. The renderer builds its failure shaders at the start, and the shader of the
   banner is in the assembly of the renderer.
 

@@ -719,10 +719,10 @@ public sealed class AssetManager : IDisposable
     /// Takes in the asset directories as the watches had them read again, <paramref name="now"/>, after they saw
     /// <paramref name="touched"/>, paths from their asset directories: each asset loaded and still held whose file
     /// changed, is another file now, lists a folder that changed, or was made from one of those, and so on out, is read
-    /// again, each after what it was made from, as a load waits for those on their way; one nothing holds, or that
-    /// failed, is forgotten, so the next load reads it; one whose file is gone is let go, and its waiters told. Refused,
-    /// false, when the asset directories are no longer <paramref name="directories"/>, the ones read: a directory was
-    /// added meanwhile. Any thread.
+    /// again, each after what it was made from, as a load waits for those on their way, an id that failed as no file had
+    /// it included; one nothing holds is forgotten, so the next load reads it; one whose file is gone is let go, and its
+    /// waiters told. Refused, false, when the asset directories are no longer <paramref name="directories"/>, the ones
+    /// read: a directory was added meanwhile. Any thread.
     /// </summary>
     internal bool Reindex(ImmutableArray<string> directories, AssetIndex now, ImmutableHashSet<string> touched)
     {
@@ -1156,11 +1156,11 @@ public sealed class AssetManager : IDisposable
 
     /// <summary>
     /// What an ask for asset <paramref name="id"/> as <paramref name="type"/> gets, and <paramref name="loaded"/> with
-    /// what it asked: a failure when no file has the id, when it is another type, or, asked for by asset
-    /// <paramref name="dependent"/>'s importer, when it depends on what asks for it; what loaded, while something holds
-    /// it; a wait with the others for a load on its way; else a new entry, read now, or once the gem expected to read its
-    /// type registers, as the one asking may be made before it. Cancelled once the run has ended, as nothing reads it then. Under
-    /// <see cref="_gate"/>.
+    /// what it asked: a failure when no file has the id, kept so that the id is read once a file has it; a failure when
+    /// it is another type, or, asked for by asset <paramref name="dependent"/>'s importer, when it depends on what asks
+    /// for it; what loaded, while something holds it; a wait with the others for a load on its way; else a new entry,
+    /// read now, or once the gem expected to read its type registers, as the one asking may be made before it. Cancelled
+    /// once the run has ended, as nothing reads it then. Under <see cref="_gate"/>.
     /// </summary>
     private (LoadedAssets, Task<Made>) Request(
         AssetDatabase database,
@@ -1197,8 +1197,20 @@ public sealed class AssetManager : IDisposable
             }
         }
 
+        // Kept as a failed entry, so Reindex reads it, and its asker hears, once a file with the id is added.
         if (!database.Index.ById.TryGetValue(id, out IndexedFile? file))
-            return (loaded, Task.FromResult(Fail($"No asset has the id {id}.")));
+        {
+            Made none = Fail($"No asset has the id {id}.");
+            AssetEntry failed = new()
+            {
+                Type = type,
+                Import = import,
+                Stage = AssetStage.Loaded,
+                Error = none.Value.Error,
+            };
+
+            return (loaded with { Entries = loaded.Entries.SetItem(id, failed) }, Task.FromResult(none));
+        }
 
         if (file.Type != type.Name)
             return (loaded, Task.FromResult(Fail($"{file.Path} is a {file.Type}, so it is not a {type.Name}.")));
