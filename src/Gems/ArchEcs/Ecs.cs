@@ -48,7 +48,7 @@ public sealed class Ecs : IEcs, IDisposable
     /// </summary>
     private long _version = 1;
 
-    public Ecs(Threads threads)
+    internal Ecs(Threads threads)
     {
         // An entity becomes Arch's and back by reinterpreting its bits, so an Arch that laid its own out differently
         // would scramble every handle.

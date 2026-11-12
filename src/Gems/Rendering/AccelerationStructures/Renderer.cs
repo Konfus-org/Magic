@@ -26,14 +26,16 @@ public readonly record struct AccelerationStructuresInput(GpuView View, GpuInsta
 /// trace rays it makes none. The models, the instances and the material rows are the renderer's, taken as its
 /// <see cref="GpuView"/> and <see cref="GpuInstances"/>.
 /// </summary>
-public sealed class Renderer(AssetManager assets) : IRender<AccelerationStructuresInput, TracedWorld>
+public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
 {
     /// <summary>
     /// A hit materials row, a <c>GpuHitMaterial</c> as the renderer's <c>Trace/HitSurface.slang</c> lays it out.
     /// </summary>
     private const int HitMaterialBytes = 32;
 
-    private readonly ShaderEntry _averageShader = PassShaders.GetEntry(assets, "AverageMaterials", "AverageMaterials");
+    private readonly AssetManager _assets;
+
+    private readonly ShaderEntry _averageShader;
 
     /// <summary>
     /// The average entry for each material shader the renderer has numbered, in their order.
@@ -52,6 +54,12 @@ public sealed class Renderer(AssetManager assets) : IRender<AccelerationStructur
     /// triangles' structure, and the box over their world boxes, min over max where none do.
     /// </summary>
     private (long Version, int Count, (Vector3 Min, Vector3 Max) Box) _built;
+
+    internal Renderer(AssetManager assets)
+    {
+        _assets = assets;
+        _averageShader = PassShaders.GetEntry(assets, "AverageMaterials", "AverageMaterials");
+    }
 
     /// <summary>
     /// The world as rays see it this frame, built again when the instances or the models' structures changed, written
@@ -106,7 +114,7 @@ public sealed class Renderer(AssetManager assets) : IRender<AccelerationStructur
                             )),
                         ],
                         Name =
-                            $"{assets.GetPath(place.Model) ?? $"model {place.Model.Id}"} acceleration {place.VertexOffset}",
+                            $"{_assets.GetPath(place.Model) ?? $"model {place.Model.Id}"} acceleration {place.VertexOffset}",
                     };
                 }
             }
@@ -152,7 +160,7 @@ public sealed class Renderer(AssetManager assets) : IRender<AccelerationStructur
             : Result.Failure(instances.Error);
         if (Result.FindFailure(hitMaterials, instances, topLevel) is { Ok: false } failed)
         {
-            Log.Error($"The world's acceleration structure is not made: {failed.Error}");
+            graph.Fail(RenderFailure.Resource, "Ray structure is not made", failed.Error);
 
             return null;
         }
@@ -179,6 +187,14 @@ public sealed class Renderer(AssetManager assets) : IRender<AccelerationStructur
             if (count > 0)
             {
                 Span<GpuAccelerationInstance> written = graph.Upload<GpuAccelerationInstance>(instances.Value, count);
+
+                // Rows not staged: built for no version, so a later frame builds it, and no ray is traced in this one.
+                if (written.IsEmpty)
+                {
+                    _built = (-1, 0, default);
+
+                    return null;
+                }
                 int next = 0;
                 for (int i = 0; i < rows.Length; i++)
                 {
@@ -227,13 +243,14 @@ public sealed class Renderer(AssetManager assets) : IRender<AccelerationStructur
         }
 
         GpuAcceleration acceleration = _built.Count == 0 ? GpuAcceleration.None : topLevel.Value;
-        graph.Upload(
+        bool isSent = graph.Upload(
             view.Frame,
             [new GpuTracedWorld { Acceleration = acceleration.Id, HitMaterials = hitMaterials.Value.Id }],
             GpuTracedWorld.Offset
         );
 
-        return new TracedWorld(acceleration, hitMaterials.Value, _built.Box);
+        // The frame's row of the traced world not staged: no ray is traced in this frame.
+        return !isSent ? null : new TracedWorld(acceleration, hitMaterials.Value, _built.Box);
     }
 
     /// <summary>

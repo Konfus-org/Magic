@@ -12,4 +12,8 @@
     <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its interfaces. -->
     <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" Private="false" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- The failure banner's shader, in the assembly, so it builds with no file read: named by the asset path it is registered at. -->
+    <EmbeddedResource Include="Embedded/FailureBanner.slang" LogicalName="Shaders/FailureBanner.slang" />
+  </ItemGroup>
 </Project>

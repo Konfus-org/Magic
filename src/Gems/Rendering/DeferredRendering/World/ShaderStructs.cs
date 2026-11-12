@@ -158,8 +158,8 @@ public record struct GpuVertex
 
 /// <summary>
 /// A material slot as the GPU reads it from the material table, 64 bytes, the twin of <c>Scene/Materials.slang</c>'s:
-/// which of <see cref="GpuResources.MaterialShaders"/> draws it, with <see cref="TranslucentBit"/> where that shader is
-/// translucent, then that shader's struct, its params as the shader's reflection lays them out.
+/// the shader word, then the struct of the shader that draws the row, its params as the shader's reflection lays them
+/// out.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal struct GpuMaterial
@@ -171,6 +171,18 @@ internal struct GpuMaterial
     /// </summary>
     public const uint TranslucentBit = 0x80000000;
 
+    /// <summary>
+    /// Where the failure index starts in <see cref="Shader"/>, and its bits from there.
+    /// </summary>
+    public const int FailureShift = 12;
+
+    public const uint FailureMask = 0x7FFFF;
+
+    /// <summary>
+    /// The shader word: the place in <see cref="GpuResources.MaterialShaders"/> of the shader that draws the row in bits
+    /// 0 to 11; the row's index in the failure table in bits 12 to 30, 0 where nothing failed; and
+    /// <see cref="TranslucentBit"/> where that shader is translucent.
+    /// </summary>
     public uint Shader;
 
     public GpuMaterialParams Params;
@@ -182,5 +194,67 @@ internal struct GpuMaterial
 [InlineArray((GpuMaterial.Bytes / 4) - 1)]
 internal struct GpuMaterialParams
 {
+    private uint _first;
+}
+
+/// <summary>
+/// What failed, the twin of <c>Scene/Failures.slang</c>'s <c>FailureKind</c>. The shader draws a part of a material, a
+/// param or a texture, in stripes over the real surface, and each other kind solid.
+/// </summary>
+internal enum FailureKind : uint
+{
+    Model = 0,
+    Material = 1,
+    Shader = 2,
+    Param = 3,
+    Texture = 4,
+}
+
+/// <summary>
+/// A row of the failure table, 64 bytes, the twin of the layout <c>Scene/Failures.slang</c> writes: the header, with
+/// the kind in bits 0 to 7 and the text's length in bits 16 to 23; the text, a one-byte character code each, 4 in each
+/// word, the first in the lowest byte; and a spare word.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal struct GpuFailure
+{
+    public const int Bytes = 64;
+
+    public uint Header;
+
+    public GpuFailureText Text;
+
+    public uint Spare;
+
+    /// <summary>
+    /// The row of a failure of <paramref name="kind"/>, with the first <see cref="GpuFailureText.Length"/> characters
+    /// of <paramref name="text"/>; a character that is not printable ASCII becomes '?'.
+    /// </summary>
+    public static GpuFailure Create(FailureKind kind, string text)
+    {
+        int length = Math.Min(text.Length, GpuFailureText.Length);
+        GpuFailure row = new() { Header = (uint)kind | ((uint)length << 16) };
+        for (int i = 0; i < length; i++)
+        {
+            char c = text[i];
+            uint code = c is >= ' ' and <= '~' ? c : '?';
+            row.Text[i / 4] |= code << (i % 4 * 8);
+        }
+
+        return row;
+    }
+}
+
+/// <summary>
+/// A <see cref="GpuFailure"/>'s text, inline: <see cref="Length"/> one-byte character codes, 4 in each word.
+/// </summary>
+[InlineArray(14)]
+internal struct GpuFailureText
+{
+    /// <summary>
+    /// The most characters the text holds.
+    /// </summary>
+    public const int Length = 56;
+
     private uint _first;
 }

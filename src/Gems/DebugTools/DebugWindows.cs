@@ -32,7 +32,7 @@ internal sealed class DebugWindows(DebugToolsSettings settings, Settings allSett
     /// <summary>
     /// Turns the lines and windows on and off by their keys, collects the meters when due, and draws what shows.
     /// </summary>
-    public void Update()
+    internal void Update()
     {
         if (input is not null && input[settings.CounterKey].WasPressed)
             settings.IsCounterShown = !settings.IsCounterShown;

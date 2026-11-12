@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
+using System.IO.Hashing;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -123,7 +124,7 @@ public sealed class AssetManager : IDisposable
     internal Caches Caches { get; }
 
     /// <summary>
-    /// Magic's built-in <c>Resources/</c>: where the defaults and failures are, and only there.
+    /// Magic's built-in <c>Resources/</c>: where the defaults are, and only there.
     /// </summary>
     internal string BuiltIn { get; }
 
@@ -159,10 +160,47 @@ public sealed class AssetManager : IDisposable
     /// The <typeparamref name="T"/> at <paramref name="path"/>, or none when no asset there is one.
     /// </summary>
     public Handle<T> Find<T>(string path)
-        where T : IAsset<T> =>
-        Database.Index.ByPath.TryGetValue(path, out IndexedFile? found) && found.Type == typeof(T).Name
-            ? new Handle<T>(found.Id)
+        where T : IAsset<T>
+    {
+        if (Database.Index.ByPath.TryGetValue(path, out IndexedFile? found))
+            return found.Type == typeof(T).Name ? new Handle<T>(found.Id) : Handle<T>.None;
+
+        ulong id = GetRegisteredId(path);
+
+        return Loaded.Registered.TryGetValue(id, out (string Path, object Asset) registered) && registered.Asset is T
+            ? new Handle<T>(id)
             : Handle<T>.None;
+    }
+
+    /// <summary>
+    /// Registers <paramref name="asset"/>, made in memory, as the asset at <paramref name="path"/>, until the
+    /// subscription is disposed: it is found, named and loaded there with no disk read or write. A file with that path
+    /// or its id wins. Any thread.
+    /// </summary>
+    public Subscription Register<T>(string path, T asset)
+        where T : IAsset<T>
+    {
+        ulong id = GetRegisteredId(path);
+        lock (_gate)
+        {
+            Loaded = Loaded with { Registered = Loaded.Registered.SetItem(id, (path, asset)) };
+        }
+
+        return new Subscription(() =>
+        {
+            lock (_gate)
+            {
+                // A later Register of the path replaced this asset, and its own subscription removes it.
+                if (
+                    Loaded.Registered.TryGetValue(id, out (string Path, object Asset) held)
+                    && held.Asset != (object)asset
+                )
+                    return;
+
+                Loaded = Loaded with { Registered = Loaded.Registered.Remove(id) };
+            }
+        });
+    }
 
     /// <summary>
     /// <typeparamref name="T"/>'s default: the asset named Default, whatever its extension, in the folder named for the
@@ -171,18 +209,28 @@ public sealed class AssetManager : IDisposable
     /// Every asset type has one. None, and an error logged once, when it is missing.
     /// </summary>
     public Handle<T> GetDefault<T>()
-        where T : IAsset<T> => FindBuiltIn<T>(typeof(T).Name + "s", "Default", "default");
-
-    /// <summary>
-    /// What is drawn in a broken <typeparamref name="TBroken"/>'s place: the <typeparamref name="T"/> named for the
-    /// broken type in <typeparamref name="T"/>'s <c>Failures</c> folder, <c>Materials/Failures/Texture.mat</c> for a
-    /// texture that does not load, in Magic's built-in <c>Resources/</c> alone, as a default is. Only what a renderer
-    /// draws a failure as has one. None, and an error logged once, when it is missing.
-    /// </summary>
-    public Handle<T> GetFailure<T, TBroken>()
         where T : IAsset<T>
-        where TBroken : IAsset<TBroken> =>
-        FindBuiltIn<T>($"{typeof(T).Name}s/Failures", typeof(TBroken).Name, $"{typeof(TBroken).Name} failure");
+    {
+        string folder = typeof(T).Name + "s";
+        if (Database.Index.FindBuiltIn(folder, "Default") is { } found && found.Type == typeof(T).Name)
+            return new Handle<T>(found.Id);
+
+        lock (_gate)
+        {
+            LoadedAssets loaded = Loaded;
+            if (loaded.ReportedMissing.Contains(folder))
+                return Handle<T>.None;
+
+            Loaded = loaded with { ReportedMissing = loaded.ReportedMissing.Add(folder) };
+        }
+
+        Log.Error(
+            $"There is no default {typeof(T).Name}: no {typeof(T).Name} is {folder}/Default or {folder}/Default/Default "
+                + $"under {BuiltIn}."
+        );
+
+        return Handle<T>.None;
+    }
 
     /// <summary>
     /// The paths of the assets directly in <paramref name="folder"/>, as <see cref="Find{T}"/> takes them.
@@ -233,10 +281,14 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Where <paramref name="asset"/> is, as <see cref="Find{T}"/> takes it; null when no file has its id.
+    /// Where <paramref name="asset"/> is, as <see cref="Find{T}"/> takes it; null when no file or registered asset has its
+    /// id.
     /// </summary>
     public string? GetPath<T>(Handle<T> asset)
-        where T : IAsset<T> => Database.Index.ById.TryGetValue(asset.Id, out IndexedFile? found) ? found.Path : null;
+        where T : IAsset<T> =>
+        Database.Index.ById.TryGetValue(asset.Id, out IndexedFile? found) ? found.Path
+        : Loaded.Registered.TryGetValue(asset.Id, out (string Path, object Asset) registered) ? registered.Path
+        : null;
 
     /// <summary>
     /// Which make of <paramref name="asset"/> a load gets: a hash of its file and its <c>.meta</c>, which changes when
@@ -299,6 +351,13 @@ public sealed class AssetManager : IDisposable
     {
         if (asset == Handle<T>.None)
             return Result.Failure($"No {typeof(T).Name} was asked for: the handle is none.");
+
+        if (
+            !Database.Index.ById.ContainsKey(asset.Id)
+            && Loaded.Registered.TryGetValue(asset.Id, out (string Path, object Asset) registered)
+            && registered.Asset is T kept
+        )
+            return Result.Success(kept);
 
         Made made = await RequestAsync(asset.Id, dependent, typeof(T), RunImportAsync<T>, progress, cancel)
             .ConfigureAwait(false);
@@ -660,10 +719,10 @@ public sealed class AssetManager : IDisposable
     /// Takes in the asset directories as the watches had them read again, <paramref name="now"/>, after they saw
     /// <paramref name="touched"/>, paths from their asset directories: each asset loaded and still held whose file
     /// changed, is another file now, lists a folder that changed, or was made from one of those, and so on out, is read
-    /// again, each after what it was made from, as a load waits for those on their way; one nothing holds, or that
-    /// failed, is forgotten, so the next load reads it; one whose file is gone is let go, and its waiters told. Refused,
-    /// false, when the asset directories are no longer <paramref name="directories"/>, the ones read: a directory was
-    /// added meanwhile. Any thread.
+    /// again, each after what it was made from, as a load waits for those on their way, an id that failed as no file had
+    /// it included; one nothing holds is forgotten, so the next load reads it; one whose file is gone is let go, and its
+    /// waiters told. Refused, false, when the asset directories are no longer <paramref name="directories"/>, the ones
+    /// read: a directory was added meanwhile. Any thread.
     /// </summary>
     internal bool Reindex(ImmutableArray<string> directories, AssetIndex now, ImmutableHashSet<string> touched)
     {
@@ -703,9 +762,9 @@ public sealed class AssetManager : IDisposable
                 if (entry.Stage == AssetStage.Wanted)
                     continue;
 
-                // One loaded that nothing holds, or that failed, is let go rather than read again: the next ask reads the
-                // file as it is.
-                if (entry.Stage == AssetStage.Loaded && entry.GetValue() is null)
+                // One loaded that nothing holds is let go rather than read again: the next ask reads the file as it is. One
+                // that failed is read again, so its asker hears when it loads.
+                if (entry.Stage == AssetStage.Loaded && entry.GetValue() is null && entry.Error.Length == 0)
                 {
                     loaded = loaded with { Entries = loaded.Entries.Remove(id) };
 
@@ -1009,6 +1068,12 @@ public sealed class AssetManager : IDisposable
     private static Made Fail(string error) => new(Result.Failure(error), 0);
 
     /// <summary>
+    /// The id of the asset registered at <paramref name="path"/>: a hash of it, in any case. A file with that id wins.
+    /// </summary>
+    private static ulong GetRegisteredId(string path) =>
+        XxHash64.HashToUInt64(Encoding.UTF8.GetBytes(path.ToUpperInvariant()));
+
+    /// <summary>
     /// Whether a load of <paramref name="type"/> waits for a gem: nothing reads it yet, and a gem not made yet will.
     /// </summary>
     private static bool WaitsForGem(Type type, LoadedAssets loaded) =>
@@ -1090,40 +1155,12 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// The built-in asset named <paramref name="name"/> in <paramref name="folder"/>, as
-    /// <see cref="AssetIndex.FindBuiltIn"/> finds it; <paramref name="what"/> says which kind of named asset it is when
-    /// it is missing, which is said once.
-    /// </summary>
-    private Handle<T> FindBuiltIn<T>(string folder, string name, string what)
-        where T : IAsset<T>
-    {
-        if (Database.Index.FindBuiltIn(folder, name) is { } found && found.Type == typeof(T).Name)
-            return new Handle<T>(found.Id);
-
-        lock (_gate)
-        {
-            LoadedAssets loaded = Loaded;
-            if (loaded.ReportedMissing.Contains($"{folder}/{name}"))
-                return Handle<T>.None;
-
-            Loaded = loaded with { ReportedMissing = loaded.ReportedMissing.Add($"{folder}/{name}") };
-        }
-
-        Log.Error(
-            $"There is no {what} {typeof(T).Name}: no {typeof(T).Name} is {folder}/{name} or {folder}/{name}/{name} "
-                + $"under {BuiltIn}."
-        );
-
-        return Handle<T>.None;
-    }
-
-    /// <summary>
     /// What an ask for asset <paramref name="id"/> as <paramref name="type"/> gets, and <paramref name="loaded"/> with
-    /// what it asked: a failure when no file has the id, when it is another type, or, asked for by asset
-    /// <paramref name="dependent"/>'s importer, when it depends on what asks for it; what loaded, while something holds
-    /// it; a wait with the others for a load on its way; else a new entry, read now, or once the gem expected to read its
-    /// type registers, as the one asking may be made before it. Cancelled once the run has ended, as nothing reads it then. Under
-    /// <see cref="_gate"/>.
+    /// what it asked: a failure when no file has the id, kept so that the id is read once a file has it; a failure when
+    /// it is another type, or, asked for by asset <paramref name="dependent"/>'s importer, when it depends on what asks
+    /// for it; what loaded, while something holds it; a wait with the others for a load on its way; else a new entry,
+    /// read now, or once the gem expected to read its type registers, as the one asking may be made before it. Cancelled
+    /// once the run has ended, as nothing reads it then. Under <see cref="_gate"/>.
     /// </summary>
     private (LoadedAssets, Task<Made>) Request(
         AssetDatabase database,
@@ -1160,8 +1197,20 @@ public sealed class AssetManager : IDisposable
             }
         }
 
+        // Kept as a failed entry, so Reindex reads it, and its asker hears, once a file with the id is added.
         if (!database.Index.ById.TryGetValue(id, out IndexedFile? file))
-            return (loaded, Task.FromResult(Fail($"No asset has the id {id}.")));
+        {
+            Made none = Fail($"No asset has the id {id}.");
+            AssetEntry failed = new()
+            {
+                Type = type,
+                Import = import,
+                Stage = AssetStage.Loaded,
+                Error = none.Value.Error,
+            };
+
+            return (loaded with { Entries = loaded.Entries.SetItem(id, failed) }, Task.FromResult(none));
+        }
 
         if (file.Type != type.Name)
             return (loaded, Task.FromResult(Fail($"{file.Path} is a {file.Type}, so it is not a {type.Name}.")));
@@ -1287,7 +1336,8 @@ public sealed class AssetManager : IDisposable
     /// <summary>
     /// Takes in what a worker's read of asset <paramref name="id"/> made: it is loaded, its waiters are told, what it
     /// depends on goes in the database and, for a type a gem reads, the cache, by its file's version, so finding that
-    /// later doesn't load it; and one that had loaded and is still held is published as <see cref="AssetReloaded"/>. One
+    /// later doesn't load it; and one that had loaded and is still held, or had failed, is published as
+    /// <see cref="AssetReloaded"/>. One
     /// that failed while what it made before is still held leaves that in use, and says so. One whose file changed
     /// meanwhile is read again instead; one gone meanwhile was told as it went, and one landing after the run is dropped.
     /// </summary>
@@ -1344,7 +1394,7 @@ public sealed class AssetManager : IDisposable
             waiter.TrySetResult(outcome);
         }
 
-        if (before is not null && made.Value is { Ok: true, Value: { } asset })
+        if ((before is not null || entry.Error.Length > 0) && made.Value is { Ok: true, Value: { } asset })
             _events.Publish(new AssetReloaded(id, asset));
 
         // What a gem-read asset depends on is kept by its file's version, so finding that later doesn't load it.

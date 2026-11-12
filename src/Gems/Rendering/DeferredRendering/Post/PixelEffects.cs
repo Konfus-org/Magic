@@ -1,7 +1,6 @@
 using System.Linq;
 using System.Runtime.CompilerServices;
 using Magic.Assets;
-using Magic.Debugging;
 using Magic.DeferredRendering.View;
 using Magic.Ecs.Components;
 using Magic.Graphics;
@@ -44,11 +43,16 @@ internal sealed class PixelEffects
     /// </summary>
     public void Record(RenderGraph graph, in GpuView gpu, uint frameIndex)
     {
-        // With no effect ready, none runs and the picture stays in the HDR target, so nothing is asked for.
+        // With no effect ready, none runs and the picture stays in the HDR target, so nothing is asked for. A failed
+        // effect is skipped and reported; an empty place, material 0, is skipped alone.
         ReadOnlySpan<GpuEffect> effects = gpu.Effects.Span;
         bool isAnyReady = false;
         foreach (GpuEffect effect in effects)
+        {
             isAnyReady |= effect.State == GpuState.Ready;
+            if (effect is { State: GpuState.Failed, Material: not 0 })
+                graph.Fail(RenderFailure.PostEffect, "An effect is not drawn", "its material or its shader failed.");
+        }
 
         if (!isAnyReady)
         {
@@ -74,7 +78,7 @@ internal sealed class PixelEffects
         );
         if (Result.FindFailure(passTable, otherPicture, sampler) is { Ok: false } failed)
         {
-            Log.Error($"The picture's effects are not drawn: {failed.Error}");
+            graph.Fail(RenderFailure.PostEffect, "Effects are not drawn", failed.Error);
 
             return;
         }
@@ -124,7 +128,7 @@ internal sealed class PixelEffects
                     : graph.Texture(GetTarget(_targetNames[filled ^ 1], gpu, levels));
             if (Result.FindFailure(target, history) is { Ok: false } unmade)
             {
-                Log.Error($"The effect at {place} in the list is not drawn: {unmade.Error}");
+                graph.Fail(RenderFailure.PostEffect, "An effect is not drawn", unmade.Error);
 
                 continue;
             }
@@ -179,7 +183,11 @@ internal sealed class PixelEffects
             (picture, other) = (other, picture);
         }
 
-        graph.Upload(passTable.Value, passes[..pass]);
+        // A table not staged leaves the picture without the effects where the passes wrote elsewhere; where the last pass
+        // wrote the picture itself, it read the table of the frame before.
+        if (!graph.Upload(passTable.Value, passes[..pass]))
+            return;
+
         if (picture != gpu.Hdr)
             graph.Blit(picture, gpu.Hdr, RenderStages.Post, TextureFilter.Linear);
     }

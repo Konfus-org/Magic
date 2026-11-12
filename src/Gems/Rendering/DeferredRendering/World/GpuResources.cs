@@ -37,26 +37,30 @@ internal sealed class GpuResources(
 {
     private const int ModelCapacity = 4096;
 
-    private const string FailureShader = "Shaders/Material/Failure.slang";
-
     private const int MeshCapacity = 1 << 16;
 
     private readonly Dictionary<ulong, TextureEntry> _textures = [];
 
     /// <summary>
-    /// Each material asked for, by its id, null while it loads; one that did not load is the failure material.
+    /// Each material asked for, by its id, null while it loads, and why not when it did not load.
     /// </summary>
-    private readonly Dictionary<ulong, Material?> _materials = [];
+    private readonly Dictionary<ulong, Result<Material>?> _materials = [];
 
     private readonly List<(Texture Asset, int First, TextureEntry Entry)> _arrivedTextures = [];
 
     /// <summary>
     /// Each material shader's struct as reflection lays it out, by the shader's id, null while it is reflected; its
-    /// fields are default when it was not, and its materials are drawn as the failure.
+    /// fields are default when it was not, and its materials are drawn as failed.
     /// </summary>
     private readonly Dictionary<ulong, MaterialLayout?> _layouts = [];
 
     private readonly List<ShaderTypeArgument> _materialShaders = [];
+
+    /// <summary>
+    /// The param of each slot drawn, its material's or its own, that names no field of its shader's struct, null for
+    /// none: found once, and again after any asset is read again.
+    /// </summary>
+    private readonly Dictionary<MaterialInstance, string?> _misfits = [];
 
     // The models' indices; row 0 is none, so it is taken from the start.
     private readonly FreeList _modelRows = new(ModelCapacity, 1);
@@ -72,9 +76,16 @@ internal sealed class GpuResources(
     private readonly Dictionary<ulong, ModelEntry> _modelEntries = [];
 
     /// <summary>
-    /// The models made since the last frame, by their id with their name, which the next <see cref="Prepare"/> settles.
+    /// The models made since the last frame, by their id with their name, which the next <see cref="Prepare"/> settles,
+    /// and each one's place once it has one, written into the model table once its copies are staged.
     /// </summary>
-    private readonly List<(ulong Model, string Name, MeshDerived Made, ModelEntry Entry)> _madeModels = [];
+    private readonly List<(
+        ulong Model,
+        string Name,
+        MeshDerived Made,
+        ModelEntry Entry,
+        ModelPlace Place
+    )> _madeModels = [];
 
     // 2 MiB of vertices and 1 MiB of indices at the start; each grows with the scene.
     private readonly BufferPool _vertices = new(new("Vertex pool", 0), GpuVertex.Bytes, 1 << 16);
@@ -163,18 +174,22 @@ internal sealed class GpuResources(
             Meshes = meshes.Value;
         }
 
+        // The failure cube asked for each frame, so it is made at the start and never evicted.
+        Get(FailureCube.Handle);
+
         // Each model made takes ranges of the pools, which grow to hold it, and of the mesh table, an index and its row
-        // of the model table; the failure model when the model table is full. One placed in a frame whose pools failed
-        // is placed already.
-        foreach ((ulong model, string name, MeshDerived made, ModelEntry entry) in _madeModels)
+        // of the model table; it fails when the model table is full. One placed in an earlier frame, whose copies were
+        // not staged, is placed already: its place names a row of the model table, and row 0 is none.
+        for (int index = 0; index < _madeModels.Count; index++)
         {
-            if (entry.State != GpuState.Loading)
+            (ulong model, string name, MeshDerived made, ModelEntry entry, _) = _madeModels[index];
+            if (entry.State != GpuState.Loading || entry.Where.ModelIndex != 0)
                 continue;
 
-            SettledModels++;
             if (!_modelRows.CanAllocate(1))
             {
-                Log.Error($"{name} is drawn as the failure model: the model table is full.");
+                SettledModels++;
+                Log.Error($"Model {name} is not on the GPU: the model table is full.");
                 entry.State = GpuState.Failed;
 
                 continue;
@@ -212,15 +227,20 @@ internal sealed class GpuResources(
             // can be evicted.
             entry.Asked = Environment.TickCount64;
             entry.Where = where;
-            entry.State = GpuState.Ready;
-            _models[where.ModelIndex] = new ModelPlace(
-                new Handle<Model>(model),
-                where.VertexOffset,
-                where.VertexCount,
-                made.BoundsMin,
-                made.BoundsMax,
-                meshes.Count == 0 ? 0 : (uint)_meshRanges.Allocate(meshes.Count),
-                meshes.ToImmutable()
+            _madeModels[index] = (
+                model,
+                name,
+                made,
+                entry,
+                new ModelPlace(
+                    new Handle<Model>(model),
+                    where.VertexOffset,
+                    where.VertexCount,
+                    made.BoundsMin,
+                    made.BoundsMax,
+                    meshes.Count == 0 ? 0 : (uint)_meshRanges.Allocate(meshes.Count),
+                    meshes.ToImmutable()
+                )
             );
             Log.Info($"{name}: {made.Vertices.Length} vertices, {made.Indices.Length / 3} triangles.");
         }
@@ -238,13 +258,16 @@ internal sealed class GpuResources(
 
         // Each placed model copied up, now that the pools are asked for at their size, with its meshes into the mesh
         // table where it has a range of it.
-        foreach ((_, _, MeshDerived made, ModelEntry entry) in _madeModels)
+        // A model is ready, and in the model table, once all its copies are staged; one whose copies were not stays
+        // placed for the next frame, out of the table, so nothing reads its vertices before they are there.
+        foreach ((_, _, MeshDerived made, ModelEntry entry, ModelPlace place) in _madeModels)
         {
-            if (entry.State != GpuState.Ready)
+            if (entry.State != GpuState.Loading || entry.Where.ModelIndex == 0)
                 continue;
 
             ResidentModel where = entry.Where;
-            graph.Upload(VertexPool, made.Vertices.AsSpan(), (ulong)where.VertexOffset * GpuVertex.Bytes);
+            if (!graph.Upload(VertexPool, made.Vertices.AsSpan(), (ulong)where.VertexOffset * GpuVertex.Bytes))
+                continue;
 
             // Indices point into the whole pool.
             Span<uint> rebased = graph.Upload<uint>(
@@ -252,27 +275,33 @@ internal sealed class GpuResources(
                 made.Indices.Length,
                 (ulong)where.IndexOffset * sizeof(uint)
             );
+            if (rebased.Length < made.Indices.Length)
+                continue;
+
             for (int i = 0; i < made.Indices.Length; i++)
             {
                 rebased[i] = made.Indices[i] + where.VertexOffset;
             }
-
-            ModelPlace place = _models[where.ModelIndex];
-            if (place.Meshes.IsEmpty)
-                continue;
 
             Span<GpuMesh> rows = graph.Upload<GpuMesh>(
                 Meshes,
                 place.Meshes.Length,
                 (ulong)place.MeshOffset * GpuMesh.Bytes
             );
+            if (rows.Length < place.Meshes.Length)
+                continue;
+
             for (int i = 0; i < rows.Length; i++)
             {
                 rows[i] = place.Meshes[i].Mesh;
             }
+
+            _models[where.ModelIndex] = place;
+            entry.State = GpuState.Ready;
+            SettledModels++;
         }
 
-        _madeModels.Clear();
+        _madeModels.RemoveAll(static made => made.Entry.State != GpuState.Loading);
 
         return Result.Success();
     }
@@ -343,22 +372,26 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// Whether the material, its shader's struct and the textures it names are on the GPU, or it is drawn as the failure;
-    /// the first ask starts loading it.
+    /// Whether the material, its shader's struct and the textures it names are on the GPU, or one of them failed; the
+    /// first ask starts loading it.
     /// </summary>
-    public GpuState Get(Handle<Material> handle) => Get(new MaterialInstance { Handle = handle }, out _);
+    public GpuState Get(Handle<Material> handle) => Get(new MaterialInstance { Handle = handle }, out _, out _);
 
     /// <summary>
-    /// Whether the slot's material, its shader's struct and the textures it names are on the GPU, and the row the slot's
-    /// params over the material's make: each field of the struct by its name, a texture's heap id in a <c>TextureRef</c>
-    /// and its sampler's in the <c>SamplerRef</c> named for it with "Sampler" after, and 0 where neither sets one. Failed
-    /// when the material, its shader's struct or a texture did not load, or the material is the failure. The first ask
-    /// starts loading the material. The row names its shader by its place in <see cref="MaterialShaders"/>, which it
-    /// takes on the first row that names it.
+    /// Whether the slot's material, its shader's struct and the textures it names are on the GPU, the row the slot's
+    /// params over the material's make, and its most severe failure, as <see cref="Pack"/> finds it: each field of the
+    /// struct by its name, a texture's heap id in a <c>TextureRef</c> and its sampler's in the <c>SamplerRef</c> named
+    /// for it with "Sampler" after, and 0 where neither sets one or the texture failed. Failed when the material or its
+    /// shader's struct did not load. The first ask starts loading the material. The row names its shader by its place in
+    /// <see cref="MaterialShaders"/>, which it takes on the first row that names it.
     /// </summary>
-    public GpuState Get(in MaterialInstance slot, out GpuMaterial row)
+    public GpuState Get(
+        in MaterialInstance slot,
+        out GpuMaterial row,
+        out (FailureKind Kind, ulong Asset, string? Param)? failure
+    )
     {
-        GpuState state = Pack(slot, out row, out MaterialLayout layout);
+        GpuState state = Pack(slot, out row, out MaterialLayout layout, out failure);
         if (!layout.Fields.IsDefault)
             row.Shader = GetMaterialShader(layout.Shader) | (layout.IsTranslucent ? GpuMaterial.TranslucentBit : 0);
 
@@ -367,13 +400,21 @@ internal sealed class GpuResources(
 
     /// <summary>
     /// Whether the slot's material, its shader's struct and the textures it names are on the GPU, its params packed into
-    /// the row, and its shader's struct as reflection laid it out; the default struct while it loads.
+    /// the row, its shader's struct as reflection laid it out, the default struct while it loads, and the most severe of
+    /// its failures: its shader's or its own, which make it Failed; else a texture that failed, which packs as no
+    /// texture, or a param of the material that fits no field of the struct, which leaves the field its default.
     /// </summary>
-    public GpuState Pack(in MaterialInstance slot, out GpuMaterial row, out MaterialLayout layout)
+    public GpuState Pack(
+        in MaterialInstance slot,
+        out GpuMaterial row,
+        out MaterialLayout layout,
+        out (FailureKind Kind, ulong Asset, string? Param)? failure
+    )
     {
         row = default;
         layout = default;
-        if (!_materials.TryGetValue(slot.Handle.Id, out Material? asked))
+        failure = null;
+        if (!_materials.TryGetValue(slot.Handle.Id, out Result<Material>? asked))
         {
             _materials[slot.Handle.Id] = null;
             LoadAsync(slot.Handle).FireAndForget();
@@ -381,33 +422,62 @@ internal sealed class GpuResources(
             return GpuState.Loading;
         }
 
-        if (asked is not { } material || _layouts.GetValueOrDefault(material.Shader.Id) is not { } reflected)
+        if (asked is not { } loaded)
+            return GpuState.Loading;
+
+        if (!loaded.Ok)
+        {
+            failure = (FailureKind.Material, slot.Handle.Id, null);
+
+            return GpuState.Failed;
+        }
+
+        Material material = loaded.Value;
+        if (_layouts.GetValueOrDefault(material.Shader.Id) is not { } reflected)
             return GpuState.Loading;
 
         layout = reflected;
         if (layout.Fields.IsDefault)
+        {
+            failure = (FailureKind.Shader, material.Shader.Id, null);
+
             return GpuState.Failed;
+        }
 
         MaterialOverrides overrides = slot.Overrides;
-        GpuState state = material.Shader == assets.Find<Shader>(FailureShader) ? GpuState.Failed : GpuState.Ready;
+        GpuState state = GpuState.Ready;
+        Handle<Texture> failedTexture = default;
+        string? misfit = null;
         Span<uint> words = row.Params;
         foreach (ShaderField field in layout.Fields)
         {
             if (!TryGetParam(field.Name, out MaterialParam? param))
                 continue;
 
+            // A texture given to a field that is no texture, or numbers to one that is, fits nothing.
+            bool isTexture = field.Struct == "TextureRef";
+            bool hasNumbers = param.X != 0 || param.Y != 0 || param.Z != 0 || param.W != 0 || IsColor(param);
+            if (isTexture ? param.Texture == Handle<Texture>.None && hasNumbers : param.Texture != Handle<Texture>.None)
+            {
+                misfit ??= field.Name;
+
+                continue;
+            }
+
             Span<uint> into = words.Slice((int)field.Offset / 4, (int)field.Size / 4);
-            if (field.Struct == "TextureRef")
+            if (isTexture)
             {
                 GpuState texture = PackTexture(layout, field.Name, param.Texture, words);
-                state = texture == GpuState.Ready || state == GpuState.Failed ? state : texture;
+                if (texture == GpuState.Failed && failedTexture == Handle<Texture>.None)
+                    failedTexture = param.Texture;
+                else if (texture == GpuState.Loading)
+                    state = GpuState.Loading;
 
                 continue;
             }
 
             // PROTO: a param that sets a colour fills the field from it, and one that sets none from its vector.
-            bool isColor = param.R != 0 || param.G != 0 || param.B != 0 || param.A != 0;
-            ReadOnlySpan<float> values = isColor
+            ReadOnlySpan<float> values = IsColor(param)
                 ? [param.R, param.G, param.B, param.A]
                 : [param.X, param.Y, param.Z, param.W];
             for (int i = 0; i < into.Length && i < values.Length; i++)
@@ -416,32 +486,52 @@ internal sealed class GpuResources(
             }
         }
 
+        // A param of the material or of the slot that names no field, looked for once for the slot.
+        if (misfit is null && !_misfits.TryGetValue(slot, out misfit))
+        {
+            ImmutableArray<ShaderField> fields = layout.Fields;
+            misfit = material
+                .Params.Keys.Concat(overrides.Params.Select(param => param.Key))
+                .FirstOrDefault(name => !fields.Any(field => field.Name == name));
+            _misfits[slot] = misfit;
+        }
+
+        if (failedTexture != Handle<Texture>.None)
+            failure = (FailureKind.Texture, failedTexture.Id, null);
+        else if (misfit is not null)
+            failure = (FailureKind.Param, slot.Handle.Id, misfit);
+
         return state;
 
         bool TryGetParam(string name, [MaybeNullWhen(false)] out MaterialParam param) =>
             overrides.TryGet(name, out param) || material.Params.TryGetValue(name, out param);
+
+        static bool IsColor(MaterialParam param) => param.R != 0 || param.G != 0 || param.B != 0 || param.A != 0;
     }
 
     /// <summary>
     /// Where the model is in the pools, or null while it is being made; the first ask starts making it, and every ask
-    /// keeps it from being evicted. A model that could not be made is the failure model, marked so.
+    /// keeps it from being evicted. A model that could not be made is the failure cube, marked so, and nothing when the
+    /// cube could not be made either. The cube is made from memory, not read.
     /// </summary>
     public ResidentModel? Get(Handle<Model> model)
     {
         if (HasFailed(model))
         {
-            Handle<Model> failure = assets.GetFailure<Model, Model>();
-            if (failure == Handle<Model>.None || HasFailed(failure))
+            if (HasFailed(FailureCube.Handle))
                 return null;
 
-            return Get(failure) is { } stand ? stand with { IsFailure = true } : null;
+            return Get(FailureCube.Handle) is { } cube ? cube with { IsFailure = true } : null;
         }
 
         if (!_modelEntries.TryGetValue(model.Id, out ModelEntry? entry))
         {
             entry = new ModelEntry();
             _modelEntries[model.Id] = entry;
-            LoadAsync(model, entry).FireAndForget();
+            if (model == FailureCube.Handle)
+                _madeModels.Add((model.Id, "The failure cube", models.Preprocess(FailureCube.Model), entry, default));
+            else
+                LoadAsync(model, entry).FireAndForget();
         }
 
         entry.Asked = Environment.TickCount64;
@@ -450,24 +540,38 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// Whether the model is in the pools, copied up in this frame's transfers at the latest, or could not be made and the
-    /// failure model it is drawn as has arrived in its place, or has no place to arrive in.
+    /// Lets go of what was made from asset <paramref name="id"/>, read again, so the next ask loads it anew: a
+    /// material, a texture, a material shader's struct, which is reflected again now, and a model that failed. A model
+    /// in the pools stays as it was made until it is evicted.
     /// </summary>
-    public bool HasArrived(Handle<Model> model)
+    public void Forget(ulong id)
     {
-        if (_modelEntries.GetValueOrDefault(model.Id)?.State == GpuState.Ready)
-            return true;
+        _materials.Remove(id);
+        _textures.Remove(id);
+        _misfits.Clear();
+        if (_layouts.ContainsKey(id))
+        {
+            _layouts[id] = null;
+            ReflectAsync(new Handle<Shader>(id)).FireAndForget();
+        }
 
-        if (!HasFailed(model))
-            return false;
-
-        Handle<Model> failure = assets.GetFailure<Model, Model>();
-
-        return failure == Handle<Model>.None || failure == model || HasArrived(failure);
+        if (HasFailed(new Handle<Model>(id)))
+        {
+            _modelEntries.Remove(id);
+            SettledModels++;
+        }
     }
 
     /// <summary>
-    /// Whether the model could not be made, and is drawn as the failure model.
+    /// Whether the model is in the pools, copied up in this frame's transfers at the latest, or could not be made and the
+    /// failure cube it is drawn as has arrived in its place, or could not be made either.
+    /// </summary>
+    public bool HasArrived(Handle<Model> model) =>
+        _modelEntries.GetValueOrDefault(model.Id)?.State == GpuState.Ready
+        || (HasFailed(model) && (HasFailed(FailureCube.Handle) || HasArrived(FailureCube.Handle)));
+
+    /// <summary>
+    /// Whether the model could not be made, and is drawn as the failure cube.
     /// </summary>
     public bool HasFailed(Handle<Model> model) => _modelEntries.GetValueOrDefault(model.Id)?.State == GpuState.Failed;
 
@@ -477,9 +581,9 @@ internal sealed class GpuResources(
     /// </summary>
     public void Upload(RenderGraph graph)
     {
-        // Each texture read and its sampler asked for, and ready with their heap ids; failed, and drawn as the failure,
-        // when either was not made.
-        foreach (TextureEntry entry in _textures.Values)
+        // Each texture read and its sampler asked for, and ready with their heap ids; failed, and drawn as stripes over
+        // its material, when either was not made.
+        foreach ((ulong id, TextureEntry entry) in _textures)
         {
             if (entry.State == GpuState.Failed || entry.Description is not { } description)
                 continue;
@@ -489,7 +593,9 @@ internal sealed class GpuResources(
             Result made = Result.FindFailure(texture, sampler);
             if (!made.Ok)
             {
-                Log.Error($"{description.Name} is drawn as a failure: {made.Error}");
+                Log.Error(
+                    $"Texture {description.Name}, named by {GetMaterialsWith(id)}, is drawn as a failure: {made.Error}"
+                );
                 entry.State = GpuState.Failed;
 
                 continue;
@@ -500,29 +606,43 @@ internal sealed class GpuResources(
             entry.State = GpuState.Ready;
         }
 
-        foreach ((Texture asset, int first, TextureEntry entry) in _arrivedTextures)
+        // A texture whose levels were not all staged loads on, unread, and is copied again in the next frame.
+        for (int i = _arrivedTextures.Count - 1; i >= 0; i--)
         {
-            if (entry.State != GpuState.Ready)
-                continue;
-
-            for (int level = first; level < asset.Levels.Length; level++)
+            (Texture asset, int first, TextureEntry entry) = _arrivedTextures[i];
+            if (entry.State == GpuState.Ready)
             {
-                TextureLevel source = asset.Levels[level];
-                graph.Upload(entry.Texture, asset.Pixels.Span.Slice(source.Offset, source.Size), level - first);
-            }
-        }
+                bool isSent = true;
+                for (int level = first; level < asset.Levels.Length; level++)
+                {
+                    TextureLevel source = asset.Levels[level];
+                    isSent &= graph.Upload(
+                        entry.Texture,
+                        asset.Pixels.Span.Slice(source.Offset, source.Size),
+                        level - first
+                    );
+                }
 
-        _arrivedTextures.Clear();
+                if (!isSent)
+                {
+                    entry.State = GpuState.Loading;
+
+                    continue;
+                }
+            }
+
+            _arrivedTextures.RemoveAt(i);
+        }
     }
 
-    private static GpuFormat ToGpu(TextureFormat format) =>
+    private static Result<GpuFormat> ToGpu(TextureFormat format) =>
         format switch
         {
-            TextureFormat.Rgba8Unorm => GpuFormat.R8G8B8A8Unorm,
-            TextureFormat.Rgba8Srgb => GpuFormat.R8G8B8A8Srgb,
-            TextureFormat.Bc7Unorm => GpuFormat.Bc7Unorm,
-            TextureFormat.Bc7Srgb => GpuFormat.Bc7Srgb,
-            _ => throw new ArgumentOutOfRangeException(nameof(format), format, "not a texture format"),
+            TextureFormat.Rgba8Unorm => Result.Success(GpuFormat.R8G8B8A8Unorm),
+            TextureFormat.Rgba8Srgb => Result.Success(GpuFormat.R8G8B8A8Srgb),
+            TextureFormat.Bc7Unorm => Result.Success(GpuFormat.Bc7Unorm),
+            TextureFormat.Bc7Srgb => Result.Success(GpuFormat.Bc7Srgb),
+            _ => Result.Failure($"{format} is not a texture format."),
         };
 
     /// <summary>
@@ -554,8 +674,31 @@ internal sealed class GpuResources(
     /// </summary>
     private async Task ReflectAsync(Handle<Shader> shader)
     {
-        string path = assets.GetPath(shader) ?? $"shader {shader.Id}";
+        string path = assets.GetPath(shader) ?? $"id {shader.Id}";
         ShaderTypeArgument type = new(shader, Path.GetFileNameWithoutExtension(path));
+        Result<MaterialLayout> layout;
+        try
+        {
+            layout = await ReflectLayoutAsync(type).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            layout = Result.Failure($"its reflection threw: {ex}");
+        }
+
+        await threads.Enter(EngineThread.Render);
+        if (!layout.Ok)
+            Log.Error($"Shader {path}, named by {GetMaterialsWith(shader.Id)}, is drawn as a failure: {layout.Error}");
+
+        _layouts[shader.Id] = layout.Ok ? layout.Value : new MaterialLayout(default, type, false, default);
+    }
+
+    /// <summary>
+    /// The struct <paramref name="type"/> names, as a material's row lays it out, with what it declares it needs; or why
+    /// not, as when it is more than a row holds.
+    /// </summary>
+    private async Task<Result<MaterialLayout>> ReflectLayoutAsync(ShaderTypeArgument type)
+    {
         Result<ImmutableArray<ShaderField>> fields = await shaders
             .ReflectAsync(type, CancellationToken.None)
             .ConfigureAwait(false);
@@ -571,29 +714,23 @@ internal sealed class GpuResources(
         Result<long> jitters = await shaders
             .ReflectConstantAsync(type, "Jitters", CancellationToken.None)
             .ConfigureAwait(false);
-        await threads.Enter(EngineThread.Render);
-        int bytes = fields.Ok
-            ? fields.Value.Select(field => (int)(field.Offset + field.Size)).DefaultIfEmpty().Max()
-            : 0;
-        if (!fields.Ok || bytes > GpuMaterial.Bytes - 4)
-        {
-            string why = fields.Ok
-                ? $"its params are {bytes} bytes, over a row's {GpuMaterial.Bytes - 4}"
-                : fields.Error;
-            Log.Error($"Materials drawn with {path} are drawn as the failure: {why}");
-            _layouts[shader.Id] = new MaterialLayout(default, type, false, default);
+        if (!fields.Ok)
+            return Result.Failure(fields.Error);
 
-            return;
-        }
+        int bytes = fields.Value.Select(field => (int)(field.Offset + field.Size)).DefaultIfEmpty().Max();
+        if (bytes > GpuMaterial.Bytes - 4)
+            return Result.Failure($"its params are {bytes} bytes, over a row's {GpuMaterial.Bytes - 4}");
 
-        _layouts[shader.Id] = new MaterialLayout(
-            fields.Value,
-            type,
-            translucent.Ok && translucent.Value != 0,
-            new EffectNeeds(
-                levels.Ok ? (int)levels.Value : 0,
-                history.Ok && history.Value != 0,
-                jitters.Ok && jitters.Value != 0
+        return Result.Success(
+            new MaterialLayout(
+                fields.Value,
+                type,
+                translucent.Ok && translucent.Value != 0,
+                new EffectNeeds(
+                    levels.Ok ? (int)levels.Value : 0,
+                    history.Ok && history.Value != 0,
+                    jitters.Ok && jitters.Value != 0
+                )
             )
         );
     }
@@ -612,15 +749,34 @@ internal sealed class GpuResources(
         return (uint)_materialShaders.Count - 1;
     }
 
+    /// <summary>
+    /// The paths of the materials loaded that draw with the shader or name the texture <paramref name="id"/>, for a log
+    /// line.
+    /// </summary>
+    private string GetMaterialsWith(ulong id) =>
+        string.Join(
+            ", ",
+            _materials
+                .Where(asked =>
+                    asked.Value is { Ok: true } loaded
+                    && (loaded.Value.Shader.Id == id || loaded.Value.Params.Values.Any(param => param.Texture.Id == id))
+                )
+                .Select(asked => assets.GetPath(new Handle<Material>(asked.Key)) ?? $"id {asked.Key}")
+        );
+
     private async Task LoadAsync(Handle<Material> handle)
     {
         Result<Material> loaded = await assets.LoadAsync(handle, null, CancellationToken.None).ConfigureAwait(false);
         await threads.Enter(EngineThread.Render);
+        _materials[handle.Id] = loaded;
         if (!loaded.Ok)
-            Log.Error($"{assets.GetPath(handle)} is drawn as a failure: {loaded.Error}");
+        {
+            Log.Error($"Material {assets.GetPath(handle) ?? $"id {handle.Id}"} is drawn as a failure: {loaded.Error}");
 
-        Material material = loaded.Ok ? loaded.Value : new Material { Shader = assets.Find<Shader>(FailureShader) };
-        _materials[handle.Id] = material;
+            return;
+        }
+
+        Material material = loaded.Value;
 
         // Its shader's struct and its textures are asked for now, so the loading gate waits for them before any row
         // needs them.
@@ -638,10 +794,11 @@ internal sealed class GpuResources(
     {
         Result<Texture> loaded = await assets.LoadAsync(handle, null, CancellationToken.None).ConfigureAwait(false);
         await threads.Enter(EngineThread.Render);
-        string name = assets.GetPath(handle) ?? $"texture {handle.Id}";
-        if (!loaded.Ok)
+        string name = assets.GetPath(handle) ?? $"id {handle.Id}";
+        Result<GpuFormat> format = loaded.Ok ? ToGpu(loaded.Value.Format) : Result.Failure(loaded.Error);
+        if (!loaded.Ok || !format.Ok)
         {
-            Log.Error($"{name} is drawn as a failure: {loaded.Error}");
+            Log.Error($"Texture {name}, named by {GetMaterialsWith(handle.Id)}, is drawn as a failure: {format.Error}");
             entry.State = GpuState.Failed;
 
             return;
@@ -654,7 +811,7 @@ internal sealed class GpuResources(
             name,
             asset.Levels[first].Width,
             asset.Levels[first].Height,
-            ToGpu(asset.Format),
+            format.Value,
             TextureUsages.Sampled | TextureUsages.CopyDestination,
             asset.Levels.Length - first
         );
@@ -669,22 +826,28 @@ internal sealed class GpuResources(
 
     private async Task LoadAsync(Handle<Model> model, ModelEntry entry)
     {
-        Result<MeshDerived> derived = await assets
-            .LoadPreprocessedAsync(model, models, CancellationToken.None)
-            .ConfigureAwait(false);
+        Result<MeshDerived> derived;
+        try
+        {
+            derived = await assets.LoadPreprocessedAsync(model, models, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            derived = Result.Failure($"making it threw: {ex}");
+        }
 
         await threads.Enter(EngineThread.Render);
-        string name = assets.GetPath(model) ?? $"model {model.Id}";
+        string name = assets.GetPath(model) ?? $"id {model.Id}";
         if (!derived.Ok)
         {
-            Log.Error($"{name} is drawn as the failure model: {derived.Error}");
+            Log.Error($"Model {name} is drawn as the failure cube: {derived.Error}");
             entry.State = GpuState.Failed;
             SettledModels++;
 
             return;
         }
 
-        _madeModels.Add((model.Id, name, derived.Value, entry));
+        _madeModels.Add((model.Id, name, derived.Value, entry, default));
     }
 
     /// <summary>
@@ -731,7 +894,7 @@ internal sealed class GpuResources(
 
 /// <summary>
 /// Where a model is in the pools, each range its offset and count, and the sphere around it in its own frame;
-/// <paramref name="IsFailure"/> when it stands in for a model that could not be made, to be drawn as a failure.
+/// <paramref name="IsFailure"/> when it is the failure cube in the place of a model that could not be made.
 /// </summary>
 internal readonly record struct ResidentModel(
     uint VertexOffset,

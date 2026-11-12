@@ -40,19 +40,21 @@ public readonly record struct ShadingInput(
 );
 
 /// <summary>
-/// The renderer, in two steps a frame. The view's step keeps the world on the GPU for the gems that draw it:
+/// The renderer, in three steps a frame. The view's step keeps the world on the GPU for the gems that draw it:
 /// <see cref="PublishInputs"/> copies what the frame draws out of the entities and publishes it; on the render thread the step
 /// takes the newest published, puts the models, materials, textures, instances, lights and sky's tables on the GPU,
 /// uploads the frame's rows, and makes the frame's <see cref="GpuView"/> and its <see cref="GpuInstances"/>. The
 /// shading's step lights that world, deferred: from the view and the GBuffer a geometry gem drew into it, the shading,
 /// shadowed by the frame's shadow mask where there is one, the nearest glass over it, the effects, a debug view where
-/// one is asked for, and the output into the window and any screenshot asked for. Where nothing made the world as rays
+/// one is asked for, and the output into the window and any screenshot asked for. The banner's step draws the frame's
+/// render failures over the top of the window, even when the view was not made. Where nothing made the world as rays
 /// see it, the shadows, the indirect light or the air, their rows of the frame's buffer are 0. As a domain replaces the
 /// world, it forgets the view's history and holds the loading screen until what comes is on the GPU and the shading's
 /// shaders are built.
 /// </summary>
 public sealed class Renderer
-    : IRender<ViewInput, (GpuView, GpuInstances)>,
+    : IRender,
+        IRender<ViewInput, (GpuView, GpuInstances)>,
         IRenderFrom<ShadingInput>,
         IHookIntoDomainLoading,
         IDisposable
@@ -84,11 +86,6 @@ public sealed class Renderer
     private readonly InstanceTable _instances;
 
     /// <summary>
-    /// The material a model that failed is drawn with, every slot; an empty slot when there is no failure material.
-    /// </summary>
-    private readonly MaterialInstance _failure;
-
-    /// <summary>
     /// What is done to the picture when no entity has a <see cref="PostProcessing"/>: the exposure and the AgX tonemap.
     /// </summary>
     private readonly PostProcessing _defaultPost;
@@ -102,9 +99,14 @@ public sealed class Renderer
     private readonly Effects _effects;
 
     /// <summary>
-    /// Every shader the view's passes run, which the GPU provider builds before the frame is made.
+    /// Every shader the view's passes run but the sky's, which the GPU provider builds before the frame is made.
     /// </summary>
     private readonly ImmutableArray<ShaderEntry> _viewShaders;
+
+    /// <summary>
+    /// The shaders that fill the sky's tables; while one failed, the frame is drawn with no sky.
+    /// </summary>
+    private readonly ImmutableArray<ShaderEntry> _skyShaders;
 
     private readonly ShaderEntry _shadeShader;
 
@@ -121,6 +123,8 @@ public sealed class Renderer
 
     private readonly PixelEffects _pixelEffects = new();
 
+    private readonly FailureBanner _banner;
+
     private readonly IGraphicsApi _gpu;
 
     private readonly EventCoordinator _events;
@@ -129,6 +133,13 @@ public sealed class Renderer
     /// The screenshots asked for on the game thread, which the shading's step takes on the render thread.
     /// </summary>
     private readonly Channel<ScreenshotRequested> _screenshots = Channel.CreateUnbounded<ScreenshotRequested>(
+        new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
+    );
+
+    /// <summary>
+    /// The ids of the assets read again, heard on the game thread, which the view's step lets go of on the render thread.
+    /// </summary>
+    private readonly Channel<ulong> _reloaded = Channel.CreateUnbounded<ulong>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
     );
 
@@ -146,11 +157,6 @@ public sealed class Renderer
     private int? _drawnWorldNumber;
 
     /// <summary>
-    /// Whether the renderer makes views: not once a shader or a pool is not made. Render thread.
-    /// </summary>
-    private bool _isRunning = true;
-
-    /// <summary>
     /// What a domain loading needs on the GPU before it shows, until the view's step has uploaded it all. Render
     /// thread.
     /// </summary>
@@ -164,7 +170,7 @@ public sealed class Renderer
 
     private bool _hasDrawn;
 
-    public Renderer(
+    internal Renderer(
         DeferredRenderingSettings settings,
         IShaderCompiler shaders,
         IGraphicsApi gpu,
@@ -188,15 +194,16 @@ public sealed class Renderer
             settings.Anisotropy,
             settings.DroppedTextureLevels
         );
-        _failure = new MaterialInstance { Handle = assets.GetFailure<Material, Model>() };
         _defaultPost.Effects[0] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Exposure.mat") };
         _defaultPost.Effects[1] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Agx.mat") };
-        _instances = new InstanceTable(assets, _resources, _failure);
+        _instances = new InstanceTable(assets, _resources);
         _frameView = new FrameView();
         _sky = new SkyLuts(assets);
         _lightTiles = new LightTiles(assets);
         _effects = new Effects(assets, _resources);
-        _viewShaders = [.. _sky.Shaders, .. _lightTiles.Shaders];
+        _banner = new FailureBanner(assets);
+        _viewShaders = _lightTiles.Shaders;
+        _skyShaders = _sky.Shaders;
 
         _gpu = gpu;
         _events = events;
@@ -217,6 +224,7 @@ public sealed class Renderer
     public void Dispose()
     {
         _preprocessing.Dispose();
+        _banner.Dispose();
         EndPreparing();
     }
 
@@ -226,16 +234,20 @@ public sealed class Renderer
     /// </summary>
     public (GpuView, GpuInstances)? Render(in Frame frame, RenderGraph graph, in ViewInput input)
     {
-        if (!_isRunning)
-            return null;
-
-        // The shaders are the GPU provider's to build, the first ask starting each; one that fails ends the start.
+        // The shaders are the GPU provider's to build, the first ask starting each.
         GpuState shaders = graph.GetState(_viewShaders.AsSpan());
         if (shaders == GpuState.Failed)
-            FailStart("a shader was not built.");
+            Fail(graph, RenderFailure.Shader, "a shader of the view was not built.");
 
         if (shaders != GpuState.Ready)
             return null;
+
+        // What was made from an asset read again is let go, so the next ask loads it anew and its failure is found again.
+        while (_reloaded.Reader.TryRead(out ulong asset))
+        {
+            _resources.Forget(asset);
+            _instances.Forget(asset);
+        }
 
         // The pools, with the models made since the last frame settled into them, before any renderer's row is built.
         // Every model asked for from here on is asked at or after the frame's start, which eviction keeps.
@@ -243,7 +255,7 @@ public sealed class Renderer
         Result pools = _resources.Prepare(graph);
         if (!pools.Ok)
         {
-            FailStart(pools.Error);
+            Fail(graph, RenderFailure.Resource, pools.Error);
 
             return null;
         }
@@ -251,10 +263,9 @@ public sealed class Renderer
         if (_inputs.TakeNewest() is not { } inputs)
             return null;
 
-        DeferredRenderingSettings settings = _settings;
-        Size resolution = settings.Resolution;
-        float renderScale = settings.RenderScale;
-        float fieldOfView = settings.FieldOfView;
+        Size resolution = _settings.Resolution;
+        float renderScale = _settings.RenderScale;
+        float fieldOfView = _settings.FieldOfView;
 
         // The first frame of another world forgets last frame's camera and size, so nothing drawn before carries
         // into it.
@@ -268,30 +279,26 @@ public sealed class Renderer
         // their rows built again, and the materials' rows are made again at upload.
         _instances.Fill(inputs.Renderers, frame.Index);
 
-        // The loading domain shows once the models, materials and effects it waits for are on the GPU, or failed: drawn
-        // as the failure material, which is then waited for too, or, for an effect, left out; and once the shading's
-        // shaders are built, or failed. Its models are asked for here, as the pools only take them once they are made;
-        // an ask for one asked for already does nothing.
+        // The loading domain shows once the models, materials and effects it waits for are on the GPU, or failed: a
+        // model drawn as the failure cube, which is then waited for too, or, for an effect, left out; and once the
+        // shading's and the sky's shaders are built, or failed. Its models are asked for here, as the pools only take
+        // them once they are made; an ask for one asked for already does nothing.
         if (_preparing is { } preparing)
         {
             bool isPrepared =
                 !_effects.IsLoading(graph, preparing.Effects)
-                && graph.GetState(_shadingShaders.AsSpan()) != GpuState.Loading;
-            bool hasFailure = false;
+                && graph.GetState(_shadingShaders.AsSpan()) != GpuState.Loading
+                && graph.GetState(_skyShaders.AsSpan()) != GpuState.Loading;
             foreach (Handle<Model> model in preparing.Models)
             {
                 _resources.Get(model);
                 isPrepared &= _resources.HasArrived(model);
-                hasFailure |= _resources.HasFailed(model);
             }
 
             foreach (Handle<Material> material in preparing.Materials)
             {
                 isPrepared &= _resources.Get(material) != GpuState.Loading;
             }
-
-            if (hasFailure && _failure.Handle != Handle<Material>.None)
-                isPrepared &= _resources.Get(_failure.Handle) != GpuState.Loading;
 
             if (isPrepared)
             {
@@ -304,7 +311,7 @@ public sealed class Renderer
 
         // A model no renderer drawn holds, and nothing asked for this frame, leaves once it is kept long enough; the
         // loading domain's models were just asked for, so they stay while it waits.
-        _resources.EvictUnusedModels(inputs.Renderers.Second[.._instances.Count], frameStart, settings.ModelKeepSec);
+        _resources.EvictUnusedModels(inputs.Renderers.Second[.._instances.Count], frameStart, _settings.ModelKeepSec);
         _resources.Upload(graph);
 
         // The picture's effects: the first post processing's, or the engine's, exposed by the exposure compensation;
@@ -315,10 +322,10 @@ public sealed class Renderer
         else
         {
             post = _defaultPost.Effects;
-            post[0].Overrides["compensation"] = settings.ExposureCompensation;
+            post[0].Overrides["compensation"] = _settings.ExposureCompensation;
         }
 
-        ImmutableArray<string> disabled = settings.DisabledEffects;
+        ImmutableArray<string> disabled = _settings.DisabledEffects;
         for (int place = 0; place < MaterialSlots.Capacity && !disabled.IsEmpty; place++)
         {
             if (
@@ -329,7 +336,7 @@ public sealed class Renderer
         }
 
         Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> effects = _effects.Resolve(graph, post);
-        Result<(GpuBuffer Rows, GpuBuffer Materials)> tables = _instances.Upload(graph);
+        Result<(GpuBuffer Rows, GpuBuffer Materials, GpuBuffer Failures)> tables = _instances.Upload(graph);
 
         // The finished picture at the resolution, or at the window's size when it has no side, and 1280 by 720 with no
         // window; the world drawn at the render scale of it, or when that is auto at the most that fits 1920 by 1080,
@@ -425,7 +432,7 @@ public sealed class Renderer
         );
         if (!asked.Ok)
         {
-            Log.Error($"The frame's view is not made: {asked.Error}");
+            Fail(graph, RenderFailure.Resource, asked.Error);
 
             return null;
         }
@@ -453,6 +460,7 @@ public sealed class Renderer
             InstanceCount = _instances.Count,
             InstanceCapacity = _instances.Capacity,
             Materials = tables.Value.Materials,
+            Failures = tables.Value.Failures,
             Vertices = _resources.VertexPool,
             Indices = _resources.IndexPool,
             Meshes = _resources.Meshes,
@@ -491,6 +499,12 @@ public sealed class Renderer
             isJittered |= effect.State == GpuState.Ready && effect.Needs.HasJitter;
         }
 
+        // The sky while there is one and its shaders are built.
+        GpuState skyShaders = graph.GetState(_skyShaders.AsSpan());
+        if (inputs.Skies.Count > 0 && skyShaders == GpuState.Failed)
+            graph.Fail(RenderFailure.Sky, "Sky is not drawn", "a shader of the sky was not built.");
+
+        bool hasSky = inputs.Skies.Count > 0 && skyShaders == GpuState.Ready;
         Result uploaded = _frameView.Upload(
             graph,
             view,
@@ -499,18 +513,18 @@ public sealed class Renderer
             frame,
             isJittered ? FrameView.GetJitter(frame.Index) : Vector2.Zero,
             GetSun(inputs.DirectionalLights),
-            inputs.Skies.Count > 0,
-            settings.SkyBrightness
+            hasSky,
+            _settings.SkyBrightness
         );
         if (!uploaded.Ok)
         {
-            Log.Error($"The frame's view is not made: {uploaded.Error}");
+            Fail(graph, RenderFailure.Resource, uploaded.Error);
 
             return null;
         }
 
         // The sky's tables while there is a sky, and each tile's lights.
-        if (inputs.Skies.Count > 0)
+        if (hasSky)
             _sky.Record(graph, view);
 
         _lightTiles.Record(graph, view);
@@ -530,24 +544,32 @@ public sealed class Renderer
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph, in ShadingInput input)
     {
-        // The shaders are the GPU provider's to build, the first ask starting each; while one failed, the renderer
-        // draws nothing.
-        if (graph.GetState(_shadingShaders.AsSpan()) != GpuState.Ready)
+        // The shaders are the GPU provider's to build, the first ask starting each; while one failed, the shading
+        // draws nothing, and the banner tells it.
+        GpuState shaders = graph.GetState(_shadingShaders.AsSpan());
+        if (shaders == GpuState.Failed)
+            graph.Fail(RenderFailure.Shader, "Surfaces are not shaded", "a shader of the shading was not built.");
+
+        if (shaders != GpuState.Ready)
             return;
 
         GpuView gpu = input.View;
-        DeferredRenderingSettings settings = _settings;
-        DebugView renderView = settings.RenderView;
-        TextureFilter upscaleFilter = settings.UpscaleFilter;
+        DebugView renderView = _settings.RenderView;
+        TextureFilter upscaleFilter = _settings.UpscaleFilter;
 
         ReadOnlySpan<GpuResource> indirect = input.Light is { } light
             ? [light.Diffuse, light.Reflections, light.Probes, light.ProbeDepth]
             : [];
 
         // Every pixel's surface shaded from the sky's tables, its tile's lights, the shadows where there are any and the
-        // indirect light, or the sky where nothing traced it.
+        // indirect light, or the sky where nothing traced it, or the failure of the sky or its clouds where they failed.
         ComputePass shade = graph
-            .Compute("Shade surfaces", _shadeShader, new GpuConstants(gpu.Frame.Id), RenderStages.Shade)
+            .Compute(
+                "Shade surfaces",
+                _shadeShader,
+                new GpuConstants(gpu.Frame.Id, GetSkyFailures(graph.Failures)),
+                RenderStages.Shade
+            )
             .Reads(
                 gpu.Frame,
                 gpu.SkyTransmittance,
@@ -566,7 +588,8 @@ public sealed class Renderer
         if (input.Air is { Clouds: { } clouds })
             shade.Reads(clouds);
 
-        shade.Writes(gpu.Hdr).DispatchOver(gpu.Width, gpu.Height);
+        // The velocity where a failure of the sky or its clouds draws, which does not move on the screen.
+        shade.Writes(gpu.Hdr, gpu.Velocity).DispatchOver(gpu.Width, gpu.Height);
 
         // The nearest pane over the shaded picture, from what the resolve left in the glass targets, with its rays
         // through the traced world where there is one, and the air in front of it or of the opaque surface; nothing to
@@ -623,8 +646,8 @@ public sealed class Renderer
                 new GpuConstants(
                     gpu.Frame.Id,
                     (uint)renderView,
-                    BitConverter.SingleToUInt32Bits(settings.DepthViewFar),
-                    BitConverter.SingleToUInt32Bits(Math.Clamp(settings.Gamma, 0.5f, 2f))
+                    BitConverter.SingleToUInt32Bits(_settings.DepthViewFar),
+                    BitConverter.SingleToUInt32Bits(Math.Clamp(_settings.Gamma, 0.5f, 2f))
                 ),
                 RenderStages.Post
             )
@@ -688,6 +711,20 @@ public sealed class Renderer
     }
 
     /// <summary>
+    /// Lets the loading domain show when the view's step is out, and draws the frame's render failures over the
+    /// window; nothing when none failed.
+    /// </summary>
+    public void Render(in Frame frame, RenderGraph graph)
+    {
+        // A view step that threw never reaches its own release; while it renders, it releases when it is ready, so
+        // nothing pops in.
+        if (graph.IsMakerOut<GpuView>())
+            EndPreparing();
+
+        _banner.Record(graph, frame);
+    }
+
+    /// <summary>
     /// Numbers the world anew, so the view's step forgets the view's history at the first frame of what comes. On
     /// the game thread, without leaving it, so the world goes on to what comes before another frame is published.
     /// </summary>
@@ -701,9 +738,9 @@ public sealed class Renderer
     /// <summary>
     /// Holds the domain loading until it can show: asks for every model and material <paramref name="entities"/> draw,
     /// and the effects of their first post processing, or the default's, and waits until they are on the GPU, or failed
-    /// and drawn as the failure or left out, and until the shading's shaders are built or failed. Materials are asked
-    /// for at once; models once the pools are made, and the effects, by the view's step. One that comes while another
-    /// waits ends that one. On the render thread, whose tables and counts these are.
+    /// and drawn as the failure or left out, and until the shading's and the sky's shaders are built or failed.
+    /// Materials are asked for at once; models once the pools are made, and the effects, by the view's step. One that
+    /// comes while another waits ends that one. On the render thread, whose tables and counts these are.
     /// </summary>
     public async Task OnDomainLoadingAsync(
         ImmutableArray<ImmutableArray<IComponent>> entities,
@@ -712,51 +749,44 @@ public sealed class Renderer
     {
         await _threads.Enter(EngineThread.Render);
         EndPreparing();
-        if (!_isRunning)
+        Ecs.Components.Renderer[] renderers =
+        [
+            .. entities
+                .SelectMany(entity => entity.OfType<Ecs.Components.Renderer>())
+                .Where(renderer => renderer.Model != Handle<Model>.None),
+        ];
+        ImmutableArray<Handle<Material>> materials =
+        [
+            .. renderers
+                .SelectMany(renderer => renderer.Materials.All.Select(slot => slot.Handle))
+                .Where(material => material != Handle<Material>.None)
+                .Distinct(),
+        ];
+        foreach (Handle<Material> material in materials)
         {
-            _preparedDomains++;
+            _resources.Get(material);
         }
-        else
-        {
-            Ecs.Components.Renderer[] renderers =
-            [
-                .. entities
-                    .SelectMany(entity => entity.OfType<Ecs.Components.Renderer>())
-                    .Where(renderer => renderer.Model != Handle<Model>.None),
-            ];
-            ImmutableArray<Handle<Material>> materials =
-            [
-                .. renderers
-                    .SelectMany(renderer => renderer.Materials.All.Select(slot => slot.Handle))
-                    .Where(material => material != Handle<Material>.None)
-                    .Distinct(),
-            ];
-            foreach (Handle<Material> material in materials)
-            {
-                _resources.Get(material);
-            }
 
-            // The effects as Render runs them: the first post processing's, or the default's.
-            MaterialSlots post = entities
-                .SelectMany(entity => entity.OfType<PostProcessing>())
-                .Select(processing => processing.Effects)
-                .DefaultIfEmpty(_defaultPost.Effects)
-                .First();
+        // The effects as Render runs them: the first post processing's, or the default's.
+        MaterialSlots post = entities
+            .SelectMany(entity => entity.OfType<PostProcessing>())
+            .Select(processing => processing.Effects)
+            .DefaultIfEmpty(_defaultPost.Effects)
+            .First();
 
-            Preparing preparing = new(
-                [.. renderers.Select(renderer => renderer.Model).Distinct()],
-                materials,
-                post,
-                new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
-            );
-            _preparing = preparing;
-            await preparing.Done.Task.WaitAsync(cancel).ConfigureAwait(false);
-        }
+        Preparing preparing = new(
+            [.. renderers.Select(renderer => renderer.Model).Distinct()],
+            materials,
+            post,
+            new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+        );
+        _preparing = preparing;
+        await preparing.Done.Task.WaitAsync(cancel).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Copies what the frame draws out of the entities and publishes it for the view's step, and hands the shading's
-    /// step the screenshots asked for.
+    /// Copies what the frame draws out of the entities and publishes it for the view's step, hands the view's step the
+    /// assets read again, and the shading's step the screenshots asked for.
     /// </summary>
     internal void PublishInputs(in Frame frame)
     {
@@ -772,10 +802,32 @@ public sealed class Renderer
         back.WorldNumber = _worldNumber;
         _inputs.Publish();
 
+        foreach (AssetReloaded reloaded in frame.Events.Get<AssetReloaded>())
+        {
+            _reloaded.Writer.TryWrite(reloaded.Id);
+        }
+
         foreach (ScreenshotRequested asked in frame.Events.Get<ScreenshotRequested>())
         {
             _screenshots.Writer.TryWrite(asked);
         }
+    }
+
+    /// <summary>
+    /// The failure bits of <c>ShadeSurfaces.slang</c>'s pass header: 1 while the sky failed, 2 while its clouds failed.
+    /// </summary>
+    private static uint GetSkyFailures(ReadOnlySpan<(RenderFailure Kind, string What)> failures)
+    {
+        uint bits = 0;
+        foreach ((RenderFailure kind, _) in failures)
+        {
+            if (kind == RenderFailure.Sky)
+                bits |= 1;
+            else if (kind == RenderFailure.Weather)
+                bits |= 2;
+        }
+
+        return bits;
     }
 
     /// <summary>
@@ -823,13 +875,12 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// Ends the start as failed: the renderer makes no view, and holds no domain back.
+    /// Tells the graph that the view is not made in this frame, and lets the loading domain show without it.
     /// </summary>
-    private void FailStart(string error)
+    private void Fail(RenderGraph graph, RenderFailure kind, string reason)
     {
-        Log.Error($"The world is not put on the GPU: {error}");
+        graph.Fail(kind, "View is not made", reason);
         EndPreparing();
-        _isRunning = false;
     }
 
     /// <summary>

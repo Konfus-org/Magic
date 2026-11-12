@@ -80,15 +80,15 @@ public record struct FrameConstants
 
 /// <summary>
 /// The frame's models, the twin of <c>Scene/Models.slang</c>: the instance table and its count, the
-/// pools and tables the instances are drawn from, and the mesh table rays find triangles through, written once a frame
-/// into the frame's buffer after <see cref="FrameConstants"/>.
+/// pools and tables the instances are drawn from, the mesh table rays find triangles through, and the failure table
+/// the material rows name, written once a frame into the frame's buffer after <see cref="FrameConstants"/>.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public record struct GpuModels
 {
     public const int Offset = FrameConstants.Bytes;
 
-    public const int Bytes = 24;
+    public const int Bytes = 28;
 
     public uint Instances;
 
@@ -101,6 +101,8 @@ public record struct GpuModels
     public uint Materials;
 
     public uint Meshes;
+
+    public uint Failures;
 }
 
 /// <summary>

@@ -20,7 +20,17 @@ internal sealed class Rendering
 {
     private const string Hook = "Render";
 
+    /// <summary>
+    /// The seconds a step that threw waits before it is tried again.
+    /// </summary>
+    private const double RetryPauseSec = 3;
+
     private readonly List<Step> _steps = [];
+
+    /// <summary>
+    /// The step that makes each type, as the steps were last ordered.
+    /// </summary>
+    private Dictionary<Type, Maker> _makers = [];
 
     /// <summary>
     /// <paramref name="part"/>'s steps of the frame, one for each render form it implements, while it renders, until
@@ -50,41 +60,61 @@ internal sealed class Rendering
     }
 
     /// <summary>
-    /// Whether <paramref name="part"/>, a gem's part, must take what no gem registered makes, so it can never render.
+    /// Whether <paramref name="part"/>, a gem's part, must take what no gem registered makes; it doesn't render until a gem that makes
+    /// it registers.
     /// </summary>
     public bool HasMissingInput(object part) => _steps.Exists(step => step.Part == part && step.Missing is not null);
 
     /// <summary>
-    /// Every gem's parts of the frame, in order, each gem timed once for all its parts; a gem that throws is logged and renders no more, and what
-    /// it would have made stays unmade, so every gem that must take it renders no more either.
+    /// Whether no gem makes <paramref name="type"/>, or the step that makes it is out this frame, as
+    /// <see cref="RenderGraph.IsMakerOut{T}"/> tells.
+    /// </summary>
+    public bool IsMakerOut(Type type) => !_makers.TryGetValue(type, out Maker maker) || maker.Step.IsOut;
+
+    /// <summary>
+    /// Every gem's parts of the frame, in order, each gem timed once for all its parts, into <paramref name="graph"/>
+    /// emptied of the last frame's failures. A part that takes what no gem makes, or whose gem threw less than
+    /// <see cref="RetryPauseSec"/> ago, is skipped and is a <see cref="RenderFailure.Pass"/> failure in that frame; what
+    /// it would have made stays unmade, so a part that must take it is skipped too, and one that may take it runs
+    /// without it.
     /// </summary>
     [SuppressMessage(
         "Design",
         "CA1031:Do not catch general exception types",
-        Justification = "Whatever a gem throws, it is logged and the gem leaves the frame; the others go on."
+        Justification = "Whatever a gem throws, it is a failure of the frame and the gem leaves it; the others go on."
     )]
     public void Pump(in Frame frame, RenderGraph graph)
     {
-        for (int i = 0; i < _steps.Count; i++)
+        graph.StartFailures();
+        foreach (Step step in _steps)
         {
-            Step step = _steps[i];
-            if (step.Missing is { } missing)
+            long start = Metrics.HookDurations.Start();
+            int told = graph.ToldCount;
+            if (step.Missing is null && (step.RetrySec is not { } retry || frame.AppSec >= retry))
             {
-                Log.Error($"Gem {step.Gem} takes {missing.Name}, which no listed gem makes, so it renders nothing.");
-                _steps.RemoveAt(i--);
-                continue;
+                try
+                {
+                    step.Run(frame, graph);
+                    step.RetrySec = null;
+                }
+                catch (Exception ex)
+                {
+                    // A step that throws again at a retry keeps the first throw's texts: only a new failure is logged.
+                    if (step.RetrySec is null)
+                        step.Failure = ($"{step.Gem} stopped rendering", $"It threw in Render: {ex}");
+
+                    step.RetrySec = frame.AppSec + RetryPauseSec;
+                    graph.LeaveOutOpenPass();
+                }
             }
 
-            long start = Metrics.HookDurations.Start();
-            try
-            {
-                step.Run(frame, graph);
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"Gem {step.Gem} failed in Render and stops rendering: {ex}");
-                _steps.RemoveAt(i--);
-            }
+            // Told each frame it is out, so the failure is logged once: when it first failed, or failed again after a
+            // frame it rendered in.
+            bool isSkipped = step.Missing is not null || step.RetrySec is not null;
+            if (isSkipped)
+                graph.Fail(RenderFailure.Pass, step.Failure.What, step.Failure.Reason);
+
+            step.IsOut = isSkipped || (!step.HasMade && graph.ToldCount > told);
 
             // A gem with several steps is timed once, by its last step, for the time of all of them.
             long since = start == 0 ? 0 : start - step.Earlier;
@@ -131,9 +161,10 @@ internal sealed class Rendering
     }
 
     /// <summary>
-    /// <paramref name="steps"/> in place of the gems before, each after every gem that makes what it takes, in their own
-    /// order otherwise, and each bound to its makers. Throws before changing anything when two make one type, or when
-    /// some take what others among them make round a cycle.
+    /// <paramref name="steps"/> in place of the gems before, each after every gem that makes what it takes, each that
+    /// takes and makes nothing after all the others, so it sees the whole frame's failures, in their own order
+    /// otherwise, and each bound to its makers. Throws before changing anything when two make one type, or when some
+    /// take what others among them make round a cycle.
     /// </summary>
     private void Order(List<Step> steps)
     {
@@ -152,6 +183,8 @@ internal sealed class Rendering
         }
 
         // The first waiting gem whose makers are all placed goes next, so gems keep their order where it is free.
+        // A gem that takes and makes nothing waits at the end; the sort keeps the order of equals.
+        steps = [.. steps.OrderBy(static step => step.Inputs.IsEmpty && step.Outputs.IsEmpty)];
         List<Step> ordered = new(steps.Count);
         while (steps.Count > 0)
         {
@@ -177,6 +210,7 @@ internal sealed class Rendering
 
         _steps.Clear();
         _steps.AddRange(ordered);
+        _makers = makers;
     }
 
     /// <summary>
@@ -210,9 +244,30 @@ internal sealed class Rendering
         public abstract ImmutableArray<Type> Inputs { get; }
 
         /// <summary>
-        /// A type it must take that no gem makes, once bound; it can never render.
+        /// A type it must take that no gem makes, once bound; it doesn't render until a gem that makes it registers.
         /// </summary>
         public Type? Missing { get; protected set; }
+
+        /// <summary>
+        /// The <see cref="Frame.AppSec"/> from which a step that threw is tried again; null while it renders.
+        /// </summary>
+        public double? RetrySec { get; set; }
+
+        /// <summary>
+        /// Why it doesn't render, made once when its input is missing or it throws, so a frame it is out in allocates
+        /// nothing for the texts.
+        /// </summary>
+        public (string What, string Reason) Failure { get; set; }
+
+        /// <summary>
+        /// Whether it made nothing this frame and the frame was told why: it was skipped, or it told a failure itself.
+        /// </summary>
+        public bool IsOut { get; set; }
+
+        /// <summary>
+        /// Whether its last run made what it makes.
+        /// </summary>
+        public abstract bool HasMade { get; }
 
         /// <summary>
         /// The gem's next step in the order, which is timed for both; null for its last.
@@ -279,6 +334,8 @@ internal sealed class Rendering
         /// </summary>
         public TOutput? Made { get; private set; }
 
+        public override bool HasMade => Made.HasValue;
+
         public override ImmutableArray<Maker> Outputs =>
             typeof(TOutput) == typeof(None) ? []
             : typeof(ITuple).IsAssignableFrom(typeof(TOutput))
@@ -313,6 +370,7 @@ internal sealed class Rendering
         /// </summary>
         public override void Bind(IReadOnlyDictionary<Type, Maker> makers)
         {
+            Made = null;
             Missing = null;
             if (_constructor is null)
                 return;
@@ -324,7 +382,12 @@ internal sealed class Rendering
                 Type type = Nullable.GetUnderlyingType(parameter.ParameterType) ?? parameter.ParameterType;
                 if (!makers.TryGetValue(type, out Maker maker))
                 {
-                    Missing ??= parameter.ParameterType == type ? type : null;
+                    if (Missing is null && parameter.ParameterType == type)
+                    {
+                        Missing = type;
+                        Failure = ($"{Gem} lacks an input", $"It takes {type.Name}, which no listed gem makes.");
+                    }
+
                     arguments.Add(Expression.Default(parameter.ParameterType));
                     continue;
                 }

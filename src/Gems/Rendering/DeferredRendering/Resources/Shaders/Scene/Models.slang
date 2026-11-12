@@ -10,7 +10,7 @@ import Core.Frame;
 
 // Where the models are in the frame's buffer, and their bytes: C#'s GpuModels.
 public static const uint ModelsOffset = FrameBytes;
-public static const uint ModelsBytes = 24u;
+public static const uint ModelsBytes = 28u;
 
 public struct Models
 {
@@ -23,6 +23,8 @@ public struct Models
     public uint materials;
     // The mesh table the instances' geometries name.
     public uint meshes;
+    // The failure table the material rows' failure indices name (Scene/Failures).
+    public uint failures;
 }
 
 // Where the world as rays see it is in the frame's buffer, right after the models, and its bytes: C#'s GpuTracedWorld.

@@ -1,11 +1,11 @@
 # DeferredRendering
 
-The renderer. Each frame it runs two render steps. The first keeps the world on the GPU for the gems that draw it:
+The renderer. Each frame it runs three render steps. The first keeps the world on the GPU for the gems that draw it:
 the view and its targets at the picture's size, the frame's buffer and its rows, the models, materials and textures
 every renderer draws with, the instances, the lights with each tile's lights, and the sky's tables. The second lights
 that world into the window, deferred: the GBuffer a geometry gem draws, lit by the sun and the sky. When the console
-asks for a screenshot, it hands the frame as a texture to the gem that writes textures. It holds the types the
-rendering gems share.
+asks for a screenshot, it hands the frame as a texture to the gem that writes textures. The third draws the frame's
+render failures over the window. The gem holds the types the rendering gems share.
 
 To use it, list `DeferredRendering` in a project's `.magic` file after the GPU provider, the ECS, the model reader and
 the texture reader, with a gem that draws its geometry.
@@ -14,8 +14,12 @@ the texture reader, with a gem that draws its geometry.
 
 - As a model loads, the gem makes what the GPU holds it as, once per change to its file, and keeps it in the cache:
   its vertices as the GPU reads them and each mesh's triangles, which rays and every renderer draw.
-- A model shows once it is on the GPU. One that doesn't load is drawn as the failure model, and a material or texture
-  that doesn't load as the magenta failure material.
+- A model shows once it is on the GPU. One that doesn't load draws a cube of one metre in its place, in flashing teal,
+  with the text "Model failed" and the model's path over it. The gem makes the cube in code at the start.
+- A failure shows on its entity's own mesh in a flashing colour, with the kind, "failed" and the path over it. A solid
+  colour means the whole thing failed: magenta for a material, purple for its shader. Stripes over the real surface
+  mean one part failed: amber for a texture, which reads as no texture, and magenta for a param that fits no field of
+  the shader, which takes the shader's default. Each failure is logged once.
 - The view names each model on the GPU by its model index, the one its instances name, so a renderer keeps a row of
   its own for each.
 - A model nothing has drawn or waited for in `Rendering.ModelKeepSec` leaves the GPU, and loads again when it is next
@@ -72,6 +76,13 @@ the texture reader, with a gem that draws its geometry.
 - The finished picture's middle tones are shown at `Rendering.Gamma`, and it is stretched over the window with
   `Rendering.UpscaleFilter`, whose names are in `TextureFilter`; where a gem upscales it, that gem's picture is copied
   to the window instead. A screenshot is of what the window shows, at the size the picture is shown at.
+- Each failure that a gem or Core tells `RenderGraph.Fail` in a frame is a line of a banner across the top of the
+  window, over the picture: a bar that flashes in the colour of its kind, and its text. The banner
+  shows eight lines at most, and the last then counts the rest. It draws also when the view was not made.
+- A failed post effect is not a line of the banner: a frame flashes blue round the window, with its line along the
+  bottom, and the other effects run. Where the sky failed, the sky flashes coral with "Sky failed" across it; where
+  the clouds failed, a band of the sky above the horizon flashes green with "Weather failed". These two stay in the
+  banner too.
 
 ## Settings
 
@@ -106,5 +117,8 @@ ends in the view it hands on; the second takes it with what the other gems made.
 - The shaders are the `Shaders/` modules in this gem's `Resources`, built on the shader library
   ([Shaders](../../../Resources/Shaders/README.md)). The passes are at the folder's root. The renderer's tables and
   techniques, which the other rendering gems import too, are in the folders under it.
+- The banner's shader, `Embedded/FailureBanner.slang`, is in the gem's assembly, not in `Resources`, so it builds when
+  no file can be read. The gem registers it with `AssetManager.Register` at `Shaders/FailureBanner.slang`. A file at
+  that path in the project or in `Resources` replaces it.
 - Parts of the lighting are adapted from another engine under the MIT licence;
   `THIRD-PARTY-NOTICES.md` holds it.

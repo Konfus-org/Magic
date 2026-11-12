@@ -55,7 +55,7 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
     private readonly Dictionary<string, Named<TopLevelDescription, GpuAcceleration>> _namedTopLevels = [];
     private readonly Dictionary<SamplerDescription, Named<SamplerDescription, GpuSampler>> _samplers = [];
 
-    public GraphicsApi(
+    internal GraphicsApi(
         VulkanGraphicsSettings settings,
         App app,
         Threads threads,

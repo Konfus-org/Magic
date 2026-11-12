@@ -1,7 +1,7 @@
 namespace Magic.Events;
 
 /// <summary>
-/// Tells that a loaded asset was loaded again because its file, or a file it is made from, changed.
+/// Tells that an asset that loaded or failed was loaded again because its file, or a file it is made from, changed.
 /// </summary>
 /// <remarks>
 /// <paramref name="Asset"/> is the new asset. One message is published for each asset, when its load completes.

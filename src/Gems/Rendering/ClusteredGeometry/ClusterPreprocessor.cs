@@ -69,19 +69,33 @@ internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClust
         )
             return Result.Failure("the entry is cut short.");
 
-        return Result.Success(
-            new ModelClusters
-            {
-                ModelVertexCount = header.ModelVertexCount,
-                Vertices = Packing.Read<GpuVertex>(ref bytes, header.VertexCount),
-                Indices = Packing.Read<uint>(ref bytes, header.IndexCount),
-                Clusters = Packing.Read<GpuCluster>(ref bytes, header.ClusterCount),
-                Impostor = Packing.Read<Half>(ref bytes, header.ImpostorHalves),
-                ImpostorUv = Packing.Read<Half>(ref bytes, header.ImpostorUvHalves),
-                BoundsMin = header.BoundsMin,
-                BoundsMax = header.BoundsMax,
-            }
-        );
+        // Each atlas is copied up whole, so an impostor of another size would leave texels of it unwritten.
+        if (
+            header.ImpostorHalves != ImpostorBuilder.Size * ImpostorBuilder.Size * 4
+            || header.ImpostorUvHalves != ImpostorBuilder.Size * ImpostorBuilder.Size * 2
+        )
+            return Result.Failure("its impostor is not the size of an atlas.");
+
+        ModelClusters clusters = new()
+        {
+            ModelVertexCount = header.ModelVertexCount,
+            Vertices = Packing.Read<GpuVertex>(ref bytes, header.VertexCount),
+            Indices = Packing.Read<uint>(ref bytes, header.IndexCount),
+            Clusters = Packing.Read<GpuCluster>(ref bytes, header.ClusterCount),
+            Impostor = Packing.Read<Half>(ref bytes, header.ImpostorHalves),
+            ImpostorUv = Packing.Read<Half>(ref bytes, header.ImpostorUvHalves),
+            BoundsMin = header.BoundsMin,
+            BoundsMax = header.BoundsMax,
+        };
+
+        // A cluster's triangles are read from the indices as its model settles, and drawn from them.
+        foreach (GpuCluster cluster in clusters.Clusters)
+        {
+            if (cluster.TriangleCount > 0 && cluster.IndexOffset + (cluster.TriangleCount * 3L) > header.IndexCount)
+                return Result.Failure("a cluster's triangles are past its indices.");
+        }
+
+        return Result.Success(clusters);
     }
 
     /// <summary>

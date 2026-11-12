@@ -12,7 +12,8 @@ namespace Magic.Graphics;
 /// dispatches or draws, and transfers (uploads, clears, blits, readbacks and builds), which the graph gathers into
 /// passes of their own; take the frame with <see cref="Finish"/>. Core holds one, every gem's Render records into it,
 /// and Core hands what it finishes to <see cref="IGraphicsApi.Present"/>, which puts in the barriers the uses need.
-/// Each method's parameters say which of a <see cref="GpuCommand"/>'s fields its kind reads. Render thread.
+/// Each method's parameters say which of a <see cref="GpuCommand"/>'s fields its kind reads. A gem that cannot record
+/// a part of its frame tells <see cref="Fail"/> and goes on. Render thread.
 /// </summary>
 public sealed class RenderGraph
 {
@@ -23,6 +24,16 @@ public sealed class RenderGraph
     private readonly ImmutableArray<GpuCommand>.Builder _commands = ImmutableArray.CreateBuilder<GpuCommand>();
 
     private GpuPass? _pass;
+
+    private List<(RenderFailure Kind, string What)> _failures = [];
+
+    private List<(RenderFailure Kind, string What)> _failedBefore = [];
+
+    /// <summary>
+    /// What failed in this frame, each once, in the order first told to <see cref="Fail"/>: for a gem that draws them
+    /// late in the frame.
+    /// </summary>
+    public ReadOnlySpan<(RenderFailure Kind, string What)> Failures => CollectionsMarshal.AsSpan(_failures);
 
     /// <summary>
     /// What the GPU has beyond the baseline; nothing while there is no provider.
@@ -40,6 +51,25 @@ public sealed class RenderGraph
     /// no gem provides the GPU.
     /// </summary>
     internal IGraphicsApi? Gpu { get; set; }
+
+    /// <summary>
+    /// The gems' steps that record into the graph, set by Core once the gems are loaded.
+    /// </summary>
+    internal Rendering? Rendering { get; set; }
+
+    /// <summary>
+    /// How many times <see cref="Fail"/> was told in this frame, a failure already in <see cref="Failures"/> too: what
+    /// tells that a part failed though its failure repeats an earlier part's.
+    /// </summary>
+    internal int ToldCount { get; private set; }
+
+    /// <summary>
+    /// Whether <typeparamref name="T"/> will not come this frame because its maker is out: no gem makes it, or the
+    /// step that makes it threw and waits for its retry, lacks an input, or told a failure and made nothing. A gem
+    /// that waits for <typeparamref name="T"/> to let a loading domain show asks it, late in the frame.
+    /// </summary>
+    public bool IsMakerOut<T>()
+        where T : struct => Rendering?.IsMakerOut(typeof(T)) ?? true;
 
     /// <summary>
     /// What <paramref name="texture"/> was made to, the window's image included.
@@ -112,6 +142,40 @@ public sealed class RenderGraph
         }
 
         return all;
+    }
+
+    /// <summary>
+    /// Whether the GPU provider still builds one of <paramref name="shaders"/>, asked in their order up to the first
+    /// that does. One that failed hides none that still builds, as it does in
+    /// <see cref="GetState(ReadOnlySpan{ShaderEntry})"/>.
+    /// </summary>
+    public bool IsAnyLoading(params ReadOnlySpan<ShaderEntry> shaders)
+    {
+        foreach (ShaderEntry shader in shaders)
+        {
+            if (GetState(shader) == GpuState.Loading)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Tells that <paramref name="what"/> failed in this frame, so it shows in the picture: a short constant text, as
+    /// "Shadows are not traced". The first frame it fails in after one it didn't logs it once, with
+    /// <paramref name="reason"/>, the full error. A gem that fails tells it every frame it fails in, and tries again
+    /// in the next.
+    /// </summary>
+    public void Fail(RenderFailure kind, string what, string reason)
+    {
+        ToldCount++;
+        (RenderFailure, string) failure = (kind, what);
+        if (_failures.Contains(failure))
+            return;
+
+        _failures.Add(failure);
+        if (!_failedBefore.Contains(failure))
+            Log.Error($"{kind} failed: {what}. {reason}");
     }
 
     /// <summary>
@@ -204,15 +268,26 @@ public sealed class RenderGraph
 
     /// <summary>
     /// Copies <paramref name="rows"/> into <paramref name="to"/> from <paramref name="offset"/> bytes on, staged through
-    /// the frame's upload ring, in a transfer pass.
+    /// the frame's upload ring, in a transfer pass; false, and nothing copied, when the ring has no room for them: the
+    /// caller keeps them as not sent.
     /// </summary>
-    public void Upload<T>(GpuBuffer to, ReadOnlySpan<T> rows, ulong offset = 0)
-        where T : unmanaged => rows.CopyTo(Upload<T>(to, rows.Length, offset));
+    public bool Upload<T>(GpuBuffer to, ReadOnlySpan<T> rows, ulong offset = 0)
+        where T : unmanaged
+    {
+        Span<T> into = Upload<T>(to, rows.Length, offset);
+        if (into.Length < rows.Length)
+            return false;
+
+        rows.CopyTo(into);
+
+        return true;
+    }
 
     /// <summary>
     /// <paramref name="rows"/> rows of the frame's upload ring to write into, copied into <paramref name="to"/> from
     /// <paramref name="offset"/> bytes on in a transfer pass: write them before the frame is presented. No rows record
-    /// nothing.
+    /// nothing. None when the ring has no room for them: the upload fails (<see cref="Fail"/>), and the caller keeps them
+    /// as not sent.
     /// </summary>
     public Span<T> Upload<T>(GpuBuffer to, int rows, ulong offset = 0)
         where T : unmanaged
@@ -220,9 +295,12 @@ public sealed class RenderGraph
         if (rows == 0)
             return [];
 
-        UseInTransfer(GetUse(to, GpuAccess.CopyDestination), RenderStage.Prepare);
         int bytes = rows * Unsafe.SizeOf<T>();
         GpuUpload upload = BeginUpload(bytes);
+        if (upload.Buffer.IsNone)
+            return [];
+
+        UseInTransfer(GetUse(to, GpuAccess.CopyDestination), RenderStage.Prepare);
         Add(
             new()
             {
@@ -241,12 +319,16 @@ public sealed class RenderGraph
     /// <summary>
     /// Copies <paramref name="pixels"/>, a whole level of the first layer tightly packed, into <paramref name="to"/>'s
     /// <paramref name="level"/>, staged as <see cref="Upload{T}(GpuBuffer, ReadOnlySpan{T}, ulong)"/> stages, in a
-    /// transfer pass. The same level filled twice in a frame gets a pass each.
+    /// transfer pass. The same level filled twice in a frame gets a pass each. False, and nothing copied, when the ring
+    /// has no room for them: the caller keeps them as not sent.
     /// </summary>
-    public void Upload(GpuTexture to, ReadOnlySpan<byte> pixels, int level = 0)
+    public bool Upload(GpuTexture to, ReadOnlySpan<byte> pixels, int level = 0)
     {
-        UseInTransfer(GetUse(to, GpuAccess.CopyDestination, level), RenderStage.Prepare);
         GpuUpload upload = BeginUpload(pixels.Length);
+        if (upload.Buffer.IsNone)
+            return false;
+
+        UseInTransfer(GetUse(to, GpuAccess.CopyDestination, level), RenderStage.Prepare);
         pixels.CopyTo(upload.Bytes);
         Add(
             new()
@@ -258,6 +340,7 @@ public sealed class RenderGraph
                 X = (uint)level,
             }
         );
+        return true;
     }
 
     /// <summary>
@@ -328,6 +411,16 @@ public sealed class RenderGraph
         );
     }
 
+    /// <summary>
+    /// Empties <see cref="Failures"/> for a new frame, and keeps the last frame's to tell which failures are new.
+    /// </summary>
+    internal void StartFailures()
+    {
+        (_failedBefore, _failures) = (_failures, _failedBefore);
+        _failures.Clear();
+        ToldCount = 0;
+    }
+
     internal void EndPass()
     {
         GpuPass pass = _pass ?? throw new InvalidOperationException("No pass has begun.");
@@ -362,6 +455,19 @@ public sealed class RenderGraph
         }
     }
 
+    /// <summary>
+    /// Leaves out the compute or draw pass open, with no word: for a gem that threw in it, whose failure is told.
+    /// </summary>
+    internal void LeaveOutOpenPass()
+    {
+        if (_pass is not { Kind: not GpuPassKind.Transfer })
+            return;
+
+        _uses.Clear();
+        _commands.Clear();
+        _pass = null;
+    }
+
     private static GpuUse GetUse(GpuResource resource, GpuAccess access, int level = -1) =>
         new()
         {
@@ -371,8 +477,22 @@ public sealed class RenderGraph
             Level = level,
         };
 
-    private GpuUpload BeginUpload(int bytes) =>
-        (Gpu ?? throw new InvalidOperationException("There is no GPU provider to upload through.")).BeginUpload(bytes);
+    /// <summary>
+    /// Room for <paramref name="bytes"/> in the frame's upload ring; none, and the upload told as failed, when the GPU
+    /// provider has no room or there is no provider.
+    /// </summary>
+    private GpuUpload BeginUpload(int bytes)
+    {
+        GpuUpload upload = Gpu is { } gpu ? gpu.BeginUpload(bytes) : default;
+        if (upload.Buffer.IsNone)
+            Fail(
+                RenderFailure.Resource,
+                "Uploads are dropped",
+                "the GPU provider has no room to stage them, or there is no provider."
+            );
+
+        return upload;
+    }
 
     private void Begin(in GpuPass pass)
     {
@@ -394,11 +514,9 @@ public sealed class RenderGraph
             return;
         }
 
-        // The gem threw in its Render or forgot to end the pass: the other gems' passes still draw.
+        // The gem forgot to end the pass: the other gems' passes still draw.
         Log.Error($"The pass {open.Name} was never ended, so it is left out of the frame.");
-        _uses.Clear();
-        _commands.Clear();
-        _pass = null;
+        LeaveOutOpenPass();
     }
 
     /// <summary>

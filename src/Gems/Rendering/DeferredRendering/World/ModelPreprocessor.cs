@@ -97,18 +97,34 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
         if (header.VertexCount < 0 || header.IndexCount < 0 || header.MeshCount < 0 || bytes.Length < needed)
             return Result.Failure("the entry is cut short.");
 
-        return Result.Success(
-            new MeshDerived
-            {
-                Vertices = Packing.Read<GpuVertex>(ref bytes, header.VertexCount),
-                Indices = Packing.Read<uint>(ref bytes, header.IndexCount),
-                Meshes = Packing.Read<GpuMesh>(ref bytes, header.MeshCount),
-                BoundsCenter = header.BoundsCenter,
-                BoundsRadius = header.BoundsRadius,
-                BoundsMin = header.BoundsMin,
-                BoundsMax = header.BoundsMax,
-            }
-        );
+        MeshDerived made = new()
+        {
+            Vertices = Packing.Read<GpuVertex>(ref bytes, header.VertexCount),
+            Indices = Packing.Read<uint>(ref bytes, header.IndexCount),
+            Meshes = Packing.Read<GpuMesh>(ref bytes, header.MeshCount),
+            BoundsCenter = header.BoundsCenter,
+            BoundsRadius = header.BoundsRadius,
+            BoundsMin = header.BoundsMin,
+            BoundsMax = header.BoundsMax,
+        };
+
+        // Each mesh's triangles run from its offset to the next mesh's, and each index names a vertex.
+        uint end = (uint)header.IndexCount;
+        for (int i = made.Meshes.Length - 1; i >= 0; i--)
+        {
+            if (made.Meshes[i].IndexOffset > end)
+                return Result.Failure("a mesh's triangles are past its indices.");
+
+            end = made.Meshes[i].IndexOffset;
+        }
+
+        foreach (uint index in made.Indices)
+        {
+            if (index >= header.VertexCount)
+                return Result.Failure("an index is past its vertices.");
+        }
+
+        return Result.Success(made);
     }
 
     /// <summary>

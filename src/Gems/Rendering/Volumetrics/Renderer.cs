@@ -1,6 +1,6 @@
+using System.Collections.Immutable;
 using System.Numerics;
 using Magic.Assets;
-using Magic.Debugging;
 using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
 using Magic.Ecs;
@@ -9,6 +9,7 @@ using Magic.Graphics;
 using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
+using Magic.Worlds;
 
 namespace Magic.Volumetrics;
 
@@ -23,8 +24,7 @@ public readonly record struct VolumetricsInput(GpuView View, TracedWorld? Traced
 /// from the camera, recorded in the light stage, written into the frame's buffer and made as the frame's
 /// <see cref="Air"/>, which shading takes, with the clouds it draws over the sky. Clear air makes none.
 /// </summary>
-public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, IEcs ecs)
-    : IRender<VolumetricsInput, Air>
+public sealed class Renderer : IRender<VolumetricsInput, Air>, IRender, IHookIntoDomainLoading
 {
     /// <summary>
     /// The volume's slices away from the camera, the twin of <c>AirSlices</c> in the renderer's <c>Light/Air.slang</c>.
@@ -47,15 +47,23 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
 
     private static readonly string[] _scatteringNames = ["Air scattering 0", "Air scattering 1"];
 
-    private readonly IEcs _ecs = ecs;
+    /// <summary>
+    /// Done once the air's and the clouds' shaders are built or failed, which a domain loading waits for, so a shader
+    /// that fails is told and logged before the world shows.
+    /// </summary>
+    private readonly TaskCompletionSource _built = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private readonly VolumetricsSettings _settings;
+
+    private readonly IEcs _ecs;
 
     private readonly Mailbox<EcsSnapshot<Weather>> _weather = new();
 
-    private readonly ShaderEntry _scatterShader = PassShaders.GetEntry(assets, "FillAir", "ScatterAir");
+    private readonly ShaderEntry _scatterShader;
 
-    private readonly ShaderEntry _integrateShader = PassShaders.GetEntry(assets, "FillAir", "IntegrateAir");
+    private readonly ShaderEntry _integrateShader;
 
-    private readonly ShaderEntry _cloudShader = PassShaders.GetEntry(assets, "DrawClouds", "DrawClouds");
+    private readonly ShaderEntry _cloudShader;
 
     /// <summary>
     /// The volume's size when it was last filled; none while its history holds nothing. Render thread.
@@ -67,17 +75,29 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
     /// </summary>
     private GpuTexture? _drawnClouds;
 
+    internal Renderer(VolumetricsSettings settings, AssetManager assets, IEcs ecs)
+    {
+        _settings = settings;
+        _ecs = ecs;
+        _scatterShader = PassShaders.GetEntry(assets, "FillAir", "ScatterAir");
+        _integrateShader = PassShaders.GetEntry(assets, "FillAir", "IntegrateAir");
+        _cloudShader = PassShaders.GetEntry(assets, "DrawClouds", "DrawClouds");
+    }
+
     /// <summary>
     /// The frame's air, while the passes' shaders are built, what they read and write is made, and the world's weather
     /// holds a haze or clouds; none otherwise, and the air changes nothing.
     /// </summary>
     public Air? Render(in Frame frame, RenderGraph graph, in VolumetricsInput input)
     {
-        bool isBuilt = graph.GetState(_scatterShader, _integrateShader) == GpuState.Ready;
+        GpuState shaders = graph.GetState(_scatterShader, _integrateShader);
+        if (shaders == GpuState.Failed)
+            graph.Fail(RenderFailure.Shader, "Air is not filled", "a shader of the air was not built.");
+
         if (
             _weather.TakeNewest() is not { First: [var weather, ..] }
             || weather is { FogDensity: <= 0, CloudCover: <= 0 }
-            || !isBuilt
+            || shaders != GpuState.Ready
         )
         {
             _filled = null;
@@ -88,7 +108,7 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
 
         // Two scattering volumes swap every frame, the other holding last frame's, which this frame's blends with.
         GpuView gpu = input.View;
-        (int Width, int Height) size = gpu.Scaled(settings.VolumetricsScale);
+        (int Width, int Height) size = gpu.Scaled(_settings.VolumetricsScale);
         int written = (int)(frame.Index % 2);
         Result<GpuTexture> scattering = graph.Texture(GetVolume(_scatteringNames[written], size));
         Result<GpuTexture> history = graph.Texture(GetVolume(_scatteringNames[1 - written], size));
@@ -96,26 +116,34 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
         Result<GpuSampler> sampler = graph.Sampler(new SamplerDescription { Wrap = TextureWrap.Clamp });
         if (Result.FindFailure(scattering, history, air, sampler) is { Ok: false } failed)
         {
-            Log.Error($"The air is not filled: {failed.Error}");
+            graph.Fail(RenderFailure.Resource, "Air is not filled", failed.Error);
 
             return null;
         }
 
         GpuTexture? cloudy = null;
-        if (weather.CloudCover > 0 && graph.GetState(_cloudShader) == GpuState.Ready)
+        GpuState cloudShader = graph.GetState(_cloudShader);
+        if (weather.CloudCover > 0)
         {
-            Result<GpuTexture> clouds = graph.Texture(_cloudsDescription);
-            if (clouds.Ok)
-                cloudy = clouds.Value;
-            else
-                Log.Error($"The clouds are not drawn: {clouds.Error}");
+            if (cloudShader == GpuState.Failed)
+            {
+                graph.Fail(RenderFailure.Weather, "Clouds are not drawn", "the clouds' shader was not built.");
+            }
+            else if (cloudShader == GpuState.Ready)
+            {
+                Result<GpuTexture> clouds = graph.Texture(_cloudsDescription);
+                if (clouds.Ok)
+                    cloudy = clouds.Value;
+                else
+                    graph.Fail(RenderFailure.Weather, "Clouds are not drawn", clouds.Error);
+            }
         }
 
         GpuAir row = new()
         {
             Volume = air.Value.Id,
             Sampler = sampler.Value.Id,
-            Distance = settings.VolumetricsDistance,
+            Distance = _settings.VolumetricsDistance,
             Density = weather.FogDensity,
             Height = weather.FogHeight,
             HalfHeight = weather.FogHalfHeight,
@@ -126,7 +154,9 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
             CloudHeight = weather.CloudHeight,
             Wind = new Vector2(weather.Wind.X, weather.Wind.Z),
         };
-        graph.Upload(gpu.Frame, [row], GpuAir.Offset);
+        // Not staged: nothing is recorded, and the frame's row stays the view's default, which the shaders read as none.
+        if (!graph.Upload(gpu.Frame, [row], GpuAir.Offset))
+            return null;
 
         // Each cell's light and haze, blended with last frame's where the cell was then, then summed along each column
         // away from the camera. The pass header's x is the frame's buffer, y the scattering written, z last frame's, 0
@@ -172,7 +202,20 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
     }
 
     /// <summary>
-    /// Publishes the world's weather for <see cref="Render"/>.
+    /// Asks for every shader of the air and the clouds each frame, from the first and whatever the weather, so each is
+    /// built, or failed, before a domain shows.
+    /// </summary>
+    public void Render(in Frame frame, RenderGraph graph)
+    {
+        if (!graph.IsAnyLoading(_scatterShader, _integrateShader, _cloudShader))
+            _built.TrySetResult();
+    }
+
+    public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel) =>
+        _built.Task.WaitAsync(cancel);
+
+    /// <summary>
+    /// Publishes the world's weather for the frame's air.
     /// </summary>
     internal void PublishWeather()
     {

@@ -88,19 +88,24 @@ internal sealed class DebugUIOverlay
         }
 
         TextureDescription description = graph.GetDescription(target);
-        graph.Upload(vertices.Value, vertexRows);
-        graph.Upload(indices.Value, indexRows);
-        graph.Upload(
-            constants.Value,
-            [
-                new DebugUIConstants
-                {
-                    InverseSize = new Vector2(1f / description.Width, 1f / description.Height),
-                    Vertices = vertices.Value.Id,
-                    Sampler = sampler.Value.Id,
-                },
-            ]
-        );
+        // A frame whose rows were not staged draws no UI; the next frame sends its own.
+        bool isSent =
+            graph.Upload(vertices.Value, vertexRows)
+            && graph.Upload(indices.Value, indexRows)
+            && graph.Upload(
+                constants.Value,
+                [
+                    new DebugUIConstants
+                    {
+                        InverseSize = new Vector2(1f / description.Width, 1f / description.Height),
+                        Vertices = vertices.Value.Id,
+                        Sampler = sampler.Value.Id,
+                    },
+                ]
+            );
+        if (!isSent)
+            return;
+
         RecordDraws(frame, graph, target, description, vertices.Value, indices.Value, constants.Value);
     }
 
@@ -130,19 +135,22 @@ internal sealed class DebugUIOverlay
     {
         while (_textureChanges.TryPeek(out DebugUITextureChange change) && change.Frame <= frame)
         {
-            _textureChanges.TryRead(out _);
-            if (change.Pixels is { } pixels)
-                FillTexture(change, pixels, graph);
-            else
+            // A fill that was not staged waits, with the changes after it, for the next frame.
+            if (change.Pixels is { } pixels && !FillTexture(change, pixels, graph))
+                return;
+
+            if (change.Pixels is null)
                 _textures.Remove(change.Texture);
+
+            _textureChanges.TryRead(out _);
         }
     }
 
     /// <summary>
     /// The texture asked for at the change's size, under a name of its own, and filled with <paramref name="pixels"/>
-    /// whole.
+    /// whole; false while the ring has no room for the pixels.
     /// </summary>
-    private void FillTexture(in DebugUITextureChange change, byte[] pixels, RenderGraph graph)
+    private bool FillTexture(in DebugUITextureChange change, byte[] pixels, RenderGraph graph)
     {
         TextureDescription description = new(
             $"Debug UI texture {change.Texture}",
@@ -156,11 +164,12 @@ internal sealed class DebugUIOverlay
         {
             Log.Error($"A debug UI texture was not made: {made.Error}");
 
-            return;
+            return true;
         }
 
         _textures[change.Texture] = (description, made.Value);
-        graph.Upload(made.Value, pixels);
+
+        return graph.Upload(made.Value, pixels);
     }
 
     /// <summary>

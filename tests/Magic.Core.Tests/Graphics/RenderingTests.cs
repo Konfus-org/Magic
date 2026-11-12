@@ -38,7 +38,7 @@ public sealed class RenderingTests
     }
 
     [Fact]
-    public void PumpDropsAGemWhoseRequiredInputNoGemMakes()
+    public void PumpSkipsAGemWhoseRequiredInputNoGemMakes()
     {
         List<string> calls = [];
         Pump(new Lost(calls), new World(calls, new View(1)));
@@ -88,12 +88,12 @@ public sealed class RenderingTests
     }
 
     [Fact]
-    public void PumpCallsAGemThatTakesAndMakesNothingInItsOrder()
+    public void PumpCallsAGemThatTakesAndMakesNothingAfterTheOthers()
     {
         List<string> calls = [];
         Pump(new Overlay(calls), new World(calls, new View(1)));
 
-        Assert.Equal(["Overlay", "World"], calls);
+        Assert.Equal(["World", "Overlay"], calls);
     }
 
     [Fact]
@@ -103,6 +103,28 @@ public sealed class RenderingTests
         Pump(new Sun(), shade);
 
         Assert.Equal(new ShadeInput(new View(3), new Light(4)), shade.Taken);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void IsMakerOutTellsOnlyWhenTheMakerFailedAndMadeNothing(bool fails)
+    {
+        Watch watch = new();
+        Rendering rendering = Register(new Broken(fails), new Lost([]), watch);
+        rendering.Pump(_frame, new RenderGraph { Rendering = rendering });
+
+        Assert.Equal(fails, watch.IsViewOut);
+    }
+
+    [Fact]
+    public void IsMakerOutTellsWhenTheMakersOnlyFailureAnEarlierPartAlreadyTold()
+    {
+        Watch watch = new();
+        Rendering rendering = Register(new Dim(), new Echo(), watch);
+        rendering.Pump(_frame, new RenderGraph { Rendering = rendering });
+
+        Assert.True(watch.IsViewOut);
     }
 
     private static Rendering Register(params object[] parts)
@@ -171,6 +193,44 @@ public sealed class RenderingTests
     private sealed class Overlay(List<string> calls) : IRender
     {
         public void Render(in Frame frame, RenderGraph graph) => calls.Add(nameof(Overlay));
+    }
+
+    private sealed class Broken(bool fails) : IRenderInto<View>
+    {
+        public View? Render(in Frame frame, RenderGraph graph)
+        {
+            if (fails)
+                graph.Fail(RenderFailure.Pass, "View is not made", "it broke.");
+
+            return null;
+        }
+    }
+
+    private sealed class Dim : IRenderInto<Light>
+    {
+        public Light? Render(in Frame frame, RenderGraph graph)
+        {
+            graph.Fail(RenderFailure.Pass, "View is not made", "it broke.");
+
+            return new Light(1);
+        }
+    }
+
+    private sealed class Echo : IRender<EggInput, View>
+    {
+        public View? Render(in Frame frame, RenderGraph graph, in EggInput input)
+        {
+            graph.Fail(RenderFailure.Pass, "View is not made", "it broke again.");
+
+            return null;
+        }
+    }
+
+    private sealed class Watch : IRender
+    {
+        public bool IsViewOut { get; private set; }
+
+        public void Render(in Frame frame, RenderGraph graph) => IsViewOut = graph.IsMakerOut<View>();
     }
 
     private sealed class Sun : IRenderInto<(View, Light)>

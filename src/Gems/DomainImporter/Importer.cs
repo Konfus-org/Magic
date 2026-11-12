@@ -12,17 +12,21 @@ namespace Magic.DomainImporter;
 /// folder named <c>x_y_z</c> a chunk, and any other at the domain's origin. The file itself holds nothing, so <c>{}</c>
 /// does.
 /// </summary>
-public sealed class Importer(AssetManager assets) : IAssetImporter<Domain>
+public sealed class Importer : IAssetImporter<Domain>
 {
+    private readonly AssetManager _assets;
+
+    internal Importer(AssetManager assets) => _assets = assets;
+
     public ImmutableArray<string> Extensions { get; } = [".domain"];
 
     public Task<Result<Domain>> ImportAsync(AssetFile file, IProgress<LoadProgress>? progress, CancellationToken cancel)
     {
         ImmutableArray<Chunk>.Builder chunks = ImmutableArray.CreateBuilder<Chunk>();
         ImmutableArray<Handle<Prefab>>.Builder globals = ImmutableArray.CreateBuilder<Handle<Prefab>>();
-        foreach (string path in assets.GetNeighbors(file))
+        foreach (string path in _assets.GetNeighbors(file))
         {
-            Handle<Prefab> prefab = assets.Find<Prefab>(path);
+            Handle<Prefab> prefab = _assets.Find<Prefab>(path);
             if (prefab == Handle<Prefab>.None)
                 continue;
 
