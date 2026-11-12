@@ -88,7 +88,7 @@ internal sealed class Rendering
         foreach (Step step in _steps)
         {
             long start = Metrics.HookDurations.Start();
-            int told = graph.Failures.Length;
+            int told = graph.ToldCount;
             if (step.Missing is null && (step.RetrySec is not { } retry || frame.AppSec >= retry))
             {
                 try
@@ -113,7 +113,7 @@ internal sealed class Rendering
             if (isSkipped)
                 graph.Fail(RenderFailure.Pass, step.Failure.What, step.Failure.Reason);
 
-            step.IsOut = isSkipped || (!step.HasMade && graph.Failures.Length > told);
+            step.IsOut = isSkipped || (!step.HasMade && graph.ToldCount > told);
 
             // A gem with several steps is timed once, by its last step, for the time of all of them.
             long since = start == 0 ? 0 : start - step.Earlier;

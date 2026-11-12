@@ -117,6 +117,16 @@ public sealed class RenderingTests
         Assert.Equal(fails, watch.IsViewOut);
     }
 
+    [Fact]
+    public void IsMakerOutTellsWhenTheMakersOnlyFailureAnEarlierPartAlreadyTold()
+    {
+        Watch watch = new();
+        Rendering rendering = Register(new Dim(), new Echo(), watch);
+        rendering.Pump(_frame, new RenderGraph { Rendering = rendering });
+
+        Assert.True(watch.IsViewOut);
+    }
+
     private static Rendering Register(params object[] parts)
     {
         Rendering rendering = new();
@@ -191,6 +201,26 @@ public sealed class RenderingTests
         {
             if (fails)
                 graph.Fail(RenderFailure.Pass, "View is not made", "it broke.");
+
+            return null;
+        }
+    }
+
+    private sealed class Dim : IRenderInto<Light>
+    {
+        public Light? Render(in Frame frame, RenderGraph graph)
+        {
+            graph.Fail(RenderFailure.Pass, "View is not made", "it broke.");
+
+            return new Light(1);
+        }
+    }
+
+    private sealed class Echo : IRender<EggInput, View>
+    {
+        public View? Render(in Frame frame, RenderGraph graph, in EggInput input)
+        {
+            graph.Fail(RenderFailure.Pass, "View is not made", "it broke again.");
 
             return null;
         }

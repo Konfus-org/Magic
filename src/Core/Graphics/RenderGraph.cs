@@ -58,6 +58,12 @@ public sealed class RenderGraph
     internal Rendering? Rendering { get; set; }
 
     /// <summary>
+    /// How many times <see cref="Fail"/> was told in this frame, a failure already in <see cref="Failures"/> too: what
+    /// tells that a part failed though its failure repeats an earlier part's.
+    /// </summary>
+    internal int ToldCount { get; private set; }
+
+    /// <summary>
     /// Whether <typeparamref name="T"/> will not come this frame because its maker is out: no gem makes it, or the
     /// step that makes it threw and waits for its retry, lacks an input, or told a failure and made nothing. A gem
     /// that waits for <typeparamref name="T"/> to let a loading domain show asks it, late in the frame.
@@ -162,6 +168,7 @@ public sealed class RenderGraph
     /// </summary>
     public void Fail(RenderFailure kind, string what, string reason)
     {
+        ToldCount++;
         (RenderFailure, string) failure = (kind, what);
         if (_failures.Contains(failure))
             return;
@@ -411,6 +418,7 @@ public sealed class RenderGraph
     {
         (_failedBefore, _failures) = (_failures, _failedBefore);
         _failures.Clear();
+        ToldCount = 0;
     }
 
     internal void EndPass()
