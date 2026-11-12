@@ -17,6 +17,8 @@ The commands and rules in this skill are in [PROJECT.md](../PROJECT.md).
 3. Get a review in a fresh context. Give the reviewer the worktree, the merge target and the slice. Use the reviewer
    in PROJECT.md. If there is none, use a new session or subagent that follows the
    [review-slice skill](../review-slice/SKILL.md).
+   - Skip this step for a small slice: 50 changed lines or fewer, or a change at the lowest validation level. Do not
+     skip it when the slice changes a public API, a file format or a dependency.
    - Fix each finding at its cause, or give the evidence for not fixing it. Then do step 1 again.
    - Get a new review only when the fixes add more than approximately 100 lines.
 4. Write the summary:

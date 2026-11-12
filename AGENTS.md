@@ -83,7 +83,8 @@ In Claude Code, the agent hooks in `.claude/settings.json` hold the workflow wit
 - The status line shows the slice's size against its limit of 300 lines, and how full the context is.
 - `git commit` and `git merge` are refused for a state `tools/Scripts/AgentTaskComplete.ps1` hasn't stamped, and for
   a slice the `slice-reviewer` subagent hasn't reviewed. One review covers the slice until fixes add more than about
-  100 lines. A swarm's slice, which commits into its root, needs no review.
+  100 lines. A swarm's slice, which commits into its root, needs no review, and neither does a small slice: 50
+  changed lines or fewer, or a `Docs` change.
 - A plan opens in plannotator for the user's approval.
 - C# diagnostics reach you after every edit through the C# language server plugin.
 
@@ -179,7 +180,7 @@ subagent and keep only its answer.
 
 ### Finish
 
-A built slice is validated, reviewed in a fresh context, summarized and shown to the user, and merges only on their
+A built slice is validated, reviewed in a fresh context unless it is small, summarized and shown to the user, and merges only on their
 approval (the finish skill). A swarm's slices go into its root branch, which
 gets QA, a cleanup and one review by the user before it merges (the parallelize skill).
 
