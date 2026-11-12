@@ -9,8 +9,10 @@ branch and the time that it ends. -Minutes takes the turn for the worktree that 
 ten minutes, until no run of Magic, build or test run from another worktree is going, and the minutes start after
 that. It fails when another worktree holds a turn that has not ended, or when the other runs don't end in time.
 -Release ends the worktree's turn: run the copy of the script in the worktree that holds it. -Wait waits while another
-worktree holds a turn, and returns at once otherwise: the scripts that build or run Magic call it before each step. A
-turn ends by itself at its time, so a holder that stops can't block the others. Runs from any current directory.
+worktree holds a turn, and returns at once otherwise: the scripts that run Magic or the tests call it before each
+step. -Build runs a build or a format: on Windows at once, at idle priority, which every process it starts takes too,
+so that it uses only what the profiled run leaves idle; elsewhere after -Wait. A turn ends by itself at its time, so a
+holder that stops can't block the others. Runs from any current directory.
 
 .PARAMETER Minutes
 Takes the turn for this many minutes, at most 20.
@@ -20,6 +22,9 @@ Ends this worktree's turn.
 
 .PARAMETER Wait
 Waits while another worktree holds a turn.
+
+.PARAMETER Build
+The build or format to run without disturbing another worktree's turn. The script exits with its exit code.
 
 .EXAMPLE
 tools/Scripts/Profiling.ps1 -Minutes 15
@@ -32,13 +37,34 @@ param(
     [ValidateRange(1, 20)]
     [int] $Minutes,
     [switch] $Release,
-    [switch] $Wait
+    [switch] $Wait,
+    [scriptblock] $Build
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 # A native command's exit code is read below, never thrown (PowerShell 7.4 would otherwise throw on it).
 $PSNativeCommandUseErrorActionPreference = $false
+
+# The build runs here, before this script names anything, as it reads the variables of the script that called this one.
+if ($Build) {
+    # A native command's stderr is output here, since Windows PowerShell would otherwise stop on its first line.
+    $ErrorActionPreference = 'Continue'
+    if ([System.Environment]::OSVersion.Platform -eq 'Win32NT') {
+        $self = [System.Diagnostics.Process]::GetCurrentProcess()
+        $was = $self.PriorityClass
+        $self.PriorityClass = 'Idle'
+        try {
+            & $Build
+        } finally {
+            $self.PriorityClass = $was
+        }
+    } else {
+        & $PSCommandPath -Wait
+        & $Build
+    }
+    exit $LASTEXITCODE
+}
 
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $common = [string](git -C $root rev-parse --path-format=absolute --git-common-dir)
@@ -133,7 +159,7 @@ if ($Release) {
 }
 
 if (-not $PSBoundParameters.ContainsKey('Minutes')) {
-    Write-Host 'Take a turn with -Minutes, or use -Release or -Wait.'
+    Write-Host 'Take a turn with -Minutes, or use -Release, -Wait or -Build.'
     exit 1
 }
 

@@ -124,7 +124,14 @@ function Invoke-Screenshot {
 }
 
 $steps = @(
-    @{ Name = 'Build'; Run = { dotnet build $solution --configuration $Configuration -tl:off -p:CSharpier_Check=true } }
+    @{
+        Name = 'Build'
+        Run = {
+            & (Join-Path $PSScriptRoot 'Profiling.ps1') -Build {
+                dotnet build $solution --configuration $Configuration -tl:off -p:CSharpier_Check=true
+            }
+        }
+    }
     @{ Name = 'Test'; Run = { dotnet test --solution $solution --configuration $Configuration --no-build } }
     @{ Name = 'Headless'; Run = { Invoke-Headless } }
     @{ Name = 'Screenshot'; Run = { Invoke-Screenshot } }
@@ -144,8 +151,9 @@ foreach ($step in $steps) {
         }
     }
 
-    # Another branch's profiling turn must not be disturbed: wait for it to end before each step.
-    & (Join-Path $PSScriptRoot 'Profiling.ps1') -Wait
+    # Another branch's profiling turn must not be disturbed: wait for it to end before each step but the build, which
+    # runs at idle priority instead.
+    if ($step.Name -ne 'Build') { & (Join-Path $PSScriptRoot 'Profiling.ps1') -Wait }
     Write-Output ""
     Write-Output "==> $($step.Name)"
     $started = [System.Diagnostics.Stopwatch]::StartNew()

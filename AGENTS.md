@@ -43,7 +43,8 @@ The scripts run under `pwsh` and Windows PowerShell ([Tools](docs/TOOLS.md)).
   Do not start `Magic`, `Magic.exe` or `dotnet run` on the engine or a sample in another way. `Magic new` and
   `Magic --help` open nothing, so they are allowed.
 - **Profiling:** `tools/Scripts/Profiling.ps1 -Minutes <n>` takes a profiling turn for the branch, and `-Release` ends
-  it. While another branch's turn runs, the scripts that build or run Magic wait for it to end.
+  it. While another branch's turn runs, the scripts that run Magic or the tests wait for it to end. On Windows, their
+  builds and formats run at once, at idle priority.
 - **Claim:** `tools/Scripts/Claim.ps1 -Slice <title> -Scope <paths>` tells every other session what the slice will
   change, and prints any overlap with theirs ([Worktrees](#worktrees)).
 - **Configuration:** build and run `Debug`. To measure or profile performance, use `Optimize`. Use `Release` only when
@@ -77,7 +78,8 @@ In Claude Code, the agent hooks in `.claude/settings.json` hold the workflow wit
 - An edit to a file in the main checkout is refused. Starting Claude Code with `MAGIC_ALLOW_MAIN_EDITS=1` allows it
   for that session; only the user sets it.
 - A command that starts Magic other than through the scripts in [Run Magic](#commands) is refused.
-- A build or a test run is refused while another branch's profiling turn runs.
+- A `dotnet build` or test run is refused while another branch's profiling turn runs. Build with
+  `tools/Scripts/Validate.ps1 -Only Build` instead, which on Windows runs at idle priority and does not wait.
 - An edit inside another session's claim is refused unless this worktree's own claim covers it too
   ([Worktrees](#worktrees)).
 - The status line shows the slice's size against its limit of 300 lines, and how full the context is.
@@ -276,7 +278,7 @@ When you reply to the user:
 | worker | A session that a coordinator starts: a coder that builds one slice, a merge train, QA or cleanup. |
 | swarm plan | The file that holds a swarm's slices and their states (the parallelize skill). |
 | worker limit | How many workers of a swarm run at the same time. |
-| profiling turn | A time in which one branch alone builds and runs Magic, to profile or measure CPU, RAM or GPU use (`tools/Scripts/Profiling.ps1`). |
+| profiling turn | A time in which one branch alone runs Magic and the tests, to profile or measure CPU, RAM or GPU use. Other branches build only at idle priority (`tools/Scripts/Profiling.ps1`). |
 | merge train | Done slices of a swarm that one worker builds and merges into the root together (the parallelize skill). |
 | QA | The check of a swarm's root for bugs by a worker that ranks them and fixes nothing (the qa skill). |
 | root branch | The branch that the slices of one feature merge into before it merges into the merge target. |

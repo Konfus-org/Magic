@@ -58,8 +58,10 @@ script does not build.
 
 ## Profiling.ps1
 
-Takes, waits for or releases a profiling turn. In a profiling turn, only one worktree builds and runs Magic, so that
-nothing disturbs its measurements. The scripts that build or run Magic wait while another worktree holds a turn.
+Takes, waits for or releases a profiling turn. In a profiling turn, only one worktree runs Magic and the tests, so
+that nothing disturbs its measurements. The scripts that run Magic or the tests wait while another worktree holds a
+turn. On Windows, `Format.ps1` and the build of `Validate.ps1` run at once, at idle priority. On other systems, they
+wait.
 
 ## Claim.ps1
 

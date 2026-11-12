@@ -94,7 +94,7 @@ turn=unread
 for part in "${parts[@]}"; do
     if [[ $part =~ $builds ]]; then
         [ "$turn" = unread ] && turn=$(other_turn)
-        [ -n "$turn" ] && deny "The profiling turn of $turn is running, and a build or a test run would disturb it. Wait until it ends, then run the command again (tools/Scripts/Profiling.ps1 -Wait waits for it)."
+        [ -n "$turn" ] && deny "The profiling turn of $turn is running, and a build or a test run would disturb it. Build with tools/Scripts/Validate.ps1 -Only Build, which runs at idle priority and does not wait, or wait until the turn ends (tools/Scripts/Profiling.ps1 -Wait)."
     fi
     starts_magic "$part" || continue
     reason="Start Magic only with tools/Scripts/Run.ps1, or Screenshot.ps1 and Validate.ps1, which name its window for this session (AGENTS.md, Commands). For example: tools/Scripts/Run.ps1 -Project samples/Forest/Forest.magic, or tools/Scripts/Run.ps1 -Headless -Commands 'wait loaded', 'exit'."

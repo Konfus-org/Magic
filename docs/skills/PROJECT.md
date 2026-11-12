@@ -79,7 +79,7 @@ These add to the table in the [timeouts skill](timeouts/SKILL.md).
 | `tools/Scripts/AgentTaskComplete.ps1` or `tools/Scripts/Validate.ps1` | 60 minutes |
 | `tools/Scripts/Profiling.ps1 -Minutes <n>` | 11 minutes |
 
-A script that builds or runs Magic waits while another worktree holds a profiling turn. Add the time that the turn has
+A script that runs Magic or the tests waits while another worktree holds a profiling turn. Add the time that the turn has
 left to the limit of that script.
 
 ## Profiling
