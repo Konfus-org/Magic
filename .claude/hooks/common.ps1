@@ -61,6 +61,18 @@ function Test-ThisRepository($checkout) {
     return (ConvertTo-Key $project) -eq (ConvertTo-Key $checkout.Common)
 }
 
+# The lines that a git diff --numstat adds and removes, binary files aside.
+function Measure-ChangedLines([string] $top, [string[]] $arguments) {
+    $lines = 0
+    foreach ($row in @(Invoke-Git $top $arguments)) {
+        $parts = ([string]$row) -split "`t"
+        if ($parts.Count -ge 2 -and $parts[0] -match '^\d+$' -and $parts[1] -match '^\d+$') {
+            $lines += [int]$parts[0] + [int]$parts[1]
+        }
+    }
+    return $lines
+}
+
 # The checkout's state as tools/Scripts/AgentTaskComplete.ps1 stamps it: the git tree of every file, tracked or new,
 # built in an index of its own. Also the lines changed against the merge base with the merge target.
 function Get-SliceState($checkout) {
@@ -78,12 +90,7 @@ function Get-SliceState($checkout) {
         if ($checkout.Target) { $base = Invoke-Git $top @('merge-base', 'HEAD', $checkout.Target) }
         if ($base) {
             $baseTree = [string](Invoke-Git $top @('rev-parse', "$base^{tree}"))
-            foreach ($row in @(Invoke-Git $top @('diff', '--cached', '--numstat', [string]$base))) {
-                $parts = ([string]$row) -split "`t"
-                if ($parts.Count -ge 2 -and $parts[0] -match '^\d+$' -and $parts[1] -match '^\d+$') {
-                    $lines += [int]$parts[0] + [int]$parts[1]
-                }
-            }
+            $lines = Measure-ChangedLines $top @('diff', '--cached', '--numstat', [string]$base)
         }
         return [pscustomobject]@{ Tree = $tree; BaseTree = $baseTree; Lines = $lines }
     } finally {

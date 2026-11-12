@@ -16,7 +16,7 @@ asked, when its trigger fits: read its `SKILL.md` and follow it. Claude Code als
 | [slice](docs/skills/slice/SKILL.md) | Any change to code, docs or tools, and the next agreed slice |
 | [finish](docs/skills/finish/SKILL.md) | A slice's code is written, or the user's review comments are addressed |
 | [review-slice](docs/skills/review-slice/SKILL.md) | Reviewing a validated slice from a context that didn't write it |
-| [tidy-worktrees](docs/skills/tidy-worktrees/SKILL.md) | The start of every session |
+| [tidy-worktrees](docs/skills/tidy-worktrees/SKILL.md) | The SessionStart note lists finished worktrees or stale claims |
 | [investigate](docs/skills/investigate/SKILL.md) | Something is broken, logs an error or draws wrong |
 | [new-gem](docs/skills/new-gem/SKILL.md) | A slice needs a new gem |
 | [cleanup](docs/skills/cleanup/SKILL.md) | The user asks to clean up, refactor or simplify code |
@@ -25,7 +25,7 @@ asked, when its trigger fits: read its `SKILL.md` and follow it. Claude Code als
 | [profiling](docs/skills/profiling/SKILL.md) | Profiling, or any mention of performance, frame time, stutter, allocations, memory, VRAM or GPU time |
 | [qa](docs/skills/qa/SKILL.md) | A swarm's QA worker, or the user asks for QA of a branch |
 | [retro](docs/skills/retro/SKILL.md) | A swarm finishes, a slice went badly, or the user corrects the workflow |
-| [ste-docs](docs/skills/ste-docs/SKILL.md) | Writing docs, skills, plans, comments or summaries |
+| [ste-docs](docs/skills/ste-docs/SKILL.md) | Each reply to the user, and each doc, skill, plan, comment or summary |
 
 ## Commands
 
@@ -43,7 +43,8 @@ The scripts run under `pwsh` and Windows PowerShell ([Tools](docs/TOOLS.md)).
   Do not start `Magic`, `Magic.exe` or `dotnet run` on the engine or a sample in another way. `Magic new` and
   `Magic --help` open nothing, so they are allowed.
 - **Profiling:** `tools/Scripts/Profiling.ps1 -Minutes <n>` takes a profiling turn for the branch, and `-Release` ends
-  it. While another branch's turn runs, the scripts that build or run Magic wait for it to end.
+  it. While another branch's turn runs, the scripts that run Magic or the tests wait for it to end. On Windows, their
+  builds and formats run at once, at idle priority.
 - **Claim:** `tools/Scripts/Claim.ps1 -Slice <title> -Scope <paths>` tells every other session what the slice will
   change, and prints any overlap with theirs ([Worktrees](#worktrees)).
 - **Configuration:** build and run `Debug`. To measure or profile performance, use `Optimize`. Use `Release` only when
@@ -77,13 +78,15 @@ In Claude Code, the agent hooks in `.claude/settings.json` hold the workflow wit
 - An edit to a file in the main checkout is refused. Starting Claude Code with `MAGIC_ALLOW_MAIN_EDITS=1` allows it
   for that session; only the user sets it.
 - A command that starts Magic other than through the scripts in [Run Magic](#commands) is refused.
-- A build or a test run is refused while another branch's profiling turn runs.
+- A `dotnet build` or test run is refused while another branch's profiling turn runs. Build with
+  `tools/Scripts/Validate.ps1 -Only Build` instead, which on Windows runs at idle priority and does not wait.
 - An edit inside another session's claim is refused unless this worktree's own claim covers it too
   ([Worktrees](#worktrees)).
 - The status line shows the slice's size against its limit of 300 lines, and how full the context is.
 - `git commit` and `git merge` are refused for a state `tools/Scripts/AgentTaskComplete.ps1` hasn't stamped, and for
   a slice the `slice-reviewer` subagent hasn't reviewed. One review covers the slice until fixes add more than about
-  100 lines. A swarm's slice, which commits into its root, needs no review.
+  100 lines. A swarm's slice, which commits into its root, needs no review, and neither does a small slice: 50
+  changed lines or fewer, or a `Docs` change.
 - A plan opens in plannotator for the user's approval.
 - C# diagnostics reach you after every edit through the C# language server plugin.
 
@@ -92,7 +95,7 @@ In Claude Code, the agent hooks in `.claude/settings.json` hold the workflow wit
 | Document | Read |
 | --- | --- |
 | [README](README.md) | Once per session |
-| [Code Standards](docs/CODE_STANDARDS.md) | Before editing any `.cs` file |
+| [Code Standards](docs/CODE_STANDARDS.md) | Before editing any `.cs` file: "How we write code" and "Ground rules", then each other section the change needs |
 | [Shader Standards](docs/SHADER_STANDARDS.md) | Before editing any `.slang` file, or a C# struct that a shader shares |
 | [Tests](docs/TOOLS.md#tests) | Before running or touching tests |
 | [Tools](docs/TOOLS.md) | Before running a tool script |
@@ -124,9 +127,11 @@ Work moves one slice at a time, and the conversation holds the plan. A swarm dif
   big: say so plainly and propose the split.
 - **Check for drift.** Before each slice, check it against the goal and decisions agreed in the conversation. Say so
   if it doesn't serve them.
-- **Stop after each slice.** Once it merges, propose the next slice and wait. Never start it on your own.
-- **One slice per session.** When compacting, keep the
-  slice list, the current slice, its worktree path, the files it changed and its `-Change` level.
+- **Go on through the approved list.** Once a slice merges, start the next slice of the list that the user approved.
+  When no approved slice is left, propose the next slice and wait. Never start a slice that the user did not approve.
+- **Keep the context small.** Start the next slice in the same session while the context is less than half full.
+  Otherwise give its brief to paste after `/clear`, and stop. When compacting, keep the slice list, the current
+  slice, its worktree path, the files it changed and its `-Change` level.
 
 ### Kickoff
 
@@ -177,7 +182,7 @@ subagent and keep only its answer.
 
 ### Finish
 
-A built slice is validated, reviewed in a fresh context, summarized and shown to the user, and merges only on their
+A built slice is validated, reviewed in a fresh context unless it is small, summarized and shown to the user, and merges only on their
 approval (the finish skill). A swarm's slices go into its root branch, which
 gets QA, a cleanup and one review by the user before it merges (the parallelize skill).
 
@@ -247,13 +252,8 @@ Agents tend to over-build. Less is more: the best change often removes more code
 ## Writing
 
 Write docs, skills, plans, comments, summaries and replies to the user with the
-[ste-docs skill](docs/skills/ste-docs/SKILL.md). Use the words in the glossary only with their meanings there.
-
-When you reply to the user:
-
-- Write a plan of actions in a reply as numbered steps, with one action in each step.
-- Write a status update or a summary with the rules above.
-- To tell the reason for a decision, use short sentences in the active voice. The other rules can relax there.
+[ste-docs skill](docs/skills/ste-docs/SKILL.md), diagrams included. Use the words in the glossary only with their
+meanings there.
 
 ### Glossary
 
@@ -273,7 +273,7 @@ When you reply to the user:
 | worker | A session that a coordinator starts: a coder that builds one slice, a merge train, QA or cleanup. |
 | swarm plan | The file that holds a swarm's slices and their states (the parallelize skill). |
 | worker limit | How many workers of a swarm run at the same time. |
-| profiling turn | A time in which one branch alone builds and runs Magic, to profile or measure CPU, RAM or GPU use (`tools/Scripts/Profiling.ps1`). |
+| profiling turn | A time in which one branch alone runs Magic and the tests, to profile or measure CPU, RAM or GPU use. Other branches build only at idle priority (`tools/Scripts/Profiling.ps1`). |
 | merge train | Done slices of a swarm that one worker builds and merges into the root together (the parallelize skill). |
 | QA | The check of a swarm's root for bugs by a worker that ranks them and fixes nothing (the qa skill). |
 | root branch | The branch that the slices of one feature merge into before it merges into the merge target. |
@@ -302,9 +302,9 @@ Every task runs in its own worktree. Never edit or commit in the main checkout.
   without that yes. Release the claim with `-Release` once the slice merges, is answered or is dropped.
 - **Finish** and merge as the finish skill says, once the user approves.
 - **Abandoned work:** if the user drops the task, release its claim, leave the worktree and branch and say so.
-- **Start of every session:** remove what is finished, stale claims included, and report the rest (the
-  tidy-worktrees skill). Never remove a
-  worktree or branch with work found nowhere else.
+- **Start of a session:** when the SessionStart note lists finished worktrees or stale claims, remove what is
+  finished and report the rest (the tidy-worktrees skill). Never remove a worktree or branch with work found nowhere
+  else.
 
 ### Sessions
 

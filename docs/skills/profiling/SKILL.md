@@ -1,6 +1,6 @@
 ---
 name: profiling
-description: Measures and improves an app's CPU, RAM, GPU and VRAM use with the right tools and a fair before and after. Use it on your own each time a task or the user mentions profiling, performance, frame time, FPS, stutter, hitches, allocations, GC, memory use, a leak, VRAM, GPU time or something being slow.
+description: Measures and improves an app's CPU, RAM, GPU and VRAM use with the right tools and a fair before and after. Use it on your own each time a task or the user mentions profiling, performance, frame time, FPS, stutter, hitches, allocations, GC, memory use, a leak, VRAM, GPU time, or says that something is slow.
 ---
 
 # Profiling
@@ -16,7 +16,7 @@ The commands, the configuration, the check run and the numbers to read are in th
   end with `STATE: needs-profiling` to get a turn (the parallelize skill).
 - Release the turn when you finish, also when you fail.
 - Build and run the configuration for profiling. Do not compare debug numbers.
-- Start the app only with the run command. Attach a tool to the running process by its id. Do not let a tool start
+- Start the app only with the run command. Attach a tool to the process of the app by its id. Do not let a tool start
   the app.
 - Put traces and dumps in the profiles folder. Delete them when you finish, unless the user wants them.
 - Give each tool a time limit (the timeouts skill).
@@ -42,8 +42,10 @@ Start the check run as a background task. Then find the process id.
 
 **RAM and allocations**
 
-- To find allocations in a hot path, read its code for LINQ, closures, string formatting, boxing, `params` arrays,
-  `new` arrays and classes, and `async` (the performance rules).
+- To find allocations in a hot path, read its code for these (the performance rules):
+  - LINQ, closures, string formats and boxed values.
+  - `params` arrays, and `new` arrays and classes.
+  - `async`.
 - To find a leak, take two heap dumps a few minutes apart:
   `dotnet-dump collect -p <id> --type Heap -o <profiles>/a.dmp`. Compare the types that grow:
   `dotnet-dump analyze <profiles>/a.dmp -c "dumpheap -stat" -c exit`. Find what holds one with `-c "gcroot <address>"`.
@@ -55,8 +57,10 @@ Start the check run as a background task. Then find the process id.
   `1..40 | % { nvidia-smi --query-gpu=utilization.gpu,clocks.sm,clocks_event_reasons.active,pstate,power.draw,temperature.gpu,memory.used --format=csv,noheader; Start-Sleep -Milliseconds 500 }`.
   Low use in a GPU-bound frame means stalls between the CPU and the GPU. A throttle reason makes the run unfair: do it
   again.
-- Look for: passes over full-size targets that can be smaller, wide formats, overdraw, barriers wider than they must be,
-  pipeline builds during play, and readbacks that wait for the same frame.
+- Look for these causes:
+  - Passes over full-size targets that can be smaller, and wide formats.
+  - Overdraw, and barriers that are wider than they must be.
+  - Pipeline builds during play, and readbacks that wait for the same frame.
 
 **VRAM**
 

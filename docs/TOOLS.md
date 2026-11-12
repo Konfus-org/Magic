@@ -33,8 +33,9 @@ Runs the checks that a change must pass. It runs these steps in order, and stops
 
 1. **Build:** builds `src/Magic.slnx`. Each warning is an error. A file that CSharpier would change is an error too.
 2. **Test:** runs the tests against that build ([Tests](#tests)).
-3. **Headless:** runs each sample project without a window under `--fail-on-error`, then types `exit`. The step passes
-   when the run exits `0`. A run that is not done after `-Seconds` fails.
+3. **Headless:** runs all the sample projects at the same time, without a window, under `--fail-on-error`. Each run
+   types `exit` when its world loads. The step passes when each run exits `0`. A run that is not done after `-Seconds`
+   fails. A run that fails prints its last output.
 4. **Screenshot:** runs `Screenshot.ps1` on each sample project. This step needs a display and a GPU.
 
 `-Only` runs only the steps that you name. `-Project` runs other projects.
@@ -42,6 +43,7 @@ Runs the checks that a change must pass. It runs these steps in order, and stops
 ## AgentTaskComplete.ps1
 
 Runs `Format.ps1`, then the steps of `Validate.ps1` that the `-Change` level needs ([Commands](../AGENTS.md#commands)).
+If the change touches only files in sample folders, Markdown aside, only those samples run.
 
 If the steps pass, the script stamps the exact files of the checkout with the level. If the state already has a stamp
 at that level or higher, the script stops at once.
@@ -58,8 +60,10 @@ script does not build.
 
 ## Profiling.ps1
 
-Takes, waits for or releases a profiling turn. In a profiling turn, only one worktree builds and runs Magic, so that
-nothing disturbs its measurements. The scripts that build or run Magic wait while another worktree holds a turn.
+Takes, waits for or releases a profiling turn. In a profiling turn, only one worktree runs Magic and the tests, so
+that nothing disturbs its measurements. The scripts that run Magic or the tests wait while another worktree holds a
+turn. On Windows, `Format.ps1` and the build of `Validate.ps1` run at once, at idle priority. On other systems, they
+wait.
 
 ## Claim.ps1
 
