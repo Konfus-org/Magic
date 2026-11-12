@@ -1,22 +1,30 @@
 ---
 name: tidy-worktrees
-description: Removes finished worktrees, branches and sessions, and reports the rest. Use it on your own, without being asked, when a session starts and finished worktrees or stale claims exist, and after deleting a session.
+description: Removes finished worktrees, branches and sessions, and reports the rest. Use it on your own, without being asked, when a session starts and finished worktrees or stale claims exist, and after you delete a session.
 ---
 
 # Tidy worktrees
 
-1. Run `git worktree list` and `git branch --no-merged <merge target>`, and look at the repository's sessions.
-2. Look at the claims, if the project has them ([PROJECT.md](../PROJECT.md)). Delete each one whose worktree is gone.
-3. Remove each worktree and branch whose session is gone and whose commits are all merged, into the merge target or
-   a remote branch: `git worktree remove`, then `git branch -d` (never `-D`). A branch cut from a remote branch goes
-   with `-d` once its upstream is set to that remote branch.
-4. Delete the sessions that are done. A session is done when it isn't running, its work has merged or its question
-   was answered, and nothing in it waits on the user. Keep any session that was interrupted, never started, or
-   waits on the user.
-   - The user approves each delete. A coordinator closes its own workers without a new approval
+1. Run `git worktree list` and `git branch --no-merged <merge target>`. Look at the sessions of the repository.
+2. If the project has claims ([PROJECT.md](../PROJECT.md)), delete each claim whose worktree is gone.
+3. Remove each worktree and branch for which these two conditions are true:
+   - Its session is gone.
+   - All its commits are merged into the merge target or into a remote branch.
+
+   Run `git worktree remove`, then `git branch -d`. Do not use `-D`. For a branch that you made from a remote branch,
+   set its upstream to that remote branch first. Then `-d` removes it.
+4. Delete each session that is done. A session is done when these three conditions are true:
+   - It does not run.
+   - Its work merged, or its question has an answer.
+   - Nothing in it waits for the user.
+
+   Keep a session that was interrupted, that never started, or that waits for the user.
+   - The user must approve each delete. A coordinator closes its own workers without a new approval
      ([parallelize skill](../parallelize/SKILL.md)).
-   - Before deleting a session, detach the side sessions it started that are still going, or leave it until they
-     finish.
-   - After deleting a session, remove its leftover worktree and branch as in step 3, and delete its claim.
-5. Report the rest in a few lines. Never remove a worktree or branch with work found nowhere else, and leave
-   abandoned work where it is.
+   - Before you delete a session, detach each side session that it started and that still runs. Or wait until they
+     stop.
+   - After you delete a session, remove its worktree and branch as step 3 says, and delete its claim.
+5. Report the rest in a few lines.
+
+> **Warning:** Do not remove a worktree or a branch that has work that is not also somewhere else. Leave abandoned
+> work where it is.
