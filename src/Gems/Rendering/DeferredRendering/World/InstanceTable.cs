@@ -380,7 +380,7 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
         if (param is not null)
         {
             Log.Error(
-                $"{path} draws {param} as its shader's default: the shader has no field of that name, or of its type."
+                $"Material {path} draws {param} as its shader's default: the shader has no field of that name, or of its type."
             );
             path += $" {param}";
         }

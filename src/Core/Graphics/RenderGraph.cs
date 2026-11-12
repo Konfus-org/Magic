@@ -139,6 +139,22 @@ public sealed class RenderGraph
     }
 
     /// <summary>
+    /// Whether the GPU provider still builds one of <paramref name="shaders"/>, asked in their order up to the first
+    /// that does. One that failed hides none that still builds, as it does in
+    /// <see cref="GetState(ReadOnlySpan{ShaderEntry})"/>.
+    /// </summary>
+    public bool IsAnyLoading(params ReadOnlySpan<ShaderEntry> shaders)
+    {
+        foreach (ShaderEntry shader in shaders)
+        {
+            if (GetState(shader) == GpuState.Loading)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Tells that <paramref name="what"/> failed in this frame, so it shows in the picture: a short constant text, as
     /// "Shadows are not traced". The first frame it fails in after one it didn't logs it once, with
     /// <paramref name="reason"/>, the full error. A gem that fails tells it every frame it fails in, and tries again

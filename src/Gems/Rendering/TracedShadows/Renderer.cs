@@ -285,13 +285,7 @@ public sealed class Renderer(TracedShadowsSettings settings, AssetManager assets
         if (
             !settings.IsTracedShadowsOn
             || !graph.Features.HasRayQuery
-            || (
-                graph.GetState(_traceShader) != GpuState.Loading
-                && graph.GetState(_classifyShader) != GpuState.Loading
-                && graph.GetState(_filterShader) != GpuState.Loading
-                && graph.GetState(_lastFilterShader) != GpuState.Loading
-                && graph.GetState(_upsampleShader) != GpuState.Loading
-            )
+            || !graph.IsAnyLoading(_traceShader, _classifyShader, _filterShader, _lastFilterShader, _upsampleShader)
         )
             _built.TrySetResult();
     }

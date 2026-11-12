@@ -688,9 +688,7 @@ internal sealed class GpuResources(
 
         await threads.Enter(EngineThread.Render);
         if (!layout.Ok)
-            Log.Error(
-                $"Shader {path} fails, so {GetMaterialsWith(shader.Id)} are drawn as the failure: {layout.Error}"
-            );
+            Log.Error($"Shader {path}, named by {GetMaterialsWith(shader.Id)}, is drawn as a failure: {layout.Error}");
 
         _layouts[shader.Id] = layout.Ok ? layout.Value : new MaterialLayout(default, type, false, default);
     }

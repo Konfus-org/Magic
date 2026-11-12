@@ -199,12 +199,7 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph)
     {
-        // Each alone, as one that failed makes them all failed while another still builds.
-        if (
-            graph.GetState(_scatterShader) != GpuState.Loading
-            && graph.GetState(_integrateShader) != GpuState.Loading
-            && graph.GetState(_cloudShader) != GpuState.Loading
-        )
+        if (!graph.IsAnyLoading(_scatterShader, _integrateShader, _cloudShader))
             _built.TrySetResult();
     }
 

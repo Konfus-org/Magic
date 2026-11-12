@@ -53,8 +53,7 @@ public sealed class Renderer : IRenderFrom<ClusteredGeometryInput>, IHookIntoDom
     public void Dispose()
     {
         _preprocessing.Dispose();
-        _loading?.TrySetResult();
-        _loading = null;
+        EndLoading();
     }
 
     /// <summary>
@@ -67,10 +66,7 @@ public sealed class Renderer : IRenderFrom<ClusteredGeometryInput>, IHookIntoDom
         if (input.View is not { } gpu)
         {
             if (graph.IsMakerOut<GpuView>())
-            {
-                _loading?.TrySetResult();
-                _loading = null;
-            }
+                EndLoading();
 
             return;
         }
@@ -100,8 +96,7 @@ public sealed class Renderer : IRenderFrom<ClusteredGeometryInput>, IHookIntoDom
             && graph.GetState(_passes.GetResolveShaders(gpu.MaterialShaders)) != GpuState.Loading
         )
         {
-            _loading.TrySetResult();
-            _loading = null;
+            EndLoading();
         }
 
         Result recorded = _passes.Record(graph, gpu, pools.Value, _settings);
@@ -121,8 +116,7 @@ public sealed class Renderer : IRenderFrom<ClusteredGeometryInput>, IHookIntoDom
     {
         await _threads.Enter(EngineThread.Render);
         _domainsLoaded++;
-        _loading?.TrySetResult();
-        _loading = null;
+        EndLoading();
         TaskCompletionSource loading = new(TaskCreationOptions.RunContinuationsAsynchronously);
         _loading = loading;
         await loading.Task.WaitAsync(cancel).ConfigureAwait(false);
@@ -134,6 +128,14 @@ public sealed class Renderer : IRenderFrom<ClusteredGeometryInput>, IHookIntoDom
     private void Fail(RenderGraph graph, RenderFailure kind, string reason)
     {
         graph.Fail(kind, "Clusters are not drawn", reason);
+        EndLoading();
+    }
+
+    /// <summary>
+    /// Lets the loading domain show, when one waits.
+    /// </summary>
+    private void EndLoading()
+    {
         _loading?.TrySetResult();
         _loading = null;
     }
