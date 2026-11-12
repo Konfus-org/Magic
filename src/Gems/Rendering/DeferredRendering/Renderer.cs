@@ -287,6 +287,9 @@ public sealed class Renderer
             return null;
 
         DeferredRenderingSettings settings = _settings;
+        Size resolution = settings.Resolution;
+        float renderScale = settings.RenderScale;
+        float fieldOfView = settings.FieldOfView;
 
         // The first frame of another world forgets last frame's camera and size, so nothing drawn before carries
         // into it.
@@ -366,7 +369,7 @@ public sealed class Renderer
         // The finished picture at the resolution, or at the window's size when it has no side, and 1280 by 720 with no
         // window; the world drawn at the render scale of it, or when that is auto at the most that fits 1920 by 1080,
         // never more than all of it.
-        Size shown = settings.Resolution;
+        Size shown = resolution;
         if (shown.Width <= 0 || shown.Height <= 0)
         {
             TextureDescription window = graph.WindowTarget.IsNone ? default : graph.GetDescription(graph.WindowTarget);
@@ -375,8 +378,8 @@ public sealed class Renderer
 
         float scale = MathF.Min(
             1,
-            settings.RenderScale > 0
-                ? settings.RenderScale
+            renderScale > 0
+                ? renderScale
                 : MathF.Min((float)AutoRenderWidth / shown.Width, (float)AutoRenderHeight / shown.Height)
         );
         int width = Math.Max(1, (int)MathF.Round(shown.Width * scale));
@@ -513,8 +516,8 @@ public sealed class Renderer
             break;
         }
 
-        if (settings.FieldOfView > 0)
-            camera.Camera = camera.Camera with { FieldOfView = settings.FieldOfView };
+        if (fieldOfView > 0)
+            camera.Camera = camera.Camera with { FieldOfView = fieldOfView };
 
         // The camera jitters while one of the effects asks for it, or while a gem upscales.
         bool isJittered = input.Upscaling is not null;
@@ -569,6 +572,8 @@ public sealed class Renderer
 
         GpuView gpu = input.View;
         DeferredRenderingSettings settings = _settings;
+        DebugView renderView = settings.RenderView;
+        TextureFilter upscaleFilter = settings.UpscaleFilter;
 
         ReadOnlySpan<GpuResource> indirect = input.Light is { } light
             ? [light.Diffuse, light.Reflections, light.Probes, light.ProbeDepth]
@@ -627,13 +632,13 @@ public sealed class Renderer
 
         // A debug view of light draws it into the picture in place of the lit one, black where none was traced, so the
         // effects finish it as they do the picture.
-        if (settings.RenderView is DebugView.IndirectDiffuse or DebugView.Reflections)
+        if (renderView is DebugView.IndirectDiffuse or DebugView.Reflections)
         {
             graph
                 .Compute(
                     "Show light",
                     _lightViewShader,
-                    new GpuConstants(gpu.Frame.Id, (uint)settings.RenderView),
+                    new GpuConstants(gpu.Frame.Id, (uint)renderView),
                     RenderStages.Shade
                 )
                 .Reads(gpu.Frame, gpu.Depth, gpu.GBufferNormal)
@@ -652,7 +657,7 @@ public sealed class Renderer
                 _showShader,
                 new GpuConstants(
                     gpu.Frame.Id,
-                    (uint)settings.RenderView,
+                    (uint)renderView,
                     BitConverter.SingleToUInt32Bits(settings.DepthViewFar),
                     BitConverter.SingleToUInt32Bits(Math.Clamp(settings.Gamma, 0.5f, 2f))
                 ),
@@ -668,7 +673,7 @@ public sealed class Renderer
         GpuTexture shown = upscaled.IsNone ? gpu.Output : upscaled;
         GpuTexture target = graph.WindowTarget;
         if (!target.IsNone)
-            graph.Blit(shown, target, RenderStages.Post, settings.UpscaleFilter);
+            graph.Blit(shown, target, RenderStages.Post, upscaleFilter);
 
         // One readback buffer, so one screenshot a frame: the last asked for, read back at the size it is shown at, and
         // through a copy stretched to it with the upscale filter, of 8 bits a channel, where the shown picture is
@@ -703,7 +708,7 @@ public sealed class Renderer
             else
             {
                 if (read.Value != shown)
-                    graph.Blit(shown, read.Value, RenderStages.Post, settings.UpscaleFilter);
+                    graph.Blit(shown, read.Value, RenderStages.Post, upscaleFilter);
 
                 graph.ReadBack(read.Value, readback.Value, RenderStages.Post);
                 SaveScreenshotAsync(readback.Value, saved.Path, width, height).FireAndForget();
