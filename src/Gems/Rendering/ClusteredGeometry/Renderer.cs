@@ -11,9 +11,9 @@ using Magic.Worlds;
 namespace Magic.ClusteredGeometry;
 
 /// <summary>
-/// What the cluster renderer takes each frame: the world as the GPU holds it.
+/// What the cluster renderer takes each frame: the world as the GPU holds it, or null in a frame without a view.
 /// </summary>
-public readonly record struct ClusteredGeometryInput(GpuView View);
+public readonly record struct ClusteredGeometryInput(GpuView? View);
 
 /// <summary>
 /// Draws every model the world's view holds as a hierarchy of clusters, GPU-driven, and far away as its impostor: each
@@ -62,6 +62,19 @@ public sealed class Renderer : IRenderFrom<ClusteredGeometryInput>, IHookIntoDom
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph, in ClusteredGeometryInput input)
     {
+        // A frame without a view while something failed lets the loading domain show: the failure is already told.
+        // Without a failure, the view is still loading, and the domain keeps waiting for the clusters.
+        if (input.View is not { } gpu)
+        {
+            if (!graph.Failures.IsEmpty)
+            {
+                _loading?.TrySetResult();
+                _loading = null;
+            }
+
+            return;
+        }
+
         // The shaders are the GPU provider's to build, the first ask starting each.
         GpuState shaders = graph.GetState(_passes.Shaders.AsSpan());
         if (shaders == GpuState.Failed)
@@ -70,7 +83,6 @@ public sealed class Renderer : IRenderFrom<ClusteredGeometryInput>, IHookIntoDom
         if (shaders != GpuState.Ready)
             return;
 
-        GpuView gpu = input.View;
         Result<ClusterPools> pools = _resources.Prepare(graph, gpu.Models.Span);
         if (!pools.Ok)
         {
