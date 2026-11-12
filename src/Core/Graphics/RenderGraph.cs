@@ -485,7 +485,11 @@ public sealed class RenderGraph
     {
         GpuUpload upload = Gpu is { } gpu ? gpu.BeginUpload(bytes) : default;
         if (upload.Buffer.IsNone)
-            Fail(RenderFailure.Resource, "Uploads are dropped", $"there is no room to stage {bytes} bytes.");
+            Fail(
+                RenderFailure.Resource,
+                "Uploads are dropped",
+                "the GPU provider has no room to stage them, or there is no provider."
+            );
 
         return upload;
     }
