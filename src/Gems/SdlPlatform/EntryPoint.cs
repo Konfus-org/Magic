@@ -7,10 +7,12 @@ using Magic.Worlds;
 namespace Magic.SdlPlatform;
 
 /// <summary>
-/// The gem: the window, clipboard and input, through SDL3, over one <see cref="SdlWindow"/>. The process's first thread,
-/// the platform thread, makes it, as SDL's windows and events belong to that thread. Each frame, <see cref="Update"/>
-/// lets the window pace the frame, then makes input the frame's.
+/// The gem: the window, clipboard and input through SDL3, over one <see cref="SdlWindow"/>.
 /// </summary>
+/// <remarks>
+/// The platform thread, which is the process's first thread, makes it, because SDL's windows and events belong to that
+/// thread. Each frame, <see cref="Update"/> lets the window pace the frame, then makes the input the frame's input.
+/// </remarks>
 public sealed class EntryPoint : IGem, IDisposable
 {
     private readonly SdlWindow _sdl;
@@ -34,9 +36,11 @@ public sealed class EntryPoint : IGem, IDisposable
     }
 
     /// <summary>
-    /// The window's and input's settings. A new window mode, display or resizability is shown on the platform thread.
-    /// Game thread.
+    /// The window's and input's settings.
     /// </summary>
+    /// <remarks>
+    /// Set them only on the game thread. The platform thread shows a new window mode, display or resizability.
+    /// </remarks>
     public SdlPlatformSettings Settings { get; }
 
     public Window Window { get; }

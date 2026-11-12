@@ -12,11 +12,13 @@ using Entity = Magic.Ecs.Entity;
 namespace Magic.ArchEcs;
 
 /// <summary>
-/// The entity world, in one Arch world, on the game thread. Entities are Arch's, bit for bit, and
-/// components live in Arch's chunks, so a query hands out spans straight over them and allocates nothing. Arch trusts
-/// its caller, so this part checks what Arch would let go wrong silently (a dead entity, a structural change during a
-/// loop, a call from another thread) and throws instead.
+/// The entity world in one Arch world, on the game thread.
 /// </summary>
+/// <remarks>
+/// Entities are Arch's, bit for bit, and components live in Arch's chunks, so a query gives spans over them and
+/// allocates nothing. Arch trusts its caller. Thus this part throws for what Arch would let go wrong silently: a dead
+/// entity, a structural change during a loop, or a call from another thread.
+/// </remarks>
 public sealed class Ecs : IEcs, IDisposable
 {
     private readonly ArchWorld _world;
@@ -224,7 +226,7 @@ public sealed class Ecs : IEcs, IDisposable
     }
 
     /// <summary>
-    /// A chunk's live entities as Magic's: Arch's arrays run to the chunk's capacity, past its last entity.
+    /// Gets a chunk's live entities as Magic's, because Arch's arrays run past the last entity to the chunk's capacity.
     /// </summary>
     private static ReadOnlySpan<Entity> GetEntities(Chunk chunk) =>
         MemoryMarshal.Cast<ArchEntity, Entity>(chunk.Entities.AsSpan(0, chunk.Count));
@@ -232,9 +234,11 @@ public sealed class Ecs : IEcs, IDisposable
     private static Span<T> GetColumn<T>(Chunk chunk) => chunk.GetArray<T>().AsSpan(0, chunk.Count);
 
     /// <summary>
-    /// The ECS's type of <paramref name="type"/>, a component known only as the program runs, from its typed registration
-    /// so a struct is measured as the typed calls measure it.
+    /// Gets the ECS's type of <paramref name="type"/>, a component known only at run time, from its typed registration.
     /// </summary>
+    /// <remarks>
+    /// Thus the struct is measured the same way as the typed calls measure it.
+    /// </remarks>
     private static ComponentType GetComponentType(Type type)
     {
         if (ComponentRegistry.TryGet(type, out ComponentType registered))
@@ -313,8 +317,11 @@ public sealed class Ecs : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Changing which components an entity has is the world's thread's, and never while a loop is open.
+    /// Throws if the caller cannot change which components an entity has.
     /// </summary>
+    /// <remarks>
+    /// Only the world's thread can change them, and never while a loop is open.
+    /// </remarks>
     private void ThrowIfCannotChange()
     {
         ThrowIfNotWorldThread();
@@ -368,10 +375,12 @@ public sealed class Ecs : IEcs, IDisposable
     }
 
     /// <summary>
-    /// A query's walk over its chunks, gathered as a loop starts, which stay current as nothing can move an entity
-    /// until the loop ends. One per query and reused, so a loop allocates nothing; a loop over the same query started
-    /// inside one gets a walk of its own.
+    /// A query's walk over its chunks, gathered as a loop starts.
     /// </summary>
+    /// <remarks>
+    /// The chunks stay current, because nothing can move an entity until the loop ends. Each query has one walk that is
+    /// used again, so a loop allocates nothing. A loop over the same query inside one gets a walk of its own.
+    /// </remarks>
     private sealed class Walk<TChunk>(Ecs ecs, QueryDescription description, Func<Chunk, long, TChunk> cut)
         : IEnumerable<TChunk>,
             IEnumerator<TChunk>

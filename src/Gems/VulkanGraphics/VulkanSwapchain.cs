@@ -7,10 +7,13 @@ using Vortice.Vulkan;
 namespace Magic.VulkanGraphics;
 
 /// <summary>
-/// The window's images: made for the window's size and whether frames wait for the display, each a texture of the heap
-/// while it lasts, remade when either changes or the surface says they are out of date. A frame takes one with
-/// <see cref="Acquire"/> and gives it back with <see cref="Present"/>.
+/// The window's images, each a texture of the heap while it lasts.
 /// </summary>
+/// <remarks>
+/// They are made for the window's size and the vsync setting, and made again when either changes or the surface says
+/// they are out of date. A frame takes an image with <see cref="Acquire"/> and gives it back with
+/// <see cref="Present"/>.
+/// </remarks>
 internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResources resources, IWindow window)
     : IDisposable
 {
@@ -217,7 +220,7 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
     }
 
     /// <summary>
-    /// An sRGB 8-bit format the surface has, else its first.
+    /// Picks an sRGB 8-bit format that the surface has, else its first format.
     /// </summary>
     private VkSurfaceFormatKHR PickFormat(VkSurfaceKHR surface)
     {
@@ -243,9 +246,12 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
     }
 
     /// <summary>
-    /// FIFO, which waits for the display and every surface has, while vsync is on; else the first of
-    /// <see cref="_unsyncedModes"/> in <paramref name="modes"/>, the surface's, else FIFO.
+    /// Picks FIFO while vsync is on, because it waits for the display and every surface has it.
     /// </summary>
+    /// <remarks>
+    /// Otherwise it picks the first of <see cref="_unsyncedModes"/> that the surface has in <paramref name="modes"/>,
+    /// else FIFO.
+    /// </remarks>
     private VkPresentModeKHR PickPresentMode(VkPresentModeKHR[] modes)
     {
         if (_isVSyncOn)

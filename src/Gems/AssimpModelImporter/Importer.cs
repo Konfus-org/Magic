@@ -12,17 +12,22 @@ using static Magic.AssimpModelImporter.assimp;
 namespace Magic.AssimpModelImporter;
 
 /// <summary>
-/// Reads FBX, glTF and OBJ files through assimp into <see cref="Model"/>s: every node's meshes flattened into the
-/// model's frame, triangulated, with normals and tangents, one mesh per material slot in the order the file's
-/// materials are first used.
+/// Reads FBX, glTF and OBJ files through assimp into <see cref="Model"/>s, with one mesh per material slot.
 /// </summary>
+/// <remarks>
+/// It flattens every node's meshes into the model's frame, triangulates them, and adds normals and tangents. The slots
+/// are in the order that the file first uses its materials.
+/// </remarks>
 public sealed unsafe class Importer : IAssetImporter<Model>
 {
     /// <summary>
-    /// How a file is brought into the engine's frame: left-handed with clockwise triangles, in metres, every node's
-    /// transform applied, so a model is its triangles and nothing else. The import relies on them: triangulating and
-    /// sorting by type leave a triangle mesh holding triangles alone, and generating normals gives every one normals.
+    /// The steps that bring a file into the engine's frame: left-handed, clockwise triangles, metres, node transforms
+    /// applied.
     /// </summary>
+    /// <remarks>
+    /// Thus a model is its triangles and nothing else. The import relies on these steps: triangulating and sorting by
+    /// type leave only triangles in a triangle mesh, and generating normals gives every mesh normals.
+    /// </remarks>
     private const uint Steps = (uint)(
         aiProcess_Triangulate
         | aiProcess_GenSmoothNormals
@@ -48,9 +53,12 @@ public sealed unsafe class Importer : IAssetImporter<Model>
     ) => Task.FromResult(Import(file));
 
     /// <summary>
-    /// Every triangle mesh of the file as one <see cref="Mesh"/> per material slot, slots numbered as the file's
-    /// materials are first used; a file with more than <see cref="MaterialSlots.Capacity"/> is refused.
+    /// Imports every triangle mesh of the file as one <see cref="Mesh"/> per material slot, in the order that the file
+    /// first uses its materials.
     /// </summary>
+    /// <remarks>
+    /// A file with more than <see cref="MaterialSlots.Capacity"/> materials is refused.
+    /// </remarks>
     private static Result<Model> Import(AssetFile file)
     {
         // Read the scene
