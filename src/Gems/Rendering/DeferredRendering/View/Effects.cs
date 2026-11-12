@@ -72,7 +72,31 @@ internal sealed class Effects(AssetManager assets, GpuResources resources)
         if (slot.Handle == Handle<Material>.None)
             return (new GpuEffect(0, GpuState.Failed, default, default, default), default);
 
-        GpuState material = resources.Pack(slot, out GpuMaterial row, out GpuResources.MaterialLayout layout, out _);
+        GpuState material = resources.Pack(
+            slot,
+            out GpuMaterial row,
+            out GpuResources.MaterialLayout layout,
+            out (FailureKind Kind, ulong Asset, string? Param)? failure
+        );
+
+        // The material, its shader or a part failed. A failed part, a texture or a param that fits no field, would run
+        // the effect wrong, so the effect fails too, with the part named.
+        if (failure is (var kind, var asset, var param))
+        {
+            string path = assets.GetPath(slot.Handle) ?? $"id {slot.Handle.Id}";
+            string part = kind switch
+            {
+                FailureKind.Texture => $"its texture {assets.GetPath(new Handle<Texture>(asset)) ?? $"id {asset}"}",
+                FailureKind.Param => $"its param {param}, which fits no field of its shader",
+                FailureKind.Shader => "its shader",
+                FailureKind.Material or FailureKind.Model => "it did not load",
+                _ => "it did not load",
+            };
+            graph.Fail(RenderFailure.PostEffect, "An effect is not drawn", $"Material {path} failed: {part}.");
+
+            return (new GpuEffect(slot.Handle.Id, GpuState.Failed, default, default, default), row);
+        }
+
         if (material != GpuState.Ready)
             return (new GpuEffect(slot.Handle.Id, material, default, default, default), row);
 
