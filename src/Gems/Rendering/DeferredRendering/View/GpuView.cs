@@ -77,6 +77,11 @@ public readonly record struct GpuView
     public required GpuBuffer Materials { get; init; }
 
     /// <summary>
+    /// The failure table: a row for each material that failed, which its material rows name.
+    /// </summary>
+    public required GpuBuffer Failures { get; init; }
+
+    /// <summary>
     /// The pools the models are in: vertices, indices and the mesh table rays read.
     /// </summary>
     public required GpuBuffer Vertices { get; init; }

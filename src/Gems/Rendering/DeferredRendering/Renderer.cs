@@ -328,7 +328,7 @@ public sealed class Renderer
         }
 
         Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> effects = _effects.Resolve(graph, post);
-        Result<(GpuBuffer Rows, GpuBuffer Materials)> tables = _instances.Upload(graph);
+        Result<(GpuBuffer Rows, GpuBuffer Materials, GpuBuffer Failures)> tables = _instances.Upload(graph);
 
         // The finished picture at the resolution, or at the window's size when it has no side, and 1280 by 720 with no
         // window; the world drawn at the render scale of it, or when that is auto at the most that fits 1920 by 1080,
@@ -452,6 +452,7 @@ public sealed class Renderer
             InstanceCount = _instances.Count,
             InstanceCapacity = _instances.Capacity,
             Materials = tables.Value.Materials,
+            Failures = tables.Value.Failures,
             Vertices = _resources.VertexPool,
             Indices = _resources.IndexPool,
             Meshes = _resources.Meshes,

@@ -107,6 +107,7 @@ internal sealed class FrameView
             Indices = view.Indices.Id,
             Materials = view.Materials.Id,
             Meshes = view.Meshes.Id,
+            Failures = view.Failures.Id,
         };
         GpuLights frameLights = new()
         {

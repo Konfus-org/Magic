@@ -14,8 +14,9 @@ the texture reader, with a gem that draws its geometry.
 
 - As a model loads, the gem makes what the GPU holds it as, once per change to its file, and keeps it in the cache:
   its vertices as the GPU reads them and each mesh's triangles, which rays and every renderer draw.
-- A model shows once it is on the GPU. One that doesn't load is drawn as the failure model, and a material or texture
-  that doesn't load as the magenta failure material.
+- A model shows once it is on the GPU. One that doesn't load is drawn as the failure model.
+- A material that fails, or whose shader or texture fails, draws on its entity's own mesh in flashing magenta, with
+  the text "Material failed" and the material's path over it.
 - The view names each model on the GPU by its model index, the one its instances name, so a renderer keeps a row of
   its own for each.
 - A model nothing has drawn or waited for in `Rendering.ModelKeepSec` leaves the GPU, and loads again when it is next
