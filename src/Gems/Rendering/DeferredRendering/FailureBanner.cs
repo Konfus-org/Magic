@@ -11,13 +11,15 @@ using Magic.Utils;
 namespace Magic.DeferredRendering;
 
 /// <summary>
-/// The frame's render failures over the top of the window, one line each, as "Shader failed Surfaces are not shaded",
-/// but a post effect's, which shows as a frame round the window and a line along its bottom: it uploads each line's
-/// kind and text as character codes, and draws them in one pass in the overlay stage, after the picture is on the
-/// window. It draws nothing while nothing failed, and nothing while its own shaders are not built. Its shader is in the
-/// gem's assembly, registered at its asset path, so no file is read to build it; a file at that path replaces it.
-/// Render thread.
+/// Draws the frame's render failures over the top of the window, one line each, as "Shader failed Surfaces are not
+/// shaded".
 /// </summary>
+/// <remarks>
+/// A post effect's failure shows as a frame round the window and a line along its bottom. The banner draws in the
+/// overlay stage, after the picture is on the window. It draws nothing while nothing failed, or while its own shaders
+/// are not built. Its shader is in the gem's assembly, registered at its asset path; a file at that path replaces it.
+/// Render thread.
+/// </remarks>
 internal sealed class FailureBanner(AssetManager assets) : IDisposable
 {
     /// <summary>
@@ -60,10 +62,12 @@ internal sealed class FailureBanner(AssetManager assets) : IDisposable
     public void Dispose() => _shader.Dispose();
 
     /// <summary>
-    /// The lines of <see cref="RenderGraph.Failures"/> over the window's image. The shaders are asked for every frame,
-    /// so they are built before the first failure; while they are not built, or the banner's buffers are not made,
-    /// it draws nothing and tells no failure, as no banner would show it.
+    /// Records the lines of <see cref="RenderGraph.Failures"/> over the window's image.
     /// </summary>
+    /// <remarks>
+    /// It asks for the shaders every frame, so they are built before the first failure. While they are not built, or
+    /// the banner's buffers are not made, it draws nothing and tells no failure, as no banner would show it.
+    /// </remarks>
     public void Record(RenderGraph graph, in Frame frame)
     {
         if (graph.GetState(_shaders.Vertex, _shaders.Pixel) != GpuState.Ready)
@@ -152,7 +156,7 @@ internal sealed class FailureBanner(AssetManager assets) : IDisposable
     }
 
     /// <summary>
-    /// The banner's shader, as the build put it in the assembly.
+    /// Reads the banner's shader, as the build put it in the assembly.
     /// </summary>
     private static string ReadShader()
     {
@@ -165,7 +169,7 @@ internal sealed class FailureBanner(AssetManager assets) : IDisposable
     }
 
     /// <summary>
-    /// "Kind failed what", cut short where the line is full.
+    /// Writes "Kind failed what", cut short where the line is full.
     /// </summary>
     private static void WriteLine(Span<uint> line, RenderFailure kind, string what)
     {
@@ -177,7 +181,7 @@ internal sealed class FailureBanner(AssetManager assets) : IDisposable
     }
 
     /// <summary>
-    /// "and N more", in the colour of the first failure not drawn.
+    /// Writes "and N more", in the colour of the first failure not drawn.
     /// </summary>
     private static void WriteMore(Span<uint> line, RenderFailure kind, int more)
     {
@@ -189,9 +193,10 @@ internal sealed class FailureBanner(AssetManager assets) : IDisposable
     }
 
     /// <summary>
-    /// <paramref name="part"/>'s character codes from <paramref name="at"/> on, as many as fit and up to its first that
-    /// is not ASCII; where the text ends.
+    /// Writes <paramref name="part"/>'s character codes from <paramref name="at"/> on, as many as fit and up to its
+    /// first that is not ASCII.
     /// </summary>
+    /// <returns>Where the text ends.</returns>
     private static int Write(Span<byte> text, int at, string part)
     {
         _ = Ascii.FromUtf16(part, text[at..], out int written);

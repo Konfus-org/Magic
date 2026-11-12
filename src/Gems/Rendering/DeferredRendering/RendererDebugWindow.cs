@@ -4,10 +4,12 @@ using Magic.Input;
 namespace Magic.DeferredRendering;
 
 /// <summary>
-/// The renderer's debug window, drawn with the debug UI's widgets: it writes the view and whether it is open, as chosen
-/// this frame, into the settings. Its key (F2) opens it, two more (F5 and F6) step through the views, and a line on screen names any view
-/// but the finished frame.
+/// The renderer's debug window, which writes the view and whether it is open, as chosen this frame, into the settings.
 /// </summary>
+/// <remarks>
+/// Its key (F2) opens it, two more (F5 and F6) step through the views, and a line on screen names any view but the
+/// finished frame.
+/// </remarks>
 internal sealed class RendererDebugWindow(IDebugUI ui, IInput? input)
 {
     private static readonly string[] _viewNames = Enum.GetNames<DebugView>();

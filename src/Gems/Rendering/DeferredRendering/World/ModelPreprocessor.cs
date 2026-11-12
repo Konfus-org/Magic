@@ -10,9 +10,11 @@ using Magic.Utils;
 namespace Magic.DeferredRendering.World;
 
 /// <summary>
-/// Makes what the GPU holds a model as, its vertices and triangles, as the model loads, and says how the cache keeps it:
-/// <see cref="AssetManager"/> keeps it under the model's version, so a model is made once per change to its file.
+/// Makes what the GPU holds a model as, its vertices and triangles, as the model loads.
 /// </summary>
+/// <remarks>
+/// <see cref="AssetManager"/> caches it under the model's version, so a model is made once per change to its file.
+/// </remarks>
 internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
 {
     /// <summary>

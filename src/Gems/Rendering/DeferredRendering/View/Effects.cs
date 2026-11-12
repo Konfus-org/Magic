@@ -7,10 +7,13 @@ using Magic.Utils;
 namespace Magic.DeferredRendering.View;
 
 /// <summary>
-/// The effects a frame runs over the lit picture, each resolved at its place: its material's row, packed as a surface
-/// material's is, the entries of its passes specialised to its shader, and what it declares it needs. An effect is
-/// ready once its material, its textures and its passes are, and failed when one of them failed.
+/// Resolves the effects a frame runs over the lit picture, each at its place.
 /// </summary>
+/// <remarks>
+/// Each effect gets its material's row, packed as a surface material's is, the entries of its passes specialised to its
+/// shader, and what it declares it needs. An effect is ready once its material, its textures and its passes are, and
+/// failed when one of them failed.
+/// </remarks>
 internal sealed class Effects(AssetManager assets, GpuResources resources)
 {
     /// <summary>
@@ -34,7 +37,7 @@ internal sealed class Effects(AssetManager assets, GpuResources resources)
     private readonly GpuMaterial[] _rows = new GpuMaterial[Places];
 
     /// <summary>
-    /// Each place of <paramref name="list"/> resolved, and their rows uploaded.
+    /// Resolves each place of <paramref name="list"/> and uploads their rows.
     /// </summary>
     public Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> Resolve(RenderGraph graph, MaterialSlots list)
     {

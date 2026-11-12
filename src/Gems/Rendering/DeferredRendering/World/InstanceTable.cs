@@ -11,17 +11,27 @@ using Magic.Utils;
 namespace Magic.DeferredRendering.World;
 
 /// <summary>
-/// The instance table: a row per renderer, at its index in a snapshot of the renderers. A frame's work is the chunks of
-/// renderers written since the snapshot the last fill read, or that moved: their rows are built again, each renderer
-/// asking for its model, and the rest stay as they are. Every row is built again once a model is made or fails. Blocks
-/// of rows that changed are uploaded in runs; a still scene uploads none. Beside it, the material table: a row per
-/// distinct <see cref="MaterialInstance"/> drawn, which every slot holding it shares, made again each frame from what
-/// <paramref name="resources"/> has then, and uploaded whole. Row 0 is the default material, which an empty slot and a
-/// material still loading are drawn with; a material that failed, or whose shader did, is drawn with row 0's params and
-/// shader, and the index of its row in the failure table, which names it; a material with a texture that failed, or a
-/// param that fits no field, is drawn as itself with that failure's index. A model that failed is drawn as the failure
-/// cube, every slot with row 0's params and shader and the index of the model's row in the failure table.
+/// The instance table, a row per renderer at its index in a snapshot of the renderers, and the material table beside
+/// it.
 /// </summary>
+/// <remarks>
+/// <para>
+/// A frame's work is the chunks of renderers written since the snapshot the last fill read, or that moved: their rows
+/// are built again, each renderer asking for its model, and the rest stay as they are. Every row is built again once a
+/// model is made or fails. Blocks of rows that changed are uploaded in runs; a still scene uploads none.
+/// </para>
+/// <para>
+/// The material table has a row per distinct <see cref="MaterialInstance"/> drawn, which every slot holding it shares,
+/// made again each frame from what <paramref name="resources"/> has then, and uploaded whole. Row 0 is the default
+/// material, which an empty slot and a material still loading are drawn with.
+/// </para>
+/// <para>
+/// A material that failed, or whose shader did, is drawn with row 0's params and shader, and the index of its row in
+/// the failure table, which names it. A material with a texture that failed, or a param that fits no field, is drawn as
+/// itself with that failure's index. A model that failed is drawn as the failure cube, every slot with row 0's params
+/// and shader and the index of the model's row in the failure table.
+/// </para>
+/// </remarks>
 internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
 {
     /// <summary>
@@ -57,14 +67,16 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
     private readonly List<EcsSnapshotChunk> _filled = [];
 
     /// <summary>
-    /// The material rows, a row for each distinct slot drawn, up to as many as there are instance rows at most, which
-    /// holds every drawn slot of a world whose renderers fill one each.
+    /// The material rows, a row for each distinct slot drawn, up to as many as there are instance rows.
     /// </summary>
+    /// <remarks>
+    /// That holds every drawn slot of a world whose renderers fill one each.
+    /// </remarks>
     private GpuMaterial[] _materialRows = new GpuMaterial[MinCapacity];
 
     /// <summary>
-    /// The slot each material row is made from, by row, with the id of the failed model whose cube it draws, 0 for none;
-    /// row 0 the default material's.
+    /// The slot each material row is made from, by row, with the id of the failed model whose cube it draws, 0 for
+    /// none; row 0 the default material's.
     /// </summary>
     private readonly List<(MaterialInstance Slot, ulong FailedModel)> _materialSlots =
     [
@@ -75,13 +87,16 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
 
     /// <summary>
     /// The failure table's rows, a row for each failure drawn, made when it is first drawn and freed when its asset is
-    /// read again; row 0 is never read, as a failure index of 0 means no failure.
+    /// read again.
     /// </summary>
+    /// <remarks>
+    /// Row 0 is never read, as a failure index of 0 means no failure.
+    /// </remarks>
     private GpuFailure[] _failureRows = new GpuFailure[16];
 
     /// <summary>
-    /// The row of each failure drawn in the failure table, by its kind, the asset that failed and the param that fits no
-    /// field.
+    /// The row of each failure drawn in the failure table, by its kind, the asset that failed and the param that fits
+    /// no field.
     /// </summary>
     private readonly Dictionary<(FailureKind Kind, ulong Asset, string? Param), uint> _failureRowOf = [];
 
@@ -105,16 +120,19 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
     public int Capacity => _rows.Length;
 
     /// <summary>
-    /// The frame's instances as the gems that build from them take them: the rows, how many rows the material table holds
-    /// and has room for, and how many times the rows have changed.
+    /// The frame's instances: the rows, how many rows the material table holds and has room for, and how many times the
+    /// rows have changed.
     /// </summary>
     public GpuInstances Instances =>
         new(_rows.AsMemory(0, Count), _materialSlots.Count, _materialRows.Length, _version);
 
     /// <summary>
-    /// Frees the failure table's rows of asset <paramref name="id"/>, read again, so a failure of it still there is made,
-    /// and logged, anew; the rows after them move down, as each frame's material rows name them again.
+    /// Frees the failure table's rows of asset <paramref name="id"/>, read again, so a failure of it still there is
+    /// made, and logged, anew.
     /// </summary>
+    /// <remarks>
+    /// The rows after them move down, as each frame's material rows name them again.
+    /// </remarks>
     public void Forget(ulong id)
     {
         if (!_failureRowOf.Keys.Any(failure => failure.Asset == id))
@@ -134,9 +152,12 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
     }
 
     /// <summary>
-    /// The rows of <paramref name="renderers"/>, from what changed since the last fill: each its model's place in the
-    /// pools and the material rows of its slots, or an empty row while its model is being made.
+    /// Builds the rows of <paramref name="renderers"/> from what changed since the last fill.
     /// </summary>
+    /// <remarks>
+    /// Each row holds its model's place in the pools and the material rows of its slots, or is empty while its model is
+    /// being made.
+    /// </remarks>
     public void Fill(EcsSnapshot<Transform, Ecs.Components.Renderer> renderers, uint frameIndex)
     {
         // The same snapshot again, with the same models, makes the same rows.
@@ -181,10 +202,13 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
     }
 
     /// <summary>
-    /// The table, the material table and the failure table asked for; the blocks of rows that changed copied into the
-    /// table, each run of them in one copy, the material rows made again from what the GPU resources have now and copied
-    /// into theirs, and the failure rows copied into theirs, in the frame's upload pass.
+    /// Asks for the table, the material table and the failure table, and copies what changed into them, in the frame's
+    /// upload pass.
     /// </summary>
+    /// <remarks>
+    /// The blocks of rows that changed go into the table, each run of them in one copy. The material rows are made
+    /// again from what the GPU resources have now and copied into theirs, and the failure rows are copied into theirs.
+    /// </remarks>
     public Result<(GpuBuffer Rows, GpuBuffer Materials, GpuBuffer Failures)> Upload(RenderGraph graph)
     {
         // A table asked for bigger than last frame keeps what it held.
@@ -201,10 +225,10 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
         if (!materials.Ok)
             return Result.Failure(materials.Error);
 
-        // Every material row made again, so a material or texture that arrived shows with no renderer written: one still
-        // loading as the default, row 0; one that failed, or its shader did, as the default with its failure; one that a
-        // model that failed is drawn with, the default, with the model's; and one with a part that failed, a texture or
-        // a param, as itself with that part's failure.
+        // Every material row made again, so a material or texture that arrived shows with no renderer written: one
+        // still loading as the default, row 0; one that failed, or its shader did, as the default with its failure; one
+        // that a model that failed is drawn with, the default, with the model's; and one with a part that failed, a
+        // texture or a param, as itself with that part's failure.
         for (int row = 0; row < _materialSlots.Count; row++)
         {
             (MaterialInstance slot, ulong failedModel) = _materialSlots[row];
@@ -279,16 +303,19 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
     }
 
     /// <summary>
-    /// How many rows a table holds to hold <paramref name="rows"/>: the next power of two, from
+    /// Gets how many rows a table holds to hold <paramref name="rows"/>: the next power of two, from
     /// <see cref="MinCapacity"/> up to <see cref="MaxCapacity"/>.
     /// </summary>
     private static int GetCapacity(int rows) =>
         (int)Math.Min(BitOperations.RoundUpToPowerOf2((uint)Math.Max(rows, MinCapacity)), MaxCapacity);
 
     /// <summary>
-    /// The rows from <paramref name="start"/> built again from their renderers, each asking for its model. A renderer
-    /// drawn at the same index in the last fill that moved in the world keeps where it was, for this frame's motion.
+    /// Builds the rows from <paramref name="start"/> again from their renderers, each asking for its model.
     /// </summary>
+    /// <remarks>
+    /// A renderer drawn at the same index in the last fill that moved in the world keeps where it was, for this frame's
+    /// motion.
+    /// </remarks>
     private void SetRows(
         EcsSnapshot<Transform, Ecs.Components.Renderer> renderers,
         int start,
@@ -308,7 +335,8 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
             GpuInstance row = default;
             if (resident is { } model)
             {
-                // The failure cube keeps its size, whatever the entity's scale, so it shows; it keeps the place and turn.
+                // The failure cube keeps its size, whatever the entity's scale, so it shows; it keeps the place and
+                // turn.
                 Transform transform = renderers.First[index];
                 if (model.IsFailure)
                     transform.Scale = Vector3.One;
@@ -356,12 +384,14 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
     }
 
     /// <summary>
-    /// The row of <paramref name="failure"/> in the failure table: the asset of its kind that failed, and for a param
-    /// that fits no field of its material's shader, the param's name. The first ask makes it, drawn in stripes when a
-    /// part failed, a texture or a param, else solid; its text the kind, " failed ", the asset's path and the param's
-    /// name, cut from the left to fit, so the name stays. A param's first ask logs it too; each other kind is logged
-    /// where it fails, with why.
+    /// Gets the row of <paramref name="failure"/> in the failure table, and makes it on the first ask.
     /// </summary>
+    /// <remarks>
+    /// The failure is the asset of its kind that failed, and for a param that fits no field of its material's shader,
+    /// the param's name. The row is drawn in stripes when a part failed, a texture or a param, else solid. Its text is
+    /// the kind, " failed ", the asset's path and the param's name, cut from the left to fit, so the name stays. A
+    /// param's first ask logs it too; each other kind is logged where it fails, with why.
+    /// </remarks>
     private uint GetFailureRow((FailureKind Kind, ulong Asset, string? Param) failure)
     {
         if (_failureRowOf.TryGetValue(failure, out uint row))
@@ -398,10 +428,13 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
     }
 
     /// <summary>
-    /// The material row of the slot, drawn for the failed model <paramref name="drawn"/>.FailedModel when not 0; 0 for an
-    /// empty slot; a value first seen takes the next row, which every slot holding it shares. A slot whose params change
-    /// takes another row; rows are never given back.
+    /// Gets the material row of the slot, drawn for the failed model <paramref name="drawn"/>.FailedModel when not 0; 0
+    /// for an empty slot.
     /// </summary>
+    /// <remarks>
+    /// A value first seen takes the next row, which every slot holding it shares. A slot whose params change takes
+    /// another row; rows are never given back.
+    /// </remarks>
     private uint GetMaterialRow((MaterialInstance Slot, ulong FailedModel) drawn)
     {
         // A failed model's slot takes its own row even with no default material, so it shows the model's failure.
@@ -430,11 +463,13 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
 }
 
 /// <summary>
-/// The frame's instances as the instance table holds them on the CPU, for the gems that build from each instance: the
-/// rows as the GPU reads them, how many rows the material table holds and has room for, so a table with a row for each
-/// of its rows is asked for at that size, and how many times the rows have changed, so what is built from them is built
-/// again when it differs. Read on the render thread in the frame it is made for.
+/// The frame's instances as the instance table holds them on the CPU.
 /// </summary>
+/// <remarks>
+/// It holds the rows as the GPU reads them; how many rows the material table holds and has room for, so a table with a
+/// row for each of its rows is asked for at that size; and how many times the rows have changed, so what is built from
+/// them is built again when it differs. Read it on the render thread in the frame it is made for.
+/// </remarks>
 public readonly record struct GpuInstances(
     ReadOnlyMemory<GpuInstance> Rows,
     int MaterialCount,

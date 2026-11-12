@@ -8,24 +8,31 @@ using Magic.Utils;
 namespace Magic.DeferredRendering.View;
 
 /// <summary>
-/// The frame's rows written from its view: the view's constants, its matrices and targets, the frame's tables and its
-/// lights, remembering last frame's view so a thing that moved carries where it was.
+/// Writes the frame's rows from its view: the view's constants, its matrices and targets, the frame's tables and its
+/// lights.
 /// </summary>
+/// <remarks>
+/// It remembers last frame's view, so a thing that moved carries where it was.
+/// </remarks>
 internal sealed class FrameView
 {
     private const uint JitterFrames = 256;
 
     /// <summary>
-    /// Last frame's view and its size, while a frame was drawn since the view was last forgotten: what a thing that
-    /// moved carries where it was from, and whether the view has a history.
+    /// Last frame's view and its size, while a frame was drawn since the view was last forgotten.
     /// </summary>
+    /// <remarks>
+    /// A thing that moved carries where it was from this view, and it tells whether the view has a history.
+    /// </remarks>
     private (Matrix4x4 ViewProjection, Vector4 CameraPosition, int Width, int Height)? _previous;
 
     /// <summary>
-    /// The jitter of frame <paramref name="frameIndex"/>, in pixels from the pixel's middle: a point in the pixel from
-    /// the Halton sequence in bases 2 and 3 that starts again every 256 frames, so an effect that blends frames sees
-    /// another point of each pixel each frame.
+    /// Gets the jitter of frame <paramref name="frameIndex"/>, in pixels from the pixel's middle.
     /// </summary>
+    /// <remarks>
+    /// It is a point in the pixel from the Halton sequence in bases 2 and 3 that starts again every 256 frames, so an
+    /// effect that blends frames sees another point of each pixel each frame.
+    /// </remarks>
     public static Vector2 GetJitter(uint frameIndex)
     {
         uint term = (frameIndex % JitterFrames) + 1;
@@ -40,11 +47,14 @@ internal sealed class FrameView
     public void ClearHistory() => _previous = null;
 
     /// <summary>
-    /// The frame's rows uploaded into its buffer: the view's constants, the camera shifted by <paramref name="jitter"/>;
-    /// the models, the instance and material tables; and the lights, the sun, the open sky at
-    /// <paramref name="skyBrightness"/>, the sky's tables, and the light table's <paramref name="lightCount"/>
-    /// lights and its tiles; and the rows the gems after the view write, at 0.
+    /// Uploads the frame's rows into its buffer.
     /// </summary>
+    /// <remarks>
+    /// The rows are the view's constants, with the camera shifted by <paramref name="jitter"/>; the models, the
+    /// instance and material tables; the lights: the sun, the open sky at <paramref name="skyBrightness"/>, the sky's
+    /// tables, and the light table's <paramref name="lightCount"/> lights and its tiles; and, at 0, the rows the gems
+    /// after the view write.
+    /// </remarks>
     public Result Upload(
         RenderGraph graph,
         in GpuView view,
@@ -167,7 +177,7 @@ internal sealed class FrameView
         _previous is { } last && last.Width == width && last.Height == height;
 
     /// <summary>
-    /// The plane scaled so its normal is a unit; the far plane's is zero, and stays so.
+    /// Scales the plane so its normal is a unit; the far plane's is zero, and stays so.
     /// </summary>
     private static Vector4 Normalize(Vector4 plane)
     {
@@ -177,7 +187,7 @@ internal sealed class FrameView
     }
 
     /// <summary>
-    /// The Halton sequence's term in a base, 0 to 1: a different one each frame that fills the pixel evenly.
+    /// Gets the Halton sequence's term in a base, 0 to 1: a different one each frame that fills the pixel evenly.
     /// </summary>
     private static float GetHalton(uint index, uint radix)
     {
@@ -194,9 +204,11 @@ internal sealed class FrameView
     }
 
     /// <summary>
-    /// A perspective with no far plane and reversed depth, for row vectors: depth is the near distance over the view
-    /// depth, 1 at the near plane and 0 at infinity.
+    /// Creates a perspective with no far plane and reversed depth, for row vectors.
     /// </summary>
+    /// <remarks>
+    /// Depth is the near distance over the view depth, 1 at the near plane and 0 at infinity.
+    /// </remarks>
     private static Matrix4x4 CreatePerspective(float fieldOfViewDegrees, float aspect, float near)
     {
         float focal = 1 / MathF.Tan(fieldOfViewDegrees * MathF.PI / 360);

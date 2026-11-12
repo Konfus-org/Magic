@@ -14,18 +14,30 @@ using Magic.Utils;
 namespace Magic.DeferredRendering.World;
 
 /// <summary>
-/// The GPU resources the gem draws with, each read once on its first ask: a texture asset by its handle, read and asked
-/// of the graph with every level and the sampler its asset asks for, then copied up in the frame after it arrives; a
-/// material asset by its handle, read once, with the textures it names asked for and its shader's struct reflected,
-/// and handed out as the row a slot's params make over its own, packed as that struct lays them out; a model asset by
-/// its handle, made by the preprocessor on a worker, settled into the pools of vertices and indices, the mesh table
-/// on a GPU that traces rays and the model table at the start of the next frame, and copied up in it. The pools and
-/// the textures are asked of the graph every frame, so the GPU provider keeps what they hold. Each pool hands out ranges
-/// first fit from a free list, and the vertex and index pools grow when none holds a model. A model not asked for in the
-/// seconds it is kept, and held by no renderer drawn, is evicted: its ranges go back to the free lists and its row of
-/// the model table is emptied, and the next ask makes it again. A smoothly filtered texture is sampled with
-/// <paramref name="anisotropy"/>, and goes up without its <paramref name="droppedLevels"/> largest mip levels.
+/// The GPU resources the gem draws with: textures, materials and models by their handles, each read once on its first
+/// ask.
 /// </summary>
+/// <remarks>
+/// <para>
+/// A texture is read and asked of the graph with every level and the sampler its asset asks for, then copied up in the
+/// frame after it arrives. A smoothly filtered texture is sampled with <paramref name="anisotropy"/>, and goes up
+/// without its <paramref name="droppedLevels"/> largest mip levels.
+/// </para>
+/// <para>
+/// A material is read once, with the textures it names asked for and its shader's struct reflected. It is handed out
+/// as the row a slot's params make over its own, packed as that struct lays them out.
+/// </para>
+/// <para>
+/// A model is made by the preprocessor on a worker. At the start of the next frame it is settled into the pools of
+/// vertices and indices, the mesh table on a GPU that traces rays and the model table, and copied up.
+/// </para>
+/// <para>
+/// The pools and the textures are asked of the graph every frame, so the GPU provider keeps what they hold. Each pool
+/// hands out ranges first fit from a free list, and the vertex and index pools grow when none holds a model. A model
+/// not asked for in the seconds it is kept, and held by no renderer drawn, is evicted: its ranges go back to the free
+/// lists and its row of the model table is emptied, and the next ask makes it again.
+/// </para>
+/// </remarks>
 internal sealed class GpuResources(
     ModelPreprocessor models,
     AssetManager assets,
@@ -49,17 +61,22 @@ internal sealed class GpuResources(
     private readonly List<(Texture Asset, int First, TextureEntry Entry)> _arrivedTextures = [];
 
     /// <summary>
-    /// Each material shader's struct as reflection lays it out, by the shader's id, null while it is reflected; its
-    /// fields are default when it was not, and its materials are drawn as failed.
+    /// Each material shader's struct as reflection lays it out, by the shader's id, null while it is reflected.
     /// </summary>
+    /// <remarks>
+    /// Its fields are default when it was not reflected, and its materials are drawn as failed.
+    /// </remarks>
     private readonly Dictionary<ulong, MaterialLayout?> _layouts = [];
 
     private readonly List<ShaderTypeArgument> _materialShaders = [];
 
     /// <summary>
     /// The param of each slot drawn, its material's or its own, that names no field of its shader's struct, null for
-    /// none: found once, and again after any asset is read again.
+    /// none.
     /// </summary>
+    /// <remarks>
+    /// It is found once, and again after any asset is read again.
+    /// </remarks>
     private readonly Dictionary<MaterialInstance, string?> _misfits = [];
 
     // The models' indices; row 0 is none, so it is taken from the start.
@@ -76,9 +93,11 @@ internal sealed class GpuResources(
     private readonly Dictionary<ulong, ModelEntry> _modelEntries = [];
 
     /// <summary>
-    /// The models made since the last frame, by their id with their name, which the next <see cref="Prepare"/> settles,
-    /// and each one's place once it has one, written into the model table once its copies are staged.
+    /// The models made since the last frame, by their id with their name, which the next <see cref="Prepare"/> settles.
     /// </summary>
+    /// <remarks>
+    /// Each one holds its place once it has one, and goes into the model table once its copies are staged.
+    /// </remarks>
     private readonly List<(
         ulong Model,
         string Name,
@@ -95,9 +114,11 @@ internal sealed class GpuResources(
     private readonly FreeList _meshRanges = new(MeshCapacity);
 
     /// <summary>
-    /// How many times models were made or failed, ever: when it changes, a renderer waiting for its model may draw now,
-    /// and every row is built again.
+    /// How many times models were made or failed, ever.
     /// </summary>
+    /// <remarks>
+    /// When it changes, a renderer waiting for its model may draw now, and every row is built again.
+    /// </remarks>
     public int SettledModels { get; private set; }
 
     public GpuBuffer VertexPool { get; private set; }
@@ -105,10 +126,13 @@ internal sealed class GpuResources(
     public GpuBuffer IndexPool { get; private set; }
 
     /// <summary>
-    /// Every resident model's meshes as rays see them, a <see cref="GpuMesh"/> a row, from its
-    /// <see cref="ModelPlace.MeshOffset"/> in the order of its <see cref="ModelPlace.Meshes"/>; none on a GPU that
-    /// traces no rays.
+    /// Every resident model's meshes as rays see them, a <see cref="GpuMesh"/> a row; none on a GPU that traces no
+    /// rays.
     /// </summary>
+    /// <remarks>
+    /// A model's meshes start at its <see cref="ModelPlace.MeshOffset"/>, in the order of its
+    /// <see cref="ModelPlace.Meshes"/>.
+    /// </remarks>
     public GpuBuffer Meshes { get; private set; }
 
     /// <summary>
@@ -141,10 +165,11 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// The textures shaders read through the heap, by the id in a row rather than by a pass's name: every material's
-    /// texture on the GPU. A pass that samples them names them in its reads, so each is readable, its copy done, before
-    /// the pass runs.
+    /// Gets every material's texture on the GPU, which shaders read through the heap by the id in a row.
     /// </summary>
+    /// <remarks>
+    /// A pass that samples them names them in its reads, so each is readable, its copy done, before the pass runs.
+    /// </remarks>
     public ImmutableArray<GpuResource> GetHeapTextures()
     {
         ImmutableArray<GpuResource>.Builder textures = ImmutableArray.CreateBuilder<GpuResource>();
@@ -158,10 +183,12 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// The pools, with the models made since the last frame settled into them, asked for every frame before any
-    /// renderer's row is built, so what they hold stays. The models take their ranges first, so a pool they grow is
-    /// asked for at its new size before they are copied into it.
+    /// Asks for the pools, and settles the models made since the last frame into them.
     /// </summary>
+    /// <remarks>
+    /// Call it every frame before any renderer's row is built, so what the pools hold stays. The models take their
+    /// ranges first, so a pool they grow is asked for at its new size before they are copied into it.
+    /// </remarks>
     public Result Prepare(RenderGraph graph)
     {
         // The mesh table first, on a GPU that traces rays, so a model placed takes a range of it only there.
@@ -307,13 +334,15 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// Evicts every model not asked for in the <paramref name="keepSec"/> before <paramref name="frameStart"/>, the tick
-    /// the frame started at, that none of <paramref name="drawn"/> holds: its ranges go back to the pools' free lists,
-    /// its range of the mesh table too, and its row of the model table is emptied. A model asked for this frame stays,
-    /// whatever the keep time.
-    /// Renderers not written since their rows were built ask for nothing, so once a model looks unused each model
-    /// <paramref name="drawn"/> holds is asked for first.
+    /// Evicts every model not asked for in the <paramref name="keepSec"/> before <paramref name="frameStart"/>, the
+    /// tick the frame started at, that none of <paramref name="drawn"/> holds.
     /// </summary>
+    /// <remarks>
+    /// An evicted model's ranges go back to the pools' free lists, its range of the mesh table too, and its row of the
+    /// model table is emptied. A model asked for this frame stays, whatever the keep time. Renderers not written since
+    /// their rows were built ask for nothing, so once a model looks unused each model <paramref name="drawn"/> holds is
+    /// asked for first.
+    /// </remarks>
     public void EvictUnusedModels(ReadOnlySpan<Ecs.Components.Renderer> drawn, long frameStart, int keepSec)
     {
         long before = frameStart - (keepSec * 1000L);
@@ -378,13 +407,16 @@ internal sealed class GpuResources(
     public GpuState Get(Handle<Material> handle) => Get(new MaterialInstance { Handle = handle }, out _, out _);
 
     /// <summary>
-    /// Whether the slot's material, its shader's struct and the textures it names are on the GPU, the row the slot's
-    /// params over the material's make, and its most severe failure, as <see cref="Pack"/> finds it: each field of the
-    /// struct by its name, a texture's heap id in a <c>TextureRef</c> and its sampler's in the <c>SamplerRef</c> named
-    /// for it with "Sampler" after, and 0 where neither sets one or the texture failed. Failed when the material or its
-    /// shader's struct did not load. The first ask starts loading the material. The row names its shader by its place in
-    /// <see cref="MaterialShaders"/>, which it takes on the first row that names it.
+    /// Gets whether the slot's material, its shader's struct and its textures are on the GPU, the row its params make,
+    /// and its most severe failure.
     /// </summary>
+    /// <remarks>
+    /// The row is the slot's params over the material's, as <see cref="Pack"/> finds it: each field of the struct by
+    /// its name, a texture's heap id in a <c>TextureRef</c> and its sampler's in the <c>SamplerRef</c> named for it
+    /// with "Sampler" after, and 0 where neither sets one or the texture failed. Failed when the material or its
+    /// shader's struct did not load. The first ask starts loading the material. The row names its shader by its place
+    /// in <see cref="MaterialShaders"/>, which it takes on the first row that names it.
+    /// </remarks>
     public GpuState Get(
         in MaterialInstance slot,
         out GpuMaterial row,
@@ -399,11 +431,14 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// Whether the slot's material, its shader's struct and the textures it names are on the GPU, its params packed into
-    /// the row, its shader's struct as reflection laid it out, the default struct while it loads, and the most severe of
-    /// its failures: its shader's or its own, which make it Failed; else a texture that failed, which packs as no
-    /// texture, or a param of the material that fits no field of the struct, which leaves the field its default.
+    /// Packs the slot's params into the row, and gets whether its material, its shader's struct and its textures are on
+    /// the GPU.
     /// </summary>
+    /// <remarks>
+    /// It also gives its shader's struct as reflection laid it out, the default struct while it loads, and the most
+    /// severe of its failures: its shader's or its own, which make it Failed; else a texture that failed, which packs
+    /// as no texture, or a param of the material that fits no field of the struct, which leaves the field its default.
+    /// </remarks>
     public GpuState Pack(
         in MaterialInstance slot,
         out GpuMaterial row,
@@ -510,10 +545,13 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// Where the model is in the pools, or null while it is being made; the first ask starts making it, and every ask
-    /// keeps it from being evicted. A model that could not be made is the failure cube, marked so, and nothing when the
-    /// cube could not be made either. The cube is made from memory, not read.
+    /// Gets where the model is in the pools, or null while it is being made.
     /// </summary>
+    /// <remarks>
+    /// The first ask starts making it, and every ask keeps it from being evicted. A model that could not be made is the
+    /// failure cube, marked so, and nothing when the cube could not be made either. The cube is made from memory, not
+    /// read.
+    /// </remarks>
     public ResidentModel? Get(Handle<Model> model)
     {
         if (HasFailed(model))
@@ -540,10 +578,12 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// Lets go of what was made from asset <paramref name="id"/>, read again, so the next ask loads it anew: a
-    /// material, a texture, a material shader's struct, which is reflected again now, and a model that failed. A model
-    /// in the pools stays as it was made until it is evicted.
+    /// Lets go of what was made from asset <paramref name="id"/>, read again, so the next ask loads it anew.
     /// </summary>
+    /// <remarks>
+    /// That is a material, a texture, a material shader's struct, which is reflected again now, and a model that
+    /// failed. A model in the pools stays as it was made until it is evicted.
+    /// </remarks>
     public void Forget(ulong id)
     {
         _materials.Remove(id);
@@ -563,9 +603,12 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// Whether the model is in the pools, copied up in this frame's transfers at the latest, or could not be made and the
-    /// failure cube it is drawn as has arrived in its place, or could not be made either.
+    /// Whether the model is in the pools, copied up in this frame's transfers at the latest, or could not be made.
     /// </summary>
+    /// <remarks>
+    /// A model that could not be made has arrived once the failure cube it is drawn as has arrived in its place, or
+    /// could not be made either.
+    /// </remarks>
     public bool HasArrived(Handle<Model> model) =>
         _modelEntries.GetValueOrDefault(model.Id)?.State == GpuState.Ready
         || (HasFailed(model) && (HasFailed(FailureCube.Handle) || HasArrived(FailureCube.Handle)));
@@ -646,10 +689,13 @@ internal sealed class GpuResources(
         };
 
     /// <summary>
-    /// Writes <paramref name="texture"/>'s heap id into the field named <paramref name="name"/> of <paramref name="words"/>,
-    /// and its sampler's into the field named for it with "Sampler" after, asking for it; its state, ready as nothing
-    /// when it is none.
+    /// Writes <paramref name="texture"/>'s heap id into the field named <paramref name="name"/> of
+    /// <paramref name="words"/>, and its sampler's into the field named for it with "Sampler" after.
     /// </summary>
+    /// <remarks>
+    /// It asks for the texture.
+    /// </remarks>
+    /// <returns>The texture's state, ready as nothing when it is none.</returns>
     private GpuState PackTexture(MaterialLayout layout, string name, Handle<Texture> texture, Span<uint> words)
     {
         if (texture == Handle<Texture>.None)
@@ -669,9 +715,11 @@ internal sealed class GpuResources(
 
     /// <summary>
     /// Reflects the struct of <paramref name="shader"/>, which a material draws with, once: named for its file, as
-    /// Material/Standard.slang declares Standard. It leaves it failed when it can't, or the struct is more than a row
-    /// holds.
+    /// Material/Standard.slang declares Standard.
     /// </summary>
+    /// <remarks>
+    /// It leaves it failed when it can't, or the struct is more than a row holds.
+    /// </remarks>
     private async Task ReflectAsync(Handle<Shader> shader)
     {
         string path = assets.GetPath(shader) ?? $"id {shader.Id}";
@@ -694,9 +742,10 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// The struct <paramref name="type"/> names, as a material's row lays it out, with what it declares it needs; or why
-    /// not, as when it is more than a row holds.
+    /// Reflects the struct <paramref name="type"/> names, as a material's row lays it out, with what it declares it
+    /// needs.
     /// </summary>
+    /// <returns>The layout, or why not, as when it is more than a row holds.</returns>
     private async Task<Result<MaterialLayout>> ReflectLayoutAsync(ShaderTypeArgument type)
     {
         Result<ImmutableArray<ShaderField>> fields = await shaders
@@ -736,7 +785,8 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// The place of <paramref name="shader"/> in <see cref="MaterialShaders"/>, which it takes at the end the first time.
+    /// Gets the place of <paramref name="shader"/> in <see cref="MaterialShaders"/>, which it takes at the end the
+    /// first time.
     /// </summary>
     private uint GetMaterialShader(ShaderTypeArgument shader)
     {
@@ -750,8 +800,8 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// The paths of the materials loaded that draw with the shader or name the texture <paramref name="id"/>, for a log
-    /// line.
+    /// Gets the paths of the materials loaded that draw with the shader or name the texture <paramref name="id"/>, for
+    /// a log line.
     /// </summary>
     private string GetMaterialsWith(ulong id) =>
         string.Join(
@@ -852,8 +902,11 @@ internal sealed class GpuResources(
 
     /// <summary>
     /// A material shader's struct as its rows are packed: its fields as reflection lays them out, default when it could
-    /// not be, the struct a pass is specialised to, and, for an effect's, what it declares it needs.
+    /// not be.
     /// </summary>
+    /// <remarks>
+    /// It also holds the struct a pass is specialised to, and, for an effect's, what it declares it needs.
+    /// </remarks>
     public readonly record struct MaterialLayout(
         ImmutableArray<ShaderField> Fields,
         ShaderTypeArgument Shader,
@@ -893,9 +946,11 @@ internal sealed class GpuResources(
 }
 
 /// <summary>
-/// Where a model is in the pools, each range its offset and count, and the sphere around it in its own frame;
-/// <paramref name="IsFailure"/> when it is the failure cube in the place of a model that could not be made.
+/// Where a model is in the pools, each range its offset and count, and the sphere around it in its own frame.
 /// </summary>
+/// <remarks>
+/// <paramref name="IsFailure"/> is true when it is the failure cube in the place of a model that could not be made.
+/// </remarks>
 internal readonly record struct ResidentModel(
     uint VertexOffset,
     uint VertexCount,

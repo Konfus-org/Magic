@@ -5,10 +5,12 @@ using Magic.Assets;
 namespace Magic.DeferredRendering.World;
 
 /// <summary>
-/// What the GPU holds a <see cref="Model"/> as, made from it once and cached under its version: its meshes' vertices
-/// as the GPU reads them, one mesh after another, and their triangles as indices into them, which rays and every
-/// renderer draw. The renderer adds where it put them in the pools.
+/// What the GPU holds a <see cref="Model"/> as, made from it once and cached under its version.
 /// </summary>
+/// <remarks>
+/// It holds its meshes' vertices as the GPU reads them, one mesh after another, and their triangles as indices into
+/// them, which rays and every renderer draw. The renderer adds where it put them in the pools.
+/// </remarks>
 internal sealed class MeshDerived
 {
     public required ImmutableArray<GpuVertex> Vertices { get; init; }

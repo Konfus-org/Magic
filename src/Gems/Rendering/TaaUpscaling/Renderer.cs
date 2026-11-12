@@ -11,13 +11,15 @@ using Magic.Worlds;
 namespace Magic.TaaUpscaling;
 
 /// <summary>
-/// Takes the finished picture to the size it is shown at with temporal anti-aliasing: each frame it makes the
-/// <see cref="Upscaling"/>, so the camera jitters, and the renderer has it record one pass once the view's output is
-/// drawn. The pass builds each shown pixel from the output's jittered texels around it and blends it with last
-/// frame's resolved picture where its surface was, so it keeps two resolved pictures and swaps them every frame,
-/// with no history on the first frame at a size or of a world; the newer is what the window shows. It makes nothing
-/// while its shader builds or after it failed.
+/// Takes the finished picture to the size it is shown at with temporal anti-aliasing.
 /// </summary>
+/// <remarks>
+/// Each frame it makes the <see cref="Upscaling"/>, so the camera jitters, and the renderer has it record one pass once
+/// the view's output is drawn. The pass builds each shown pixel from the output's jittered texels around it and blends
+/// it with last frame's resolved picture where its surface was. It keeps two resolved pictures and swaps them every
+/// frame, with no history on the first frame at a size or of a world; the newer is what the window shows. It makes
+/// nothing while its shader builds or after it failed.
+/// </remarks>
 public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
 {
     /// <summary>
@@ -45,7 +47,7 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
     }
 
     /// <summary>
-    /// The frame's upscaling; none while the shader builds or after it failed.
+    /// Makes the frame's upscaling; none while the shader builds or after it failed.
     /// </summary>
     public Upscaling? Render(in Frame frame, RenderGraph graph)
     {
@@ -72,9 +74,9 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
         );
 
     /// <summary>
-    /// The pass that resolves the view's output at the size it is shown at, and the picture it resolves; none when
-    /// its pictures were not made.
+    /// Records the pass that resolves the view's output at the size it is shown at.
     /// </summary>
+    /// <returns>The picture it resolves; none when its pictures were not made.</returns>
     private GpuTexture Record(RenderGraph graph, GpuView view)
     {
         (int width, int height) = (view.ShownWidth, view.ShownHeight);
