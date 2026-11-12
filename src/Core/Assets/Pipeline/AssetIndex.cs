@@ -44,7 +44,7 @@ internal sealed record AssetIndex
 
     /// <summary>
     /// The built-in files, Magic's own, by their path without the extension (<c>Materials/Default</c>): where the
-    /// defaults and failures are, and only there.
+    /// defaults are, and only there.
     /// </summary>
     public required FrozenDictionary<string, IndexedFile> BuiltIn { get; init; }
 

@@ -174,7 +174,7 @@ internal sealed record LoadedAssets
     public ImmutableDictionary<Type, ImmutableArray<Type>> Expected { get; init; } = [];
 
     /// <summary>
-    /// The defaults and failures found missing, each said once.
+    /// The folders of the defaults found missing, each said once.
     /// </summary>
     public ImmutableHashSet<string> ReportedMissing { get; init; } =
         ImmutableHashSet.Create<string>(StringComparer.Ordinal);

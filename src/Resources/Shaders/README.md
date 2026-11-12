@@ -7,8 +7,8 @@ compiler loads a module and its imports from the assets, so a game's `Shaders/` 
 - `Core/` is what every module needs: the heap every resource is read through (`Heap`), what a pass is handed
   (`Pass`), what every pass of a frame reads (`Frame`), numbers, colour, packing, sampling and hashing.
 - `Surface/` is what a material is handed for a pixel and what it gives back.
-- `Material/` is the material contract, `IMaterial`, and the materials every project has: the standard one, the one
-  a broken asset is drawn with, and glass, which is translucent.
+- `Material/` is the material contract, `IMaterial`, and the materials every project has: the standard one and glass,
+  which is translucent.
 - `Sky/` is the sky contract, `ISky`.
 - `Post/` is the pixel effect contract, `IPixelEffect`, which post effects implement, a vignette, a blur, the temporal
   anti-aliasing, the metered exposure, a bloom and the AgX tonemap. Where an effect runs is its place in the list, so

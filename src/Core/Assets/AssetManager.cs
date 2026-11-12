@@ -123,7 +123,7 @@ public sealed class AssetManager : IDisposable
     internal Caches Caches { get; }
 
     /// <summary>
-    /// Magic's built-in <c>Resources/</c>: where the defaults and failures are, and only there.
+    /// Magic's built-in <c>Resources/</c>: where the defaults are, and only there.
     /// </summary>
     internal string BuiltIn { get; }
 
@@ -171,18 +171,28 @@ public sealed class AssetManager : IDisposable
     /// Every asset type has one. None, and an error logged once, when it is missing.
     /// </summary>
     public Handle<T> GetDefault<T>()
-        where T : IAsset<T> => FindBuiltIn<T>(typeof(T).Name + "s", "Default", "default");
-
-    /// <summary>
-    /// What is drawn in a broken <typeparamref name="TBroken"/>'s place: the <typeparamref name="T"/> named for the
-    /// broken type in <typeparamref name="T"/>'s <c>Failures</c> folder, <c>Materials/Failures/Texture.mat</c> for a
-    /// texture that does not load, in Magic's built-in <c>Resources/</c> alone, as a default is. Only what a renderer
-    /// draws a failure as has one. None, and an error logged once, when it is missing.
-    /// </summary>
-    public Handle<T> GetFailure<T, TBroken>()
         where T : IAsset<T>
-        where TBroken : IAsset<TBroken> =>
-        FindBuiltIn<T>($"{typeof(T).Name}s/Failures", typeof(TBroken).Name, $"{typeof(TBroken).Name} failure");
+    {
+        string folder = typeof(T).Name + "s";
+        if (Database.Index.FindBuiltIn(folder, "Default") is { } found && found.Type == typeof(T).Name)
+            return new Handle<T>(found.Id);
+
+        lock (_gate)
+        {
+            LoadedAssets loaded = Loaded;
+            if (loaded.ReportedMissing.Contains(folder))
+                return Handle<T>.None;
+
+            Loaded = loaded with { ReportedMissing = loaded.ReportedMissing.Add(folder) };
+        }
+
+        Log.Error(
+            $"There is no default {typeof(T).Name}: no {typeof(T).Name} is {folder}/Default or {folder}/Default/Default "
+                + $"under {BuiltIn}."
+        );
+
+        return Handle<T>.None;
+    }
 
     /// <summary>
     /// The paths of the assets directly in <paramref name="folder"/>, as <see cref="Find{T}"/> takes them.
@@ -1087,34 +1097,6 @@ public sealed class AssetManager : IDisposable
         }
 
         return new Made(Result.Success<object>(asset), version, AssetScan.FindHandles(asset));
-    }
-
-    /// <summary>
-    /// The built-in asset named <paramref name="name"/> in <paramref name="folder"/>, as
-    /// <see cref="AssetIndex.FindBuiltIn"/> finds it; <paramref name="what"/> says which kind of named asset it is when
-    /// it is missing, which is said once.
-    /// </summary>
-    private Handle<T> FindBuiltIn<T>(string folder, string name, string what)
-        where T : IAsset<T>
-    {
-        if (Database.Index.FindBuiltIn(folder, name) is { } found && found.Type == typeof(T).Name)
-            return new Handle<T>(found.Id);
-
-        lock (_gate)
-        {
-            LoadedAssets loaded = Loaded;
-            if (loaded.ReportedMissing.Contains($"{folder}/{name}"))
-                return Handle<T>.None;
-
-            Loaded = loaded with { ReportedMissing = loaded.ReportedMissing.Add($"{folder}/{name}") };
-        }
-
-        Log.Error(
-            $"There is no {what} {typeof(T).Name}: no {typeof(T).Name} is {folder}/{name} or {folder}/{name}/{name} "
-                + $"under {BuiltIn}."
-        );
-
-        return Handle<T>.None;
     }
 
     /// <summary>
