@@ -5,7 +5,6 @@ using System.Linq;
 using System.Numerics;
 using System.Threading.Channels;
 using Magic.Assets;
-using Magic.Configuration;
 using Magic.Debugging;
 using Magic.DeferredRendering.Post;
 using Magic.DeferredRendering.View;
@@ -43,7 +42,7 @@ public readonly record struct ShadingInput(
 
 /// <summary>
 /// The renderer, in two steps a frame. The view's step keeps the world on the GPU for the gems that draw it:
-/// <c>LateUpdate</c> copies what the frame draws out of the entities and publishes it; on the render thread the step
+/// <see cref="PublishInputs"/> copies what the frame draws out of the entities and publishes it; on the render thread the step
 /// takes the newest published, puts the models, materials, textures, instances, lights and sky's tables on the GPU,
 /// uploads the frame's rows, and makes the frame's <see cref="GpuView"/> and its <see cref="GpuInstances"/>. The
 /// shading's step lights that world, deferred: from the view and the GBuffer a geometry gem drew into it, the shading,
@@ -51,13 +50,10 @@ public readonly record struct ShadingInput(
 /// one is asked for, and the output into the window and any screenshot asked for. Where nothing made the world as rays
 /// see it, the shadows, the indirect light or the air, their rows of the frame's buffer are 0. As a domain replaces the
 /// world, it forgets the view's history and holds the loading screen until what comes is on the GPU and the shading's
-/// shaders are built. It is public because nothing in its assembly makes it: Magic does, by reflection, when a project
-/// lists the gem.
+/// shaders are built.
 /// </summary>
-public sealed class DeferredRenderingGem
-    : IGem,
-        IHasSettings<DeferredRenderingSettings>,
-        IRender<ViewInput, (GpuView, GpuInstances)>,
+public sealed class Renderer
+    : IRender<ViewInput, (GpuView, GpuInstances)>,
         IRenderFrom<ShadingInput>,
         IHookIntoDomainLoading,
         IDisposable
@@ -69,6 +65,12 @@ public sealed class DeferredRenderingGem
     private const int AutoRenderWidth = 1920;
 
     private const int AutoRenderHeight = 1080;
+
+    /// <summary>
+    /// How the world is drawn and what the renderer shows, which the debug window also sets on the game thread. Both
+    /// steps read it on the render thread.
+    /// </summary>
+    private readonly DeferredRenderingSettings _settings;
 
     private readonly IEcs _ecs;
 
@@ -136,7 +138,7 @@ public sealed class DeferredRenderingGem
     private readonly Subscription _preprocessing;
 
     /// <summary>
-    /// The number of the world the frames <see cref="LateUpdate"/> publishes are of, a new one each time a domain
+    /// The number of the world the frames <see cref="PublishInputs"/> publishes are of, a new one each time a domain
     /// replaces it, so the view's step forgets the view's history at the first frame of what comes. Game thread.
     /// </summary>
     private int _worldNumber;
@@ -165,7 +167,7 @@ public sealed class DeferredRenderingGem
 
     private bool _hasDrawn;
 
-    public DeferredRenderingGem(
+    public Renderer(
         DeferredRenderingSettings settings,
         IShaderCompiler shaders,
         IGraphicsApi gpu,
@@ -177,7 +179,7 @@ public sealed class DeferredRenderingGem
         IInput? input = null
     )
     {
-        Settings = settings;
+        _settings = settings;
         _ecs = ecs;
         _assets = assets;
         _threads = threads;
@@ -218,12 +220,6 @@ public sealed class DeferredRenderingGem
         _shadingShaders = [_shadeShader, _translucentShader, _lightViewShader, _showShader];
     }
 
-    /// <summary>
-    /// How the world is drawn and what the renderer shows, which the debug window also sets on the game thread.
-    /// Both steps read it once a frame on the render thread: a record, written whole, which no one changes.
-    /// </summary>
-    public DeferredRenderingSettings Settings { get; set; }
-
     public void Dispose()
     {
         _preprocessing.Dispose();
@@ -233,17 +229,13 @@ public sealed class DeferredRenderingGem
     /// <summary>
     /// Draws the debug window, which sets the settings.
     /// </summary>
-    public void Update(in Frame frame)
-    {
-        if (_debugWindow is not null)
-            Settings = _debugWindow.Update(Settings);
-    }
+    public void UpdateDebugWindow() => _debugWindow?.Update(_settings);
 
     /// <summary>
     /// Copies what the frame draws out of the entities and publishes it for the view's step, and hands the shading's
     /// step the screenshots asked for.
     /// </summary>
-    public void LateUpdate(in Frame frame)
+    public void PublishInputs(in Frame frame)
     {
         RenderInputs back = _inputs.Back;
         back.Renderers.Fill(_ecs);
@@ -294,7 +286,7 @@ public sealed class DeferredRenderingGem
         if (_inputs.TakeNewest() is not { } inputs)
             return null;
 
-        DeferredRenderingSettings settings = Settings;
+        DeferredRenderingSettings settings = _settings;
 
         // The first frame of another world forgets last frame's camera and size, so nothing drawn before carries
         // into it.
@@ -576,7 +568,7 @@ public sealed class DeferredRenderingGem
             return;
 
         GpuView gpu = input.View;
-        DeferredRenderingSettings settings = Settings;
+        DeferredRenderingSettings settings = _settings;
 
         ReadOnlySpan<GpuResource> indirect = input.Light is { } light
             ? [light.Diffuse, light.Reflections, light.Probes, light.ProbeDepth]
@@ -756,10 +748,10 @@ public sealed class DeferredRenderingGem
         }
         else
         {
-            Renderer[] renderers =
+            Ecs.Components.Renderer[] renderers =
             [
                 .. entities
-                    .SelectMany(entity => entity.OfType<Renderer>())
+                    .SelectMany(entity => entity.OfType<Ecs.Components.Renderer>())
                     .Where(renderer => renderer.Model != Handle<Model>.None),
             ];
             ImmutableArray<Handle<Material>> materials =

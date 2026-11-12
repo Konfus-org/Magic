@@ -96,7 +96,7 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
     /// The rows of <paramref name="renderers"/>, from what changed since the last fill: each its model's place in the
     /// pools and the material rows of its slots, or an empty row while its model is being made.
     /// </summary>
-    public void Fill(EcsSnapshot<Transform, Renderer> renderers, uint frameIndex)
+    public void Fill(EcsSnapshot<Transform, Ecs.Components.Renderer> renderers, uint frameIndex)
     {
         // The same snapshot again, with the same models, makes the same rows.
         bool isRebuild = resources.SettledModels != _settledModels;
@@ -211,7 +211,7 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
     /// drawn at the same index in the last fill that moved in the world keeps where it was, for this frame's motion.
     /// </summary>
     private void SetRows(
-        EcsSnapshot<Transform, Renderer> renderers,
+        EcsSnapshot<Transform, Ecs.Components.Renderer> renderers,
         int start,
         int length,
         int lastCount,
@@ -221,7 +221,7 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
         for (int index = start; index < start + length; index++)
         {
             Entity entity = renderers.Entities[index];
-            Renderer renderer = renderers.Second[index];
+            Ecs.Components.Renderer renderer = renderers.Second[index];
             ResidentModel? resident = renderer.Model == Handle<Model>.None ? null : resources.Get(renderer.Model);
 
             // A resident model's row: where it is, its bounds in the world and the material rows of its slots, every
