@@ -1,11 +1,9 @@
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Graphics;
 using Magic.Platform;
-using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
 using Vortice.Vulkan;
@@ -17,15 +15,18 @@ namespace Magic.VulkanGraphics;
 /// submitted at a time. Core hands it each frame the gems recorded, and <see cref="Present"/> runs it, shows it and
 /// begins the next, as the first begins as it is made: waits for the frame two before, takes the window's image, and
 /// leaves the staging ring empty for what records next.
-/// It is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IHasSettings<VulkanGraphicsSettings>, IDisposable
+public sealed class GraphicsApi : IGraphicsApi, IDisposable
 {
     /// <summary>
     /// How many frames in a row a named resource may go unasked for before it is destroyed.
     /// </summary>
     private const int UnusedFrames = 3;
 
+    /// <summary>
+    /// How frames reach the window, which the render thread reads as each frame begins.
+    /// </summary>
+    private readonly VulkanGraphicsSettings _settings;
     private readonly Threads _threads;
     private readonly VulkanDevice _device;
     private readonly VulkanHeap _heap;
@@ -54,7 +55,7 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IHasSettings<VulkanG
     private readonly Dictionary<string, Named<TopLevelDescription, GpuAcceleration>> _namedTopLevels = [];
     private readonly Dictionary<SamplerDescription, Named<SamplerDescription, GpuSampler>> _samplers = [];
 
-    public VulkanGraphicsGem(
+    public GraphicsApi(
         VulkanGraphicsSettings settings,
         App app,
         Threads threads,
@@ -62,7 +63,7 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IHasSettings<VulkanG
         IWindow? window = null
     )
     {
-        Settings = settings;
+        _settings = settings;
         _threads = threads;
         IWindow? drawn = app.IsHeadless ? null : window;
         _device = new VulkanDevice(drawn, settings.Gpu, wantsValidation: IsDebugBuild);
@@ -102,11 +103,6 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IHasSettings<VulkanG
     public GpuFeatures Features => _device.Features;
 
     public GpuTexture WindowTarget { get; private set; }
-
-    /// <summary>
-    /// How frames reach the window, which the render thread reads whole as each frame begins. Game thread.
-    /// </summary>
-    public VulkanGraphicsSettings Settings { get; set; }
 
     /// <summary>
     /// Whether this is a Debug build, which turns the validation layer on when the Vulkan SDK provides it.
@@ -312,7 +308,7 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IHasSettings<VulkanG
     {
         _frames.Begin();
         Compact();
-        WindowTarget = _swapchain?.Acquire(_frames.Current.Acquired, Settings.IsVSyncOn) ?? GpuTexture.None;
+        WindowTarget = _swapchain?.Acquire(_frames.Current.Acquired, _settings.IsVSyncOn) ?? GpuTexture.None;
     }
 
     /// <summary>
@@ -381,8 +377,8 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IHasSettings<VulkanG
         TKey key,
         TDescription description,
         string name,
-        Func<VulkanGraphicsGem, TDescription, Result<T>> create,
-        Action<VulkanGraphicsGem, T> destroy
+        Func<GraphicsApi, TDescription, Result<T>> create,
+        Action<GraphicsApi, T> destroy
     )
         where TKey : notnull
         where TDescription : struct, IEquatable<TDescription>
@@ -426,7 +422,7 @@ public sealed class VulkanGraphicsGem : IGem, IGraphicsApi, IHasSettings<VulkanG
 
     private void DestroyUnasked<TKey, TDescription, T>(
         Dictionary<TKey, Named<TDescription, T>> named,
-        Action<VulkanGraphicsGem, T> destroy
+        Action<GraphicsApi, T> destroy
     )
         where TKey : notnull
     {
