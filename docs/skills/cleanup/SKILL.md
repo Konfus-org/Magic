@@ -36,7 +36,9 @@ more code than it adds.
       and mode fields, state that you can compute, and guards for cases that cannot happen.
    2. Merge what repeats. Use an existing method, type or library feature in place of new code.
    3. Remove layers: types that only forward, interfaces with one implementation, and helpers with one caller.
-   4. Put a method with one caller back into its caller, as a section with a short comment.
+   4. Put a method with one caller back into its caller, as a section with a short comment. When you put a method
+      into a constructor, build the result. An analyzer can then report an error in the code that calls the
+      constructor.
    5. Find a better data shape or a reframing, so that the special cases disappear.
    6. Flatten deep nesting with guard clauses and early returns.
    7. Use the API shape that fits each call site (API shape, in [PROJECT.md](../PROJECT.md)).

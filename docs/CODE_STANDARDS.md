@@ -265,6 +265,8 @@ what the caller does:
   lines.
 - Put a `//` comment above a block whose purpose isn't obvious at a glance (a loop doing two things, a calculation, an
   order that matters, a workaround). It covers the block down to the next blank line. Never restate the line.
+- Code that has its shape for a tool's sake, such as a method kept apart so that an analyzer gives no false report,
+  says so in a comment that names the tool.
 - No divider comments and no `#region`.
 
 ## Cross platform

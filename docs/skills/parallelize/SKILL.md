@@ -98,7 +98,8 @@ once.
    - `merged` or `answered`: do step 8.
    - `rejected`, from a train: resume the coder with the reason. It rebases onto the root, fixes the build, commits
      and ends with `done`. `requeued`: add it to the merge queue again.
-   - `blocked`: add its proposal and questions to the queue for the user.
+   - `blocked`: add its proposal and questions to the queue for the user. If the block is a failure whose cause is
+     not proved, first start a spike that finds the cause. Give the user the choice of a fix only with that cause.
    - `needs-profiling`: add it to the profiling queue. `profiling-done`: end its turn, and resume it with "Continue
      your slice."
    - `validated`, from QA: resume it with "Continue." `qa-done`: do step 9.
@@ -115,9 +116,9 @@ once.
    of the queue: resume the first coder with "Your profiling turn starts now." The turn ends when that coder ends. If
    it ended without its release, run the command that releases a profiling turn, in its worktree.
 
-   **Merge trains.** When the merge queue has slices and no train runs, start a train worker with up to five of them.
-   It counts against the worker limit. Its prompt gives the root and the slices, and tells it that it owns their
-   worktrees until it ends. It tells it to:
+   **Merge trains.** When no train runs, and the merge queue has two or more slices or has one slice while no coder
+   builds, start a train worker with up to five of them. It counts against the worker limit. Its prompt gives the
+   root and the slices, and tells it that it owns their worktrees until it ends. It tells it to:
    1. Order the slices: fixes first, then features, then the others, each group in the order of the queue.
    2. Write down each slice's head commit. Rebase the first slice onto the root, and each next slice onto the one
       before. If a slice conflicts, abort the rebase, reset it with `git reset --keep <head>`, and leave it out as
