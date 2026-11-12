@@ -77,7 +77,7 @@ public readonly record struct GpuView
     public required GpuBuffer Materials { get; init; }
 
     /// <summary>
-    /// The failure table: a row for each material that failed, which its material rows name.
+    /// The failure table: a row for each failure drawn, which the material rows name.
     /// </summary>
     public required GpuBuffer Failures { get; init; }
 

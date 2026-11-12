@@ -60,7 +60,8 @@ internal sealed class Rendering
     }
 
     /// <summary>
-    /// Whether <paramref name="part"/>, a gem's part, must take what no gem registered makes, so it can never render.
+    /// Whether <paramref name="part"/>, a gem's part, must take what no gem registered makes; it doesn't render until a gem that makes
+    /// it registers.
     /// </summary>
     public bool HasMissingInput(object part) => _steps.Exists(step => step.Part == part && step.Missing is not null);
 
