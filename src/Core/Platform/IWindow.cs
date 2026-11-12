@@ -3,17 +3,22 @@ using Magic.Assets;
 namespace Magic.Platform;
 
 /// <summary>
-/// The window the game draws into, which a platform gem opens. Its title and icon are the game thread's, and a new title
-/// or icon reaches the OS once the gem gets to it. Its size is written whole on the platform thread and read from any.
+/// The window that the game draws into, which a platform gem opens.
 /// </summary>
+/// <remarks>
+/// Use the title and the icon only on the game thread. The OS gets a new title or icon when the gem next updates the
+/// window. The platform thread writes the size as one value, and any thread can read it.
+/// </remarks>
 public interface IWindow
 {
     string Title { get; set; }
 
     /// <summary>
-    /// What the window shows in its title bar and task bar: the default icon until it is set. A new one shows once it has
-    /// loaded.
+    /// The icon in the title bar and the task bar of the window.
     /// </summary>
+    /// <remarks>
+    /// It is the default icon until you set it. A new icon shows after it loads.
+    /// </remarks>
     Handle<Icon> Icon { get; set; }
 
     /// <summary>
@@ -27,13 +32,12 @@ public interface IWindow
     int Height { get; }
 
     /// <summary>
-    /// How many of the window's pixels a UI the size the OS asks for gives each of its points, as 1.5 on a display set
-    /// to 150 %.
+    /// The number of window pixels for each point of a UI at the size the OS asks for, for example 1.5 at 150 %.
     /// </summary>
     float DisplayScale { get; }
 
     /// <summary>
-    /// What the OS knows the window by; none when there is no window.
+    /// The OS handle of the window, with <see cref="WindowSystem.None"/> if there is no window.
     /// </summary>
     WindowHandle Handle { get; }
 }

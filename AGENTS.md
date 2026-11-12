@@ -7,6 +7,7 @@ code and docs follow.
 
 A skill is a step-by-step procedure in [`docs/skills/`](docs/skills). Any agent uses one on its own, without being
 asked, when its trigger fits: read its `SKILL.md` and follow it. Claude Code also finds them through `.claude/`.
+[`PROJECT.md`](docs/skills/PROJECT.md) gives the commands, paths and rules that the skills name by role.
 
 | Skill | Use it |
 | --- | --- |
@@ -24,10 +25,11 @@ asked, when its trigger fits: read its `SKILL.md` and follow it. Claude Code als
 | [profiling](docs/skills/profiling/SKILL.md) | Profiling, or any mention of performance, frame time, stutter, allocations, memory, VRAM or GPU time |
 | [qa](docs/skills/qa/SKILL.md) | A swarm's QA worker, or the user asks for QA of a branch |
 | [retro](docs/skills/retro/SKILL.md) | A swarm finishes, a slice went badly, or the user corrects the workflow |
+| [ste-docs](docs/skills/ste-docs/SKILL.md) | Writing docs, skills, plans, comments or summaries |
 
 ## Commands
 
-The scripts run under `pwsh` and Windows PowerShell ([Tools](tools/README.md)).
+The scripts run under `pwsh` and Windows PowerShell ([Tools](docs/TOOLS.md)).
 
 - **Task complete:** `tools/Scripts/AgentTaskComplete.ps1 -Change <level>` formats, runs the steps of
   `tools/Scripts/Validate.ps1` the level needs and stamps the validated state. Run it when a task is done, and again
@@ -62,7 +64,7 @@ unsure:
 Commit or merge only once `tools/Scripts/AgentTaskComplete.ps1` has stamped that exact state.
 
 To run one step on its own, use `tools/Scripts/Validate.ps1 -Only Build`, `Test`, `Headless` or `Screenshot`, with
-`-Project` for one sample ([Tools](tools/README.md#validateps1)).
+`-Project` for one sample ([Tools](docs/TOOLS.md#validateps1)).
 
 - The build must have no errors, and no warnings but unused or unreachable code's (`Directory.Build.props`). Fix a
   warning at its cause. If a warning doesn't apply, say so in your summary instead of suppressing it.
@@ -92,10 +94,11 @@ In Claude Code, the agent hooks in `.claude/settings.json` hold the workflow wit
 | [README](README.md) | Once per session |
 | [Code Standards](docs/CODE_STANDARDS.md) | Before editing any `.cs` file |
 | [Shader Standards](docs/SHADER_STANDARDS.md) | Before editing any `.slang` file, or a C# struct that a shader shares |
-| [Tests](tests/README.md) | Before running or touching tests |
-| [Tools](tools/README.md) | Before running a tool script |
+| [Tests](docs/TOOLS.md#tests) | Before running or touching tests |
+| [Tools](docs/TOOLS.md) | Before running a tool script |
 
-Before changing an area, read every `README.md` from that area's root folder down to the folder you are editing.
+Before changing an area, read its doc in `docs/`, such as [Gems](docs/GEMS.md) or [Debugging](docs/DEBUGGING.md).
+A rendering gem and the shader library also have a `README.md` in their folder: read it too.
 Read a long review file by the part you need: its index first, then only that part.
 
 ## Workflow
@@ -231,7 +234,7 @@ Agents tend to over-build. Less is more: the best change often removes more code
 - **Data-oriented, explicit data flow.** Only the inheritance, interfaces and indirection the problem needs.
 - **Dependencies come from NuGet.** Never vendor or copy external code.
 - **Tests:** don't write new tests unless asked. Run the existing tests that cover what you changed. When a test is
-  asked for with a fix, write it first and see it fail ([Tests](tests/README.md)).
+  asked for with a fix, write it first and see it fail ([Tests](docs/TOOLS.md#tests)).
 
 ## Documentation Rules
 
@@ -243,16 +246,8 @@ Agents tend to over-build. Less is more: the best change often removes more code
 
 ## Writing
 
-Write docs, skills, plans, summaries and replies to the user with these rules, a short form of ASD-STE100 Simplified
-Technical English.
-
-- Write one instruction in one sentence. Write a step as a command: "Run the tests."
-- Put the condition before the instruction: "If the build fails, stop."
-- Keep a sentence to 20 words in a procedure and to 25 words in a description.
-- Use the active voice. Name who or what does the action.
-- Use "must", "do not" and "can" for a rule. Do not use "should", "may" or "might" in a rule.
-- Use one word for one meaning, and the words in the glossary only with their meanings there.
-- Keep a paragraph to one topic and six sentences. Write steps as a numbered list.
+Write docs, skills, plans, comments, summaries and replies to the user with the
+[ste-docs skill](docs/skills/ste-docs/SKILL.md). Use the words in the glossary only with their meanings there.
 
 When you reply to the user:
 
@@ -320,9 +315,9 @@ tidy-worktrees skill). A coordinator closes its own workers without a new approv
 ### Commits
 
 - The subject starts with `type: `, as in `fix: `, which the repository's git hook writes from the branch's type and the
-  files staged ([Git hooks](.githooks/README.md)): `feature/` gives `feat`, every other branch type its own word, and a
-  commit of Markdown alone `docs`. Write the subject alone, never a scope or area prefix such as `fix(core): ` or
-  `Core, Gems:`. The `commit-msg` git hook refuses a commit whose subject lacks the type or has a scope, and the
+  files staged ([Git hooks](docs/TOOLS.md#git-hooks)): `feature/` gives `feat`, every other branch type its own word,
+  and a commit of Markdown alone `docs`. Write the subject alone, never a scope or area prefix such as `fix(core): `
+  or `Core, Gems:`. The `commit-msg` git hook refuses a commit whose subject lacks the type or has a scope, and the
   Commits check a push.
 - Commit only after the user approves the change in the user's review. A swarm's coder commits when its slice
   builds (the parallelize skill).

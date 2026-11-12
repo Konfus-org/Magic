@@ -5,6 +5,8 @@ description: Runs a large effort as a swarm: coders build slices side by side in
 
 # Parallelize
 
+The commands, paths and rules in this skill are in [PROJECT.md](../PROJECT.md).
+
 You coordinate: you plan the slices, give them to workers, keep the user up to date and bring the whole in. You do
 not build. After the user approves the plan, act like `/goal`: keep starting workers until the goal is met. Do not ask
 the user whether to continue.
@@ -31,16 +33,16 @@ once.
 1. **Ask the overarching questions,** one at a time. Skip what the conversation already answers.
    - The kickoff questions ([kickoff skill](../kickoff/SKILL.md)): what it's for, the one outcome, what "it works"
      looks like, the riskiest unknown, and what is out of scope.
-   - The decisions every slice leans on: public API, file formats, new dependencies or gems, architecture.
+   - The decisions every slice leans on: public API, file formats, new dependencies or plugins, architecture.
    - How many workers can run at the same time. The default is 3.
    - The permission flags of the workers, if the user has not set them: `--permission-mode auto`, or
      `--allowedTools <list>`. Do not use plan mode.
 2. **Split it into slices.** A coder writes and builds a slice in one run of one hour. Give each slice its mode, its
-   `-Change` level, its runnable check, its scope as the coder will claim it, and the slices it waits on. A list of
+   validation level, its runnable check, its scope as the coder will claim it, and the slices it waits on. A list of
    tasks from the user keeps their tasks. Split a task only to fit the hour, and say so.
 3. **Write the swarm plan,** and get the user's yes.
    1. Make the root branch, `<type>/<effort>`, from the merge target in its own worktree:
-      `git worktree add ../Magic-worktrees/<type>/<effort> -b <type>/<effort>`. Claim every slice's scope for it. Each
+      `git worktree add <worktree folder>/<type>/<effort> -b <type>/<effort>`. Claim every slice's scope for it. Each
       slice branches from the root with `--track`, as `<type>/<effort>-<slice>`, never under the root's name.
    2. Write the plan to `agent-swarm/<effort>.md` in `git rev-parse --git-common-dir`. Only you write it. Rewrite it
       whenever something changes. It holds: the goal in three lines, the decisions, the root, the worker limit, the
@@ -51,7 +53,7 @@ once.
       each worker. With the plan, give this line to paste, with `<n>` eight times the number of slices, plus 20:
       `/goal every slice of the swarm has merged or answered and the final report is given, as the chat shows, or stop after <n> turns`
 4. **Start every slice that is ready:** each slice it waits on has merged or answered, no unmerged slice changes the
-   same files or gem, and fewer workers run than the limit. Start with the riskiest spike alone, unless the user says
+   same files or module, and fewer workers run than the limit. Start with the riskiest spike alone, unless the user says
    the risk is known.
 
    Choose each worker's model by your own model. Use the same `--effort` as your own. If you do not know your
@@ -72,18 +74,18 @@ once.
 
    A coder's prompt holds the slice's brief in the slice skill's format, its branch, the root, the decisions, and the
    other running slices with their scopes. It tells the coder to:
-   - Make its worktree, `git worktree add --track -b <branch> ../Magic-worktrees/<branch> <root>`, and claim its scope.
-   - Follow the slice skill from step 3, and each skill that the work needs, such as investigate, new-gem, cleanup,
+   - Make its worktree, `git worktree add --track -b <branch> <worktree folder>/<branch> <root>`, and claim its scope.
+   - Follow the slice skill from step 3, and each skill that the work needs, such as investigate, cleanup,
      profiling and timeouts. Do not use the finish skill.
-   - Build only. Run `tools/Scripts/AgentTaskComplete.ps1 -Change Docs`, which formats, builds and stamps. Do not run
-     tests, headless runs, screenshots or reviews. Do not run Magic, except to profile in a profiling turn.
+   - Build only. Run the build and stamp command. Do not run tests, headless runs, screenshots or reviews. Do not run
+     the app, except to profile in a profiling turn.
    - When the slice builds, commit on its branch and end with `STATE: done`. For a spike, release its claim and end
      with `STATE: answered` after its summary.
    - Ask the user nothing. When a skill says to ask the user or to stop, end with `STATE: blocked`, the proposal, and
      each question as a multiple choice of two to four options, the recommended one first.
    - Before it profiles or measures, end with `STATE: needs-profiling`, with what it will run and for how long. When
-     resumed with its turn, take it with `tools/Scripts/Profiling.ps1 -Minutes <n>` (at most 20). If the take fails,
-     end with `STATE: needs-profiling` again. Release the turn with `-Release`, and end with `STATE: profiling-done`
+     resumed with its turn, take it with the profiling turn command. If the take fails, end with
+     `STATE: needs-profiling` again. Release the turn, and end with `STATE: profiling-done`
      and the results.
    - If the slice does not fit in the hour, end with `STATE: too-big`, what is done and what is left.
    - Touch no other worker's worktree.
@@ -96,7 +98,8 @@ once.
    - `merged` or `answered`: do step 8.
    - `rejected`, from a train: resume the coder with the reason. It rebases onto the root, fixes the build, commits
      and ends with `done`. `requeued`: add it to the merge queue again.
-   - `blocked`: add its proposal and questions to the queue for the user.
+   - `blocked`: add its proposal and questions to the queue for the user. If the block is a failure whose cause is
+     not proved, first start a spike that finds the cause. Give the user the choice of a fix only with that cause.
    - `needs-profiling`: add it to the profiling queue. `profiling-done`: end its turn, and resume it with "Continue
      your slice."
    - `validated`, from QA: resume it with "Continue." `qa-done`: do step 9.
@@ -111,16 +114,16 @@ once.
 
    **Profiling turns.** Profiling is the only work that waits for a turn. Give the turns one at a time, in the order
    of the queue: resume the first coder with "Your profiling turn starts now." The turn ends when that coder ends. If
-   it ended without its release, run `<its worktree>/tools/Scripts/Profiling.ps1 -Release`.
+   it ended without its release, run the command that releases a profiling turn, in its worktree.
 
-   **Merge trains.** When the merge queue has slices and no train runs, start a train worker with up to five of them.
-   It counts against the worker limit. Its prompt gives the root and the slices, and tells it that it owns their
-   worktrees until it ends. It tells it to:
+   **Merge trains.** When no train runs, and the merge queue has two or more slices or has one slice while no coder
+   builds, start a train worker with up to five of them. It counts against the worker limit. Its prompt gives the
+   root and the slices, and tells it that it owns their worktrees until it ends. It tells it to:
    1. Order the slices: fixes first, then features, then the others, each group in the order of the queue.
    2. Write down each slice's head commit. Rebase the first slice onto the root, and each next slice onto the one
       before. If a slice conflicts, abort the rebase, reset it with `git reset --keep <head>`, and leave it out as
       `rejected`.
-   3. Run `tools/Scripts/AgentTaskComplete.ps1 -Change Docs` in the last slice's worktree. If the build fails, run
+   3. Run the build and stamp command in the last slice's worktree. If the build fails, run
       it in each slice's worktree from the first, and stop at the first that fails. That slice is `rejected`, with
       the error. The slices after it are `requeued`.
    4. In the root's worktree, run `git merge --ff-only <the last slice that built>`.
@@ -132,9 +135,9 @@ once.
 
    ```text
    Waiting on you: QA's issues (2 more in the queue)
-   In flight (2): foliage (building), sky (profiling)
-   Done (3/9): heightmap import, sample project, player spawn
-   Next: wind, once foliage merges
+   In flight (2): search (building), export (profiling)
+   Done (3/9): sign-in, settings page, file import
+   Next: undo, once search merges
    ```
 
    **The queue for the user** holds the questions, QA's issues, the cleanup plan and the final review, in the order
@@ -162,11 +165,10 @@ once.
        queue. When the user approves, resume it. It builds, commits and ends with `STATE: done`, like a coder.
     2. When the cleanup merges, have a worker rebase the root onto the merge target. If that conflicts, have it
        resolve the conflicts, and put the resolution in the queue. Then have it run
-       `tools/Scripts/AgentTaskComplete.ps1` in the root's worktree at the highest level of the slices, examine the
+       the validate and stamp command in the root's worktree at the highest level of the slices, examine the
        screenshots, and get a review of the root in a fresh context ([review-slice skill](../review-slice/SKILL.md)).
        Its findings are fix slices.
-    3. Put the user's review of the root in the queue: run `plannotator review --base <merge target>` from the
-       root's worktree, in the background, with the limit from the timeouts skill. Comments become fix slices.
+    3. Put the user's review of the root in the queue: run the user's review command from the root's worktree, in the background, with the limit from the timeouts skill. Comments become fix slices.
     4. When fix slices from step 2 or 3 merge, do steps 2 and 3 again. Get a new review in a fresh context only when
        the fixes added more than about 100 lines.
     5. When the user approves, fast-forward the merge target to the root in its checkout. If the merge target moved,

@@ -3,9 +3,9 @@ using System.Runtime.InteropServices;
 namespace Magic.SlangShaderCompiler;
 
 /// <summary>
-/// The compiler's API, bound by hand (README): its C entry points, and its C++ interfaces called through their
-/// tables of functions, each method at the index slang.h declares it. The indices and layouts are those of the tag
-/// the project builds; a new tag is checked against them.
+/// The compiler's API, bound by hand (docs/GEMS.md, SlangShaderCompiler): its C entry points, and its C++
+/// interfaces called through their tables of functions, each method at the index slang.h declares it. The
+/// indices and layouts are those of the tag the project builds; a new tag is checked against them.
 /// </summary>
 internal static unsafe partial class Slang
 {
