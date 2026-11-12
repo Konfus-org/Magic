@@ -44,13 +44,13 @@ internal sealed class PixelEffects
     public void Record(RenderGraph graph, in GpuView gpu, uint frameIndex)
     {
         // With no effect ready, none runs and the picture stays in the HDR target, so nothing is asked for. A failed
-        // effect is skipped.
+        // effect is skipped and reported; an empty place, material 0, is skipped alone.
         ReadOnlySpan<GpuEffect> effects = gpu.Effects.Span;
         bool isAnyReady = false;
         foreach (GpuEffect effect in effects)
         {
             isAnyReady |= effect.State == GpuState.Ready;
-            if (effect.State == GpuState.Failed)
+            if (effect is { State: GpuState.Failed, Material: not 0 })
                 graph.Fail(RenderFailure.PostEffect, "An effect is not drawn", "its material or its shader failed.");
         }
 
