@@ -11,6 +11,7 @@ using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Events;
 using Magic.Files;
+using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
 
@@ -868,7 +869,9 @@ public sealed class World : IEcs, IDisposable
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Log.Error($"{gem.GetType().Name} failed {doing} as the world changed, and it goes on without it: {ex}");
+                Log.Error(
+                    $"{GemRegistry.GetGemName(gem.GetType())} failed {doing} as the world changed, and it goes on without it: {ex}"
+                );
             }
         }
     }

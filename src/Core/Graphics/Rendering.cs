@@ -197,7 +197,7 @@ internal sealed class Rendering
     {
         public object Part { get; } = part;
 
-        public string Gem { get; } = part.GetType().Assembly.GetName().Name ?? part.GetType().Name;
+        public string Gem { get; } = GemRegistry.GetGemName(part.GetType());
 
         /// <summary>
         /// Each type it makes: none, one, or each of a tuple's.
@@ -267,7 +267,9 @@ internal sealed class Rendering
 
                 return null;
             },
-            _ => throw new InvalidOperationException($"{part.GetType().Name} has no render form."),
+            _ => throw new InvalidOperationException(
+                $"{GemRegistry.GetGemName(part.GetType())}'s {part.GetType().Name} has no render form."
+            ),
         };
 
         private Func<TInput?> _take = static () => default(TInput);

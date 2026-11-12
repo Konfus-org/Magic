@@ -1067,7 +1067,7 @@ public sealed class AssetManager : IDisposable
             if (!ReferenceEquals(other, gem))
             {
                 Log.Error(
-                    $"{gem.GetType().Name} {verb} {type.Name}s, which {other.GetType().Name} {verb} already, so it "
+                    $"{GemRegistry.GetGemName(gem.GetType())} {verb} {type.Name}s, which {GemRegistry.GetGemName(other.GetType())} {verb} already, so it "
                         + "does not."
                 );
             }

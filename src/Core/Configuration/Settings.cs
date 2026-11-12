@@ -240,7 +240,7 @@ public sealed class Settings
             if (clash is not null)
             {
                 throw new InvalidOperationException(
-                    $"{GetName(other.Value.GetType())} and {GetName(type)} both have the setting {clash}."
+                    $"{GemRegistry.GetGemName(other.Value.GetType())} and {GemRegistry.GetGemName(type)} both have the setting {clash}."
                 );
             }
         }
@@ -260,8 +260,6 @@ public sealed class Settings
             _registered = _registered.Remove(registered);
         });
     }
-
-    private static string GetName(Type type) => type.Assembly.GetName().Name ?? type.Name;
 
     private static object CreateDefaults(Type type) =>
         Activator.CreateInstance(type) ?? throw new InvalidOperationException($"{type.Name} could not be made.");
@@ -290,7 +288,7 @@ public sealed class Settings
         if (type.GetCustomAttribute<CategoryAttribute>() is not { } category)
         {
             throw new InvalidOperationException(
-                $"{GetName(type)}'s {type.Name} has no [Category], which its settings' keys start with."
+                $"{GemRegistry.GetGemName(type)}'s {type.Name} has no [Category], which its settings' keys start with."
             );
         }
 
@@ -436,7 +434,9 @@ public sealed class Settings
     /// </summary>
     private ImmutableDictionary<string, string> ReadSummaries(Type type)
     {
-        Result<string> docs = _files.ReadText(Path.ChangeExtension(GemRegistry.GetPath(_files, GetName(type)), ".xml"));
+        Result<string> docs = _files.ReadText(
+            Path.ChangeExtension(GemRegistry.GetPath(_files, GemRegistry.GetGemName(type)), ".xml")
+        );
         if (!docs.Ok)
             return [];
 

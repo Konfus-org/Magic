@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Runtime.CompilerServices;
+using Magic.Projects;
 using Magic.Utils;
 
 namespace Magic.Debugging;
@@ -140,7 +141,7 @@ public static class Log
                 {
                     ILogSink sink = _sinks[i];
                     _sinks.RemoveAt(i);
-                    Error($"Log sink {sink.GetType().Name} threw and was removed: {ex}");
+                    Error($"The log sink of {GemRegistry.GetGemName(sink.GetType())} threw and was removed: {ex}");
                 }
             }
         }
@@ -228,7 +229,7 @@ public static class Log
         {
             // Removed before the error is logged, so the sink isn't given the line about itself.
             _sinks.Remove(sink);
-            Error($"Log sink {sink.GetType().Name} threw and was removed: {ex}");
+            Error($"The log sink of {GemRegistry.GetGemName(sink.GetType())} threw and was removed: {ex}");
             return false;
         }
     }

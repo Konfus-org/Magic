@@ -222,6 +222,12 @@ internal static class GemRegistry
         files.Combine(AppContext.BaseDirectory, "Gems", name, name + ".dll");
 
     /// <summary>
+    /// The name of the gem that declares <paramref name="type"/>, which is its assembly's name; the type's own name when
+    /// the assembly has none.
+    /// </summary>
+    internal static string GetGemName(Type type) => type.Assembly.GetName().Name ?? type.Name;
+
+    /// <summary>
     /// The listed gem <paramref name="name"/>, loaded into its context of <paramref name="contexts"/>, or why it can't
     /// be made: it must hold one <see cref="IGem"/> class with one public constructor, and the project must list every
     /// gem it references. The class's public instance properties are the gem's parts, and what they implement is what

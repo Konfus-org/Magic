@@ -1,4 +1,3 @@
-using Magic.Debugging;
 using Magic.Projects;
 
 namespace Magic.GemName;
@@ -10,9 +9,7 @@ namespace Magic.GemName;
 /// </summary>
 public sealed class EntryPoint : IGem
 {
-    public void Update(in Frame frame)
-    {
-        if (frame.Index % 60 == 0)
-            Log.Info($"GemName is running, at frame {frame.Index}.");
-    }
+    private readonly Heartbeat _heartbeat = new(frames: 60);
+
+    public void Update(in Frame frame) => _heartbeat.Beat(frame);
 }
