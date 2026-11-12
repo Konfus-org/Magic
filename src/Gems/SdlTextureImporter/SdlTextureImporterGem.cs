@@ -23,8 +23,7 @@ namespace Magic.SdlTextureImporter;
 /// Reads image files into textures ready to upload, through SDL_image: decoded, their mip chain made by halving each level
 /// with SDL's linear scaling, and every level packed into BC7 blocks unless its <c>.meta</c> says otherwise, in sRGB for
 /// colour and linear for normals and masks. As an <see cref="ICache{T}"/> an image is made once per change. It also writes
-/// a plain texture as a PNG, through SDL. SDL_image needs no SDL started, so files load on any worker, several at once. It
-/// is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
+/// a plain texture as a PNG, through SDL. SDL_image needs no SDL started, so files load on any worker, several at once.
 /// </summary>
 public sealed unsafe class SdlTextureImporterGem
     : IGem,
@@ -81,23 +80,17 @@ public sealed unsafe class SdlTextureImporterGem
 
     public Result<Texture> Read(ReadOnlySpan<byte> bytes)
     {
-        if (bytes.Length < HeaderBytes)
-            return Result.Failure("the entry is cut short.");
-
+        // Bytes cut short throw from a slice, which the caches take as a dirty entry.
         ReadOnlySpan<byte> header = bytes;
         int levelCount = BinaryPrimitives.ReadInt32LittleEndian(header[4..]);
         int tableBytes = levelCount * sizeof(TextureLevel);
         bytes = bytes[HeaderBytes..];
-        if (levelCount < 1 || bytes.Length < tableBytes)
-            return Result.Failure("the entry is cut short.");
 
         // The level table, then the pixels, which end where the table's last level does.
         ImmutableArray<TextureLevel> levels = [.. MemoryMarshal.Cast<byte, TextureLevel>(bytes[..tableBytes])];
         bytes = bytes[tableBytes..];
         TextureLevel last = levels[^1];
         int pixelBytes = last.Offset + last.Size;
-        if (pixelBytes < 0 || bytes.Length < pixelBytes)
-            return Result.Failure("the entry is cut short.");
 
         return Result.Success(
             new Texture

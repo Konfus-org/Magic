@@ -16,8 +16,7 @@ namespace Magic.ArchEcs;
 /// The entity world, in one Arch world, on the game thread. Entities are Arch's, bit for bit, and
 /// components live in Arch's chunks, so a query hands out spans straight over them and allocates nothing. Arch trusts
 /// its caller, so this gem checks what Arch would let go wrong silently (a dead entity, a structural change during a
-/// loop, a call from another thread) and throws instead. It is public because nothing in its assembly makes it: Magic
-/// does, by reflection, when a project lists the gem.
+/// loop, a call from another thread) and throws instead.
 /// </summary>
 public sealed class ArchEcsGem : IGem, IEcs, IDisposable
 {

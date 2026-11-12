@@ -15,8 +15,7 @@ namespace Magic.AssimpModelImporter;
 /// <summary>
 /// Reads FBX, glTF and OBJ files through assimp into <see cref="Model"/>s: every node's meshes flattened into the
 /// model's frame, triangulated, with normals and tangents, one mesh per material slot in the order the file's
-/// materials are first used. It is public because nothing in its assembly makes it: Magic does, by reflection, when
-/// a project lists the gem.
+/// materials are first used.
 /// </summary>
 public sealed unsafe class AssimpModelImporterGem : IGem, IAssetImporter<Model>
 {
