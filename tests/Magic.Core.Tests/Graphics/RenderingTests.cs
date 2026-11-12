@@ -105,10 +105,19 @@ public sealed class RenderingTests
         Assert.Equal(new ShadeInput(new View(3), new Light(4)), shade.Taken);
     }
 
-    private static Rendering Register(params IGem[] gems)
+    [Fact]
+    public void PumpCallsAPartThatIsNotAGem()
+    {
+        List<string> calls = [];
+        Pump(new Renderer(calls), new World(calls, new View(1)));
+
+        Assert.Equal(["Renderer", "World"], calls);
+    }
+
+    private static Rendering Register(params object[] gems)
     {
         Rendering rendering = new();
-        foreach (IGem gem in gems)
+        foreach (object gem in gems)
         {
             rendering.Register(gem);
         }
@@ -116,7 +125,7 @@ public sealed class RenderingTests
         return rendering;
     }
 
-    private static void Pump(params IGem[] gems) => Register(gems).Pump(_frame, new RenderGraph());
+    private static void Pump(params object[] gems) => Register(gems).Pump(_frame, new RenderGraph());
 
     private readonly record struct View(int Id);
 
@@ -171,6 +180,14 @@ public sealed class RenderingTests
     private sealed class Overlay(List<string> calls) : IGem, IRender
     {
         public void Render(in Frame frame, RenderGraph graph) => calls.Add(nameof(Overlay));
+    }
+
+    /// <summary>
+    /// A gem's part, which renders but is no <see cref="IGem"/>.
+    /// </summary>
+    private sealed class Renderer(List<string> calls) : IRender
+    {
+        public void Render(in Frame frame, RenderGraph graph) => calls.Add(nameof(Renderer));
     }
 
     private sealed class Sun : IGem, IRenderInto<(View, Light)>

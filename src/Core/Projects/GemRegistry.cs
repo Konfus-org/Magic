@@ -17,11 +17,16 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Magic.Projects;
 
 /// <summary>
-/// The gems a project lists, found and registered with the services as their class and every interface they provide,
-/// but not yet made. A gem that can't be found or registered is logged, and the others go on without it.
+/// The gems a project lists, found and registered with the services as their class, their parts and every interface
+/// they provide, but not yet made. A gem that can't be found or registered is logged, and the others go on without it.
 /// </summary>
 internal static class GemRegistry
 {
+    /// <summary>
+    /// The name of a gem class whose public properties are its parts.
+    /// </summary>
+    private const string EntryPoint = "EntryPoint";
+
     /// <summary>
     /// What the host takes itself and so no gem provides: any number of gems can be sinks or hook into domain loading,
     /// and the assets say which gem reads or writes a type. A generic contract is held by its definition.
@@ -125,13 +130,30 @@ internal static class GemRegistry
             );
             providers[gem.Type] = gem;
 
-            // A gem's settings are what was set before over their defaults, for its constructor.
-            if (Settings.GetSettingsContract(gem.Type)?.GetGenericArguments()[0] is { } settings)
-                services.AddTransient(settings, provider => provider.GetRequiredService<Settings>().Get(settings));
+            // Each part is the value of its property on the made gem.
+            foreach (PropertyInfo part in gem.Parts)
+            {
+                services.AddSingleton(
+                    part.PropertyType,
+                    provider =>
+                        part.GetValue(provider.GetRequiredService(gem.Type))
+                        ?? throw new InvalidOperationException($"{gem.Name}'s {part.Name} is null.")
+                );
+                providers[part.PropertyType] = gem;
+            }
 
+            // A gem's settings are what was set before over their defaults, for its constructor.
+            foreach (Type type in gem.Types)
+            {
+                if (Settings.GetSettingsContract(type)?.GetGenericArguments()[0] is { } settings)
+                    services.AddTransient(settings, provider => provider.GetRequiredService<Settings>().Get(settings));
+            }
+
+            // Each interface is the gem class or the part that implements it.
             foreach (Type contract in gem.Provides)
             {
-                services.AddSingleton(contract, provider => provider.GetRequiredService(gem.Type));
+                Type type = gem.Types.First(provider => provider.IsAssignableTo(contract));
+                services.AddSingleton(contract, provider => provider.GetRequiredService(type));
                 providers[contract] = gem;
             }
 
@@ -262,8 +284,13 @@ internal static class GemRegistry
         if (constructors != 1)
             return Result.Failure($"Gem {name}: {gem.Name} must have one public constructor; it has {constructors}.");
 
+        // Only an EntryPoint exports its public properties as parts.
+        List<PropertyInfo> parts =
+            gem.Name == EntryPoint ? [.. gem.GetProperties(BindingFlags.Public | BindingFlags.Instance)] : [];
+        IEnumerable<Type> interfaces = gem.GetInterfaces()
+            .Concat(parts.SelectMany(part => part.PropertyType.GetInterfaces()));
         List<Type> provides = [];
-        foreach (Type contract in gem.GetInterfaces())
+        foreach (Type contract in interfaces)
         {
             if (!_hostContracts.Contains(contract.IsGenericType ? contract.GetGenericTypeDefinition() : contract))
                 provides.Add(contract);
@@ -283,6 +310,7 @@ internal static class GemRegistry
                 description,
                 version,
                 gem,
+                parts,
                 provides,
                 references,
                 hasResources ? resources : null,

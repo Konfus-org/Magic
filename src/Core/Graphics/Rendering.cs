@@ -13,7 +13,7 @@ namespace Magic.Graphics;
 
 /// <summary>
 /// The gems that render, each render form after every form whose output it takes: register each gem as it is made, then
-/// pump them once a frame on the render thread. A gem is named in what is logged and timed by its assembly,
+/// pump them once a frame on the render thread. A gem's class or one of its parts renders. A gem is named in what is logged and timed by its assembly,
 /// as the project lists it.
 /// </summary>
 internal sealed class Rendering
@@ -28,7 +28,7 @@ internal sealed class Rendering
     /// makes, or when it and others take what the others make round a cycle; the gems registered before go on as they
     /// were.
     /// </summary>
-    public Subscription Register(IGem gem)
+    public Subscription Register(object gem)
     {
         List<Step> steps =
         [
@@ -52,7 +52,7 @@ internal sealed class Rendering
     /// <summary>
     /// Whether <paramref name="gem"/> must take what no gem registered makes, so it can never render.
     /// </summary>
-    public bool HasMissingInput(IGem gem) => _steps.Exists(step => step.Instance == gem && step.Missing is not null);
+    public bool HasMissingInput(object gem) => _steps.Exists(step => step.Instance == gem && step.Missing is not null);
 
     /// <summary>
     /// Every gem's parts of the frame, in order, each gem timed once for all its parts; a gem that throws is logged and renders no more, and what
@@ -107,7 +107,7 @@ internal sealed class Rendering
     /// What each render form <paramref name="gem"/> implements takes and makes, <see cref="None"/> for either it lacks;
     /// none when it renders nothing.
     /// </summary>
-    private static IEnumerable<(Type Input, Type Output)> GetForms(IGem gem)
+    private static IEnumerable<(Type Input, Type Output)> GetForms(object gem)
     {
         if (gem is IRender)
             yield return (typeof(None), typeof(None));
@@ -193,9 +193,9 @@ internal sealed class Rendering
     /// A gem's render form: what it takes, what it makes, and what it made at its last run, which the gems after it
     /// take.
     /// </summary>
-    private abstract class Step(IGem gem)
+    private abstract class Step(object gem)
     {
-        public IGem Instance { get; } = gem;
+        public object Instance { get; } = gem;
 
         public string Gem { get; } = gem.GetType().Assembly.GetName().Name ?? gem.GetType().Name;
 
@@ -240,7 +240,7 @@ internal sealed class Rendering
     /// boxes nothing and reflects on nothing. Each render form is called as <see cref="IRender{TInput, TOutput}"/>,
     /// with <see cref="None"/> for what it lacks.
     /// </summary>
-    private sealed class Step<TInput, TOutput>(IGem gem) : Step(gem)
+    private sealed class Step<TInput, TOutput>(object gem) : Step(gem)
         where TInput : struct
         where TOutput : struct
     {

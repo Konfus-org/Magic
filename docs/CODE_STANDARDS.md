@@ -41,7 +41,11 @@ Write the engine as data flowing through functions, not objects calling each oth
 ## Gems, hooks and services
 
 - A gem is a plugin: a decoupled, hot-reloadable, modular piece of logic that a project adds or replaces to meet its
-  needs. It is a `public sealed` class implementing `IGem` and the Core interfaces it provides.
+  needs. It is one of two shapes, for now:
+  - An `EntryPoint` class at the gem's root that implements only `IGem` and `IDisposable`. It makes its parts with
+    `new` and exports each as a public property. Its hooks call its parts. `Dispose` ends the parts. Core does to each
+    part what it does to a gem class: a part provides the Core interfaces it implements, renders, and has settings.
+  - One `public sealed` class that implements `IGem` and the Core interfaces it provides.
 - A gem's constructor takes everything it depends on and starts what the gem is; `Dispose` ends it. Only code that
   builds objects from constructors takes `IServiceProvider`. Gems are made in dependency order, then in the order the
   project lists them, and disposed in reverse.

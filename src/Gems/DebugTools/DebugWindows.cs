@@ -2,7 +2,6 @@ using System.Diagnostics;
 using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Input;
-using Magic.Projects;
 
 namespace Magic.DebugTools;
 
@@ -11,13 +10,11 @@ namespace Magic.DebugTools;
 /// which its key, also a setting, turns on and off: the frame rate and memory line (F1), on from the start in a Debug
 /// build, the stats window (F3) and the window of every gem's settings (F4). It listens to the meters only while the
 /// counter or the stats window shows, and collects what they measured as often as
-/// <see cref="DebugToolsSettings.StatsCollectSec"/> says. They are drawn with <see cref="IDebugUI"/> in Update, so
-/// the gem takes the UI and is made after it. Without a gem that provides input no key works. It is public because
-/// nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
+/// <see cref="DebugToolsSettings.StatsCollectSec"/> says. They are drawn with <see cref="IDebugUI"/> in
+/// <see cref="Update"/>. Without input no key works.
 /// </summary>
-public sealed class DebugToolsGem(DebugToolsSettings settings, Settings allSettings, IDebugUI ui, IInput? input = null)
-    : IGem,
-        IHasSettings<DebugToolsSettings>,
+public sealed class DebugWindows(DebugToolsSettings settings, Settings allSettings, IDebugUI ui, IInput? input)
+    : IHasSettings<DebugToolsSettings>,
         IDisposable
 {
     private readonly MetricsReader _metrics = new();
@@ -38,7 +35,10 @@ public sealed class DebugToolsGem(DebugToolsSettings settings, Settings allSetti
 
     public void Dispose() => _metrics.Dispose();
 
-    public void Update(in Frame frame)
+    /// <summary>
+    /// Turns the lines and windows on and off by their keys, collects the meters when due, and draws what shows.
+    /// </summary>
+    public void Update()
     {
         if (input is not null && input[Settings.CounterKey].WasPressed)
             Settings = Settings with { IsCounterShown = !Settings.IsCounterShown };
