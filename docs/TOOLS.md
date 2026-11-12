@@ -58,6 +58,20 @@ the run. The script does not build.
 Runs a project with a window until its world loads. Then it takes a screenshot and prints the path of the image. The
 script does not build.
 
+The screenshot shows the scene only. To photograph a failure:
+
+- `-AllowErrors` lets a run that logs errors go on and take its screenshots. The script prints the `[Error]` lines of
+  the run before the paths.
+- `-Window` also captures the client area of the window to a PNG next to each screenshot, with `-window` in its name.
+  The capture shows what is drawn onto the window too, such as the banner of a failure and the debug UI. It copies
+  the screen, so keep other windows off the window of Magic. It needs Windows.
+
+The camera of HelloWorld turns. To stop it and face the spawn direction, send these lines with `-Commands`:
+
+```powershell
+tools/Scripts/Screenshot.ps1 -AllowErrors -Window -Commands 'set player.spin.degreesPerSec 0', 'set player.transform.rotation 0.2164 0 0 0.9763'
+```
+
 ## Profiling.ps1
 
 Takes, waits for or releases a profiling turn. In a profiling turn, only one worktree runs Magic and the tests, so
