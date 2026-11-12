@@ -5,29 +5,39 @@ using Magic.Projects;
 namespace Magic.Events;
 
 /// <summary>
-/// Messages between gems, by type. Anything publishes one, from any thread, and every gem hears it the next frame,
-/// read from that frame's <see cref="Frame.Events"/> in a hook, in load order, until one handles it. A message is a
-/// struct, and publishing and reading allocate nothing once its type's buffers have grown.
+/// Carries messages between gems, with one queue for each message type.
 /// </summary>
+/// <remarks>
+/// Any thread can publish a message. Each gem reads it in the next frame from <see cref="Frame.Events"/> in a hook, in
+/// load order, until a gem handles it. A message is a struct. After the buffers for its type have grown, publish and
+/// read do not allocate.
+/// </remarks>
 public sealed class EventCoordinator
 {
     private readonly ConcurrentDictionary<Type, IEventQueue> _queues = new();
     private readonly Lock _adding = new();
 
     /// <summary>
-    /// Every queue in <see cref="_queues"/>, replaced whole as one is added, so a take walks them without allocating.
+    /// The queues of <see cref="_queues"/> as an array, replaced when a queue is added, so that a take does not
+    /// allocate.
     /// </summary>
     private IEventQueue[] _all = [];
 
     /// <summary>
-    /// Hands <paramref name="message"/> to every gem in the next frame. Any thread.
+    /// Gives <paramref name="message"/> to every gem in the next frame.
     /// </summary>
+    /// <remarks>
+    /// You can call it from any thread.
+    /// </remarks>
     public void Publish<T>(in T message)
         where T : struct, IEvent => GetQueue<T>().Published.Enqueue(message);
 
     /// <summary>
-    /// What was published since the last take, as the frame about to start reads it. The frame loop's, once a frame.
+    /// Takes the messages published since the last take, for the frame that is about to start.
     /// </summary>
+    /// <remarks>
+    /// Call it only from the frame loop, once each frame.
+    /// </remarks>
     internal FrameEvents Take()
     {
         foreach (IEventQueue queue in Volatile.Read(ref _all))
@@ -39,9 +49,11 @@ public sealed class EventCoordinator
     }
 
     /// <summary>
-    /// What the last take took of <typeparamref name="T"/> that nothing has handled; empty when none was ever
-    /// published. Game thread.
+    /// Gets the messages of type <typeparamref name="T"/> from the last take that no gem has handled.
     /// </summary>
+    /// <remarks>
+    /// Call it only on the game thread. The span is empty if no message of the type was ever published.
+    /// </remarks>
     internal Span<T> GetTaken<T>()
         where T : struct, IEvent =>
         _queues.TryGetValue(typeof(T), out IEventQueue? queue) ? ((EventQueue<T>)queue).GetUnhandled() : [];
@@ -66,7 +78,8 @@ public sealed class EventCoordinator
     }
 
     /// <summary>
-    /// The queues of every type published, as one kind for the take: type erasure over <see cref="EventQueue{T}"/>.
+    /// A queue of one message type with its type erased (<see cref="EventQueue{T}"/>), so that a take can go through
+    /// all queues.
     /// </summary>
     private interface IEventQueue
     {
@@ -80,7 +93,7 @@ public sealed class EventCoordinator
         where T : struct, IEvent
     {
         /// <summary>
-        /// What the last take took, at its start, reused take after take and grown as needed.
+        /// The messages of the last take, at the start of an array that each take reuses and grows when needed.
         /// </summary>
         private T[] _taken = [];
         private int _takenCount;
@@ -88,8 +101,8 @@ public sealed class EventCoordinator
         public ConcurrentQueue<T> Published { get; } = new();
 
         /// <summary>
-        /// What the last take took, less what was handled since it was last read, so whoever reads it next doesn't get
-        /// what a reader before handled.
+        /// Removes the handled messages from the last take and returns the rest, so that a reader does not get a
+        /// message that an earlier reader handled.
         /// </summary>
         public Span<T> GetUnhandled()
         {
@@ -107,7 +120,8 @@ public sealed class EventCoordinator
 
         public void Take()
         {
-            // As many as were published when the take began; one published meanwhile waits for the next.
+            // Take only the messages published before the take began. A message published during the take waits for the
+            // next take.
             int count = Published.Count;
             if (_taken.Length < count)
                 Array.Resize(ref _taken, (int)BitOperations.RoundUpToPowerOf2((uint)count));

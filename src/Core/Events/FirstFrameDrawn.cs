@@ -1,7 +1,7 @@
 namespace Magic.Events;
 
 /// <summary>
-/// Whatever draws the frame has drawn its first one, its shaders compiled: what the console's <c>wait drawn</c> holds for.
+/// Tells that the renderer drew its first frame, after its shaders compiled.
 /// </summary>
 public record struct FirstFrameDrawn : IEvent
 {

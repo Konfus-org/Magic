@@ -1,9 +1,11 @@
 namespace Magic.Input;
 
 /// <summary>
-/// What a <see cref="Control"/>'s value holds: its device kind in the second byte, its number within the kind in
-/// the first.
+/// Reads the device kind and the number in that kind from the value of a <see cref="Control"/>.
 /// </summary>
+/// <remarks>
+/// The device kind is in the second byte. The number in the kind is in the first byte.
+/// </remarks>
 public static class ControlExtensions
 {
     extension(Control control)
@@ -14,7 +16,7 @@ public static class ControlExtensions
         public DeviceKind DeviceKind => (DeviceKind)((int)control >> 8);
 
         /// <summary>
-        /// The control's number among its kind's, 0 to 255: where a device keeps its state.
+        /// The number of the control in its device kind, from 0 to 255, which is where a device keeps its state.
         /// </summary>
         public int Index => (int)control & 0xFF;
     }
