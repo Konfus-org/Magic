@@ -16,10 +16,10 @@ using Magic.Utils;
 namespace Magic.Configuration;
 
 /// <summary>
-/// Every gem's settings in one place. It holds the gems, not the values: each gem with settings
-/// (<see cref="IHasSettings{TSettings}"/>) keeps its own record. A key is the record's or the member's
-/// <see cref="CategoryAttribute"/>, then the member's name, or its <see cref="JsonPropertyNameAttribute"/>, as
-/// <c>Rendering.Resolution</c>. Game thread, or while no frame runs.
+/// Every gem's settings in one place. It holds the gems, not the values: each gem's settings are a part of it
+/// (<see cref="ISettings"/>), or a record it keeps (<see cref="IHasSettings{TSettings}"/>). A key is the record's or
+/// the member's <see cref="CategoryAttribute"/>, then the member's name, or its
+/// <see cref="JsonPropertyNameAttribute"/>, as <c>Rendering.Resolution</c>. Game thread, or while no frame runs.
 /// <para>
 /// A gem is first made with its record's defaults, then what <see cref="SaveAsync"/> saved for this user and project,
 /// then what <c>--configure</c> gave at launch; made again, after a restart or a rebuild of its code, it runs by what it
@@ -172,13 +172,17 @@ public sealed class Settings
     }
 
     /// <summary>
-    /// The <see cref="IHasSettings{TSettings}"/> <paramref name="gem"/> implements, or null when it has no settings.
+    /// The settings <paramref name="type"/> is, as an <see cref="ISettings"/>, or keeps, as an
+    /// <see cref="IHasSettings{TSettings}"/>; null when it has none.
     /// </summary>
-    internal static Type? GetSettingsContract(Type gem) =>
-        gem.GetInterfaces()
-            .FirstOrDefault(contract =>
-                contract.IsGenericType && contract.GetGenericTypeDefinition() == typeof(IHasSettings<>)
-            );
+    internal static Type? GetSettingsType(Type type) =>
+        type.IsAssignableTo(typeof(ISettings))
+            ? type
+            : type.GetInterfaces()
+                .FirstOrDefault(contract =>
+                    contract.IsGenericType && contract.GetGenericTypeDefinition() == typeof(IHasSettings<>)
+                )
+                ?.GetGenericArguments()[0];
 
     /// <summary>
     /// <see cref="Get{TSettings}"/> of a type known only at run time, as the services hand it to a gem's constructor.
@@ -236,10 +240,9 @@ public sealed class Settings
     /// </summary>
     internal Subscription Register(object gem)
     {
-        if (GetSettingsContract(gem.GetType()) is not { } contract)
+        if (GetSettingsType(gem.GetType()) is not { } type)
             return new Subscription(static () => { });
 
-        Type type = contract.GetGenericArguments()[0];
         ImmutableArray<SettingMember> members = GetMembers(type);
         HashSet<string> keys = [.. members.Select(member => member.Key)];
         foreach (RegisteredGem other in _gems)
@@ -253,12 +256,8 @@ public sealed class Settings
             }
         }
 
-        PropertyInfo property =
-            contract.GetProperty(nameof(IHasSettings<>.Settings))
-            ?? throw new InvalidOperationException($"{contract.Name} has no Settings.");
-
         // The key is taken now, as the project may change before the gem ends.
-        RegisteredGem registered = new(gem, property, members, ReadSummaries(type), GetLiveKey(type));
+        RegisteredGem registered = new(gem, type, members, ReadSummaries(type), GetLiveKey(type));
         _gems = _gems.Add(registered);
 
         return new Subscription(() =>
@@ -318,6 +317,7 @@ public sealed class Settings
                     json.Name,
                     json.PropertyType,
                     get,
+                    json.Set,
                     requiresRestart
                 )
             );
@@ -326,7 +326,7 @@ public sealed class Settings
         return [.. members];
     }
 
-    private RegisteredGem? Find(Type type) => _gems.FirstOrDefault(gem => gem.Property.PropertyType == type);
+    private RegisteredGem? Find(Type type) => _gems.FirstOrDefault(gem => gem.Type == type);
 
     private string GetLiveKey(Type type) => $"{_app.Project?.Name}/{type.Name}";
 
@@ -405,12 +405,13 @@ public sealed class Settings
 
     private void Set(RegisteredGem gem, object settings)
     {
+        // Compared before the write, which may change the object the gem holds.
         object old = gem.Read();
-        gem.Property.SetValue(gem.Gem, settings);
-        Keep(gem.LiveKey, settings);
         SettingMember? restart = gem.Members.FirstOrDefault(member =>
             member.RequiresRestart && !Equals(member.Get(old), member.Get(settings))
         );
+        gem.Write(settings);
+        Keep(gem.LiveKey, settings);
         if (restart is null)
             return;
 
@@ -469,19 +470,47 @@ public sealed class Settings
         string JsonName,
         Type Type,
         Func<object, object?> Get,
+        Action<object, object?> Set,
         bool RequiresRestart
     );
 
+    /// <summary>
+    /// A gem class or part with settings, of <paramref name="Type"/>: an <see cref="ISettings"/> is its own settings,
+    /// and an <see cref="IHasSettings{TSettings}"/> keeps them.
+    /// </summary>
     private sealed record RegisteredGem(
         object Gem,
-        PropertyInfo Property,
+        Type Type,
         ImmutableArray<SettingMember> Members,
         ImmutableDictionary<string, string> Summaries,
         string LiveKey
     )
     {
+        private PropertyInfo Holder =>
+            typeof(IHasSettings<>).MakeGenericType(Type).GetProperty(nameof(IHasSettings<>.Settings))
+            ?? throw new InvalidOperationException($"{Type.Name} has no Settings.");
+
         public object Read() =>
-            Property.GetValue(Gem) ?? throw new InvalidOperationException($"{Gem.GetType().Name}.Settings is null.");
+            Gem is ISettings
+                ? Gem
+                : Holder.GetValue(Gem)
+                    ?? throw new InvalidOperationException($"{Gem.GetType().Name}.Settings is null.");
+
+        /// <summary>
+        /// Writes each member of <paramref name="settings"/> on an <see cref="ISettings"/>, which stays the object its
+        /// parts hold, or gives an <see cref="IHasSettings{TSettings}"/> the new record whole.
+        /// </summary>
+        public void Write(object settings)
+        {
+            if (Gem is not ISettings)
+            {
+                Holder.SetValue(Gem, settings);
+                return;
+            }
+
+            foreach (SettingMember member in Members)
+                member.Set(Gem, member.Get(settings));
+        }
 
         public Setting ToSetting(SettingMember member) =>
             new(

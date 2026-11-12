@@ -61,8 +61,9 @@ Write the engine as data flowing through functions, not objects calling each oth
   that take it. Core runs each gem after the gems whose output it takes; gems pass what they draw from one another
   that way, as data, never through a gem in a constructor.
   `LateUpdate` hands `Render` what it draws as data, the newest through a `Mailbox<T>` and what must not be lost
-  through a `Channel<T>`. `Render` reads a gem's settings record directly: it is immutable and written whole. A gem implements the ones it needs. One that throws in a hook is logged
-  and leaves every hook.
+  through a `Channel<T>`. `Render` reads a gem's settings directly. A settings record is written whole; an
+  `ISettings` object is written one member at a time, so a frame can see one old and one new member. A gem implements
+  the ones it needs. One that throws in a hook is logged and leaves every hook.
 - Where Core needs something from a gem, the gem implements an interface and Core calls it, as with `IEcs` and
   `IAssetImporter<T>`. Add one when a gem first needs it.
 - A gem that keeps something for each entity compares what it holds with the entities each frame, adding what came and
@@ -80,9 +81,12 @@ Write the engine as data flowing through functions, not objects calling each oth
   constructor and reads what came of it in a hook.
 - `Dispose` frees what the gem started, once none of its work still runs on a worker.
 - A gem's csproj states its `Description`, `Version` and `Authors`. Nothing else does.
-- A value a player, game or developer would tune is a member of its gem's settings record, never a const, a
-  `#if DEBUG` choice, a key-only toggle or a console string. The gem implements `IHasSettings<TSettings>`, and the
-  record is a `sealed record` of init properties with a `[Category]`, each with its default and a doc comment.
+- A value a player, game or developer would tune is a member of its gem's settings, never a const, a
+  `#if DEBUG` choice, a key-only toggle or a console string. The settings are a `sealed class` that implements
+  `ISettings`, with settable properties, a `[Category]`, and a default and a doc comment for each property.
+  `EntryPoint` takes the settings in its constructor, exports them as a public property, and gives them to the parts
+  that read them. Core changes a member on that same object. A gem that is not yet an `EntryPoint` implements
+  `IHasSettings<TSettings>` and keeps a `sealed record` of init properties instead.
   Game code reads and sets it through `Settings` by type; the console and tools by key, as `Rendering.Resolution`.
 - Gems may depend on each other and reference one another. A gem throws when a dependency it needs isn't there.
 - A component is an unmanaged struct with public fields that implements `IComponent`, and members for what follows from

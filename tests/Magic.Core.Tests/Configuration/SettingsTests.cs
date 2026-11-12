@@ -9,7 +9,8 @@ using Xunit;
 namespace Magic.Tests.Configuration;
 
 /// <summary>
-/// A gem's settings set by key: the gem runs by them, and the gem made again, as after a rebuild, starts with them.
+/// A gem's settings set by key: the gem runs by them, and the gem made again, as after a rebuild, starts with them. An
+/// <see cref="ISettings"/> part is changed in place.
 /// </summary>
 public sealed class SettingsTests
 {
@@ -29,6 +30,20 @@ public sealed class SettingsTests
         settings.Register(second).Dispose();
 
         Assert.Equal(new Size(2560, 1440), second.Settings.Resolution);
+    }
+
+    [Fact]
+    public void SetByKeyChangesAnISettingsPartInPlace()
+    {
+        using App app = new();
+        Settings settings = new(app, new FileSystem());
+        EntryPoint gem = new(settings.Get<ShapeSettings>());
+        using Subscription registered = settings.Register(gem.Settings);
+
+        Assert.True(settings.Set("Shapes.Size", 3).Ok);
+
+        Assert.Equal(3, gem.Settings.Size);
+        Assert.Same(gem.Settings, settings.Get<ShapeSettings>());
     }
 
     [Fact]
@@ -65,6 +80,17 @@ public sealed class SettingsTests
     private sealed record DrawSettings
     {
         public Size Resolution { get; init; } = new(1920, 1080);
+    }
+
+    [Category("Shapes")]
+    private sealed class ShapeSettings : ISettings
+    {
+        public int Size { get; set; } = 1;
+    }
+
+    private sealed class EntryPoint(ShapeSettings settings) : IGem
+    {
+        public ShapeSettings Settings { get; } = settings;
     }
 
     private sealed class DrawGem(DrawSettings settings) : IGem, IHasSettings<DrawSettings>

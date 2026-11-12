@@ -41,6 +41,7 @@ internal static class GemRegistry
         typeof(IAssetImporter<>),
         typeof(IAssetExporter<>),
         typeof(IHasSettings<>),
+        typeof(ISettings),
         typeof(IRender<,>),
         typeof(IRenderFrom<>),
         typeof(IRenderInto<>),
@@ -130,22 +131,25 @@ internal static class GemRegistry
             );
             providers[gem.Type] = gem;
 
-            // Each part is the value of its property on the made gem.
+            // Each part is the value of its property on the made gem, but settings, which the gem is made with.
             foreach (PropertyInfo part in gem.Parts)
             {
+                providers[part.PropertyType] = gem;
+                if (part.PropertyType.IsAssignableTo(typeof(ISettings)))
+                    continue;
+
                 services.AddSingleton(
                     part.PropertyType,
                     provider =>
                         part.GetValue(provider.GetRequiredService(gem.Type))
                         ?? throw new InvalidOperationException($"{gem.Name}'s {part.Name} is null.")
                 );
-                providers[part.PropertyType] = gem;
             }
 
             // A gem's settings are what was set before over their defaults, for its constructor.
             foreach (Type type in gem.Types)
             {
-                if (Settings.GetSettingsContract(type)?.GetGenericArguments()[0] is { } settings)
+                if (Settings.GetSettingsType(type) is { } settings)
                     services.AddTransient(settings, provider => provider.GetRequiredService<Settings>().Get(settings));
             }
 
