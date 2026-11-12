@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
+using System.IO.Hashing;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -159,10 +160,40 @@ public sealed class AssetManager : IDisposable
     /// The <typeparamref name="T"/> at <paramref name="path"/>, or none when no asset there is one.
     /// </summary>
     public Handle<T> Find<T>(string path)
-        where T : IAsset<T> =>
-        Database.Index.ByPath.TryGetValue(path, out IndexedFile? found) && found.Type == typeof(T).Name
-            ? new Handle<T>(found.Id)
+        where T : IAsset<T>
+    {
+        if (Database.Index.ByPath.TryGetValue(path, out IndexedFile? found))
+            return found.Type == typeof(T).Name ? new Handle<T>(found.Id) : Handle<T>.None;
+
+        ulong id = GetRegisteredId(path);
+
+        return Loaded.Registered.TryGetValue(id, out (string Path, object Asset) registered) && registered.Asset is T
+            ? new Handle<T>(id)
             : Handle<T>.None;
+    }
+
+    /// <summary>
+    /// Has <paramref name="asset"/>, made in memory, found, named and loaded as the asset at <paramref name="path"/>
+    /// while no file has that path, until the subscription is disposed. Nothing reads or writes a disk for it. Any
+    /// thread.
+    /// </summary>
+    public Subscription Register<T>(string path, T asset)
+        where T : IAsset<T>
+    {
+        ulong id = GetRegisteredId(path);
+        lock (_gate)
+        {
+            Loaded = Loaded with { Registered = Loaded.Registered.SetItem(id, (path, asset)) };
+        }
+
+        return new Subscription(() =>
+        {
+            lock (_gate)
+            {
+                Loaded = Loaded with { Registered = Loaded.Registered.Remove(id) };
+            }
+        });
+    }
 
     /// <summary>
     /// <typeparamref name="T"/>'s default: the asset named Default, whatever its extension, in the folder named for the
@@ -243,10 +274,14 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Where <paramref name="asset"/> is, as <see cref="Find{T}"/> takes it; null when no file has its id.
+    /// Where <paramref name="asset"/> is, as <see cref="Find{T}"/> takes it; null when no file or registered asset has its
+    /// id.
     /// </summary>
     public string? GetPath<T>(Handle<T> asset)
-        where T : IAsset<T> => Database.Index.ById.TryGetValue(asset.Id, out IndexedFile? found) ? found.Path : null;
+        where T : IAsset<T> =>
+        Database.Index.ById.TryGetValue(asset.Id, out IndexedFile? found) ? found.Path
+        : Loaded.Registered.TryGetValue(asset.Id, out (string Path, object Asset) registered) ? registered.Path
+        : null;
 
     /// <summary>
     /// Which make of <paramref name="asset"/> a load gets: a hash of its file and its <c>.meta</c>, which changes when
@@ -309,6 +344,12 @@ public sealed class AssetManager : IDisposable
     {
         if (asset == Handle<T>.None)
             return Result.Failure($"No {typeof(T).Name} was asked for: the handle is none.");
+
+        if (
+            Loaded.Registered.TryGetValue(asset.Id, out (string Path, object Asset) registered)
+            && registered.Asset is T kept
+        )
+            return Result.Success(kept);
 
         Made made = await RequestAsync(asset.Id, dependent, typeof(T), RunImportAsync<T>, progress, cancel)
             .ConfigureAwait(false);
@@ -1017,6 +1058,13 @@ public sealed class AssetManager : IDisposable
     /// What a load that made nothing gives: why not.
     /// </summary>
     private static Made Fail(string error) => new(Result.Failure(error), 0);
+
+    /// <summary>
+    /// The id of the asset registered at <paramref name="path"/>: a hash of it, in any case, with
+    /// <see cref="AssetIndex.RegisteredBit"/>, which no file's id has.
+    /// </summary>
+    private static ulong GetRegisteredId(string path) =>
+        XxHash64.HashToUInt64(Encoding.UTF8.GetBytes(path.ToUpperInvariant())) | AssetIndex.RegisteredBit;
 
     /// <summary>
     /// Whether a load of <paramref name="type"/> waits for a gem: nothing reads it yet, and a gem not made yet will.

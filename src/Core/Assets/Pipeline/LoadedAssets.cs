@@ -149,6 +149,11 @@ internal sealed record LoadedAssets
     public ImmutableDictionary<ulong, AssetEntry> Entries { get; init; } = [];
 
     /// <summary>
+    /// The assets registered from memory, by their id, with the path they are found at when no file has it.
+    /// </summary>
+    public ImmutableDictionary<ulong, (string Path, object Asset)> Registered { get; init; } = [];
+
+    /// <summary>
     /// Every asset type Magic and the gems hold, by the name a <c>.meta</c> gives it.
     /// </summary>
     public ImmutableDictionary<string, AssetType> Types { get; init; } = [];

@@ -117,5 +117,8 @@ ends in the view it hands on; the second takes it with what the other gems made.
 - The shaders are the `Shaders/` modules in this gem's `Resources`, built on the shader library
   ([Shaders](../../../Resources/Shaders/README.md)). The passes are at the folder's root. The renderer's tables and
   techniques, which the other rendering gems import too, are in the folders under it.
+- The banner's shader, `Embedded/FailureBanner.slang`, is in the gem's assembly, not in `Resources`, so it builds when
+  no file can be read. The gem registers it with `AssetManager.Register` at `Shaders/FailureBanner.slang`. A file at
+  that path in the project or in `Resources` replaces it.
 - Parts of the lighting are adapted from another engine under the MIT licence;
   `THIRD-PARTY-NOTICES.md` holds it.

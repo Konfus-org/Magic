@@ -222,6 +222,7 @@ public sealed class Renderer
     public void Dispose()
     {
         _preprocessing.Dispose();
+        _banner.Dispose();
         EndPreparing();
     }
 

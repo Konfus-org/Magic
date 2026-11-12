@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Globalization;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using Magic.Assets;
@@ -13,10 +14,17 @@ namespace Magic.DeferredRendering;
 /// The frame's render failures over the top of the window, one line each, as "Shader failed Surfaces are not shaded",
 /// but a post effect's, which shows as a frame round the window and a line along its bottom: it uploads each line's
 /// kind and text as character codes, and draws them in one pass in the overlay stage, after the picture is on the
-/// window. It draws nothing while nothing failed, and nothing while its own shaders are not built. Render thread.
+/// window. It draws nothing while nothing failed, and nothing while its own shaders are not built. Its shader is in the
+/// gem's assembly, registered at its asset path, so no file is read to build it; a file at that path replaces it.
+/// Render thread.
 /// </summary>
-internal sealed class FailureBanner(AssetManager assets)
+internal sealed class FailureBanner(AssetManager assets) : IDisposable
 {
+    /// <summary>
+    /// The asset path of the banner's shader, and the name of the assembly's resource that holds it.
+    /// </summary>
+    private const string ShaderPath = "Shaders/FailureBanner.slang";
+
     /// <summary>
     /// The most lines drawn; the last says how many more there are when there are more.
     /// </summary>
@@ -38,6 +46,9 @@ internal sealed class FailureBanner(AssetManager assets)
     /// </summary>
     private static readonly string[] _kinds = ["Pass", "Resource", "Shader", "Sky", "Weather", "Post effect"];
 
+    // Registered before the shaders below find it by its path.
+    private readonly Subscription _shader = assets.Register(ShaderPath, new Shader { Text = ReadShader() });
+
     private readonly DrawShaders _shaders = new(
         PassShaders.GetEntry(assets, "FailureBanner", "DrawFailureBannerVertex", ShaderStage.Vertex),
         PassShaders.GetEntry(assets, "FailureBanner", "DrawFailureBannerPixel", ShaderStage.Pixel)
@@ -45,6 +56,8 @@ internal sealed class FailureBanner(AssetManager assets)
     {
         Cull = CullMode.None,
     };
+
+    public void Dispose() => _shader.Dispose();
 
     /// <summary>
     /// The lines of <see cref="RenderGraph.Failures"/> over the window's image. The shaders are asked for every frame,
@@ -130,6 +143,19 @@ internal sealed class FailureBanner(AssetManager assets)
                     },
                 ]
             );
+    }
+
+    /// <summary>
+    /// The banner's shader, as the build put it in the assembly.
+    /// </summary>
+    private static string ReadShader()
+    {
+        using Stream stream =
+            typeof(FailureBanner).Assembly.GetManifestResourceStream(ShaderPath)
+            ?? throw new InvalidOperationException($"The renderer's assembly holds no {ShaderPath}.");
+        using StreamReader reader = new(stream);
+
+        return reader.ReadToEnd();
     }
 
     /// <summary>
