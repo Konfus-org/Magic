@@ -105,7 +105,7 @@ internal static class GemRegistry
                 continue;
             }
 
-            if (FindClash(services, gem) is { } clash)
+            if (FindClash(services, providers, gem) is { } clash)
             {
                 Log.Error(clash);
                 continue;
@@ -335,10 +335,14 @@ internal static class GemRegistry
     }
 
     /// <summary>
-    /// Why <paramref name="gem"/> is refused when <paramref name="services"/> already provides an interface it does;
-    /// null when none.
+    /// Why <paramref name="gem"/> is refused when <paramref name="services"/> already provides an interface it does,
+    /// named by the gem of <paramref name="providers"/> whose part it is, or by the host's class; null when none.
     /// </summary>
-    private static string? FindClash(ServiceCollection services, RegisteredGem gem)
+    private static string? FindClash(
+        ServiceCollection services,
+        Dictionary<Type, RegisteredGem> providers,
+        RegisteredGem gem
+    )
     {
         foreach (Type contract in gem.Provides)
         {
@@ -350,8 +354,13 @@ internal static class GemRegistry
 
                 // A part is registered as its class before its interfaces, so the class is what is found.
                 Type provider = service.ImplementationInstance?.GetType() ?? service.ServiceType;
-                if (provider.IsAssignableTo(contract))
-                    return $"Gem {gem.Name} provides {GetName(contract)}, which {provider.Name} already provides.";
+                if (!provider.IsAssignableTo(contract))
+                    continue;
+
+                string owner = providers.TryGetValue(provider, out RegisteredGem? other)
+                    ? $"gem {other.Name}"
+                    : provider.Name;
+                return $"Gem {gem.Name} provides {GetName(contract)}, which {owner} already provides.";
             }
         }
 

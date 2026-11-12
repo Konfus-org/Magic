@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Linq;
+using System.Reflection;
 using Magic.Assets;
 using Magic.Configuration;
 using Magic.Debugging;
@@ -96,6 +97,11 @@ internal sealed class Gems : IDisposable
     /// Set by the render thread each time it has drawn a frame, for the game thread waiting to stay one frame ahead.
     /// </summary>
     private readonly AutoResetEvent _drawn = new(initialState: false);
+
+    /// <summary>
+    /// The gem whose part is the GPU provider, which presents the frame; null when no gem provides one.
+    /// </summary>
+    private readonly LoadedGem? _gpuProvider;
 
     /// <summary>
     /// When a watch last saw a build write a gem's files, 0 when none has: written whole from the watches' threads.
@@ -194,26 +200,32 @@ internal sealed class Gems : IDisposable
                 // anything else is a bug in the gem, and its stack says where.
                 string why = ex is InvalidOperationException ? ex.Message : ex.ToString();
                 Log.Error($"Gem {gem.Name} was not made: {why}");
-                foreach (Type type in gem.PartTypes)
-                {
-                    assets.Drop(type);
-                }
-
+                assets.Drop(gem.PartTypes);
                 code.Dispose();
                 continue;
             }
 
             LoadedGem loaded = new(
                 made,
-                [.. gem.Parts.Select(part => part.GetValue(made)).OfType<object>()],
+                [],
                 gem.Name,
                 [new Subscription(gem.Context.Unload), new Subscription(() => (made as IDisposable)?.Dispose()), code]
             );
             _loaded.Add(loaded);
-            foreach (object part in loaded.Parts)
+            foreach (PropertyInfo property in gem.Parts)
             {
+                if (property.GetValue(made) is not { } part)
+                {
+                    Log.Error($"Gem {gem.Name}'s part {property.Name} is null, so nothing it would do is set up.");
+                    continue;
+                }
+
+                loaded.Parts.Add(part);
                 SetUp(gem, part, loaded.Ends, settings, assets);
             }
+
+            // What a part reads was expected by its property's type, which can be a base of the part's class.
+            assets.Drop(gem.PartTypes);
 
             string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
             Log.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");
@@ -232,7 +244,8 @@ internal sealed class Gems : IDisposable
             }
         }
 
-        _graph.Gpu = _loaded.SelectMany(static gem => gem.Parts).OfType<IGraphicsApi>().FirstOrDefault();
+        _gpuProvider = _loaded.Find(static gem => gem.Parts.OfType<IGraphicsApi>().Any());
+        _graph.Gpu = _gpuProvider?.Parts.OfType<IGraphicsApi>().First();
         _threads.Start(EngineThread.Render, Render);
     }
 
@@ -346,8 +359,8 @@ internal sealed class Gems : IDisposable
     }
 
     /// <summary>
-    /// Calls <paramref name="hook"/> on <paramref name="gem"/>, which leaves the frame if it throws. Present is the GPU
-    /// provider's alone.
+    /// Calls <paramref name="hook"/> on <paramref name="gem"/>, timed, unless it left the frame; it leaves the frame if it
+    /// throws. Present is the GPU provider's alone.
     /// </summary>
     [SuppressMessage(
         "Design",
@@ -356,6 +369,10 @@ internal sealed class Gems : IDisposable
     )]
     private void RunHook(Hook hook, in Frame frame, LoadedGem gem)
     {
+        if (gem.HasFailed)
+            return;
+
+        long start = Metrics.HookDurations.Start();
         try
         {
             switch (hook)
@@ -370,9 +387,7 @@ internal sealed class Gems : IDisposable
                     gem.Instance.LateUpdate(in frame);
                     break;
                 case Hook.Present:
-                    if (_graph.Gpu is { } gpu && gem.Parts.Contains(gpu))
-                        gpu.Present(_graph.Finish());
-
+                    _graph.Gpu?.Present(_graph.Finish());
                     break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(hook), hook, "There is no such hook.");
@@ -383,6 +398,12 @@ internal sealed class Gems : IDisposable
             Log.Error($"Gem {gem.Name} failed in {hook} and stops running: {ex}");
             gem.HasFailed = true;
         }
+
+        Metrics.HookDurations.RecordSince(
+            start,
+            new KeyValuePair<string, object?>(Metrics.GemNameTag, gem.Name),
+            new KeyValuePair<string, object?>(Metrics.HookTag, _hookNames[(int)hook])
+        );
     }
 
     /// <summary>
@@ -400,7 +421,8 @@ internal sealed class Gems : IDisposable
             _renderFrameDuration.Record(frame.AppDeltaSec);
 
         _rendering.Pump(frame, _graph);
-        RunHook(Hook.Present, frame);
+        if (_gpuProvider is not null)
+            RunHook(Hook.Present, frame, _gpuProvider);
 
         // Without a GPU provider, nothing presents what the gems recorded, so it goes.
         _graph.Finish();
@@ -415,16 +437,7 @@ internal sealed class Gems : IDisposable
     {
         foreach (LoadedGem gem in _loaded)
         {
-            if (gem.HasFailed)
-                continue;
-
-            long start = Metrics.HookDurations.Start();
             RunHook(hook, frame, gem);
-            Metrics.HookDurations.RecordSince(
-                start,
-                new KeyValuePair<string, object?>(Metrics.GemNameTag, gem.Name),
-                new KeyValuePair<string, object?>(Metrics.HookTag, _hookNames[(int)hook])
-            );
         }
     }
 

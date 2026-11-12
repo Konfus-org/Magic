@@ -588,9 +588,9 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Has a load of an asset type one of <paramref name="parts"/>, the classes of the gems' parts, reads, as its
+    /// Has a load of an asset type one of <paramref name="parts"/>, the types of the gems' parts, reads, as its
     /// <see cref="IAssetImporter{T}"/>s say, wait for that part until it registers (<see cref="Register(object)"/>) or
-    /// its gem is not made (<see cref="Drop"/>), as a gem made before it may load one. Game thread.
+    /// its gem stops the wait (<see cref="Drop"/>), as a gem made before it may load one. Game thread.
     /// </summary>
     internal void Expect(IEnumerable<Type> parts)
     {
@@ -605,14 +605,15 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Stops waiting for <paramref name="part"/>, as its gem was not made: what was asked for as a type only it would
-    /// read is read now, and fails as a type no gem reads. Game thread.
+    /// Stops waiting for <paramref name="parts"/>, as their gem is made and its parts registered, or was not made: what
+    /// was asked for as a type only they would read and no part registered reads is read now, and fails as a type no gem
+    /// reads. Game thread.
     /// </summary>
-    internal void Drop(Type part)
+    internal void Drop(IEnumerable<Type> parts)
     {
         lock (_gate)
         {
-            Loaded = StartWanted(Database, Loaded with { Expected = Loaded.Expected.Remove(part) });
+            Loaded = StartWanted(Database, Loaded with { Expected = Loaded.Expected.RemoveRange(parts) });
         }
     }
 
@@ -634,7 +635,6 @@ public sealed class AssetManager : IDisposable
             {
                 Importers = Claim(loaded.Importers, reads, part),
                 Exporters = Claim(loaded.Exporters, writes, part),
-                Expected = loaded.Expected.Remove(part.GetType()),
             };
             Loaded = StartWanted(Database, claimed);
         }
