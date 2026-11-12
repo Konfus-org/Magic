@@ -258,8 +258,8 @@ internal sealed class GpuResources(
 
         // Each placed model copied up, now that the pools are asked for at their size, with its meshes into the mesh
         // table where it has a range of it.
-        // A model is ready, and in the model table, once all its copies are staged; one whose copies were not stays placed
-        // for the next frame, out of the table, so nothing reads its vertices before they are there.
+        // A model is ready, and in the model table, once all its copies are staged; one whose copies were not stays
+        // placed for the next frame, out of the table, so nothing reads its vertices before they are there.
         foreach ((_, _, MeshDerived made, ModelEntry entry, ModelPlace place) in _madeModels)
         {
             if (entry.State != GpuState.Loading || entry.Where.ModelIndex == 0)
@@ -540,9 +540,9 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// Lets go of what was made from asset <paramref name="id"/>, read again, so the next ask loads it anew: a material, a
-    /// texture, a material shader's struct, which is reflected again now, and a model that failed. A model in the pools
-    /// stays as it was made until it is evicted.
+    /// Lets go of what was made from asset <paramref name="id"/>, read again, so the next ask loads it anew: a
+    /// material, a texture, a material shader's struct, which is reflected again now, and a model that failed. A model
+    /// in the pools stays as it was made until it is evicted.
     /// </summary>
     public void Forget(ulong id)
     {
@@ -581,8 +581,8 @@ internal sealed class GpuResources(
     /// </summary>
     public void Upload(RenderGraph graph)
     {
-        // Each texture read and its sampler asked for, and ready with their heap ids; failed, and drawn as the failure,
-        // when either was not made.
+        // Each texture read and its sampler asked for, and ready with their heap ids; failed, and drawn as stripes over
+        // its material, when either was not made.
         foreach ((ulong id, TextureEntry entry) in _textures)
         {
             if (entry.State == GpuState.Failed || entry.Description is not { } description)

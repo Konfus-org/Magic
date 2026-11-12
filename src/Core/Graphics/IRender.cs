@@ -9,8 +9,9 @@ namespace Magic.Graphics;
 /// every other form; the part records its passes into the frame's graph, each in its <see cref="RenderStage"/>, and
 /// once every gem has, the GPU provider presents it. A part that takes or makes what other gems draw from implements
 /// <see cref="IRenderFrom{TInput}"/>, <see cref="IRenderInto{TOutput}"/> or <see cref="IRender{TInput, TOutput}"/>
-/// instead. A part with more than one step in the frame implements a form for each.
-/// What it cannot record it tells <see cref="RenderGraph.Fail"/>, and goes on; a gem that throws renders no more.
+/// instead. A part with more than one step in the frame implements a form for each. What it cannot record it tells
+/// <see cref="RenderGraph.Fail"/>, and goes on; a step that throws is a failure of the frame, and Core runs it again
+/// after a pause.
 /// </summary>
 public interface IRender
 {

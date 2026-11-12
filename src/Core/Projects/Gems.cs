@@ -22,7 +22,8 @@ namespace Magic.Projects;
 /// <summary>
 /// The run's gems: makes the ones registered, in their order, as it is made, drives them through the frame, restarts
 /// the run once a build of one has settled, and ends them as it is disposed. A gem that can't be made is logged, and the
-/// others go on without it; one that throws in a hook is logged and leaves every hook, and the frame goes on.
+/// others go on without it; one that throws in an update hook is logged and leaves those hooks, one that throws in
+/// <c>Render</c> is a failure of the frame and is run again after a pause, and the frame goes on.
 /// </summary>
 internal sealed class Gems : IDisposable
 {
@@ -231,8 +232,8 @@ internal sealed class Gems : IDisposable
             Log.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");
         }
 
-        // Once every gem renders, a gem that must take what no listed gem makes never renders, so it holds no domain's
-        // loading back either.
+        // Once every gem renders, a gem that must take what no listed gem makes does not render until a gem that makes
+        // it registers, so it holds no domain's loading back either.
         foreach (LoadedGem loaded in _loaded)
         {
             if (loaded.Parts.Exists(_rendering.HasMissingInput))

@@ -194,9 +194,8 @@ FailureAnchor GetFailureAnchor(FrameConstants frame, GpuInstance instance, Failu
     return anchor;
 }
 
-// Draws the failure over a pixel's surface: its kind's colour, pulsing, over all of it or in diagonal stripes, each with
-// a black edge after it, then its
-// text, white with a black shadow a pixel down and right. Hands back the pixel's velocity: the anchor's, so the
+// Draws the failure over a pixel's surface: its kind's colour, pulsing, over all of it or in diagonal stripes, each
+// with a black edge after it, then its text, white with a black shadow a pixel down and right. Hands back the pixel's velocity: the anchor's, so the
 // history follows the text, not the surface under it.
 public float2 ApplyFailure(
     FrameConstants frame,

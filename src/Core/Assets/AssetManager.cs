@@ -173,9 +173,9 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Has <paramref name="asset"/>, made in memory, found, named and loaded as the asset at <paramref name="path"/>
-    /// while no file has that path or its id, until the subscription is disposed. Nothing reads or writes a disk for it.
-    /// Any thread.
+    /// Registers <paramref name="asset"/>, made in memory, as the asset at <paramref name="path"/>, until the
+    /// subscription is disposed: it is found, named and loaded there with no disk read or write. A file with that path
+    /// or its id wins. Any thread.
     /// </summary>
     public Subscription Register<T>(string path, T asset)
         where T : IAsset<T>

@@ -16,13 +16,13 @@ namespace Magic.TaaUpscaling;
 /// drawn. The pass builds each shown pixel from the output's jittered texels around it and blends it with last
 /// frame's resolved picture where its surface was, so it keeps two resolved pictures and swaps them every frame,
 /// with no history on the first frame at a size or of a world; the newer is what the window shows. It makes nothing
-/// while its shader builds.
+/// while its shader builds or after it failed.
 /// </summary>
 public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
 {
     /// <summary>
-    /// Done once the shader is built or failed, which a domain loading waits for, so a shader that fails is told and logged before the world
-    /// shows.
+    /// Done once the shader is built or failed, which a domain loading waits for, so a shader that fails is told and
+    /// logged before the world shows.
     /// </summary>
     private readonly TaskCompletionSource _built = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -45,7 +45,7 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
     }
 
     /// <summary>
-    /// The frame's upscaling; none while the shader builds.
+    /// The frame's upscaling; none while the shader builds or after it failed.
     /// </summary>
     public Upscaling? Render(in Frame frame, RenderGraph graph)
     {

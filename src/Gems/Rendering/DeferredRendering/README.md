@@ -4,8 +4,8 @@ The renderer. Each frame it runs three render steps. The first keeps the world o
 the view and its targets at the picture's size, the frame's buffer and its rows, the models, materials and textures
 every renderer draws with, the instances, the lights with each tile's lights, and the sky's tables. The second lights
 that world into the window, deferred: the GBuffer a geometry gem draws, lit by the sun and the sky. When the console
-asks for a screenshot, it hands the frame as a texture to the gem that writes textures. It holds the types the
-rendering gems share. The third draws the frame's render failures over the window.
+asks for a screenshot, it hands the frame as a texture to the gem that writes textures. The third draws the frame's
+render failures over the window. The gem holds the types the rendering gems share.
 
 To use it, list `DeferredRendering` in a project's `.magic` file after the GPU provider, the ECS, the model reader and
 the texture reader, with a gem that draws its geometry.

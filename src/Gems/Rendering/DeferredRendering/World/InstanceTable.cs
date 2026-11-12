@@ -19,8 +19,8 @@ namespace Magic.DeferredRendering.World;
 /// <paramref name="resources"/> has then, and uploaded whole. Row 0 is the default material, which an empty slot and a
 /// material still loading are drawn with; a material that failed, or whose shader did, is drawn with row 0's params and
 /// shader, and the index of its row in the failure table, which names it; a material with a texture that failed, or a
-/// param that fits no field, is drawn as itself with that failure's index. A model that failed is drawn as the failure cube, every slot
-/// with row 0's params and shader and the index of the model's row in the failure table.
+/// param that fits no field, is drawn as itself with that failure's index. A model that failed is drawn as the failure
+/// cube, every slot with row 0's params and shader and the index of the model's row in the failure table.
 /// </summary>
 internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
 {

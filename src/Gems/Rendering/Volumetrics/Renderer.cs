@@ -51,8 +51,8 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
     private static readonly string[] _scatteringNames = ["Air scattering 0", "Air scattering 1"];
 
     /// <summary>
-    /// Done once the air's and the clouds' shaders are built or failed, which a domain loading waits for, so a shader that fails is told and logged
-    /// before the world shows.
+    /// Done once the air's and the clouds' shaders are built or failed, which a domain loading waits for, so a shader
+    /// that fails is told and logged before the world shows.
     /// </summary>
     private readonly TaskCompletionSource _built = new(TaskCreationOptions.RunContinuationsAsynchronously);
 

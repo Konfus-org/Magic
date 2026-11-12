@@ -43,8 +43,8 @@ public sealed class Renderer(TracedShadowsSettings settings, AssetManager assets
     private static readonly string[] _momentNames = ["Sun shadow moments 1", "Sun shadow moments 2"];
 
     /// <summary>
-    /// Done once the shaders are built or failed, at once while shadows are off or no ray is traced, which a domain loading waits for, so a shader that fails is told and logged before the world
-    /// shows.
+    /// Done once the shaders are built or failed, at once while shadows are off or no ray is traced, which a domain
+    /// loading waits for, so a shader that fails is told and logged before the world shows.
     /// </summary>
     private readonly TaskCompletionSource _built = new(TaskCreationOptions.RunContinuationsAsynchronously);
 

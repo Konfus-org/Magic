@@ -282,8 +282,8 @@ public sealed class Renderer
 
         // The loading domain shows once the models, materials and effects it waits for are on the GPU, or failed: a
         // model drawn as the failure cube, which is then waited for too, or, for an effect, left out; and once the
-        // shading's and the sky's shaders are built, or failed. Its models are asked for here, as the pools only take them once
-        // they are made; an ask for one asked for already does nothing.
+        // shading's and the sky's shaders are built, or failed. Its models are asked for here, as the pools only take
+        // them once they are made; an ask for one asked for already does nothing.
         if (_preparing is { } preparing)
         {
             bool isPrepared =
@@ -545,8 +545,8 @@ public sealed class Renderer
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph, in ShadingInput input)
     {
-        // The shaders are the GPU provider's to build, the first ask starting each; while one failed, the renderer
-        // draws nothing.
+        // The shaders are the GPU provider's to build, the first ask starting each; while one failed, the shading
+        // draws nothing, and the banner tells it.
         GpuState shaders = graph.GetState(_shadingShaders.AsSpan());
         if (shaders == GpuState.Failed)
             graph.Fail(RenderFailure.Shader, "Surfaces are not shaded", "a shader of the shading was not built.");
