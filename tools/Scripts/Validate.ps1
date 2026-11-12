@@ -11,9 +11,10 @@ error, so a clean build is one that exits 0. It logs with MSBuild's plain consol
 progress shows as it happens, which the terminal logger holds back until each project ends. Formatting is not checked
 here: tools/Scripts/Format.ps1 formats a change before it is validated, and the build fails on every rule it applies that a
 build can see.
-The tests run against that build, so running them alone (-Only Test) needs one. The Headless step runs each project
-without a window under --fail-on-error, waits for its world, types exit into it and passes when it ends with 0; an
-error logged during the run exits 2, and a run still going after -Seconds is killed and fails. The Screenshot step runs
+The tests run against that build, so running them alone (-Only Test) needs one. The Headless step runs every project at
+once without a window under --fail-on-error, each waiting for its world before it types exit, and
+passes when each ends with 0; an error logged during a run exits 2, a run still going after -Seconds is killed and
+fails, and a failed run's last output is printed. The Screenshot step runs
 tools/Scripts/Screenshot.ps1 on each project and prints the images' paths last: open each and look at what it shows
 before reporting the change as working. It needs a display and a GPU; the others do not. Runs from any current
 directory.
@@ -66,33 +67,44 @@ if ($Project.Count -eq 0) {
 }
 $screenshots = @()
 
-# Runs the project headless, waits for its world, types exit into it and waits for it to end; a run still going after
+# Starts every project headless at once, each waiting for its world before it types exit, then waits
+# for each to end. Each run's output goes to a file, which is printed only when that run fails. A run still going after
 # -Seconds is killed.
 function Invoke-Headless {
-    foreach ($one in $Project) {
-        Invoke-HeadlessProject $(if ([System.IO.Path]::IsPathRooted($one)) { $one } else { Join-Path $root $one })
-        if ($LASTEXITCODE -ne 0) { return }
-    }
-}
-
-function Invoke-HeadlessProject([string] $projectPath) {
     & (Join-Path $PSScriptRoot 'Profiling.ps1') -Wait
-    $info = New-Object System.Diagnostics.ProcessStartInfo
-    $info.FileName = $magic
-    $info.Arguments = "open `"$projectPath`" --headless true --fail-on-error"
-    $info.UseShellExecute = $false
-    $info.RedirectStandardInput = $true
-    $process = [System.Diagnostics.Process]::Start($info)
-    $process.StandardInput.WriteLine('wait loaded')
-    $process.StandardInput.WriteLine('exit')
-    $process.StandardInput.Close()
-    if (-not $process.WaitForExit($Seconds * 1000)) {
-        $process.Kill()
-        Write-Host "FAILED: the run was still going after $Seconds s."
-        $global:LASTEXITCODE = 1
-        return
+    $commands = Join-Path ([System.IO.Path]::GetTempPath()) ('Validate-' + [guid]::NewGuid() + '.txt')
+    Set-Content -Path $commands -Value @('wait loaded', 'exit')
+    $runs = foreach ($one in $Project) {
+        $projectPath = if ([System.IO.Path]::IsPathRooted($one)) { $one } else { Join-Path $root $one }
+        $log = Join-Path ([System.IO.Path]::GetTempPath()) ('Validate-' + [guid]::NewGuid() + '.log')
+        $process = Start-Process -FilePath $magic -ArgumentList "open `"$projectPath`" --headless true --fail-on-error" `
+            -NoNewWindow -PassThru -RedirectStandardInput $commands -RedirectStandardOutput $log
+        # Reading the handle keeps the exit code readable after the process ends.
+        $null = $process.Handle
+        [pscustomobject]@{ Project = $projectPath; Process = $process; Log = $log }
     }
-    $global:LASTEXITCODE = $process.ExitCode
+
+    $code = 0
+    $started = [System.Diagnostics.Stopwatch]::StartNew()
+    foreach ($run in $runs) {
+        $left = [math]::Max(0, $Seconds * 1000 - $started.ElapsedMilliseconds)
+        $result = 0
+        if (-not $run.Process.WaitForExit([int]$left)) {
+            $run.Process.Kill()
+            Write-Output "FAILED: $($run.Project) was still going after $Seconds s."
+            $result = 1
+        } elseif ($run.Process.ExitCode -ne 0) {
+            Write-Output "FAILED: $($run.Project) exited $($run.Process.ExitCode)."
+            $result = $run.Process.ExitCode
+        }
+        if ($result -ne 0) {
+            Get-Content $run.Log -Tail 60 -ErrorAction SilentlyContinue
+            if ($code -eq 0) { $code = $result }
+        }
+        Remove-Item $run.Log -ErrorAction SilentlyContinue
+    }
+    Remove-Item $commands -ErrorAction SilentlyContinue
+    $global:LASTEXITCODE = $code
 }
 
 # Runs tools/Scripts/Screenshot.ps1 on each project and keeps the images' paths, its output.
