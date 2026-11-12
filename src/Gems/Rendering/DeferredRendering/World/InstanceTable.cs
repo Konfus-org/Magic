@@ -17,10 +17,10 @@ namespace Magic.DeferredRendering.World;
 /// distinct <see cref="MaterialInstance"/> drawn, which every slot holding it shares, made again each frame from what
 /// <paramref name="resources"/> has then, and uploaded whole. Row 0 is the default material, which an empty slot and a
 /// material still loading are drawn with; a material that failed is drawn with row 0's params and shader, and the
-/// index of its row in the failure table, which names it. <paramref name="failure"/> is the material a model that
-/// failed is drawn with; an empty slot when there is none.
+/// index of its row in the failure table, which names it. A model that failed is drawn as the failure cube, every slot
+/// with row 0's params and shader and the index of the model's row in the failure table.
 /// </summary>
-internal sealed class InstanceTable(AssetManager assets, GpuResources resources, MaterialInstance failure)
+internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
 {
     /// <summary>
     /// The most rows the table and the material table hold.
@@ -61,20 +61,24 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
     private GpuMaterial[] _materialRows = new GpuMaterial[MinCapacity];
 
     /// <summary>
-    /// The slot each material row is made from, by row; row 0 the default material's.
+    /// The slot each material row is made from, by row, with the row of the failure table it draws, 0 for none; row 0 the
+    /// default material's.
     /// </summary>
-    private readonly List<MaterialInstance> _materialSlots = [new() { Handle = assets.GetDefault<Material>() }];
+    private readonly List<(MaterialInstance Slot, uint Failure)> _materialSlots =
+    [
+        (new() { Handle = assets.GetDefault<Material>() }, 0),
+    ];
 
-    private readonly Dictionary<MaterialInstance, uint> _materialRowOf = [];
+    private readonly Dictionary<(MaterialInstance Slot, uint Failure), uint> _materialRowOf = [];
 
     /// <summary>
-    /// The failure table's rows, a row for each material that failed, made once when it fails; row 0 is never read, as
-    /// a failure index of 0 means no failure.
+    /// The failure table's rows, a row for each model or material that failed, made once when it fails; row 0 is never
+    /// read, as a failure index of 0 means no failure.
     /// </summary>
     private GpuFailure[] _failureRows = new GpuFailure[16];
 
     /// <summary>
-    /// The row of each material that failed in the failure table, by the material's id.
+    /// The row of each model or material that failed in the failure table, by the asset's id.
     /// </summary>
     private readonly Dictionary<ulong, uint> _failureRowOf = [];
 
@@ -173,17 +177,19 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
             return Result.Failure(materials.Error);
 
         // Every material row made again, so a material or texture that arrived shows with no renderer written: one still
-        // loading as the default, row 0, and one that failed as the default with its failure; the failure material, which
-        // a model that failed is drawn with, as itself.
+        // loading as the default, row 0, and one that failed, or that a model that failed is drawn with, as the default
+        // with its failure.
         for (int row = 0; row < _materialSlots.Count; row++)
         {
-            Handle<Material> material = _materialSlots[row].Handle;
-            GpuState state = resources.Get(_materialSlots[row], out _materialRows[row]);
+            (MaterialInstance slot, uint failed) = _materialSlots[row];
+            GpuState state = resources.Get(slot, out _materialRows[row]);
+            if (state == GpuState.Failed)
+                failed = GetFailureRow(slot.Handle, FailureKind.Material);
+
             if (state == GpuState.Loading)
                 _materialRows[row] = _materialRows[0];
-            else if (state == GpuState.Failed && material != failure.Handle)
+            else if (failed != 0)
             {
-                uint failed = GetFailureRow(material);
                 _materialRows[row] = _materialRows[0];
                 _materialRows[row].Shader =
                     (_materialRows[0].Shader & ~(GpuMaterial.FailureMask << GpuMaterial.FailureShift))
@@ -252,7 +258,7 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
             ResidentModel? resident = renderer.Model == Handle<Model>.None ? null : resources.Get(renderer.Model);
 
             // A resident model's row: where it is, its bounds in the world and the material rows of its slots, every
-            // slot the failure's when the model failed.
+            // slot the default with the model's failure when the model failed.
             GpuInstance row = default;
             if (resident is { } model)
             {
@@ -271,10 +277,13 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
                     Model = model.ModelIndex,
                 };
                 ImmutableArray<MaterialInstance> slots = renderer.Materials.All;
+                (MaterialInstance Slot, uint Failure) failure = model.IsFailure
+                    ? (_materialSlots[0].Slot, GetFailureRow(renderer.Model, FailureKind.Model))
+                    : default;
                 for (int slot = 0; slot < MaterialSet.Capacity; slot++)
                 {
                     MaterialInstance held = slot < slots.Length ? slots[slot] : default;
-                    row.Materials[slot] = GetMaterialRow(model.IsFailure ? failure : held);
+                    row.Materials[slot] = GetMaterialRow(model.IsFailure ? failure : (held, 0u));
                 }
             }
 
@@ -298,50 +307,55 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources,
     }
 
     /// <summary>
-    /// The row of <paramref name="material"/>, which failed, in the failure table; the first ask makes it, its text
-    /// "Material failed " and the material's path, cut from the left to fit, so the file's name stays.
+    /// The row of <paramref name="asset"/>, a model or material that failed, in the failure table; the first ask makes
+    /// it, drawn solid, its text the kind, " failed " and the asset's path, cut from the left to fit, so the file's name
+    /// stays.
     /// </summary>
-    private uint GetFailureRow(Handle<Material> material)
+    private uint GetFailureRow<T>(Handle<T> asset, FailureKind kind)
+        where T : IAsset<T>
     {
-        if (_failureRowOf.TryGetValue(material.Id, out uint row))
+        if (_failureRowOf.TryGetValue(asset.Id, out uint row))
             return row;
 
-        const string Text = "Material failed ";
-        string path = assets.GetPath(material) ?? $"material {material.Id}";
-        int kept = Math.Min(path.Length, GpuFailureText.Length - Text.Length);
+        string text = $"{kind} failed ";
+        string path = assets.GetPath(asset) ?? $"id {asset.Id}";
+        int kept = Math.Min(path.Length, GpuFailureText.Length - text.Length);
         row = (uint)_failureRowOf.Count + 1;
         if (row == _failureRows.Length)
             Array.Resize(ref _failureRows, _failureRows.Length * 2);
 
-        _failureRows[row] = GpuFailure.Create(FailureKind.Material, FailurePattern.Solid, Text + path[^kept..]);
-        _failureRowOf[material.Id] = row;
+        _failureRows[row] = GpuFailure.Create(kind, FailurePattern.Solid, text + path[^kept..]);
+        _failureRowOf[asset.Id] = row;
 
         return row;
     }
 
     /// <summary>
-    /// The slot's material row, 0 for an empty slot; a value first seen takes the next row, which every slot holding it
-    /// shares. A slot whose params change takes another row; rows are never given back.
+    /// The material row of the slot drawn with the failure table's row <paramref name="drawn"/>.Failure, 0 for an empty
+    /// slot; a value first seen takes the next row, which every slot holding it shares. A slot whose params change takes
+    /// another row; rows are never given back.
     /// </summary>
-    private uint GetMaterialRow(in MaterialInstance slot)
+    private uint GetMaterialRow((MaterialInstance Slot, uint Failure) drawn)
     {
-        if (slot.Handle == Handle<Material>.None)
+        if (drawn.Slot.Handle == Handle<Material>.None)
             return 0;
 
-        if (_materialRowOf.TryGetValue(slot, out uint row))
+        if (_materialRowOf.TryGetValue(drawn, out uint row))
             return row;
 
         if (_materialSlots.Count >= MaxCapacity)
         {
-            Log.Error($"{assets.GetPath(slot.Handle)} is drawn as the default material: the material table is full.");
-            _materialRowOf[slot] = 0;
+            Log.Error(
+                $"{assets.GetPath(drawn.Slot.Handle)} is drawn as the default material: the material table is full."
+            );
+            _materialRowOf[drawn] = 0;
 
             return 0;
         }
 
         row = (uint)_materialSlots.Count;
-        _materialSlots.Add(slot);
-        _materialRowOf[slot] = row;
+        _materialSlots.Add(drawn);
+        _materialRowOf[drawn] = row;
 
         return row;
     }

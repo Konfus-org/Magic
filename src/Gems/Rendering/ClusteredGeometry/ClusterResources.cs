@@ -207,16 +207,20 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
     private string GetName(ModelPlace place) => assets.GetPath(place.Model) ?? $"model {place.Model.Id}";
 
     /// <summary>
-    /// The model's clusters, as its preprocessor made them, settled by the next <see cref="Prepare"/>.
+    /// The model's clusters, as its preprocessor made them, settled by the next <see cref="Prepare"/>; the failure
+    /// cube's made from memory, on a worker.
     /// </summary>
     private async Task LoadAsync(int index, ModelPlace place)
     {
         Result<ModelClusters> made;
         try
         {
-            made = await assets
-                .LoadPreprocessedAsync(place.Model, clusters, CancellationToken.None)
-                .ConfigureAwait(false);
+            made =
+                place.Model == FailureCube.Handle
+                    ? Result.Success(await Task.Run(() => clusters.Preprocess(FailureCube.Model)).ConfigureAwait(false))
+                    : await assets
+                        .LoadPreprocessedAsync(place.Model, clusters, CancellationToken.None)
+                        .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

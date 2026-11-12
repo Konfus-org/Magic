@@ -86,11 +86,6 @@ public sealed class Renderer
     private readonly InstanceTable _instances;
 
     /// <summary>
-    /// The material a model that failed is drawn with, every slot; an empty slot when there is no failure material.
-    /// </summary>
-    private readonly MaterialInstance _failure;
-
-    /// <summary>
     /// What is done to the picture when no entity has a <see cref="PostProcessing"/>: the exposure and the AgX tonemap.
     /// </summary>
     private readonly PostProcessing _defaultPost;
@@ -192,10 +187,9 @@ public sealed class Renderer
             settings.Anisotropy,
             settings.DroppedTextureLevels
         );
-        _failure = new MaterialInstance { Handle = assets.GetFailure<Material, Model>() };
         _defaultPost.Effects[0] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Exposure.mat") };
         _defaultPost.Effects[1] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Agx.mat") };
-        _instances = new InstanceTable(assets, _resources, _failure);
+        _instances = new InstanceTable(assets, _resources);
         _frameView = new FrameView();
         _sky = new SkyLuts(assets);
         _lightTiles = new LightTiles(assets);
@@ -271,9 +265,9 @@ public sealed class Renderer
         // their rows built again, and the materials' rows are made again at upload.
         _instances.Fill(inputs.Renderers, frame.Index);
 
-        // The loading domain shows once the models, materials and effects it waits for are on the GPU, or failed: drawn
-        // as the failure material, which is then waited for too, or, for an effect, left out; and once the shading's
-        // and the sky's shaders are built, or failed. Its models are asked for here, as the pools only take them once
+        // The loading domain shows once the models, materials and effects it waits for are on the GPU, or failed: a
+        // model drawn as the failure cube, which is then waited for too, or, for an effect, left out; and once the
+        // shading's and the sky's shaders are built, or failed. Its models are asked for here, as the pools only take them once
         // they are made; an ask for one asked for already does nothing.
         if (_preparing is { } preparing)
         {
@@ -281,21 +275,16 @@ public sealed class Renderer
                 !_effects.IsLoading(graph, preparing.Effects)
                 && graph.GetState(_shadingShaders.AsSpan()) != GpuState.Loading
                 && graph.GetState(_skyShaders.AsSpan()) != GpuState.Loading;
-            bool hasFailure = false;
             foreach (Handle<Model> model in preparing.Models)
             {
                 _resources.Get(model);
                 isPrepared &= _resources.HasArrived(model);
-                hasFailure |= _resources.HasFailed(model);
             }
 
             foreach (Handle<Material> material in preparing.Materials)
             {
                 isPrepared &= _resources.Get(material) != GpuState.Loading;
             }
-
-            if (hasFailure && _failure.Handle != Handle<Material>.None)
-                isPrepared &= _resources.Get(_failure.Handle) != GpuState.Loading;
 
             if (isPrepared)
             {
