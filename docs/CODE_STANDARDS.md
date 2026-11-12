@@ -68,7 +68,8 @@ Write the engine as data flowing through functions, not objects calling each oth
   `EntryPoint.LateUpdate` calls a method of `Renderer` that publishes what `Render` draws, as data. `Renderer` owns
   the hand-off: the newest through a `Mailbox<T>`, and what must not be lost through a `Channel<T>`. `Render` reads
   the gem's settings directly. Core writes them one member at a time, so a frame can see one old and one new member.
-  A gem implements the hooks it needs. One that throws in a hook is logged and leaves every hook.
+  A gem implements the hooks it needs. One that throws in `Update`, `FixedUpdate` or `LateUpdate` is logged and
+  leaves those hooks. One that throws in `Render` is a failure in the picture, and Core runs it again after a pause.
 - Where Core needs something from a gem, a part implements an interface and Core calls it, as with `IEcs` and
   `IAssetImporter<T>`. Add one when a gem first needs it.
 - A gem that keeps something for each entity compares what it holds with the entities each frame, adding what came and
@@ -131,6 +132,8 @@ Write the engine as data flowing through functions, not objects calling each oth
 - Return a `Result` for anything content or the machine can break: I/O, import, compile, readback.
 - Broken content logs `Log.Error` and shows a visible stand-in; it never stops the frame. What still works, only
   worse, logs `Log.Warn`.
+- A step of `Render` that can't draw tells `RenderGraph.Fail`, returns for this frame and tries again in the next. It
+  never logs the failure itself and never stops for the run ([Failures](DEBUGGING.md#report-a-failure-from-a-gem)).
 - Throw only for a programmer's mistake or a gem that can't exist (no GPU): `ArgumentException`,
   `InvalidOperationException` or `NotSupportedException`, never `Exception` itself. Use the throw helpers
   (`ArgumentNullException.ThrowIfNull`, `ObjectDisposedException.ThrowIf` and their siblings).

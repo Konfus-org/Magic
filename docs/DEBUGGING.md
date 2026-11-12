@@ -1,5 +1,65 @@
 # Debugging
 
+## Failures
+
+When an asset or a part of the rendering fails, the frame is still drawn. The failure shows in the picture as a
+flashing colour with text, and the log gets one error for it.
+
+### What a failure looks like
+
+The colour tells the kind of thing that failed. The pattern tells how much of it failed:
+
+- **Solid:** the whole thing failed. The colour replaces the surface.
+- **Stripes:** one part failed. Diagonal stripes of the colour, each with a black edge, lie over the real surface.
+
+| Kind | Colour | Pattern | Where it shows |
+| --- | --- | --- | --- |
+| Model | Teal | Solid | A cube in the place of the model |
+| Material | Magenta | Solid | The mesh of the entity |
+| Shader of a material | Purple | Solid | The mesh of the entity |
+| Param of a material | Magenta | Stripes | The mesh of the entity, over its real surface |
+| Texture | Amber | Stripes | The mesh of the entity, over its real surface |
+| Sky | Coral | Solid | The pixels of the sky |
+| Weather | Green | Solid | A band of the sky above the horizon |
+| Post effect | Blue | Solid | A frame round the window, with a line along the bottom |
+| Render pass, resource or shader of a pass | Red | Solid | A line of the banner at the top of the window |
+
+- The text names the kind and what failed, as `Model failed Trees/Oak.fbx`. A line of the banner names what the
+  frame lacks, as `Shadows are not traced`.
+- A failed param takes the default of its shader field. A failed texture reads as no texture.
+- The sky and the weather also show as lines of the banner.
+- The README of the renderer tells more about each one, and how a project replaces the shader of the banner
+  ([DeferredRendering](../src/Gems/Rendering/DeferredRendering/README.md)).
+
+### What stays true
+
+- The frame is still drawn. Only the part that failed is missing.
+- The log gets one `Log.Error` for each failure, in the first frame it shows in. A failure that goes away and comes
+  back logs again.
+- A run with `--fail-on-error`, as `Validate.ps1` starts, exits with code `2` at that error.
+- A failure that goes away leaves the picture in the next frame.
+- A failure reads nothing from disk. The renderer builds its failure shaders at the start, and the shader of the
+  banner is in the assembly of the renderer.
+
+To take a picture of a failure, use `Screenshot.ps1` with `-AllowErrors` and `-Window`
+([Screenshot.ps1](TOOLS.md#screenshotps1)).
+
+### Report a failure from a gem
+
+A gem that records passes reports a failure in its `Render`:
+
+1. Call `RenderGraph.Fail` with a `RenderFailure` kind, a short constant text for the picture, and the reason for
+   the log.
+2. Return from the step for this frame. Do not record the passes that need what failed.
+3. Try again in the next frame. Call `Fail` again in each frame that still fails.
+
+Do not stop the gem for the rest of the run, and do not log the failure yourself. The graph logs it once.
+
+Core reports two failures itself, each as a line of the banner:
+
+- A gem whose step takes an input that no listed gem makes.
+- A gem that threw in `Render`. Core runs that step again after a pause of a few seconds.
+
 ## ImGuiDebugUI
 
 Draws the debug UI with [Dear ImGui](https://github.com/ocornut/imgui). Provides `IDebugUI`.
