@@ -13,7 +13,6 @@ using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Events;
 using Magic.Graphics;
-using Magic.Input;
 using Magic.Projects;
 using Magic.Threading;
 using Magic.Utils;
@@ -122,8 +121,6 @@ public sealed class Renderer
 
     private readonly PixelEffects _pixelEffects = new();
 
-    private readonly RendererDebugWindow? _debugWindow;
-
     private readonly IGraphicsApi _gpu;
 
     private readonly EventCoordinator _events;
@@ -149,7 +146,7 @@ public sealed class Renderer
     private int? _drawnWorldNumber;
 
     /// <summary>
-    /// Whether the gem makes views: not once a shader or a pool is not made. Render thread.
+    /// Whether the renderer makes views: not once a shader or a pool is not made. Render thread.
     /// </summary>
     private bool _isRunning = true;
 
@@ -174,9 +171,7 @@ public sealed class Renderer
         AssetManager assets,
         IEcs ecs,
         Threads threads,
-        EventCoordinator events,
-        IDebugUI? debugUI = null,
-        IInput? input = null
+        EventCoordinator events
     )
     {
         _settings = settings;
@@ -203,7 +198,6 @@ public sealed class Renderer
         _effects = new Effects(assets, _resources);
         _viewShaders = [.. _sky.Shaders, .. _lightTiles.Shaders];
 
-        _debugWindow = debugUI is null ? null : new RendererDebugWindow(debugUI, input);
         _gpu = gpu;
         _events = events;
         ImmutableArray<ShaderTypeArgument> atmosphere = [GpuView.GetAtmosphere(assets)];
@@ -224,35 +218,6 @@ public sealed class Renderer
     {
         _preprocessing.Dispose();
         EndPreparing();
-    }
-
-    /// <summary>
-    /// Draws the debug window, which sets the settings.
-    /// </summary>
-    public void UpdateDebugWindow() => _debugWindow?.Update(_settings);
-
-    /// <summary>
-    /// Copies what the frame draws out of the entities and publishes it for the view's step, and hands the shading's
-    /// step the screenshots asked for.
-    /// </summary>
-    public void PublishInputs(in Frame frame)
-    {
-        RenderInputs back = _inputs.Back;
-        back.Renderers.Fill(_ecs);
-        back.Cameras.Fill(_ecs);
-        back.DirectionalLights.Fill(_ecs);
-        back.PointLights.Fill(_ecs);
-        back.SpotLights.Fill(_ecs);
-        back.RectLights.Fill(_ecs);
-        back.Skies.Fill(_ecs);
-        back.PostProcessing.Fill(_ecs);
-        back.WorldNumber = _worldNumber;
-        _inputs.Publish();
-
-        foreach (ScreenshotRequested asked in frame.Events.Get<ScreenshotRequested>())
-        {
-            _screenshots.Writer.TryWrite(asked);
-        }
     }
 
     /// <summary>
@@ -790,6 +755,30 @@ public sealed class Renderer
     }
 
     /// <summary>
+    /// Copies what the frame draws out of the entities and publishes it for the view's step, and hands the shading's
+    /// step the screenshots asked for.
+    /// </summary>
+    internal void PublishInputs(in Frame frame)
+    {
+        RenderInputs back = _inputs.Back;
+        back.Renderers.Fill(_ecs);
+        back.Cameras.Fill(_ecs);
+        back.DirectionalLights.Fill(_ecs);
+        back.PointLights.Fill(_ecs);
+        back.SpotLights.Fill(_ecs);
+        back.RectLights.Fill(_ecs);
+        back.Skies.Fill(_ecs);
+        back.PostProcessing.Fill(_ecs);
+        back.WorldNumber = _worldNumber;
+        _inputs.Publish();
+
+        foreach (ScreenshotRequested asked in frame.Events.Get<ScreenshotRequested>())
+        {
+            _screenshots.Writer.TryWrite(asked);
+        }
+    }
+
+    /// <summary>
     /// The directional light the frame is lit by: the sun while it is up, else the moon while it is up, else the first
     /// there is, else a white light from above: towards it, unit, and its colour times its intensity, in lux, above the
     /// air.
@@ -834,7 +823,7 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// Ends the start as failed: the gem makes no view, and holds no domain back.
+    /// Ends the start as failed: the renderer makes no view, and holds no domain back.
     /// </summary>
     private void FailStart(string error)
     {

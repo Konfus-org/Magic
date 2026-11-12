@@ -3,7 +3,7 @@ namespace Magic.Projects;
 /// <summary>
 /// A plugin's entry point: the one class in a gem's assembly, named <c>EntryPoint</c>. Magic makes it after the gems
 /// whose parts its constructor takes and the gems its code references, then in the order the project lists the gems,
-/// and disposes it in reverse. It makes its parts with <c>new</c> and exports each as a public property; it holds
+/// and disposes it in reverse. It is public because nothing in its assembly makes it: Magic does, by reflection. It makes its parts with <c>new</c> and exports each as a public property; it holds
 /// nothing else. Magic sets up each part by the interfaces it implements: a part that draws implements one of
 /// <see cref="Graphics.IRender"/>'s forms, which runs on the render thread at its own pace, and each other interface is
 /// what the gem provides to the gems made after it. The hooks run every frame, in this order over the gems, on the

@@ -6,8 +6,7 @@ namespace Magic.ClusteredGeometry;
 
 /// <summary>
 /// The gem: <see cref="Renderer"/> draws every model the world's view holds as clusters, and far away as its impostor,
-/// over its <see cref="Settings"/>. It is public because nothing in its assembly makes it: Magic does, by reflection,
-/// when a project lists the gem.
+/// over its <see cref="Settings"/>.
 /// </summary>
 public sealed class EntryPoint(ClusteredGeometrySettings settings, AssetManager assets, Threads threads)
     : IGem,
@@ -18,9 +17,6 @@ public sealed class EntryPoint(ClusteredGeometrySettings settings, AssetManager 
     /// </summary>
     public ClusteredGeometrySettings Settings { get; } = settings;
 
-    /// <summary>
-    /// The clusters and impostors of the world's view.
-    /// </summary>
     public Renderer Renderer { get; } = new(settings, assets, threads);
 
     public void Dispose() => Renderer.Dispose();

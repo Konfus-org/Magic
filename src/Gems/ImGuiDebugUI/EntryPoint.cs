@@ -9,8 +9,7 @@ namespace Magic.ImGuiDebugUI;
 /// <summary>
 /// The gem: the debug UI, drawn with Dear ImGui. <see cref="DebugUI"/> holds ImGui's frame from Update to LateUpdate, so
 /// the widgets gems made after this one call in their Update go into it; <see cref="Renderer"/> draws each frame ImGui
-/// ended over the window's image; and <see cref="LogSink"/> shows the lines logged to show on screen. It is public
-/// because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
+/// ended over the window's image; and <see cref="LogSink"/> shows the lines logged to show on screen.
 /// </summary>
 public sealed class EntryPoint : IGem, IDisposable
 {
@@ -36,19 +35,10 @@ public sealed class EntryPoint : IGem, IDisposable
     /// </summary>
     public ImGuiDebugUISettings Settings { get; }
 
-    /// <summary>
-    /// The widgets, what gems report, and ImGui's frame.
-    /// </summary>
     public DebugUI DebugUI { get; }
 
-    /// <summary>
-    /// The lines logged to show on screen.
-    /// </summary>
     public LogSink LogSink { get; }
 
-    /// <summary>
-    /// ImGui's frames over the window's image.
-    /// </summary>
     public Renderer Renderer { get; }
 
     public void Dispose() => DebugUI.Dispose();

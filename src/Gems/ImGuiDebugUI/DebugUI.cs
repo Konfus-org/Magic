@@ -190,7 +190,7 @@ public sealed class DebugUI : IDebugUI, IDisposable
     /// <summary>
     /// Hands ImGui the frame's input and starts its frame, which the widgets called in Update go into.
     /// </summary>
-    public unsafe void BeginFrame(in Frame frame)
+    internal unsafe void BeginFrame(in Frame frame)
     {
         _text.Reset();
         ImGuiIO_t* io = ImGui_GetIO();
@@ -220,7 +220,7 @@ public sealed class DebugUI : IDebugUI, IDisposable
     /// Draws what is reported under the frame's windows, the last of the frame's widgets, then ends ImGui's frame, which
     /// it needs before the next begins, whether or not anything draws it.
     /// </summary>
-    public void EndFrame(in Frame frame)
+    internal void EndFrame(in Frame frame)
     {
         if (_depth > 0)
             Text("A debug UI window was begun and not ended; it is ended for it.", Reports.Error);

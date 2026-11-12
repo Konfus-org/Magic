@@ -6,8 +6,7 @@ using Magic.Threading;
 namespace Magic.GlobalIllumination;
 
 /// <summary>
-/// The gem: its <see cref="Renderer"/> lights the view's surfaces indirectly, as its <see cref="Settings"/> say. It is
-/// public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
+/// The gem: its <see cref="Renderer"/> lights the view's surfaces indirectly, as its <see cref="Settings"/> say.
 /// </summary>
 public sealed class EntryPoint(
     GlobalIlluminationSettings settings,
@@ -21,8 +20,5 @@ public sealed class EntryPoint(
     /// </summary>
     public GlobalIlluminationSettings Settings { get; } = settings;
 
-    /// <summary>
-    /// The probe grid, the traced diffuse light and the traced reflections.
-    /// </summary>
     public Renderer Renderer { get; } = new(settings, assets, threads, gpu);
 }

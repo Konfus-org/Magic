@@ -11,8 +11,7 @@ namespace Magic.DeferredRendering;
 
 /// <summary>
 /// The gem: <see cref="Renderer"/> keeps the world on the GPU for the gems that draw it and lights it, deferred, over
-/// its <see cref="Settings"/>. It is public because nothing in its assembly makes it: Magic does, by reflection, when a
-/// project lists the gem.
+/// its <see cref="Settings"/>, which its debug window also sets when a gem provides the debug UI.
 /// </summary>
 public sealed class EntryPoint(
     DeferredRenderingSettings settings,
@@ -26,19 +25,18 @@ public sealed class EntryPoint(
     IInput? input = null
 ) : IGem, IDisposable
 {
+    private readonly RendererDebugWindow? _debugWindow = debugUI is null ? null : new(debugUI, input);
+
     /// <summary>
     /// How the world is drawn and what the renderer shows. Game thread.
     /// </summary>
     public DeferredRenderingSettings Settings { get; } = settings;
 
-    /// <summary>
-    /// The world on the GPU, and its shading.
-    /// </summary>
-    public Renderer Renderer { get; } = new(settings, shaders, gpu, assets, ecs, threads, events, debugUI, input);
+    public Renderer Renderer { get; } = new(settings, shaders, gpu, assets, ecs, threads, events);
 
     public void Dispose() => Renderer.Dispose();
 
-    public void Update(in Frame frame) => Renderer.UpdateDebugWindow();
+    public void Update(in Frame frame) => _debugWindow?.Update(Settings);
 
     public void LateUpdate(in Frame frame) => Renderer.PublishInputs(frame);
 }

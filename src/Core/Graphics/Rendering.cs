@@ -23,21 +23,21 @@ internal sealed class Rendering
     private readonly List<Step> _steps = [];
 
     /// <summary>
-    /// <paramref name="gem"/>'s parts of the frame, one for each render form it implements, while it renders, until the
-    /// subscription ends; nothing when it doesn't. Throws, naming the gems and the type, when it makes what another gem
+    /// <paramref name="part"/>'s steps of the frame, one for each render form it implements, while it renders, until
+    /// the subscription ends; nothing when it doesn't. Throws, naming the gems and the type, when it makes what another gem
     /// makes, or when it and others take what the others make round a cycle; the gems registered before go on as they
     /// were.
     /// </summary>
-    public Subscription Register(object gem)
+    public Subscription Register(object part)
     {
         List<Step> steps =
         [
-            .. GetForms(gem)
+            .. GetForms(part)
                 .Select(form =>
                 {
                     Type type = typeof(Step<,>).MakeGenericType(form.Input, form.Output);
                     return (Step)(
-                        Activator.CreateInstance(type, gem) ?? throw new InvalidOperationException(type.Name)
+                        Activator.CreateInstance(type, part) ?? throw new InvalidOperationException(type.Name)
                     );
                 }),
         ];
@@ -46,13 +46,13 @@ internal sealed class Rendering
 
         Order([.. _steps, .. steps]);
 
-        return new Subscription(() => Order([.. _steps.Where(other => other.Instance != gem)]));
+        return new Subscription(() => Order([.. _steps.Where(other => other.Part != part)]));
     }
 
     /// <summary>
-    /// Whether <paramref name="gem"/> must take what no gem registered makes, so it can never render.
+    /// Whether <paramref name="part"/>, a gem's part, must take what no gem registered makes, so it can never render.
     /// </summary>
-    public bool HasMissingInput(object gem) => _steps.Exists(step => step.Instance == gem && step.Missing is not null);
+    public bool HasMissingInput(object part) => _steps.Exists(step => step.Part == part && step.Missing is not null);
 
     /// <summary>
     /// Every gem's parts of the frame, in order, each gem timed once for all its parts; a gem that throws is logged and renders no more, and what
@@ -104,15 +104,15 @@ internal sealed class Rendering
     }
 
     /// <summary>
-    /// What each render form <paramref name="gem"/> implements takes and makes, <see cref="None"/> for either it lacks;
+    /// What each render form <paramref name="part"/> implements takes and makes, <see cref="None"/> for either it lacks;
     /// none when it renders nothing.
     /// </summary>
-    private static IEnumerable<(Type Input, Type Output)> GetForms(object gem)
+    private static IEnumerable<(Type Input, Type Output)> GetForms(object part)
     {
-        if (gem is IRender)
+        if (part is IRender)
             yield return (typeof(None), typeof(None));
 
-        foreach (Type contract in gem.GetType().GetInterfaces())
+        foreach (Type contract in part.GetType().GetInterfaces())
         {
             if (!contract.IsGenericType)
                 continue;
@@ -172,7 +172,7 @@ internal sealed class Rendering
         {
             Step step = ordered[i];
             step.Bind(makers);
-            step.Next = ordered.Skip(i + 1).FirstOrDefault(other => other.Instance == step.Instance);
+            step.Next = ordered.Skip(i + 1).FirstOrDefault(other => other.Part == step.Part);
         }
 
         _steps.Clear();
@@ -193,11 +193,11 @@ internal sealed class Rendering
     /// A gem's render form: what it takes, what it makes, and what it made at its last run, which the gems after it
     /// take.
     /// </summary>
-    private abstract class Step(object gem)
+    private abstract class Step(object part)
     {
-        public object Instance { get; } = gem;
+        public object Part { get; } = part;
 
-        public string Gem { get; } = gem.GetType().Assembly.GetName().Name ?? gem.GetType().Name;
+        public string Gem { get; } = part.GetType().Assembly.GetName().Name ?? part.GetType().Name;
 
         /// <summary>
         /// Each type it makes: none, one, or each of a tuple's.
@@ -240,7 +240,7 @@ internal sealed class Rendering
     /// boxes nothing and reflects on nothing. Each render form is called as <see cref="IRender{TInput, TOutput}"/>,
     /// with <see cref="None"/> for what it lacks.
     /// </summary>
-    private sealed class Step<TInput, TOutput>(object gem) : Step(gem)
+    private sealed class Step<TInput, TOutput>(object part) : Step(part)
         where TInput : struct
         where TOutput : struct
     {
@@ -251,7 +251,7 @@ internal sealed class Rendering
             .GetConstructors()
             .MaxBy(static constructor => constructor.GetParameters().Length);
 
-        private readonly Renders _render = gem switch
+        private readonly Renders _render = part switch
         {
             IRender<TInput, TOutput> both => both.Render,
             IRenderFrom<TInput> from => (in Frame frame, RenderGraph graph, in TInput input) =>
@@ -267,7 +267,7 @@ internal sealed class Rendering
 
                 return null;
             },
-            _ => throw new InvalidOperationException($"{gem.GetType().Name} has no render form."),
+            _ => throw new InvalidOperationException($"{part.GetType().Name} has no render form."),
         };
 
         private Func<TInput?> _take = static () => default(TInput);

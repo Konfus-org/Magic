@@ -48,9 +48,13 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
     private static readonly string[] _scatteringNames = ["Air scattering 0", "Air scattering 1"];
 
     private readonly IEcs _ecs = ecs;
+
     private readonly Mailbox<EcsSnapshot<Weather>> _weather = new();
+
     private readonly ShaderEntry _scatterShader = PassShaders.GetEntry(assets, "FillAir", "ScatterAir");
+
     private readonly ShaderEntry _integrateShader = PassShaders.GetEntry(assets, "FillAir", "IntegrateAir");
+
     private readonly ShaderEntry _cloudShader = PassShaders.GetEntry(assets, "DrawClouds", "DrawClouds");
 
     /// <summary>
@@ -62,15 +66,6 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
     /// The clouds' picture as it was last drawn; none while it holds nothing. Render thread.
     /// </summary>
     private GpuTexture? _drawnClouds;
-
-    /// <summary>
-    /// Publishes the world's weather for <see cref="Render"/>.
-    /// </summary>
-    public void PublishWeather()
-    {
-        _weather.Back.Fill(_ecs);
-        _weather.Publish();
-    }
 
     /// <summary>
     /// The frame's air, while the passes' shaders are built, what they read and write is made, and the world's weather
@@ -174,6 +169,15 @@ public sealed class Renderer(VolumetricsSettings settings, AssetManager assets, 
         _drawnClouds = cloudy;
 
         return new Air(air.Value, cloudy);
+    }
+
+    /// <summary>
+    /// Publishes the world's weather for <see cref="Render"/>.
+    /// </summary>
+    internal void PublishWeather()
+    {
+        _weather.Back.Fill(_ecs);
+        _weather.Publish();
     }
 
     /// <summary>

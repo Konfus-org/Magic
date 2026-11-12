@@ -140,7 +140,7 @@ public sealed class Input : IInput, IDisposable
     /// Makes input this frame's: what happened last frame is over, SDL's events since are applied, and sticks and
     /// triggers are read as they stand now.
     /// </summary>
-    public unsafe void Update(in Frame frame)
+    internal unsafe void Update(in Frame frame)
     {
         // What happened last frame is over: pressed and released clear, and a mouse's wheel goes back to 0. Its motion
         // eases: it keeps what the frame's share of new motion leaves of last frame's, all of it gone with no smoothing.
@@ -214,7 +214,7 @@ public sealed class Input : IInput, IDisposable
     [SuppressMessage(
         "Style",
         "IDE0010:Add missing cases",
-        Justification = "SDL has far more events than the gem reads; the rest are ignored on purpose."
+        Justification = "SDL has far more events than the input reads; the rest are ignored on purpose."
     )]
     private unsafe void ApplyEvents(float motionShare)
     {

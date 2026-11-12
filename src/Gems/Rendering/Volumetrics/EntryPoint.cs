@@ -6,7 +6,7 @@ namespace Magic.Volumetrics;
 
 /// <summary>
 /// The gem: its <see cref="Renderer"/> fills the air with the world's haze, as finely as its <see cref="Settings"/>
-/// say. It is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
+/// say.
 /// </summary>
 public sealed class EntryPoint(VolumetricsSettings settings, AssetManager assets, IEcs ecs) : IGem
 {
@@ -15,9 +15,6 @@ public sealed class EntryPoint(VolumetricsSettings settings, AssetManager assets
     /// </summary>
     public VolumetricsSettings Settings { get; } = settings;
 
-    /// <summary>
-    /// The air's passes and the world's weather they read.
-    /// </summary>
     public Renderer Renderer { get; } = new(settings, assets, ecs);
 
     public void LateUpdate(in Frame frame) => Renderer.PublishWeather();

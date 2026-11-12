@@ -40,7 +40,7 @@ public sealed class Renderer : IRender
     /// Publishes a copy of the frame ImGui just ended in <paramref name="frame"/> for the overlay. Its textures get their
     /// ids before the copy, which reads them. Game thread.
     /// </summary>
-    public unsafe void Publish(uint frame)
+    internal unsafe void Publish(uint frame)
     {
         ImDrawData_t* data = ImGui_GetDrawData();
         QueueTextureChanges(data, frame);

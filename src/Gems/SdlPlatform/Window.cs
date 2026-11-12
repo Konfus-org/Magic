@@ -113,7 +113,7 @@ public sealed class Window : IWindow
     /// Shows a new window mode, display or resizability of the settings on the platform thread, then waits out the frame
     /// cap. Game thread.
     /// </summary>
-    public void Update()
+    internal void Update()
     {
         Placement settings = new(_settings.Mode, _settings.Display, _settings.IsResizable);
         if (settings != _shown && !_app.IsHeadless)

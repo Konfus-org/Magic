@@ -466,13 +466,16 @@ internal sealed class Gems : IDisposable
         }
 
         // A gem whose settings can't be listed still runs by them; only the console and tools can't reach them.
-        try
+        if (part is ISettings partSettings)
         {
-            ends.Add(settings.Register(part));
-        }
-        catch (InvalidOperationException ex)
-        {
-            Log.Error($"Gem {gem.Name}'s settings can't be reached: {ex.Message}");
+            try
+            {
+                ends.Add(settings.Register(partSettings));
+            }
+            catch (InvalidOperationException ex)
+            {
+                Log.Error($"Gem {gem.Name}'s settings can't be reached: {ex.Message}");
+            }
         }
 
         if (part is ILogSink sink)

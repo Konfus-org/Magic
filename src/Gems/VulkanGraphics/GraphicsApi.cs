@@ -135,8 +135,8 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
             description.Name,
             description,
             description.Name,
-            static (gem, made) => gem._resources.CreateTexture(made),
-            static (gem, texture) => gem.Destroy(texture)
+            static (api, made) => api._resources.CreateTexture(made),
+            static (api, texture) => api.Destroy(texture)
         );
 
     public Result<GpuBuffer> GetBuffer(in BufferDescription description)
@@ -157,8 +157,8 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
             description.Name,
             description,
             description.Name,
-            static (gem, made) => gem._resources.CreateBuffer(made),
-            static (gem, buffer) => gem.Destroy(buffer)
+            static (api, made) => api._resources.CreateBuffer(made),
+            static (api, buffer) => api.Destroy(buffer)
         );
     }
 
@@ -168,8 +168,8 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
             description.Name,
             description,
             description.Name,
-            static (gem, made) => gem._resources.CreateAcceleration(made),
-            static (gem, acceleration) => gem.Destroy(acceleration)
+            static (api, made) => api._resources.CreateAcceleration(made),
+            static (api, acceleration) => api.Destroy(acceleration)
         );
 
     public Result<GpuAcceleration> GetAcceleration(in TopLevelDescription description) =>
@@ -178,8 +178,8 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
             description.Name,
             description,
             description.Name,
-            static (gem, made) => gem._resources.CreateAcceleration(made),
-            static (gem, acceleration) => gem.Destroy(acceleration)
+            static (api, made) => api._resources.CreateAcceleration(made),
+            static (api, acceleration) => api.Destroy(acceleration)
         );
 
     public Result<GpuSampler> GetSampler(in SamplerDescription description) =>
@@ -188,8 +188,8 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
             description,
             description,
             "sampler",
-            static (gem, made) => gem._resources.CreateSampler(made),
-            static (gem, sampler) => gem.Destroy(sampler)
+            static (api, made) => api._resources.CreateSampler(made),
+            static (api, sampler) => api.Destroy(sampler)
         );
 
     public GpuState GetState(in ShaderEntry shader)
@@ -413,11 +413,11 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
     /// </summary>
     private void DestroyUnasked()
     {
-        DestroyUnasked(_namedTextures, static (gem, texture) => gem.Destroy(texture));
-        DestroyUnasked(_namedBuffers, static (gem, buffer) => gem.Destroy(buffer));
-        DestroyUnasked(_namedBottomLevels, static (gem, acceleration) => gem.Destroy(acceleration));
-        DestroyUnasked(_namedTopLevels, static (gem, acceleration) => gem.Destroy(acceleration));
-        DestroyUnasked(_samplers, static (gem, sampler) => gem.Destroy(sampler));
+        DestroyUnasked(_namedTextures, static (api, texture) => api.Destroy(texture));
+        DestroyUnasked(_namedBuffers, static (api, buffer) => api.Destroy(buffer));
+        DestroyUnasked(_namedBottomLevels, static (api, acceleration) => api.Destroy(acceleration));
+        DestroyUnasked(_namedTopLevels, static (api, acceleration) => api.Destroy(acceleration));
+        DestroyUnasked(_samplers, static (api, sampler) => api.Destroy(sampler));
     }
 
     private void DestroyUnasked<TKey, TDescription, T>(

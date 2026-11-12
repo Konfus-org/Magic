@@ -13,7 +13,7 @@ namespace Magic.DebugTools;
 /// <see cref="DebugToolsSettings.StatsCollectSec"/> says. They are drawn with <see cref="IDebugUI"/> in
 /// <see cref="Update"/>. Without input no key works.
 /// </summary>
-public sealed class DebugWindows(DebugToolsSettings settings, Settings allSettings, IDebugUI ui, IInput? input)
+internal sealed class DebugWindows(DebugToolsSettings settings, Settings allSettings, IDebugUI ui, IInput? input)
     : IDisposable
 {
     private readonly MetricsReader _metrics = new();
@@ -60,7 +60,7 @@ public sealed class DebugWindows(DebugToolsSettings settings, Settings allSettin
         if (isStatsOpen != settings.IsStatsOpen)
             settings.IsStatsOpen = isStatsOpen;
 
-        // Last, as a row may set this gem's own settings; only the close button is taken back from it.
+        // Last, as a row may set these windows' own settings; only the close button is taken back from it.
         bool wasSettingsOpen = settings.IsSettingsOpen;
         bool isSettingsOpen = wasSettingsOpen;
         _settingsWindow.Update(ref isSettingsOpen);

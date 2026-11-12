@@ -9,8 +9,7 @@ namespace Magic.SdlPlatform;
 /// <summary>
 /// The gem: the window, clipboard and input, through SDL3, over one <see cref="SdlWindow"/>. The process's first thread,
 /// the platform thread, makes it, as SDL's windows and events belong to that thread. Each frame, <see cref="Update"/>
-/// lets the window pace the frame, then makes input the frame's. It is public because nothing in its assembly makes it:
-/// Magic does, by reflection, when a project lists the gem.
+/// lets the window pace the frame, then makes input the frame's.
 /// </summary>
 public sealed class EntryPoint : IGem, IDisposable
 {

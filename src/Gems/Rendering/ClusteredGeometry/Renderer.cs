@@ -35,7 +35,7 @@ public sealed class Renderer : IRenderFrom<ClusteredGeometryInput>, IHookIntoDom
     private readonly ClusterPasses _passes;
 
     /// <summary>
-    /// Whether the gem draws: not once a shader, a pool or a frame's passes are not made. Render thread.
+    /// Whether the renderer draws: not once a shader, a pool or a frame's passes are not made. Render thread.
     /// </summary>
     private bool _isRunning = true;
 
@@ -129,7 +129,7 @@ public sealed class Renderer : IRenderFrom<ClusteredGeometryInput>, IHookIntoDom
     }
 
     /// <summary>
-    /// Ends the start as failed: the gem draws nothing, and holds no domain back.
+    /// Ends the start as failed: the renderer draws nothing, and holds no domain back.
     /// </summary>
     private void FailStart(string error)
     {

@@ -36,7 +36,7 @@ public sealed class Settings
     /// <summary>
     /// The settings registered, in the order their gems were made.
     /// </summary>
-    private ImmutableArray<RegisteredSettings> _gems = [];
+    private ImmutableArray<RegisteredSettings> _registered = [];
 
     /// <summary>
     /// What each settings class last ran by in this process, by its project and name, as <c>Forest/PlayerSettings</c>:
@@ -64,11 +64,11 @@ public sealed class Settings
         get
         {
             ImmutableArray<Setting>.Builder options = ImmutableArray.CreateBuilder<Setting>();
-            foreach (RegisteredSettings gem in _gems)
+            foreach (RegisteredSettings registered in _registered)
             {
-                foreach (SettingMember member in gem.Members)
+                foreach (SettingMember member in registered.Members)
                 {
-                    options.Add(gem.ToSetting(member));
+                    options.Add(registered.ToSetting(member));
                 }
             }
 
@@ -92,8 +92,8 @@ public sealed class Settings
         where TSettings : ISettings
     {
         ArgumentNullException.ThrowIfNull(settings);
-        if (Find(typeof(TSettings)) is { } gem)
-            Set(gem, settings);
+        if (Find(typeof(TSettings)) is { } registered)
+            Set(registered, settings);
         else
             Keep(GetLiveKey(typeof(TSettings)), settings);
     }
@@ -107,16 +107,16 @@ public sealed class Settings
     /// </summary>
     public Result Set<T>(string key, T value)
     {
-        foreach (RegisteredSettings gem in _gems)
+        foreach (RegisteredSettings registered in _registered)
         {
-            if (gem.Members.FirstOrDefault(member => member.Key == key) is not { } member)
+            if (registered.Members.FirstOrDefault(member => member.Key == key) is not { } member)
                 continue;
 
             Result<JsonElement> written = Json.Write(value, value?.GetType() ?? typeof(T));
             if (!written.Ok)
                 return Result.Failure(written.Error);
 
-            object settings = gem.Value;
+            object settings = registered.Value;
             JsonObject json = ToJson(settings);
             json[member.JsonName] = JsonNode.Parse(written.Value.GetRawText());
             Result<object> changed = Json.Read(
@@ -126,7 +126,7 @@ public sealed class Settings
             if (!changed.Ok)
                 return Result.Failure($"{key} takes a {member.Type.Name}: {changed.Error}");
 
-            Set(gem, changed.Value);
+            Set(registered, changed.Value);
 
             return Result.Success();
         }
@@ -146,11 +146,11 @@ public sealed class Settings
 
         // What each gem runs by now, which it may have set itself, taken before the writes leave the game thread.
         List<(string File, JsonElement Changed)> saves = [];
-        foreach (RegisteredSettings gem in _gems)
+        foreach (RegisteredSettings registered in _registered)
         {
-            object settings = gem.Value;
-            Keep(gem.LiveKey, settings);
-            saves.Add((GetFile(project, settings.GetType()), _live[gem.LiveKey]));
+            object settings = registered.Value;
+            Keep(registered.LiveKey, settings);
+            saves.Add((GetFile(project, settings.GetType()), _live[registered.LiveKey]));
         }
 
         foreach ((string file, JsonElement changed) in saves)
@@ -201,7 +201,9 @@ public sealed class Settings
                 continue;
             }
 
-            Result<object> parsed = _gems.SelectMany(gem => gem.Members).FirstOrDefault(member => member.Key == key)
+            Result<object> parsed = _registered
+                .SelectMany(registered => registered.Members)
+                .FirstOrDefault(member => member.Key == key)
                 is { } member
                 ? ValueText.Parse(member.Type, ValueText.Split(text))
                 : Result.Failure($"no gem has the setting {key}; get lists them.");
@@ -223,19 +225,16 @@ public sealed class Settings
     }
 
     /// <summary>
-    /// Lists <paramref name="part"/>, a gem's part, until the subscription is disposed, as the gem ends; then what it
-    /// last ran by is kept for when it is made again. A part that is not an <see cref="ISettings"/> changes nothing.
-    /// Throws, naming the gem, for settings without a category or a key another gem has.
+    /// Lists <paramref name="settings"/>, a gem's part, until the subscription is disposed, as the gem ends; then what
+    /// it last ran by is kept for when it is made again. Throws, naming the gem, for settings without a category or a
+    /// key another gem has.
     /// </summary>
-    internal Subscription Register(object part)
+    internal Subscription Register(ISettings settings)
     {
-        if (part is not ISettings settings)
-            return new Subscription(static () => { });
-
         Type type = settings.GetType();
         ImmutableArray<SettingMember> members = GetMembers(type);
         HashSet<string> keys = [.. members.Select(member => member.Key)];
-        foreach (RegisteredSettings other in _gems)
+        foreach (RegisteredSettings other in _registered)
         {
             string? clash = other.Members.Select(member => member.Key).FirstOrDefault(keys.Contains);
             if (clash is not null)
@@ -246,20 +245,19 @@ public sealed class Settings
             }
         }
 
+        // A copy of what the gem is made with, which a later change is compared with.
+        object madeWith = CreateDefaults(type);
+        foreach (SettingMember member in members)
+            member.Set(madeWith, member.Get(settings));
+
         // The key is taken now, as the project may change before the gem ends.
-        RegisteredSettings registered = new(
-            settings,
-            Copy(settings, members),
-            members,
-            ReadSummaries(type),
-            GetLiveKey(type)
-        );
-        _gems = _gems.Add(registered);
+        RegisteredSettings registered = new(settings, madeWith, members, ReadSummaries(type), GetLiveKey(type));
+        _registered = _registered.Add(registered);
 
         return new Subscription(() =>
         {
             Keep(registered.LiveKey, registered.Value);
-            _gems = _gems.Remove(registered);
+            _registered = _registered.Remove(registered);
         });
     }
 
@@ -267,19 +265,6 @@ public sealed class Settings
 
     private static object CreateDefaults(Type type) =>
         Activator.CreateInstance(type) ?? throw new InvalidOperationException($"{type.Name} could not be made.");
-
-    /// <summary>
-    /// A copy of <paramref name="settings"/>: a new object of its class, with each of <paramref name="members"/> set
-    /// to the same value.
-    /// </summary>
-    private static object Copy(object settings, ImmutableArray<SettingMember> members)
-    {
-        object copy = CreateDefaults(settings.GetType());
-        foreach (SettingMember member in members)
-            member.Set(copy, member.Get(settings));
-
-        return copy;
-    }
 
     private static JsonObject ToJson(object settings) =>
         JsonSerializer.SerializeToNode(settings, settings.GetType(), Json.Options) as JsonObject
@@ -335,7 +320,8 @@ public sealed class Settings
         return [.. members];
     }
 
-    private RegisteredSettings? Find(Type type) => _gems.FirstOrDefault(gem => gem.Value.GetType() == type);
+    private RegisteredSettings? Find(Type type) =>
+        _registered.FirstOrDefault(registered => registered.Value.GetType() == type);
 
     private string GetLiveKey(Type type) => $"{_app.Project?.Name}/{type.Name}";
 
@@ -412,15 +398,15 @@ public sealed class Settings
         return [];
     }
 
-    private void Set(RegisteredSettings gem, object settings)
+    private void Set(RegisteredSettings registered, object settings)
     {
-        SettingMember? restart = gem.Members.FirstOrDefault(member =>
-            member.RequiresRestart && !Equals(member.Get(gem.MadeWith), member.Get(settings))
+        SettingMember? restart = registered.Members.FirstOrDefault(member =>
+            member.RequiresRestart && !Equals(member.Get(registered.MadeWith), member.Get(settings))
         );
-        foreach (SettingMember member in gem.Members)
-            member.Set(gem.Value, member.Get(settings));
+        foreach (SettingMember member in registered.Members)
+            member.Set(registered.Value, member.Get(settings));
 
-        Keep(gem.LiveKey, settings);
+        Keep(registered.LiveKey, settings);
         if (restart is null)
             return;
 
