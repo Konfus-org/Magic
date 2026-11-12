@@ -7,7 +7,7 @@ namespace Magic.SlangShaderCompiler;
 /// How shaders compile.
 /// </summary>
 [Category("Debug")]
-public sealed record SlangShaderCompilerSettings
+public sealed class SlangShaderCompilerSettings : ISettings
 {
     /// <summary>
     /// How hard the compiler optimizes shaders, trading the time a load spends compiling against how fast they run on the
@@ -16,9 +16,9 @@ public sealed record SlangShaderCompilerSettings
     /// </summary>
     [RequireRestart]
 #if DEBUG
-    public ShaderOptimization ShaderOptimization { get; init; } = ShaderOptimization.None;
+    public ShaderOptimization ShaderOptimization { get; set; } = ShaderOptimization.None;
 #else
-    public ShaderOptimization ShaderOptimization { get; init; } = ShaderOptimization.High;
+    public ShaderOptimization ShaderOptimization { get; set; } = ShaderOptimization.High;
 #endif
 }
 

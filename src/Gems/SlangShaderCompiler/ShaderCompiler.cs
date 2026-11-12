@@ -7,10 +7,8 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using Magic.Assets;
-using Magic.Configuration;
 using Magic.Files;
 using Magic.Graphics;
-using Magic.Projects;
 using Magic.Utils;
 
 namespace Magic.SlangShaderCompiler;
@@ -31,13 +29,7 @@ internal readonly record struct Reflection(ImmutableArray<ShaderField> Fields, l
 /// assets, go into a session in dependency order, and the entry comes out compiled and cached under a hash of the
 /// sources, so an unchanged entry never compiles twice.
 /// </summary>
-public sealed partial class SlangShaderCompilerGem
-    : IGem,
-        IShaderCompiler,
-        ICache<CompiledShader>,
-        ICache<Reflection>,
-        IHasSettings<SlangShaderCompilerSettings>,
-        IDisposable
+public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledShader>, ICache<Reflection>, IDisposable
 {
     private const string ShadersFolder = "Shaders";
 
@@ -52,6 +44,8 @@ public sealed partial class SlangShaderCompilerGem
     private readonly AssetManager _assets;
 
     private readonly Caches _caches;
+
+    private readonly SlangShaderCompilerSettings _settings;
 
     /// <summary>
     /// One compile at a time: the compiler's global session is not for several threads at once.
@@ -81,10 +75,11 @@ public sealed partial class SlangShaderCompilerGem
     /// </summary>
     private unsafe void* _globalSession;
 
-    public SlangShaderCompilerGem(App app, AssetManager assets, Caches caches, SlangShaderCompilerSettings settings)
+    public ShaderCompiler(App app, AssetManager assets, Caches caches, SlangShaderCompilerSettings settings)
     {
         _assets = assets;
         _caches = caches;
+        _settings = settings;
         _lifetime = app.Lifetime;
         _idle = new Timer(_ =>
         {
@@ -95,15 +90,12 @@ public sealed partial class SlangShaderCompilerGem
             ReleaseGlobalSession();
             _compiling.Release();
         });
-        Settings = settings;
     }
 
     /// <summary>
     /// Raised when the bytes written change shape, and when the compiler's options or tag change.
     /// </summary>
     public int Version => 4;
-
-    public SlangShaderCompilerSettings Settings { get; set; }
 
     public void Dispose()
     {
@@ -143,7 +135,7 @@ public sealed partial class SlangShaderCompilerGem
             return Result.Failure(modules.Error);
 
         // Read once, so the compile is made and cached at the same level.
-        ShaderOptimization optimization = Settings.ShaderOptimization;
+        ShaderOptimization optimization = _settings.ShaderOptimization;
         ulong key = GetKey(entryPath, entry, typeArguments, optimization);
         ulong version = GetVersion(modules.Value);
         Result<CompiledShader> cached = await _caches
