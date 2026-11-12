@@ -60,7 +60,7 @@ internal sealed class VulkanShaders(IShaderCompiler compiler, VulkanResources re
 
     /// <summary>
     /// The pipeline <paramref name="shaders"/> draw into <paramref name="targets"/> with, built on the first ask once
-    /// both are compiled; none until then, and after a build that failed.
+    /// both are compiled; none until then, and after a build that failed, which fails the pixel shader too.
     /// </summary>
     public GpuPipeline Get(in DrawShaders shaders, in GpuRenderTargets targets)
     {
@@ -98,8 +98,12 @@ internal sealed class VulkanShaders(IShaderCompiler compiler, VulkanResources re
                 Name = shaders.Pixel.Name,
             }
         );
+        // A gem asks its shaders' state, not its pipeline's: the pixel shader is failed, so the gem tells the graph.
         if (!made.Ok)
+        {
             Log.Error($"The passes that draw with {shaders.Pixel.Name} are left out: {made.Error}");
+            GetOrStart(shaders.Pixel).State = GpuState.Failed;
+        }
 
         GpuPipeline pipeline = made.Ok ? made.Value : GpuPipeline.None;
         _drawPipelines[(shaders, colors, depth)] = pipeline;
