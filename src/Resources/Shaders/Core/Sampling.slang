@@ -42,23 +42,20 @@ public float2 SampleConcentricDisk(float2 xi)
     return radius * float2(cos(angle), sin(angle));
 }
 
-// A direction on the hemisphere about +z with the density of cos(theta) / pi, which the diffuse lobe has, and that
-// density as its pdf.
-public float3 SampleCosineHemisphere(float2 xi, out float pdf)
+// A direction on the hemisphere about +z with the density of cos(theta) / pi, which the diffuse lobe has.
+public float3 SampleCosineHemisphere(float2 xi)
 {
     float2 disk = SampleConcentricDisk(xi);
     float z = sqrt(max(0.0, 1.0 - dot(disk, disk)));
-    pdf = z * InvPi;
     return float3(disk, z);
 }
 
-// A direction over the whole sphere, uniform, with its pdf of 1 / (4 pi).
-public float3 SampleUniformSphere(float2 xi, out float pdf)
+// A direction over the whole sphere, uniform.
+public float3 SampleUniformSphere(float2 xi)
 {
     float z = 1.0 - 2.0 * xi.x;
     float radius = sqrt(max(0.0, 1.0 - z * z));
     float angle = TwoPi * xi.y;
-    pdf = 1.0 / (4.0 * Pi);
     return float3(radius * cos(angle), radius * sin(angle), z);
 }
 

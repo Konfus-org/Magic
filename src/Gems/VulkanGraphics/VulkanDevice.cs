@@ -423,6 +423,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
             || !core.drawIndirectFirstInstance
             || !core.fillModeNonSolid
             || !core.fragmentStoresAndAtomics
+            || !core.vertexPipelineStoresAndAtomics
             || !core.shaderClipDistance
             || !core.shaderStorageImageReadWithoutFormat
             || !core.shaderStorageImageWriteWithoutFormat
@@ -618,6 +619,8 @@ internal sealed unsafe class VulkanDevice : IDisposable
                 drawIndirectFirstInstance = true,
                 fillModeNonSolid = true,
                 fragmentStoresAndAtomics = true,
+                // The heap's buffers are writable in every stage, vertex stages included.
+                vertexPipelineStoresAndAtomics = true,
                 shaderClipDistance = true,
                 shaderStorageImageReadWithoutFormat = true,
                 shaderStorageImageWriteWithoutFormat = true,

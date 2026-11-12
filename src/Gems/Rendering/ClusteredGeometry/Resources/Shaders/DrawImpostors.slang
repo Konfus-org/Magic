@@ -1,11 +1,10 @@
 // The impostors the cull left, one indirect draw each of a quad fitted to the instance's box, its instance in
 // the draw's first instance. The vertices pick the atlas views the instance blends; a pixel traces them, writes the
 // impostor's id and the depth of what it sees, and shows the impostor's share of the handoff's dither, or all of it
-// when the first instance carries ImpostorWhole. The pass header's z is the impostor table.
+// when the first instance carries ImpostorWhole.
 module "DrawImpostors";
 
 import Core.Heap;
-import Core.Pass;
 import Core.Frame;
 import Scene.Instances;
 import Scene.Impostors;
@@ -34,9 +33,8 @@ Varyings DrawImpostorsVertex(uint vertexIndex : SV_VertexID, uint start : SV_Sta
 {
     uint instanceIndex = start & ~ImpostorWhole;
     FrameConstants frame = GetFrame();
-    PassHeader header = GetPassHeader();
     GpuInstance instance = LoadInstance(GetModels().instances, instanceIndex);
-    GpuImpostor impostor = LoadImpostor(header.z, LoadClusterModel(instance.model).impostor);
+    GpuImpostor impostor = LoadImpostor(LoadClusterModel(instance.model).impostor);
     static const float2 corners[6] = { float2(0, 0), float2(1, 0), float2(1, 1), float2(0, 0), float2(1, 1), float2(0, 1) };
 
     Varyings output;
@@ -58,13 +56,14 @@ Targets DrawImpostorsPixel(Varyings input)
 
     FrameConstants frame = GetFrame();
     GpuInstance instance = LoadInstance(GetModels().instances, input.instance);
-    GpuImpostor impostor = LoadImpostor(GetPassHeader().z, LoadClusterModel(instance.model).impostor);
+    GpuImpostor impostor = LoadImpostor(LoadClusterModel(instance.model).impostor);
     ImpostorBlend blend = { input.viewCells, input.viewWeights };
     ImpostorHit hit = TraceImpostor(instance, impostor, blend, GetModelRay(frame, instance, input.relative), 0.5);
     if (!hit.isHit)
         discard;
 
-    float4 clip = mul(float4(Relative(frame, ToWorld(instance.world, hit.position)), 1.0), frame.viewProjection);
+    float3 relative = ToCameraRelative(frame, ToWorld(instance.world, hit.position));
+    float4 clip = mul(float4(relative, 1.0), frame.viewProjection);
     Targets output;
     output.id = EncodeImpostorId(input.instance, hit.slot);
     output.depth = min(clip.z / clip.w, input.position.z);

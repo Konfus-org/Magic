@@ -3,6 +3,8 @@ using System.Runtime.CompilerServices;
 using Magic.Assets;
 using Magic.Configuration;
 using Magic.Debugging;
+using Magic.DeferredRendering;
+using Magic.DeferredRendering.View;
 using Magic.Ecs;
 using Magic.Graphics;
 using Magic.Projects;
@@ -24,6 +26,12 @@ public sealed class GlobalIlluminationGem
         IRender<TracedInput, IndirectLight>,
         IHookIntoDomainLoading
 {
+    /// <summary>
+    /// The view depth's two textures: the even frames write the first and the odd the second, the other being the
+    /// history both blends read.
+    /// </summary>
+    private static readonly string[] _depthNames = ["Traced depth 0", "Traced depth 1"];
+
     private readonly Threads _threads;
     private readonly Probes _probes;
     private readonly TracedDiffuse _diffuse;
@@ -76,8 +84,10 @@ public sealed class GlobalIlluminationGem
     /// </summary>
     public IndirectLight? Render(in Frame frame, RenderGraph graph, in TracedInput input)
     {
+        GlobalIlluminationSettings settings = Settings;
+
         // Off, no domain waits for the passes, and the probes start afresh once it is back on.
-        if (!Settings.IsIndirectLightOn)
+        if (!settings.IsIndirectLightOn)
         {
             _built.TrySetResult();
             _traced = null;
@@ -102,19 +112,16 @@ public sealed class GlobalIlluminationGem
         }
 
         GpuView gpu = input.View;
-        Result<GpuBuffer> constants = graph.Buffer(
-            GpuDescriptions.GetBuffer("GI constants", Unsafe.SizeOf<GIConstants>())
-        );
-        (int Width, int Height) tracedSize = gpu.Scaled(Settings.IndirectScale);
+        Result<GpuBuffer> constants = graph.Buffer(new("GI constants", Unsafe.SizeOf<GIConstants>()));
+        (int Width, int Height) tracedSize = gpu.Scaled(settings.IndirectScale);
+        bool hasHistory = _traced == tracedSize;
         GIView view = new(
             graph,
             gpu,
             constants.Value,
             tracedSize,
-            HasHistory: _traced == tracedSize,
             [
                 gpu.SkyTransmittance,
-                gpu.SkyMultiScattering,
                 gpu.SkyView,
                 gpu.LightTable,
                 gpu.Instances,
@@ -124,63 +131,59 @@ public sealed class GlobalIlluminationGem
                 input.Traced.HitMaterials,
             ]
         );
-        Result<ProbeBuffers> probes = _probes.Prepare(
+        Result<(ProbeGridConstants Grid, ProbeUpdateConstants Update)> probes = _probes.Prepare(
             graph,
             _traced is not null,
             input.Traced.Box,
-            (Settings.ProbesAcross, Settings.ProbesUp)
+            (settings.ProbesAcross, settings.ProbesUp)
         );
-        Result<TracedDiffuseConstants> diffuse = TracedDiffuse.Prepare(view, frame.Index);
-        Result<TracedReflectionConstants> reflections = Settings.IsReflectionsOn
-            ? TracedReflections.Prepare(
-                view with
-                {
-                    HasHistory = view.HasHistory && _reflected == tracedSize,
-                },
-                frame.Index
-            )
+        Result<TracedDiffuseConstants> diffuse = TracedDiffuse.Prepare(view, frame.Index, hasHistory);
+        Result<TracedReflectionConstants> reflections = settings.IsReflectionsOn
+            ? TracedReflections.Prepare(view, frame.Index, hasHistory && _reflected == tracedSize)
             : Result.Success(default(TracedReflectionConstants));
+        int written = (int)(frame.Index % 2);
+        Result<GpuTexture> depth = graph.Texture(view.GetTraced(_depthNames[written], GpuFormat.R32Sfloat));
+        Result<GpuTexture> depthHistory = graph.Texture(view.GetTraced(_depthNames[1 - written], GpuFormat.R32Sfloat));
         Result<GpuSampler> sampler = graph.Sampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
-        if (Result.FindFailure(constants, probes, diffuse, reflections, sampler) is { Ok: false } failed)
+        Result asked = Result.FindFailure(constants, probes, diffuse, reflections, depth, depthHistory, sampler);
+        if (!asked.Ok)
         {
-            Log.Error($"The indirect light is not traced: {failed.Error}");
+            Log.Error($"The indirect light is not traced: {asked.Error}");
 
             return null;
         }
 
-        graph.Upload(
-            view.Constants,
-            [
-                new GIConstants
-                {
-                    Diffuse = diffuse.Value,
-                    Reflections = reflections.Value,
-                    Sampler = sampler.Value,
-                    TracedWidth = (uint)tracedSize.Width,
-                    TracedHeight = (uint)tracedSize.Height,
-                },
-            ]
-        );
-        GpuTexture diffuseLight = diffuse.Value.Blend.Light;
-        GpuTexture reflectionLight = reflections.Value.Blend.Light;
+        GIConstants gi = new()
+        {
+            Diffuse = diffuse.Value,
+            Reflections = reflections.Value,
+            Probes = probes.Value.Update,
+            Depth = depth.Value,
+            DepthHistory = depthHistory.Value,
+            Sampler = sampler.Value,
+            TracedWidth = (uint)tracedSize.Width,
+            TracedHeight = (uint)tracedSize.Height,
+        };
+        graph.Upload(view.Constants, [gi]);
+        ProbeGridConstants grid = probes.Value.Grid;
         GpuIndirectLight row = new()
         {
-            Diffuse = diffuseLight.Id,
-            Reflections = reflectionLight.Id,
-            Grid = probes.Value.Constants,
+            Diffuse = gi.Diffuse.Blend.Light.Id,
+            Reflections = gi.Reflections.Blend.Light.Id,
+            Grid = grid,
         };
         graph.Upload(gpu.Frame, [row], GpuIndirectLight.Offset);
-        _probes.Record(view, probes.Value);
-        _diffuse.Record(view, probes.Value, diffuse.Value);
-        if (Settings.IsReflectionsOn)
-            _reflections.Record(view, probes.Value, reflections.Value);
+        _probes.Record(view, grid, gi.Probes);
+        _diffuse.Record(view, grid, gi);
+        if (settings.IsReflectionsOn)
+            _reflections.Record(view, grid, gi);
 
         _traced = tracedSize;
-        _reflected = Settings.IsReflectionsOn ? tracedSize : null;
+        _reflected = settings.IsReflectionsOn ? tracedSize : null;
 
-        return new IndirectLight(diffuseLight, reflectionLight, probes.Value.Probes, probes.Value.Depth);
+        return new IndirectLight(gi.Diffuse.Blend.Light, gi.Reflections.Blend.Light, grid.Probes, grid.Depth);
     }
 
     /// <summary>

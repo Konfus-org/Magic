@@ -40,7 +40,7 @@ public sealed class Settings
     private ImmutableArray<RegisteredGem> _gems = [];
 
     /// <summary>
-    /// What each record last ran by in this process, by its project and name, as <c>Forest/GpuWorldSettings</c>: a JSON
+    /// What each record last ran by in this process, by its project and name, as <c>Forest/PlayerSettings</c>: a JSON
     /// object of the members that differ from its defaults, which outlasts the record's types and, once there, stands
     /// in for what was saved or given at launch.
     /// </summary>

@@ -36,13 +36,13 @@ To use it, list `GlobalIllumination` in a project's `.magic` file with a gem tha
 ## How it works
 
 - Its `Render` takes the view and the world as rays see it, places the grid, records its passes in the frame's light
-  stage, writes the indirect light into the frame's buffer as the library's `Light/Indirect`, and hands the frame's
+  stage, writes the indirect light into the frame's buffer as the renderer's `Light/Indirect`, and hands the frame's
   `IndirectLight` to the gems that take it. A frame whose world rays see no instance of makes none.
 - The shaders are the `Shaders/` modules in this gem's `Resources`, built on the shader library
   ([Shaders](../../../Resources/Shaders/README.md)). Each pass reads the frame's buffer, which holds the indirect light,
   as its header's x, and the gem's own constants as its y.
   - `UpdateProbes` brings the probes' light up to date.
-  - `Traced` is what the light traced at a part of the picture's size shares: the gem's constants, which pixel
-    traces, how a pass averages its neighbours, and its history.
+  - `Traced` is what the passes share: the gem's constants, the light a ray brings back from what it lands on, which
+    pixel traces, how a pass averages its neighbours, and its history.
 - Parts of the traced diffuse light and the traced reflections are adapted from another engine under the MIT
   licence; `THIRD-PARTY-NOTICES.md` holds it.

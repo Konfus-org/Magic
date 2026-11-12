@@ -19,7 +19,6 @@ import Traced;
 import Sky.ISky;
 import Surface.Brdf;
 import Trace.HitSurface;
-import Trace.HitLight;
 import Scene.Models;
 
 // How far a ray reaches, and the distance a ray that hits nothing counts as having gone.
@@ -72,7 +71,7 @@ void TraceReflections<S : ISky>(uint3 thread : SV_DispatchThreadID)
     StorageRef traced = { reflections.traced, 0u };
     StorageRef rays = { reflections.rays, 0u };
     ReflectingSurface surface;
-    if (!LoadReflectingSurface(frame, GetTracedPixel(frame, thread.xy), surface))
+    if (!LoadReflectingSurface(frame, GetTracedPixel(frame, thread.xy, gi.tracedSize), surface))
     {
         traced.Store(thread.xy, float4(0.0, 0.0, 0.0, RayRange));
         rays.Store(thread.xy, float4(0.0));
@@ -168,8 +167,7 @@ float2 GetReflectedHistoryUv(FrameConstants frame, ReflectingSurface surface, fl
 {
     float3 reflected = surface.relative - surface.view * rayLength;
     float3 previous = reflected + frame.cameraPosition.xyz - frame.previousCameraPosition.xyz;
-    float4 clip = mul(float4(previous, 1.0), frame.previousViewProjection);
-    return ToUv(clip.xy / max(clip.w, Epsilon));
+    return GetPreviousScreen(frame, previous).xy;
 }
 
 // A thread a traced pixel: its resolved light blended with the history where the surface was last frame, or where what
@@ -188,10 +186,7 @@ void BlendReflections(uint3 thread : SV_DispatchThreadID)
     TracedBlendConstants blend = gi.reflections.blend;
     TextureRef resolved = { gi.reflections.resolved };
     StorageRef light = { blend.light, 0u };
-    TextureRef depthTexture = { frame.depth };
-    float depth = depthTexture.Load(pixel, 0u).x;
     float4 current = resolved.Load(thread.xy, 0u);
-    StoreViewDepth(frame, blend, thread.xy, depth);
     ReflectingSurface surface;
     if (!LoadReflectingSurface(frame, pixel, surface) || blend.hasHistory == 0u)
     {
@@ -200,16 +195,17 @@ void BlendReflections(uint3 thread : SV_DispatchThreadID)
     }
 
     Neighbourhood neighbourhood = GetNeighbourhood(resolved, thread.xy, size);
-    TracedHistory history = CreateHistory(gi, blend, size);
+    TextureRef history = { blend.lightHistory };
+    SamplerRef sampler = { gi.sampler };
     TextureRef velocityTexture = { frame.velocity };
     TextureRef distance = { gi.reflections.distance };
     float3 velocity = velocityTexture.Load(pixel, 0u).xyz;
     float2 surfaceUv = GetTexelCenterUv(thread.xy, size) + velocity.xy;
     float2 reflectedUv = GetReflectedHistoryUv(frame, surface, distance.Load(thread.xy, 0u).x);
-    float surfaceGap = abs(GetLuminance(history.light.SampleLevel(history.sampler, surfaceUv, 0.0).rgb) - GetLuminance(neighbourhood.mean));
-    float reflectedGap = abs(GetLuminance(history.light.SampleLevel(history.sampler, reflectedUv, 0.0).rgb) - GetLuminance(neighbourhood.mean));
+    float surfaceGap = abs(GetLuminance(history.SampleLevel(sampler, surfaceUv, 0.0).rgb) - GetLuminance(neighbourhood.mean));
+    float reflectedGap = abs(GetLuminance(history.SampleLevel(sampler, reflectedUv, 0.0).rgb) - GetLuminance(neighbourhood.mean));
     float2 uv = surfaceGap < reflectedGap ? surfaceUv : reflectedUv;
     light.Store(
         thread.xy,
-        BlendHistory(history, current, neighbourhood, velocity.z, uv, HistoryBlend, HistorySpread, VarianceBlend));
+        BlendHistory(gi, blend, current, neighbourhood, velocity.z, uv, HistoryBlend, HistorySpread, VarianceBlend));
 }

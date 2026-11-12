@@ -3,15 +3,15 @@
 Draws every model in the world's view as a hierarchy of clusters, GPU-driven, and far away as its impostor, into the
 view's depth, GBuffer and glass targets for the gems that light them.
 
-To use it, list `ClusteredGeometry` in a project's `.magic` file after the gem that keeps the world on the GPU, whose
-view it draws, with a gem that lights the GBuffer.
+To use it, list `ClusteredGeometry` in a project's `.magic` file after the renderer, whose view it draws and which
+lights its GBuffer.
 
 ## What it draws
 
 - As a model loads, the gem makes what it draws it as, once per change to its file, and keeps it in the cache: a
   hierarchy of clusters of up to 128 triangles. Each level of the hierarchy groups neighbouring clusters of the one
   below and simplifies them, so the GPU picks per cluster how much detail to draw. The leaves draw the model's own
-  vertices, as the world's gem holds them; each level above draws copies of the vertices it kept. meshoptimizer, which
+  vertices, as the renderer holds them; each level above draws copies of the vertices it kept. meshoptimizer, which
   the kit builds from source, does the clustering and the simplifying.
 - Every model also gets an octahedral impostor atlas: 12 by 12 views over the whole sphere, 64 texels a side each,
   every texel the surface's normal, its depth, its material slot and its texture coordinates as the view sees it,
@@ -41,7 +41,7 @@ when a model draws as its impostor.
 - `ClusterResources` keeps a row for each row of the view's model table: when a row's model changes, it reads the new
   model's clusters from the cache and copies them into its own pools, and gives the old one's ranges back. A pool
   starts small, and a model that doesn't fit grows it by half; the GPU provider keeps what it held.
-- `Visibility` records the passes: the cluster budget, the cull, the draws into the visibility buffer, the depth
+- `ClusterPasses` records the passes: the cluster budget, the cull, the draws into the visibility buffer, the depth
   pyramid, the retest, the glass and the per-material resolve.
 - The shaders are the `Shaders/` modules in this gem's `Resources`, built on the shader library
   ([Shaders](../../../Resources/Shaders/README.md)). The passes are at the folder's root, and what they share is under it:

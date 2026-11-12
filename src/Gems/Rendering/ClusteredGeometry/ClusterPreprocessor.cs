@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.Assets.Pipeline;
-using Magic.GpuWorld;
+using Magic.DeferredRendering.World;
 using Magic.Utils;
 
 namespace Magic.ClusteredGeometry;

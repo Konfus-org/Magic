@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using Magic.Assets;
 using Magic.Configuration;
 using Magic.Debugging;
+using Magic.DeferredRendering.View;
 using Magic.Ecs;
 using Magic.Graphics;
 using Magic.Projects;
@@ -34,12 +35,12 @@ public sealed class ClusteredGeometryGem
     private readonly Threads _threads;
     private readonly Subscription _preprocessing;
     private readonly ClusterResources _resources;
-    private readonly Visibility _visibility;
+    private readonly ClusterPasses _passes;
 
     /// <summary>
-    /// Whether the gem draws: failed once a shader is not built. Render thread.
+    /// Whether the gem draws: not once a shader, a pool or a frame's passes are not made. Render thread.
     /// </summary>
-    private Result _started = Result.Success();
+    private bool _isRunning = true;
 
     /// <summary>
     /// How many domains have loaded since the start, and what the newest waits on before it shows: its models clustered
@@ -55,7 +56,7 @@ public sealed class ClusteredGeometryGem
         ClusterPreprocessor clusters = new();
         _preprocessing = assets.Register(clusters);
         _resources = new ClusterResources(clusters, assets, threads);
-        _visibility = new Visibility(assets);
+        _passes = new ClusterPasses(assets);
     }
 
     /// <summary>
@@ -76,18 +77,17 @@ public sealed class ClusteredGeometryGem
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph, in ClusteredGeometryInput input)
     {
-        if (!_started.Ok)
+        if (!_isRunning)
             return;
 
         // The shaders are the GPU provider's to build, the first ask starting each; one that fails ends the start.
-        GpuState shaders = graph.GetState(_visibility.Shaders.AsSpan());
+        GpuState shaders = graph.GetState(_passes.Shaders.AsSpan());
         if (shaders == GpuState.Failed)
             FailStart("a shader was not built.");
 
         if (shaders != GpuState.Ready)
             return;
 
-        ClusteredGeometrySettings settings = Settings;
         GpuView gpu = input.View;
         Result<ClusterPools> pools = _resources.Prepare(graph, gpu.Models.Span);
         if (!pools.Ok)
@@ -100,31 +100,19 @@ public sealed class ClusteredGeometryGem
         // The loading domain shows once its models are clustered on the GPU and the resolve for each material shader is
         // built.
         if (
-            _loading is { } loading
+            _loading is not null
             && gpu.PreparedDomains >= _domainsLoaded
             && !_resources.IsLoading
-            && graph.GetState(_visibility.GetResolveShaders(gpu.MaterialShaders)) != GpuState.Loading
+            && graph.GetState(_passes.GetResolveShaders(gpu.MaterialShaders)) != GpuState.Loading
         )
         {
-            loading.TrySetResult();
+            _loading.TrySetResult();
             _loading = null;
         }
 
-        Result<RenderView> view = Visibility.Prepare(
-            graph,
-            gpu,
-            pools.Value,
-            settings.ImpostorPixels,
-            settings.ImpostorDistance
-        );
-        if (!view.Ok)
-        {
-            Log.Error($"The clusters are not drawn: {view.Error}");
-
-            return;
-        }
-
-        _visibility.Record(view.Value);
+        Result recorded = _passes.Record(graph, gpu, pools.Value, Settings);
+        if (!recorded.Ok)
+            FailStart(recorded.Error);
     }
 
     /// <summary>
@@ -141,7 +129,7 @@ public sealed class ClusteredGeometryGem
         _domainsLoaded++;
         _loading?.TrySetResult();
         _loading = null;
-        if (!_started.Ok)
+        if (!_isRunning)
             return;
 
         TaskCompletionSource loading = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -157,6 +145,6 @@ public sealed class ClusteredGeometryGem
         Log.Error($"The clusters are not drawn: {error}");
         _loading?.TrySetResult();
         _loading = null;
-        _started = Result.Failure(error);
+        _isRunning = false;
     }
 }

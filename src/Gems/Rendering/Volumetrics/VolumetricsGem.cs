@@ -2,6 +2,8 @@ using System.Numerics;
 using Magic.Assets;
 using Magic.Configuration;
 using Magic.Debugging;
+using Magic.DeferredRendering;
+using Magic.DeferredRendering.View;
 using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Graphics;
@@ -23,10 +25,13 @@ public readonly record struct VolumetricsInput(GpuView View, TracedWorld? Traced
 /// <see cref="Air"/>, which shading takes, with the clouds it draws over the sky. Clear air makes none. It
 /// is public because nothing in its assembly makes it: Magic does, by reflection, when a project lists the gem.
 /// </summary>
-public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IRender<VolumetricsInput, Air>
+public sealed class VolumetricsGem(VolumetricsSettings settings, AssetManager assets, IEcs ecs)
+    : IGem,
+        IHasSettings<VolumetricsSettings>,
+        IRender<VolumetricsInput, Air>
 {
     /// <summary>
-    /// The volume's slices away from the camera: the library's <c>AirSlices</c>.
+    /// The volume's slices away from the camera, the twin of <c>AirSlices</c> in the renderer's <c>Light/Air.slang</c>.
     /// </summary>
     private const int Slices = 64;
 
@@ -37,22 +42,20 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
 
     private const int CloudBlock = 4;
 
-    private static readonly TextureDescription _cloudsDescription = new()
-    {
-        Width = CloudTexels,
-        Height = CloudTexels,
-        Format = GpuFormat.R16G16B16A16Sfloat,
-        Usage = TextureUsages.Storage | TextureUsages.Sampled,
-        Name = "Clouds",
-    };
+    private static readonly TextureDescription _cloudsDescription = new(
+        "Clouds",
+        CloudTexels,
+        CloudTexels,
+        GpuFormat.R16G16B16A16Sfloat
+    );
 
     private static readonly string[] _scatteringNames = ["Air scattering 0", "Air scattering 1"];
 
-    private readonly IEcs _ecs;
-    private readonly Mailbox<AirInputs> _inputs = new();
-    private readonly ShaderEntry _scatterShader;
-    private readonly ShaderEntry _integrateShader;
-    private readonly ShaderEntry _cloudShader;
+    private readonly IEcs _ecs = ecs;
+    private readonly Mailbox<EcsSnapshot<Weather>> _weather = new();
+    private readonly ShaderEntry _scatterShader = PassShaders.GetEntry(assets, "FillAir", "ScatterAir");
+    private readonly ShaderEntry _integrateShader = PassShaders.GetEntry(assets, "FillAir", "IntegrateAir");
+    private readonly ShaderEntry _cloudShader = PassShaders.GetEntry(assets, "DrawClouds", "DrawClouds");
 
     /// <summary>
     /// The volume's size when it was last filled; none while its history holds nothing. Render thread.
@@ -64,29 +67,18 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
     /// </summary>
     private GpuTexture? _drawnClouds;
 
-    public VolumetricsGem(VolumetricsSettings settings, AssetManager assets, IEcs ecs)
-    {
-        Settings = settings;
-        _ecs = ecs;
-        _scatterShader = PassShaders.GetEntry(assets, "FillAir", "ScatterAir");
-        _integrateShader = _scatterShader with { Name = "IntegrateAir" };
-        _cloudShader = PassShaders.GetEntry(assets, "DrawClouds", "DrawClouds");
-    }
-
     /// <summary>
     /// How finely the air is filled, which <see cref="Render"/> reads whole each frame. Game thread.
     /// </summary>
-    public VolumetricsSettings Settings { get; set; }
+    public VolumetricsSettings Settings { get; set; } = settings;
 
     /// <summary>
-    /// Publishes the settings and the world's weather for <see cref="Render"/>.
+    /// Publishes the world's weather for <see cref="Render"/>.
     /// </summary>
     public void LateUpdate(in Frame frame)
     {
-        AirInputs back = _inputs.Back;
-        back.Settings = Settings;
-        _ecs.Snapshot(back.Weather);
-        _inputs.Publish();
+        _ecs.Snapshot(_weather.Back);
+        _weather.Publish();
     }
 
     /// <summary>
@@ -95,9 +87,10 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
     /// </summary>
     public Air? Render(in Frame frame, RenderGraph graph, in VolumetricsInput input)
     {
+        VolumetricsSettings settings = Settings;
         bool isBuilt = graph.GetState(_scatterShader, _integrateShader) == GpuState.Ready;
         if (
-            _inputs.TakeNewest() is not { Weather.First: [var weather, ..], Settings: var settings }
+            _weather.TakeNewest() is not { First: [var weather, ..] }
             || weather is { FogDensity: <= 0, CloudCover: <= 0 }
             || !isBuilt
         )
@@ -159,13 +152,13 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
             ? [world.HitMaterials, gpu.Instances, gpu.Meshes]
             : [];
         graph
-            .Compute("Scatter air", _scatterShader, header, RenderStage.Light)
+            .Compute("Scatter air", _scatterShader, header, RenderStages.Light)
             .Reads(traced)
             .Reads(gpu.Frame, gpu.LightTable, history.Value)
             .Writes(scattering.Value)
             .DispatchOver(size.Width, size.Height, Slices);
         graph
-            .Compute("Integrate air", _integrateShader, header, RenderStage.Light)
+            .Compute("Integrate air", _integrateShader, header, RenderStages.Light)
             .Reads(gpu.Frame, scattering.Value)
             .Writes(air.Value)
             .DispatchOver(size.Width, size.Height);
@@ -181,7 +174,7 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
                     "Draw clouds",
                     _cloudShader,
                     new GpuConstants(gpu.Frame.Id, picture.Id, (uint)block, 0),
-                    RenderStage.Light
+                    RenderStages.Light
                 )
                 .Reads(gpu.Frame)
                 .Writes(picture)
@@ -197,24 +190,9 @@ public sealed class VolumetricsGem : IGem, IHasSettings<VolumetricsSettings>, IR
     /// The description of a volume of the air's cells.
     /// </summary>
     private static TextureDescription GetVolume(string name, (int Width, int Height) size) =>
-        new()
+        new(name, size.Width, size.Height, GpuFormat.R16G16B16A16Sfloat)
         {
             Kind = TextureKind.Texture3D,
-            Width = size.Width,
-            Height = size.Height,
             Depth = Slices,
-            Format = GpuFormat.R16G16B16A16Sfloat,
-            Usage = TextureUsages.Storage | TextureUsages.Sampled,
-            Name = name,
         };
-
-    /// <summary>
-    /// What the game thread hands a frame: the settings and the world's weather, copied as its frame ends.
-    /// </summary>
-    private sealed class AirInputs
-    {
-        public VolumetricsSettings Settings { get; set; } = new();
-
-        public EcsSnapshot<Weather> Weather { get; } = new();
-    }
 }

@@ -1,6 +1,7 @@
 using Magic.Assets;
 using Magic.Debugging;
-using Magic.GpuWorld;
+using Magic.DeferredRendering;
+using Magic.DeferredRendering.View;
 using Magic.Graphics;
 using Magic.Projects;
 using Magic.Utils;
@@ -43,7 +44,7 @@ public sealed class TaaUpscalingGem : IGem, IRenderInto<Upscaling>
         graph.GetState(_shader) != GpuState.Ready ? null : _upscaling;
 
     private static TextureDescription GetResolved(string name, int width, int height) =>
-        GpuDescriptions.GetTexture(
+        new(
             name,
             width,
             height,
@@ -82,7 +83,7 @@ public sealed class TaaUpscalingGem : IGem, IRenderInto<Upscaling>
                 "Upscale picture",
                 _shader,
                 new GpuConstants(view.Frame.Id, hasHistory ? history.Id : resolved.Id, resolved.Id, sampler.Value.Id),
-                RenderStage.Post
+                RenderStages.Post
             )
             .Reads(view.Frame, view.Output, view.Depth, view.Velocity)
             .Reads(past)

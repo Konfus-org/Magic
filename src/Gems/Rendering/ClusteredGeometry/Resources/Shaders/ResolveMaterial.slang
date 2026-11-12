@@ -2,7 +2,7 @@
 // barycentrics and their derivatives, the attributes interpolate from them, and the material decides the surface,
 // written to the GBuffer, with how far the pixel's point rises off its flat triangle, and its emissive light to the
 // picture for the shading to add to; and the nearest translucent surface of the pixel, from the glass's visibility
-// buffer, to the glass targets. The entry is specialised to one material shader, numbered in the pass header's z, and
+// buffer, to the glass targets. The entry is specialised to one material shader, numbered in the pass header's y, and
 // resolves only the pixels whose rows that shader draws, loading its struct from each; every pass writes the sky's
 // velocity, the same each time. The pixel's velocity is written beside it: where the surface was on last frame's
 // screen, from where its instance was and where the camera was; a pixel of sky moves with the camera alone.
@@ -59,46 +59,39 @@ void ResolveOpaque<M : IMaterial>(FrameConstants frame, uint2 pixel)
     Models models = GetModels();
     uint2 size = uint2(frame.width, frame.height);
     UintTextureRef visibility = { GetClusters().visibility };
-    uint visibleIndex = 0u;
-    uint triangle = 0u;
     // The pixel's centre is where the jittered view saw its surface, which is unjittered where the camera saw it.
     float2 center = GetTexelCenterUv(pixel, size);
     float2 unjittered = center - frame.jitter.xy / float2(size);
     StorageRef velocityTarget = { frame.velocity, 0u };
     uint id = visibility.Load(pixel, 0u);
-    bool isImpostor = (id & ImpostorFlag) != 0u;
-    uint shader = GetPassHeader().z;
-    if (!isImpostor && !DecodeVisibilityId(id, visibleIndex, triangle))
+    if (id == 0u)
     {
-        float3 far = ReconstructRelative(frame, center, FarDepth);
-        float4 previousClip = mul(float4(far, 1.0), frame.previousViewProjection);
-        float2 previousUv = ToUv(previousClip.xy / max(previousClip.w, Epsilon));
-        velocityTarget.Store(pixel, float4(previousUv - unjittered, 0.0, 0.0));
+        float3 sky = GetPreviousScreen(frame, ReconstructRelative(frame, center, FarDepth));
+        velocityTarget.Store(pixel, float4(sky.xy - unjittered, 0.0, 0.0));
         return;
     }
 
     // The surface's inputs, the point in its model's frame, its instance and its material slot: from the triangle the
     // id names, or, for an impostor's pixel, from its atlas traced again along the pixel's ray, with the slot the
-    // draw saw. An impostor has no triangle to rise off.
+    // draw saw. An impostor has no triangle to rise off. Another pass's pixel goes before its surface is loaded.
+    uint shader = GetPassHeader().y;
     SurfaceInputs inputs;
     float3 model;
     GpuInstance instance;
     uint slot;
     float lift = 0.0;
-    if (isImpostor)
+    if ((id & ImpostorFlag) != 0u)
     {
         instance = LoadInstance(models.instances, id & ImpostorInstanceMask);
         slot = (id >> ImpostorSlotShift) & 7u;
-
-        // Another pass's pixel goes before its atlas is traced.
         if (LoadMaterialShader(models.materials, GetMaterial(instance, slot)) != shader)
             return;
 
         ImpostorRay ray = GetModelRay(frame, instance, ReconstructRelative(frame, center, 0.5));
-        GpuImpostor impostor = LoadImpostor(GetPassHeader().y, LoadClusterModel(instance.model).impostor);
+        GpuImpostor impostor = LoadImpostor(LoadClusterModel(instance.model).impostor);
         ImpostorHit hit = TraceImpostor(instance, impostor, GetImpostorBlend(frame, instance), ray, 0.0);
         model = hit.position;
-        inputs.position = Relative(frame, ToWorld(instance.world, hit.position));
+        inputs.position = ToCameraRelative(frame, ToWorld(instance.world, hit.position));
         inputs.normal = ToWorldNormal(instance.world, hit.normal);
         float3 side = abs(inputs.normal.y) < 0.999 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0);
         inputs.tangent = normalize(cross(side, inputs.normal));
@@ -115,25 +108,25 @@ void ResolveOpaque<M : IMaterial>(FrameConstants frame, uint2 pixel)
     }
     else
     {
-        PixelTriangle shown = LoadPixelTriangle(frame, visibleIndex, triangle, ToClip(center));
-        instance = shown.instance;
+        VisibleTriangle visible = LoadVisibleTriangle(id);
+        instance = visible.instance;
+        slot = visible.cluster.materialSlot;
+        if (LoadMaterialShader(models.materials, GetMaterial(instance, slot)) != shader)
+            return;
+
+        PixelTriangle shown = LoadPixelTriangle(frame, visible, ToClip(center));
         model = Interpolate(shown.v0.position, shown.v1.position, shown.v2.position, shown.bary.lambda);
-        slot = shown.cluster.materialSlot;
         inputs = CreateSurfaceInputs(shown);
         lift = GetTriangleLift(shown, inputs.position);
     }
 
     uint row = GetMaterial(instance, slot);
-    if (LoadMaterialShader(models.materials, row) != shader)
-        return;
-
     M material = LoadMaterialParams<M>(models.materials, row);
     SurfaceOutputs surface = material.Evaluate(inputs);
 
     float3 previous = ToWorld(GetPreviousWorld(instance, frame.frameIndex), model) - frame.previousCameraPosition.xyz;
-    float4 previousClip = mul(float4(previous, 1.0), frame.previousViewProjection);
-    float2 previousUv = ToUv(previousClip.xy / max(previousClip.w, Epsilon));
-    velocityTarget.Store(pixel, float4(previousUv - unjittered, previousClip.w, 0.0));
+    float3 screen = GetPreviousScreen(frame, previous);
+    velocityTarget.Store(pixel, float4(screen.xy - unjittered, screen.z, 0.0));
 
     StorageRef normalTarget = { frame.gbufferNormal, 0u };
     StorageRef baseTarget = { frame.gbufferBase, 0u };
@@ -155,18 +148,18 @@ void ResolveTranslucent<M : IMaterial>(FrameConstants frame, uint2 pixel)
         return;
 
     UintTextureRef glass = { glassId };
-    uint visibleIndex;
-    uint triangle;
-    if (!DecodeVisibilityId(glass.Load(pixel, 0u), visibleIndex, triangle))
+    uint id = glass.Load(pixel, 0u);
+    if (id == 0u)
         return;
 
     Models models = GetModels();
-    float2 center = GetTexelCenterUv(pixel, uint2(frame.width, frame.height));
-    PixelTriangle shown = LoadPixelTriangle(frame, visibleIndex, triangle, ToClip(center));
-    uint row = GetMaterial(shown.instance, shown.cluster.materialSlot);
-    if (LoadMaterialShader(models.materials, row) != GetPassHeader().z)
+    VisibleTriangle visible = LoadVisibleTriangle(id);
+    uint row = GetMaterial(visible.instance, visible.cluster.materialSlot);
+    if (LoadMaterialShader(models.materials, row) != GetPassHeader().y)
         return;
 
+    float2 center = GetTexelCenterUv(pixel, uint2(frame.width, frame.height));
+    PixelTriangle shown = LoadPixelTriangle(frame, visible, ToClip(center));
     M material = LoadMaterialParams<M>(models.materials, row);
     SurfaceOutputs surface = material.Evaluate(CreateSurfaceInputs(shown));
     StorageRef baseTarget = { frame.glassBase, 0u };

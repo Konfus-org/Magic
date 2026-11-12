@@ -1,6 +1,7 @@
-// What the light traced at a part of the picture's size shares, the diffuse and the reflections alike: the GI buffer,
-// which pixel of each traced pixel's footprint traces this frame, how a pass averages its neighbours' light, and its
-// history found where the surface was last frame. C#'s GIConstants is the GI buffer, the pass header's y.
+// What the gem's passes share: the GI buffer; the light a ray brings back from what it lands on; and for the light
+// traced at a part of the picture's size, the diffuse and the reflections alike, which pixel of each traced pixel's
+// footprint traces this frame, how a pass averages its neighbours' light, and its history found where the surface was
+// last frame. C#'s GIConstants is the GI buffer, the pass header's y.
 module "Traced";
 
 import Core.Heap;
@@ -10,17 +11,19 @@ import Core.Math;
 import Core.Color;
 import Core.Random;
 import Core.Sampling;
+import Scene.Lights;
+import Light.Probes;
+import Light.LocalLights;
 import Light.Indirect;
+import Sky.ISky;
+import Trace.HitSurface;
 
-// What a traced effect blends over frames: this frame's light, with its variance in alpha, and the view depth of each
-// of its pixels; and the last frame's of both, which this frame's blends with, 0 while they hold nothing of the view
-// and this frame starts them afresh.
+// What a traced effect blends over frames: this frame's light, with its variance in alpha, and last frame's, which this
+// frame's blends with, 0 while it holds nothing of the view and this frame starts it afresh.
 public struct TracedBlendConstants
 {
     public uint light;
-    public uint depth;
     public uint lightHistory;
-    public uint depthHistory;
     public uint hasHistory;
 }
 
@@ -46,28 +49,95 @@ public struct TracedReflectionConstants
     public TracedBlendConstants blend;
 }
 
+// What the probe update reads beyond the grid: the frame's rays, the list of which probe traces each, the trace's
+// arguments, each probe's count of rays and where they start, and each probe texel's variance; and how far a probe's
+// depth reaches, one and a half cells.
+public struct ProbeUpdateConstants
+{
+    public uint rays;
+    public uint rayList;
+    public uint rayArguments;
+    public uint rayCounts;
+    public uint variance;
+    public float maxDistance;
+}
+
 public struct GIConstants
 {
     public TracedDiffuseConstants diffuse;
     public TracedReflectionConstants reflections;
+    public ProbeUpdateConstants probes;
+    // The view depth of each traced pixel, which the diffuse blend writes, and last frame's, which both blends read.
+    public uint depth;
+    public uint depthHistory;
     // Linear, clamped to the edges: what the history is read with.
     public uint sampler;
     // The traced textures' size.
     public uint2 tracedSize;
 }
 
-public GIConstants GetGIConstants()
+public GIConstants GetGIConstants() { return LoadConstants<GIConstants>(GetPassHeader().y); }
+
+// The light that reaches a surface from one light picked at random by xi.x, the sun among them, aimed at a point of it
+// by xi.yz, over pi and times how many there are to pick from: what a white diffuse surface reflects of them all, on
+// average.
+public float3 GetDirectLight<S : ISky>(
+    Lights lights,
+    RaytracingAccelerationStructure world,
+    HitSurface surface,
+    float3 xi
+)
 {
-    BufferRef gi = { GetPassHeader().y };
-    return gi.Load<GIConstants>(0u);
+    uint lightCount = min(lights.count, MaxLights);
+    uint picked = min(uint(xi.x * float(lightCount + 1u)), lightCount);
+    float3 origin = surface.position + surface.normal * 0.01;
+    float3 direction;
+    float3 irradiance;
+    float distance;
+    if (picked == lightCount)
+    {
+        direction = SampleSunDirection(lights.sunDirection.xyz, xi.yz);
+        irradiance = GetSunIlluminance<S>(lights);
+        distance = 1e6;
+    }
+    else
+    {
+        GpuLight light = LoadLight(lights.table, picked);
+        LightRay ray = CreateLightRay(origin, SampleLightPoint(light, surface.position, xi.yz));
+        direction = ray.direction;
+        distance = ray.distance;
+        irradiance = SampleLight(light, surface.position, surface.normal).irradiance;
+    }
+
+    float cosine = dot(surface.normal, direction);
+    if (cosine <= 0.0)
+        return float3(0.0);
+
+    float3 through = GetTransmittance(world, origin, direction, distance);
+    return float(lightCount + 1u) * irradiance * through * cosine * InvPi;
+}
+
+// The light a surface a ray landed on sends back along it: what it reflects of one light picked at random by xi and of
+// the probes' light around it, and what it gives off.
+public float3 GetHitLight<S : ISky>(
+    Lights lights,
+    ProbeGridConstants grid,
+    RaytracingAccelerationStructure world,
+    HitSurface surface,
+    float3 xi
+)
+{
+    float3 light = GetDirectLight<S>(lights, world, surface, xi)
+        + GetProbeIrradiance(grid, surface.position, surface.normal);
+    return light * surface.diffuse + surface.emissive;
 }
 
 // The picture's pixel a traced pixel traces from: another of its footprint each frame, the same in all of them, so the
 // blend over frames sees every one.
-public uint2 GetTracedPixel(FrameConstants frame, uint2 traced)
+public uint2 GetTracedPixel(FrameConstants frame, uint2 traced, uint2 tracedSize)
 {
     float2 shift = GetRandom(uint2(0u), frame.frameIndex, 0u).xy;
-    return GetPicturePixel(frame, traced, GetGIConstants().tracedSize, shift);
+    return GetPicturePixel(frame, traced, tracedSize, shift);
 }
 
 // The traced pixel a pass averages as sample i of count around a traced pixel: a Hammersley set shifted at random per
@@ -141,33 +211,6 @@ public Neighbourhood GetNeighbourhood(TextureRef light, uint2 traced, uint2 size
     return neighbourhood;
 }
 
-// What a traced effect blended last frame: its light, with the variance in alpha, and the view depth of each pixel.
-public struct TracedHistory
-{
-    public TextureRef light;
-    public TextureRef depth;
-    public SamplerRef sampler;
-    public uint2 size;
-}
-
-// A traced effect's history, at the traced textures' size.
-public TracedHistory CreateHistory(GIConstants gi, TracedBlendConstants blend, uint2 size)
-{
-    TracedHistory history;
-    history.light.id = blend.lightHistory;
-    history.depth.id = blend.depthHistory;
-    history.sampler.id = gi.sampler;
-    history.size = size;
-    return history;
-}
-
-// A traced pixel's view depth, kept for the next frame's history: 0 where nothing was drawn.
-public void StoreViewDepth(FrameConstants frame, TracedBlendConstants blend, uint2 traced, float depth)
-{
-    StorageRef target = { blend.depth, 0u };
-    target.Store(traced, float4(depth > 0.0 ? ToViewDepth(depth, frame.near) : 0.0, 0.0, 0.0, 0.0));
-}
-
 // How alike the history's depth must be to the surface's to be the same surface.
 public static const float SameSurface = 0.9;
 
@@ -177,18 +220,20 @@ float GetSameness(float previousDepth, float historyDepth)
     return exp(-abs(historyDepth - previousDepth) / max(previousDepth, Epsilon));
 }
 
-float LoadHistoryDepth(TracedHistory history, float2 uv)
+float LoadHistoryDepth(TextureRef depthHistory, float2 uv, uint2 size)
 {
-    return history.depth.Load(GetTexelAt(saturate(uv), history.size), 0u).x;
+    return depthHistory.Load(GetTexelAt(saturate(uv), size), 0u).x;
 }
 
-// The light blended with its history, read at texture coordinates where the surface last frame at a view depth was.
-// Where the texel there saw another surface, the nearest of its neighbours that saw this one is read, and failing that
-// the four around it blended by hand. The history is held within spread deviations of the neighbours' mean, so light
-// that changed doesn't trail, keeping blend of it, and the variance keeping varianceBlend of its own. Where the history
-// saw another surface or lies off the screen, the light alone at the most variance, so the picture blurs what is new.
+// A traced effect's light blended with its history, read at texture coordinates where the surface last frame at a view
+// depth was. Where the texel there saw another surface, the nearest of its neighbours that saw this one is read, and
+// failing that the four around it blended by hand. The history is held within spread deviations of the neighbours'
+// mean, so light that changed doesn't trail, keeping blend of it, and the variance keeping varianceBlend of its own.
+// Where the history saw another surface or lies off the screen, the light alone at the most variance, so the picture
+// blurs what is new.
 public float4 BlendHistory(
-    TracedHistory history,
+    GIConstants gi,
+    TracedBlendConstants effect,
     float4 current,
     Neighbourhood neighbourhood,
     float previousDepth,
@@ -198,15 +243,20 @@ public float4 BlendHistory(
     float varianceBlend
 )
 {
+    TextureRef light = { effect.lightHistory };
+    TextureRef depthHistory = { gi.depthHistory };
+    SamplerRef sampler = { gi.sampler };
+    uint2 size = gi.tracedSize;
+
     // Written so a depth the history never held, NaN, counts as another surface.
-    float sameness = GetSameness(previousDepth, LoadHistoryDepth(history, uv));
+    float sameness = GetSameness(previousDepth, LoadHistoryDepth(depthHistory, uv, size));
     if (!(sameness >= SameSurface))
     {
         float2 nearest = uv;
         for (uint i = 0u; i < 9u; i++)
         {
-            float2 at = uv + float2(int2(i % 3u, i / 3u) - 1) / float2(history.size);
-            float candidate = GetSameness(previousDepth, LoadHistoryDepth(history, at));
+            float2 at = uv + float2(int2(i % 3u, i / 3u) - 1) / float2(size);
+            float candidate = GetSameness(previousDepth, LoadHistoryDepth(depthHistory, at, size));
             if (!(candidate > sameness))
                 continue;
 
@@ -219,10 +269,10 @@ public float4 BlendHistory(
 
     float4 previous;
     if (sameness >= SameSurface)
-        previous = history.light.SampleLevel(history.sampler, uv, 0.0);
+        previous = light.SampleLevel(sampler, uv, 0.0);
     else
     {
-        float2 texel = uv * float2(history.size) - 0.5;
+        float2 texel = uv * float2(size) - 0.5;
         float2 f = frac(texel);
         uint2 corner = uint2(max(floor(texel), 0.0));
         float4 weights = float4((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y);
@@ -230,9 +280,9 @@ public float4 BlendHistory(
         float depth = 0.0;
         for (uint i = 0u; i < 4u; i++)
         {
-            uint2 at = min(corner + uint2(i & 1u, i >> 1u), history.size - 1u);
-            previous += history.light.Load(at, 0u) * weights[i];
-            depth += history.depth.Load(at, 0u).x * weights[i];
+            uint2 at = min(corner + uint2(i & 1u, i >> 1u), size - 1u);
+            previous += light.Load(at, 0u) * weights[i];
+            depth += depthHistory.Load(at, 0u).x * weights[i];
         }
 
         sameness = GetSameness(previousDepth, depth);

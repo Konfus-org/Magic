@@ -52,7 +52,8 @@ Write the engine as data flowing through functions, not objects calling each oth
   `Render` records into the frame's `RenderGraph`, each pass in its `RenderStage`, and Core hands it to the GPU provider
   once every gem has. A gem renders through the form that fits it: `IRender` takes and makes nothing for other gems,
   `IRenderFrom<TInput>` takes their output, `IRenderInto<TOutput>` makes its own, and `IRender<TInput, TOutput>` does
-  both. An input is a record of other gems' outputs, and an output one type or a tuple of types, each made for the gems
+  both. A gem with more than one part of the frame implements a form for each, and Core runs each as its own step. An
+  input is a record of other gems' outputs, and an output one type or a tuple of types, each made for the gems
   that take it. Core runs each gem after the gems whose output it takes; gems pass what they draw from one another
   that way, as data, never through a gem in a constructor.
   `LateUpdate` hands `Render` what it draws as data, the newest through a `Mailbox<T>` and what must not be lost
@@ -156,7 +157,8 @@ Write the engine as data flowing through functions, not objects calling each oth
   goes in the folder of its area, such as `Files` or `Plugins`. A new area is a new folder, never a new project.
 - A folder exists only once it holds something. Split a big one into a subfolder per area, never named like a type in
   it.
-- A gem is flat: every file at its root, in `Magic.<Gem>`. Its `Resources/` holds the assets and scripts only it uses.
+- A gem's files are in `Magic.<Gem>`, and the files in a folder of it in `Magic.<Gem>.<Folder>`. Its `Resources/`
+  holds the assets and scripts only it uses.
 - Built-in assets every project can use go in `src/Resources/`.
 - Name a file for its main type. Small types that belong with it may share the file.
 - Extension members are for a type the project doesn't own, or an interface; anything else is a member of its type.
@@ -222,6 +224,8 @@ what the caller does:
 | Says what it wants in one sentence, such as a query or a chain of setup | Fluent | Each method returns its receiver, or a struct's new value, so the chain reads as `subject.Verb(x).Verb(y)`. |
 | Builds what is valid only once complete, over many calls or across members | Builder | Calls collect into the builder, and `Build()` checks them and returns the finished, immutable value. Only where an initializer with `required` can't express it. |
 
+- A description whose few values are always given takes them in a constructor, as `new("Shadow mask", bytes)`. An
+  initializer sets the rest: `new("Fog", width, height, format) { Depth = slices }`.
 - No `Pipe`, `Cascade`, `Then` or other method that only calls the function it is given. Assign each step, and set
   members in an initializer or as statements:
 

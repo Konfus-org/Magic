@@ -1,4 +1,4 @@
-// Octahedral impostors. An instance whose model baked an atlas (the mesh preprocessor's ImpostorBuilder) draws
+// Octahedral impostors. An instance whose model baked an atlas as it was clustered (C#'s ImpostorBuilder) draws
 // as a quad fitted to its box once it is under a handoff's pixel radius on screen or past its distance, the three
 // views nearest the camera's direction blended; in the handoff its clusters draw too, each pixel shown by one of the
 // two by a dither on the fade, so nothing pops (Brucks, "Octahedral Impostors", 2018).
@@ -31,10 +31,6 @@ public static const uint ImpostorInstanceMask = (1u << ImpostorSlotShift) - 1u;
 
 public uint EncodeImpostorId(uint instance, uint slot) { return ImpostorFlag | ((slot & 7u) << ImpostorSlotShift) | instance; }
 
-// A retest list entry's cluster for an instance whose impostor the old pyramid hid, and for one drawn whole.
-public static const uint RetestImpostor = 0xFFFFFFFFu;
-public static const uint RetestWholeImpostor = 0xFFFFFFFEu;
-
 // One model's impostor, C#'s GpuImpostor: the box around the model in its frame, the heap id of its atlas and of the
 // atlas of the texture coordinates each texel shows.
 public struct GpuImpostor
@@ -45,9 +41,9 @@ public struct GpuImpostor
     public uint uvAtlas;
 }
 
-public GpuImpostor LoadImpostor(uint table, uint row)
+public GpuImpostor LoadImpostor(uint row)
 {
-    ArrayRef<GpuImpostor> impostors = { table };
+    ArrayRef<GpuImpostor> impostors = { GetClusters().impostors };
     return impostors[row];
 }
 
@@ -59,7 +55,7 @@ public float GetImpostorFade(FrameConstants frame, GpuInstance instance)
 
     ClusterConstants clusters = GetClusters();
 
-    float3 center = Relative(frame, instance.boundsCenter);
+    float3 center = ToCameraRelative(frame, instance.boundsCenter);
     float fade = 0.0;
     float start = clusters.impostorPixels;
     if (start > 0.0)
@@ -102,7 +98,7 @@ ImpostorView GetView(uint2 cell) { return CreateViewFrame(DecodeOctahedral(float
 // it, on the plane through the box's nearest corner, so the depth it writes is never nearer than the quad.
 public float3 GetImpostorCorner(FrameConstants frame, GpuInstance instance, GpuImpostor impostor, float2 uv)
 {
-    float3 center = Relative(frame, instance.boundsCenter);
+    float3 center = ToCameraRelative(frame, instance.boundsCenter);
     float centerAlong = length(center);
     ImpostorView view = CreateViewFrame(center / max(centerAlong, 1e-3));
 
@@ -118,7 +114,7 @@ public float3 GetImpostorCorner(FrameConstants frame, GpuInstance instance, GpuI
             (i & 2u) != 0u ? impostor.boundsMax.y : impostor.boundsMin.y,
             (i & 4u) != 0u ? impostor.boundsMax.z : impostor.boundsMin.z
         );
-        float3 corner = Relative(frame, ToWorld(instance.world, local));
+        float3 corner = ToCameraRelative(frame, ToWorld(instance.world, local));
         float along = max(dot(corner, view.forward), 1e-3);
         float2 onPlane = float2(dot(corner, view.right), dot(corner, view.up)) * (centerAlong / along);
         low = min(low, onPlane);
