@@ -26,15 +26,18 @@ that takes `IDebugUI` after this gem.
 Draws debug lines and windows for the measurements of the meters and for the settings of the gems. It provides
 nothing. It needs a gem that provides `IDebugUI`.
 
-| Tool | Key | Setting | Shows |
-| --- | --- | --- | --- |
-| Counter | `Debug.CounterKey` (F1) | `Debug.IsCounterShown` | The frame rate, the frame time, and the memory of the GPU and the process, in the top-left corner |
-| Stats | `Debug.StatsKey` (F3) | `Debug.IsStatsOpen` | Each instrument of the `Magic.*` meters and the `System.Runtime` meter of .NET |
-| Settings | `Debug.SettingsKey` (F4) | `Debug.IsSettingsOpen` | The settings of each gem |
+| Tool | Shows |
+| --- | --- |
+| Counter | The frame rate, the frame time, and the memory of the GPU and the process, in the top-left corner |
+| Stats | Each instrument of the `Magic.*` meters and the `System.Runtime` meter of .NET |
+| Settings | The settings of each gem |
 
 - In a Debug build, the counter shows from the start. In other builds, the counter line shows only while a debug
   window is open.
-- The gem collects the numbers each `Debug.StatsCollectSec`, and only while the counter or the stats window shows.
+- The gem collects the numbers at an interval that a setting gives, and only while the counter or the stats window
+  shows.
+- The settings of the gem, with the key of each tool, are in `DebugToolsSettings`, in the `Debug` category.
+  `get Debug` lists them.
 - Without a gem that provides input, no key works.
 
 ### Stats
