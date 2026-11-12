@@ -9,7 +9,8 @@ Follow the [Code of Conduct](CODE_OF_CONDUCT.md) in every space of the project.
 1. Read the [README](../README.md) for the requirements and the build.
 2. Once for each clone, run `git config core.hooksPath .githooks` ([Git hooks](TOOLS.md#git-hooks)).
 3. Make a branch from `dev`.
-4. Before you change an area, read its doc in `docs/`.
+4. Before you change an area, read its doc in `docs/`. A rendering gem and the shader library have their
+   `README.md` in their folder.
 5. Make the change.
 6. If the change alters how an area works, update its doc in the same change.
 7. Format the change with `tools/Scripts/Format.ps1`.

@@ -6,7 +6,7 @@ namespace Magic.Platform;
 /// The window that the game draws into, which a platform gem opens.
 /// </summary>
 /// <remarks>
-/// Set the title and the icon only on the game thread. The OS gets a new title or icon when the gem next updates the
+/// Use the title and the icon only on the game thread. The OS gets a new title or icon when the gem next updates the
 /// window. The platform thread writes the size as one value, and any thread can read it.
 /// </remarks>
 public interface IWindow

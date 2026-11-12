@@ -9,7 +9,8 @@ The rules, paths and commands in this skill are in [PROJECT.md](../PROJECT.md).
 
 1. **Pick one area** with the user, as the project defines one. Bigger asks are several reviews.
 2. **Read what it is judged against:** Simplest first, the code standards, and the root README and the doc in
-   `docs/` for the area. Then read every file in the area, and how the rest of the code calls it.
+   `docs/` for the area. For a rendering gem or the shader library, also read the `README.md` in its folder.
+   Then read every file in the area, and how the rest of the code calls it.
 3. **Look for less code that does the same job:** code nothing calls, a type that only forwards, a single-caller
    helper, a flag or mode field, state that could be computed, two places doing one thing, an abstraction with one
    use, a deep call chain or nesting, and brute force where a better data shape makes the cases disappear. Ask of

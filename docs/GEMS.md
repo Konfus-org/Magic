@@ -3,6 +3,7 @@
 A gem is a plugin: a part of the engine that a project adds or replaces. The gems that come with Magic are in
 `src/Gems/`. A project runs a gem when its `.magic` file lists the name of the gem. To make a gem, use the gem
 template ([Templates](TOOLS.md#templates)).
+The debug gems, ImGuiDebugUI and DebugTools, are in [Debugging](DEBUGGING.md).
 
 ## Gems that use other gems
 
@@ -83,7 +84,7 @@ The settings of the gem are in `SdlPlatformSettings`. `get Window`, `get Input` 
 
 ### Threads
 
-- Use the members of the window and the clipboard only on the game thread. On other threads, they throw.
+- Use the members of the window and the clipboard only on the game thread. On other threads, a set throws.
 - You can read the size of the window from any thread.
 - A change that you make reaches the OS when the platform thread next gets the events of the OS.
 

@@ -7,6 +7,8 @@ holds the `Magic` program, the gems that come with it, the sample projects and t
 
 - The .NET SDK that `global.json` names.
 - PowerShell for the scripts in `tools/`: `pwsh`, or Windows PowerShell 5.1 on Windows.
+- To build the native libraries: git, CMake, Ninja and a C++ toolchain. On Windows, Visual Studio with its
+  "Desktop development with C++" workload gives CMake, Ninja and the toolchain.
 
 ## Build and run
 
