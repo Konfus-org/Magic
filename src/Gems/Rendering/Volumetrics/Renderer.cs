@@ -19,11 +19,13 @@ namespace Magic.Volumetrics;
 public readonly record struct VolumetricsInput(GpuView View, TracedWorld? Traced);
 
 /// <summary>
-/// Fills the air between the camera and what it sees with the world's haze: each frame, a volume over the view, lit by
-/// the sky, the sun and the local lights where a ray through the world reaches it, blended over frames and summed away
-/// from the camera, recorded in the light stage, written into the frame's buffer and made as the frame's
-/// <see cref="Air"/>, which shading takes, with the clouds it draws over the sky. Clear air makes none.
+/// Fills the air between the camera and what it sees with the world's haze, as the frame's <see cref="Air"/>.
 /// </summary>
+/// <remarks>
+/// Each frame it fills a volume over the view, lit by the sky, the sun and the local lights where a ray through the
+/// world reaches it. It blends the volume over frames and sums it away from the camera. It also draws the clouds over
+/// the sky. Shading takes the air. Clear air makes none.
+/// </remarks>
 public sealed class Renderer : IRender<VolumetricsInput, Air>, IRender, IHookIntoDomainLoading
 {
     /// <summary>
@@ -48,9 +50,11 @@ public sealed class Renderer : IRender<VolumetricsInput, Air>, IRender, IHookInt
     private static readonly string[] _scatteringNames = ["Air scattering 0", "Air scattering 1"];
 
     /// <summary>
-    /// Done once the air's and the clouds' shaders are built or failed, which a domain loading waits for, so a shader
-    /// that fails is told and logged before the world shows.
+    /// Done once the air's and the clouds' shaders are built or failed.
     /// </summary>
+    /// <remarks>
+    /// A domain loading waits for it, so a shader that fails is told and logged before the world shows.
+    /// </remarks>
     private readonly TaskCompletionSource _built = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private readonly VolumetricsSettings _settings;
@@ -85,9 +89,12 @@ public sealed class Renderer : IRender<VolumetricsInput, Air>, IRender, IHookInt
     }
 
     /// <summary>
-    /// The frame's air, while the passes' shaders are built, what they read and write is made, and the world's weather
-    /// holds a haze or clouds; none otherwise, and the air changes nothing.
+    /// Fills the frame's air and writes its row into the frame's buffer.
     /// </summary>
+    /// <returns>
+    /// The frame's air, or none while the shaders build, what they read and write is not made, or the weather holds no
+    /// haze or clouds. With none, the air changes nothing.
+    /// </returns>
     public Air? Render(in Frame frame, RenderGraph graph, in VolumetricsInput input)
     {
         GpuState shaders = graph.GetState(_scatterShader, _integrateShader);
@@ -202,8 +209,8 @@ public sealed class Renderer : IRender<VolumetricsInput, Air>, IRender, IHookInt
     }
 
     /// <summary>
-    /// Asks for every shader of the air and the clouds each frame, from the first and whatever the weather, so each is
-    /// built, or failed, before a domain shows.
+    /// Asks for every shader of the air and the clouds each frame, whatever the weather, so each is built or failed
+    /// before a domain shows.
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph)
     {
@@ -224,7 +231,7 @@ public sealed class Renderer : IRender<VolumetricsInput, Air>, IRender, IHookInt
     }
 
     /// <summary>
-    /// The description of a volume of the air's cells.
+    /// Describes a volume of the air's cells.
     /// </summary>
     private static TextureDescription GetVolume(string name, (int Width, int Height) size) =>
         new(name, size.Width, size.Height, GpuFormat.R16G16B16A16Sfloat)

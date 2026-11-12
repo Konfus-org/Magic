@@ -16,12 +16,14 @@ namespace Magic.ClusteredGeometry;
 public readonly record struct ClusteredGeometryInput(GpuView? View);
 
 /// <summary>
-/// Draws every model the world's view holds as a hierarchy of clusters, GPU-driven, and far away as its impostor: each
-/// frame its clusters culled, drawn into a visibility buffer and resolved by material into the view's GBuffer and glass
-/// targets, with its depth. As a model loads, its preprocessor clusters it once per change to its file and bakes its
-/// impostor. As a domain loads, it holds the loading screen until the models it draws are clustered on the GPU and
-/// their resolve passes are built.
+/// Draws every model that the world's view holds as a hierarchy of clusters, GPU-driven, and far away as its impostor.
 /// </summary>
+/// <remarks>
+/// Each frame it culls the clusters, draws them into a visibility buffer, and resolves them by material into the view's
+/// GBuffer and glass targets, with their depth. As a model loads, its preprocessor clusters it once per change to its
+/// file and bakes its impostor. As a domain loads, it holds the loading screen until the models it draws are clustered
+/// on the GPU and their resolve passes are built.
+/// </remarks>
 public sealed class Renderer : IRenderFrom<ClusteredGeometryInput>, IHookIntoDomainLoading, IDisposable
 {
     /// <summary>
@@ -34,9 +36,12 @@ public sealed class Renderer : IRenderFrom<ClusteredGeometryInput>, IHookIntoDom
     private readonly ClusterPasses _passes;
 
     /// <summary>
-    /// How many domains have loaded since the start, and what the newest waits on before it shows: its models clustered
-    /// on the GPU and their resolve passes built, once the view counts it prepared. Render thread.
+    /// How many domains have loaded since the start. Render thread.
     /// </summary>
+    /// <remarks>
+    /// The newest waits until its models are clustered on the GPU and their resolve passes are built, once the view
+    /// counts it prepared.
+    /// </remarks>
     private int _domainsLoaded;
     private TaskCompletionSource? _loading;
 
@@ -105,10 +110,13 @@ public sealed class Renderer : IRenderFrom<ClusteredGeometryInput>, IHookIntoDom
     }
 
     /// <summary>
-    /// Holds the domain loading until its models are clustered on the GPU and their resolve passes are built, once the
-    /// world's view counts what it draws on the GPU. One that comes while another waits ends that one. On the render
-    /// thread, whose count this is.
+    /// Holds the domain loading until its models are clustered on the GPU and their resolve passes are built. Render
+    /// thread.
     /// </summary>
+    /// <remarks>
+    /// It waits until the world's view counts what it draws on the GPU. A loading that comes while another waits ends
+    /// that one.
+    /// </remarks>
     public async Task OnDomainLoadingAsync(
         ImmutableArray<ImmutableArray<IComponent>> entities,
         CancellationToken cancel

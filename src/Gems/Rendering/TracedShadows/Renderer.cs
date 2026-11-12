@@ -13,10 +13,12 @@ using Magic.Worlds;
 namespace Magic.TracedShadows;
 
 /// <summary>
-/// How much of each light reaches each pixel, traced through the world as rays see it at the size its settings scale
-/// the picture to, then denoised, as <c>DenoiseShadows.slang</c> says. Each frame it writes the ids of the mask and the
-/// sun's tint into the frame's buffer and makes the frame's <see cref="ShadowMask"/>.
+/// Traces how much of each light reaches each pixel, denoises it, and makes the frame's <see cref="ShadowMask"/>.
 /// </summary>
+/// <remarks>
+/// It traces through the world as rays see it, at the size that its settings scale the picture to. Each frame it writes
+/// the ids of the mask and the sun's tint into the frame's buffer.
+/// </remarks>
 public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookIntoDomainLoading
 {
     private const int BytesPerPixel = 16;
@@ -40,9 +42,11 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
     private static readonly string[] _momentNames = ["Sun shadow moments 1", "Sun shadow moments 2"];
 
     /// <summary>
-    /// Done once the shaders are built or failed, at once while shadows are off or no ray is traced, which a domain
-    /// loading waits for, so a shader that fails is told and logged before the world shows.
+    /// Done once the shaders are built or failed, and at once while shadows are off or no ray is traced.
     /// </summary>
+    /// <remarks>
+    /// A domain loading waits for it, so a shader that fails is told and logged before the world shows.
+    /// </remarks>
     private readonly TaskCompletionSource _built = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private readonly TracedShadowsSettings _settings;
@@ -73,9 +77,11 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
     }
 
     /// <summary>
-    /// The frame's shadows, traced and denoised, their ids written into the frame's buffer; none while it is off,
-    /// the passes' shaders build, or what they write is not made.
+    /// Traces and denoises the frame's shadows, and writes their ids into the frame's buffer.
     /// </summary>
+    /// <returns>
+    /// The frame's shadows, or none while they are off, the passes' shaders build, or what they write is not made.
+    /// </returns>
     public ShadowMask? Render(in Frame frame, RenderGraph graph, in TracedInput input)
     {
         // Off, the history starts afresh once it is back on.
@@ -276,14 +282,13 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
 
         return new ShadowMask(mask.Value, sunTint.Value);
 
-        // A texture at the traced size.
         Result<GpuTexture> GetTracedTexture(string name, GpuFormat format) =>
             graph.Texture(new(name, width, height, format));
     }
 
     /// <summary>
-    /// Asks for every shader of the shadows each frame from the first, while they are on and rays are traced, so each is
-    /// built, or failed, before a domain shows.
+    /// Asks for every shader of the shadows each frame while they are on and rays are traced, so each is built or
+    /// failed before a domain shows.
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph)
     {

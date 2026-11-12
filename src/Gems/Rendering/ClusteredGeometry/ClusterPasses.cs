@@ -10,11 +10,13 @@ using Magic.Utils;
 namespace Magic.ClusteredGeometry;
 
 /// <summary>
-/// What a view sees: the cluster budget's handoff and error threshold set from what last frame asked for; every
-/// instance's clusters culled on the GPU against the frustum, their cones, the pixel error threshold and last frame's
-/// depth pyramid; the visible ones drawn into a visibility buffer; what the old pyramid hid retested against the new
-/// one; and every pixel's material resolved into the GBuffer.
+/// Draws what a view sees as clusters into a visibility buffer, and resolves every pixel's material into the GBuffer.
 /// </summary>
+/// <remarks>
+/// What last frame asked for sets the cluster budget's handoff and error threshold. The GPU culls every instance's
+/// clusters against the frustum, their cones, the pixel error threshold and last frame's depth pyramid. What the old
+/// pyramid hid is tested again against the new one.
+/// </remarks>
 internal sealed class ClusterPasses
 {
     private const int MaxVisibleClusters = 1 << 18;
@@ -131,11 +133,13 @@ internal sealed class ClusterPasses
     public ImmutableArray<ShaderEntry> Shaders { get; }
 
     /// <summary>
-    /// Asks for the cull's buffers and the cluster targets, uploads the cluster constants that name them and
-    /// <paramref name="pools"/> after the air's row, then records the passes: the cluster budget set, the main view
-    /// drawn twice, what last frame's pyramid shows, then what it hid and this frame's shows, the nearest glass in
-    /// front of it drawn into the glass's buffer, and every pixel's material resolved into the GBuffer.
+    /// Asks for the cull's buffers and the cluster targets, uploads the cluster constants, then records the passes.
     /// </summary>
+    /// <remarks>
+    /// The constants name the targets and <paramref name="pools"/>, after the air's row. The passes set the cluster
+    /// budget, draw the main view twice, what last frame's pyramid shows, then what it hid and this frame's shows, draw
+    /// the nearest glass in front of it into the glass's buffer, and resolve every pixel's material into the GBuffer.
+    /// </remarks>
     public Result Record(RenderGraph graph, GpuView gpu, ClusterPools pools, ClusteredGeometrySettings settings)
     {
         (int width, int height) = (gpu.Width, gpu.Height);
@@ -415,7 +419,7 @@ internal sealed class ClusterPasses
     }
 
     /// <summary>
-    /// The resolve entry for each of <paramref name="materialShaders"/>, one made for each newly numbered.
+    /// Gets the resolve entry for each of <paramref name="materialShaders"/>, and makes one for each newly numbered.
     /// </summary>
     public ReadOnlySpan<ShaderEntry> GetResolveShaders(IReadOnlyList<ShaderTypeArgument> materialShaders)
     {
@@ -428,11 +432,13 @@ internal sealed class ClusterPasses
     }
 
     /// <summary>
-    /// The regions of the draw arguments, each as many draws as the visible list has rows and counted at word
-    /// <c>region * 4</c> of the counts, the twin of <c>CullClusters.slang</c>'s: the clusters last frame's depth
-    /// pyramid shows and those the retest finds this frame's shows, the same of the instances in the impostor handoff,
-    /// the translucent clusters of both, and the impostors of both.
+    /// The regions of the draw arguments, the twin of <c>CullClusters.slang</c>'s.
     /// </summary>
+    /// <remarks>
+    /// Each region is as many draws as the visible list has rows, counted at word <c>region * 4</c> of the counts. The
+    /// regions are the clusters that last frame's depth pyramid shows and those the retest finds this frame's shows,
+    /// the same of the instances in the impostor handoff, the translucent clusters of both, and the impostors of both.
+    /// </remarks>
     private enum DrawRegion
     {
         Visible,

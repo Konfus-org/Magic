@@ -4,15 +4,20 @@ using Magic.Utils;
 namespace Magic.GlobalIllumination;
 
 /// <summary>
-/// What a traced effect blends over frames, at the traced size: this frame's light, with its variance in alpha, and last
-/// frame's, which this frame's blends with while it holds the view. It keeps two and swaps them every frame.
+/// What a traced effect blends over frames, at the traced size.
 /// </summary>
+/// <remarks>
+/// It holds this frame's light, with its variance in alpha, and last frame's, which this frame's blends with while it
+/// holds the view. It keeps two and swaps them every frame.
+/// </remarks>
 internal static class TracedBlend
 {
     /// <summary>
-    /// The textures asked for under <paramref name="names"/>: the even frames write the first and the odd the second,
-    /// the other being the history, which holds the view as <paramref name="hasHistory"/> says.
+    /// Asks for the textures under <paramref name="names"/>: the even frames write the first and the odd the second.
     /// </summary>
+    /// <remarks>
+    /// The other texture is the history, which holds the view as <paramref name="hasHistory"/> says.
+    /// </remarks>
     public static Result<TracedBlendConstants> Prepare(
         in GIView view,
         ReadOnlySpan<string> names,

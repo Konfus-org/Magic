@@ -10,15 +10,17 @@ using static Magic.ClusteredGeometry.meshoptimizer;
 namespace Magic.ClusteredGeometry;
 
 /// <summary>
-/// Builds a model's cluster hierarchy, the DAG of Karis, "Nanite: A Deep Dive", 2021: the leaves are clusters of
-/// its triangles; each level above groups neighbouring clusters, simplifies the group's triangles to about half with
-/// the group's border locked, and clusters the result, until one group is left or nothing simplifies further; the
-/// last level is the root, the whole mesh simplified without regard to its topology down to a few triangles. Every
-/// cluster records its own error and its parent group's, each no less than its children's, so the cut through the
-/// hierarchy is decided per cluster on the GPU; a root's parent error is the model's diameter, so a model stops
-/// drawing when the whole of it is under the threshold. Pure functions over arrays, which a test drives with a
-/// known mesh.
+/// Builds a model's cluster hierarchy, the DAG of Karis, "Nanite: A Deep Dive", 2021.
 /// </summary>
+/// <remarks>
+/// The leaves are clusters of the model's triangles. Each level above groups neighbouring clusters, simplifies the
+/// group's triangles to about half with the group's border locked, and clusters the result, until one group is left or
+/// nothing simplifies further. The last level is the root: the whole mesh simplified, without regard to its topology,
+/// down to a few triangles. Every cluster records its own error and its parent group's, each no less than its
+/// children's, so the GPU decides the cut through the hierarchy per cluster. A root's parent error is the model's
+/// diameter, so a model stops drawing when the whole of it is under the threshold. It has only pure functions over
+/// arrays.
+/// </remarks>
 internal static unsafe class ClusterBuilder
 {
     /// <summary>
@@ -127,10 +129,13 @@ internal static unsafe class ClusterBuilder
     }
 
     /// <summary>
-    /// One mesh's hierarchy, its clusters appended leaves first, its indices appended as each cluster's run. The
-    /// leaves draw the mesh's own vertices; each level above draws copies of the vertices its simplification kept,
-    /// with normals made from its own triangles, as the simplifier joins the vertices split at a hard edge or a seam.
+    /// Builds one mesh's hierarchy, and appends its clusters, leaves first, and its indices, as each cluster's run.
     /// </summary>
+    /// <remarks>
+    /// The leaves draw the mesh's own vertices. Each level above draws copies of the vertices that its simplification
+    /// kept, with normals made from its own triangles, because the simplifier joins the vertices split at a hard edge
+    /// or a seam.
+    /// </remarks>
     private static void BuildMesh(
         Mesh mesh,
         uint firstVertex,
@@ -357,10 +362,13 @@ internal static unsafe class ClusterBuilder
     }
 
     /// <summary>
-    /// The triangles simplified to at most a target count, and the error that cost in the mesh's units. The ordinary
-    /// simplifier keeps the border locked so neighbouring groups keep meeting; the sloppy one has no regard for the
-    /// topology and reaches what the ordinary one cannot.
+    /// Simplifies the triangles to at most a target count.
     /// </summary>
+    /// <remarks>
+    /// The ordinary simplifier keeps the border locked so neighbouring groups keep meeting. The sloppy one has no
+    /// regard for the topology and reaches what the ordinary one cannot.
+    /// </remarks>
+    /// <returns>The simplified triangles, and the error that cost in the mesh's units.</returns>
     private static (uint[] Indices, float Error) Simplify(
         uint[] indices,
         Vector3[] positions,
@@ -415,7 +423,7 @@ internal static unsafe class ClusterBuilder
     }
 
     /// <summary>
-    /// <paramref name="indices"/> cut into clusters of at most <see cref="GpuCluster.MaxTriangles"/> triangles,
+    /// Cuts <paramref name="indices"/> into clusters of at most <see cref="GpuCluster.MaxTriangles"/> triangles,
     /// each with its bounds and cone, at <paramref name="error"/>.
     /// </summary>
     private static List<Cluster> Clusterize(uint[] indices, Vector3[] positions, float error, int materialSlot)
@@ -501,11 +509,17 @@ internal static unsafe class ClusterBuilder
     }
 
     /// <summary>
-    /// Copies of the vertices the simplified triangles use, appended to the pool, with normals from those triangles
-    /// alone: a vertex has one copy per smoothing group of its faces, those within <see cref="CreaseAngle"/> of each
-    /// other, so a hard edge stays hard; the faces are gathered by position, so the vertices split along a seam
-    /// shade alike. By each corner of <paramref name="clustered"/>, the same triangles clustered, its copy's pool index.
+    /// Appends copies of the vertices that the simplified triangles use to the pool, with normals from those triangles
+    /// alone.
     /// </summary>
+    /// <remarks>
+    /// A vertex has one copy per smoothing group of its faces, those within <see cref="CreaseAngle"/> of each other, so
+    /// a hard edge stays hard. The faces are gathered by position, so the vertices split along a seam shade alike.
+    /// </remarks>
+    /// <returns>
+    /// The pool index of each corner's copy, by each corner of <paramref name="clustered"/>, the same triangles
+    /// clustered.
+    /// </returns>
     private static uint[] CopyVertices(
         Mesh mesh,
         uint[] simplified,
@@ -611,9 +625,12 @@ internal static unsafe class ClusterBuilder
     }
 
     /// <summary>
-    /// One cluster while its level is built: its triangles as mesh-local indices, the pool indices it draws with, and
-    /// its row as the GPU reads it, short of where its indices land and what its parent group measures.
+    /// One cluster while its level is built.
     /// </summary>
+    /// <remarks>
+    /// It holds its triangles as mesh-local indices, the pool indices it draws with, and its row as the GPU reads it,
+    /// short of where its indices land and what its parent group measures.
+    /// </remarks>
     private sealed class Cluster
     {
         public required uint[] Indices;

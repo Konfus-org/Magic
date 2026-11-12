@@ -6,12 +6,15 @@ using Magic.DeferredRendering.World;
 namespace Magic.ClusteredGeometry;
 
 /// <summary>
-/// What the cluster renderer draws a <see cref="Model"/> as, made from it once and cached under its version: its
-/// cluster hierarchy, the indices of every cluster's triangles, the vertices the levels above the leaves draw, and the
-/// model's impostor. An index under <see cref="ModelVertexCount"/> is a vertex of the model's own, as the renderer
-/// holds them; one at or over it is <see cref="Vertices"/>' at the index less that count. A cluster's
-/// <see cref="GpuCluster.IndexOffset"/> is into <see cref="Indices"/>; the renderer adds where it put them in the pools.
+/// What the cluster renderer draws a <see cref="Model"/> as, made from it once and cached under its version.
 /// </summary>
+/// <remarks>
+/// It holds the cluster hierarchy, the indices of every cluster's triangles, the vertices that the levels above the
+/// leaves draw, and the model's impostor. An index under <see cref="ModelVertexCount"/> is a vertex of the model's own,
+/// as the renderer holds them; one at or over it is <see cref="Vertices"/>' at the index less that count. A cluster's
+/// <see cref="GpuCluster.IndexOffset"/> is into <see cref="Indices"/>; the renderer adds where it put them in the
+/// pools.
+/// </remarks>
 internal sealed class ModelClusters
 {
     /// <summary>
@@ -32,10 +35,13 @@ internal sealed class ModelClusters
     public required ImmutableArray<GpuCluster> Clusters { get; init; }
 
     /// <summary>
-    /// The model's octahedral impostor atlas, <see cref="ImpostorBuilder.Views"/> by <see cref="ImpostorBuilder.Views"/> views of
-    /// <see cref="ImpostorBuilder.Tile"/> texels a side, row by row as RGBA16F: each texel the octahedral normal, the depth from
-    /// the view's front plane over the sphere's diameter, and the material slot plus one, 0 where the view sees nothing.
+    /// The model's octahedral impostor atlas, row by row as RGBA16F.
     /// </summary>
+    /// <remarks>
+    /// It has <see cref="ImpostorBuilder.Views"/> by <see cref="ImpostorBuilder.Views"/> views of
+    /// <see cref="ImpostorBuilder.Tile"/> texels a side. Each texel holds the octahedral normal, the depth from the
+    /// view's front plane over the sphere's diameter, and the material slot plus one, 0 where the view sees nothing.
+    /// </remarks>
     public required ImmutableArray<Half> Impostor { get; init; }
 
     /// <summary>

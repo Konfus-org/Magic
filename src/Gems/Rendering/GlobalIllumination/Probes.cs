@@ -9,11 +9,13 @@ using Magic.Utils;
 namespace Magic.GlobalIllumination;
 
 /// <summary>
-/// The probe grid of diffuse light: a box of probes over the traced world's box, given rays in turn within each frame's
-/// budget, more as their light still changes, traced, and blended into each probe's light and distances. The box
-/// follows the world's slowly, so the probes' light moves with it. What the probes hold carries from frame to frame,
-/// from the first update on.
+/// The probe grid of diffuse light: a box of probes over the traced world's box.
 /// </summary>
+/// <remarks>
+/// Probes get rays in turn within each frame's budget, more while their light still changes, and blend what the rays
+/// trace into their light and distances. The box follows the world's slowly, so the probes' light moves with it. What
+/// the probes hold carries from frame to frame, from the first update on.
+/// </remarks>
 internal sealed class Probes(AssetManager assets)
 {
     /// <summary>
@@ -40,9 +42,12 @@ internal sealed class Probes(AssetManager assets)
     private const int VarianceBytes = 16;
 
     /// <summary>
-    /// The metres the grid reaches past the traced world's box on every side, and how far towards it the grid moves a
-    /// frame once the probes hold light, so it doesn't shake their light as instances come and go.
+    /// The metres the grid reaches past the traced world's box on every side.
     /// </summary>
+    /// <remarks>
+    /// It is also how far the grid moves towards that box each frame once the probes hold light, so the grid does not
+    /// shake their light as instances come and go.
+    /// </remarks>
     private const float BoxMargin = 1;
     private const float BoxBlend = 0.01f;
 
@@ -65,12 +70,13 @@ internal sealed class Probes(AssetManager assets)
     public ImmutableArray<ShaderEntry> Shaders => [_askShader, _planShader, _listShader, _traceShader, _blendShader];
 
     /// <summary>
-    /// The grid's buffers and depth texture asked for at <paramref name="size"/>, from 2 probes a side up to the most,
-    /// named by the grid that shading reads and by the update's own constants, and the probes started at none while
-    /// they hold nothing or the size changed. The
-    /// grid is placed over <paramref name="box"/> with a margin: at once when the probes start afresh, else a little
-    /// nearer each frame.
+    /// Asks for the grid's buffers and depth texture at <paramref name="size"/>, and places the grid over
+    /// <paramref name="box"/> with a margin.
     /// </summary>
+    /// <remarks>
+    /// The size goes from 2 probes a side up to the most. The probes start at none while they hold nothing or the size
+    /// changed. The grid moves to the box at once when the probes start afresh, else a little nearer each frame.
+    /// </remarks>
     public Result<(ProbeGridConstants Grid, ProbeUpdateConstants Update)> Prepare(
         RenderGraph graph,
         bool hasHistory,
@@ -135,10 +141,12 @@ internal sealed class Probes(AssetManager assets)
     }
 
     /// <summary>
-    /// The rays the probes ask for given to them in turn while they fit in the frame's budget, the probe the next frame
-    /// starts at kept in the trace's arguments; traced through the world, lit by the lights and the sky, and blended
-    /// into the probes given them.
+    /// Traces the rays that the probes ask for through the world, and blends their light into the probes.
     /// </summary>
+    /// <remarks>
+    /// Probes get rays in turn while they fit in the frame's budget. The trace's arguments keep the probe that the next
+    /// frame starts at. The lights and the sky light the rays.
+    /// </remarks>
     public void Record(in GIView view, in ProbeGridConstants grid, in ProbeUpdateConstants update)
     {
         RenderGraph graph = view.Graph;
