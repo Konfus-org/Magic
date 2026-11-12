@@ -216,9 +216,7 @@ public sealed class AssetManager : IDisposable
     /// </summary>
     public ImmutableArray<string> GetNeighbors(AssetFile file)
     {
-        string path = file.Path;
-        int slash = path.LastIndexOf('/');
-        string folder = slash < 0 ? string.Empty : path[..slash];
+        string folder = AssetIndex.GetFolder(file.Path);
         lock (_gate)
         {
             LoadedAssets loaded = Loaded;
@@ -282,10 +280,7 @@ public sealed class AssetManager : IDisposable
     /// remembered until its file changes. <paramref name="cancel"/> only stops this caller's wait.
     /// </summary>
     public Task<Result<T>> LoadAsync<T>(Handle<T> asset, IProgress<LoadProgress>? progress, CancellationToken cancel)
-        where T : IAsset<T> =>
-        asset == Handle<T>.None
-            ? Task.FromResult<Result<T>>(Result.Failure($"No {typeof(T).Name} was asked for: the handle is none."))
-            : LoadIdAsync<T>(asset.Id, 0, progress, cancel);
+        where T : IAsset<T> => LoadAsync(asset, 0, progress, cancel);
 
     /// <summary>
     /// <paramref name="asset"/>, loaded by an <see cref="IAssetImporter{T}"/> as it makes asset
@@ -294,16 +289,22 @@ public sealed class AssetManager : IDisposable
     /// <paramref name="asset"/> is <paramref name="dependent"/> or is made from it, as each would wait for the other for
     /// ever.
     /// </summary>
-    public Task<Result<T>> LoadAsync<T>(
+    public async Task<Result<T>> LoadAsync<T>(
         Handle<T> asset,
         ulong dependent,
         IProgress<LoadProgress>? progress,
         CancellationToken cancel
     )
-        where T : IAsset<T> =>
-        asset == Handle<T>.None
-            ? LoadAsync(asset, progress, cancel)
-            : LoadIdAsync<T>(asset.Id, dependent, progress, cancel);
+        where T : IAsset<T>
+    {
+        if (asset == Handle<T>.None)
+            return Result.Failure($"No {typeof(T).Name} was asked for: the handle is none.");
+
+        Made made = await RequestAsync(asset.Id, dependent, typeof(T), RunImportAsync<T>, progress, cancel)
+            .ConfigureAwait(false);
+
+        return made.Value.Ok ? Result.Success((T)made.Value.Value) : Result.Failure(made.Value.Error);
+    }
 
     /// <summary>
     /// The ids of what <paramref name="asset"/> depends on, as its file and theirs name them, down to
@@ -515,11 +516,8 @@ public sealed class AssetManager : IDisposable
         if (!Files.DirectoryExists(directory))
             return;
 
-        foreach (string added in Database.Directories)
-        {
-            if (string.Equals(added, directory, StringComparison.OrdinalIgnoreCase))
-                return;
-        }
+        if (Database.Directories.Contains(directory, StringComparer.OrdinalIgnoreCase))
+            return;
 
         // Watched before it is read, so nothing written meanwhile is missed.
         _watches.Add(directory);
@@ -547,7 +545,7 @@ public sealed class AssetManager : IDisposable
 
     /// <summary>
     /// Adds the asset types <paramref name="assembly"/> declares, Magic's or a gem's, so a <c>.meta</c> can name them and the
-    /// assets can be crawled without knowing them. A name another type has already stays that one's, and is an error. Main
+    /// assets can be crawled without knowing them. A name another type has already stays that one's, and is an error. Game
     /// thread.
     /// </summary>
     internal void Register(Assembly assembly)
@@ -811,12 +809,12 @@ public sealed class AssetManager : IDisposable
         {
             string extensions = string.Join(", ", reader.Extensions);
 
-            return new Made(Result.Failure($"{notAsset}a {typeof(T).Name}'s file ends in {extensions}."), 0);
+            return Fail($"{notAsset}a {typeof(T).Name}'s file ends in {extensions}.");
         }
 
         Result<byte[]> bytes = await Files.ReadBytesAsync(file.File, cancel).ConfigureAwait(false);
         if (!bytes.Ok)
-            return new Made(Result.Failure($"{file.Path} could not be read: {bytes.Error}"), 0);
+            return Fail($"{file.Path} could not be read: {bytes.Error}");
 
         ulong version = AssetIndex.ComputeVersion(bytes.Value, file.Settings);
         Result<AssetMetadata> metadata = ReadSettings<T>(file.Settings);
@@ -1092,24 +1090,6 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Asset <paramref name="id"/>, at once when it has loaded, else once it has been imported; asked for by asset
-    /// <paramref name="dependent"/>'s importer when that is not 0.
-    /// </summary>
-    private async Task<Result<T>> LoadIdAsync<T>(
-        ulong id,
-        ulong dependent,
-        IProgress<LoadProgress>? progress,
-        CancellationToken cancel
-    )
-        where T : IAsset<T>
-    {
-        Made made = await RequestAsync(id, dependent, typeof(T), RunImportAsync<T>, progress, cancel)
-            .ConfigureAwait(false);
-
-        return made.Value.Ok ? Result.Success((T)made.Value.Value) : Result.Failure(made.Value.Error);
-    }
-
-    /// <summary>
     /// The built-in asset named <paramref name="name"/> in <paramref name="folder"/>, as
     /// <see cref="AssetIndex.FindBuiltIn"/> finds it; <paramref name="what"/> says which kind of named asset it is when
     /// it is missing, which is said once.
@@ -1343,7 +1323,7 @@ public sealed class AssetManager : IDisposable
             done = done with { Stage = AssetStage.Loaded, Waiting = [] };
             LoadedAssets loaded = Loaded with { Entries = Loaded.Entries.SetItem(id, done) };
             AssetDatabase database = Database;
-            if (made.Value.Ok && !made.Handles.IsDefault)
+            if (made.Value.Ok)
             {
                 dependencies = [.. made.Handles.Union(entry.MadeFrom)];
                 database = database.SetDependencies(id, dependencies);

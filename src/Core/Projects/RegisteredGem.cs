@@ -18,7 +18,7 @@ namespace Magic.Projects;
 /// Where its assemblies load, held from the moment they do: nothing else keeps it alive, and once collected it would start
 /// unloading the gem.
 /// </param>
-internal sealed record GemInfo(
+internal sealed record RegisteredGem(
     string Name,
     string Author,
     string Description,

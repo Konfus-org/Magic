@@ -35,7 +35,7 @@ internal static class SaveCommand
                 return;
 
             Result saved = await queue
-                .ChangeWorldAsync(() => world.SaveAsync(saveName, CancellationToken.None))
+                .ChangeWorldAsync(world.SaveAsync(saveName, CancellationToken.None))
                 .ConfigureAwait(false);
             if (saved.Ok)
                 Log.Info($"Saved the game as {saveName}.");

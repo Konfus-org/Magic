@@ -68,7 +68,22 @@ internal sealed class MaterialSlotsJsonConverter : JsonConverter<MaterialSlots>
             if (slot == MaterialSlots.Capacity)
                 throw new JsonException($"Material slots are at most {MaterialSlots.Capacity}.");
 
-            slots[slot++] = ReadInstance(ref reader, options);
+            // A slot is its material's handle alone, or an object of its handle and overrides.
+            JsonElement element = JsonSerializer.Deserialize<JsonElement>(ref reader, options);
+            if (!element.TryGetProperty("handle", out JsonElement handle))
+            {
+                slots[slot++] = new MaterialInstance { Handle = element.Deserialize<Handle<Material>>(options) };
+
+                continue;
+            }
+
+            slots[slot++] = new MaterialInstance
+            {
+                Handle = handle.Deserialize<Handle<Material>>(options),
+                Overrides = element.TryGetProperty("overrides", out JsonElement overrides)
+                    ? overrides.Deserialize<MaterialOverrides>(options)
+                    : default,
+            };
         }
 
         return slots;
@@ -85,46 +100,24 @@ internal sealed class MaterialSlotsJsonConverter : JsonConverter<MaterialSlots>
         writer.WriteStartArray();
         for (int i = 0; i < count; i++)
         {
-            WriteInstance(writer, value[i], options);
+            // A slot that sets no params is its material's handle alone.
+            MaterialInstance instance = value[i];
+            if (instance.Overrides.Params.IsEmpty)
+            {
+                JsonSerializer.Serialize(writer, instance.Handle, options);
+
+                continue;
+            }
+
+            writer.WriteStartObject();
+            writer.WritePropertyName("handle");
+            JsonSerializer.Serialize(writer, instance.Handle, options);
+            writer.WritePropertyName("overrides");
+            JsonSerializer.Serialize(writer, instance.Overrides, options);
+            writer.WriteEndObject();
         }
 
         writer.WriteEndArray();
-    }
-
-    private static MaterialInstance ReadInstance(ref Utf8JsonReader reader, JsonSerializerOptions options)
-    {
-        JsonElement element = JsonSerializer.Deserialize<JsonElement>(ref reader, options);
-        if (!element.TryGetProperty("handle", out JsonElement handle))
-            return new MaterialInstance { Handle = element.Deserialize<Handle<Material>>(options) };
-
-        return new MaterialInstance
-        {
-            Handle = handle.Deserialize<Handle<Material>>(options),
-            Overrides = element.TryGetProperty("overrides", out JsonElement overrides)
-                ? overrides.Deserialize<MaterialOverrides>(options)
-                : default,
-        };
-    }
-
-    private static void WriteInstance(
-        Utf8JsonWriter writer,
-        in MaterialInstance instance,
-        JsonSerializerOptions options
-    )
-    {
-        if (instance.Overrides.Params.IsEmpty)
-        {
-            JsonSerializer.Serialize(writer, instance.Handle, options);
-
-            return;
-        }
-
-        writer.WriteStartObject();
-        writer.WritePropertyName("handle");
-        JsonSerializer.Serialize(writer, instance.Handle, options);
-        writer.WritePropertyName("overrides");
-        JsonSerializer.Serialize(writer, instance.Overrides, options);
-        writer.WriteEndObject();
     }
 }
 
@@ -185,21 +178,4 @@ internal sealed class MaterialOverridesJsonConverter : JsonConverter<MaterialOve
 
         writer.WriteEndObject();
     }
-}
-
-/// <summary>
-/// An entity as JSON: its id, which means nothing once the run that gave it ends, so it reads back as none.
-/// </summary>
-[SuppressMessage(
-    "Performance",
-    "CA1812:Avoid uninstantiated internal classes",
-    Justification = "The serializer makes it, as a [JsonConverter] names it."
-)]
-internal sealed class EntityJsonConverter : JsonConverter<Entity>
-{
-    public override Entity Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
-        default;
-
-    public override void Write(Utf8JsonWriter writer, Entity value, JsonSerializerOptions options) =>
-        writer.WriteNumberValue(value.Id);
 }

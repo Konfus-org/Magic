@@ -25,7 +25,67 @@ internal sealed class Cli
     public Cli(App app, Settings settings, IFileSystem files, EventCoordinator events, AssetManager assets, World world)
     {
         _queue = new CommandQueue(events);
-        _cliCommands = CreateCliCommands(app, settings, files, events, assets, world, _queue);
+
+        // The commands, each given only the services it uses: verbs that act on the app or do a job of their own, and
+        // options that set how it runs, given before or after the verb.
+        _cliCommands = new("Magic CLI.\nAllows interaction with the Magic game engine from the command line.")
+        {
+            Subcommands =
+            {
+                OpenCommand.Create(app, files, assets, world, _queue),
+                NewCommand.Create(),
+                ScreenshotCommand.Create(app, files, events),
+                StatsCommand.Create(),
+                SaveCommand.Create(app, settings, world, _queue),
+                LoadCommand.Create(app, world, _queue),
+                BakeCommand.Create(app, assets, _queue),
+                SetCommand.Create(app, settings, world),
+                GetCommand.Create(app, settings, world),
+                TeleportCommand.Create(app, world, assets, _queue),
+                SpawnCommand.Create(app, world, assets, _queue),
+                WaitCommand.Create(_queue, world),
+                NameCommand.Create(app),
+                ExitCommand.Create(app),
+            },
+            Options =
+            {
+                CreateOption<bool>("--headless", "Run without a GUI (headless mode)", value => app.IsHeadless = value),
+                CreateOption<Log.VerbosityLevel>(
+                    "--verbosity",
+                    "How much the log prints",
+                    value => Log.Verbosity = value,
+                    "-v"
+                ),
+                CreateOption<bool>(
+                    "--fail-on-error",
+                    "Exit with code 2 as soon as an error is logged",
+                    value => app.ShouldExitOnError = value
+                ),
+                CreateOption<string[]>(
+                    "--configure",
+                    "Set settings as their gems are made, as --configure Window.Mode=windowed Rendering.Resolution=\"1280 720\"",
+                    settings.Configure
+                ),
+            },
+        };
+
+        // An option's action runs only before its command's own, so the root has one, which does nothing.
+        _cliCommands.SetAction(_ => { });
+
+        // Every option is recursive, and its action applies its value before the command runs. A list option takes each
+        // value after it, up to the next option or command.
+        static Option<T> CreateOption<T>(string name, string description, Action<T> apply, params string[] aliases)
+        {
+            Option<T> option = new(name, aliases)
+            {
+                Description = description,
+                Recursive = true,
+                AllowMultipleArgumentsPerToken = true,
+            };
+            option.Action = new OptionAction(parsed => apply(parsed.GetRequiredValue(option)));
+
+            return option;
+        }
     }
 
     /// <summary>
@@ -92,81 +152,5 @@ internal sealed class Cli
             Log.Error(errors.ToString().TrimEnd());
 
         return Result.Success();
-    }
-
-    /// <summary>
-    /// The commands, each given only the services it uses: verbs that act on the app or do a job of their own, and
-    /// options that set how it runs, given before or after the verb.
-    /// </summary>
-    private static RootCommand CreateCliCommands(
-        App app,
-        Settings settings,
-        IFileSystem files,
-        EventCoordinator events,
-        AssetManager assets,
-        World world,
-        CommandQueue queue
-    )
-    {
-        RootCommand commands = new("Magic CLI.\nAllows interaction with the Magic game engine from the command line.")
-        {
-            Subcommands =
-            {
-                OpenCommand.Create(app, files, assets, world, queue),
-                NewCommand.Create(),
-                ScreenshotCommand.Create(app, files, events),
-                StatsCommand.Create(),
-                SaveCommand.Create(app, settings, world, queue),
-                LoadCommand.Create(app, world, queue),
-                BakeCommand.Create(app, assets, queue),
-                SetCommand.Create(app, settings, world),
-                GetCommand.Create(app, settings, world),
-                TeleportCommand.Create(app, world, assets, queue),
-                SpawnCommand.Create(app, world, assets, queue),
-                WaitCommand.Create(queue, world),
-                NameCommand.Create(app),
-                ExitCommand.Create(app),
-            },
-            Options =
-            {
-                CreateOption<bool>("--headless", "Run without a GUI (headless mode)", value => app.IsHeadless = value),
-                CreateOption<Log.VerbosityLevel>(
-                    "--verbosity",
-                    "How much the log prints",
-                    value => Log.Verbosity = value,
-                    "-v"
-                ),
-                CreateOption<bool>(
-                    "--fail-on-error",
-                    "Exit with code 2 as soon as an error is logged",
-                    value => app.ShouldExitOnError = value
-                ),
-                CreateOption<string[]>(
-                    "--configure",
-                    "Set settings as their gems are made, as --configure Window.Mode=windowed Rendering.Resolution=\"1280 720\"",
-                    settings.Configure
-                ),
-            },
-        };
-
-        // An option's action runs only before its command's own, so the root has one, which does nothing.
-        commands.SetAction(_ => { });
-
-        return commands;
-
-        // Every option is recursive, and its action applies its value before the command runs. A list option takes each
-        // value after it, up to the next option or command.
-        static Option<T> CreateOption<T>(string name, string description, Action<T> apply, params string[] aliases)
-        {
-            Option<T> option = new(name, aliases)
-            {
-                Description = description,
-                Recursive = true,
-                AllowMultipleArgumentsPerToken = true,
-            };
-            option.Action = new OptionAction(parsed => apply(parsed.GetRequiredValue(option)));
-
-            return option;
-        }
     }
 }

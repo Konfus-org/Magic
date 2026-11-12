@@ -33,48 +33,45 @@ internal static class GetCommand
 
         return get;
 
-        // Every setting with nothing named; the settings of the category or key named; or else the entity's value.
         void Get(string? what)
         {
+            // Every setting with nothing named, or the settings of the category or key named.
             Setting[] rows =
             [
                 .. settings.Options.Where(row => what is null || row.Key == what || row.Category == what),
             ];
-            if (what is not null && rows.Length == 0)
-                PrintEntityValue(what);
-            else if (rows.Length == 0)
-                Log.Info("No gem has settings.");
-            else
-                PrintSettings(rows);
-        }
-
-        static void PrintSettings(Setting[] rows)
-        {
             foreach (Setting row in rows)
             {
                 string restarts = row.RequiresRestart ? " Changing it restarts the run." : string.Empty;
                 string value = row.Value is { } set ? ValueText.Format(set) : "null";
                 Terminal.Write($"{row.Key} {value}: {row.Summary}{restarts}");
             }
-        }
 
-        // Prints the value at the path on each entity it names, or why there is none.
-        void PrintEntityValue(string entityPath)
-        {
-            if (!CommandLookups.IsProjectOpen(app, $"get {entityPath} in"))
+            if (rows.Length > 0)
                 return;
 
-            Result<ImmutableArray<string>> read = EntityPaths.Read(world, entityPath);
+            if (what is null)
+            {
+                Log.Info("No gem has settings.");
+
+                return;
+            }
+
+            // Else the value at the path on each entity it names, or why there is none.
+            if (!CommandLookups.IsProjectOpen(app, $"get {what} in"))
+                return;
+
+            Result<ImmutableArray<string>> read = EntityPaths.Read(world, what);
             if (!read.Ok)
             {
-                Log.Error($"{entityPath} was not read: {read.Error}");
+                Log.Error($"{what} was not read: {read.Error}");
 
                 return;
             }
 
             foreach (string line in read.Value)
             {
-                Terminal.Write($"{entityPath} of {line}");
+                Terminal.Write($"{what} of {line}");
             }
         }
     }

@@ -36,11 +36,13 @@ internal static class SpawnCommand
             prefab,
             at,
         };
-        spawn.SetAction(parsed => Spawn(parsed.GetRequiredValue(prefab), parsed.GetValue(at) ?? []));
+        spawn.SetAction(parsed =>
+            SpawnAsync(parsed.GetRequiredValue(prefab), parsed.GetValue(at) ?? []).FireAndForget()
+        );
 
         return spawn;
 
-        void Spawn(string name, string[] where)
+        async Task SpawnAsync(string name, string[] where)
         {
             if (!CommandLookups.IsProjectOpen(app, $"spawn {name} in"))
                 return;
@@ -62,13 +64,9 @@ internal static class SpawnCommand
                 return;
             }
 
-            SpawnAsync(found, name, new Transform { Position = position.Value }).FireAndForget();
-        }
-
-        async Task SpawnAsync(Handle<Prefab> found, string name, Transform place)
-        {
+            Transform place = new() { Position = position.Value };
             Result<ImmutableArray<Entity>> spawned = await queue
-                .ChangeWorldAsync(() => world.SpawnAsync(found, place, null, CancellationToken.None))
+                .ChangeWorldAsync(world.SpawnAsync(found, place, null, CancellationToken.None))
                 .ConfigureAwait(false);
             if (!spawned.Ok)
             {

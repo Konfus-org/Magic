@@ -40,15 +40,14 @@ internal sealed class CommandQueue(EventCoordinator events)
     public void Hold(Func<bool> isHeld) => _hold = isHeld;
 
     /// <summary>
-    /// Runs <paramref name="change"/>, a change to the world, and returns what it returns: <see cref="IsChangingWorld"/>
-    /// holds until it ends.
+    /// Returns <paramref name="change"/>, a change to the world a command started: <see cref="IsChangingWorld"/> holds
+    /// until it ends.
     /// </summary>
-    public Task<T> ChangeWorldAsync<T>(Func<Task<T>> change)
+    public Task<T> ChangeWorldAsync<T>(Task<T> change)
     {
-        Task<T> changing = change();
-        _change = changing;
+        _change = change;
 
-        return changing;
+        return change;
     }
 
     /// <summary>

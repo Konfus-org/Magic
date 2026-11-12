@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
@@ -61,15 +62,7 @@ internal sealed class Gems : IDisposable
         "From one frame the render thread draws to the next, the waits for the GPU and the display among it."
     );
 
-    private readonly IServiceProvider _provider;
-
     private readonly App _app;
-
-    private readonly Settings _settings;
-
-    private readonly IFileSystem _files;
-
-    private readonly AssetManager _assets;
 
     private readonly World _world;
 
@@ -134,12 +127,22 @@ internal sealed class Gems : IDisposable
     private Frame _renderFrame;
 
     /// <summary>
-    /// Makes the gems <paramref name="registered"/> through <paramref name="provider"/>, which was built from the services
-    /// they were registered with.
+    /// Registers the gems <paramref name="listed"/> with <paramref name="services"/>, makes them through the provider
+    /// built from those, and starts the render thread. Each gem's folder is watched for a build, and
+    /// what it brings is registered before it is made, so its constructor can find it: its folder of assets, its asset
+    /// types and its code, which goes when it does. Then the gem is set up: the app's window for as long as it lasts
+    /// when it provides one, the world's ECS, its settings, its place on the log when it is a sink, the asset types it
+    /// reads and writes, and its part of the frame; and, once every gem is made, its hooks into domain loading, unless
+    /// it can never render.
     /// </summary>
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Whatever a gem's constructor throws, it is logged and the gem is not made; the others go on."
+    )]
     public Gems(
-        List<GemInfo> registered,
-        IServiceProvider provider,
+        ImmutableArray<string> listed,
+        ServiceCollection services,
         App app,
         Settings settings,
         IFileSystem files,
@@ -149,15 +152,117 @@ internal sealed class Gems : IDisposable
         Threads threads
     )
     {
-        _provider = provider;
         _app = app;
-        _settings = settings;
-        _files = files;
-        _assets = assets;
         _world = world;
         _events = events;
         _threads = threads;
-        Load(registered);
+        List<RegisteredGem> registered = GemRegistry.Register(files, listed, services);
+
+        // Never disposed, since its singletons are the gems, which Dispose ends.
+        services.MakeReadOnly();
+        IServiceProvider provider = services.BuildServiceProvider();
+
+        // A constructor may load an asset of a type a gem made after it reads.
+        assets.Expect(registered.ConvertAll(gem => gem.Type));
+        foreach (RegisteredGem gem in registered)
+        {
+            // A build writes the gem's assemblies; the run restarts once it has settled.
+            Result<IDisposable> watched = files.Watch(
+                gem.Folder,
+                "*.dll",
+                _ => Volatile.Write(ref _buildTimestamp, Stopwatch.GetTimestamp())
+            );
+            if (watched.Ok)
+                _watches.Add(new Subscription(watched.Value.Dispose));
+            else
+                Log.Warn($"Gem {gem.Name} is not watched, so a build of it won't restart the run: {watched.Error}");
+
+            if (gem.Resources is not null)
+                assets.Register(gem.Resources);
+
+            assets.Register(gem.Type.Assembly);
+            Subscription code = Assemblies.Register(gem.Type.Assembly);
+            IGem made;
+            try
+            {
+                made = (IGem)provider.GetRequiredService(gem.Type);
+            }
+            catch (Exception ex)
+            {
+                // A missing service, a gem it needs that wasn't made, or a gem that can't start says why in the message;
+                // anything else is a bug in the gem, and its stack says where.
+                string why = ex is InvalidOperationException ? ex.Message : ex.ToString();
+                Log.Error($"Gem {gem.Name} was not made: {why}");
+                assets.Drop(gem.Type);
+                code.Dispose();
+                continue;
+            }
+
+            LoadedGem loaded = new(
+                made,
+                gem.Name,
+                [
+                    new Subscription(gem.Context.Unload),
+                    new Subscription(() => (made as IDisposable)?.Dispose()),
+                    code,
+                    assets.Register(made),
+                ]
+            );
+            _loaded.Add(loaded);
+
+            // The gem is an IWindow in any mode, but a headless run has no window.
+            if (made is IWindow window && !_app.IsHeadless)
+            {
+                _app.Window = window;
+
+                // The window is the gem, which can't unload while the app holds it.
+                loaded.Ends.Add(new Subscription(() => _app.Window = null));
+            }
+
+            if (made is IPlatform platform)
+            {
+                _app.Platform = platform;
+                loaded.Ends.Add(new Subscription(() => _app.Platform = null));
+            }
+
+            // A gem whose settings can't be listed still runs by them; only the console and tools can't reach them.
+            try
+            {
+                loaded.Ends.Add(settings.Register(made));
+            }
+            catch (InvalidOperationException ex)
+            {
+                Log.Error($"Gem {gem.Name}'s settings can't be reached: {ex.Message}");
+            }
+
+            if (made is ILogSink sink)
+                loaded.Ends.Add(Log.Register(sink));
+
+            if (made is IEcs ecs)
+                loaded.Ends.Add(_world.Register(ecs));
+
+            // A gem that makes what another makes, or closes a cycle, renders nothing; the others go on.
+            try
+            {
+                loaded.Ends.Add(_rendering.Register(made));
+            }
+            catch (InvalidOperationException ex)
+            {
+                Log.Error($"Gem {gem.Name} renders nothing: {ex.Message}");
+            }
+
+            string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
+            Log.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");
+        }
+
+        // Once every gem renders, a gem that must take what no listed gem makes never renders, so it holds no domain's
+        // loading back either.
+        foreach (LoadedGem loaded in _loaded)
+        {
+            if (loaded.Instance is IHookIntoDomainLoading hooks && !_rendering.HasMissingInput(loaded.Instance))
+                loaded.Ends.Add(_world.Register(hooks));
+        }
+
         _graph.Gpu = _loaded.Find(static gem => gem.Instance is IGraphicsApi)?.Instance as IGraphicsApi;
         _threads.Start(EngineThread.Render, Render);
     }
@@ -188,7 +293,14 @@ internal sealed class Gems : IDisposable
     /// </summary>
     public void Pump()
     {
-        RestartIfBuilt();
+        // A build writes each gem and its dependencies in turn, so the run restarts once it left the files alone a
+        // while.
+        long built = Volatile.Read(ref _buildTimestamp);
+        if (built != 0 && Stopwatch.GetElapsedTime(built) >= _settleTime)
+        {
+            Log.Info("A gem's code changed, so the run restarts.");
+            _app.Restart();
+        }
 
         // While the loading screen shows, time runs as it is, so it moves however the world it replaces was paused.
         bool isPaused = _world.IsPaused && !_world.IsShowingLoadingScreen;
@@ -306,9 +418,9 @@ internal sealed class Gems : IDisposable
 
     /// <summary>
     /// One frame of the render thread, which runs them as fast as the GPU and the display let it, never waiting for the
-    /// game thread: every gem's Render into the frame's graph, then the GPU provider's Present of it. It tells the world which published frame it drew at least, the gems taking what
-    /// was published when it began or newer, and wakes the game thread if it waits for that. A render frame has no
-    /// messages.
+    /// game thread: every gem's Render into the frame's graph, then the GPU provider's Present of it. It tells the world
+    /// which published frame it drew at least, the gems taking what was published when it began or newer, and wakes the
+    /// game thread if it waits for that. A render frame has no messages.
     /// </summary>
     private void Render()
     {
@@ -325,125 +437,6 @@ internal sealed class Gems : IDisposable
         _graph.Finish();
         _world.DrawnFrame = published;
         _drawn.Set();
-    }
-
-    /// <summary>
-    /// Makes each gem, after registering what it brings so its constructor can find it: its folder of assets, its asset
-    /// types and its code, which goes when it does. Then it sets the gem up: the app's window for as long as it lasts when it provides one, the world's ECS, its
-    /// settings, its place on the log when it is a sink, the asset types it reads and writes, and its part of the frame; and, once every
-    /// gem is made, its hooks into domain loading, unless it can never render.
-    /// </summary>
-    [SuppressMessage(
-        "Design",
-        "CA1031:Do not catch general exception types",
-        Justification = "Whatever a gem's constructor throws, it is logged and the gem is not made; the others go on."
-    )]
-    private void Load(List<GemInfo> registered)
-    {
-        // A constructor may load an asset of a type a gem made after it reads.
-        _assets.Expect(registered.ConvertAll(gem => gem.Type));
-        foreach (GemInfo gem in registered)
-        {
-            Watch(gem);
-            if (gem.Resources is not null)
-                _assets.Register(gem.Resources);
-
-            _assets.Register(gem.Type.Assembly);
-            Subscription code = Assemblies.Register(gem.Type.Assembly);
-            IGem made;
-            try
-            {
-                made = (IGem)_provider.GetRequiredService(gem.Type);
-            }
-            catch (Exception ex)
-            {
-                // A missing service, a gem it needs that wasn't made, or a gem that can't start says why in the message;
-                // anything else is a bug in the gem, and its stack says where.
-                string why = ex is InvalidOperationException ? ex.Message : ex.ToString();
-                Log.Error($"Gem {gem.Name} was not made: {why}");
-                _assets.Drop(gem.Type);
-                code.Dispose();
-                continue;
-            }
-
-            LoadedGem loaded = new(
-                made,
-                gem.Name,
-                [
-                    new Subscription(gem.Context.Unload),
-                    new Subscription(() => (made as IDisposable)?.Dispose()),
-                    code,
-                    _assets.Register(made),
-                ]
-            );
-            _loaded.Add(loaded);
-
-            // The gem is an IWindow in any mode, but a headless run has no window.
-            if (made is IWindow window && !_app.IsHeadless)
-            {
-                _app.Window = window;
-
-                // The window is the gem, which can't unload while the app holds it.
-                loaded.Ends.Add(new Subscription(() => _app.Window = null));
-            }
-
-            if (made is IPlatform platform)
-            {
-                _app.Platform = platform;
-                loaded.Ends.Add(new Subscription(() => _app.Platform = null));
-            }
-
-            // A gem whose settings can't be listed still runs by them; only the console and tools can't reach them.
-            try
-            {
-                loaded.Ends.Add(_settings.Register(made));
-            }
-            catch (InvalidOperationException ex)
-            {
-                Log.Error($"Gem {gem.Name}'s settings can't be reached: {ex.Message}");
-            }
-
-            if (made is ILogSink sink)
-                loaded.Ends.Add(Log.Register(sink));
-
-            if (made is IEcs ecs)
-                loaded.Ends.Add(_world.Register(ecs));
-
-            // A gem that makes what another makes, or closes a cycle, renders nothing; the others go on.
-            try
-            {
-                loaded.Ends.Add(_rendering.Register(made));
-            }
-            catch (InvalidOperationException ex)
-            {
-                Log.Error($"Gem {gem.Name} renders nothing: {ex.Message}");
-            }
-
-            string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
-            Log.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");
-        }
-
-        // Once every gem renders, a gem that must take what no listed gem makes never renders, so it holds no domain's
-        // loading back either.
-        foreach (LoadedGem loaded in _loaded)
-        {
-            if (loaded.Instance is IHookIntoDomainLoading hooks && !_rendering.HasMissingInput(loaded.Instance))
-                loaded.Ends.Add(_world.Register(hooks));
-        }
-    }
-
-    /// <summary>
-    /// Restarts the run once a build has written a gem's files and then left them alone for a while: a build writes each
-    /// gem and its dependencies in turn.
-    /// </summary>
-    private void RestartIfBuilt()
-    {
-        long built = Volatile.Read(ref _buildTimestamp);
-        if (built == 0 || Stopwatch.GetElapsedTime(built) < _settleTime)
-            return;
-
-        Log.Info("A gem's code changed, so the run restarts.");
-        _app.Restart();
     }
 
     /// <summary>
@@ -464,26 +457,6 @@ internal sealed class Gems : IDisposable
                 new KeyValuePair<string, object?>(Metrics.HookTag, _hookNames[(int)hook])
             );
         }
-    }
-
-    /// <summary>
-    /// Watches <paramref name="gem"/>'s folder for a build, which writes its assemblies.
-    /// </summary>
-    private void Watch(GemInfo gem)
-    {
-        Result<IDisposable> watched = _files.Watch(
-            gem.Folder,
-            "*.dll",
-            _ => Volatile.Write(ref _buildTimestamp, Stopwatch.GetTimestamp())
-        );
-        if (!watched.Ok)
-        {
-            Log.Warn($"Gem {gem.Name} is not watched, so a build of it won't restart the run: {watched.Error}");
-
-            return;
-        }
-
-        _watches.Add(new Subscription(watched.Value.Dispose));
     }
 
     /// <summary>

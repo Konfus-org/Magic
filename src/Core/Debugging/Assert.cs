@@ -57,7 +57,8 @@ public static class Assert
     [SuppressMessage(
         "ApiDesign",
         "RS0030:Do not use banned APIs",
-        Justification = "A crash prints straight to the terminal, past sinks that may be what failed."
+        Justification = "A crash prints straight to the terminal, past sinks that may be what failed, and can come "
+            + "before any file system exists."
     )]
     public static void Now(
         string message = "",
@@ -73,7 +74,6 @@ public static class Assert
         Log.Critical(message, member, file, line);
         Log.Flush();
 
-        DateTime time = DateTime.Now;
         string where = $"{Path.GetFileName(file)}:{line} in {member}";
 
         // Skips Now, so the stack starts where the crash was called.
@@ -93,7 +93,23 @@ public static class Assert
                 text.Append(logged.ToString()).Append('\n');
         }
 
-        string crashFile = WriteCrashFile(time, text.ToString().ReplaceLineEndings("\n"));
+        // To Logs/<time>.crash beside Magic.
+        string folder = Path.Join(AppContext.BaseDirectory, "Logs");
+        string path = Path.Join(
+            folder,
+            DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss.fff", CultureInfo.InvariantCulture) + ".crash"
+        );
+        string crashFile;
+        try
+        {
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(path, text.ToString().ReplaceLineEndings("\n"));
+            crashFile = $"Crash file: {path}";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            crashFile = $"The crash file {path} could not be written: {ex.Message}";
+        }
 
         Console.Error.WriteLine($"Crash: {message} ({where})");
         Console.Error.WriteLine(crashFile);
@@ -108,33 +124,4 @@ public static class Assert
 
     private static string FormatFailed(string expression, string message) =>
         message.Length == 0 ? $"Assert failed: {expression}" : $"Assert failed: {expression}: {message}";
-
-    /// <summary>
-    /// Writes <paramref name="text"/> to Logs/&lt;time&gt;.crash beside Magic, and says where it went or why it could
-    /// not.
-    /// </summary>
-    [SuppressMessage(
-        "ApiDesign",
-        "RS0030:Do not use banned APIs",
-        Justification = "A crash can come before any file system exists."
-    )]
-    private static string WriteCrashFile(DateTime time, string text)
-    {
-        string folder = Path.Join(AppContext.BaseDirectory, "Logs");
-        string path = Path.Join(
-            folder,
-            time.ToString("yyyy-MM-dd_HH-mm-ss.fff", CultureInfo.InvariantCulture) + ".crash"
-        );
-        try
-        {
-            Directory.CreateDirectory(folder);
-            File.WriteAllText(path, text);
-
-            return $"Crash file: {path}";
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return $"The crash file {path} could not be written: {ex.Message}";
-        }
-    }
 }
