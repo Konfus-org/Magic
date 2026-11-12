@@ -143,9 +143,10 @@ internal sealed class Rendering
     }
 
     /// <summary>
-    /// <paramref name="steps"/> in place of the gems before, each after every gem that makes what it takes, in their own
-    /// order otherwise, and each bound to its makers. Throws before changing anything when two make one type, or when
-    /// some take what others among them make round a cycle.
+    /// <paramref name="steps"/> in place of the gems before, each after every gem that makes what it takes, each that
+    /// takes and makes nothing after all the others, so it sees the whole frame's failures, in their own order
+    /// otherwise, and each bound to its makers. Throws before changing anything when two make one type, or when some
+    /// take what others among them make round a cycle.
     /// </summary>
     private void Order(List<Step> steps)
     {
@@ -164,6 +165,8 @@ internal sealed class Rendering
         }
 
         // The first waiting gem whose makers are all placed goes next, so gems keep their order where it is free.
+        // A gem that takes and makes nothing waits at the end; the sort keeps the order of equals.
+        steps = [.. steps.OrderBy(static step => step.Inputs.IsEmpty && step.Outputs.IsEmpty)];
         List<Step> ordered = new(steps.Count);
         while (steps.Count > 0)
         {

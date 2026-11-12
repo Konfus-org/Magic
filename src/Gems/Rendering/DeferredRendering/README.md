@@ -74,7 +74,7 @@ the texture reader, with a gem that draws its geometry.
   `Rendering.UpscaleFilter`, whose names are in `TextureFilter`; where a gem upscales it, that gem's picture is copied
   to the window instead. A screenshot is of what the window shows, at the size the picture is shown at.
 - Each failure that a gem or Core tells `RenderGraph.Fail` in a frame is a line of a banner across the top of the
-  window, over the picture and the debug UI: a bar that flashes in the colour of its kind, and its text. The banner
+  window, over the picture: a bar that flashes in the colour of its kind, and its text. The banner
   shows eight lines at most, and the last then counts the rest. It draws also when the view was not made.
 
 ## Settings
