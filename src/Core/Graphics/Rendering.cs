@@ -20,9 +20,12 @@ internal sealed class Rendering
 {
     private const string Hook = "Render";
 
-    private readonly List<Step> _steps = [];
+    /// <summary>
+    /// The seconds a step that threw waits before it is tried again.
+    /// </summary>
+    private const double RetryPauseSec = 3;
 
-    private readonly List<(string What, string Reason)> _removed = [];
+    private readonly List<Step> _steps = [];
 
     /// <summary>
     /// <paramref name="part"/>'s steps of the frame, one for each render form it implements, while it renders, until
@@ -58,9 +61,10 @@ internal sealed class Rendering
 
     /// <summary>
     /// Every gem's parts of the frame, in order, each gem timed once for all its parts, into <paramref name="graph"/>
-    /// emptied of the last frame's failures. A part that takes what no gem makes, or whose gem throws, renders no more,
-    /// and what it would have made stays unmade, so every part that must take it renders no more either; each such part
-    /// is a <see cref="RenderFailure.Pass"/> failure in every frame after.
+    /// emptied of the last frame's failures. A part that takes what no gem makes, or whose gem threw less than
+    /// <see cref="RetryPauseSec"/> ago, is skipped and is a <see cref="RenderFailure.Pass"/> failure in that frame; what
+    /// it would have made stays unmade, so a part that must take it is skipped too, and one that may take it runs
+    /// without it.
     /// </summary>
     [SuppressMessage(
         "Design",
@@ -70,33 +74,34 @@ internal sealed class Rendering
     public void Pump(in Frame frame, RenderGraph graph)
     {
         graph.StartFailures();
-        foreach ((string what, string reason) in _removed)
+        foreach (Step step in _steps)
         {
-            graph.Fail(RenderFailure.Pass, what, reason);
-        }
-
-        for (int i = 0; i < _steps.Count; i++)
-        {
-            Step step = _steps[i];
+            long start = Metrics.HookDurations.Start();
             if (step.Missing is { } missing)
             {
-                _removed.Add(($"{step.Gem} lacks an input", $"It takes {missing.Name}, which no listed gem makes."));
-                graph.Fail(RenderFailure.Pass, _removed[^1].What, _removed[^1].Reason);
-                _steps.RemoveAt(i--);
-                continue;
+                graph.Fail(
+                    RenderFailure.Pass,
+                    $"{step.Gem} lacks an input",
+                    $"It takes {missing.Name}, which no listed gem makes."
+                );
+            }
+            else if (step.Thrown is not { } thrown || frame.AppSec >= thrown.RetrySec)
+            {
+                try
+                {
+                    step.Run(frame, graph);
+                    step.Thrown = null;
+                }
+                catch (Exception ex)
+                {
+                    step.Thrown = (ex, frame.AppSec + RetryPauseSec);
+                }
             }
 
-            long start = Metrics.HookDurations.Start();
-            try
-            {
-                step.Run(frame, graph);
-            }
-            catch (Exception ex)
-            {
-                _removed.Add(($"{step.Gem} stopped rendering", $"It threw in Render: {ex}"));
-                graph.Fail(RenderFailure.Pass, _removed[^1].What, _removed[^1].Reason);
-                _steps.RemoveAt(i--);
-            }
+            // Told each frame it is out, so the failure is logged once: when it first threw, or threw again after a frame
+            // it rendered in.
+            if (step.Thrown is { } failure)
+                graph.Fail(RenderFailure.Pass, $"{step.Gem} stopped rendering", $"It threw in Render: {failure.Error}");
 
             // A gem with several steps is timed once, by its last step, for the time of all of them.
             long since = start == 0 ? 0 : start - step.Earlier;
@@ -225,9 +230,15 @@ internal sealed class Rendering
         public abstract ImmutableArray<Type> Inputs { get; }
 
         /// <summary>
-        /// A type it must take that no gem makes, once bound; it can never render.
+        /// A type it must take that no gem makes, once bound; it doesn't render until a gem that makes it registers.
         /// </summary>
         public Type? Missing { get; protected set; }
+
+        /// <summary>
+        /// What the gem last threw in this step, and the <see cref="Frame.AppSec"/> from which it is tried again; null
+        /// while it renders.
+        /// </summary>
+        public (Exception Error, double RetrySec)? Thrown { get; set; }
 
         /// <summary>
         /// The gem's next step in the order, which is timed for both; null for its last.
@@ -328,6 +339,7 @@ internal sealed class Rendering
         /// </summary>
         public override void Bind(IReadOnlyDictionary<Type, Maker> makers)
         {
+            Made = null;
             Missing = null;
             if (_constructor is null)
                 return;
