@@ -40,19 +40,21 @@ public readonly record struct ShadingInput(
 );
 
 /// <summary>
-/// The renderer, in two steps a frame. The view's step keeps the world on the GPU for the gems that draw it:
+/// The renderer, in three steps a frame. The view's step keeps the world on the GPU for the gems that draw it:
 /// <see cref="PublishInputs"/> copies what the frame draws out of the entities and publishes it; on the render thread the step
 /// takes the newest published, puts the models, materials, textures, instances, lights and sky's tables on the GPU,
 /// uploads the frame's rows, and makes the frame's <see cref="GpuView"/> and its <see cref="GpuInstances"/>. The
 /// shading's step lights that world, deferred: from the view and the GBuffer a geometry gem drew into it, the shading,
 /// shadowed by the frame's shadow mask where there is one, the nearest glass over it, the effects, a debug view where
-/// one is asked for, and the output into the window and any screenshot asked for. Where nothing made the world as rays
+/// one is asked for, and the output into the window and any screenshot asked for. The banner's step draws the frame's
+/// render failures over the top of the window, even when the view was not made. Where nothing made the world as rays
 /// see it, the shadows, the indirect light or the air, their rows of the frame's buffer are 0. As a domain replaces the
 /// world, it forgets the view's history and holds the loading screen until what comes is on the GPU and the shading's
 /// shaders are built.
 /// </summary>
 public sealed class Renderer
-    : IRender<ViewInput, (GpuView, GpuInstances)>,
+    : IRender,
+        IRender<ViewInput, (GpuView, GpuInstances)>,
         IRenderFrom<ShadingInput>,
         IHookIntoDomainLoading,
         IDisposable
@@ -126,6 +128,8 @@ public sealed class Renderer
 
     private readonly PixelEffects _pixelEffects = new();
 
+    private readonly FailureBanner _banner;
+
     private readonly IGraphicsApi _gpu;
 
     private readonly EventCoordinator _events;
@@ -196,6 +200,7 @@ public sealed class Renderer
         _sky = new SkyLuts(assets);
         _lightTiles = new LightTiles(assets);
         _effects = new Effects(assets, _resources);
+        _banner = new FailureBanner(assets);
         _viewShaders = _lightTiles.Shaders;
         _skyShaders = _sky.Shaders;
 
@@ -696,6 +701,11 @@ public sealed class Renderer
             _events.Publish(new FirstFrameDrawn());
         }
     }
+
+    /// <summary>
+    /// Draws the frame's render failures over the window; nothing when none failed.
+    /// </summary>
+    public void Render(in Frame frame, RenderGraph graph) => _banner.Record(graph, frame);
 
     /// <summary>
     /// Numbers the world anew, so the view's step forgets the view's history at the first frame of what comes. On

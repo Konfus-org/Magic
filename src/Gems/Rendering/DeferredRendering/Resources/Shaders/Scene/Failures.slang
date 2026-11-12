@@ -62,6 +62,7 @@ static const uint CopyGap = 3u;
 
 // The font: printable ASCII from code 32, each character 5 by 7 dots, bit = row * 5 + column from the top left,
 // bits 0 to 31 in x and 32 to 34 in y. A 64-bit table draws wrong on the engine's target, so it is two uints.
+// FailureBanner.slang holds a copy, as that module imports nothing so that it can be built with no file.
 static const uint FirstCode = 32u;
 static const uint LastCode = 126u;
 static const uint2 Font[95] = {

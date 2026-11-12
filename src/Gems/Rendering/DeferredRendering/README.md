@@ -1,11 +1,11 @@
 # DeferredRendering
 
-The renderer. Each frame it runs two render steps. The first keeps the world on the GPU for the gems that draw it:
+The renderer. Each frame it runs three render steps. The first keeps the world on the GPU for the gems that draw it:
 the view and its targets at the picture's size, the frame's buffer and its rows, the models, materials and textures
 every renderer draws with, the instances, the lights with each tile's lights, and the sky's tables. The second lights
 that world into the window, deferred: the GBuffer a geometry gem draws, lit by the sun and the sky. When the console
 asks for a screenshot, it hands the frame as a texture to the gem that writes textures. It holds the types the
-rendering gems share.
+rendering gems share. The third draws the frame's render failures over the window.
 
 To use it, list `DeferredRendering` in a project's `.magic` file after the GPU provider, the ECS, the model reader and
 the texture reader, with a gem that draws its geometry.
@@ -73,6 +73,9 @@ the texture reader, with a gem that draws its geometry.
 - The finished picture's middle tones are shown at `Rendering.Gamma`, and it is stretched over the window with
   `Rendering.UpscaleFilter`, whose names are in `TextureFilter`; where a gem upscales it, that gem's picture is copied
   to the window instead. A screenshot is of what the window shows, at the size the picture is shown at.
+- Each failure that a gem or Core tells `RenderGraph.Fail` in a frame is a line of a banner across the top of the
+  window, over the picture and the debug UI: a bar that flashes in the colour of its kind, and its text. The banner
+  shows eight lines at most, and the last then counts the rest. It draws also when the view was not made.
 
 ## Settings
 
