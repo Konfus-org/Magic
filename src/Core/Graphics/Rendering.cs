@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Linq.Expressions;
@@ -54,7 +55,7 @@ internal sealed class Rendering
     public bool HasMissingInput(IGem gem) => _steps.Exists(step => step.Instance == gem && step.Missing is not null);
 
     /// <summary>
-    /// Every gem's part of the frame, in order, each timed; a gem that throws is logged and renders no more, and what
+    /// Every gem's parts of the frame, in order, each gem timed once for all its parts; a gem that throws is logged and renders no more, and what
     /// it would have made stays unmade, so every gem that must take it renders no more either.
     /// </summary>
     [SuppressMessage(
@@ -85,8 +86,17 @@ internal sealed class Rendering
                 _steps.RemoveAt(i--);
             }
 
+            // A gem with several steps is timed once, by its last step, for the time of all of them.
+            long since = start == 0 ? 0 : start - step.Earlier;
+            step.Earlier = 0;
+            if (since != 0 && step.Next is { } next)
+            {
+                next.Earlier = Stopwatch.GetTimestamp() - since;
+                continue;
+            }
+
             Metrics.HookDurations.RecordSince(
-                start,
+                since,
                 new KeyValuePair<string, object?>(Metrics.GemNameTag, step.Gem),
                 new KeyValuePair<string, object?>(Metrics.HookTag, Hook)
             );
@@ -158,9 +168,11 @@ internal sealed class Rendering
             steps.RemoveAt(next);
         }
 
-        foreach (Step step in ordered)
+        for (int i = 0; i < ordered.Count; i++)
         {
+            Step step = ordered[i];
             step.Bind(makers);
+            step.Next = ordered.Skip(i + 1).FirstOrDefault(other => other.Instance == step.Instance);
         }
 
         _steps.Clear();
@@ -201,6 +213,16 @@ internal sealed class Rendering
         /// A type it must take that no gem makes, once bound; it can never render.
         /// </summary>
         public Type? Missing { get; protected set; }
+
+        /// <summary>
+        /// The gem's next step in the order, which is timed for both; null for its last.
+        /// </summary>
+        public Step? Next { get; set; }
+
+        /// <summary>
+        /// The ticks the gem's steps before it took this frame.
+        /// </summary>
+        public long Earlier { get; set; }
 
         /// <summary>
         /// Records the gem's passes, when every input it must take was made this frame, and keeps what it made.
