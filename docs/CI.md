@@ -1,10 +1,10 @@
 # Continuous integration
 
 GitHub runs the checks on every pull request into `dev` or `main`, on every push to either, and by hand from the
-Actions tab. They run `tools/Scripts/Validate.ps1` in `Release` ([Tools](../../tools/README.md)): the Build and
-Headless steps on Windows, Linux and macOS, and the Test step on Linux. They also check that every commit's subject
-starts with `type: ` ([Commits](../../AGENTS.md#commits)), check every link in the Markdown and run GitHub's
-CodeQL analysis on the C#. The Screenshot step doesn't run here.
+Actions tab. The workflows are in `.github/workflows/`. They run `tools/Scripts/Validate.ps1` in `Release`
+([Tools](TOOLS.md#validateps1)): the Build and Headless steps on Windows, Linux and macOS, and the Test step on Linux.
+They also check that every commit's subject starts with `type: ` ([Commits](../AGENTS.md#commits)), check every link
+in the Markdown and run GitHub's CodeQL analysis on the C#. The Screenshot step doesn't run here.
 
 - The repository's rulesets require every check to pass before a merge into `dev` or `main`. Give every job a name
   no other job has.

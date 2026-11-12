@@ -1,7 +1,7 @@
 # Tools
 
-The scripts that build and check Magic are in `Scripts/`, and the analyzer that checks the house rules is in
-[`Analyzers/`](Analyzers/README.md). Nothing here ships.
+The scripts that build and check Magic are in `tools/Scripts/`, and the analyzer that checks the house rules is in
+`tools/Analyzers/` ([Analyzers](#analyzers)). Nothing in `tools/` ships.
 
 Each script is one PowerShell file that runs under both `pwsh` and Windows PowerShell 5.1, so don't use what 5.1
 lacks (`&&`, `?:`, `??`). A script runs from any folder and exits `0` when it passes. Its help comment lists its
@@ -27,7 +27,7 @@ or package reference nothing compiled uses, which the build otherwise refuses.
 Runs the checks a change must pass, in order, and stops at the first failure:
 
 1. **Build:** builds `src/Magic.slnx`. Every warning is an error, and so is a file CSharpier would change.
-2. **Test:** runs the tests against that build.
+2. **Test:** runs the tests against that build ([Tests](#tests)).
 3. **Headless:** runs the sample project without a window under `--fail-on-error`, types `exit` into it and passes
    when it exits `0`. A run still going after `-Seconds` is killed and fails.
 4. **Screenshot:** runs `Screenshot.ps1` on the sample project. Needs a display and a GPU.
@@ -59,7 +59,7 @@ The window's title is the branch checked out where the script is, or `-Name`.
 
 Runs `Format.ps1`, then the steps of `Validate.ps1` that `-Change` needs: `Docs` builds, `Code` adds Test and
 Headless, and `Visual` adds Test and Screenshot. If they pass, it stamps the checkout's exact files with the level,
-and a state already stamped returns at once. It also points git at the repository's [hooks](../.githooks/README.md).
+and a state already stamped returns at once. It also points git at the repository's [hooks](#git-hooks).
 
 ## Claim.ps1
 
@@ -70,8 +70,8 @@ The SessionStart agent hook lists the claims, and the edit agent hook refuses an
 
 ## Templates
 
-`VS Templates/` holds the `dotnet new` templates for a gem and a sample project, and `InstallTemplates.ps1` installs
-them. Run it once, and again after a template changes. Each template is a project in the solution's
+`tools/VS Templates/` holds the `dotnet new` templates for a gem and a sample project, and `InstallTemplates.ps1`
+installs them. Run it once, and again after a template changes. Each template is a project in the solution's
 `Tools/VS Templates` folder and builds where it is, so a template that no longer compiles fails the build.
 
 To add a gem:
@@ -92,4 +92,39 @@ To add a sample project:
   `dotnet sln src/Magic.slnx add samples/Foo/Samples.Foo.csproj --solution-folder Samples`.
 
 Either makes `samples/Foo/Foo.magic`, listing no gems, and `Samples.Foo.csproj`, whose Run builds Magic and opens the
-project ([Samples](../samples/README.md)).
+project ([Samples](../README.md#samples)).
+
+## Analyzers
+
+`tools/Analyzers/` holds the rules of the [Code Standards](CODE_STANDARDS.md) that no built-in rule checks, as a Roslyn
+analyzer every other project in the solution runs through `Directory.Build.props`. A rule's id is `MG` and a number;
+each is one class whose summary says what it checks and names the standard, and the build and the editor report it
+like any other rule. `.editorconfig` sets the severities.
+
+Every rule has a code fix, in a class beside it named for the rule with `CodeFix` in place of `Analyzer`, so the
+editor offers it and `tools/Scripts/Format.ps1` can apply it. A rule whose fix would need a decision the author must
+make still has one: it does the mechanical part and leaves the decision visible.
+
+To add a rule: the analyzer and its fix, a line in `AnalyzerReleases.Unshipped.md`, the severity in `.editorconfig`,
+and the standard it enforces named in its summary. Visual Studio keeps the analyzer it loaded; restart it after a
+change here.
+
+## Git hooks
+
+Git runs the hooks in `.githooks/` once `core.hooksPath` names that folder: `git config core.hooksPath .githooks`,
+once per clone, which `tools/Scripts/AgentTaskComplete.ps1` also sets ([Commits](../AGENTS.md#commits)).
+
+- `prepare-commit-msg` starts a commit's subject with `type: `, such as `feat: `. The type comes from the branch's
+  name, or from the staged files when they are all Markdown, CI, build or test files.
+- `commit-msg` refuses a commit whose subject still doesn't start with `type: `, or has a scope such as
+  `feat(core): `.
+
+## Tests
+
+The unit tests are in `tests/`, one project per gem or library under test, named `<Gem>.Tests`. They run on xunit
+through the Microsoft testing platform, which `global.json` selects.
+
+- **Run them all:** `dotnet test --solution src/Magic.slnx`.
+- **Run one project:** `dotnet test --project tests/<Gem>.Tests/<Gem>.Tests.csproj`.
+- A test project sees the gem's internal members through `InternalsVisibleTo` in the gem's project file.
+- A test builds what it checks from small data in the test itself, never from an asset on disk.

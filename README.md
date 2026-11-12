@@ -50,10 +50,23 @@ src/Core/        the engine: the Magic program and everything it is built from
 src/Gems/        the plugins that come with Magic, each built to Gems/<Name>/ beside it
 samples/         the sample projects, which show and test Magic
 tools/           the scripts and the analyzers; nothing here ships
-docs/            how to contribute and the code standards
+docs/            how to contribute, the code standards, the gems, the tools, debugging and CI
 Build/           build output, not in git
 ```
 
+## Samples
+
+Each folder in `samples/` is one project that shows what Magic does and that `tools/Scripts/Validate.ps1` runs: its
+`.magic` file and the csproj that holds its own code. `dotnet run --project samples/<Name>` builds Magic and opens the
+project headless; type `exit` to end the run. To open one with a window, build the solution and run
+`dotnet run --project src/Core -- open samples/<Name>/<Name>.magic`. Make another with the project template
+([Templates](docs/TOOLS.md#templates)).
+
+Every sample lists the gem in `samples/Shared/`, which brings the assets they share in its `Resources/` folder. Its
+player is one entity tagged `player`, with a transform, a camera and a spin that turns it in place. Each sample names
+it as its `player`, and a domain puts it at its entity tagged `spawn`.
+
 ## Contributing
 
-See [Contributing](docs/CONTRIBUTING.md), the [Code Standards](docs/CODE_STANDARDS.md) and [Tools](tools/README.md).
+See [Contributing](docs/CONTRIBUTING.md), the [Code Standards](docs/CODE_STANDARDS.md), [Gems](docs/GEMS.md),
+[Tools](docs/TOOLS.md), [Debugging](docs/DEBUGGING.md) and [CI](docs/CI.md).

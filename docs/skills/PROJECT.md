@@ -94,7 +94,7 @@ The [profiling skill](profiling/SKILL.md) uses these values.
 
 ### The check run
 
-Magic measures itself on its `Magic.*` meters and .NET's `System.Runtime` meter (the DebugTools README). The console
+Magic measures itself on its `Magic.*` meters and .NET's `System.Runtime` meter ([Debugging](../DEBUGGING.md#measuring)). The console
 command `stats <category> <seconds>` logs them.
 
 ```powershell

@@ -25,16 +25,19 @@
   </Folder>
   <Folder Name="/Docs/">
     <File Path="../AGENTS.md" />
+    <File Path="../docs/CI.md" />
     <File Path="../docs/CODE_OF_CONDUCT.md" />
     <File Path="../docs/CODE_STANDARDS.md" />
     <File Path="../docs/CONTRIBUTING.md" />
+    <File Path="../docs/DEBUGGING.md" />
+    <File Path="../docs/GEMS.md" />
+    <File Path="../docs/TOOLS.md" />
   </Folder>
   <Folder Name="/Tests/">
     <Project Path="../tests/ClusteredGeometry.Tests/ClusteredGeometry.Tests.csproj" />
     <Project Path="../tests/Magic.Core.Tests/Magic.Core.Tests.csproj" />
   </Folder>
   <Folder Name="/Samples/">
-    <File Path="../samples/README.md" />
   </Folder>
     <Folder Name="/Samples/Terrain/">
       <File Path="../samples/Terrain/Terrain.magic" />
@@ -49,7 +52,6 @@
       <Project Path="../samples/Lights/Samples.Lights.csproj" />
     </Folder>
   <Folder Name="/Samples/Shared/">
-    <File Path="../samples/Shared/README.md" />
     <Project Path="../samples/Shared/SamplesShared.csproj" />
   </Folder>
   <Folder Name="/Samples/HelloWorld/">
@@ -57,7 +59,6 @@
     <Project Path="../samples/HelloWorld/Samples.HelloWorld.csproj" />
   </Folder>
   <Folder Name="/Tools/">
-    <File Path="../tools/README.md" />
   </Folder>
   <Folder Name="/Tools/Analyzers/">
     <Project Path="../tools/Analyzers/Magic.Analyzers/Magic.Analyzers.csproj" />
@@ -75,7 +76,6 @@
     <File Path="../tools/VS Templates/Gem/.template.config/icon.png" />
     <File Path="../tools/VS Templates/Gem/.template.config/ide.host.json" />
     <File Path="../tools/VS Templates/Gem/.template.config/template.json" />
-    <File Path="../tools/VS Templates/Gem/README.md" />
     <Project Path="../tools/VS Templates/Gem/GemName.csproj" />
   </Folder>
   <Folder Name="/Tools/VS Templates/Project/">

@@ -29,8 +29,8 @@ more code than it adds.
 
 1. **Find the target.** Name the files and members that the user means. If the target is bigger than one slice, use
    the [simplify-review skill](../simplify-review/SKILL.md) first. Then do each of its slices with this skill.
-2. **Read before you change.** Read the target, its callers and the README of its area. Write down what the target
-   does now, and the check that shows it.
+2. **Read before you change.** Read the target, its callers and the doc in `docs/` for its area. Write down what the
+   target does now, and the check that shows it.
 3. **Find the changes,** in this order:
    1. Remove what nothing needs: code that nothing calls, members, parameters and overloads without a caller, flags
       and mode fields, state that you can compute, and guards for cases that cannot happen.

@@ -35,7 +35,7 @@ Write the engine as data flowing through functions, not objects calling each oth
   across the code base.
 - Managed dependencies come from NuGet. A package with a known vulnerability, direct or transitive, fails the restore.
 - Native libraries are built from source or downloaded as their author publishes them. No third-party wrapper, package,
-  binary or copied code. Hand-write a binding only where the generator can't, and say so in the gem's README.
+  binary or copied code. Hand-write a binding only where the generator can't, and say so in the gem's docs.
 - No keys, tokens or passwords in code, configuration or workflows. CI reads its own from the repository's secrets.
 
 ## Gems, hooks and services
@@ -187,9 +187,9 @@ Write the engine as data flowing through functions, not objects calling each oth
 
 CSharpier decides layout, every line break, indent and blank line, from `.editorconfig`'s `[*]` block: the editor's
 extension prints a file on save, `tools/Scripts/Format.ps1` the files a change touches
-([Format.ps1](../tools/README.md#formatps1)), a local build what is left, and `Validate.ps1` refuses a file it would
+([Format.ps1](TOOLS.md#formatps1)), a local build what is left, and `Validate.ps1` refuses a file it would
 change. The rules below that no
-built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
+built-in rule checks are [tools/Analyzers](TOOLS.md#analyzers).
 
 ### Type layout
 

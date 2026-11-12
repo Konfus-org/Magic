@@ -1,9 +1,35 @@
-# DebugTools
+# Debugging
+
+The debug UI, the debug windows, and how Core and the gems publish what they measure.
+
+## ImGuiDebugUI
+
+The debug UI, drawn with [Dear ImGui](https://github.com/ocornut/imgui): provides `IDebugUI`.
+
+It shows what gems and scripts report: lines down the left of the picture and short text at places in the world. A
+line logged with `onScreen` shows there for a while too. Other gems draw their debug windows with its widgets.
+
+List it in a project's `.magic` file with the GPU provider, the shader compiler and the ECS. A gem that takes
+`IDebugUI` is made after it.
+
+- The UI draws itself over the window's image, in the overlay layer, so it shows over whatever drew the world. It is
+  not in screenshots, and a headless run, which has no window, draws none.
+- Lines and text that gems ask for always show. Lines logged with `onScreen` show while a debug window is open, or
+  always when its settings say so, as they do by default in a Debug build.
+- The gem's settings are `ImGuiDebugUISettings`, under `Debug`; `get Debug` lists them. Its size follows the
+  display's scale until `Debug.UiScale` is set.
+- Without a gem that provides `IInput`, nothing can be clicked or typed. Without one that provides `IClipboard`, nothing
+  can be copied or pasted.
+- Nothing is drawn until the UI's shaders compile.
+- Text is written in ImGui's own font.
+
+Dear ImGui is a native library, used through the C API that
+[dear_bindings](https://github.com/dearimgui/dear_bindings) generates ([Native libraries](GEMS.md#native-libraries)).
+
+## DebugTools
 
 Debug lines and windows over what the meters measure and the gems' settings, drawn with the debug UI. It provides
 nothing and needs a gem that provides `IDebugUI`.
-
-To use it, list `DebugTools` in a project's `.magic` file.
 
 - **Counter**, on `Debug.CounterKey` (F1) or `Debug.IsCounterShown`: the drawn frame rate and frame time, then the GPU's
   memory and the process's, as a line in the top left corner. It shows from the start in a Debug build. In other builds
@@ -28,7 +54,7 @@ A gem's meter is made with it and disposed with it. Record a gauge each frame ra
 and time work into a histogram of seconds with its `Start` and `RecordSince`, which do nothing while nothing listens.
 A number the OS keeps for the whole process, rather than one of a frame, is an observable gauge, asked when read.
 Core's console command `stats [category] <seconds>` also logs them, as text, every so many seconds, with or without
-this gem: `stats gpu 30` logs those with gpu in their name.
+DebugTools: `stats gpu 30` logs those with gpu in their name.
 
 - Core times each gem's hooks and its own steps; a gem needs nothing more to show under CPU.
 - An instrument named `gpu.*` shows under GPU, with its tags' values as rows of a fold of its own, and the meter's tags
