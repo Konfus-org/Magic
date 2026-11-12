@@ -313,6 +313,7 @@ internal sealed class ClusterPasses
                     pools.Vertices,
                     pools.Indices,
                     gpu.Materials,
+                    gpu.Failures,
                     visibleClusters.Value,
                     visibility.Value,
                     glassVisibility.Value
