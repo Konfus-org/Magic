@@ -60,6 +60,10 @@ To write a script:
    class.
 3. Give the file a `.meta` file with an id and `"type": "Script"`.
 4. Give an entity the script in its `ScriptContainer`, as `"ScriptContainer": [ { "id": <the id> } ]` in a prefab.
+5. To give the script values, write them beside its id: `{ "id": <the id>, "depth": 0.5 }`. Each key but `id` is
+   a value, and the gem sets it on the public settable property of that name, whatever the case of the first
+   letter. A value that the script has no property for, or that its type cannot hold, goes to the log and is left
+   out.
 
 How a script runs:
 
@@ -67,6 +71,7 @@ How a script runs:
   world is not loading.
 - The constructor gets the `Entity` for an `Entity` parameter, and a service for each other parameter. Only keep them
   in the constructor. Do the first work in `Start`.
+- The values of the prefab are set on the copy before `Start`, so `Start` reads them.
 - The hooks of the behaviours run on the game thread, in the order that the copies started, after the hooks of the
   gems listed before this gem.
 - A behaviour far from each camera of the player updates less often: every frame within 64 m, then one frame in n at

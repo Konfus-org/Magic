@@ -3,10 +3,12 @@ using System.IO;
 using System.Numerics;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
+using Magic.Files;
 using Magic.Projects;
 using Magic.Utils;
 using Magic.Worlds;
@@ -35,7 +37,7 @@ internal sealed class Runner(World world, AssetManager assets, IServiceProvider 
     /// The scripts that an entity names and that have no copy, found in the query and started after it, as a start can
     /// change the entities.
     /// </summary>
-    private readonly List<(Entity Entity, Handle<Script> Script)> _starting = [];
+    private readonly List<(Entity Entity, ScriptSlot Slot)> _starting = [];
 
     /// <summary>
     /// Where the cameras of the player are, as of this frame's <see cref="Update"/>.
@@ -92,6 +94,42 @@ internal sealed class Runner(World world, AssetManager assets, IServiceProvider 
         ex is TargetInvocationException { InnerException: { } inner } ? inner : ex;
 
     /// <summary>
+    /// Sets each value of <paramref name="values"/> on the public settable property of <paramref name="script"/> that
+    /// has its name, whatever the case of the first letter.
+    /// </summary>
+    /// <remarks>
+    /// A value that the script has no property for, or that the property's type cannot hold, goes to the log and is
+    /// left out, so the rest of the script still runs.
+    /// </remarks>
+    private static void Set(ScriptValues values, IScript script, Entity entity)
+    {
+        foreach ((string name, JsonElement value) in values.All)
+        {
+            PropertyInfo? property = Array.Find(
+                script.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance),
+                candidate =>
+                    candidate.Name.Equals(name, StringComparison.OrdinalIgnoreCase)
+                    && candidate.SetMethod is { IsPublic: true }
+            );
+            if (property is null)
+            {
+                Log.Error(
+                    $"Script {script.GetType().Name} on {entity} has no settable {name}, so {value} is left out."
+                );
+                continue;
+            }
+
+            Result<object> read = Json.Read(value, property.PropertyType);
+            if (read.Ok)
+                property.SetValue(script, read.Value);
+            else
+                Log.Error(
+                    $"Script {script.GetType().Name} on {entity} cannot read {value} as its {property.Name}: {read.Error}"
+                );
+        }
+    }
+
+    /// <summary>
     /// Starts a copy of each C# script that an entity names and has none of.
     /// </summary>
     private void StartNew()
@@ -101,25 +139,25 @@ internal sealed class Runner(World world, AssetManager assets, IServiceProvider 
         {
             for (int i = 0; i < chunk.Entities.Length; i++)
             {
-                foreach (Handle<Script> script in chunk.First[i])
+                foreach (ScriptSlot slot in chunk.First[i])
                 {
-                    if (script != Handle<Script>.None && !_attached.ContainsKey((chunk.Entities[i], script)))
-                        _starting.Add((chunk.Entities[i], script));
+                    if (slot.Script != Handle<Script>.None && !_attached.ContainsKey((chunk.Entities[i], slot.Script)))
+                        _starting.Add((chunk.Entities[i], slot));
                 }
             }
         }
 
-        foreach ((Entity entity, Handle<Script> handle) in _starting)
+        foreach ((Entity entity, ScriptSlot slot) in _starting)
         {
             // A start before this one can destroy the entity or take the handle off.
-            if (!IsNamed(entity, handle) || FindClass(handle) is not { } found)
+            if (!IsNamed(entity, slot.Script) || FindClass(slot.Script) is not { } found)
                 continue;
 
-            Result<IScript> started = found.Ok ? Start(found.Value, entity) : Result.Failure(found.Error);
+            Result<IScript> started = found.Ok ? Start(found.Value, entity, slot.Values) : Result.Failure(found.Error);
             if (started.Ok)
-                _attached.Add((entity, handle), new Copy(started.Value));
+                _attached.Add((entity, slot.Script), new Copy(started.Value));
             else
-                TakeOff(entity, handle, $"is left off: {started.Error}");
+                TakeOff(entity, slot.Script, $"is left off: {started.Error}");
         }
     }
 
@@ -187,7 +225,8 @@ internal sealed class Runner(World world, AssetManager assets, IServiceProvider 
     }
 
     /// <summary>
-    /// Makes a copy of <paramref name="type"/> for <paramref name="entity"/> and starts it, or gives why not.
+    /// Makes a copy of <paramref name="type"/> for <paramref name="entity"/>, sets <paramref name="values"/> on it and
+    /// starts it, or gives why not.
     /// </summary>
     /// <remarks>
     /// Its one public constructor gets the entity for an <see cref="Entity"/> parameter, a service for each other
@@ -198,7 +237,7 @@ internal sealed class Runner(World world, AssetManager assets, IServiceProvider 
         "CA1031:Do not catch general exception types",
         Justification = "Whatever a script throws as it is made or started, the entity goes without it."
     )]
-    private Result<IScript> Start(Type type, Entity entity)
+    private Result<IScript> Start(Type type, Entity entity, ScriptValues values)
     {
         ConstructorInfo[] constructors = type.GetConstructors();
         if (constructors.Length != 1)
@@ -226,6 +265,7 @@ internal sealed class Runner(World world, AssetManager assets, IServiceProvider 
             if (constructors[0].Invoke(arguments) is not IScript script)
                 return Result.Failure("it is not an IScript.");
 
+            Set(values, script, entity);
             script.Start();
 
             return Result.Success(script);

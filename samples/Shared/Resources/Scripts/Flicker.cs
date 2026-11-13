@@ -4,7 +4,7 @@ using Magic.Ecs.Components;
 using Magic.Projects;
 using Magic.Worlds;
 
-namespace Samples.Lights.Scripts;
+namespace Magic.SamplesShared.Resources.Scripts;
 
 /// <summary>
 /// Makes the point light of its entity flicker like a flame: its intensity goes up and down around the intensity
@@ -12,12 +12,13 @@ namespace Samples.Lights.Scripts;
 /// </summary>
 public sealed class Flicker(Entity owner, World world) : IBehavior
 {
-    /// <summary>
-    /// How far the intensity goes from where it started, as a share of it.
-    /// </summary>
-    private const float Depth = 0.35f;
-
     private float _baseIntensity;
+
+    /// <summary>
+    /// How far the intensity goes from where it started, as a share of it. A prefab sets it beside the handle of the
+    /// script.
+    /// </summary>
+    public float Depth { get; set; } = 0.35f;
 
     public void Start() => _baseIntensity = world.Get<PointLight>(owner).Intensity;
 

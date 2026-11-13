@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Magic.Assets;
@@ -188,8 +189,13 @@ internal sealed class MaterialOverridesJsonConverter : JsonConverter<MaterialOve
 }
 
 /// <summary>
-/// Reads and writes <see cref="ScriptContainer"/> as an array of handles, with the free slots left out.
+/// Reads and writes <see cref="ScriptContainer"/> as an array of scripts, each the handle of the script with its
+/// values beside it, with the free slots left out.
 /// </summary>
+/// <remarks>
+/// In a slot, <c>id</c> is the handle of the script, and every other key is a value for the script:
+/// <c>{ "id": 3312, "height": 1 }</c>.
+/// </remarks>
 [SuppressMessage(
     "Performance",
     "CA1812:Avoid uninstantiated internal classes",
@@ -200,13 +206,14 @@ internal sealed class ScriptContainerJsonConverter : JsonConverter<ScriptContain
     public override ScriptContainer Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         if (reader.TokenType != JsonTokenType.StartArray)
-            throw new JsonException("A ScriptContainer is an array of handles.");
+            throw new JsonException("A ScriptContainer is an array of scripts.");
 
         ScriptContainer scripts = default;
         while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
         {
-            Handle<Script> script = JsonSerializer.Deserialize<Handle<Script>>(ref reader, options);
-            if (!scripts.Add(script))
+            // The slot holds keys that no one type takes, so it is read key by key.
+            using JsonDocument slot = JsonDocument.ParseValue(ref reader);
+            if (!scripts.Add(ReadHandle(slot.RootElement), ReadValues(slot.RootElement)))
                 throw new JsonException($"An entity has at most {ScriptContainer.Capacity} scripts, each one time.");
         }
 
@@ -216,12 +223,54 @@ internal sealed class ScriptContainerJsonConverter : JsonConverter<ScriptContain
     public override void Write(Utf8JsonWriter writer, ScriptContainer value, JsonSerializerOptions options)
     {
         writer.WriteStartArray();
-        foreach (Handle<Script> script in value)
+        foreach (ScriptSlot slot in value)
         {
-            if (script != Handle<Script>.None)
-                JsonSerializer.Serialize(writer, script, options);
+            if (slot.Script == Handle<Script>.None)
+                continue;
+
+            writer.WriteStartObject();
+            writer.WriteNumber("id", slot.Script.Id);
+            foreach ((string name, JsonElement held) in slot.Values.All)
+            {
+                writer.WritePropertyName(name);
+                held.WriteTo(writer);
+            }
+
+            writer.WriteEndObject();
         }
 
         writer.WriteEndArray();
+    }
+
+    /// <summary>
+    /// The handle that the <c>id</c> of <paramref name="slot"/> names.
+    /// </summary>
+    private static Handle<Script> ReadHandle(JsonElement slot)
+    {
+        if (
+            slot.ValueKind != JsonValueKind.Object
+            || !slot.TryGetProperty("id", out JsonElement id)
+            || !id.TryGetUInt64(out ulong asset)
+        )
+        {
+            throw new JsonException("A script of an entity is its handle and its values: { \"id\": 3312, \"x\": 1 }.");
+        }
+
+        return new Handle<Script>(asset);
+    }
+
+    /// <summary>
+    /// The values of <paramref name="slot"/>: every key of it but <c>id</c>.
+    /// </summary>
+    private static ScriptValues ReadValues(JsonElement slot)
+    {
+        List<KeyValuePair<string, JsonElement>> values = [];
+        foreach (JsonProperty value in slot.EnumerateObject())
+        {
+            if (!value.NameEquals("id"))
+                values.Add(KeyValuePair.Create(value.Name, value.Value));
+        }
+
+        return ScriptValues.Of(CollectionsMarshal.AsSpan(values));
     }
 }
