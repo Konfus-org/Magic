@@ -36,9 +36,15 @@ public sealed class EntryPoint(
 
     public Renderer Renderer { get; } = new(settings, shaders, gpu, assets, ecs, threads, events);
 
+    public SkyRenderer SkyRenderer { get; } = new(assets, ecs);
+
     public void Dispose() => Renderer.Dispose();
 
     public void Update(in Frame frame) => _debugWindow?.Update(Settings);
 
-    public void LateUpdate(in Frame frame) => Renderer.PublishInputs(frame);
+    public void LateUpdate(in Frame frame)
+    {
+        Renderer.PublishInputs(frame);
+        SkyRenderer.PublishSkies();
+    }
 }

@@ -82,19 +82,20 @@ float3 ShadeIndirectLight<S : ISky>(
 )
 {
     IndirectLight indirect = GetIndirectLight();
+    SkyTables tables = GetSkyTables();
     bool isTraced = indirect.diffuse != 0u;
     float3 diffuse;
     if (isTraced)
         diffuse = SampleIndirectDiffuse(frame, indirect.diffuse, pixel, relative, normal);
-    else if (lights.hasSky != 0u)
-        diffuse = S.GetAmbient(CreateSkyInputs(lights, normal, false), normal) * InvPi;
+    else if (HasSky(tables))
+        diffuse = S.GetAmbient(CreateSkyInputs(lights, tables, normal, false), normal) * InvPi;
     else
         diffuse = lights.sunIlluminance.rgb * 0.1 * (0.5 + 0.5 * normal.y) * InvPi;
 
     float3 specular = diffuse;
-    if (!isTraced && lights.hasSky != 0u)
+    if (!isTraced && HasSky(tables))
     {
-        float3 reflected = S.Evaluate(CreateSkyInputs(lights, reflect(-view, normal), false));
+        float3 reflected = S.Evaluate(CreateSkyInputs(lights, tables, reflect(-view, normal), false));
         specular = lerp(reflected, diffuse, saturate(roughness));
     }
 
@@ -128,8 +129,9 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
     // Nothing drawn here leaves the depth as cleared, at the far plane's 0: the sky shows.
     if (depth == 0.0)
     {
-        float3 sky = lights.hasSky != 0u
-            ? S.Evaluate(CreateSkyInputs(lights, -view, true))
+        SkyTables tables = GetSkyTables();
+        float3 sky = HasSky(tables)
+            ? S.Evaluate(CreateSkyInputs(lights, tables, -view, true))
             : GetOpenSkyRadiance(lights) * lerp(0.6, 1.4, 1.0 - uv.y);
         float3 color = ApplyClouds(sky, -view);
         uint failed = GetPassHeader().y;

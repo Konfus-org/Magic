@@ -23,8 +23,6 @@ internal sealed class RenderInputs
 
     public EcsSnapshot<Transform, RectLight> RectLights { get; } = new();
 
-    public EcsSnapshot<Sky> Skies { get; } = new();
-
     public EcsSnapshot<PostProcessing> PostProcessing { get; } = new();
 
     /// <summary>

@@ -134,17 +134,11 @@ public readonly record struct GpuView
     public required ImmutableArray<GpuResource> HeapTextures { get; init; }
 
     /// <summary>
-    /// The local lights, each tile's lights and the sky's tables.
+    /// The local lights and each tile's lights.
     /// </summary>
     public required GpuBuffer LightTable { get; init; }
 
     public required GpuBuffer LightTiles { get; init; }
-
-    public required GpuTexture SkyTransmittance { get; init; }
-
-    public required GpuTexture SkyMultiScattering { get; init; }
-
-    public required GpuTexture SkyView { get; init; }
 
     /// <summary>
     /// The effects run over the lit picture this frame, by their place in the post processing's list.

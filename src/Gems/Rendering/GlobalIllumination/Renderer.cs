@@ -13,9 +13,10 @@ using Magic.Worlds;
 namespace Magic.GlobalIllumination;
 
 /// <summary>
-/// What the indirect light takes each frame: the view and the world as rays see it, each null in a frame that lacks it.
+/// What the indirect light takes each frame: the view, the world as rays see it and the sky's tables, each null in a
+/// frame that lacks it.
 /// </summary>
-public readonly record struct GlobalIlluminationInput(GpuView? View, TracedWorld? Traced);
+public readonly record struct GlobalIlluminationInput(GpuView? View, TracedWorld? Traced, SkyTables? Sky);
 
 /// <summary>
 /// Lights each view's surfaces indirectly through the world as rays see it, as the view's
@@ -147,21 +148,13 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         (int Width, int Height) tracedSize = gpu.Scaled(_settings.IndirectScale);
         ((int Width, int Height)? lastTraced, (int Width, int Height)? lastReflected) = _views[graph.View];
         bool hasHistory = lastTraced == tracedSize;
+        ReadOnlySpan<GpuResource> sky = input.Sky is { } tables ? [tables.Transmittance, tables.View] : [];
         GIView view = new(
             graph,
             gpu,
             constants.Value,
             tracedSize,
-            [
-                gpu.SkyTransmittance,
-                gpu.SkyView,
-                gpu.LightTable,
-                gpu.Instances,
-                gpu.Vertices,
-                gpu.Indices,
-                gpu.Meshes,
-                traced.HitMaterials,
-            ]
+            [.. sky, gpu.LightTable, gpu.Instances, gpu.Vertices, gpu.Indices, gpu.Meshes, traced.HitMaterials]
         );
         Result<(ProbeGridConstants Grid, ProbeUpdateConstants Update)> probes = _probes.Prepare(
             graph,

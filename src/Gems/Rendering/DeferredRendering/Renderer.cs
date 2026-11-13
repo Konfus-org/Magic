@@ -31,14 +31,15 @@ public readonly record struct ViewInput(GpuWorld World, RenderViews Views, Trace
 /// inputs that other gems make.
 /// </summary>
 /// <remarks>
-/// Where a gem makes them, it also takes the world as rays see it, each pixel's shadows, the light that reaches the
-/// surfaces indirectly, the air between the camera and them, and the output's upscaling.
+/// Where a gem makes them, it also takes the world as rays see it, the sky's tables, each pixel's shadows, the light
+/// that reaches the surfaces indirectly, the air between the camera and them, and the output's upscaling.
 /// </remarks>
 public readonly record struct ShadingInput(
     GpuWorld World,
     RenderViews Views,
     GpuView View,
     TracedWorld? Traced,
+    SkyTables? Sky,
     ShadowMask? Shadows,
     IndirectLight? Light,
     Air? Air,
@@ -120,21 +121,14 @@ public sealed class Renderer
     /// </summary>
     private readonly List<(FrameView Frame, PixelEffects Effects)> _views = [];
 
-    private readonly SkyLuts _sky;
-
     private readonly LightTiles _lightTiles;
 
     private readonly Effects _effects;
 
     /// <summary>
-    /// Every shader the view's passes run but the sky's, which the GPU provider builds before the frame is made.
+    /// Every shader the view's passes run, which the GPU provider builds before the frame is made.
     /// </summary>
     private readonly ImmutableArray<ShaderEntry> _viewShaders;
-
-    /// <summary>
-    /// The shaders that fill the sky's tables; while one failed, the frame is drawn with no sky.
-    /// </summary>
-    private readonly ImmutableArray<ShaderEntry> _skyShaders;
 
     private readonly ShaderEntry _shadeShader;
 
@@ -228,12 +222,10 @@ public sealed class Renderer
         _defaultPost.Effects[0] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Exposure.mat") };
         _defaultPost.Effects[1] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Agx.mat") };
         _instances = new InstanceTable(assets, _resources);
-        _sky = new SkyLuts(assets);
         _lightTiles = new LightTiles(assets);
         _effects = new Effects(assets, _resources);
         _banner = new FailureBanner(assets);
         _viewShaders = _lightTiles.Shaders;
-        _skyShaders = _sky.Shaders;
 
         _gpu = gpu;
         _events = events;
@@ -316,14 +308,13 @@ public sealed class Renderer
 
         // The loading domain shows once the models, materials and effects it waits for are on the GPU, or failed: a
         // model drawn as the failure cube, which is then waited for too, or, for an effect, left out; and once the
-        // shading's and the sky's shaders are built, or failed. Its models are asked for here, as the pools only take
+        // shading's shaders are built, or failed. Its models are asked for here, as the pools only take
         // them once they are made; an ask for one asked for already does nothing.
         if (_preparing is { } preparing)
         {
             bool isPrepared =
                 !_effects.IsLoading(graph, preparing.Effects)
-                && graph.GetState(_shadingShaders.AsSpan()) != GpuState.Loading
-                && graph.GetState(_skyShaders.AsSpan()) != GpuState.Loading;
+                && graph.GetState(_shadingShaders.AsSpan()) != GpuState.Loading;
             foreach (Handle<Model> model in preparing.Models)
             {
                 _resources.Get(model);
@@ -471,8 +462,8 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// The view of this turn on the GPU: its camera's targets at its size, the frame's rows in its own buffer, the
-    /// sky's tables and its tiles' lights; none while the render texture its camera draws into is not made.
+    /// The view of this turn on the GPU: its camera's targets at its size, the frame's rows in its own buffer and its
+    /// tiles' lights; none while the render texture its camera draws into is not made.
     /// </summary>
     public GpuView? Render(in Frame frame, RenderGraph graph, in ViewInput input)
     {
@@ -522,7 +513,7 @@ public sealed class Renderer
         int width = Math.Max(1, (int)MathF.Round(shown.Width * scale));
         int height = Math.Max(1, (int)MathF.Round(shown.Height * scale));
 
-        // The frame's buffer, the view's targets, its tiles and the sky's tables asked for in that order; the glass
+        // The frame's buffer, the view's targets and its tiles asked for in that order; the glass
         // targets only while a material draws translucent, so the graph frees them in a world with none.
         bool hasGlass = _resources.HasTranslucent;
         TextureDescription depthTarget = new(
@@ -564,9 +555,6 @@ public sealed class Renderer
             )
         );
         Result<GpuBuffer> tiles = LightTiles.PrepareTiles(graph, width, height);
-        Result<GpuTexture> transmittance = graph.Texture(GetSkyTable("Sky transmittance", 256, 64));
-        Result<GpuTexture> multiScattering = graph.Texture(GetSkyTable("Sky multi-scattering", 32, 32));
-        Result<GpuTexture> skyView = graph.Texture(GetSkyTable("Sky view", 192, 108));
         Result asked = Result.FindFailure(
             constants,
             depth,
@@ -580,10 +568,7 @@ public sealed class Renderer
             velocity,
             hdr,
             output,
-            tiles,
-            transmittance,
-            multiScattering,
-            skyView
+            tiles
         );
         if (!asked.Ok)
         {
@@ -633,9 +618,6 @@ public sealed class Renderer
             HeapTextures = world.HeapTextures,
             LightTable = world.Lights.Table,
             LightTiles = tiles.Value,
-            SkyTransmittance = transmittance.Value,
-            SkyMultiScattering = multiScattering.Value,
-            SkyView = skyView.Value,
             Effects = world.Effects,
             EffectRows = world.EffectRows,
             PreparedDomains = world.PreparedDomains,
@@ -648,12 +630,6 @@ public sealed class Renderer
             isJittered |= effect.State == GpuState.Ready && effect.Needs.HasJitter;
         }
 
-        // The sky while there is one and its shaders are built.
-        GpuState skyShaders = graph.GetState(_skyShaders.AsSpan());
-        if (inputs.Skies.Count > 0 && skyShaders == GpuState.Failed)
-            graph.Fail(RenderFailure.Sky, "Sky is not drawn", "a shader of the sky was not built.");
-
-        bool hasSky = inputs.Skies.Count > 0 && skyShaders == GpuState.Ready;
         Result uploaded = frameView.Upload(
             graph,
             view,
@@ -662,7 +638,6 @@ public sealed class Renderer
             frame,
             isJittered ? FrameView.GetJitter(frame.Index) : Vector2.Zero,
             GetSun(inputs.DirectionalLights),
-            hasSky,
             _settings.SkyBrightness,
             input.Traced is { } traced
                 ? new GpuTracedWorld { Acceleration = traced.Structure.Id, HitMaterials = traced.HitMaterials.Id }
@@ -675,18 +650,12 @@ public sealed class Renderer
             return null;
         }
 
-        // The sky's tables while there is a sky, and each tile's lights.
-        if (hasSky)
-            _sky.Record(graph, view);
-
+        // Each tile's lights.
         _lightTiles.Record(graph, view);
 
         return view;
 
         TextureDescription GetTarget(string name, GpuFormat format) => new(name, width, height, format);
-
-        static TextureDescription GetSkyTable(string name, int width, int height) =>
-            new(name, width, height, GpuFormat.R16G16B16A16Sfloat);
 
         Result<GpuTexture> GetGlass(in TextureDescription glass) =>
             hasGlass ? graph.Texture(glass) : Result.Success(GpuTexture.None);
@@ -713,6 +682,7 @@ public sealed class Renderer
         ReadOnlySpan<GpuResource> indirect = input.Light is { } light
             ? [light.Diffuse, light.Reflections, light.Probes, light.ProbeDepth]
             : [];
+        ReadOnlySpan<GpuResource> sky = input.Sky is { } tables ? [tables.Transmittance, tables.View] : [];
 
         // Every pixel's surface shaded from the sky's tables, its tile's lights, the shadows where there are any and
         // the indirect light, or the sky where nothing traced it, or the failure of the sky or its clouds where they
@@ -724,10 +694,9 @@ public sealed class Renderer
                 new GpuConstants(gpu.Frame.Id, GetSkyFailures(graph.Failures)),
                 RenderStages.Shade
             )
+            .Reads(sky)
             .Reads(
                 gpu.Frame,
-                gpu.SkyTransmittance,
-                gpu.SkyView,
                 gpu.LightTable,
                 gpu.LightTiles,
                 gpu.Depth,
@@ -752,16 +721,8 @@ public sealed class Renderer
         {
             ComputePass translucent = graph
                 .Compute("Shade translucent", _translucentShader, new GpuConstants(gpu.Frame.Id), RenderStages.Shade)
-                .Reads(
-                    gpu.Frame,
-                    gpu.SkyTransmittance,
-                    gpu.SkyView,
-                    gpu.Depth,
-                    gpu.GlassDepth,
-                    gpu.GlassBase,
-                    gpu.GlassNormal,
-                    gpu.GlassSurface
-                )
+                .Reads(sky)
+                .Reads(gpu.Frame, gpu.Depth, gpu.GlassDepth, gpu.GlassBase, gpu.GlassNormal, gpu.GlassSurface)
                 .Reads(indirect);
             if (input.Traced is { } traced)
                 translucent.Reads(traced.HitMaterials, gpu.Meshes, gpu.Instances);
@@ -882,7 +843,7 @@ public sealed class Renderer
     /// <remarks>
     /// It asks for every model and material the entities draw, and the effects of their first post processing, or the
     /// default's. It waits until they are on the GPU, or failed and drawn as the failure or left out, and until the
-    /// shading's and the sky's shaders are built or failed. Materials are asked for at once; models once the pools are
+    /// shading's shaders are built or failed. Materials are asked for at once; models once the pools are
     /// made, and the effects, by the world's step. One that comes while another waits ends that one. Render thread,
     /// whose tables and counts these are.
     /// </remarks>
@@ -941,7 +902,6 @@ public sealed class Renderer
         back.PointLights.Fill(_ecs);
         back.SpotLights.Fill(_ecs);
         back.RectLights.Fill(_ecs);
-        back.Skies.Fill(_ecs);
         back.PostProcessing.Fill(_ecs);
         back.WorldNumber = _worldNumber;
         _inputs.Publish();

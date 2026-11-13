@@ -16,6 +16,9 @@ flowchart LR
     Taa[TaaUpscaling] -- Upscaling --> View
     Accel -- TracedWorld --> View
     View -- GpuView --> Clusters[ClusteredGeometry]
+    View -- GpuView --> Sky[DeferredRendering sky]
+    Sky -- SkyTables --> GI
+    Sky -- SkyTables --> Shading
     Pools -- ClusterPools --> Clusters
     Accel -- TracedWorld --> Shadows[TracedShadows]
     Accel -- TracedWorld --> GI[GlobalIllumination]
@@ -42,11 +45,13 @@ The renderer. It has four render steps:
 
 1. The world, one time for each frame: it puts the models, materials, textures, render textures, instances and lights
    of the world on the GPU. It makes the `GpuWorld`, the `GpuInstances` and the `RenderViews` of the frame.
-2. The view, one time for each view: it makes the targets, the frame buffer and the sky tables of the view, as its
-   `GpuView`.
+2. The view, one time for each view: it makes the targets and the frame buffer of the view, as its `GpuView`.
 3. The shading, one time for each view: it lights the GBuffer that a geometry gem drew, with the sun, the sky and the
    lights. Then it runs the post effects and writes the picture into the target of the view.
 4. The failure banner: it draws the render failures of the frame over the top of the window.
+
+Its `SkyRenderer` part has one more step, one time for each view: while an entity has a sky, it makes the three sky
+tables of the view, as its `SkyTables`.
 
 The gem also holds the types that the rendering gems share. List it in the `.magic` file after the GPU provider, the
 ECS, the model importer and the texture importer, with a gem that draws its geometry. The settings are in
@@ -82,6 +87,7 @@ ECS, the model importer and the texture importer, with a gem that draws its geom
 ### Lights and the sky
 
 - A pixel with no geometry shows the sky. The material of a sky entity draws the sky.
+- Without a sky entity, there are no sky tables, and the open sky lights the world at `Rendering.SkyBrightness`.
 - The directional light is the sun while it is above the horizon. Else it is the moon while the moon is above the
   horizon. Else it is the first directional light.
 - Lights use physical units: lux for the sun, candela for point, spot and rect lights. A frame draws the first 1024

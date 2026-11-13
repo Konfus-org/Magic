@@ -9,8 +9,8 @@ import Core.Pass;
 import Core.Frame;
 import Scene.Lights;
 
-// Where the shadows are in the frame's buffer, right after the lights, and their bytes: C#'s GpuShadows.
-public static const uint ShadowsOffset = LightsOffset + LightsBytes;
+// Where the shadows are in the frame's buffer, right after the sky's tables, and their bytes: C#'s GpuShadows.
+public static const uint ShadowsOffset = SkyTablesOffset + SkyTablesBytes;
 public static const uint ShadowsBytes = 8u;
 
 public struct Shadows
