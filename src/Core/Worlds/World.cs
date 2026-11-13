@@ -270,9 +270,9 @@ public sealed class World : IEcs, IDisposable
                 Result.Failure(IsLoading ? "the world is loading." : "no domain is open.")
             );
 
-        foreach (IHookIntoWorldSave hooks in _saveHooks)
+        foreach (IHookIntoWorldSave hook in _saveHooks)
         {
-            hooks.OnWorldSaving();
+            hook.OnWorldSaving();
         }
 
         ImmutableArray<Handle<Domain>> open = Domains;

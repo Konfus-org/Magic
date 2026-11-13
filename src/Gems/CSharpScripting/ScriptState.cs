@@ -46,14 +46,22 @@ internal sealed class ScriptState(IServiceProvider services)
         foreach (PropertyInfo value in GetValues(type))
         {
             backing.Add($"<{value.Name}>k__BackingField");
-            Read(state, type, GetKey(value), value.PropertyType, value.GetValue(script));
+
+            // A value is saved by the name that a prefab gives it.
+            string key = JsonNamingPolicy.CamelCase.ConvertName(value.Name);
+            Add(state, type, key, value.PropertyType, value.GetValue(script));
         }
 
-        Type[] handed = GetHandedTypes(type);
+        // The types that a copy is handed when it is made: the parameters of the one public constructor of a script.
+        ConstructorInfo[] constructors = type.GetConstructors();
+        Type[] handed =
+            constructors.Length == 1
+                ? Array.ConvertAll(constructors[0].GetParameters(), parameter => parameter.ParameterType)
+                : [];
         foreach (FieldInfo field in type.GetFields(AnyField))
         {
             if (!backing.Contains(field.Name) && !IsHanded(field.FieldType, handed))
-                Read(state, type, GetFieldName(field), field.FieldType, field.GetValue(script));
+                Add(state, type, GetFieldName(field), field.FieldType, field.GetValue(script));
         }
 
         return state;
@@ -81,7 +89,14 @@ internal sealed class ScriptState(IServiceProvider services)
         Type type = script.GetType();
         foreach ((string name, JsonElement value) in state.All)
         {
-            Set(script, entity, name, value, (MemberInfo?)FindValue(type, name) ?? FindField(type, name));
+            // Else the field: its own of that name, or the one that the compiler made for a property or a primary
+            // constructor parameter of that name.
+            MemberInfo? member =
+                (MemberInfo?)FindValue(type, name)
+                ?? type.GetField(name, AnyField)
+                ?? type.GetField($"<{name}>k__BackingField", AnyField)
+                ?? type.GetField($"<{name}>P", AnyField);
+            Set(script, entity, name, value, member);
         }
     }
 
@@ -114,20 +129,6 @@ internal sealed class ScriptState(IServiceProvider services)
         GetValues(type).Find(value => value.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
-    /// The field of <paramref name="type"/> saved as <paramref name="name"/>: its own of that name, else the one that
-    /// the compiler made for a property or a primary constructor parameter of that name. Null when it has none.
-    /// </summary>
-    private static FieldInfo? FindField(Type type, string name) =>
-        type.GetField(name, AnyField)
-        ?? type.GetField($"<{name}>k__BackingField", AnyField)
-        ?? type.GetField($"<{name}>P", AnyField);
-
-    /// <summary>
-    /// The name that a file gives a value, as the prefab that sets it writes it.
-    /// </summary>
-    private static string GetKey(PropertyInfo value) => JsonNamingPolicy.CamelCase.ConvertName(value.Name);
-
-    /// <summary>
     /// The name that a field is saved as: its own, or for one that the compiler made, the name between the angle
     /// brackets, which is that of the property or primary constructor parameter it holds.
     /// </summary>
@@ -139,38 +140,24 @@ internal sealed class ScriptState(IServiceProvider services)
     }
 
     /// <summary>
-    /// The types that a copy of <paramref name="type"/> is handed when it is made: the parameters of the one public
-    /// constructor that a script has.
-    /// </summary>
-    private static Type[] GetHandedTypes(Type type)
-    {
-        ConstructorInfo[] constructors = type.GetConstructors();
-
-        return constructors.Length == 1
-            ? Array.ConvertAll(constructors[0].GetParameters(), parameter => parameter.ParameterType)
-            : [];
-    }
-
-    /// <summary>
     /// Whether a field of <paramref name="type"/> is no data of the copy's own, so a save leaves it out: its entity, a
     /// delegate, a task, a disposable, one of the <paramref name="handed"/> types, or a service, each of which a copy
     /// gets again when it is made.
     /// </summary>
+    /// <remarks>
+    /// A sequence is data, not a service: the provider answers for every <see cref="IEnumerable{T}"/>, and a copy's
+    /// own list is its data.
+    /// </remarks>
     private bool IsHanded(Type type, Type[] handed) =>
         type == typeof(Entity)
         || typeof(Delegate).IsAssignableFrom(type)
         || typeof(Task).IsAssignableFrom(type)
         || typeof(IDisposable).IsAssignableFrom(type)
         || (!type.IsValueType && Array.Exists(handed, given => given == type))
-        || IsGiven(type);
-
-    /// <summary>
-    /// Whether the provider gives <paramref name="type"/>, which a copy asks it for again. A sequence is left out, as
-    /// the provider answers for every <see cref="IEnumerable{T}"/>, and a copy's own list is its data.
-    /// </summary>
-    private bool IsGiven(Type type) =>
-        !(type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IEnumerable<>))
-        && _given?.IsService(type) == true;
+        || (
+            !(type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IEnumerable<>))
+            && _given?.IsService(type) == true
+        );
 
     /// <summary>
     /// Sets <paramref name="value"/>, which a file names <paramref name="name"/>, on <paramref name="member"/> of
@@ -200,10 +187,10 @@ internal sealed class ScriptState(IServiceProvider services)
     }
 
     /// <summary>
-    /// Writes <paramref name="value"/>, the member <paramref name="name"/> of <paramref name="type"/>, into
+    /// Adds <paramref name="value"/>, the member <paramref name="name"/> of <paramref name="type"/>, to
     /// <paramref name="state"/> as JSON; one that JSON cannot hold goes to the log one time and is left out.
     /// </summary>
-    private void Read(
+    private void Add(
         List<KeyValuePair<string, JsonElement>> state,
         Type type,
         string name,

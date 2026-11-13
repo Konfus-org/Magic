@@ -15,8 +15,7 @@ namespace Magic.Ecs.Components;
 /// </para>
 /// <para>
 /// A value is JSON, so a set fits a script in any language, and the gem of the script's language gives it to the
-/// script in the way of that language. In a file, the values stand beside the handle in the slot:
-/// <c>{ "id": 3312, "depth": 0.5 }</c>.
+/// script in the way of that language.
 /// </para>
 /// </remarks>
 public readonly struct ScriptValues : IEquatable<ScriptValues>
