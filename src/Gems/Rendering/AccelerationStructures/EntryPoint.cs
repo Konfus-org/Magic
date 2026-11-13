@@ -4,7 +4,7 @@ using Magic.Projects;
 namespace Magic.AccelerationStructures;
 
 /// <summary>
-/// The gem: its <see cref="Renderer"/> builds the world as rays see it.
+/// Builds the world as rays see it.
 /// </summary>
 public sealed class EntryPoint(AssetManager assets) : IGem
 {

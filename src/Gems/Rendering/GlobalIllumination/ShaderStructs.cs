@@ -4,10 +4,13 @@ using Magic.Graphics;
 namespace Magic.GlobalIllumination;
 
 /// <summary>
-/// The gem's own constants, the pass header's y, the twin of <c>Traced.slang</c>'s: the traced diffuse light's,
-/// the traced reflections', the probe update's, the view depth both blend with, and what both read their history
-/// with. Each buffer, texture and sampler is its handle, laid out as the heap id the shader reads.
+/// The gem's own constants, the pass header's y, the twin of <c>Traced.slang</c>'s.
 /// </summary>
+/// <remarks>
+/// They hold the traced diffuse light's, the traced reflections' and the probe update's constants, the view depth both
+/// blends use, and what both read their history with. Each buffer, texture and sampler is its handle, laid out as the
+/// heap id the shader reads.
+/// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct GIConstants
 {
@@ -32,6 +35,22 @@ internal record struct GIConstants
     public uint TracedWidth;
 
     public uint TracedHeight;
+
+    /// <summary>
+    /// The diffuse light's rays a traced pixel and how far they reach, the reflections' reach, how much of its history
+    /// each keeps a frame, and how much of its rays' light a probe takes.
+    /// </summary>
+    public uint DiffuseRayCount;
+
+    public float DiffuseRayRange;
+
+    public float ReflectionRayRange;
+
+    public float DiffuseHistory;
+
+    public float ReflectionHistory;
+
+    public float ProbeBlend;
 }
 
 /// <summary>
@@ -81,10 +100,12 @@ internal record struct TracedBlendConstants
 }
 
 /// <summary>
-/// What the probe update reads beyond the grid, the twin of <c>Traced.slang</c>'s: its rays, the list of which probe
-/// traces each, the trace's arguments, the probes' ray counts, each probe texel's variance, and how far a probe's depth
-/// reaches.
+/// What the probe update reads beyond the grid, the twin of <c>Traced.slang</c>'s.
 /// </summary>
+/// <remarks>
+/// It holds the rays, the list of which probe traces each, the trace's arguments, the probes' ray counts, each probe
+/// texel's variance, and how far a probe's depth reaches.
+/// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct ProbeUpdateConstants
 {

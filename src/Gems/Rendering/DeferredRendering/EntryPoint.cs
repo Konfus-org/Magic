@@ -10,9 +10,11 @@ using Magic.Threading;
 namespace Magic.DeferredRendering;
 
 /// <summary>
-/// The gem: <see cref="Renderer"/> keeps the world on the GPU for the gems that draw it and lights it, deferred, over
-/// its <see cref="Settings"/>, which its debug window also sets when a gem provides the debug UI.
+/// Keeps the world on the GPU for the gems that draw it, and lights it with deferred shading.
 /// </summary>
+/// <remarks>
+/// The debug window also sets <see cref="Settings"/> when a gem provides the debug UI.
+/// </remarks>
 public sealed class EntryPoint(
     DeferredRenderingSettings settings,
     IShaderCompiler shaders,

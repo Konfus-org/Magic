@@ -1,8 +1,7 @@
 namespace Magic.Graphics;
 
 /// <summary>
-/// How a pass touches a resource, which a transition names before and after: enough for the GPU provider to put the
-/// right barrier and image layout between two passes, and nothing of the API's own words for them.
+/// How a pass touches a resource, from which the GPU provider picks the barrier and image layout between two passes.
 /// </summary>
 public enum GpuAccess : byte
 {

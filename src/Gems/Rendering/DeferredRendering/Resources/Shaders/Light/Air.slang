@@ -41,7 +41,7 @@ public struct Air
     public float2 wind;
 }
 
-// The frame's air; every id 0 where nothing filled it.
+// The frame's air, every id 0 where nothing filled it.
 public Air GetAir() { return LoadFrameRow<Air>(AirOffset); }
 
 // The volume's slices away from the camera.
@@ -94,7 +94,7 @@ float GetHazeDepth(Air air, float3 camera, float3 direction, float near, float f
     float rise = direction.y * falloff;
     float atNear = GetHazeDensity(air, camera.y + direction.y * near);
     float span = far - near;
-    // Clamped going down only, where exp(-rise) would overflow; going up it falls to 0 and the form stays exact.
+    // Clamped going down only, where exp(-rise) would overflow. Going up it falls to 0 and the form stays exact.
     float risen = max(rise * span, -80.0);
     return atNear * (abs(risen) > LevelRise ? span * (1.0 - exp(-risen)) / risen : span);
 }
@@ -163,7 +163,7 @@ public float GetCloudCoverage(Air air, float2 ground, float time)
 }
 
 // How much of the sun's light reaches a point in the world through the clouds, read where the way to the sun crosses
-// their middle; 1 where there are none.
+// their middle, 1 where there are none.
 public float GetCloudShadow(Air air, float3 world, float3 toSun, float time)
 {
     if (air.cloudCover <= 0.0 || toSun.y <= 0.0)
@@ -178,7 +178,7 @@ public float GetCloudShadow(Air air, float3 world, float3 toSun, float time)
 }
 
 // Where a direction from the camera is on the clouds' picture of the sky: the sky's half folded onto a square, the
-// zenith at its centre and the horizon on its edge; and back.
+// zenith at its centre and the horizon on its edge, and back.
 public float2 ToCloudUv(float3 direction)
 {
     float3 up = float3(direction.x, max(direction.y, 0.0), direction.z);
@@ -193,7 +193,7 @@ public float3 FromCloudUv(float2 uv)
     return normalize(float3(diamond.x, 1.0 - abs(diamond.x) - abs(diamond.y), diamond.y));
 }
 
-// The sky along a unit direction from the camera with the clouds in front of it; unchanged where there are none.
+// The sky along a unit direction from the camera with the clouds in front of it, unchanged where there are none.
 public float3 ApplyClouds(float3 sky, float3 direction)
 {
     Air air = GetAir();

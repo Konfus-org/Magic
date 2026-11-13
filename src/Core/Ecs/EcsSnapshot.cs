@@ -3,10 +3,13 @@ using System.Runtime.InteropServices;
 namespace Magic.Ecs;
 
 /// <summary>
-/// A copy of the entities that have a <typeparamref name="T1"/> and their components, as <see cref="Fill"/> took them:
-/// one list each, at the same indexes, that a reader keeps and reads on any thread while the ECS goes on changing.
-/// Taking it again copies, into the same lists, only the chunks written since or that moved.
+/// A copy of the entities that have a <typeparamref name="T1"/> and their components, which a reader keeps and reads on
+/// any thread.
 /// </summary>
+/// <remarks>
+/// <see cref="Fill"/> copies them into one list each, at the same indexes, while the ECS continues to change. A new
+/// fill copies into the same lists only the chunks written or moved since the last fill.
+/// </remarks>
 public sealed class EcsSnapshot<T1>
     where T1 : unmanaged, IComponent
 {
@@ -21,11 +24,13 @@ public sealed class EcsSnapshot<T1>
     public ReadOnlySpan<T1> First => CollectionsMarshal.AsSpan(_first);
 
     /// <summary>
-    /// Fills this with a copy of the entities of <paramref name="ecs"/> that have a <typeparamref name="T1"/> and their
-    /// components, in query order, replacing what it held: a bulk copy of each chunk written since it was last filled,
-    /// on this thread, so a still world copies nothing. What reads it then needs nothing of the ECS, so it can on
-    /// another thread.
+    /// Replaces the copy with the entities of <paramref name="ecs"/> that have a <typeparamref name="T1"/> and their
+    /// components, in query order.
     /// </summary>
+    /// <remarks>
+    /// The fill runs on this thread and copies only the chunks written since the last fill, so a world that does not
+    /// change copies nothing. After the fill, any thread can read the copy.
+    /// </remarks>
     public void Fill(IEcs ecs)
     {
         ArgumentNullException.ThrowIfNull(ecs);
@@ -73,9 +78,11 @@ public sealed class EcsSnapshot<T1, T2>
     public ReadOnlySpan<EcsSnapshotChunk> Chunks => _chunks.Held;
 
     /// <summary>
-    /// The version the last fill read at: a chunk whose <see cref="EcsSnapshotChunk.Written"/> is no higher was not
-    /// written after it.
+    /// The version at which the last fill read.
     /// </summary>
+    /// <remarks>
+    /// A chunk whose <see cref="EcsSnapshotChunk.Written"/> is not higher was not written after that fill.
+    /// </remarks>
     public long Version => _chunks.Version;
 
     /// <summary>
@@ -105,11 +112,12 @@ public sealed class EcsSnapshot<T1, T2>
 }
 
 /// <summary>
-/// Where each chunk a snapshot holds was copied to, so taking it again copies only the chunks written after the last
-/// fill's version or that moved. The next chunk is what the lists hold there already when it starts at the same place
-/// with the same entity, has as many entities, and was written no later: an entity joins, leaves or moves within a
-/// chunk only by a write, which marks it.
+/// Records where each chunk of a snapshot was copied, so that the next fill copies only the chunks written or moved.
 /// </summary>
+/// <remarks>
+/// The lists already hold the next chunk when it starts at the same place with the same entity, has as many entities,
+/// and was not written later. An entity joins, leaves or moves in a chunk only by a write, which marks the chunk.
+/// </remarks>
 internal sealed class EcsSnapshotChunks
 {
     private readonly List<EcsSnapshotChunk> _held = [];
@@ -136,9 +144,12 @@ internal sealed class EcsSnapshotChunks
     public void Start() => (_index, _count) = (0, 0);
 
     /// <summary>
-    /// Whether the lists hold the next chunk as it is, the one of <paramref name="entities"/> last written at
-    /// <paramref name="written"/>, with the place it takes in <paramref name="offset"/>. An empty chunk takes none.
+    /// Records the next chunk, of <paramref name="entities"/> last written at <paramref name="written"/>, and returns
+    /// whether the lists already hold it.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="offset"/> gets the place of the chunk in the lists. An empty chunk takes no place.
+    /// </remarks>
     public bool IsHeld(ReadOnlySpan<Entity> entities, long written, out int offset)
     {
         offset = _count;
@@ -159,7 +170,7 @@ internal sealed class EcsSnapshotChunks
     }
 
     /// <summary>
-    /// How many entities the fill placed, the fill having read at <paramref name="version"/>.
+    /// Ends the fill that read at <paramref name="version"/>, and returns how many entities it placed.
     /// </summary>
     public int End(long version)
     {
@@ -177,9 +188,12 @@ internal sealed class EcsSnapshotChunks
 public readonly record struct EcsSnapshotChunk(int Offset, int Count, Entity First, long Written)
 {
     /// <summary>
-    /// Whether <paramref name="other"/> is this chunk in the same place, whenever either was written: an entity joins,
-    /// leaves or moves within a chunk only by a write, so the same first entity there is the same chunk.
+    /// Whether <paramref name="other"/> is this chunk in the same place, at any version.
     /// </summary>
+    /// <remarks>
+    /// An entity joins, leaves or moves in a chunk only by a write, so the same first entity at the same place is the
+    /// same chunk.
+    /// </remarks>
     public bool IsSameChunk(EcsSnapshotChunk other) =>
         Offset == other.Offset && Count == other.Count && First == other.First;
 }

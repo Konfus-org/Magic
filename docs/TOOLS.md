@@ -33,8 +33,9 @@ Runs the checks that a change must pass. It runs these steps in order, and stops
 
 1. **Build:** builds `src/Magic.slnx`. Each warning is an error. A file that CSharpier would change is an error too.
 2. **Test:** runs the tests against that build ([Tests](#tests)).
-3. **Headless:** runs each sample project without a window under `--fail-on-error`, then types `exit`. The step passes
-   when the run exits `0`. A run that is not done after `-Seconds` fails.
+3. **Headless:** runs all the sample projects at the same time, without a window, under `--fail-on-error`. Each run
+   types `exit` when its world loads. The step passes when each run exits `0`. A run that is not done after `-Seconds`
+   fails. A run that fails prints its last output.
 4. **Screenshot:** runs `Screenshot.ps1` on each sample project. This step needs a display and a GPU.
 
 `-Only` runs only the steps that you name. `-Project` runs other projects.
@@ -42,6 +43,7 @@ Runs the checks that a change must pass. It runs these steps in order, and stops
 ## AgentTaskComplete.ps1
 
 Runs `Format.ps1`, then the steps of `Validate.ps1` that the `-Change` level needs ([Commands](../AGENTS.md#commands)).
+If the change touches only files in sample folders, Markdown aside, only those samples run.
 
 If the steps pass, the script stamps the exact files of the checkout with the level. If the state already has a stamp
 at that level or higher, the script stops at once.
@@ -51,15 +53,34 @@ at that level or higher, the script stops at once.
 Runs a project for an agent, and names the window with the branch of the worktree. End `-Commands` with `exit` to end
 the run. The script does not build.
 
+The window opens on the display after the main one, behind the window that has the focus, so that it does not interrupt
+the user. Use `-Display` to select a different display. `Screenshot.ps1` does the same.
+
 ## Screenshot.ps1
 
 Runs a project with a window until its world loads. Then it takes a screenshot and prints the path of the image. The
 script does not build.
 
+The screenshot shows the scene only. To photograph a failure:
+
+- `-AllowErrors` lets a run that logs errors go on and take its screenshots. The script prints the `[Error]` lines of
+  the run before the paths.
+- `-Window` also captures the client area of the window to a PNG next to each screenshot, with `-window` in its name.
+  The capture shows what is drawn onto the window too, such as the banner of a failure and the debug UI. It copies
+  the screen, so keep other windows off the window of Magic. It needs Windows.
+
+The camera of HelloWorld turns. To stop it and face the spawn direction, send these lines with `-Commands`:
+
+```powershell
+tools/Scripts/Screenshot.ps1 -AllowErrors -Window -Commands 'set player.spin.degreesPerSec 0', 'set player.transform.rotation 0.2164 0 0 0.9763'
+```
+
 ## Profiling.ps1
 
-Takes, waits for or releases a profiling turn. In a profiling turn, only one worktree builds and runs Magic, so that
-nothing disturbs its measurements. The scripts that build or run Magic wait while another worktree holds a turn.
+Takes, waits for or releases a profiling turn. In a profiling turn, only one worktree runs Magic and the tests, so
+that nothing disturbs its measurements. The scripts that run Magic or the tests wait while another worktree holds a
+turn. On Windows, `Format.ps1` and the build of `Validate.ps1` run at once, at idle priority. On other systems, they
+wait.
 
 ## Claim.ps1
 
@@ -130,10 +151,4 @@ once for each clone. `AgentTaskComplete.ps1` also sets it ([Commits](../AGENTS.m
 
 ## Tests
 
-The unit tests are in `tests/`. There is one project for each gem or library under test, with the name
-`<Gem>.Tests`. The tests use xunit on the Microsoft testing platform, which `global.json` selects.
-
-- To run all the tests, run `dotnet test --solution src/Magic.slnx`.
-- To run one project, run `dotnet test --project tests/<Gem>.Tests/<Gem>.Tests.csproj`.
-- A test project sees the internal members of its gem through `InternalsVisibleTo` in the csproj of the gem.
-- A test makes the data that it checks in the test itself. It never reads an asset from disk.
+The commands that run the tests, and the rules for tests, are in [Tests](TESTS.md).

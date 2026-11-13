@@ -1,3 +1,4 @@
+using System.Net.WebSockets;
 using Magic.Debugging;
 using Magic.Platform;
 using Magic.Projects;
@@ -51,6 +52,18 @@ public sealed class App : IDisposable
     /// </remarks>
     public IWindow? Window { get; internal set; }
 
+    /// <summary>
+    /// The app that started Magic and keeps it running, or null when Magic runs alone. <c>--owner</c> on the command
+    /// line sets it.
+    /// </summary>
+    /// <remarks>
+    /// Magic exits when the owner stops sending. A gem can connect to <see cref="AppOwner.Port"/> to send data to the
+    /// owner.
+    /// </remarks>
+    public AppOwner? Owner { get; internal set; }
+
+    // TODO(Konfus): remove getter, null window means headless also we check both window and this in many places.
+    // Either use this or window but not both, if we go with just checking if window is null then we should remove this property!
     /// <summary>
     /// Whether the run has no window.
     /// </summary>
@@ -119,5 +132,66 @@ public sealed class App : IDisposable
     {
         _lifetime.Dispose();
         _lifetime = CancellationTokenSource.CreateLinkedTokenSource(_exiting.Token);
+    }
+}
+
+/// <summary>
+/// The app that started Magic and keeps it running, for example an editor. Magic exits when the owner stops sending.
+/// </summary>
+/// <param name="Name">The name of the owner, which the log shows.</param>
+/// <param name="Port">
+/// The port on this computer that the owner listens on. Core and the gems connect to it to talk to the owner.
+/// </param>
+public sealed record AppOwner(string Name, int Port);
+
+/// <summary>
+/// Keeps Magic running only while its owner sends. Magic connects a WebSocket to <c>/magic/owner</c> on the owner's
+/// port. The owner sends a message at least once a second.
+/// </summary>
+internal static class AppOwnerLink
+{
+    /// <summary>
+    /// How long the owner can send nothing before Magic exits.
+    /// </summary>
+    private static readonly TimeSpan _silence = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Connects to <paramref name="owner"/>, and exits Magic when the owner closes the connection or sends nothing for
+    /// 5 seconds. Call it one time, after the command line set the owner.
+    /// </summary>
+    public static async Task WatchAsync(App app, AppOwner owner)
+    {
+        Log.Info($"Owned by {owner.Name} on port {owner.Port}. Magic exits when {owner.Name} stops sending.");
+        using ClientWebSocket link = new();
+        try
+        {
+            await link.ConnectAsync(new Uri($"ws://127.0.0.1:{owner.Port}/magic/owner"), CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (WebSocketException ex)
+        {
+            Log.Error($"{owner.Name} can't be reached on port {owner.Port}, so Magic exits: {ex.Message}");
+            app.Exit();
+
+            return;
+        }
+
+        // The messages say only that the owner runs, so they are not read.
+        byte[] message = new byte[256];
+        try
+        {
+            while (true)
+            {
+                using CancellationTokenSource silence = new(_silence);
+                WebSocketReceiveResult received = await link.ReceiveAsync(message, silence.Token).ConfigureAwait(false);
+                if (received.MessageType == WebSocketMessageType.Close)
+                    break;
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (WebSocketException) { }
+
+        Log.Info($"{owner.Name} stopped sending, so Magic exits.");
+        app.Exit();
     }
 }

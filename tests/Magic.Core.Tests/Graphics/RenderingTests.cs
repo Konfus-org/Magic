@@ -5,9 +5,12 @@ using Xunit;
 namespace Magic.Tests.Graphics;
 
 /// <summary>
-/// The gems' parts that render: ordered as they register from what each takes and makes, refused when two make one
-/// type or they form a cycle, and pumped so each takes what the parts before it made this frame.
+/// The gems' parts that render: how they are ordered, refused and pumped each frame.
 /// </summary>
+/// <remarks>
+/// Parts are ordered as they register, from what each takes and makes. They are refused when two make one type or they
+/// form a cycle. Each takes what the parts before it made this frame.
+/// </remarks>
 public sealed class RenderingTests
 {
     private static readonly Frame _frame = new()
@@ -38,7 +41,7 @@ public sealed class RenderingTests
     }
 
     [Fact]
-    public void PumpDropsAGemWhoseRequiredInputNoGemMakes()
+    public void PumpSkipsAGemWhoseRequiredInputNoGemMakes()
     {
         List<string> calls = [];
         Pump(new Lost(calls), new World(calls, new View(1)));
@@ -88,12 +91,12 @@ public sealed class RenderingTests
     }
 
     [Fact]
-    public void PumpCallsAGemThatTakesAndMakesNothingInItsOrder()
+    public void PumpCallsAGemThatTakesAndMakesNothingAfterTheOthers()
     {
         List<string> calls = [];
         Pump(new Overlay(calls), new World(calls, new View(1)));
 
-        Assert.Equal(["Overlay", "World"], calls);
+        Assert.Equal(["World", "Overlay"], calls);
     }
 
     [Fact]
@@ -103,6 +106,28 @@ public sealed class RenderingTests
         Pump(new Sun(), shade);
 
         Assert.Equal(new ShadeInput(new View(3), new Light(4)), shade.Taken);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void IsMakerOutTellsOnlyWhenTheMakerFailedAndMadeNothing(bool fails)
+    {
+        Watch watch = new();
+        Rendering rendering = Register(new Broken(fails), new Lost([]), watch);
+        rendering.Pump(_frame, new RenderGraph { Rendering = rendering });
+
+        Assert.Equal(fails, watch.IsViewOut);
+    }
+
+    [Fact]
+    public void IsMakerOutTellsWhenTheMakersOnlyFailureAnEarlierPartAlreadyTold()
+    {
+        Watch watch = new();
+        Rendering rendering = Register(new Dim(), new Echo(), watch);
+        rendering.Pump(_frame, new RenderGraph { Rendering = rendering });
+
+        Assert.True(watch.IsViewOut);
     }
 
     private static Rendering Register(params object[] parts)
@@ -171,6 +196,44 @@ public sealed class RenderingTests
     private sealed class Overlay(List<string> calls) : IRender
     {
         public void Render(in Frame frame, RenderGraph graph) => calls.Add(nameof(Overlay));
+    }
+
+    private sealed class Broken(bool fails) : IRenderInto<View>
+    {
+        public View? Render(in Frame frame, RenderGraph graph)
+        {
+            if (fails)
+                graph.Fail(RenderFailure.Pass, "View is not made", "it broke.");
+
+            return null;
+        }
+    }
+
+    private sealed class Dim : IRenderInto<Light>
+    {
+        public Light? Render(in Frame frame, RenderGraph graph)
+        {
+            graph.Fail(RenderFailure.Pass, "View is not made", "it broke.");
+
+            return new Light(1);
+        }
+    }
+
+    private sealed class Echo : IRender<EggInput, View>
+    {
+        public View? Render(in Frame frame, RenderGraph graph, in EggInput input)
+        {
+            graph.Fail(RenderFailure.Pass, "View is not made", "it broke again.");
+
+            return null;
+        }
+    }
+
+    private sealed class Watch : IRender
+    {
+        public bool IsViewOut { get; private set; }
+
+        public void Render(in Frame frame, RenderGraph graph) => IsViewOut = graph.IsMakerOut<View>();
     }
 
     private sealed class Sun : IRenderInto<(View, Light)>

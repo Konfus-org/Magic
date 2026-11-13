@@ -4,7 +4,7 @@ module "Core/Sampling";
 
 import Core.Math;
 
-// The bits of i reversed as a fraction in [0, 1): the second axis of a Hammersley point set.
+// The bits of a word reversed as a fraction in [0, 1): the second axis of a Hammersley point set.
 public float GetRadicalInverse(uint bits)
 {
     bits = (bits << 16u) | (bits >> 16u);

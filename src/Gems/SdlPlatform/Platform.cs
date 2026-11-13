@@ -9,13 +9,17 @@ using static Magic.SdlBindings.SDL3;
 namespace Magic.SdlPlatform;
 
 /// <summary>
-/// The platform thread's side of SDL: it pumps SDL's events and hands them to the game thread as they came, and gives
-/// the window and clipboard what the game thread set on them. It also measures the RAM the process holds.
+/// The platform thread's side of SDL: it pumps events to the game thread, and gives the window and clipboard their
+/// changes.
 /// </summary>
+/// <remarks>
+/// It also measures the RAM that the process holds.
+/// </remarks>
 public sealed class Platform : IPlatform, IDisposable
 {
     /// <summary>
-    /// The longest a pump waits for the OS's next event, so what was handed to the platform thread is never kept longer.
+    /// The longest a pump waits for the OS's next event, so what was handed to the platform thread is never kept
+    /// longer.
     /// </summary>
     private const int PumpWaitMs = 10;
 
@@ -41,9 +45,12 @@ public sealed class Platform : IPlatform, IDisposable
     public void Dispose() => _meter.Dispose();
 
     /// <summary>
-    /// Gives the window and clipboard what the game thread set, then hands the game thread SDL's events since the last
-    /// pump, waiting up to <see cref="PumpWaitMs"/> for one when there are none. Platform thread.
+    /// Gives the window and clipboard what the game thread set, then hands the game thread the SDL events since the
+    /// last pump.
     /// </summary>
+    /// <remarks>
+    /// When there are no events, it waits up to <see cref="PumpWaitMs"/> for one. Call it only on the platform thread.
+    /// </remarks>
     public unsafe void Pump()
     {
         if (_sdl.Pointer != null)

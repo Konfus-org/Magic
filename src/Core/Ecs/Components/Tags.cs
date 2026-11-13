@@ -4,9 +4,11 @@ using System.Text.Json.Serialization;
 namespace Magic.Ecs.Components;
 
 /// <summary>
-/// The tags an entity has, inline so the component stays plain unmanaged data: up to <see cref="Capacity"/>, unordered,
-/// each once, a free slot <see cref="Tag.None"/>.
+/// The tags of an entity, inline so the component stays plain unmanaged data.
 /// </summary>
+/// <remarks>
+/// It holds up to <see cref="Capacity"/> tags, in no order, each one time. A free slot holds <see cref="Tag.None"/>.
+/// </remarks>
 [InlineArray(Capacity)]
 [JsonConverter(typeof(TagsJsonConverter))]
 public struct Tags : IComponent, IEquatable<Tags>
@@ -24,7 +26,7 @@ public struct Tags : IComponent, IEquatable<Tags>
     /// </summary>
     public readonly bool Equals(Tags other)
     {
-        // Every tag this has, the other has too, and the other has no more than this.
+        // The other has each tag that this has, and no more tags than this.
         int count = 0;
         foreach (Tag held in this)
         {

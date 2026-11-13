@@ -7,14 +7,21 @@ using Magic.Assets;
 namespace Magic.Ecs.Components;
 
 /// <summary>
-/// A <see cref="Renderer"/>'s materials by the slot a model's mesh names (<see cref="Mesh.MaterialSlot"/>), each a
-/// <see cref="MaterialInstance"/>: a list no one changes, held once for the process and shared by every renderer that
-/// holds the same, so the component stays a few bytes however many slots it fills. Equal lists are equal sets. A slot
-/// changes by making the set that has it: <c>renderer.Materials = renderer.Materials.With(0, slot)</c>. Sets read from a
-/// file are kept for the process; sets made in code are freed once no renderer has held them for a while, so a set kept
-/// anywhere but a renderer may come back empty. In a file, an array of instances by slot, as
-/// <see cref="MaterialSlots"/>.
+/// The materials of a <see cref="Renderer"/>: a <see cref="MaterialInstance"/> for each slot that a mesh of its model
+/// names (<see cref="Mesh.MaterialSlot"/>).
 /// </summary>
+/// <remarks>
+/// <para>
+/// The process holds each list once, and no one changes it. Each renderer with the same list shares it, so the
+/// component stays a few bytes for any count of slots. Equal lists are equal sets. To change a slot, make the set that
+/// has it: <c>renderer.Materials = renderer.Materials.With(0, slot)</c>.
+/// </para>
+/// <para>
+/// The process keeps the sets read from a file. It frees a set made in code when no renderer held it for a time, so a
+/// set that is kept anywhere but in a renderer can come back empty. In a file, it is an array of instances by slot, as
+/// <see cref="MaterialSlots"/>.
+/// </para>
+/// </remarks>
 [JsonConverter(typeof(MaterialSetJsonConverter))]
 public readonly struct MaterialSet : IEquatable<MaterialSet>
 {
@@ -95,9 +102,11 @@ public readonly struct MaterialSet : IEquatable<MaterialSet>
     public static bool operator !=(MaterialSet left, MaterialSet right) => !left.Equals(right);
 
     /// <summary>
-    /// The set of these instances, by slot; at most <see cref="Capacity"/>, empty slots after the last filled one left
-    /// out.
+    /// Returns the set of these instances, by slot.
     /// </summary>
+    /// <remarks>
+    /// It takes at most <see cref="Capacity"/> instances, and leaves out the empty slots after the last filled slot.
+    /// </remarks>
     public static MaterialSet Of(params ReadOnlySpan<MaterialInstance> instances)
     {
         Slots slots = ToSlots(instances);
@@ -151,10 +160,12 @@ public readonly struct MaterialSet : IEquatable<MaterialSet>
     }
 
     /// <summary>
-    /// Frees the sets made in code that no live renderer has held since the sweep before, a few times a second and at
-    /// least 3 frames apart, so no frame still being drawn holds one. Game thread, once a frame, between the gems'
-    /// hooks.
+    /// Frees the sets made in code that no live renderer held since the sweep before.
     /// </summary>
+    /// <remarks>
+    /// It sweeps a few times a second and at least 3 frames apart, so no frame that is still in drawing holds a freed
+    /// set. Call it on the game thread, once a frame, between the hooks of the gems.
+    /// </remarks>
     internal static void SweepIfDue(IEcs ecs)
     {
         _framesSinceSweep++;
@@ -260,9 +271,12 @@ public readonly struct MaterialSet : IEquatable<MaterialSet>
     }
 
     /// <summary>
-    /// A held set, and the last sweep a renderer held it at or, when it was asked for since, the sweep before that ask.
-    /// Game thread, but for the slots.
+    /// A held set, and the last sweep at which a renderer held it.
     /// </summary>
+    /// <remarks>
+    /// When something asked for the set after that sweep, the sweep is the one before that ask. Use it on the game
+    /// thread; any thread can read the slots.
+    /// </remarks>
     private sealed class Stored(Slots slots)
     {
         public Slots Slots { get; } = slots;

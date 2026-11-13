@@ -3,7 +3,7 @@ using Magic.Assets;
 namespace Magic.Graphics;
 
 /// <summary>
-/// The entries a gem's passes run, in the modules of its <c>Shaders/</c> folder.
+/// Entries for a gem's passes, from the modules in its <c>Shaders/</c> folder.
 /// </summary>
 public static class PassShaders
 {

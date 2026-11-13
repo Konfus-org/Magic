@@ -10,9 +10,12 @@ using Magic.Worlds;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>open</c>: runs the project at a path, ending the run of any other; or, for a <c>.domain</c>, opens that domain in
-/// place of the world, holding <c>wait loaded</c> while it comes.
+/// <c>open</c>: runs the project at a path and ends the run of any other, or opens a <c>.domain</c> in place of the
+/// world.
 /// </summary>
+/// <remarks>
+/// For a domain, it holds <c>wait loaded</c> while the domain comes.
+/// </remarks>
 internal static class OpenCommand
 {
     public static Command Create(App app, IFileSystem files, AssetManager assets, World world, CommandQueue queue)

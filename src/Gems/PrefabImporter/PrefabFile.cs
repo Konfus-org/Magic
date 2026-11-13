@@ -19,9 +19,12 @@ internal sealed class PrefabFile
 }
 
 /// <summary>
-/// One entity of a file: what messages call it, its tags, its components, each by its type's name and as that type's
-/// JSON, and the entities under it; when it names a prefab, that prefab's parts go under it too.
+/// One entity of a file: its name in messages, its tags, its components, and the entities under it.
 /// </summary>
+/// <remarks>
+/// Each component is its type's name and that type's JSON. When the entity names a prefab, the prefab's parts go under
+/// it too.
+/// </remarks>
 [SuppressMessage(
     "Performance",
     "CA1812:Avoid uninstantiated internal classes",

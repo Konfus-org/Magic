@@ -24,7 +24,7 @@ internal sealed unsafe class VulkanBuffer
     public byte* Mapped { get; init; }
 
     /// <summary>
-    /// Its device address, for what reads it by address, as the acceleration structure builds do; 0 when none.
+    /// Its device address, for work that reads it by address; 0 when none.
     /// </summary>
     public ulong Address { get; init; }
 
@@ -66,8 +66,8 @@ internal sealed unsafe class VulkanAcceleration
     public required ulong Address { get; init; }
 
     /// <summary>
-    /// How a structure of <paramref name="type"/> is sized and built: for fast tracing, and a bottom-level one so it
-    /// can be compacted once built.
+    /// Gets the build flags for a structure of <paramref name="type"/>: fast tracing, and compaction for a bottom-level
+    /// structure.
     /// </summary>
     public static VkBuildAccelerationStructureFlagsKHR GetBuildFlags(VkAccelerationStructureTypeKHR type) =>
         type == VkAccelerationStructureTypeKHR.BottomLevel
@@ -77,9 +77,12 @@ internal sealed unsafe class VulkanAcceleration
 }
 
 /// <summary>
-/// A texture as Vulkan holds it: the image, a view of the whole for sampling and one per level for writing and
-/// drawing into, and the access each level was last used as, which its layout follows and the barriers move.
+/// A texture as Vulkan holds it: the image, its views, and the access that each level was last used as.
 /// </summary>
+/// <remarks>
+/// It has a view of the whole texture for sampling, and a view of each level for writing and drawing into. The layout
+/// of each level follows its access, and the barriers change it.
+/// </remarks>
 internal sealed class VulkanTexture
 {
     public required VkImage Image { get; init; }
@@ -111,9 +114,11 @@ internal sealed class VulkanPipeline
 }
 
 /// <summary>
-/// Resources of one kind by their handles' ids, at most <paramref name="capacity"/> of them, id 0 never taken. A
-/// removed resource's id stays taken until it is released, as the frames in flight may still name it.
+/// Holds resources of one kind by the ids of their handles, at most <paramref name="capacity"/>; id 0 is never taken.
 /// </summary>
+/// <remarks>
+/// The id of a removed resource stays taken until it is released, because the frames in flight can still name it.
+/// </remarks>
 internal sealed class Slots<T>(uint capacity)
 {
     private readonly List<T?> _items = [default];
@@ -163,9 +168,12 @@ internal sealed class Slots<T>(uint capacity)
 }
 
 /// <summary>
-/// Every resource the heap holds, by its handle's id, and how each is made and freed. A freed resource goes to the
-/// frame's trash and dies once the frames in flight are done with it; its id waits as long.
+/// Makes, holds and frees every resource of the heap, by the id of its handle.
 /// </summary>
+/// <remarks>
+/// A freed resource goes to the frame's trash, and is destroyed after the frames in flight are done with it. Its id
+/// waits as long.
+/// </remarks>
 internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap heap) : IDisposable
 {
     private const float LodClampNone = 1000;
@@ -220,8 +228,8 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     }
 
     /// <summary>
-    /// A bottom-level acceleration structure over triangles of the heap's buffers, sized for them and put in the
-    /// heap, to be built by the recorder.
+    /// Creates a bottom-level acceleration structure over triangles in the heap's buffers, and puts it in the heap for
+    /// the recorder to build.
     /// </summary>
     public Result<GpuAcceleration> CreateAcceleration(in BottomLevelDescription description)
     {
@@ -268,9 +276,12 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     }
 
     /// <summary>
-    /// A top-level acceleration structure over instances read from a buffer, sized for the most it may hold and
-    /// put in the heap, to be built by the recorder.
+    /// Creates a top-level acceleration structure over the instances in a buffer, and puts it in the heap for the
+    /// recorder to build.
     /// </summary>
+    /// <remarks>
+    /// It is sized for the most instances that it can hold.
+    /// </remarks>
     public Result<GpuAcceleration> CreateAcceleration(in TopLevelDescription description)
     {
         if (description.MaxInstances <= 0)
@@ -353,7 +364,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     }
 
     /// <summary>
-    /// A window's image as a texture of the heap: drawn into and copied to, never sampled.
+    /// Adds a window's image as a texture of the heap, which is drawn into and copied to, but never sampled.
     /// </summary>
     public Result<GpuTexture> AddWindowTexture(VkImage image, in TextureDescription description)
     {
@@ -539,9 +550,11 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     }
 
     /// <summary>
-    /// Frees what a frame threw away once no frame uses it, and lets its id be taken again. A buffer may still be
-    /// in the heap under that id, as a staging ring that grew is; it leaves now.
+    /// Frees what a frame threw away after no frame uses it, and lets its id be taken again.
     /// </summary>
+    /// <remarks>
+    /// A buffer can still be in the heap under that id, such as a staging ring that grew. It leaves the heap now.
+    /// </remarks>
     public void Free(VulkanFrames.Trash trash)
     {
         switch (trash.Resource)
@@ -610,10 +623,13 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     }
 
     /// <summary>
-    /// A copy of a built bottom-level structure in <paramref name="bytes"/>, the size it compacts to, recorded into
-    /// <paramref name="cmd"/> and put in the heap with no scratch. The build's barrier, in the frame that built it,
-    /// made the build visible to the copy; the next build that reads the copy waits for every command before it.
+    /// Records into <paramref name="cmd"/> a copy of a built bottom-level structure at its compacted size
+    /// <paramref name="bytes"/>, and puts the copy in the heap with no scratch.
     /// </summary>
+    /// <remarks>
+    /// The build's barrier, in the frame that built it, made the build visible to the copy. The next build that reads
+    /// the copy waits for every command before it.
+    /// </remarks>
     public Result<GpuAcceleration> Compact(VkCommandBuffer cmd, VulkanAcceleration built, ulong bytes)
     {
         Result<VulkanBuffer> buffer = CreateVulkanBuffer(
@@ -732,8 +748,8 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     }
 
     /// <summary>
-    /// An acceleration structure of a type over geometries, sized by the driver, with its buffer and scratch made
-    /// and its place in the heap taken.
+    /// Creates an acceleration structure of a type over geometries, at the driver's size, with its buffer, its scratch
+    /// and its place in the heap.
     /// </summary>
     private Result<GpuAcceleration> CreateAcceleration(
         VkAccelerationStructureTypeKHR type,
@@ -787,8 +803,8 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     }
 
     /// <summary>
-    /// A structure of <paramref name="type"/> made over its <paramref name="buffer"/> and put in the heap; its buffers
-    /// freed when it can't be.
+    /// Makes a structure of <paramref name="type"/> over its <paramref name="buffer"/> and puts it in the heap; if that
+    /// fails, it frees the buffers.
     /// </summary>
     private Result<GpuAcceleration> AddAcceleration(
         VkAccelerationStructureTypeKHR type,
@@ -968,8 +984,8 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     }
 
     /// <summary>
-    /// A view of <paramref name="levels"/> levels from <paramref name="firstLevel"/>: the whole texture as it is
-    /// sampled, or one level as it is written and drawn into.
+    /// Creates a view of <paramref name="levels"/> levels from <paramref name="firstLevel"/>: the whole texture for
+    /// sampling, or one level for writing and drawing into.
     /// </summary>
     private Result<VkImageView> CreateView(VkImage image, in TextureDescription description, int firstLevel, int levels)
     {
@@ -1011,7 +1027,8 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
     }
 
     /// <summary>
-    /// What a GPU debugger shows the object as, when the debug extension is there and the name is not empty.
+    /// Gives the object the name that a GPU debugger shows, when the debug extension is there and the name is not
+    /// empty.
     /// </summary>
     private void Name(VkObjectType type, ulong handle, string name)
     {

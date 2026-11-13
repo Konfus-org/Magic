@@ -13,10 +13,12 @@ using Log = Magic.Debugging.Log;
 namespace Magic.Tests.Projects;
 
 /// <summary>
-/// A gem whose code references another gem: it shares that gem's one copy of its types, loads after it, and is refused
-/// when the project doesn't list it; and a gem whose part provides an interface. Each gem is compiled here and written
-/// where Magic finds gems, beside the tests.
+/// A gem whose code references another gem, and a gem whose part provides an interface.
 /// </summary>
+/// <remarks>
+/// A gem that references another shares that gem's one copy of its types, loads after it, and is refused when the
+/// project doesn't list it. Each gem is compiled here and written where Magic finds gems, beside the tests.
+/// </remarks>
 public sealed class GemRegistryTests
 {
     private const string LenderSource = """
@@ -64,7 +66,9 @@ public sealed class GemRegistryTests
     {
         await CreateGemsAsync("Lender", "Borrower").ConfigureAwait(true);
 
-        List<RegisteredGem> gems = GemRegistry.Register(_files, ["Lender", "Borrower"], []);
+        using Assemblies assemblies = new(_files);
+
+        List<RegisteredGem> gems = GemRegistry.Register(assemblies, _files, ["Lender", "Borrower"], []);
 
         Type lender = Assert.Single(gems.Single(gem => gem.Name == "Lender").PartTypes);
         Type borrower = gems.Single(gem => gem.Name == "Borrower").Type;
@@ -76,7 +80,9 @@ public sealed class GemRegistryTests
     {
         await CreateGemsAsync("Lender", "Borrower").ConfigureAwait(true);
 
-        List<RegisteredGem> gems = GemRegistry.Register(_files, ["Borrower", "Lender"], []);
+        using Assemblies assemblies = new(_files);
+
+        List<RegisteredGem> gems = GemRegistry.Register(assemblies, _files, ["Borrower", "Lender"], []);
 
         Assert.Equal(["Lender", "Borrower"], gems.ConvertAll(gem => gem.Name));
     }
@@ -86,7 +92,9 @@ public sealed class GemRegistryTests
     {
         await CreateGemsAsync("Absent", "Orphan").ConfigureAwait(true);
 
-        List<RegisteredGem> gems = GemRegistry.Register(_files, ["Orphan"], []);
+        using Assemblies assemblies = new(_files);
+
+        List<RegisteredGem> gems = GemRegistry.Register(assemblies, _files, ["Orphan"], []);
 
         Assert.Empty(gems);
         Assert.Contains(
@@ -103,7 +111,9 @@ public sealed class GemRegistryTests
         await WriteGemAsync("Parted", Compile("Parted", PartedSource, [])).ConfigureAwait(true);
         ServiceCollection services = [];
 
-        RegisteredGem gem = Assert.Single(GemRegistry.Register(_files, ["Parted"], services));
+        using Assemblies assemblies = new(_files);
+
+        RegisteredGem gem = Assert.Single(GemRegistry.Register(assemblies, _files, ["Parted"], services));
 
         using ServiceProvider provider = services.BuildServiceProvider();
         object? part = Assert.Single(gem.Parts).GetValue(provider.GetRequiredService(gem.Type));
@@ -127,7 +137,7 @@ public sealed class GemRegistryTests
     }
 
     /// <summary>
-    /// <paramref name="source"/> compiled as the library <paramref name="name"/> against the framework, Core and
+    /// Compiles <paramref name="source"/> as the library <paramref name="name"/> against the framework, Core and
     /// <paramref name="references"/>.
     /// </summary>
     private static byte[] Compile(string name, string source, ImmutableArray<MetadataReference> references)

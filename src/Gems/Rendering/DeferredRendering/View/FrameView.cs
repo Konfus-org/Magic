@@ -1,5 +1,6 @@
 using System.Numerics;
 using Magic.Assets;
+using Magic.DeferredRendering.World;
 using Magic.Ecs.Components;
 using Magic.Graphics;
 using Magic.Projects;
@@ -8,24 +9,31 @@ using Magic.Utils;
 namespace Magic.DeferredRendering.View;
 
 /// <summary>
-/// The frame's rows written from its view: the view's constants, its matrices and targets, the frame's tables and its
-/// lights, remembering last frame's view so a thing that moved carries where it was.
+/// Writes the frame's rows from its view: the view's constants, its matrices and targets, the frame's tables and its
+/// lights.
 /// </summary>
+/// <remarks>
+/// It remembers last frame's view, so a thing that moved carries where it was.
+/// </remarks>
 internal sealed class FrameView
 {
     private const uint JitterFrames = 256;
 
     /// <summary>
-    /// Last frame's view and its size, while a frame was drawn since the view was last forgotten: what a thing that
-    /// moved carries where it was from, and whether the view has a history.
+    /// Last frame's view and its size, while a frame was drawn since the view was last forgotten.
     /// </summary>
+    /// <remarks>
+    /// A thing that moved carries where it was from this view, and it tells whether the view has a history.
+    /// </remarks>
     private (Matrix4x4 ViewProjection, Vector4 CameraPosition, int Width, int Height)? _previous;
 
     /// <summary>
-    /// The jitter of frame <paramref name="frameIndex"/>, in pixels from the pixel's middle: a point in the pixel from
-    /// the Halton sequence in bases 2 and 3 that starts again every 256 frames, so an effect that blends frames sees
-    /// another point of each pixel each frame.
+    /// Gets the jitter of frame <paramref name="frameIndex"/>, in pixels from the pixel's middle.
     /// </summary>
+    /// <remarks>
+    /// It is a point in the pixel from the Halton sequence in bases 2 and 3 that starts again every 256 frames, so an
+    /// effect that blends frames sees another point of each pixel each frame.
+    /// </remarks>
     public static Vector2 GetJitter(uint frameIndex)
     {
         uint term = (frameIndex % JitterFrames) + 1;
@@ -40,21 +48,25 @@ internal sealed class FrameView
     public void ClearHistory() => _previous = null;
 
     /// <summary>
-    /// The frame's rows uploaded into its buffer: the view's constants, the camera shifted by <paramref name="jitter"/>;
-    /// the models, the instance and material tables; and the lights, the sun, the open sky at
-    /// <paramref name="skyBrightness"/>, the sky's tables, and the light table's <paramref name="lightCount"/>
-    /// lights and its tiles; and the rows the gems after the view write, at 0.
+    /// Uploads the frame's rows into its buffer.
     /// </summary>
+    /// <remarks>
+    /// The rows are the view's constants, with the camera shifted by <paramref name="jitter"/>; the models, the
+    /// instance and material tables of <paramref name="world"/>; the lights: the sun, the open sky at
+    /// <paramref name="skyBrightness"/>, the sky's tables, and the light table's lights and its tiles; the world as
+    /// rays see it, <paramref name="traced"/>; and, at 0, the rows the gems after the view write.
+    /// </remarks>
     public Result Upload(
         RenderGraph graph,
         in GpuView view,
-        int lightCount,
+        in GpuWorld world,
         (Transform Transform, Camera Camera) camera,
         in Frame frame,
         Vector2 jitter,
         (Vector3 Direction, Vector3 Illuminance) sun,
         bool hasSky,
-        float skyBrightness
+        float skyBrightness,
+        GpuTracedWorld traced
     )
     {
         Result<GpuSampler> sampler = graph.Sampler(
@@ -99,15 +111,6 @@ internal sealed class FrameView
             FrameIndex = frame.Index,
             Jitter = jitter,
         };
-        GpuModels models = new()
-        {
-            Instances = view.Instances.Id,
-            Count = (uint)view.InstanceCount,
-            Vertices = view.Vertices.Id,
-            Indices = view.Indices.Id,
-            Materials = view.Materials.Id,
-            Meshes = view.Meshes.Id,
-        };
         GpuLights frameLights = new()
         {
             SunDirection = new Vector4(sun.Direction, 0),
@@ -120,7 +123,7 @@ internal sealed class FrameView
             LutSampler = sampler.Value.Id,
             HasSky = hasSky ? 1u : 0u,
             Table = view.LightTable.Id,
-            Count = (uint)lightCount,
+            Count = (uint)world.Lights.Count,
             Tiles = view.LightTiles.Id,
         };
 
@@ -145,18 +148,18 @@ internal sealed class FrameView
                 ? (last.ViewProjection, last.CameraPosition)
                 : (unjittered, constants.CameraPosition);
         _previous = (unjittered, constants.CameraPosition, width, height);
-        graph.Upload(view.Frame, [constants]);
-        graph.Upload(view.Frame, [models], GpuModels.Offset);
-        graph.Upload(view.Frame, [frameLights], GpuLights.Offset);
+        bool isSent = graph.Upload(view.Frame, [constants]);
+        isSent &= graph.Upload(view.Frame, [world.ModelsRow], GpuModels.Offset);
+        isSent &= graph.Upload(view.Frame, [frameLights], GpuLights.Offset);
 
-        // The rows the gems after the view write, 0 until one does, so the shaders that read them trace, shadow and
-        // light nothing indirectly, the sky lights the surfaces, and the air changes nothing.
-        graph.Upload(view.Frame, [default(GpuTracedWorld)], GpuTracedWorld.Offset);
-        graph.Upload(view.Frame, [default(GpuShadows)], GpuShadows.Offset);
-        graph.Upload(view.Frame, [default(GpuIndirectLight)], GpuIndirectLight.Offset);
-        graph.Upload(view.Frame, [default(GpuAir)], GpuAir.Offset);
+        // The rows the gems after the view write, 0 until one does, so the shaders that read them shadow and light
+        // nothing indirectly, the sky lights the surfaces, and the air changes nothing.
+        isSent &= graph.Upload(view.Frame, [traced], GpuTracedWorld.Offset);
+        isSent &= graph.Upload(view.Frame, [default(GpuShadows)], GpuShadows.Offset);
+        isSent &= graph.Upload(view.Frame, [default(GpuIndirectLight)], GpuIndirectLight.Offset);
+        isSent &= graph.Upload(view.Frame, [default(GpuAir)], GpuAir.Offset);
 
-        return Result.Success();
+        return isSent ? Result.Success() : Result.Failure("the frame's constants were not staged.");
     }
 
     /// <summary>
@@ -166,7 +169,7 @@ internal sealed class FrameView
         _previous is { } last && last.Width == width && last.Height == height;
 
     /// <summary>
-    /// The plane scaled so its normal is a unit; the far plane's is zero, and stays so.
+    /// Scales the plane so its normal is a unit; the far plane's is zero, and stays so.
     /// </summary>
     private static Vector4 Normalize(Vector4 plane)
     {
@@ -176,7 +179,7 @@ internal sealed class FrameView
     }
 
     /// <summary>
-    /// The Halton sequence's term in a base, 0 to 1: a different one each frame that fills the pixel evenly.
+    /// Gets the Halton sequence's term in a base, 0 to 1: a different one each frame that fills the pixel evenly.
     /// </summary>
     private static float GetHalton(uint index, uint radix)
     {
@@ -193,9 +196,11 @@ internal sealed class FrameView
     }
 
     /// <summary>
-    /// A perspective with no far plane and reversed depth, for row vectors: depth is the near distance over the view
-    /// depth, 1 at the near plane and 0 at infinity.
+    /// Creates a perspective with no far plane and reversed depth, for row vectors.
     /// </summary>
+    /// <remarks>
+    /// Depth is the near distance over the view depth, 1 at the near plane and 0 at infinity.
+    /// </remarks>
     private static Matrix4x4 CreatePerspective(float fieldOfViewDegrees, float aspect, float near)
     {
         float focal = 1 / MathF.Tan(fieldOfViewDegrees * MathF.PI / 360);

@@ -36,7 +36,68 @@ the item.
 
 ## Bundled gems
 
-The debug gems, ImGuiDebugUI and DebugTools, are in [Debugging](DEBUGGING.md).
+The debug gems, ImGuiDebugUI and DebugTools, are in [Debugging](DEBUGGING.md). The rendering gems are in
+[Rendering](RENDERING.md).
+
+### ArchEcs
+
+The entity world, through [Arch](https://github.com/genaray/Arch). Provides `IEcs`.
+
+- Change the world only on the game thread. On other threads, a change throws.
+- A query gives spans over the components and allocates nothing.
+- A use of a dead entity, or a structural change inside a query loop, throws.
+
+### CSharpScripting
+
+Runs the C# scripts of the entities: the `Script` assets in an entity's `ScriptContainer` that are `.cs` files. A
+`Script` asset in another language is for the gem of that language.
+
+To write a script:
+
+1. In the csproj of the code that holds the script, reference the project of this gem with `Private="false"`
+   ([Gems that use other gems](#gems-that-use-other-gems)).
+2. Write a class that implements `IBehavior`, or `ISystem` for work over many entities. Give the file the name of the
+   class.
+3. Give the file a `.meta` file with an id and `"type": "Script"`.
+4. Give an entity the script in its `ScriptContainer`, as `"ScriptContainer": [ { "id": <the id> } ]` in a prefab.
+
+How a script runs:
+
+- Each entity gets its own copy of each script in its `ScriptContainer`. The copy starts in a later frame, when the
+  world is not loading.
+- The constructor gets the `Entity` for an `Entity` parameter, and a service for each other parameter. Only keep them
+  in the constructor. Do the first work in `Start`.
+- The hooks of the behaviours run on the game thread, in the order that the copies started, after the hooks of the
+  gems listed before this gem.
+- A behaviour far from each camera of the player updates less often: every frame within 64 m, then one frame in n at
+  n times that distance, up to one frame in 32. Its frame then gives the time since its last update as the deltas.
+  `FixedUpdate` runs at each step. A behaviour on an entity tagged `global`, or on an entity without a `Transform`,
+  updates each frame.
+- A system runs in `Update`, each frame, wherever its own entity is. `ISystem<T1>` and `ISystem<T1, T2>` give it the
+  entities that have those components, and it can change them. Give a system an entity of its own.
+- When the handle goes from the `ScriptContainer`, or the entity is destroyed, the copy ends. If the copy is
+  `IDisposable`, it is disposed.
+- If a script cannot start, or a hook throws, the error goes to the log, and the handle goes from the `ScriptContainer`.
+- A build of the code that holds a script restarts the run.
+
+### DomainImporter
+
+Reads `.domain` files into domains. Provides `IAssetImporter<Domain>`.
+
+- A domain is a folder with its `.domain` file and its prefabs. The file holds nothing, so `{}` is a full file.
+- Each prefab in a folder named `x_y_z` is a chunk at that place. Each other prefab is at the origin of the domain.
+
+### PrefabImporter
+
+Reads `.prefab` files into prefabs. Provides `IAssetImporter<Prefab>`.
+
+- A file is `{ "entities": [ ... ] }`. Each entity has a name, tags, components and the entities under it.
+- A component is the name of its type and its values as JSON.
+- An entity can name a prefab. The parts of that prefab then go under it.
+- If a component has no type in the code, or its values do not fit the type, the importer logs an error. The entity
+  goes without that component.
+- If a prefab that a file names does not load, the file fails.
+- When a prefab that a file names changes, the importer reads the file again.
 
 ### AssimpModelImporter
 

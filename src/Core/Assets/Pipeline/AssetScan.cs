@@ -19,7 +19,7 @@ internal static class AssetScan
     private static readonly ConcurrentDictionary<Type, bool> _canHoldHandle = new();
 
     /// <summary>
-    /// The ids of every <see cref="Handle{T}"/> in <paramref name="asset"/>, but none's, each once.
+    /// The ids of every <see cref="Handle{T}"/> in <paramref name="asset"/> except <c>None</c>, each once.
     /// </summary>
     public static ImmutableArray<ulong> FindHandles(object asset)
     {

@@ -22,12 +22,14 @@ public enum Transparency : byte
 }
 
 /// <summary>
-/// What a surface looks like: a material shader, a module implementing the shader library's material contract, values
-/// for the parameters its struct declares, and how much shows through it. A <c>.mat</c> file is this class as JSON:
-/// <c>{ "shader": { "id": 10001 }, "params": { "roughness": { "x": 0.8 } } }</c>. Its params, its transparency and
-/// its sides may be set while it is drawn, on the game thread, and are drawn so from the next frame; what is set holds
-/// until the material is made again, as its file changes, and is not saved with the world.
+/// What a surface looks like: a material shader, values for the parameters of its struct, and how much shows through.
 /// </summary>
+/// <remarks>
+/// The shader is a module that implements the material contract of the shader library. A <c>.mat</c> file is this class
+/// as JSON: <c>{ "shader": { "id": 10001 }, "params": { "roughness": { "x": 0.8 } } }</c>. Set the params, the
+/// transparency and the sides only on the game thread; you can set them while it is drawn. A change shows from the next
+/// frame and holds until the material is made again when its file changes. The world does not save it.
+/// </remarks>
 [AssetFormat(AssetFileFormat.Json)]
 public sealed class Material : IAsset<Material>
 {
@@ -44,22 +46,26 @@ public sealed class Material : IAsset<Material>
     public bool IsDoubleSided { get; set; }
 
     /// <summary>
-    /// Values by the names of the fields of the shader's struct, case and all; one left out takes the field's
-    /// initializer. Its values change, never the dictionary, so whatever draws it sees each change.
+    /// Values by the case-sensitive names of the fields of the shader's struct; a field left out takes its initializer.
     /// </summary>
+    /// <remarks>
+    /// Its values change, never the dictionary, so the renderer sees each change.
+    /// </remarks>
     public MaterialParamDictionary Params { get; init; } = [];
 }
 
 /// <summary>
-/// One material parameter, whatever its type in the shader, whose declaration says which part is read: a scalar is
-/// <see cref="X"/> (a bool is non-zero), a vector <see cref="X"/> to <see cref="W"/>, a colour <see cref="R"/> to
-/// <see cref="A"/>, a texture <see cref="Texture"/> or <see cref="RenderTexture"/>, a curve <see cref="Curve"/>. In a
-/// file: <c>{ "x": 0.8 }</c>, <c>{ "r": 1, "g": 0.5, "b": 0, "a": 1 }</c>, <c>{ "texture": { "id": 36 } }</c>,
-/// <c>{ "curve": { "id": 3364 } }</c>; what it leaves out is 0 or none, and a curve left out the default curve. A
-/// value, never changed once made: a param changes by setting another in its place, which its dictionary counts. It
-/// converts from a number, a vector, a colour or a texture's handle, so
-/// <c>material.Params["tint"] = new Color(1, 0, 0)</c> sets one.
+/// One material parameter of any shader type; the declaration in the shader says which part is read.
 /// </summary>
+/// <remarks>
+/// A scalar reads <see cref="X"/> (a bool is non-zero), a vector <see cref="X"/> to <see cref="W"/>, a colour
+/// <see cref="R"/> to <see cref="A"/>, a texture <see cref="Texture"/> or <see cref="RenderTexture"/>, and a curve
+/// <see cref="Curve"/>. In a file: <c>{ "x": 0.8 }</c>, <c>{ "r": 1, "g": 0.5, "b": 0, "a": 1 }</c>,
+/// <c>{ "texture": { "id": 36 } }</c>, <c>{ "curve": { "id": 3364 } }</c>. A part left out is 0 or none, and a curve
+/// left out is the default curve. It is a value that never changes: to change a param, set another in its place, and
+/// the dictionary counts the change. It converts from a number, a vector, a colour or a texture's handle, so
+/// <c>material.Params["tint"] = new Color(1, 0, 0)</c> sets one.
+/// </remarks>
 [SuppressMessage(
     "Usage",
     "CA2225:Operator overloads have named alternates",

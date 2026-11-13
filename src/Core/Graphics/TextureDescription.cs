@@ -16,7 +16,7 @@ public enum TextureKind : byte
 }
 
 /// <summary>
-/// What a texture is for, which picks the memory layouts the GPU provider keeps it in.
+/// What a texture is for, which sets the memory layouts that the GPU provider keeps it in.
 /// </summary>
 [Flags]
 public enum TextureUsages : byte
@@ -55,9 +55,11 @@ public enum TextureUsages : byte
 }
 
 /// <summary>
-/// How to make a texture: the name a GPU debugger shows it as, its kind, size, levels and format, and what it is for.
-/// Level 0 is the full size, and each level is half the size of the level before it.
+/// How to make a texture: its debugger name, kind, size, levels, format and usage.
 /// </summary>
+/// <remarks>
+/// Level 0 is the full size, and each level is half the size of the level before it.
+/// </remarks>
 public readonly record struct TextureDescription(
     string Name,
     int Width,

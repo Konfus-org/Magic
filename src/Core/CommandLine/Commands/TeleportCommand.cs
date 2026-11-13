@@ -10,9 +10,12 @@ using Magic.Worlds;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>teleport</c>: moves the player to x y z; or, with a domain first, opens it in place of the world, which puts the
-/// player at its spawn, then moves the player to the x y z after it, if any, once it has loaded.
+/// <c>teleport</c>: moves the player to x y z, or first opens a domain in place of the world.
 /// </summary>
+/// <remarks>
+/// The domain puts the player at its spawn. When the domain has loaded, the command moves the player to the x y z
+/// after the domain, if there is one.
+/// </remarks>
 internal static class TeleportCommand
 {
     private const string Usage = "teleport takes x y z, a domain, or a domain then x y z";

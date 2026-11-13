@@ -4,10 +4,13 @@ using System.Text.Json.Serialization;
 namespace Magic.Ecs;
 
 /// <summary>
-/// Marks a struct as a component: plain unmanaged data an entity holds in the <see cref="IEcs"/>, as public fields,
-/// with members for what follows from them. Make one with <c>new</c>, which gives its fields their defaults, rather
-/// than <c>default</c>, which leaves every field zero.
+/// Marks a struct as a component: plain unmanaged data in public fields, which an entity holds in the
+/// <see cref="IEcs"/>.
 /// </summary>
+/// <remarks>
+/// Other members give values that follow from the fields. Make a component with <c>new</c>, which gives the fields
+/// their defaults. Do not use <c>default</c>, which sets every field to zero.
+/// </remarks>
 [SuppressMessage(
     "Design",
     "CA1040:Avoid empty interfaces",

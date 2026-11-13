@@ -11,9 +11,11 @@ public enum CullMode : byte
 }
 
 /// <summary>
-/// How a draw's depth is tested and written. Depth is reversed: 1 at the near plane and 0 at infinity, so the test
-/// passes what is nearer as greater.
+/// How a draw's depth is tested and written.
 /// </summary>
+/// <remarks>
+/// Depth is reversed: 1 at the near plane and 0 at infinity, so a nearer value is greater.
+/// </remarks>
 public enum DepthMode : byte
 {
     /// <summary>
@@ -54,8 +56,7 @@ public enum BlendMode : byte
 }
 
 /// <summary>
-/// A draw pass's shaders and fixed state, which the GPU provider builds into a pipeline for the formats of the targets
-/// the pass draws into.
+/// A draw pass's shaders and fixed state, which the GPU provider builds into a pipeline for the pass's target formats.
 /// </summary>
 public readonly record struct DrawShaders(ShaderEntry Vertex, ShaderEntry Pixel)
 {

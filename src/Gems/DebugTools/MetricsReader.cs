@@ -27,10 +27,12 @@ internal enum MetricKind : byte
 }
 
 /// <summary>
-/// One instrument's numbers since the last collection, under one set of its tags: its meter, its name and unit, its tags,
-/// and what <see cref="Kind"/> says it sums up as. <see cref="PerSecond"/> and <see cref="Max"/> are 0 where the kind has
-/// none. <see cref="MeterTags"/> are the meter's own, what it says of itself, such as the API and the GPU.
+/// One instrument's numbers since the last collection, under one set of its tags.
 /// </summary>
+/// <remarks>
+/// <see cref="Kind"/> says how the numbers sum up. <see cref="PerSecond"/> and <see cref="Max"/> are 0 where the kind
+/// has none. <see cref="MeterTags"/> are what the meter says of itself, such as the API and the GPU.
+/// </remarks>
 internal readonly record struct MetricRow(
     string Meter,
     string Instrument,
@@ -64,17 +66,18 @@ internal readonly record struct MetricRow(
 }
 
 /// <summary>
-/// What every <c>Magic.*</c> meter and .NET's <c>System.Runtime</c> measure, through OpenTelemetry: it sums
-/// measurements up on the thread that records them, without locks or allocation, and hands them over as rows when
-/// collected, on the game thread. It listens only between <see cref="Listen"/> on and off.
+/// Reads what every <c>Magic.*</c> meter and .NET's <c>System.Runtime</c> measure, as rows.
 /// </summary>
+/// <remarks>
+/// Measurements sum up on the thread that records them, without locks or allocation. <see cref="Collect"/> hands them
+/// over on the game thread. It listens only between <see cref="Listen"/> on and off.
+/// </remarks>
 internal sealed class MetricsReader : IDisposable
 {
     private static readonly string[] _meters = ["Magic.*", "System.Runtime"];
 
     /// <summary>
-    /// The rows of the last collection, in the order the instruments were published, which the provider's exporter
-    /// refills and outlives no longer than the provider.
+    /// The rows of the last collection, in the order the instruments were published.
     /// </summary>
     private readonly List<MetricRow> _rows = [];
 
@@ -138,7 +141,7 @@ internal sealed class MetricsReader : IDisposable
     }
 
     /// <summary>
-    /// <paramref name="point"/>'s row of <paramref name="metric"/>.
+    /// Makes the row of <paramref name="metric"/> for <paramref name="point"/>.
     /// </summary>
     private static MetricRow ToRow(
         Metric metric,

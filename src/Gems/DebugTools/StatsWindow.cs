@@ -6,12 +6,15 @@ using Magic.Debugging;
 namespace Magic.DebugTools;
 
 /// <summary>
-/// A window of everything the meters measure, in sections that fold: CPU, the game thread's frame and the render
-/// thread's, with what Core and each gem spend of them; GPU, what the GPU provider says of the API and the GPU, and its frame and passes; Memory, Core's
-/// and the process's, then each gem's; and Other, the rest by meter. A histogram's row shows its mean, how many a second
-/// and its most; a counter's how much it rose and how much a second; a gauge's its latest value. Seconds show as
-/// milliseconds and bytes as megabytes. It also writes the <see cref="CounterLine"/> from the same rows.
+/// A window of everything the meters measure, in sections that fold: CPU, GPU, Memory and Other.
 /// </summary>
+/// <remarks>
+/// CPU holds the game thread's frame and the render thread's, with what Core and each gem spend of them. GPU holds what
+/// the GPU provider says of the API and the GPU, and its frame and passes. Memory holds Core's and the process's, then
+/// each gem's. Other holds the rest by meter. A histogram's row shows its mean, how many a second and its most; a
+/// counter's, how much it rose and how much a second; a gauge's, its latest value. Seconds show as milliseconds and
+/// bytes as megabytes. It also writes the <see cref="CounterLine"/> from the same rows.
+/// </remarks>
 internal sealed class StatsWindow(IDebugUI ui)
 {
     private const double BytesPerMegabyte = 1024 * 1024;
@@ -51,7 +54,7 @@ internal sealed class StatsWindow(IDebugUI ui)
     public string CounterLine { get; private set; } = string.Empty;
 
     /// <summary>
-    /// The sections and the counter line written out again from the last collection's <paramref name="rows"/>.
+    /// Writes the sections and the counter line again from the last collection's <paramref name="rows"/>.
     /// </summary>
     public void Refresh(IReadOnlyList<MetricRow> rows)
     {
@@ -110,7 +113,7 @@ internal sealed class StatsWindow(IDebugUI ui)
             }
             else if (row.Instrument is Metrics.HookDuration or Metrics.StepDuration)
             {
-                // A gem's hook or a step of Core's, which add up to the time a frame it takes.
+                // A gem's hook or a step of Core's, which add up to the time a frame takes.
                 bool isHook = row.Instrument == Metrics.HookDuration;
                 Section part = cpu.GetChild(isHook ? row.GetTag(Metrics.GemNameTag) : Core);
                 part.Rows.Add(ToCells(row.GetTag(isHook ? Metrics.HookTag : Metrics.StepTag), row));
@@ -197,9 +200,12 @@ internal sealed class StatsWindow(IDebugUI ui)
     }
 
     /// <summary>
-    /// <paramref name="name"/> without its meter's, as instruments and tags are named after their meter in snake case
-    /// (<c>magic.core.</c> for <c>Magic.Core</c>), or without its first part when named otherwise, as .NET's are.
+    /// Takes the meter's prefix off <paramref name="name"/>, or the first part when the name has no such prefix.
     /// </summary>
+    /// <remarks>
+    /// Instruments and tags are named after their meter in snake case (<c>magic.core.</c> for <c>Magic.Core</c>).
+    /// .NET's are named otherwise.
+    /// </remarks>
     private static string StripMeter(string meter, string name)
     {
         string[] parts = Array.ConvertAll(meter.Split('.'), JsonNamingPolicy.SnakeCaseLower.ConvertName);
@@ -211,7 +217,8 @@ internal sealed class StatsWindow(IDebugUI ui)
     }
 
     /// <summary>
-    /// The part a meter measures: the gem a <c>Magic.Gems.*</c> meter is named after, or Core for Core's and .NET's.
+    /// Gets the part a meter measures: the gem a <c>Magic.Gems.*</c> meter is named after, or Core for Core's and
+    /// .NET's.
     /// </summary>
     private static string GetPart(string meter) =>
         meter.StartsWith(GemMeterPrefix, StringComparison.Ordinal) ? meter[GemMeterPrefix.Length..] : Core;
@@ -228,9 +235,13 @@ internal sealed class StatsWindow(IDebugUI ui)
         ];
 
     /// <summary>
-    /// <paramref name="value"/> in <paramref name="unit"/>: seconds as milliseconds, as most of what is timed in a frame
-    /// takes far less than one, bytes as megabytes, and a count's unit, in braces, left out.
+    /// Formats <paramref name="value"/> in <paramref name="unit"/>: seconds as milliseconds, bytes as megabytes, and a
+    /// count with no unit.
     /// </summary>
+    /// <remarks>
+    /// Seconds show as milliseconds because most of what a frame times takes far less than one. A count's unit is in
+    /// braces.
+    /// </remarks>
     private static string FormatAmount(double value, string unit) =>
         unit switch
         {
@@ -259,7 +270,7 @@ internal sealed class StatsWindow(IDebugUI ui)
         row.MeterTags.Select(tag => $"{StripMeter(row.Meter, tag.Key).Replace('.', ' ')}: {tag.Value}");
 
     /// <summary>
-    /// <paramref name="section"/>'s header, then, while it is open, its lines, its rows and its sections, a step in.
+    /// Draws <paramref name="section"/>'s header, then, while it is open, its lines, rows and sections, a step in.
     /// An empty section is left out.
     /// </summary>
     private void Draw(Section section, int depth)
@@ -293,9 +304,11 @@ internal sealed class StatsWindow(IDebugUI ui)
     }
 
     /// <summary>
-    /// A part of the window under a header: its lines, its rows, and the sections in it, which start folded. Its
-    /// <see cref="Amount"/> sums what its header shows: seconds a second for a part of the CPU's, bytes for memory.
+    /// A part of the window under a header: its lines, its rows, and the sections in it, which start folded.
     /// </summary>
+    /// <remarks>
+    /// <see cref="Amount"/> sums what its header shows: seconds a second for a part of the CPU's, bytes for memory.
+    /// </remarks>
     private sealed class Section(string id, string name, bool isOpenAtStart)
     {
         public string Id { get; } = id;

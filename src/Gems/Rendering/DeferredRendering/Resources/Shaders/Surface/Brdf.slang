@@ -1,7 +1,7 @@
 // How a surface reflects a light: a Lambert diffuse, less what the specular's Fresnel reflects, under a GGX specular
 // with Smith's height-correlated masking and Schlick's Fresnel (Walter et al., "Microfacet Models for Refraction
-// through Rough Surfaces", 2007; Heitz, "Understanding the Masking-Shadowing Function", 2014), as every lighting pass
-// evaluates it; and the specular's response to light from every direction, for what an environment reflects.
+// through Rough Surfaces", 2007, and Heitz, "Understanding the Masking-Shadowing Function", 2014), as every lighting
+// pass evaluates it, and the specular's response to light from every direction, for what an environment reflects.
 module "Surface/Brdf";
 
 import Core.Math;

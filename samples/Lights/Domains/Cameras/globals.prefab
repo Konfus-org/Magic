@@ -1,0 +1,614 @@
+{
+    "entities": [
+        {
+            "name": "Spawn",
+            "tags": [
+                "spawn"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 2.2,
+                        "z": -8.5
+                    }
+                }
+            }
+        },
+        {
+            "name": "PostProcessing",
+            "components": {
+                "PostProcessing": {
+                    "effects": [
+                        {
+                            "id": 16110046817102106845
+                        },
+                        {
+                            "id": 6176367544898210812
+                        },
+                        {
+                            "id": 8524205974686507763
+                        },
+                        {
+                            "id": 5350400469144486248
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Sun",
+            "components": {
+                "Transform": {
+                    "rotation": {
+                        "x": 0.0,
+                        "y": 0.99255,
+                        "z": -0.12187,
+                        "w": 0.0
+                    }
+                },
+                "DirectionalLight": {
+                    "mode": "sun",
+                    "color": {
+                        "r": 1,
+                        "g": 0.95,
+                        "b": 0.85
+                    },
+                    "intensity": 2000
+                }
+            }
+        },
+        {
+            "name": "Sky",
+            "components": {
+                "Sky": {
+                    "material": {
+                        "id": 4569236087865836549
+                    }
+                }
+            }
+        },
+        {
+            "name": "Weather",
+            "components": {
+                "Weather": {
+                    "fogDensity": 0.02,
+                    "fogAnisotropy": 0.6
+                }
+            }
+        },
+        {
+            "name": "Floor",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "w": 1
+                    },
+                    "scale": {
+                        "x": 10,
+                        "y": 1,
+                        "z": 10
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 7203946551318837061
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Ceiling",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 6,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": 1.0,
+                        "y": 0.0,
+                        "z": 0.0,
+                        "w": 0.0
+                    },
+                    "scale": {
+                        "x": 10,
+                        "y": 1,
+                        "z": 10
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 12045873320119837722
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Wall -X",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -10,
+                        "y": 3.0,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": -0.0,
+                        "y": -0.0,
+                        "z": -0.70711,
+                        "w": 0.70711
+                    },
+                    "scale": {
+                        "x": 6,
+                        "y": 1,
+                        "z": 10
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 12045873320119837722
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Wall +X",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 10,
+                        "y": 3.0,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": 0.0,
+                        "y": 0.0,
+                        "z": 0.70711,
+                        "w": 0.70711
+                    },
+                    "scale": {
+                        "x": 6,
+                        "y": 1,
+                        "z": 10
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 12045873320119837722
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Wall -Z",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 3.0,
+                        "z": -10
+                    },
+                    "rotation": {
+                        "x": 0.70711,
+                        "y": 0.0,
+                        "z": 0.0,
+                        "w": 0.70711
+                    },
+                    "scale": {
+                        "x": 10,
+                        "y": 1,
+                        "z": 6
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 12045873320119837722
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Window wall left",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -5.75,
+                        "y": 3.0,
+                        "z": 10
+                    },
+                    "rotation": {
+                        "x": -0.70711,
+                        "y": -0.0,
+                        "z": -0.0,
+                        "w": 0.70711
+                    },
+                    "scale": {
+                        "x": 4.25,
+                        "y": 1,
+                        "z": 6
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 12045873320119837722
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Window wall right",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 5.75,
+                        "y": 3.0,
+                        "z": 10
+                    },
+                    "rotation": {
+                        "x": -0.70711,
+                        "y": -0.0,
+                        "z": -0.0,
+                        "w": 0.70711
+                    },
+                    "scale": {
+                        "x": 4.25,
+                        "y": 1,
+                        "z": 6
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 12045873320119837722
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Window sill",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 1,
+                        "z": 10
+                    },
+                    "rotation": {
+                        "x": -0.70711,
+                        "y": -0.0,
+                        "z": -0.0,
+                        "w": 0.70711
+                    },
+                    "scale": {
+                        "x": 1.5,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 12045873320119837722
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Window head",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 5.25,
+                        "z": 10
+                    },
+                    "rotation": {
+                        "x": -0.70711,
+                        "y": -0.0,
+                        "z": -0.0,
+                        "w": 0.70711
+                    },
+                    "scale": {
+                        "x": 1.5,
+                        "y": 1,
+                        "z": 0.75
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 12045873320119837722
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Window pane",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 3.25,
+                        "z": 10
+                    },
+                    "rotation": {
+                        "x": -0.70711,
+                        "y": -0.0,
+                        "z": -0.0,
+                        "w": 0.70711
+                    },
+                    "scale": {
+                        "x": 1.5,
+                        "y": 1,
+                        "z": 1.25
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "handle": {
+                                "id": 9074876982782962638
+                            },
+                            "overrides": {
+                                "color": {
+                                    "r": 0.55,
+                                    "g": 0.75,
+                                    "b": 1.0,
+                                    "a": 1.0
+                                },
+                                "clarity": {
+                                    "x": 0.6
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Window pane red",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0.6,
+                        "y": 3.0,
+                        "z": 9.7
+                    },
+                    "rotation": {
+                        "x": -0.70711,
+                        "y": -0.0,
+                        "z": -0.0,
+                        "w": 0.70711
+                    },
+                    "scale": {
+                        "x": 0.7,
+                        "y": 1,
+                        "z": 0.7
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "handle": {
+                                "id": 9074876982782962638
+                            },
+                            "overrides": {
+                                "color": {
+                                    "r": 1.0,
+                                    "g": 0.25,
+                                    "b": 0.25,
+                                    "a": 1.0
+                                },
+                                "clarity": {
+                                    "x": 0.45
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Question",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -3,
+                        "y": 1,
+                        "z": 2
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 1529
+                    },
+                    "materials": [
+                        {
+                            "handle": {
+                                "id": 7203946551318837061
+                            },
+                            "overrides": {
+                                "stripeColor": {
+                                    "r": 0.1,
+                                    "g": 0.4,
+                                    "b": 1
+                                },
+                                "stripes": {
+                                    "x": 3
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Panel",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 6,
+                        "y": 3,
+                        "z": 4
+                    },
+                    "rotation": {
+                        "x": -0.0,
+                        "y": -0.70711,
+                        "z": -0.0,
+                        "w": 0.70711
+                    }
+                },
+                "RectLight": {
+                    "color": {
+                        "r": 0.4,
+                        "g": 0.7,
+                        "b": 1
+                    },
+                    "intensity": 600,
+                    "width": 3,
+                    "height": 1.5,
+                    "range": 12
+                }
+            }
+        },
+        {
+            "name": "Screen",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 3,
+                        "z": 6
+                    },
+                    "rotation": {
+                        "x": -0.70711,
+                        "y": 0,
+                        "z": 0,
+                        "w": 0.70711
+                    },
+                    "scale": {
+                        "x": 2.4,
+                        "y": 1,
+                        "z": 1.35
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": [
+                        {
+                            "id": 100321
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Screen camera",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 6,
+                        "y": 4,
+                        "z": -6
+                    },
+                    "rotation": {
+                        "x": 0,
+                        "y": -0.38268,
+                        "z": 0,
+                        "w": 0.92388
+                    }
+                },
+                "Camera": {
+                    "target": {
+                        "texture": {
+                            "id": 100320
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Inset camera",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 5.5,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": 0.70711,
+                        "y": 0,
+                        "z": 0,
+                        "w": 0.70711
+                    }
+                },
+                "Camera": {
+                    "target": {
+                        "section": "topRight"
+                    }
+                }
+            }
+        }
+    ]
+}

@@ -1,11 +1,11 @@
 // The traced shadow mask's noise taken out in place, into the mask shading reads. The sun's slot, the same light at
 // every pixel, is denoised in time, then in space: ClassifyShadows skips each 8 by 8 pixels whose neighbourhood the
 // sun's rays found all lit or all dark, and blends every other pixel with where it was last frame, clamped to its
-// neighbours, keeping a running mean and variance of it; FilterShadows then blurs that once or twice, 1 and 2 pixels
+// neighbours, keeping a running mean and variance of it. FilterShadows then blurs that once or twice, 1 and 2 pixels
 // apart, and FilterLastAndBlendShadows a last time, 4 apart, by how alike neighbours' depths, normals and shadows are,
 // into the mask. A tile light's slot may hold another light in the next tile or the next frame, so
 // FilterLastAndBlendShadows only blends those with last frame.
-// All of it runs at the traced size, each traced pixel reading the picture's pixel at its footprint's corner; then
+// All of it runs at the traced size, each traced pixel reading the picture's pixel at its footprint's corner. Then
 // UpsampleShadows brings the mask and the sun's tint to the picture's size, which shading reads. The pass header's x is
 // the frame's buffer, which holds the shadows, y the denoiser's constants and w the filter's pass, or for
 // FilterLastAndBlendShadows the target the last filter pass wrote.
@@ -38,7 +38,7 @@ public struct ShadowDenoiseConstants
     // The traced mask, as the rays left it and then denoised in place, and last frame's.
     public uint mask;
     public uint previousMask;
-    // The sun's tint as traced; 0 while no glass tints it.
+    // The sun's tint as traced. 0 while no glass tints it.
     public uint sunTint;
     // Whether last frame's targets hold a frame of this size.
     public uint hasHistory;
@@ -71,7 +71,7 @@ float GetKernelWeight(int i) { return exp(-3.0 * float(i * i) / 81.0) * 0.110829
 groupshared uint groupAnyFalse;
 groupshared float groupRowMoments[8][24];
 
-// Whether a value is true at every thread of the group; every thread of it must ask.
+// Whether a value is true at every thread of the group. Every thread of it must ask.
 bool IsTrueForGroup(bool value)
 {
     GroupMemoryBarrierWithGroupSync();
@@ -178,7 +178,8 @@ void ClassifyShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupT
     StorageRef moments = { denoise.moments, 0u };
     ArrayRef<uint> sunTiles = { denoise.sunTiles };
 
-    // A group of sky, or one whose neighbourhood is all lit or all dark, is skipped, with values its neighbours can read.
+    // A group of sky, or one whose neighbourhood is all lit or all dark, is skipped, with values its neighbours can
+    // read.
     uint state = IsTrueForGroup(!isReceiver) ? TileSkipped : GetRegionState(sunTiles, group.xy, size);
     if (all(local.xy == 0u))
         tileStates[stateIndex] = state;
@@ -194,7 +195,8 @@ void ClassifyShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupT
         return;
     }
 
-    // The move to last frame's screen of the nearest of the pixel's 2 by 2, so an edge reprojects with what is in front.
+    // The move to last frame's screen of the nearest of the pixel's 2 by 2, so an edge reprojects with what is in
+    // front.
     TextureRef velocityTexture = { frame.velocity };
     uint2 quad = pixel & ~1u;
     float nearest = -1.0;
@@ -281,7 +283,7 @@ groupshared float groupDepths[16][16];
 groupshared uint groupNormals[16][16];
 
 // A pixel's shadow and variance blurred with its 3 by 3 neighbours a step apart, each weighted by how alike their
-// shadows are against the local deviation, how near their depths are and how alike their normals; a skipped group's
+// shadows are against the local deviation, how near their depths are and how alike their normals. A skipped group's
 // all lit or all dark, with none.
 float2 Filter(FrameConstants frame, uint state, uint input, int2 pixel, int2 local, int step, uint2 size)
 {
@@ -417,7 +419,7 @@ void FilterLastAndBlendShadows(
         isReprojected = abs(previousMoments.Load(historyPixel, 0u).y - velocity.z) <= 1.0;
     }
 
-    // Where last frame saw something else, the rays as they are; elsewhere each slot blended with last frame's, the
+    // Where last frame saw something else, the rays as they are. Elsewhere each slot blended with last frame's, the
     // more the less it changed and the less the pixel moved.
     uint4 words = traced & uint4(~0xFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu);
     if (isReprojected)
@@ -445,7 +447,7 @@ void FilterLastAndBlendShadows(
 
 // A pixel of the picture's mask and the sun's tint, read from the four traced pixels around it on its surface: the
 // sun's slot and tint from each, and a tile light's slot only from those in the pixel's own tile of lights, as a slot
-// holds the light its tile lists there; from the traced pixel that holds it where none counts. The sky is all lit.
+// holds the light its tile lists there, or from the traced pixel that holds it where none counts. The sky is all lit.
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void UpsampleShadows(uint3 thread : SV_DispatchThreadID)

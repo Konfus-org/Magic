@@ -7,11 +7,14 @@ using Microsoft.CodeAnalysis.Diagnostics;
 namespace Magic.Analyzers;
 
 /// <summary>
-/// MG0001: a type's members are in the order the standards lay down. By kind, fields first and nested types last;
-/// within a kind public before private; constants before other fields; static before instance; Dispose before the
-/// other methods. Members that rank the same keep the order they are in. Reported once per type, at the first member
-/// that belongs before the one above it; <see cref="MemberOrderCodeFix"/> puts the whole type in order.
+/// MG0001: a type's members are in the order the standards lay down.
 /// </summary>
+/// <remarks>
+/// By kind, fields come first and nested types last. Within a kind, public comes before private, constants before other
+/// fields, static before instance, and Dispose before the other methods. Members that rank the same keep their order.
+/// It reports once per type, at the first member that belongs before the one above it.
+/// <see cref="MemberOrderCodeFix"/> puts the whole type in order.
+/// </remarks>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class MemberOrderAnalyzer : DiagnosticAnalyzer
 {
@@ -44,9 +47,12 @@ public sealed class MemberOrderAnalyzer : DiagnosticAnalyzer
     }
 
     /// <summary>
-    /// Where <paramref name="member"/> ranks among its type's members: a smaller rank comes first, and equal ranks keep
-    /// their order. Interface members with no modifier are public; any other member with none is private.
+    /// Gets where <paramref name="member"/> ranks among its type's members: a smaller rank comes first.
     /// </summary>
+    /// <remarks>
+    /// Equal ranks keep their order. Interface members with no modifier are public; any other member with none is
+    /// private.
+    /// </remarks>
     public static int RankOf(MemberDeclarationSyntax member, bool inInterface)
     {
         int kind = KindOf(member);

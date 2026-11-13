@@ -18,7 +18,7 @@ public static const uint LightsBytes = 84u;
 
 public struct Lights
 {
-    // Towards the sun, unit; the sun's colour times intensity, in lux, before the air; and the open sky's radiance a
+    // Towards the sun, unit. The sun's colour times intensity, in lux, before the air. The open sky's radiance a
     // lux of the sun gives where no sky entity draws the sky.
     public float4 sunDirection;
     public float4 sunIlluminance;

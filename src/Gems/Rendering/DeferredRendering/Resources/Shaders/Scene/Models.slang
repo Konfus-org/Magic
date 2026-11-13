@@ -1,5 +1,5 @@
 // The frame's models: the instances drawn and the pools and tables they are drawn from, C#'s GpuModels, in the frame's
-// buffer right after the frame; then the world as rays see it, C#'s GpuTracedWorld. On a GPU that traces rays, each
+// buffer right after the frame, then the world as rays see it, C#'s GpuTracedWorld. On a GPU that traces rays, each
 // model's acceleration structure has a geometry for each of its meshes, whose row of the mesh table says where its
 // triangles are in the index pool and which material slot they take.
 module "Scene/Models";
@@ -10,7 +10,7 @@ import Core.Frame;
 
 // Where the models are in the frame's buffer, and their bytes: C#'s GpuModels.
 public static const uint ModelsOffset = FrameBytes;
-public static const uint ModelsBytes = 24u;
+public static const uint ModelsBytes = 28u;
 
 public struct Models
 {
@@ -23,6 +23,8 @@ public struct Models
     public uint materials;
     // The mesh table the instances' geometries name.
     public uint meshes;
+    // The failure table the material rows' failure indices name (Scene/Failures).
+    public uint failures;
 }
 
 // Where the world as rays see it is in the frame's buffer, right after the models, and its bytes: C#'s GpuTracedWorld.
@@ -48,7 +50,7 @@ public Models GetModels() { return LoadFrameRow<Models>(ModelsOffset); }
 
 public TracedWorld GetTracedWorld() { return LoadFrameRow<TracedWorld>(TracedWorldOffset); }
 
-// The world's top-level acceleration structure; only where GetTracedWorld's acceleration isn't 0.
+// The world's top-level acceleration structure. Call it only where GetTracedWorld's acceleration isn't 0.
 public RaytracingAccelerationStructure GetTracedAcceleration()
 {
     AccelerationRef acceleration = { GetTracedWorld().acceleration };

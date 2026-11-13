@@ -58,7 +58,7 @@ float GetMiePhase(float cosine)
     return k * (1.0 + cosine * cosine) / pow(1.0 + g * g - 2.0 * g * cosine, 1.5);
 }
 
-// Where a ray from a point at radius r, at cosine mu to the zenith, leaves a sphere of radius R; negative for never.
+// Where a ray from a point at radius r, at cosine mu to the zenith, leaves a sphere of radius R, negative for never.
 float GetDistanceToSphere(float r, float mu, float R)
 {
     float discriminant = r * r * (mu * mu - 1.0) + R * R;

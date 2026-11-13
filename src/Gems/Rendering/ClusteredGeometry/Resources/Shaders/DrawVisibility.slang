@@ -1,7 +1,7 @@
 // The visible clusters drawn into the visibility buffer: one indirect draw a cluster, its row of the visible list in
 // the draw's first instance, each vertex fetched from the cluster's vertex pool by the index at its place in the
-// cluster's run of the cluster index pool. The pixel is the row and the triangle, packed, with the hardware depth beside it. The translucent ones
-// draw the same way into the glass's buffer and depth, behind none of the opaque.
+// cluster's run of the cluster index pool. The pixel is the row and the triangle, packed, with the hardware depth
+// beside it. The translucent ones draw the same way into the glass's buffer and depth, behind none of the opaque.
 module "DrawVisibility";
 
 import Core.Heap;

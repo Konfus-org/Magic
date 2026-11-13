@@ -4,15 +4,21 @@ using Magic.Assets;
 namespace Magic.Ecs.Components;
 
 /// <summary>
-/// The world's weather as it is now: the way the air moves, and the haze and the clouds in it. A world has one, on an
-/// entity of its own, which a script may change as it runs; whatever draws the air reads it, and so may anything the
-/// wind moves.
-/// Calm, clear air is no wind, no haze and no clouds. A breeze, a light haze and scattered clouds:
+/// The weather of the world now: the way the air moves, and the haze and the clouds in it.
+/// </summary>
+/// <remarks>
+/// <para>
+/// A world has one, on an entity of its own, which a script can change while it runs. The part that draws the air
+/// reads it, and so can anything that the wind moves.
+/// </para>
+/// <para>
+/// Calm, clear air has no wind, no haze and no clouds. A breeze, a light haze and scattered clouds:
 /// <code>
 /// { "wind": { "x": 6, "y": 0, "z": 3 }, "fogDensity": 0.01, "cloudCover": 0.4 }
 /// </code>
-/// A script thickens the haze as it runs: <c>weather.FogDensity = 0.03f;</c>.
-/// </summary>
+/// A script makes the haze thicker while it runs: <c>weather.FogDensity = 0.03f;</c>.
+/// </para>
+/// </remarks>
 public record struct Weather : IComponent
 {
     /// <summary>
@@ -26,11 +32,13 @@ public record struct Weather : IComponent
     public float FogDensity;
 
     /// <summary>
-    /// The height in metres where the haze is as thick as <see cref="FogDensity"/> says, and the metres above it at
-    /// which it is half as thick.
+    /// The height in metres where the haze is as thick as <see cref="FogDensity"/> says.
     /// </summary>
     public float FogHeight;
 
+    /// <summary>
+    /// The metres above <see cref="FogHeight"/> at which the haze is half as thick.
+    /// </summary>
     public float FogHalfHeight = 20;
 
     /// <summary>
@@ -39,9 +47,11 @@ public record struct Weather : IComponent
     public Color FogColor = new(1, 1, 1);
 
     /// <summary>
-    /// How much of the light the haze scatters goes onward rather than everywhere, from -1 to 1: 0 evenly, towards 1
-    /// mostly ahead, as mist does, so it glows towards the sun.
+    /// How much of the light that the haze scatters goes forward, from -1 to 1: 0 is even, 1 is mostly forward.
     /// </summary>
+    /// <remarks>
+    /// Mist scatters mostly forward, so it glows towards the sun.
+    /// </remarks>
     public float FogAnisotropy = 0.3f;
 
     /// <summary>

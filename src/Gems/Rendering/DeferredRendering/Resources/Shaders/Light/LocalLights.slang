@@ -1,6 +1,6 @@
 // What a local light gives a point: its direction, its irradiance there in the frame's units, nothing past its reach,
-// and a random point of the light for a shadow ray to aim at. A point light is a sphere, a spot light a cone of one, a rect light a rectangle lit from its nearest point
-// (Karis, "Real Shading in Unreal Engine 4", 2013).
+// and a random point of the light for a shadow ray to aim at. A point light is a sphere, a spot light a cone of one, a
+// rect light a rectangle lit from its nearest point (Karis, "Real Shading in Unreal Engine 4", 2013).
 module "Light/LocalLights";
 
 import Core.Math;
@@ -50,7 +50,7 @@ public float3 SampleSunDirection(float3 toSun, float2 xi)
     return normalize(ToWorld(CreateBasis(toSun), float3(SampleConcentricDisk(xi) * SunAngularRadius, 1.0)));
 }
 
-// A shadow ray from an origin towards a point: its unit direction, and how far it goes, stopping just short of the
+// A shadow ray from an origin towards a point: its unit direction, and how far it goes, stopping short of the
 // point so it doesn't hit what it aims at.
 public struct LightRay
 {

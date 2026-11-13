@@ -1,9 +1,9 @@
 // The probe grid's light brought up to date each frame (Majercik et al., "Dynamic Diffuse Global Illumination with
 // Ray-Traced Irradiance Fields", 2019): each probe asks for rays as its light still changes, and the probes are given
-// them in turn while they fit in a budget for all of them; each ray is traced into the world and lit where it lands by
+// them in turn while they fit in a budget for all of them. Each ray is traced into the world and lit where it lands by
 // one light picked at random and by the probes themselves, and each probe given rays blends them into its light's
 // harmonics and its map of distances, moving away from a surface it is near. The pass header's x is the frame's
-// buffer, which holds the lights and IndirectLight, which holds the grid; its y is the GI buffer, which holds the
+// buffer, which holds the lights and IndirectLight, which holds the grid. Its y is the GI buffer, which holds the
 // update's own buffers.
 module "UpdateProbes";
 
@@ -56,8 +56,7 @@ ProbeSh ProjectOntoSh(float3 direction, float3 value)
 static const uint IrradianceTexelCount = IrradianceTexels * IrradianceTexels;
 static const uint DepthTexelCount = DepthTexels * DepthTexels;
 
-// How fast a probe's light follows its rays, and its distances and its place theirs.
-static const float IrradianceBlend = 0.1;
+// How fast a probe's distances and its place follow its rays; the gem's constants say how fast its light does.
 static const float DepthBlend = 0.02;
 static const float OffsetBlend = 0.01;
 
@@ -203,8 +202,8 @@ groupshared uint groupServed;
 groupshared uint groupTraced;
 
 // One group: the probes taken in turn from the one the last frame stopped at, each given the rays it asked for, and
-// where they start, while they fit in the budget, and none past it, so every probe has its turn within a few frames;
-// the rays given in all, the trace's groups to reach them, and the probe the next frame starts at.
+// where they start, while they fit in the budget, and none past it, so every probe has its turn within a few frames.
+// It also writes the rays given in all, the trace's groups to reach them, and the probe the next frame starts at.
 [shader("compute")]
 [numthreads(PlanGroupSize, 1, 1)]
 void PlanProbeRays(uint index : SV_GroupIndex)
@@ -392,7 +391,7 @@ static const uint DepthBorderTexels = 4u * DepthTexels + 4u;
 // A group a probe, a thread a ray and a direction of its 16 by 16 map of distances, the first 64 threads also one of
 // its 8 by 8 map of light. The light: the probe's rays weighted by how near each is to the direction, followed by the
 // mean estimator, then the map projected into the probe's harmonics. The distances: the mean and squared mean of its
-// rays' distances, sharply weighted towards the direction, blended slowly into the map, its border copied around it;
+// rays' distances, sharply weighted towards the direction, blended slowly into the map, its border copied around it,
 // and the probe moved away from what its rays found nearer than it should keep. A probe traces at most a ray a thread.
 [shader("compute")]
 [numthreads(DepthTexels, DepthTexels, 1)]
@@ -450,7 +449,7 @@ void BlendProbes(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID, uint 
             data.inconsistency = 1.0;
         }
 
-        data = EstimateMean(data, sum, IrradianceBlend);
+        data = EstimateMean(data, sum, GetGIConstants().probeBlend);
         variance[texel] = EncodeProbeVariance(data);
         groupMeans[index] = data.mean;
     }

@@ -5,9 +5,11 @@ using System.Runtime.InteropServices;
 namespace Magic.Assets;
 
 /// <summary>
-/// The one vertex layout every <see cref="Mesh"/> uses, so all geometry can share one vertex buffer and one pipeline
-/// input layout. <see cref="Size"/> bytes, as the GPU reads them.
+/// The one vertex layout of every <see cref="Mesh"/>, so all geometry can share one vertex buffer and input layout.
 /// </summary>
+/// <remarks>
+/// Each vertex is <see cref="Size"/> bytes, as the GPU reads them.
+/// </remarks>
 [StructLayout(LayoutKind.Sequential)]
 public record struct Vertex
 {
@@ -47,9 +49,11 @@ public sealed class Mesh
 }
 
 /// <summary>
-/// The meshes imported from one file. They are in the engine's frame (+X right, +Y up, +Z forward, a metre a unit,
-/// triangles clockwise from outside), with <see cref="Origin"/> moved to (0, 0, 0).
+/// The meshes imported from one file, in the engine's frame, with <see cref="Origin"/> moved to (0, 0, 0).
 /// </summary>
+/// <remarks>
+/// The engine's frame is +X right, +Y up, +Z forward, one metre a unit, and triangles clockwise from outside.
+/// </remarks>
 public sealed class Model : IAsset<Model>
 {
     public required ImmutableArray<Mesh> Meshes { get; init; }

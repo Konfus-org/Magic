@@ -58,9 +58,11 @@ public sealed class MemberOrderCodeFix : CodeFixProvider
     }
 
     /// <summary>
-    /// <paramref name="member"/> with the blank lines before it replaced by one, or by none for the first member. A
-    /// blank line between members is an end-of-line trivia at the start of the next member's leading trivia.
+    /// Gives <paramref name="member"/> with the blank lines before it replaced by one, or by none for the first member.
     /// </summary>
+    /// <remarks>
+    /// A blank line between members is an end-of-line trivia at the start of the next member's leading trivia.
+    /// </remarks>
     private static MemberDeclarationSyntax WithSpacing(MemberDeclarationSyntax member, bool first, SyntaxTrivia newLine)
     {
         SyntaxTriviaList leading = member.GetLeadingTrivia();

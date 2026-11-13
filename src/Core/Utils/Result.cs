@@ -3,10 +3,13 @@ using System.Diagnostics.CodeAnalysis;
 namespace Magic.Utils;
 
 /// <summary>
-/// The outcome of work that can fail on content or the machine and has nothing to give back (writing, deleting): done,
-/// or why not. It also makes <see cref="Result{T}"/> values: <see cref="Success{T}(T)"/> takes the type from the
-/// value, and <see cref="Failure(string)"/> becomes whichever result the method returns.
+/// The outcome of work that can fail on content or the machine and gives nothing back, such as a write: done, or why
+/// not.
 /// </summary>
+/// <remarks>
+/// It also makes <see cref="Result{T}"/> values: <see cref="Success{T}(T)"/> takes the type from the value, and
+/// <see cref="Failure(string)"/> becomes the result type that the method returns.
+/// </remarks>
 public readonly record struct Result
 {
     private Result(bool ok, string error)
@@ -46,9 +49,11 @@ public readonly record struct Result
 }
 
 /// <summary>
-/// The outcome of work that can fail on content or the machine (reading, parsing, loading): the value, or why
-/// there is none. <see cref="Value"/> is there only once <see cref="Ok"/> says so.
+/// The outcome of work that can fail on content or the machine, such as a read: the value, or why there is none.
 /// </summary>
+/// <remarks>
+/// Read <see cref="Value"/> only when <see cref="Ok"/> is true.
+/// </remarks>
 public readonly record struct Result<T>
 {
     internal Result(bool ok, T? value, string error)

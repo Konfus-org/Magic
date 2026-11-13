@@ -34,14 +34,13 @@ using static Magic.ImGuiDebugUI.ImGuiWindowFlags_;
 namespace Magic.ImGuiDebugUI;
 
 /// <summary>
-/// The debug UI's widgets and ImGui's frame, over the one ImGui context: what gems and scripts report, as lines down the
-/// left of the picture and text in the world, and the windows gems draw with its widgets (<see cref="IDebugUI"/>).
-/// <para>
-/// ImGui's frame is the game thread's. <see cref="BeginFrame"/> hands ImGui the frame's input and starts its frame, so the
-/// widgets gems made after this one call in their Update go into it; <see cref="EndFrame"/> draws what is reported and
-/// ends the frame, which <see cref="Renderer"/> then publishes. Reports come from any thread (<see cref="Reports"/>).
-/// </para>
+/// Draws the widgets of gems' windows, and what gems and scripts report, over the one ImGui context.
 /// </summary>
+/// <remarks>
+/// ImGui's frame belongs to the game thread. <see cref="BeginFrame"/> starts it, so the widgets that gems after this
+/// one make in their Update go into it. <see cref="EndFrame"/> draws the reports and ends the frame, which
+/// <see cref="Renderer"/> then publishes. Reports come from any thread (<see cref="Reports"/>).
+/// </remarks>
 public sealed class DebugUI : IDebugUI, IDisposable
 {
     private const int InputBytes = 256;
@@ -69,8 +68,7 @@ public sealed class DebugUI : IDebugUI, IDisposable
     private static readonly Vector2 _windowlessSize = new(1280, 720);
 
     /// <summary>
-    /// Text in the world, and the lines on screen, sit on a dark plate, so they read over anything behind them, a white
-    /// debug view too, reaching this far past the text before the UI's scale.
+    /// How far the dark plate behind report text reaches past the text, before the UI's scale.
     /// </summary>
     private static readonly Vector2 _platePadding = new(4, 2);
     private static readonly Vector2 _linesMargin = new(8, 8);
@@ -217,9 +215,11 @@ public sealed class DebugUI : IDebugUI, IDisposable
     }
 
     /// <summary>
-    /// Draws what is reported under the frame's windows, the last of the frame's widgets, then ends ImGui's frame, which
-    /// it needs before the next begins, whether or not anything draws it.
+    /// Draws the reports under the frame's windows, then ends ImGui's frame.
     /// </summary>
+    /// <remarks>
+    /// Call it every frame: ImGui must end a frame before the next begins, even when nothing draws it.
+    /// </remarks>
     internal void EndFrame(in Frame frame)
     {
         if (_depth > 0)
@@ -588,9 +588,11 @@ public sealed class DebugUI : IDebugUI, IDisposable
     }
 
     /// <summary>
-    /// A UTF-8 literal as the C string ImGui reads: the literal's bytes sit in the assembly's static data and never move, so
-    /// no copy and no pinning is needed. For <c>u8</c> literals only.
+    /// Gives a UTF-8 literal as the C string ImGui reads, with no copy and no pinning.
     /// </summary>
+    /// <remarks>
+    /// Use it only for <c>u8</c> literals: their bytes are in the assembly's static data and never move.
+    /// </remarks>
     private static unsafe byte* Literal(ReadOnlySpan<byte> utf8) =>
         (byte*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(utf8));
 
@@ -625,9 +627,9 @@ public sealed class DebugUI : IDebugUI, IDisposable
         _app.Window is { Width: > 0, Height: > 0 } window ? new Vector2(window.Width, window.Height) : _windowlessSize;
 
     /// <summary>
-    /// Lays out a field: its label, up to any <c>##</c>, on the left, then the field stretched to the right edge. Returns
-    /// the field's hidden ImGui id: the whole label, so fields that share what they show stay apart.
+    /// Lays out a field: its label, up to any <c>##</c>, on the left, then the field stretched to the right edge.
     /// </summary>
+    /// <returns>The field's hidden ImGui id: the whole label, so fields that show the same text stay apart.</returns>
     private unsafe byte* LabelField(string label)
     {
         if (!_fields.TryGetValue(label, out (string Shown, string Id) field))
@@ -729,8 +731,7 @@ public sealed class DebugUI : IDebugUI, IDisposable
     }
 
     /// <summary>
-    /// Widgets go into ImGui's frame, which is open from <see cref="BeginFrame"/> to <see cref="EndFrame"/>; called
-    /// outside it, ImGui would stop the process.
+    /// Throws when no ImGui frame is open, because ImGui stops the process for a widget called outside its frame.
     /// </summary>
     private unsafe void ThrowIfOutsideFrame()
     {
@@ -743,11 +744,14 @@ public sealed class DebugUI : IDebugUI, IDisposable
     }
 
     /// <summary>
-    /// What is reported, each on a dark plate with its tooltip while the mouse rests on the plate and on no window: text in
-    /// the world where the window's camera shows it within <see cref="ImGuiDebugUISettings.TextDistance"/>, and the lines
-    /// down the left of the picture, oldest first, as many of the last as fit. ImGui draws its background under every
-    /// window, so the windows stay readable over what is reported.
+    /// Draws each report on a dark plate: text in the world, and the newest lines down the left of the picture.
     /// </summary>
+    /// <remarks>
+    /// Text in the world shows where the window's camera sees it within
+    /// <see cref="ImGuiDebugUISettings.TextDistance"/>. The lines show oldest first, as many of the last as fit. A
+    /// report shows its tooltip while the mouse rests on its plate and on no window. ImGui draws its background under
+    /// every window, so the windows stay readable over the reports.
+    /// </remarks>
     private unsafe void DrawReports()
     {
         ImDrawList_t* under = ImGui_GetBackgroundDrawList();

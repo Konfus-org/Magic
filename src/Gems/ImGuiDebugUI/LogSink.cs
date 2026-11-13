@@ -33,7 +33,7 @@ public sealed class LogSink : ILogSink
             Log.LoggingLevel.Error or Log.LoggingLevel.Critical => (ReportKind.Alarm, Reports.Error),
             _ => (ReportKind.Counted, Reports.White),
         };
-        _reports.Add(new Report(line.Message, kind, color, null, null, _settings.ReportSec));
+        _reports.Add(new Report(line.Message, kind, color, null, null, line.ShowForSec ?? _settings.ReportSec));
     }
 
     /// <summary>

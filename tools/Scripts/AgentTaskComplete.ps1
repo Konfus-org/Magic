@@ -13,7 +13,8 @@ render as the headless run does, ending in a screenshot of each to open and look
 
 The script first formats the change, so what is validated, stamped and reviewed is the formatted code, then runs those
 steps, and when all pass, stamps the checkout's state: the git tree of every file in it, tracked or new, as git add -A
-would record it, so the stamp names content rather than a time. A checkout whose files changed while it ran is not
+would record it, so the stamp names content rather than a time. When every file that the change touches, Markdown
+aside, is in the folder of a sample, only the samples that it touches run. A checkout whose files changed while it ran is not
 stamped. The stamps are kept in the repository's git folder, which every worktree shares, so a merge from the main
 checkout finds the stamp its branch's worktree wrote. A stamp keeps its level and its screenshots, and a state already
 stamped at the level asked for or a higher one is not validated again, so a run after a rebase that brought in
@@ -77,6 +78,36 @@ function Get-StampPath([string] $checkout, [string] $tree) {
     return Join-Path (Join-Path $common 'agent-task-complete') $tree
 }
 
+# The sample projects a change can affect, when every file it changes against the merge base with its merge target,
+# Markdown aside, is in the folder of one or more samples: those samples' projects. Nothing, which Validate.ps1 takes
+# as every sample, otherwise. The merge target is the branch's upstream when that is a local branch, as a swarm
+# worker's root is, otherwise the branch checked out in the main checkout.
+function Get-AffectedProjects([string] $checkout) {
+    $ErrorActionPreference = 'Continue'
+    try {
+        $common = & git -C $checkout rev-parse --path-format=absolute --git-common-dir 2>$null
+        $target = [string](& git -C $checkout rev-parse --symbolic-full-name '@{upstream}' 2>$null)
+        if ($target -notmatch '^refs/heads/(.+)$') { $target = [string](Get-Content (Join-Path $common 'HEAD') -TotalCount 1) }
+        $target = $target -replace '^(ref: )?refs/heads/', ''
+        $base = & git -C $checkout merge-base HEAD $target 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $base) { return @() }
+        $files = @(& git -C $checkout diff --name-only $base) + @(& git -C $checkout ls-files --others --exclude-standard)
+    } finally {
+        $ErrorActionPreference = 'Stop'
+    }
+    $folders = @()
+    foreach ($file in $files) {
+        if (-not $file -or $file -like '*.md') { continue }
+        # Shared is the samples' shared gem, which every sample loads.
+        if ($file -notmatch '^samples/([^/]+)/' -or $Matches[1] -eq 'Shared') { return @() }
+        $folders += $Matches[1]
+    }
+
+    return @($folders | Sort-Object -Unique | ForEach-Object {
+            Get-ChildItem (Join-Path (Join-Path $checkout 'samples') $_) -Filter '*.magic' | ForEach-Object { $_.FullName }
+        })
+}
+
 # A Git Bash path (/c/Users/...) as Windows takes it.
 function ConvertTo-Native([string] $path) {
     if ($path -match '^/([a-zA-Z])/(.*)$') { return "$($Matches[1]):/$($Matches[2])" }
@@ -118,7 +149,13 @@ if (-not $Hook) {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     $before = Get-CheckoutTree $root
-    & (Join-Path $PSScriptRoot 'Validate.ps1') -Only $steps[$Change] | Tee-Object -Variable lines
+    $validate = @{ Only = $steps[$Change] }
+    $projects = @(Get-AffectedProjects $root)
+    if ($Change -ne 'Docs' -and $projects.Count -gt 0) {
+        Write-Output "The change touches only these samples, so only they run: $($projects -join ', ')"
+        $validate.Project = $projects
+    }
+    & (Join-Path $PSScriptRoot 'Validate.ps1') @validate | Tee-Object -Variable lines
     $code = $LASTEXITCODE
     if ($code -ne 0) { exit $code }
 

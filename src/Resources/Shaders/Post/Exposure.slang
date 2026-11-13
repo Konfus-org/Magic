@@ -79,7 +79,7 @@ float2 GetCoveredAverage(PixelEffectInputs inputs)
     return sum / (scale.x * scale.y);
 }
 
-// The pixel's log luminance, from the average of the 2 by 2 it is in, as clamped to the range, and 1, or nothing when
+// The pixel's log luminance, from the average of the 2 by 2 it is in, clamped to the range, and 1, or nothing when
 // it is black.
 float4 GetLogLuminance(PixelEffectInputs inputs)
 {

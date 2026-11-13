@@ -3,7 +3,8 @@
 // marched along each texel's direction and lit by the sun through the cloud towards it and by the open sky, each frame
 // a sixteenth of the texels, in turn (Schneider, "The Real-Time Volumetric Cloudscapes of Horizon Zero Dawn", 2015).
 // The pass header's x is the frame's buffer, which holds the lights and the air, y the picture written, and z the side
-// of the blocks of texels of which a thread draws one a frame, blended with what the texel held: 1 draws all of it anew.
+// of the blocks of texels of which a thread draws one a frame, blended with what the texel held: 1 draws all of it
+// anew.
 module "DrawClouds";
 
 import Core.Heap;

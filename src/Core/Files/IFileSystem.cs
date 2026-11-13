@@ -37,9 +37,12 @@ public interface IFileSystem
     Result Write(string path, string contents);
 
     /// <summary>
-    /// Writes <paramref name="bytes"/> as the whole file at <paramref name="path"/>, making its folders. It is written
-    /// beside the file and moved over it, so a reader, or a crash, finds it whole: as it was or as it is now.
+    /// Writes <paramref name="bytes"/> as the whole file at <paramref name="path"/>, and makes its folders.
     /// </summary>
+    /// <remarks>
+    /// It writes beside the file and moves the result over the file, so a reader, or a crash, finds the whole file: as
+    /// it was or as it is now.
+    /// </remarks>
     Task<Result> WriteAsync(string path, ReadOnlyMemory<byte> bytes, CancellationToken cancel);
 
     /// <summary>
@@ -49,17 +52,22 @@ public interface IFileSystem
 
     /// <summary>
     /// Deletes the file or folder at <paramref name="path"/>; nothing happens when there is none.
-    /// <paramref name="recursive"/> applies only to a folder: it also deletes everything inside it, without which a
-    /// folder that isn't empty is refused.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="recursive"/> applies only to a folder: it also deletes everything in it. Without it, a folder
+    /// that is not empty is refused.
+    /// </remarks>
     Result Delete(string path, bool recursive);
 
     Result Copy(string sourceFile, string destinationFile);
 
     /// <summary>
-    /// Watches the directory tree under <paramref name="path"/>, calling <paramref name="touched"/> with the full path
-    /// of each file matching <paramref name="filter"/> that is made, written, deleted or renamed (its old path and its
-    /// new one), on a background thread, until the watch is disposed.
+    /// Watches the directory tree under <paramref name="path"/> and calls <paramref name="touched"/> with the full path
+    /// of each changed file that matches <paramref name="filter"/>, until the watch is disposed.
     /// </summary>
+    /// <remarks>
+    /// A change is a file that is made, written, deleted or renamed; a rename calls it with the old path and the new
+    /// one. <paramref name="touched"/> runs on a background thread.
+    /// </remarks>
     Result<IDisposable> Watch(string path, string filter, Action<string> touched);
 }

@@ -4,12 +4,14 @@ using Magic.Assets.Pipeline;
 namespace Magic.Assets;
 
 /// <summary>
-/// What a project's files describe, as the types gems share: a sealed class implementing this, of itself, is an asset
-/// type, which a <see cref="Handle{T}"/> names and <see cref="AssetManager"/> loads. It holds what its users read,
-/// never how its file was read, which is the business of the <see cref="IAssetImporter{T}"/> a gem provides for it, or
-/// of Core itself for a type marked <see cref="AssetFormatAttribute"/>. Every caller that loads an asset gets the same
-/// object.
+/// Marks a sealed class that implements this of itself as an asset type, which a <see cref="Handle{T}"/> names and
+/// <see cref="AssetManager"/> loads.
 /// </summary>
+/// <remarks>
+/// An asset type holds what its users read, never how its file was read. The <see cref="IAssetImporter{T}"/> that a
+/// gem gives for the type reads the file, or Core reads it for a type marked <see cref="AssetFormatAttribute"/>. Every
+/// caller that loads an asset gets the same object.
+/// </remarks>
 [SuppressMessage(
     "Design",
     "CA1040:Avoid empty interfaces",

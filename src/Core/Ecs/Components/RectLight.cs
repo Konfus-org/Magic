@@ -3,10 +3,12 @@ using Magic.Assets;
 namespace Magic.Ecs.Components;
 
 /// <summary>
-/// Light from a rectangle, like a window or a panel, facing along its entity's +Z and sized by
-/// <see cref="Width"/> and <see cref="Height"/> in metres before the entity's scale. <see cref="Intensity"/>, in
-/// candela as from its centre, scales <see cref="Color"/>; it lights nothing behind it.
+/// Light from a rectangle, like a window or a panel, that faces along the +Z of its entity.
 /// </summary>
+/// <remarks>
+/// <see cref="Width"/> and <see cref="Height"/> give its size in metres, before the scale of the entity.
+/// <see cref="Intensity"/>, in candela as from its centre, scales <see cref="Color"/>. It lights nothing behind it.
+/// </remarks>
 public record struct RectLight : IComponent
 {
     public Color Color = new(1, 1, 1);

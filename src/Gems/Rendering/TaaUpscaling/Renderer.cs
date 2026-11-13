@@ -1,23 +1,33 @@
+using System.Collections.Immutable;
 using Magic.Assets;
-using Magic.Debugging;
 using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
+using Magic.Ecs;
 using Magic.Graphics;
 using Magic.Projects;
 using Magic.Utils;
+using Magic.Worlds;
 
 namespace Magic.TaaUpscaling;
 
 /// <summary>
-/// Takes the finished picture to the size it is shown at with temporal anti-aliasing: each frame it makes the
-/// <see cref="Upscaling"/>, so the camera jitters, and the renderer has it record one pass once the view's output is
-/// drawn. The pass builds each shown pixel from the output's jittered texels around it and blends it with last
-/// frame's resolved picture where its surface was, so it keeps two resolved pictures and swaps them every frame,
-/// with no history on the first frame at a size or of a world; the newer is what the window shows. It makes nothing
-/// while its shader builds.
+/// Takes the finished picture to the size it is shown at with temporal anti-aliasing.
 /// </summary>
-public sealed class Renderer : IRenderInto<Upscaling>
+/// <remarks>
+/// Each frame it makes the <see cref="Upscaling"/>, so the camera jitters, and the renderer has it record one pass once
+/// the view's output is drawn. The pass builds each shown pixel from the output's jittered texels around it and blends
+/// it with last frame's resolved picture where its surface was. It keeps two resolved pictures and swaps them every
+/// frame, with no history on the first frame at a size or of a world; the newer is what the window shows. It makes
+/// nothing while its shader builds or after it failed.
+/// </remarks>
+public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
 {
+    /// <summary>
+    /// Done once the shader is built or failed, which a domain loading waits for, so a shader that fails is told and
+    /// logged before the world shows.
+    /// </summary>
+    private readonly TaskCompletionSource _built = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     private readonly ShaderEntry _shader;
 
     /// <summary>
@@ -26,21 +36,33 @@ public sealed class Renderer : IRenderInto<Upscaling>
     private readonly Upscaling _upscaling;
 
     /// <summary>
-    /// The picture the frame drawn last resolved, the next one's history, and its size.
+    /// The picture the frame drawn last resolved in each view, the next one's history, and its size.
     /// </summary>
-    private (GpuTexture Picture, int Width, int Height) _resolved;
+    private readonly List<(GpuTexture Picture, int Width, int Height)> _resolved = [];
 
-    public Renderer(AssetManager assets)
+    internal Renderer(AssetManager assets)
     {
         _shader = PassShaders.GetEntry(assets, "TaaUpscaling", "UpscalePicture");
         _upscaling = new Upscaling(Record);
     }
 
     /// <summary>
-    /// The frame's upscaling; none while the shader builds.
+    /// Makes the frame's upscaling; none while the shader builds or after it failed.
     /// </summary>
-    public Upscaling? Render(in Frame frame, RenderGraph graph) =>
-        graph.GetState(_shader) != GpuState.Ready ? null : _upscaling;
+    public Upscaling? Render(in Frame frame, RenderGraph graph)
+    {
+        GpuState state = graph.GetState(_shader);
+        if (state == GpuState.Failed)
+            graph.Fail(RenderFailure.Shader, "Picture is not upscaled", "the upscaling's shader was not built.");
+
+        if (state != GpuState.Loading)
+            _built.TrySetResult();
+
+        return state == GpuState.Ready ? _upscaling : null;
+    }
+
+    public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel) =>
+        _built.Task.WaitAsync(cancel);
 
     private static TextureDescription GetResolved(string name, int width, int height) =>
         new(
@@ -52,9 +74,9 @@ public sealed class Renderer : IRenderInto<Upscaling>
         );
 
     /// <summary>
-    /// The pass that resolves the view's output at the size it is shown at, and the picture it resolves; none when
-    /// its pictures were not made.
+    /// Records the pass that resolves the view's output at the size it is shown at.
     /// </summary>
+    /// <returns>The picture it resolves; none when its pictures were not made.</returns>
     private GpuTexture Record(RenderGraph graph, GpuView view)
     {
         (int width, int height) = (view.ShownWidth, view.ShownHeight);
@@ -65,17 +87,22 @@ public sealed class Renderer : IRenderInto<Upscaling>
         );
         if (Result.FindFailure(first, second, sampler) is { Ok: false } failed)
         {
-            Log.Error($"The picture is not upscaled: {failed.Error}");
+            graph.Fail(RenderFailure.Resource, "Picture is not upscaled", failed.Error);
 
             return GpuTexture.None;
         }
 
         // Last frame's resolved picture is this frame's history, where last frame drew this view at this size; the
         // shader reads none where the history it is handed is the picture it resolves.
+        while (_resolved.Count <= graph.View)
+        {
+            _resolved.Add(default);
+        }
+
         (GpuTexture history, GpuTexture resolved) =
-            _resolved.Picture == first.Value ? (first.Value, second.Value) : (second.Value, first.Value);
-        bool hasHistory = view.HasHistory && _resolved == (history, width, height);
-        _resolved = (resolved, width, height);
+            _resolved[graph.View].Picture == first.Value ? (first.Value, second.Value) : (second.Value, first.Value);
+        bool hasHistory = view.HasHistory && _resolved[graph.View] == (history, width, height);
+        _resolved[graph.View] = (resolved, width, height);
         ReadOnlySpan<GpuResource> past = hasHistory ? [history] : [];
         graph
             .Compute(

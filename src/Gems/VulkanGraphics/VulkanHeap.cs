@@ -4,11 +4,14 @@ using Vortice.Vulkan;
 namespace Magic.VulkanGraphics;
 
 /// <summary>
-/// The bindless heap: one descriptor set every shader reads, an array per kind of resource, each resource at the
-/// index its handle holds. A texture takes its index in every array its kind and format can be read through, and a
-/// slot per mip level in the storage arrays, so one id reaches it however a shader declares it. The set is bound once
-/// per pass and never changes shape; what is written into it changes as resources come and go.
+/// The bindless heap: one descriptor set that every shader reads, with an array for each kind of resource.
 /// </summary>
+/// <remarks>
+/// Each resource is at the index that its handle holds. A texture takes its index in every array that its kind and
+/// format can be read through, and a slot for each mip level in the storage arrays. Thus one id reaches it however a
+/// shader declares it. The set is bound once per pass and never changes shape. Only its contents change as resources
+/// come and go.
+/// </remarks>
 internal sealed unsafe class VulkanHeap : IDisposable
 {
     /// <summary>

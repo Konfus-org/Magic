@@ -1,4 +1,6 @@
 using System.Diagnostics.Metrics;
+using System.IO;
+using System.Reflection;
 using System.Runtime;
 using Magic.Assets;
 using Magic.CommandLine;
@@ -17,7 +19,7 @@ namespace Magic;
 internal static class Program
 {
     /// <summary>
-    /// How long the platform thread waits between looks at what was posted to it, with no platform gem to wait on the OS.
+    /// How long the platform thread waits between checks for posted work, when no platform gem waits on the OS.
     /// </summary>
     private static readonly TimeSpan _platformWait = TimeSpan.FromMilliseconds(10);
 
@@ -26,6 +28,35 @@ internal static class Program
         "s",
         "One step of Core's own in the run's loop."
     );
+
+    /// <summary>
+    /// Loads the project's own code from <paramref name="path"/>, which <paramref name="assemblies"/> has, and registers
+    /// it with the code and the assets until the subscription is disposed. Null when it has no code, or the code does not
+    /// load.
+    /// </summary>
+    private static Subscription? LoadProjectCode(
+        Project project,
+        string? path,
+        AssetManager assets,
+        Assemblies assemblies
+    )
+    {
+        if (path is null)
+            return null;
+
+        Result<Assembly> code = assemblies.Load(Path.GetFileNameWithoutExtension(path));
+        if (!code.Ok)
+        {
+            Log.Error($"The code of {project.Name} was not loaded from {path}: {code.Error}");
+
+            return null;
+        }
+
+        assets.Register(code.Value);
+        Log.Info($"Loaded the code of {project.Name} from {path}.");
+
+        return Assemblies.Register(code.Value);
+    }
 
     private static int Main(string[] commandLine)
     {
@@ -41,10 +72,13 @@ internal static class Program
     }
 
     /// <summary>
-    /// Runs what the commands ask for, a job like new or --version, or a project, pumping the terminal for more until
-    /// they ask to exit. Exits 0 clean; 1 for a bad command line, a job that failed or a project that won't open; and 2
-    /// at the first error under --fail-on-error.
+    /// Runs what the commands ask for, a job like new or --version, or a project, and pumps the terminal until they ask
+    /// to exit.
     /// </summary>
+    /// <remarks>
+    /// It returns 0 for a clean exit; 1 for a bad command line, a job that failed or a project that does not open; and
+    /// 2 at the first error under --fail-on-error.
+    /// </remarks>
     private static int Run(string[] commandLine)
     {
         Log.Verbose($"Command line args: {string.Join(", ", commandLine)}");
@@ -56,8 +90,8 @@ internal static class Program
         Task<Result<byte[]>>? worldRestorePoint = null;
         string[]? launchCommands = commandLine;
 
-        // One pass per run, all new for it: a typed command that asks for another project or mode, or a change to a gem's
-        // code, ends the run, and the next starts anew.
+        // One pass per run, all new for it: a typed command that asks for another project or mode, or a change to the
+        // code of a gem, ends the run, and the next run starts new.
         while (true)
         {
             (int? exitCode, worldRestorePoint) = RunPass(app, settings, launchCommands, worldRestorePoint);
@@ -70,9 +104,9 @@ internal static class Program
 
     /// <summary>
     /// Runs one pass, all new for it: the command line first when it is given, then the project until its run ends.
-    /// Gives Run's exit code, or null and the world as this run saved it when the next run must start.
     /// </summary>
     /// <remarks>
+    /// It returns the exit code of Run, or null and the world as this run saved it when the next run must start.
     /// It is a method of its own because, in Run's loop, CA2000 falsely reports the world as not disposed
     /// (dotnet/roslyn-analyzers#7047).
     /// </remarks>
@@ -99,6 +133,10 @@ internal static class Program
                 Log.Critical($"Couldn't run the command line: {ran.Error}");
                 return (1, null);
             }
+
+            // Only the command line gives the owner, so Magic watches it from the first pass to the end.
+            if (app.Owner is { } owner)
+                AppOwnerLink.WatchAsync(app, owner).FireAndForget();
         }
 
         if (app.HasFailed)
@@ -126,11 +164,21 @@ internal static class Program
         Log.Info($"Running {project.Name} in {(app.IsHeadless ? "headless" : "GUI")} mode.");
 
         app.StartRun();
-        using Gems gems = new(project.Gems, services, app, settings, files, assets, world, events, threads);
+
+        // The code of the run, which outlives the gems and the project's code that use it.
+        using Assemblies assemblies = new(files);
+
+        // The project's code is added before the gems' code can load, so each finds the other.
+        string? projectCodePath = project.FindCodePath(files);
+        if (projectCodePath is not null)
+            assemblies.Add(projectCodePath);
+
+        using Gems gems = new(project.Gems, assemblies, services, app, settings, files, assets, world, events, threads);
+        using Subscription? projectCode = LoadProjectCode(project, projectCodePath, assets, assemblies);
         settings.ReportUnknownKeys();
         world.StartAsync(worldRestorePoint?.WaitAsync(app.Lifetime), Terminal.Progress, app.Lifetime).FireAndForget();
 
-        // If we don't have a window and aren't headless something is wrong, early out.
+        // A run that is not headless cannot continue without a window.
         if (!app.IsHeadless && app.Window is null)
         {
             Log.Warn(
@@ -141,7 +189,7 @@ internal static class Program
 
         // The frames run on the game thread, while this one, the platform thread, pumps the OS's events until the
         // run ends; then the game thread's last frame finishes, and this thread is the game thread for what ends.
-        threads.Start(EngineThread.Game, () => RunFrame(app, world, gems, cli));
+        threads.Start(EngineThread.Game, () => RunFrame(app, world, assemblies, gems, cli));
         while (!app.Lifetime.IsCancellationRequested)
         {
             threads.Pump(EngineThread.Platform);
@@ -162,13 +210,19 @@ internal static class Program
 
         return (app.IsExiting ? 0 : null, saved);
 
-        // One frame on the game thread, after what was posted to it: Core's own steps are timed for whatever listens, and
-        // the gems' pump times its hooks itself. Under --fail-on-error, the first error logged ends the run; the exit
-        // code says so.
-        static void RunFrame(App app, World world, Gems gems, Cli cli)
+        // One frame on the game thread, after what was posted to it: Core's own steps are timed for whatever listens,
+        // and the pump of the gems times their hooks itself. Under --fail-on-error, the first error logged ends the
+        // run, and the exit code says so.
+        static void RunFrame(App app, World world, Assemblies assemblies, Gems gems, Cli cli)
         {
             if (app.HasFailed)
                 app.Exit();
+
+            if (assemblies.IsBuilt)
+            {
+                Log.Info("Code of the run was built again, so the run restarts.");
+                app.Restart();
+            }
 
             // The platform thread ends the game thread once it next wakes; until then no frame runs for an ended run.
             if (app.Lifetime.IsCancellationRequested)

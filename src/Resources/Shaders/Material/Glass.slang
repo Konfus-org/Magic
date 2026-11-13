@@ -1,7 +1,7 @@
 // Glass: a pane that lets the light behind it through, tinted by its colour, and reflects what is in front of it. It
 // draws over the lit picture, after the opaque surfaces. "clarity" is how much of the light behind gets through, 0 to
-// 1; a colour map, as stained glass has, tints the pane further where it names one, its alpha letting less through; a
-// normal map bends the surface the pane reflects with; a rougher pane spreads the sun's highlight.
+// 1. A colour map, as stained glass has, tints the pane further where it names one, its alpha letting less through. A
+// normal map bends the surface the pane reflects with. A rougher pane spreads the sun's highlight.
 module "Material/Glass";
 
 import Core.Heap;
@@ -16,7 +16,7 @@ public struct Glass : IMaterial
     public float4 color;
     public float clarity;
     public float roughness;
-    // The colour map and the normal map, and the samplers they are read with; 0 for none.
+    // The colour map and the normal map, and the samplers they are read with. An id of 0 means none.
     public TextureRef colorMap;
     public SamplerRef colorMapSampler;
     public TextureRef normalMap;

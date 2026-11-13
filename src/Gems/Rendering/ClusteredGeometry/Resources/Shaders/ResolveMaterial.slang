@@ -1,11 +1,12 @@
 // Every pixel of the visibility buffer to a surface: the id names the triangle, its three vertices give the pixel its
 // barycentrics and their derivatives, the attributes interpolate from them, and the material decides the surface,
 // written to the GBuffer, with how far the pixel's point rises off its flat triangle, and its emissive light to the
-// picture for the shading to add to; and the nearest translucent surface of the pixel, from the glass's visibility
+// picture for the shading to add to, and the nearest translucent surface of the pixel, from the glass's visibility
 // buffer, to the glass targets. The entry is specialised to one material shader, numbered in the pass header's y, and
-// resolves only the pixels whose rows that shader draws, loading its struct from each; every pass writes the sky's
+// resolves only the pixels whose rows that shader draws, loading its struct from each. Every pass writes the sky's
 // velocity, the same each time. The pixel's velocity is written beside it: where the surface was on last frame's
-// screen, from where its instance was and where the camera was; a pixel of sky moves with the camera alone.
+// screen, from where its instance was and where the camera was. A pixel of sky moves with the camera alone. A row
+// whose asset failed names its failure, which is drawn over the surface, and its pixels move with the failure's text.
 module "ResolveMaterial";
 
 import Core.Heap;
@@ -21,6 +22,7 @@ import Surface.Surface;
 import Material.IMaterial;
 import Scene.Clusters;
 import Scene.Models;
+import Scene.Failures;
 
 // How far a point must rise along a vertex's normal to reach the plane through the vertex square to it, when it lies
 // below that plane.
@@ -126,7 +128,12 @@ void ResolveOpaque<M : IMaterial>(FrameConstants frame, uint2 pixel)
 
     float3 previous = ToWorld(GetPreviousWorld(instance, frame.frameIndex), model) - frame.previousCameraPosition.xyz;
     float3 screen = GetPreviousScreen(frame, previous);
-    velocityTarget.Store(pixel, float4(screen.xy - unjittered, screen.z, 0.0));
+    float2 velocity = screen.xy - unjittered;
+    uint failure = LoadFailureIndex(models.materials, row);
+    if (failure != 0u)
+        velocity = ApplyFailure(frame, pixel, instance, LoadFailure(models.failures, failure), surface);
+
+    velocityTarget.Store(pixel, float4(velocity, screen.z, 0.0));
 
     StorageRef normalTarget = { frame.gbufferNormal, 0u };
     StorageRef baseTarget = { frame.gbufferBase, 0u };
@@ -139,7 +146,7 @@ void ResolveOpaque<M : IMaterial>(FrameConstants frame, uint2 pixel)
     picture.Store(pixel, float4(surface.emissive, 1.0));
 }
 
-// The pixel's nearest translucent surface into the glass targets, where one is in front of the opaque surface; none
+// The pixel's nearest translucent surface into the glass targets, where one is in front of the opaque surface. None
 // where the view has no glass, whose buffer's id is 0.
 void ResolveTranslucent<M : IMaterial>(FrameConstants frame, uint2 pixel)
 {
@@ -162,6 +169,10 @@ void ResolveTranslucent<M : IMaterial>(FrameConstants frame, uint2 pixel)
     PixelTriangle shown = LoadPixelTriangle(frame, visible, ToClip(center));
     M material = LoadMaterialParams<M>(models.materials, row);
     SurfaceOutputs surface = material.Evaluate(CreateSurfaceInputs(shown));
+    uint failure = LoadFailureIndex(models.materials, row);
+    if (failure != 0u)
+        ApplyFailure(frame, pixel, visible.instance, LoadFailure(models.failures, failure), surface);
+
     StorageRef baseTarget = { frame.glassBase, 0u };
     StorageRef normalTarget = { frame.glassNormal, 0u };
     StorageRef surfaceTarget = { frame.glassSurface, 0u };

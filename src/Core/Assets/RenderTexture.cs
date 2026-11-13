@@ -1,10 +1,13 @@
 namespace Magic.Assets;
 
 /// <summary>
-/// A texture a camera draws into, which materials sample like any other (<see cref="MaterialParam.RenderTexture"/>).
-/// It has no image: it is black until a camera has drawn into it. A <c>.rtex</c> file is this class as JSON:
-/// <c>{ "width": 1024, "height": 512 }</c>.
+/// A texture that a camera draws into, which materials sample like any other
+/// (<see cref="MaterialParam.RenderTexture"/>).
 /// </summary>
+/// <remarks>
+/// It has no image: it is black until a camera draws into it. A <c>.rtex</c> file is this class as JSON:
+/// <c>{ "width": 1024, "height": 512 }</c>.
+/// </remarks>
 [AssetFormat(AssetFileFormat.Json)]
 public sealed class RenderTexture : IAsset<RenderTexture>
 {

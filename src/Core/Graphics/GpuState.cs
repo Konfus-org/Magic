@@ -1,7 +1,7 @@
 namespace Magic.Graphics;
 
 /// <summary>
-/// Where something the GPU provider makes in the background is: not yet, ready to use, or never.
+/// Whether something that the GPU provider makes in the background is not ready yet, ready, or failed.
 /// </summary>
 public enum GpuState : byte
 {

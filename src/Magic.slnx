@@ -1,4 +1,9 @@
 <Solution>
+  <Configurations>
+    <BuildType Name="Debug" />
+    <BuildType Name="Optimize" />
+    <BuildType Name="Release" />
+  </Configurations>
   <Folder Name="/Core/">
     <File Path="../README.md" />
     <Project Path="Core/Magic.Core.csproj" />
@@ -15,6 +20,7 @@
     <Project Path="Gems/VulkanGraphics/VulkanGraphics.csproj" />
     <Project Path="Gems/ImGuiDebugUI/ImGuiDebugUI.csproj" />
     <Project Path="Gems/DebugTools/DebugTools.csproj" />
+    <Project Path="Gems/CSharpScripting/CSharpScripting.csproj" />
     <Project Path="Gems/Rendering/AccelerationStructures/AccelerationStructures.csproj" />
     <Project Path="Gems/Rendering/ClusteredGeometry/ClusteredGeometry.csproj" />
     <Project Path="Gems/Rendering/DeferredRendering/DeferredRendering.csproj" />
@@ -31,6 +37,8 @@
     <File Path="../docs/CONTRIBUTING.md" />
     <File Path="../docs/DEBUGGING.md" />
     <File Path="../docs/GEMS.md" />
+    <File Path="../docs/RENDERING.md" />
+    <File Path="../docs/SHADERS.md" />
     <File Path="../docs/TOOLS.md" />
   </Folder>
   <Folder Name="/Tests/">

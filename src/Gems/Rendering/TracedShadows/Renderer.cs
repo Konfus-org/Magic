@@ -1,24 +1,30 @@
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Assets;
-using Magic.Debugging;
 using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
+using Magic.Ecs;
 using Magic.Graphics;
 using Magic.Projects;
 using Magic.Utils;
+using Magic.Worlds;
 
 namespace Magic.TracedShadows;
 
 /// <summary>
-/// How much of each light reaches each pixel, traced through the world as rays see it at the size its settings scale
-/// the picture to, then denoised, as <c>DenoiseShadows.slang</c> says. Each frame it writes the ids of the mask and the
-/// sun's tint into the frame's buffer and makes the frame's <see cref="ShadowMask"/>.
+/// Traces how much of each light reaches each pixel, denoises it, and makes the frame's <see cref="ShadowMask"/>.
 /// </summary>
-public sealed class Renderer(TracedShadowsSettings settings, AssetManager assets) : IRender<TracedInput, ShadowMask>
+/// <remarks>
+/// It traces through the world as rays see it, at the size that its settings scale the picture to. Each frame it writes
+/// the ids of the mask and the sun's tint into the frame's buffer.
+/// </remarks>
+public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookIntoDomainLoading
 {
     private const int BytesPerPixel = 16;
+
     private const int SunTileWidth = 8;
+
     private const int SunTileHeight = 4;
 
     /// <summary>
@@ -35,31 +41,53 @@ public sealed class Renderer(TracedShadowsSettings settings, AssetManager assets
 
     private static readonly string[] _momentNames = ["Sun shadow moments 1", "Sun shadow moments 2"];
 
-    private readonly ShaderEntry _traceShader = PassShaders.GetEntry(assets, "TraceShadows", "TraceShadows");
-    private readonly ShaderEntry _classifyShader = PassShaders.GetEntry(assets, "DenoiseShadows", "ClassifyShadows");
-    private readonly ShaderEntry _filterShader = PassShaders.GetEntry(assets, "DenoiseShadows", "FilterShadows");
-    private readonly ShaderEntry _lastFilterShader = PassShaders.GetEntry(
-        assets,
-        "DenoiseShadows",
-        "FilterLastAndBlendShadows"
-    );
-    private readonly ShaderEntry _upsampleShader = PassShaders.GetEntry(assets, "DenoiseShadows", "UpsampleShadows");
+    /// <summary>
+    /// Done once the shaders are built or failed, and at once while shadows are off or no ray is traced.
+    /// </summary>
+    /// <remarks>
+    /// A domain loading waits for it, so a shader that fails is told and logged before the world shows.
+    /// </remarks>
+    private readonly TaskCompletionSource _built = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private readonly TracedShadowsSettings _settings;
+
+    private readonly ShaderEntry _traceShader;
+
+    private readonly ShaderEntry _classifyShader;
+
+    private readonly ShaderEntry _filterShader;
+
+    private readonly ShaderEntry _lastFilterShader;
+
+    private readonly ShaderEntry _upsampleShader;
 
     /// <summary>
-    /// The size the frame drawn last traced at, which the next blends with only at the same size.
+    /// The size the frame drawn last traced each view at, which the next blends with only at the same size.
     /// </summary>
-    private (int Width, int Height) _traced;
+    private readonly List<(int Width, int Height)> _traced = [];
+
+    internal Renderer(TracedShadowsSettings settings, AssetManager assets)
+    {
+        _settings = settings;
+        _traceShader = PassShaders.GetEntry(assets, "TraceShadows", "TraceShadows");
+        _classifyShader = PassShaders.GetEntry(assets, "DenoiseShadows", "ClassifyShadows");
+        _filterShader = PassShaders.GetEntry(assets, "DenoiseShadows", "FilterShadows");
+        _lastFilterShader = PassShaders.GetEntry(assets, "DenoiseShadows", "FilterLastAndBlendShadows");
+        _upsampleShader = PassShaders.GetEntry(assets, "DenoiseShadows", "UpsampleShadows");
+    }
 
     /// <summary>
-    /// The frame's shadows, traced and denoised, their ids written into the frame's buffer; none while it is off,
-    /// the passes' shaders build, or what they write is not made.
+    /// Traces and denoises the frame's shadows, and writes their ids into the frame's buffer.
     /// </summary>
+    /// <returns>
+    /// The frame's shadows, or none while they are off, the passes' shaders build, or what they write is not made.
+    /// </returns>
     public ShadowMask? Render(in Frame frame, RenderGraph graph, in TracedInput input)
     {
-        // Off, the history starts afresh once it is back on.
-        if (!settings.IsTracedShadowsOn)
+        // Off, each view's history starts afresh once it is back on.
+        if (!_settings.IsTracedShadowsOn)
         {
-            _traced = default;
+            _traced.Clear();
 
             return null;
         }
@@ -72,13 +100,16 @@ public sealed class Renderer(TracedShadowsSettings settings, AssetManager assets
             _lastFilterShader,
             _upsampleShader
         );
+        if (state == GpuState.Failed)
+            graph.Fail(RenderFailure.Shader, "Shadows are not traced", "a shader of the shadows was not built.");
+
         if (state != GpuState.Ready)
             return null;
 
         // The masks and the denoiser's targets at the traced size, this frame's and last frame's mask and moments by
         // the frame's index, and the mask and tint shading reads at the view's size.
         GpuView view = input.View;
-        (int width, int height) = view.Scaled(settings.ShadowScale);
+        (int width, int height) = view.Scaled(_settings.ShadowScale);
         long tiles = (long)((width + SunTileWidth - 1) / SunTileWidth) * ((height + SunTileHeight - 1) / SunTileHeight);
         long maskBytes = (long)width * height * BytesPerPixel;
         long groups =
@@ -127,14 +158,19 @@ public sealed class Renderer(TracedShadowsSettings settings, AssetManager assets
         );
         if (!asked.Ok)
         {
-            Log.Error($"The shadows are not traced: {asked.Error}");
+            graph.Fail(RenderFailure.Resource, "Shadows are not traced", asked.Error);
 
             return null;
         }
 
-        // Last frame's mask and moments are this frame's history, at the same size only.
-        bool hasHistory = view.HasHistory && _traced == (width, height);
-        _traced = (width, height);
+        // Last frame's mask and moments of this view are this frame's history, at the same size only.
+        while (_traced.Count <= graph.View)
+        {
+            _traced.Add(default);
+        }
+
+        bool hasHistory = view.HasHistory && _traced[graph.View] == (width, height);
+        _traced[graph.View] = (width, height);
         ShadowDenoiseConstants denoise = new()
         {
             TileStates = tileStates.Value.Id,
@@ -150,9 +186,10 @@ public sealed class Renderer(TracedShadowsSettings settings, AssetManager assets
             Width = (uint)width,
             Height = (uint)height,
         };
-        graph.Upload(constants.Value, [denoise]);
+        // Not staged: nothing is recorded, and the frame's row stays the view's default, which the shaders read as none.
         GpuShadows row = new() { Mask = mask.Value.Id, SunTint = sunTint.Value.Id };
-        graph.Upload(view.Frame, [row], GpuShadows.Offset);
+        if (!graph.Upload(constants.Value, [denoise]) || !graph.Upload(view.Frame, [row], GpuShadows.Offset))
+            return null;
 
         // Trace each traced pixel's shadows from the view's surfaces.
         GpuConstants header = new(view.Frame.Id, constants.Value.Id);
@@ -191,7 +228,7 @@ public sealed class Renderer(TracedShadowsSettings settings, AssetManager assets
             .DispatchOver(width, height);
 
         // Each pass reads the last one's output; the first pass's is what the next frame blends with.
-        int passes = Math.Clamp(settings.ShadowFilterPasses, 1, _filterPassNames.Length);
+        int passes = Math.Clamp(_settings.ShadowFilterPasses, 1, _filterPassNames.Length);
         GpuTexture filtered = passes == 1 ? sunHistory.Value : sunBlend.Value;
         for (int pass = 0; pass < passes; pass++)
         {
@@ -250,10 +287,26 @@ public sealed class Renderer(TracedShadowsSettings settings, AssetManager assets
 
         return new ShadowMask(mask.Value, sunTint.Value);
 
-        // A texture at the traced size.
         Result<GpuTexture> GetTracedTexture(string name, GpuFormat format) =>
             graph.Texture(new(name, width, height, format));
     }
+
+    /// <summary>
+    /// Asks for every shader of the shadows each frame while they are on and rays are traced, so each is built or
+    /// failed before a domain shows.
+    /// </summary>
+    public void Render(in Frame frame, RenderGraph graph)
+    {
+        if (
+            !_settings.IsTracedShadowsOn
+            || !graph.Features.HasRayQuery
+            || !graph.IsAnyLoading(_traceShader, _classifyShader, _filterShader, _lastFilterShader, _upsampleShader)
+        )
+            _built.TrySetResult();
+    }
+
+    public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel) =>
+        _built.Task.WaitAsync(cancel);
 }
 
 /// <summary>

@@ -3,10 +3,12 @@ using Magic.Graphics;
 namespace Magic.DeferredRendering.View;
 
 /// <summary>
-/// An effect at its place in a frame's list: its material, ready when its material, textures and passes are, its passes'
-/// entries specialised to its shader, and what it declares it needs. Its material's row is the view's effect row at
-/// its place.
+/// An effect at its place in a frame's list: its material, its passes' entries specialised to its shader, and its
+/// needs.
 /// </summary>
+/// <remarks>
+/// It is ready when its material, textures and passes are. Its material's row is the view's effect row at its place.
+/// </remarks>
 public readonly record struct GpuEffect(
     ulong Material,
     GpuState State,

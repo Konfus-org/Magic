@@ -6,7 +6,7 @@
             "components": {
                 "Transform": {},
                 "Camera": {},
-                "Spin": {}
+                "ScriptContainer": [ { "id": 100411 }, { "id": 100412 } ]
             }
         }
     ]

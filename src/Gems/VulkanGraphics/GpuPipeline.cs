@@ -28,10 +28,12 @@ internal readonly record struct ComputePipelineDescription
 }
 
 /// <summary>
-/// How to build a graphics pipeline: a vertex and a pixel entry, the formats of the targets it draws into, and its
-/// fixed state. It takes no vertex layout: vertices are fetched from the heap by the vertex entry. Viewport and scissor
-/// are commands.
+/// How to build a graphics pipeline: its vertex and pixel entries, the formats of its targets, and its fixed state.
 /// </summary>
+/// <remarks>
+/// It takes no vertex layout, because the vertex entry reads the vertices from the heap. Viewport and scissor are
+/// commands.
+/// </remarks>
 internal readonly record struct GraphicsPipelineDescription
 {
     public GraphicsPipelineDescription() { }

@@ -1,7 +1,7 @@
 // A pixel effect's passes: each level of its target filled, then the effect applied over every pixel of the picture.
 // A pass reads its GpuEffectPass from the table whose heap id is the pass header's y, at the row its z names, and the
 // effect's struct from its row of the params table that names. The effect is handed each pixel as the effects before
-// it left it, with how far its surface is; what it gives back is written into the other picture, for the next effect
+// it left it, with how far its surface is. What it gives back is written into the other picture, for the next effect
 // or the output.
 module "ApplyPixelEffect";
 

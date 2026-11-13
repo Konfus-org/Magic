@@ -9,9 +9,11 @@ using Magic.Worlds;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>get</c>: prints every gem's settings, a category's or one key's; or an entity's value, named by a path as
-/// <see cref="EntityPaths"/> reads it, on each entity the path names.
+/// <c>get</c>: prints the settings of each gem, of a category or of one key, or a value of an entity named by a path.
 /// </summary>
+/// <remarks>
+/// <see cref="EntityPaths"/> reads the path, and the command prints the value on each entity that the path names.
+/// </remarks>
 internal static class GetCommand
 {
     public static Command Create(App app, Settings settings, World world)

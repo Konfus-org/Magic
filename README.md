@@ -24,8 +24,11 @@ and options, and the commands are in [`Commands/`](src/Core/CommandLine/Commands
 To open a project with a window, the project must list a gem that provides a window. `--headless` runs the project
 without a window.
 
-When you build a gem that the open project lists, Magic restarts the run with the new build. The world stays where it
-was.
+A project's own code, such as its scripts, is the csproj next to its `.magic` file. Magic loads the build of that code
+from `Projects/<csproj name>/` beside Magic. The code can use the types of Magic and of the gems that the project lists.
+
+When you build a gem that the open project lists, or the project's code, Magic restarts the run with the new build. The
+world stays where it was.
 
 ### Commands in a run
 

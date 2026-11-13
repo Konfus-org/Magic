@@ -3,15 +3,19 @@ using Magic.Assets;
 namespace Magic.Ecs.Components;
 
 /// <summary>
-/// Light from a small sphere at its entity's position, shining in a cone along its +Z. A new one is a white 800 lumen
-/// spot, 60 degrees across.
+/// Light from a small sphere at the position of its entity, that shines in a cone along its +Z.
 /// </summary>
+/// <remarks>
+/// A new one is a white 800 lumen spot, 60 degrees across.
+/// </remarks>
 public record struct SpotLight : IComponent
 {
     /// <summary>
-    /// The illuminance, in lux, below which a point or spot light's light counts as gone, where its default range ends:
-    /// about a full moon's.
+    /// The illuminance in lux, about that of a full moon, below which the light of a point or spot light is gone.
     /// </summary>
+    /// <remarks>
+    /// The default range of such a light ends there.
+    /// </remarks>
     public const float FaintestLux = 0.02f;
 
     public Color Color = new(1, 1, 1);
@@ -22,10 +26,12 @@ public record struct SpotLight : IComponent
     public float Intensity = 255;
 
     /// <summary>
-    /// Metres it reaches: its light fades to nothing there, so whatever draws it can leave it out of everything
-    /// farther. 0 is where its light falls below <see cref="FaintestLux"/>, 113 m for the default spot, as
-    /// <see cref="Reach"/> works out.
+    /// Metres that it reaches: its light fades to nothing there.
     /// </summary>
+    /// <remarks>
+    /// The part that draws the light can leave it out of everything farther. 0 means where its light falls below
+    /// <see cref="FaintestLux"/>, 113 m for the default spot, as <see cref="Reach"/> calculates.
+    /// </remarks>
     public float Range;
 
     /// <summary>
@@ -39,15 +45,19 @@ public record struct SpotLight : IComponent
     public float OuterAngle = 30;
 
     /// <summary>
-    /// Degrees from the cone's axis to where the light starts fading towards the edge. 0 is three quarters of
-    /// <see cref="OuterAngle"/>, as <see cref="FadeAngle"/> works out.
+    /// Degrees from the axis of the cone to where the light starts to fade towards the edge.
     /// </summary>
+    /// <remarks>
+    /// 0 means three quarters of <see cref="OuterAngle"/>, as <see cref="FadeAngle"/> calculates.
+    /// </remarks>
     public float InnerAngle;
 
     /// <summary>
-    /// It casts no shadow: its light reaches through everything, which costs next to nothing to draw. A light far off,
-    /// whose shadows would not show, is best drawn so.
+    /// Whether it casts no shadow, so that its light goes through everything at almost no cost to draw.
     /// </summary>
+    /// <remarks>
+    /// Use it for a far light, whose shadows would not show.
+    /// </remarks>
     public bool IsShadowless;
 
     public SpotLight() { }

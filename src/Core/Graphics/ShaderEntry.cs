@@ -20,16 +20,21 @@ public enum ShaderStage : byte
 public readonly record struct ShaderTypeArgument(Handle<Shader> Module, string Type);
 
 /// <summary>
-/// One field of a shader's struct as a buffer lays it out: its name, its byte offset and size, and, for a field that is
-/// itself a struct such as <c>TextureRef</c>, that struct's name; empty for a number or a vector.
+/// One field of a shader's struct as a buffer lays it out: name, byte offset, size and struct name.
 /// </summary>
+/// <remarks>
+/// <paramref name="Struct"/> names the field's struct, such as <c>TextureRef</c>. It is empty for a number or a
+/// vector.
+/// </remarks>
 public readonly record struct ShaderField(string Name, uint Offset, uint Size, string Struct);
 
 /// <summary>
-/// One entry point to compile: a function of a <see cref="Shader"/> module, its stage, and the types it is specialised
-/// with, in the order of its generic parameters. Equal entries compile to the same code, which is how the compiled
-/// shader is cached.
+/// One entry point to compile: a function of a <see cref="Shader"/> module, its stage and its type arguments.
 /// </summary>
+/// <remarks>
+/// The type arguments are in the order of the generic parameters. Equal entries compile to the same code, so the
+/// compiled shader is cached by entry.
+/// </remarks>
 public readonly record struct ShaderEntry
 {
     public ShaderEntry() { }
@@ -55,7 +60,7 @@ public readonly record struct ShaderEntry
 }
 
 /// <summary>
-/// An entry compiled for the GPU: its SPIR-V, and what the renderer reads of its reflection.
+/// An entry compiled for the GPU: its SPIR-V and the reflection data a renderer needs.
 /// </summary>
 public sealed class CompiledShader
 {

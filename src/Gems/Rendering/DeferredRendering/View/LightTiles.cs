@@ -11,14 +11,17 @@ using Magic.Utils;
 namespace Magic.DeferredRendering.View;
 
 /// <summary>
-/// A frame's light table, holding <paramref name="Count"/> lights, and each tile's words of bits, a bit per light.
+/// A frame's light table, holding <paramref name="Count"/> lights.
 /// </summary>
-internal readonly record struct LightBuffers(GpuBuffer Table, GpuBuffer Tiles, int Count);
+internal readonly record struct LightBuffers(GpuBuffer Table, int Count);
 
 /// <summary>
-/// The light table and the tiles of the screen each light reaches: the world's local lights uploaded each frame, and a
-/// pass that sets each tile's bit for every light that touches what the tile shows.
+/// Fills the light table and the tiles of the screen each light reaches.
 /// </summary>
+/// <remarks>
+/// It uploads the world's local lights each frame, and runs a pass that sets each tile's bit for every light that
+/// touches what the tile shows.
+/// </remarks>
 internal sealed class LightTiles(AssetManager assets)
 {
     /// <summary>
@@ -48,13 +51,16 @@ internal sealed class LightTiles(AssetManager assets)
     public ImmutableArray<ShaderEntry> Shaders => [_cullShader];
 
     /// <summary>
-    /// The table and the view's tiles asked for, and the world's lights into the table, point lights first, in the
-    /// frame's upload pass.
+    /// Asks for the words of bits of each tile of a view of this size, a bit per light.
+    /// </summary>
+    public static Result<GpuBuffer> PrepareTiles(RenderGraph graph, int width, int height) =>
+        graph.Buffer(new("Light tiles", (long)GetTiles(width) * GetTiles(height) * Buckets * sizeof(uint)));
+
+    /// <summary>
+    /// Asks for the table, and writes the world's lights into it, point lights first, in the frame's upload pass.
     /// </summary>
     public Result<LightBuffers> Prepare(
         RenderGraph graph,
-        int width,
-        int height,
         EcsSnapshot<Transform, PointLight> points,
         EcsSnapshot<Transform, SpotLight> spots,
         EcsSnapshot<Transform, RectLight> rects
@@ -64,14 +70,8 @@ internal sealed class LightTiles(AssetManager assets)
         if (!table.Ok)
             return Result.Failure(table.Error);
 
-        Result<GpuBuffer> tiles = graph.Buffer(
-            new("Light tiles", (long)GetTiles(width) * GetTiles(height) * Buckets * sizeof(uint))
-        );
-        if (!tiles.Ok)
-            return Result.Failure(tiles.Error);
-
         int total = points.Count + spots.Count + rects.Count;
-        LightBuffers lights = new(table.Value, tiles.Value, Math.Min(total, MaxLights));
+        LightBuffers lights = new(table.Value, Math.Min(total, MaxLights));
         if (total > MaxLights && _lastTotal <= MaxLights)
             Log.Error($"Some lights are not drawn: the light table holds {MaxLights}.");
 
@@ -96,13 +96,14 @@ internal sealed class LightTiles(AssetManager assets)
             _lights[row++] = ToGpuLight(rects.First[i], rects.Second[i]);
         }
 
-        graph.Upload(lights.Table, _lights.AsSpan(0, lights.Count));
+        if (!graph.Upload(lights.Table, _lights.AsSpan(0, lights.Count)))
+            return Result.Failure("the light table was not staged.");
 
         return Result.Success(lights);
     }
 
     /// <summary>
-    /// Each tile's lights, from the view's depth.
+    /// Records the pass that finds each tile's lights from the view's depth.
     /// </summary>
     public void Record(RenderGraph graph, in GpuView view)
     {

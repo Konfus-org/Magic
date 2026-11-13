@@ -181,7 +181,7 @@ internal static class SdlControlExtensions
     }
 
     /// <summary>
-    /// The control a mouse button event's button, SDL's button number, is.
+    /// Converts SDL's number for a mouse button to its control.
     /// </summary>
     internal static Control? ToMouseControl(byte button) =>
         button switch

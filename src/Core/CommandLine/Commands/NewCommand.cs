@@ -6,8 +6,8 @@ using Magic.Debugging;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>new</c>: makes a project or gem from Magic's <c>dotnet new</c> templates, passing on any option Magic doesn't know,
-/// such as <c>-o</c>.
+/// <c>new</c>: makes a project or gem from the <c>dotnet new</c> templates of Magic, and passes on each option that
+/// Magic does not know, such as <c>-o</c>.
 /// </summary>
 internal static class NewCommand
 {

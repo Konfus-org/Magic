@@ -24,7 +24,7 @@ public struct VisibleCluster
 // for, which the cluster budget reads next frame.
 public static const uint CountWantedRows = 36u;
 
-// A visibility id: the visible list's row and the triangle in it; 0 is no surface.
+// A visibility id: the visible list's row and the triangle in it. 0 is no surface.
 public uint EncodeVisibilityId(uint visibleIndex, uint triangle)
 {
     return ((visibleIndex + 1u) * MaxClusterTriangles) | (triangle % MaxClusterTriangles);

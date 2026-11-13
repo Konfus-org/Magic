@@ -14,19 +14,24 @@ using static Magic.SdlBindings.SDL3;
 namespace Magic.SdlPlatform;
 
 /// <summary>
-/// The input, through SDL3: keyboards, mice and gamepads as <see cref="IInput"/>'s controls, and typed text. Headless,
-/// it reads gamepads only: keyboards and mice need a window to type and point into.
-/// <para>
-/// The platform thread hands SDL's events to the game thread as they came (<see cref="Platform.Pump"/>).
-/// <see cref="Update"/> applies them to the controls there, before any gem that takes the input runs, as they are made
-/// after this one, so input stays fixed for the rest of a frame. Losing the window's focus can pause the world.
-/// </para>
+/// Reads keyboards, mice and gamepads through SDL3 as the controls of <see cref="IInput"/>, and reads typed text.
 /// </summary>
+/// <remarks>
+/// <para>
+/// Headless, it reads gamepads only, because keyboards and mice need a window.
+/// </para>
+/// <para>
+/// The platform thread hands SDL's events to the game thread in order (<see cref="Platform.Pump"/>).
+/// <see cref="Update"/> applies them to the controls before any gem that takes the input runs, because those gems are
+/// made after this one. Thus the input stays fixed for the rest of a frame. When the window loses focus, the world can
+/// pause.
+/// </para>
+/// </remarks>
 public sealed class Input : IInput, IDisposable
 {
     /// <summary>
-    /// Each stick and trigger: the control it sets, SDL's axis it is read from, and the sign the value takes. SDL's stick
-    /// y grows downward; Magic's is up positive.
+    /// Each stick and trigger: the control it sets, SDL's axis it is read from, and the sign the value takes. SDL's
+    /// stick y grows downward; Magic's is up positive.
     /// </summary>
     private static readonly (Control Control, SDL_GamepadAxis Axis, float Sign)[] _axes =
     [
@@ -137,9 +142,12 @@ public sealed class Input : IInput, IDisposable
     }
 
     /// <summary>
-    /// Makes input this frame's: what happened last frame is over, SDL's events since are applied, and sticks and
-    /// triggers are read as they stand now.
+    /// Makes the input this frame's input.
     /// </summary>
+    /// <remarks>
+    /// What happened last frame ends, the SDL events since then are applied, and sticks and triggers are read as they
+    /// are now.
+    /// </remarks>
     internal unsafe void Update(in Frame frame)
     {
         // What happened last frame is over: pressed and released clear, and a mouse's wheel goes back to 0. Its motion
@@ -192,9 +200,11 @@ public sealed class Input : IInput, IDisposable
     }
 
     /// <summary>
-    /// Gives a control a new value, and with it whether it went down or came up. Pressed and released only ever turn on
-    /// within a frame, so a tap between two frames shows as both.
+    /// Gives a control a new value, and with it whether it went down or came up.
     /// </summary>
+    /// <remarks>
+    /// Pressed and released only turn on within a frame, so a tap between two frames shows as both.
+    /// </remarks>
     private void SetState(ControlState[] states, Control control, float value)
     {
         ref ControlState state = ref states[control.Index];
@@ -208,9 +218,11 @@ public sealed class Input : IInput, IDisposable
     }
 
     /// <summary>
-    /// Applies SDL's events the platform thread handed over since the last frame to the devices and their controls, in
-    /// the order they happened, with <paramref name="motionShare"/> of the mouse's new motion.
+    /// Applies the SDL events that the platform thread handed over since the last frame to the devices, in order.
     /// </summary>
+    /// <remarks>
+    /// The mouse's new motion is taken at <paramref name="motionShare"/>.
+    /// </remarks>
     [SuppressMessage(
         "Style",
         "IDE0010:Add missing cases",
@@ -348,9 +360,11 @@ public sealed class Input : IInput, IDisposable
     }
 
     /// <summary>
-    /// A keyboard's or mouse's controls, adding it as <paramref name="name"/> the first time it is heard of: input can
-    /// arrive before its device does, unnamed, and some from no device at all (id 0).
+    /// Gets the controls of a keyboard or mouse, and adds it as <paramref name="name"/> the first time it is heard of.
     /// </summary>
+    /// <remarks>
+    /// Input can arrive before its device does, unnamed, and some input comes from no device (id 0).
+    /// </remarks>
     private ControlState[] GetOrAddDevice(DeviceKind kind, uint id, string name)
     {
         int index = FindIndex(kind, id);
@@ -359,9 +373,11 @@ public sealed class Input : IInput, IDisposable
     }
 
     /// <summary>
-    /// Adds a device and its controls: its kind's block of 256, at each control's index. One that gives no name is
-    /// shown as what it is.
+    /// Adds a device and its controls, in its kind's block of 256, at the index of each control.
     /// </summary>
+    /// <remarks>
+    /// A device that gives no name is shown by its kind.
+    /// </remarks>
     private ControlState[] AddDevice(DeviceKind kind, uint id, string name)
     {
         _devices.Add(new InputDevice(kind, id, string.IsNullOrEmpty(name) ? kind.ToString() : name));

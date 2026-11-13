@@ -8,21 +8,27 @@ using Magic.Utils;
 namespace Magic.DomainImporter;
 
 /// <summary>
-/// Reads <c>.domain</c> files into <see cref="Domain"/>s, each in a folder of its own beside its prefabs: every one in the
-/// folder named <c>x_y_z</c> a chunk, and any other at the domain's origin. The file itself holds nothing, so <c>{}</c>
-/// does.
+/// Reads <c>.domain</c> files into <see cref="Domain"/>s, each in its own folder beside its prefabs.
 /// </summary>
-public sealed class Importer(AssetManager assets) : IAssetImporter<Domain>
+/// <remarks>
+/// Each prefab in the folder named <c>x_y_z</c> is a chunk, and any other prefab is at the domain's origin. The file
+/// itself holds nothing, so <c>{}</c> is enough.
+/// </remarks>
+public sealed class Importer : IAssetImporter<Domain>
 {
+    private readonly AssetManager _assets;
+
+    internal Importer(AssetManager assets) => _assets = assets;
+
     public ImmutableArray<string> Extensions { get; } = [".domain"];
 
     public Task<Result<Domain>> ImportAsync(AssetFile file, IProgress<LoadProgress>? progress, CancellationToken cancel)
     {
         ImmutableArray<Chunk>.Builder chunks = ImmutableArray.CreateBuilder<Chunk>();
         ImmutableArray<Handle<Prefab>>.Builder globals = ImmutableArray.CreateBuilder<Handle<Prefab>>();
-        foreach (string path in assets.GetNeighbors(file))
+        foreach (string path in _assets.GetNeighbors(file))
         {
-            Handle<Prefab> prefab = assets.Find<Prefab>(path);
+            Handle<Prefab> prefab = _assets.Find<Prefab>(path);
             if (prefab == Handle<Prefab>.None)
                 continue;
 

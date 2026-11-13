@@ -10,16 +10,17 @@ using Magic.Utils;
 namespace Magic.ClusteredGeometry;
 
 /// <summary>
-/// Makes what the cluster renderer draws a model as, its cluster hierarchy and impostor, as the model loads, and says
-/// how the cache keeps it: <see cref="AssetManager"/> keeps it under the model's version, so a model is clustered once
-/// per change to its file.
+/// Makes what the cluster renderer draws a model as, its cluster hierarchy and impostor, as the model loads.
 /// </summary>
+/// <remarks>
+/// <see cref="AssetManager"/> caches it under the model's version, so a model is clustered once per change to its file.
+/// </remarks>
 internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClusters>
 {
     /// <summary>
     /// Raised when the bytes written change shape, or the hierarchy is built otherwise.
     /// </summary>
-    public int Version => 2;
+    public int Version => 3;
 
     public ModelClusters Preprocess(Model asset) => ClusterBuilder.Build(asset);
 
@@ -34,6 +35,7 @@ internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClust
                 value.Clusters.Length,
                 value.Impostor.Length,
                 value.ImpostorUv.Length,
+                value.ImpostorViewBounds.Length,
                 value.BoundsMin,
                 value.BoundsMax
             )
@@ -44,6 +46,7 @@ internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClust
         bytes.Write(MemoryMarshal.AsBytes(value.Clusters.AsSpan()));
         bytes.Write(MemoryMarshal.AsBytes(value.Impostor.AsSpan()));
         bytes.Write(MemoryMarshal.AsBytes(value.ImpostorUv.AsSpan()));
+        bytes.Write(MemoryMarshal.AsBytes(value.ImpostorViewBounds.AsSpan()));
     }
 
     public Result<ModelClusters> Read(ReadOnlySpan<byte> bytes)
@@ -57,7 +60,8 @@ internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClust
             + ((long)header.IndexCount * sizeof(uint))
             + ((long)header.ClusterCount * GpuCluster.Bytes)
             + ((long)header.ImpostorHalves * sizeof(ushort))
-            + ((long)header.ImpostorUvHalves * sizeof(ushort));
+            + ((long)header.ImpostorUvHalves * sizeof(ushort))
+            + ((long)header.ImpostorViewBoundsCount * sizeof(uint));
         if (
             header.ModelVertexCount < 0
             || header.VertexCount < 0
@@ -65,23 +69,40 @@ internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClust
             || header.ClusterCount < 0
             || header.ImpostorHalves < 0
             || header.ImpostorUvHalves < 0
+            || header.ImpostorViewBoundsCount < 0
             || bytes.Length < needed
         )
             return Result.Failure("the entry is cut short.");
 
-        return Result.Success(
-            new ModelClusters
-            {
-                ModelVertexCount = header.ModelVertexCount,
-                Vertices = Packing.Read<GpuVertex>(ref bytes, header.VertexCount),
-                Indices = Packing.Read<uint>(ref bytes, header.IndexCount),
-                Clusters = Packing.Read<GpuCluster>(ref bytes, header.ClusterCount),
-                Impostor = Packing.Read<Half>(ref bytes, header.ImpostorHalves),
-                ImpostorUv = Packing.Read<Half>(ref bytes, header.ImpostorUvHalves),
-                BoundsMin = header.BoundsMin,
-                BoundsMax = header.BoundsMax,
-            }
-        );
+        // Each atlas is copied up whole, so an impostor of another size would leave texels of it unwritten.
+        if (
+            header.ImpostorHalves != ImpostorBuilder.Size * ImpostorBuilder.Size * 4
+            || header.ImpostorUvHalves != ImpostorBuilder.Size * ImpostorBuilder.Size * 2
+            || header.ImpostorViewBoundsCount != ImpostorBuilder.Views * ImpostorBuilder.Views
+        )
+            return Result.Failure("its impostor is not the size of an atlas.");
+
+        ModelClusters clusters = new()
+        {
+            ModelVertexCount = header.ModelVertexCount,
+            Vertices = Packing.Read<GpuVertex>(ref bytes, header.VertexCount),
+            Indices = Packing.Read<uint>(ref bytes, header.IndexCount),
+            Clusters = Packing.Read<GpuCluster>(ref bytes, header.ClusterCount),
+            Impostor = Packing.Read<Half>(ref bytes, header.ImpostorHalves),
+            ImpostorUv = Packing.Read<Half>(ref bytes, header.ImpostorUvHalves),
+            ImpostorViewBounds = Packing.Read<uint>(ref bytes, header.ImpostorViewBoundsCount),
+            BoundsMin = header.BoundsMin,
+            BoundsMax = header.BoundsMax,
+        };
+
+        // A cluster's triangles are read from the indices as its model settles, and drawn from them.
+        foreach (GpuCluster cluster in clusters.Clusters)
+        {
+            if (cluster.TriangleCount > 0 && cluster.IndexOffset + (cluster.TriangleCount * 3L) > header.IndexCount)
+                return Result.Failure("a cluster's triangles are past its indices.");
+        }
+
+        return Result.Success(clusters);
     }
 
     /// <summary>
@@ -95,6 +116,7 @@ internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClust
         int ClusterCount,
         int ImpostorHalves,
         int ImpostorUvHalves,
+        int ImpostorViewBoundsCount,
         Vector3 BoundsMin,
         Vector3 BoundsMax
     );

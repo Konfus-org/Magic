@@ -27,7 +27,7 @@ internal static unsafe class VulkanSurface
         };
 
     /// <summary>
-    /// A surface on the window <paramref name="handle"/> names, for the caller to destroy; why not when there is none.
+    /// Creates a surface on the window that <paramref name="handle"/> names, which the caller destroys.
     /// </summary>
     public static Result<VkSurfaceKHR> Create(VkInstanceApi api, WindowHandle handle)
     {

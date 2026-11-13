@@ -6,13 +6,15 @@ namespace Magic.Assets;
 
 /// <summary>
 /// The params of a <see cref="Material"/>, by the names of its shader's members:
-/// <c>material.Params["roughness"] = 0.8f</c>. A script may set them while the asset is in use, on the game
-/// thread, and whatever draws with them reads them from any thread. Its values are a snapshot that never changes, which
-/// each change replaces whole, so a reader on another thread never sees one half made; and each change counts in
-/// <see cref="Version"/>, which whatever draws from it compares with the count it last read, so nothing has to tell it.
-/// Setting a param to the value it has counts nothing. As JSON, an object of params by name,
-/// <c>{ "roughness": { "x": 0.8 } }</c>.
+/// <c>material.Params["roughness"] = 0.8f</c>.
 /// </summary>
+/// <remarks>
+/// Set params only on the game thread; you can set them while the asset is in use. Read them from any thread. Each
+/// change replaces the whole snapshot of values, so a reader on another thread never sees a half-made change. Each
+/// change also adds one to <see cref="Version"/>, which a reader compares with the count it last read. Setting a param
+/// to the value it has counts nothing. As JSON, it is an object of params by name, <c>{ "roughness": { "x": 0.8 }
+/// }</c>.
+/// </remarks>
 public sealed class MaterialParamDictionary
     : IDictionary<string, MaterialParam>,
         IReadOnlyDictionary<string, MaterialParam>
@@ -32,9 +34,12 @@ public sealed class MaterialParamDictionary
     public ICollection<MaterialParam> Values => ((IDictionary<string, MaterialParam>)_values).Values;
 
     /// <summary>
-    /// How many times it has changed. Read it before the values, as a change counts once its values are in: what is
-    /// read after it is at least as new as it says.
+    /// How many times it has changed.
     /// </summary>
+    /// <remarks>
+    /// Read it before the values. A change counts only after its values are in, so the values that you read after it
+    /// are at least as new as it says.
+    /// </remarks>
     public long Version => Volatile.Read(ref _version);
 
     IEnumerable<string> IReadOnlyDictionary<string, MaterialParam>.Keys => _values.Keys;
@@ -82,9 +87,11 @@ public sealed class MaterialParamDictionary
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
     /// <summary>
-    /// Takes <paramref name="values"/> in place of the snapshot, then counts the change, unless nothing changed. The
-    /// game thread's alone, so the count needs no more than to be written after the values.
+    /// Takes <paramref name="values"/> in place of the snapshot, then counts the change, unless nothing changed.
     /// </summary>
+    /// <remarks>
+    /// Only the game thread calls it, so it is enough to write the count after the values.
+    /// </remarks>
     private void Change(ImmutableDictionary<string, MaterialParam> values)
     {
         if (ReferenceEquals(values, _values))

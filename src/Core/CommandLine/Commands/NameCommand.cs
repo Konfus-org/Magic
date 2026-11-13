@@ -4,9 +4,11 @@ using Magic.Debugging;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>name</c>: shows a name in the window's title bar until the run ends, so a person can tell whose window it is when
-/// several run at once.
+/// <c>name</c>: shows a name in the title bar of the window until the run ends.
 /// </summary>
+/// <remarks>
+/// With it, a person can tell whose window it is when several run at once.
+/// </remarks>
 internal static class NameCommand
 {
     public static Command Create(App app)

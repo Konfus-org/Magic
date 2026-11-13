@@ -14,15 +14,20 @@ namespace Magic.DeferredRendering;
 public sealed class DeferredRenderingSettings : ISettings
 {
     /// <summary>
-    /// The finished picture's size in pixels, with a window or without, which the window shows stretched over it. 0 by
-    /// 0 is auto: the window's size, or 1280 by 720 with no window, as it is with a side of 0 or less.
+    /// The finished picture's size in pixels, with a window or without, which the window shows stretched over it.
     /// </summary>
+    /// <remarks>
+    /// 0 by 0 is auto: the window's size, or 1280 by 720 with no window. A side of 0 or less is also auto.
+    /// </remarks>
     public Size Resolution { get; set; }
 
     /// <summary>
     /// The part of the resolution the world is drawn at, more than 0 to 1, before the picture is upscaled or stretched
-    /// to it. 0 is auto: the most that draws at 1920 by 1080 or less.
+    /// to it.
     /// </summary>
+    /// <remarks>
+    /// 0 is auto: the most that draws at 1920 by 1080 or less.
+    /// </remarks>
     public float RenderScale { get; set; }
 
     /// <summary>
@@ -38,23 +43,27 @@ public sealed class DeferredRenderingSettings : ISettings
     public float SkyBrightness { get; set; } = 0.3f;
 
     /// <summary>
-    /// How many seconds a model nothing draws or waits for stays on the GPU before it leaves, to load again when it is
-    /// next drawn.
+    /// How many seconds a model nothing draws or waits for stays on the GPU. It loads again when it is next drawn.
     /// </summary>
     public int ModelKeepSec { get; set; } = 60;
 
     /// <summary>
-    /// How many samples a smoothly filtered texture takes along a surface seen at a slant, 1 to 16: more keeps a floor
-    /// sharp into the distance. 1 is off.
+    /// How many samples a smoothly filtered texture takes along a surface seen at a slant, 1 to 16. 1 is off.
     /// </summary>
+    /// <remarks>
+    /// More samples keep a floor sharp into the distance.
+    /// </remarks>
     [RequireRestart]
     public int Anisotropy { get; set; } = 8;
 
     /// <summary>
-    /// How many of a texture's largest mip levels are left off the GPU, each halving its width and height and saving
-    /// about three quarters of its memory: a softer picture for less video memory. A texture keeps at least its smallest
-    /// level. 0 keeps every level.
+    /// How many of a texture's largest mip levels are left off the GPU: a softer picture for less video memory. 0 keeps
+    /// every level.
     /// </summary>
+    /// <remarks>
+    /// Each level left off halves the width and height and saves about three quarters of the memory. A texture keeps at
+    /// least its smallest level.
+    /// </remarks>
     [RequireRestart]
     public int DroppedTextureLevels { get; set; }
 
@@ -107,10 +116,12 @@ public sealed class DeferredRenderingSettings : ISettings
     public float DepthViewFar { get; set; } = 1000;
 
     /// <summary>
-    /// How the picture is read where it is stretched over the window or into a screenshot: Nearest keeps each texel a
-    /// hard-edged block, Linear blends between them. A gem that upscales takes the picture to the size it is shown at in
-    /// place of the stretch.
+    /// How the picture is read where it is stretched over the window or into a screenshot: Nearest keeps hard-edged
+    /// texels, Linear blends them.
     /// </summary>
+    /// <remarks>
+    /// A gem that upscales takes the picture to the size it is shown at in place of the stretch.
+    /// </remarks>
     public TextureFilter UpscaleFilter { get; set; }
 
     /// <summary>
@@ -160,9 +171,11 @@ public enum DebugView : uint
     Velocity,
 
     /// <summary>
-    /// The indirect diffuse light as shading reads it, where something traces it: what a white diffuse surface would
-    /// reflect of the light that reaches it indirectly.
+    /// The indirect diffuse light as shading reads it, where something traces it.
     /// </summary>
+    /// <remarks>
+    /// It shows what a white diffuse surface would reflect of the light that reaches it indirectly.
+    /// </remarks>
     IndirectDiffuse,
 
     /// <summary>

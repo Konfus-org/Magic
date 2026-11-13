@@ -39,8 +39,6 @@ $PSNativeCommandUseErrorActionPreference = $false
 $env:MSBUILDDISABLENODEREUSE = '1'
 
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-# Another branch's profiling turn must not be disturbed: wait for it to end.
-& (Join-Path $PSScriptRoot 'Profiling.ps1') -Wait
 $solution = Join-Path (Join-Path $root 'src') 'Magic.slnx'
 $analyzer = Join-Path $root 'tools/Analyzers/Magic.Analyzers/Magic.Analyzers.csproj'
 
@@ -128,7 +126,8 @@ try {
     foreach ($pass in $passes) {
         if ($pass.Name -in 'Order', 'Style' -and -not $All -and $csFiles.Count -eq 0) { continue }
         Write-Output "==> $($pass.Name)"
-        & $pass.Run 2>&1 | ForEach-Object { "$_" }
+        # Each pass builds or reads the solution, so it runs without disturbing another branch's profiling turn.
+        & (Join-Path $PSScriptRoot 'Profiling.ps1') -Build $pass.Run 2>&1 | ForEach-Object { "$_" }
         if ($LASTEXITCODE -ne 0) {
             Write-Output "FAILED: $($pass.Name) exited $LASTEXITCODE"
             exit $LASTEXITCODE

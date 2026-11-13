@@ -6,10 +6,11 @@ using Magic.Utils;
 namespace Magic.Assets.Pipeline;
 
 /// <summary>
-/// Walks what assets depend on, down or up to a number of levels, finding what the database does not know yet, and loads
-/// what it finds: what <see cref="AssetManager"/>'s dependency calls run. An asset's own handles are found by
-/// <see cref="AssetScan"/>.
+/// Walks what assets depend on, down or up a number of levels, finds what the database does not know yet, and loads it.
 /// </summary>
+/// <remarks>
+/// <see cref="AssetScan"/> finds the handles of one asset.
+/// </remarks>
 internal static class AssetCrawl
 {
     /// <summary>
@@ -52,8 +53,8 @@ internal static class AssetCrawl
     }
 
     /// <summary>
-    /// The ids that depend on <paramref name="asset"/>, up to <paramref name="levels"/> levels, scanning every asset the
-    /// first time it is asked; one that cannot be read is taken to depend on nothing.
+    /// The ids that depend on <paramref name="asset"/>, up to <paramref name="levels"/> levels, scanning every asset
+    /// the first time it is asked; one that cannot be read is taken to depend on nothing.
     /// </summary>
     public static async Task<ImmutableArray<ulong>> FindDependentsAsync(
         AssetManager assets,
@@ -116,10 +117,12 @@ internal static class AssetCrawl
     }
 
     /// <summary>
-    /// What asset <paramref name="id"/> depends on: from the database when it has been through it while its file is the
-    /// same, else from it as it has loaded, else from its file read by Core for a type Core reads, else from the cache by
-    /// its file's version, else from loading it; or why it could not be read.
+    /// What asset <paramref name="id"/> depends on, or why it could not be read.
     /// </summary>
+    /// <remarks>
+    /// It takes the first source that has the answer: the database while the file is the same, the loaded asset, the
+    /// file for a type that Core reads, the cache by the file's version, and last a load of the asset.
+    /// </remarks>
     private static async Task<Result<ImmutableArray<ulong>>> ScanAsync(
         AssetManager assets,
         ulong id,
@@ -138,7 +141,7 @@ internal static class AssetCrawl
                 $"{file.Path} is a {file.Type}, which neither Magic nor a gem the project lists holds."
             );
 
-        // Loaded and still held, what it holds is there: one a gem added.
+        // A loaded asset can hold handles that a gem added, so scan it as it is now.
         LoadedAssets loaded = assets.Loaded;
         if (loaded.Entries.TryGetValue(id, out AssetEntry? entry) && entry.GetValue() is { } current)
             return Result.Success(AssetScan.FindHandles(current));

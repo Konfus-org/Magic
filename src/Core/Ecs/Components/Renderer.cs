@@ -6,10 +6,13 @@ using Magic.Assets;
 namespace Magic.Ecs.Components;
 
 /// <summary>
-/// Draws a model where its entity's <see cref="Transform"/> puts it, each of the model's meshes with the material in
-/// the slot the mesh names, with the params the slot sets over the material's. A few bytes, as a world holds a great
-/// many: the slots are a shared <see cref="MaterialSet"/>.
+/// Draws a model at the <see cref="Transform"/> of its entity, each mesh with the material in the slot that the mesh
+/// names.
 /// </summary>
+/// <remarks>
+/// The params that the slot sets go over those of the material. The component is a few bytes, because a world holds
+/// very many: the slots are a shared <see cref="MaterialSet"/>.
+/// </remarks>
 public record struct Renderer : IComponent
 {
     public Handle<Model> Model;
@@ -17,18 +20,20 @@ public record struct Renderer : IComponent
     public MaterialSet Materials;
 
     /// <summary>
-    /// It casts no shadow and hides nothing from the light around it, as a lamp's shade around its own light: it is
-    /// drawn, but light passes through it.
+    /// Whether it casts no shadow: it is drawn, but light goes through it, as through the shade of a lamp.
     /// </summary>
     public bool IsShadowless;
 }
 
 /// <summary>
-/// Materials by slot, inline in a component of which a world holds a few: the post effects in the order they run, whose
-/// params a script may change each frame, <c>post.Effects[0].Overrides["compensation"] = 1f</c>.
-/// <see cref="Capacity"/> of them, each a <see cref="MaterialInstance"/>, inline so the component stays plain unmanaged
-/// data, indexed, an empty slot's handle none. In a file, an array of them, the empty slots after the last left out.
+/// Materials by slot, inline in a component of which a world holds few, such as the post effects in the order they run.
 /// </summary>
+/// <remarks>
+/// It holds <see cref="Capacity"/> slots, each a <see cref="MaterialInstance"/>, inline so the component stays plain
+/// unmanaged data. An empty slot has no handle. A script can change the params each frame:
+/// <c>post.Effects[0].Overrides["compensation"] = 1f</c>. In a file, it is an array of instances, without the empty
+/// slots after the last.
+/// </remarks>
 [InlineArray(Capacity)]
 [JsonConverter(typeof(MaterialSlotsJsonConverter))]
 public struct MaterialSlots : IEquatable<MaterialSlots>
@@ -38,9 +43,11 @@ public struct MaterialSlots : IEquatable<MaterialSlots>
     private MaterialInstance _first;
 
     /// <summary>
-    /// Every slot as a list, an empty slot's handle none: what reading an inline array through reflection can't
-    /// reach.
+    /// Every slot as a list, where an empty slot has no handle.
     /// </summary>
+    /// <remarks>
+    /// Reflection cannot read an inline array, so it reads this list.
+    /// </remarks>
     public readonly ImmutableArray<MaterialInstance> All => [.. (ReadOnlySpan<MaterialInstance>)this];
 
     public static bool operator ==(MaterialSlots left, MaterialSlots right) => left.Equals(right);

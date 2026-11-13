@@ -12,7 +12,7 @@ public struct Standard : IMaterial
     public float roughness;
     public float metalness;
     public float3 emissive;
-    // The colour map and the sampler it is read with; 0 for none.
+    // The colour map and the sampler it is read with. An id of 0 means none.
     public TextureRef colorMap;
     public SamplerRef colorMapSampler;
 

@@ -11,13 +11,15 @@ using Magic.Utils;
 namespace Magic.ClusteredGeometry;
 
 /// <summary>
-/// Each model on the GPU as the cluster renderer draws it, kept row for row with the view's model table: a model that
-/// comes into a row is read from the cache on a worker, as its preprocessor made it, settled into the pools of
-/// vertices, indices and clusters, which grow to hold it, the impostor table and its atlases, and copied up in the
-/// frame it arrives; one that leaves its row gives its ranges back to the free lists, and its atlases are no longer
-/// asked for, so the GPU provider frees them. A row is empty, and its instances draw nothing, until its model arrives.
-/// The pools and the atlases are asked of the graph every frame, so the GPU provider keeps what they hold.
+/// Holds each model on the GPU as the cluster renderer draws it, row for row with the view's model table.
 /// </summary>
+/// <remarks>
+/// A model that comes into a row is read from the cache on a worker, settled into the pools of vertices, indices and
+/// clusters, the impostor table and its atlases, and copied up in the frame it arrives. The pools grow to hold it. A
+/// model that leaves its row gives its ranges back to the free lists, and the GPU provider frees its atlases once no
+/// frame asks for them. A row is empty, and its instances draw nothing, until its model arrives. The pools and the
+/// atlases are asked of the graph every frame, so the GPU provider keeps what they hold.
+/// </remarks>
 internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManager assets, Threads threads)
 {
     private const int ImpostorCapacity = 1024;
@@ -34,10 +36,13 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
     private readonly List<(int Index, ModelPlace Place, Result<ModelClusters> Made)> _madeModels = [];
 
     /// <summary>
-    /// The models of this frame's <see cref="_madeModels"/> that took their ranges, by the row they took them for, to
-    /// copy up once the pools are asked for at their size.
+    /// The models of <see cref="_madeModels"/> that took their ranges, by the row and place they took them for, to copy
+    /// up once the pools are asked for at their size.
     /// </summary>
-    private readonly List<(int Index, ModelClusters Made)> _placedModels = [];
+    /// <remarks>
+    /// One whose copies were not staged waits for the next frame.
+    /// </remarks>
+    private readonly List<(int Index, ModelPlace Place, ModelClusters Made)> _placedModels = [];
 
     // The impostor table's rows; row 0 is none, so it is taken from the start.
     private readonly FreeList _impostorRows = new(ImpostorCapacity, 1);
@@ -67,10 +72,13 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
     }
 
     /// <summary>
-    /// The pools and tables asked for, and kept row for row with <paramref name="models"/>: each row whose model changed
-    /// emptied and its model asked for, each model read since the last frame copied up, the pools grown where it does
-    /// not fit, and every resident impostor's atlases asked for, which are what it returns beside the pools.
+    /// Asks for the pools and tables, and keeps them row for row with <paramref name="models"/>.
     /// </summary>
+    /// <remarks>
+    /// Each row whose model changed is emptied and its model asked for. Each model read since the last frame is copied
+    /// up, and the pools grow where it does not fit.
+    /// </remarks>
+    /// <returns>The pools and tables, and every resident impostor's atlases.</returns>
     public Result<ClusterPools> Prepare(RenderGraph graph, ReadOnlySpan<ModelPlace> models)
     {
         // A row past the view's last row in use has lost its model: its ranges given back, and the row dropped.
@@ -92,7 +100,9 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
         Result<GpuBuffer> table = graph.Buffer(
             new("Cluster model table", (long)_rows.Capacity * GpuClusterModel.Bytes)
         );
-        Result<GpuBuffer> impostors = graph.Buffer(new("Impostor table", (long)ImpostorCapacity * GpuImpostor.Bytes));
+        Result<GpuBuffer> impostors = graph.Buffer(
+            new("Impostor table", (long)ImpostorCapacity * GpuImpostor.RowBytes)
+        );
         if (Result.FindFailure(table, impostors) is { Ok: false } failedTable)
             return Result.Failure(failedTable.Error);
 
@@ -102,11 +112,15 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
             if (_rows[index].Place == models[index])
                 continue;
 
-            Free(_rows[index]);
             ModelPlace place = models[index];
             bool isEmpty = place.Model == Handle<Model>.None;
+
+            // A row not emptied keeps its old model, whose ranges are not freed; the next frame tries again.
+            if (!graph.Upload(table.Value, [default(GpuClusterModel)], (ulong)index * GpuClusterModel.Bytes))
+                return Result.Failure("a row of the model table was not emptied.");
+
+            Free(_rows[index]);
             _rows[index] = new Row { Place = place, State = isEmpty ? RowState.Empty : RowState.Loading };
-            graph.Upload(table.Value, [default(GpuClusterModel)], (ulong)index * GpuClusterModel.Bytes);
             if (!isEmpty)
                 LoadAsync(index, place).FireAndForget();
         }
@@ -138,7 +152,7 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
                 ClusterOffset = (uint)_clusters.Allocate(model.Clusters.Length),
                 ClusterCount = (uint)model.Clusters.Length,
             };
-            _placedModels.Add((index, model));
+            _placedModels.Add((index, place, model));
         }
 
         _madeModels.Clear();
@@ -152,12 +166,14 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
             return Result.Failure(failed.Error);
 
         ClusterPools pools = new(vertices.Value, indices.Value, clusters.Value, table.Value, impostors.Value, []);
-        foreach ((int index, ModelClusters made) in _placedModels)
+        // One whose row has since changed is dropped; one not staged stays for the next frame.
+        for (int i = _placedModels.Count - 1; i >= 0; i--)
         {
-            Upload(graph, pools, index, made);
+            (int index, ModelPlace place, ModelClusters made) = _placedModels[i];
+            bool isStale = _rows.Count <= index || _rows[index].Place != place || _rows[index].State != RowState.Ready;
+            if (isStale || Upload(graph, pools, index, made))
+                _placedModels.RemoveAt(i);
         }
-
-        _placedModels.Clear();
 
         // Every resident impostor's atlases, asked of the graph, so the GPU provider keeps them and a pass that samples
         // them names them in its reads.
@@ -178,7 +194,7 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
     }
 
     /// <summary>
-    /// An impostor atlas of <see cref="ImpostorBuilder.Size"/> texels a side, in <paramref name="format"/>.
+    /// Describes an impostor atlas of <see cref="ImpostorBuilder.Size"/> texels a side, in <paramref name="format"/>.
     /// </summary>
     private static TextureDescription GetAtlasDescription(string name, GpuFormat format) =>
         new(
@@ -190,7 +206,8 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
         );
 
     /// <summary>
-    /// The row's ranges given back to the free lists, when it holds a model; its atlases go once no frame asks for them.
+    /// Gives the row's ranges back to the free lists, when it holds a model; its atlases go once no frame asks for
+    /// them.
     /// </summary>
     private void Free(Row row)
     {
@@ -207,26 +224,47 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
     private string GetName(ModelPlace place) => assets.GetPath(place.Model) ?? $"model {place.Model.Id}";
 
     /// <summary>
-    /// The model's clusters, as its preprocessor made them, settled by the next <see cref="Prepare"/>.
+    /// Reads the model's clusters, as its preprocessor made them, on a worker, for the next <see cref="Prepare"/> to
+    /// settle.
     /// </summary>
+    /// <remarks>
+    /// The failure cube's clusters are made from memory.
+    /// </remarks>
     private async Task LoadAsync(int index, ModelPlace place)
     {
-        Result<ModelClusters> made = await assets
-            .LoadPreprocessedAsync(place.Model, clusters, CancellationToken.None)
-            .ConfigureAwait(false);
+        Result<ModelClusters> made;
+        try
+        {
+            made =
+                place.Model == FailureCube.Handle
+                    ? Result.Success(await Task.Run(() => clusters.Preprocess(FailureCube.Model)).ConfigureAwait(false))
+                    : await assets
+                        .LoadPreprocessedAsync(place.Model, clusters, CancellationToken.None)
+                        .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            made = Result.Failure($"making them threw: {ex}");
+        }
+
         await threads.Enter(EngineThread.Render);
         _madeModels.Add((index, place, made));
     }
 
     /// <summary>
-    /// The model's clusters copied into the ranges its row took in <paramref name="pools"/>, its impostor given a row of
-    /// the impostor table and its atlases when it baked one, and its row of the model table written.
+    /// Copies the model's clusters into the ranges that its row took in <paramref name="pools"/>, and writes its row of
+    /// the model table last.
     /// </summary>
-    private void Upload(RenderGraph graph, in ClusterPools pools, int index, ModelClusters made)
+    /// <remarks>
+    /// When the model baked an impostor, the impostor gets a row of the impostor table and its atlases.
+    /// </remarks>
+    /// <returns>False, with no row of the model table written, when a copy was not staged.</returns>
+    private bool Upload(RenderGraph graph, ClusterPools pools, int index, ModelClusters made)
     {
         Row row = _rows[index];
         ModelPlace place = row.Place;
-        graph.Upload(pools.Vertices, made.Vertices.AsSpan(), (ulong)row.VertexOffset * GpuVertex.Bytes);
+        if (!graph.Upload(pools.Vertices, made.Vertices.AsSpan(), (ulong)row.VertexOffset * GpuVertex.Bytes))
+            return false;
 
         // An index under the model's own vertex count is into the world's vertex pool, where its model's vertices start
         // at its place; the rest are into this pool's copies.
@@ -236,6 +274,9 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
             made.Indices.Length,
             (ulong)row.IndexOffset * sizeof(uint)
         );
+        if (rebased.Length < made.Indices.Length)
+            return false;
+
         for (int i = 0; i < made.Indices.Length; i++)
         {
             uint vertex = made.Indices[i];
@@ -249,6 +290,9 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
             made.Clusters.Length,
             (ulong)row.ClusterOffset * GpuCluster.Bytes
         );
+        if (rows.Length < made.Clusters.Length)
+            return false;
+
         for (int i = 0; i < made.Clusters.Length; i++)
         {
             GpuCluster cluster = made.Clusters[i];
@@ -260,21 +304,38 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
 
         string name = GetName(place);
         if (_impostorRows.CanAllocate(1))
-            row = UploadImpostor(graph, pools.Impostors, name, made, row);
+        {
+            if (UploadImpostor(graph, pools.Impostors, name, made, row) is not { } withImpostor)
+                return false;
+
+            row = withImpostor;
+        }
 
         GpuClusterModel model = new(row.ClusterOffset, row.ClusterCount, row.ImpostorRow);
-        graph.Upload(pools.Models, [model], (ulong)index * GpuClusterModel.Bytes);
+        if (!graph.Upload(pools.Models, [model], (ulong)index * GpuClusterModel.Bytes))
+        {
+            if (row.ImpostorRow != 0)
+                _impostorRows.Free((int)row.ImpostorRow, 1);
+
+            return false;
+        }
+
         _rows[index] = row;
         Log.Info(
             $"{name}: {made.Clusters.Length} clusters, {made.Indices.Length / 3} triangles in every level, {made.Vertices.Length} vertices above the leaves."
         );
+
+        return true;
     }
 
     /// <summary>
-    /// The model's impostor atlases asked of the graph and copied up, and its row of the impostor table taken and
-    /// written; the row as it was, drawing no impostor, when an atlas was not made.
+    /// Asks for the model's impostor atlases and copies them up, then takes and writes its row of the impostor table.
     /// </summary>
-    private Row UploadImpostor(RenderGraph graph, GpuBuffer impostors, string name, ModelClusters made, Row row)
+    /// <returns>
+    /// The row; the row as it was, drawing no impostor, when an atlas was not made; or null, with no row taken, when a
+    /// copy was not staged.
+    /// </returns>
+    private Row? UploadImpostor(RenderGraph graph, GpuBuffer impostors, string name, ModelClusters made, Row row)
     {
         TextureDescription atlasDescription = GetAtlasDescription($"{name} impostor", GpuFormat.R16G16B16A16Sfloat);
         TextureDescription uvDescription = GetAtlasDescription($"{name} impostor uv", GpuFormat.R16G16Sfloat);
@@ -287,8 +348,12 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
             return row;
         }
 
-        graph.Upload(atlas.Value, MemoryMarshal.AsBytes(made.Impostor.AsSpan()));
-        graph.Upload(uvAtlas.Value, MemoryMarshal.AsBytes(made.ImpostorUv.AsSpan()));
+        if (
+            !graph.Upload(atlas.Value, MemoryMarshal.AsBytes(made.Impostor.AsSpan()))
+            || !graph.Upload(uvAtlas.Value, MemoryMarshal.AsBytes(made.ImpostorUv.AsSpan()))
+        )
+            return null;
+
         row = row with
         {
             ImpostorDescription = atlasDescription,
@@ -302,9 +367,16 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
             BoundsMax = made.BoundsMax,
             UvAtlas = uvAtlas.Value.Id,
         };
-        graph.Upload(impostors, [impostor], (ulong)row.ImpostorRow * GpuImpostor.Bytes);
+        ulong rowOffset = (ulong)row.ImpostorRow * GpuImpostor.RowBytes;
+        if (
+            graph.Upload(impostors, [impostor], rowOffset)
+            && graph.Upload(impostors, made.ImpostorViewBounds.AsSpan(), rowOffset + GpuImpostor.Bytes)
+        )
+            return row;
 
-        return row;
+        _impostorRows.Free((int)row.ImpostorRow, 1);
+
+        return null;
     }
 
     /// <summary>
@@ -319,10 +391,12 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
     }
 
     /// <summary>
-    /// A row of the view's model table as the cluster renderer holds it: the model it was made for, and, once ready,
-    /// each of its ranges as an offset and a count, and its impostor's atlases and row of the impostor table, 0 for
-    /// none.
+    /// A row of the view's model table as the cluster renderer holds it.
     /// </summary>
+    /// <remarks>
+    /// It holds the model it was made for and, once ready, each of its ranges as an offset and a count, its impostor's
+    /// atlases, and its row of the impostor table, 0 for none.
+    /// </remarks>
     private readonly record struct Row
     {
         public ModelPlace Place { get; init; }
@@ -350,10 +424,14 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
 }
 
 /// <summary>
-/// The cluster renderer's pools and tables this frame: its vertex copies, indices and clusters, each model's clusters
-/// and impostor by its model index, the impostors, and every resident impostor's atlases.
+/// The cluster renderer's pools and tables this frame, one set for every view.
 /// </summary>
-internal readonly record struct ClusterPools(
+/// <remarks>
+/// They hold its vertex copies, indices and clusters, each model's clusters and impostor by its model index, the
+/// impostors, and every resident impostor's atlases. The renderer makes them once a frame for the step that draws each
+/// view.
+/// </remarks>
+public readonly record struct ClusterPools(
     GpuBuffer Vertices,
     GpuBuffer Indices,
     GpuBuffer Clusters,

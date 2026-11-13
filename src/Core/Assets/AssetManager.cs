@@ -1,5 +1,7 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.IO.Hashing;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -16,35 +18,39 @@ using Magic.Utils;
 namespace Magic.Assets;
 
 /// <summary>
-/// The assets, as gems and gameplay use them: what the files under the asset directories describe, the project's folder,
-/// then each gem's <c>Resources/</c>, then Magic's built-in one, the first winning a path two of them have. A file is an
-/// asset when a <c>.meta</c> sidecar is beside it, holding its 64-bit id, which is what a <see cref="Handle{T}"/> holds,
-/// and the import settings its importer reads. An asset path is relative to its asset directory, with <c>/</c> between
-/// folders on every OS. Any thread.
-/// <para>
-/// Every asset directory is indexed as it is registered, a gem's before the gem is made, so finding an asset works in a
-/// constructor, and so does loading one: a load of a type a gem reads, asked for before that gem is made, starts as the
-/// gem registers.
-/// </para>
-/// <para>
-/// Each file is imported on a worker by <see cref="RunImportAsync{T}"/>: read it, read its <c>.meta</c>, look in the
-/// cache, make it, keep it in the cache. It is made by the <see cref="IAssetImporter{T}"/> a gem provides for its type,
-/// else by Core itself for a type marked <see cref="AssetFormatAttribute"/>. What loaded is kept while something holds it:
-/// once nothing does, the GC frees it, and the next load reads it again.
-/// </para>
-/// <para>
-/// The asset directories are watched from when they are registered until the assets are disposed. Once their changes settle, they are
-/// indexed again, and every asset loaded and still held whose file changed, or that was made from one that did, is made again, each after
-/// what it was made from: <see cref="GetVersion{T}"/> then says so, a load gets the new one, and the next frame hears
-/// an <see cref="AssetReloaded"/>. One that fails to load again keeps what loaded before.
-/// </para>
-/// <para>
-/// What assets there are and what depends on what is its <see cref="AssetDatabase"/>, what was loaded its
-/// <see cref="LoadedAssets"/>: values every call reads as they are, each ask replacing them whole under one lock, held
-/// only for the swap. A load lands as its worker finishes, and a change to the files is taken in as the watches see it
-/// settle, so two calls in one frame can see different assets, each a whole one.
-/// </para>
+/// The assets that gems and gameplay use: what the files under the asset directories describe.
 /// </summary>
+/// <remarks>
+/// <para>
+/// The asset directories are the project's folder, then each gem's <c>Resources/</c>, then Magic's built-in one; when
+/// two hold the same path, the first wins. A file is an asset when a <c>.meta</c> sidecar is beside it. The sidecar
+/// holds the 64-bit id that a <see cref="Handle{T}"/> holds, and the import settings that its importer reads. An asset
+/// path is relative to its asset directory, with <c>/</c> between folders on every OS. Any thread.
+/// </para>
+/// <para>
+/// Each asset directory is indexed when it is registered, a gem's before the gem is made, so a constructor can find and
+/// load an asset. A load of a type that a gem reads, asked for before that gem is made, starts when the gem registers.
+/// </para>
+/// <para>
+/// <see cref="RunImportAsync{T}"/> imports each file on a worker: it reads the file and its <c>.meta</c>, looks in the
+/// cache, makes the asset and keeps it in the cache. The <see cref="IAssetImporter{T}"/> that a gem gives for the type
+/// makes it, or Core makes it for a type marked <see cref="AssetFormatAttribute"/>. A loaded asset stays while
+/// something holds it. When nothing holds it, the GC frees it, and the next load reads it again.
+/// </para>
+/// <para>
+/// The asset directories are watched from when they are registered until the assets are disposed. When their changes
+/// settle, they are indexed again. Each loaded asset that is still held and whose file changed, or that was made from
+/// one that changed, is made again, after what it was made from. Then <see cref="GetVersion{T}"/> shows the change, a
+/// load gets the new asset, and the next frame gets an <see cref="AssetReloaded"/>. An asset that fails to load again
+/// keeps what loaded before.
+/// </para>
+/// <para>
+/// <see cref="AssetDatabase"/> holds what assets there are and what depends on what, and <see cref="LoadedAssets"/>
+/// holds what was loaded. Each call reads these values as they are. Each change replaces them whole under one lock,
+/// held only for the swap. A load lands when its worker finishes, and a file change is taken in when the watches see it
+/// settle, so two calls in one frame can see different assets, but each sees a whole one.
+/// </para>
+/// </remarks>
 public sealed class AssetManager : IDisposable
 {
     /// <summary>
@@ -71,12 +77,13 @@ public sealed class AssetManager : IDisposable
     private readonly EventCoordinator _events;
 
     /// <summary>
-    /// Whose <see cref="App.Lifetime"/> ends the loads on their way.
+    /// The app whose <see cref="App.Lifetime"/> cancels the loads in progress.
     /// </summary>
     private readonly App _app;
 
     /// <summary>
-    /// The assets, knowing Magic's built-in folder and Core's own asset types: register the rest (<see cref="Register(string)"/>).
+    /// Makes the assets with Magic's built-in folder and Core's asset types; register the rest with
+    /// <see cref="Register(string)"/>.
     /// </summary>
     internal AssetManager(IFileSystem files, Caches caches, EventCoordinator events, App app)
     {
@@ -91,8 +98,7 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Whether a load is on its way, as a replace of the world waits for none to be: an asset asked for that has not
-    /// landed. Any thread.
+    /// Whether an asset was asked for and has not landed yet. Any thread.
     /// </summary>
     internal bool HasLoadsInFlight => Loaded.Entries.Values.Any(entry => entry.Stage != AssetStage.Loaded);
 
@@ -123,23 +129,28 @@ public sealed class AssetManager : IDisposable
     internal Caches Caches { get; }
 
     /// <summary>
-    /// Magic's built-in <c>Resources/</c>: where the defaults and failures are, and only there.
+    /// Magic's built-in <c>Resources/</c>: where the defaults are, and only there.
     /// </summary>
     internal string BuiltIn { get; }
 
     /// <summary>
-    /// Where the part built as <paramref name="assembly"/> keeps its own assets: the folder its build recorded, its
-    /// source <c>Resources/</c>, which every build but a release does; else <c>Resources/</c> in
-    /// <paramref name="folder"/>, the assembly's, where a release copies them.
+    /// Where the part built as <paramref name="assembly"/> keeps its own assets.
     /// </summary>
+    /// <remarks>
+    /// Every build but a release records the folder: its source <c>Resources/</c>. Else it is <c>Resources/</c> in
+    /// <paramref name="folder"/>, the folder of the assembly, where a release copies them.
+    /// </remarks>
     public static string GetResources(IFileSystem files, Assembly assembly, string folder) =>
         assembly.GetMetadata(ResourcesKey) ?? files.Combine(folder, "Resources");
 
     /// <summary>
-    /// Stops the watching: the host's to call, at the end of the run, on its thread. The loads on their way stopped with
-    /// the run's <see cref="App.Lifetime"/>, one landing after it is dropped, and a load still waited for ends cancelled,
-    /// as one asked for after it does.
+    /// Stops the watching.
     /// </summary>
+    /// <remarks>
+    /// Only the host calls it, at the end of the run, on its thread. The loads in progress stopped with the run's
+    /// <see cref="App.Lifetime"/>, and a load that lands after it is dropped. A load that is still awaited ends
+    /// cancelled, and so does a load asked for after it.
+    /// </remarks>
     public void Dispose()
     {
         _watches.Dispose();
@@ -159,30 +170,83 @@ public sealed class AssetManager : IDisposable
     /// The <typeparamref name="T"/> at <paramref name="path"/>, or none when no asset there is one.
     /// </summary>
     public Handle<T> Find<T>(string path)
-        where T : IAsset<T> =>
-        Database.Index.ByPath.TryGetValue(path, out IndexedFile? found) && found.Type == typeof(T).Name
-            ? new Handle<T>(found.Id)
-            : Handle<T>.None;
-
-    /// <summary>
-    /// <typeparamref name="T"/>'s default: the asset named Default, whatever its extension, in the folder named for the
-    /// type, <c>Materials/Default.mat</c>, or <c>Domains/Default/Default.domain</c> for an asset that is a folder, in
-    /// Magic's built-in <c>Resources/</c> alone: a project's or a gem's file at that path is an asset like any other.
-    /// Every asset type has one. None, and an error logged once, when it is missing.
-    /// </summary>
-    public Handle<T> GetDefault<T>()
-        where T : IAsset<T> => FindBuiltIn<T>(typeof(T).Name + "s", "Default", "default");
-
-    /// <summary>
-    /// What is drawn in a broken <typeparamref name="TBroken"/>'s place: the <typeparamref name="T"/> named for the
-    /// broken type in <typeparamref name="T"/>'s <c>Failures</c> folder, <c>Materials/Failures/Texture.mat</c> for a
-    /// texture that does not load, in Magic's built-in <c>Resources/</c> alone, as a default is. Only what a renderer
-    /// draws a failure as has one. None, and an error logged once, when it is missing.
-    /// </summary>
-    public Handle<T> GetFailure<T, TBroken>()
         where T : IAsset<T>
-        where TBroken : IAsset<TBroken> =>
-        FindBuiltIn<T>($"{typeof(T).Name}s/Failures", typeof(TBroken).Name, $"{typeof(TBroken).Name} failure");
+    {
+        if (Database.Index.ByPath.TryGetValue(path, out IndexedFile? found))
+            return found.Type == typeof(T).Name ? new Handle<T>(found.Id) : Handle<T>.None;
+
+        ulong id = GetRegisteredId(path);
+
+        return Loaded.Registered.TryGetValue(id, out (string Path, object Asset) registered) && registered.Asset is T
+            ? new Handle<T>(id)
+            : Handle<T>.None;
+    }
+
+    /// <summary>
+    /// Registers <paramref name="asset"/>, made in memory, as the asset at <paramref name="path"/> until the
+    /// subscription is disposed.
+    /// </summary>
+    /// <remarks>
+    /// It is found, named and loaded there with no disk read or write. A file with that path or its id wins. Any
+    /// thread.
+    /// </remarks>
+    public Subscription Register<T>(string path, T asset)
+        where T : IAsset<T>
+    {
+        ulong id = GetRegisteredId(path);
+        lock (_gate)
+        {
+            Loaded = Loaded with { Registered = Loaded.Registered.SetItem(id, (path, asset)) };
+        }
+
+        return new Subscription(() =>
+        {
+            lock (_gate)
+            {
+                // A later Register of the path replaced this asset, and its own subscription removes it.
+                if (
+                    Loaded.Registered.TryGetValue(id, out (string Path, object Asset) held)
+                    && held.Asset != (object)asset
+                )
+                    return;
+
+                Loaded = Loaded with { Registered = Loaded.Registered.Remove(id) };
+            }
+        });
+    }
+
+    /// <summary>
+    /// The default asset of type <typeparamref name="T"/>, from Magic's built-in <c>Resources/</c>; every asset type
+    /// has one.
+    /// </summary>
+    /// <remarks>
+    /// It is the asset named Default, of any extension, in the folder named for the type: <c>Materials/Default.mat</c>,
+    /// or <c>Domains/Default/Default.domain</c> for an asset that is a folder. A project's or a gem's file at that path
+    /// is an ordinary asset. When the default is missing, it returns none and logs an error once.
+    /// </remarks>
+    public Handle<T> GetDefault<T>()
+        where T : IAsset<T>
+    {
+        string folder = typeof(T).Name + "s";
+        if (Database.Index.FindBuiltIn(folder, "Default") is { } found && found.Type == typeof(T).Name)
+            return new Handle<T>(found.Id);
+
+        lock (_gate)
+        {
+            LoadedAssets loaded = Loaded;
+            if (loaded.ReportedMissing.Contains(folder))
+                return Handle<T>.None;
+
+            Loaded = loaded with { ReportedMissing = loaded.ReportedMissing.Add(folder) };
+        }
+
+        Log.Error(
+            $"There is no default {typeof(T).Name}: no {typeof(T).Name} is {folder}/Default or {folder}/Default/Default "
+                + $"under {BuiltIn}."
+        );
+
+        return Handle<T>.None;
+    }
 
     /// <summary>
     /// The paths of the assets directly in <paramref name="folder"/>, as <see cref="Find{T}"/> takes them.
@@ -210,10 +274,13 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// The paths of <paramref name="file"/>'s neighbors, the assets directly in its folder, as <see cref="Find{T}"/>
-    /// takes them and as the <see cref="IAssetImporter{T}"/> making it reads them: a domain's prefabs. It is made again
-    /// when a file in the folder changes.
+    /// The paths of the assets directly in the folder of <paramref name="file"/>, as <see cref="Find{T}"/> takes them,
+    /// such as the prefabs of a domain.
     /// </summary>
+    /// <remarks>
+    /// Call it from the <see cref="IAssetImporter{T}"/> that makes <paramref name="file"/>. The asset is then made
+    /// again when a file in the folder changes.
+    /// </remarks>
     public ImmutableArray<string> GetNeighbors(AssetFile file)
     {
         string folder = AssetIndex.GetFolder(file.Path);
@@ -233,16 +300,22 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Where <paramref name="asset"/> is, as <see cref="Find{T}"/> takes it; null when no file has its id.
+    /// Where <paramref name="asset"/> is, as <see cref="Find{T}"/> takes it; null when no file or registered asset has
+    /// its id.
     /// </summary>
     public string? GetPath<T>(Handle<T> asset)
-        where T : IAsset<T> => Database.Index.ById.TryGetValue(asset.Id, out IndexedFile? found) ? found.Path : null;
+        where T : IAsset<T> =>
+        Database.Index.ById.TryGetValue(asset.Id, out IndexedFile? found) ? found.Path
+        : Loaded.Registered.TryGetValue(asset.Id, out (string Path, object Asset) registered) ? registered.Path
+        : null;
 
     /// <summary>
-    /// Which make of <paramref name="asset"/> a load gets: a hash of its file and its <c>.meta</c>, which changes when
-    /// either does. Compare it with the version an asset was loaded at to know whether to load it again. 0 when no file
-    /// has it.
+    /// Which make of <paramref name="asset"/> a load gets: a hash of its file and its <c>.meta</c>; 0 when no file has
+    /// it.
     /// </summary>
+    /// <remarks>
+    /// Compare it with the version that an asset was loaded at to know whether to load it again.
+    /// </remarks>
     public ulong GetVersion<T>(Handle<T> asset)
         where T : IAsset<T>
     {
@@ -259,36 +332,48 @@ public sealed class AssetManager : IDisposable
 
     /// <summary>
     /// The ids of what <paramref name="asset"/> holds handles to or was made from, down to <paramref name="levels"/>
-    /// levels: 1 for its own, <see cref="AllLevels"/> for everything under it. As far as is known now, from what has
-    /// loaded or been found; reading what has not is <see cref="FindDependenciesAsync{TAsset}"/>'s.
+    /// levels: 1 for its own, <see cref="AllLevels"/> for all.
     /// </summary>
+    /// <remarks>
+    /// It gives only what is known now, from what has loaded or been found. To read what has not, use
+    /// <see cref="FindDependenciesAsync{TAsset}"/>.
+    /// </remarks>
     public ImmutableArray<ulong> GetDependencies<T>(Handle<T> asset, int levels)
         where T : IAsset<T> => [.. Database.GetDependencies(asset.Id, levels)];
 
     /// <summary>
     /// The ids of what holds handles to <paramref name="asset"/> or was made from it, up to <paramref name="levels"/>
-    /// levels: 1 for what names it itself, <see cref="AllLevels"/> for everything above it. As far as is known now, from
-    /// what has loaded or been found; reading what has not is <see cref="FindDependentsAsync{TAsset}"/>'s.
+    /// levels: 1 for what names it, <see cref="AllLevels"/> for all.
     /// </summary>
+    /// <remarks>
+    /// It gives only what is known now, from what has loaded or been found. To read what has not, use
+    /// <see cref="FindDependentsAsync{TAsset}"/>.
+    /// </remarks>
     public ImmutableArray<ulong> GetDependents<T>(Handle<T> asset, int levels)
         where T : IAsset<T> => [.. Database.GetDependents(asset.Id, levels)];
 
     /// <summary>
-    /// The asset, or why it could not be loaded. It is read on a worker, from now, or once the gem that reads its type
-    /// registers when it is not made yet, and kept while any caller holds it, so each gets the same object; once none does,
-    /// the next load reads it again. One asking while it is made again waits for what it is made into. A load that fails is
-    /// remembered until its file changes. <paramref name="cancel"/> only stops this caller's wait.
+    /// Loads the asset, or tells why it could not be loaded.
     /// </summary>
+    /// <remarks>
+    /// It is read on a worker now, or when the gem that reads its type registers. It is kept while a caller holds it,
+    /// so each caller gets the same object; when no caller holds it, the next load reads it again. A caller that asks
+    /// while the asset is made again waits for the new asset. A failed load is remembered until its file changes.
+    /// <paramref name="cancel"/> stops only the wait of this caller.
+    /// </remarks>
     public Task<Result<T>> LoadAsync<T>(Handle<T> asset, IProgress<LoadProgress>? progress, CancellationToken cancel)
         where T : IAsset<T> => LoadAsync(asset, 0, progress, cancel);
 
     /// <summary>
-    /// <paramref name="asset"/>, loaded by an <see cref="IAssetImporter{T}"/> as it makes asset
-    /// <paramref name="dependent"/> (<see cref="AssetFile.Id"/>), as the other overload loads it, and recorded as what
-    /// <paramref name="dependent"/> is made from, so it is made again when <paramref name="asset"/> changes. Refused when
-    /// <paramref name="asset"/> is <paramref name="dependent"/> or is made from it, as each would wait for the other for
-    /// ever.
+    /// Loads <paramref name="asset"/> for an <see cref="IAssetImporter{T}"/> that makes asset
+    /// <paramref name="dependent"/> (<see cref="AssetFile.Id"/>), and records that <paramref name="dependent"/> is made
+    /// from it.
     /// </summary>
+    /// <remarks>
+    /// So <paramref name="dependent"/> is made again when <paramref name="asset"/> changes. It refuses when
+    /// <paramref name="asset"/> is <paramref name="dependent"/> or is made from it, because each would wait for the
+    /// other for ever.
+    /// </remarks>
     public async Task<Result<T>> LoadAsync<T>(
         Handle<T> asset,
         ulong dependent,
@@ -300,6 +385,13 @@ public sealed class AssetManager : IDisposable
         if (asset == Handle<T>.None)
             return Result.Failure($"No {typeof(T).Name} was asked for: the handle is none.");
 
+        if (
+            !Database.Index.ById.ContainsKey(asset.Id)
+            && Loaded.Registered.TryGetValue(asset.Id, out (string Path, object Asset) registered)
+            && registered.Asset is T kept
+        )
+            return Result.Success(kept);
+
         Made made = await RequestAsync(asset.Id, dependent, typeof(T), RunImportAsync<T>, progress, cancel)
             .ConfigureAwait(false);
 
@@ -307,11 +399,13 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// The ids of what <paramref name="asset"/> depends on, as its file and theirs name them, down to
-    /// <paramref name="levels"/> levels: 1 for what it names itself, <see cref="AllLevels"/> for everything under it.
-    /// Found by reading the file of a type Core reads, and for a type a gem reads from what its last import kept, else by
-    /// loading it; or why one could not be read.
+    /// The ids of what <paramref name="asset"/> depends on as the files name them, down to <paramref name="levels"/>
+    /// levels, or why one could not be read.
     /// </summary>
+    /// <remarks>
+    /// 1 gives what it names itself, <see cref="AllLevels"/> everything under it. For a type that Core reads, it reads
+    /// the file. For a type that a gem reads, it uses what the last import kept, else it loads the asset.
+    /// </remarks>
     public Task<Result<ImmutableArray<ulong>>> FindDependenciesAsync<TAsset>(
         Handle<TAsset> asset,
         int levels,
@@ -321,12 +415,14 @@ public sealed class AssetManager : IDisposable
         where TAsset : IAsset<TAsset> => AssetCrawl.FindDependenciesAsync(this, asset.Id, levels, progress, cancel);
 
     /// <summary>
-    /// The ids of what depends on <paramref name="asset"/>, as the files under the asset directories name it, up to
-    /// <paramref name="levels"/> levels: 1 for what names it itself, <see cref="AllLevels"/> for everything above it.
-    /// Found the first time it is asked by going through every asset: reading the file of a type Core reads, and for a
-    /// type a gem reads from what its last import kept, else by loading it. One that cannot be read is taken to depend on
-    /// nothing.
+    /// The ids of what depends on <paramref name="asset"/> as the files under the asset directories name it, up to
+    /// <paramref name="levels"/> levels.
     /// </summary>
+    /// <remarks>
+    /// 1 gives what names it itself, <see cref="AllLevels"/> everything above it. The first call goes through every
+    /// asset. For a type that Core reads, it reads the file. For a type that a gem reads, it uses what the last import
+    /// kept, else it loads the asset. An asset that cannot be read counts as one that depends on nothing.
+    /// </remarks>
     public Task<ImmutableArray<ulong>> FindDependentsAsync<TAsset>(
         Handle<TAsset> asset,
         int levels,
@@ -336,10 +432,13 @@ public sealed class AssetManager : IDisposable
         where TAsset : IAsset<TAsset> => AssetCrawl.FindDependentsAsync(this, asset.Id, levels, progress, cancel);
 
     /// <summary>
-    /// Loads what <paramref name="asset"/> depends on, down to <paramref name="levels"/> levels, as
-    /// <see cref="FindDependenciesAsync{TAsset}"/> finds it, each as the type its <c>.meta</c> names: their ids, or why
-    /// one could not be found or loaded.
+    /// Loads what <paramref name="asset"/> depends on, down to <paramref name="levels"/> levels: their ids, or why one
+    /// could not be found or loaded.
     /// </summary>
+    /// <remarks>
+    /// It finds them as <see cref="FindDependenciesAsync{TAsset}"/> does, and loads each as the type its <c>.meta</c>
+    /// names.
+    /// </remarks>
     public async Task<Result<ImmutableArray<ulong>>> LoadDependenciesAsync<TAsset>(
         Handle<TAsset> asset,
         int levels,
@@ -357,8 +456,8 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Has <paramref name="preprocessor"/> run on each asset of its type that loads from now on, and on each made again,
-    /// until the subscription is disposed. Any thread.
+    /// Has <paramref name="preprocessor"/> run on each asset of its type that loads from now on, and on each made
+    /// again, until the subscription is disposed. Any thread.
     /// </summary>
     public Subscription Register<T, TMade>(IAssetPreprocessor<T, TMade> preprocessor)
         where T : IAsset<T>
@@ -401,10 +500,12 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// What <paramref name="preprocessor"/> made of <paramref name="asset"/> as it loaded, read from the cache; else
-    /// the asset is loaded, and what it makes of it made now, on a worker, and cached. The cache misses when the asset
-    /// loaded before the preprocessor was registered, or the cache could not keep it.
+    /// What <paramref name="preprocessor"/> made of <paramref name="asset"/>, from the cache, else made now on a worker
+    /// and cached.
     /// </summary>
+    /// <remarks>
+    /// The cache misses when the asset loaded before the preprocessor was registered, or the cache could not keep it.
+    /// </remarks>
     public async Task<Result<TMade>> LoadPreprocessedAsync<T, TMade>(
         Handle<T> asset,
         IAssetPreprocessor<T, TMade> preprocessor,
@@ -428,10 +529,13 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Loads every asset of a type Magic or a gem reads, each as the type its <c>.meta</c> names, so what each importer
-    /// that is a cache and each <see cref="IAssetPreprocessor{T, TMade}"/> makes of it is in the cache: their ids, or
-    /// why one could not be loaded.
+    /// Loads every asset of a type that Magic or a gem reads, so the cache holds what each caching importer and
+    /// preprocessor makes.
     /// </summary>
+    /// <remarks>
+    /// Each asset loads as the type its <c>.meta</c> names. It gives their ids, or why one could not be loaded. A
+    /// preprocessor is an <see cref="IAssetPreprocessor{T, TMade}"/>.
+    /// </remarks>
     public Task<Result<ImmutableArray<ulong>>> BakeAsync(IProgress<LoadProgress>? progress, CancellationToken cancel)
     {
         LoadedAssets loaded = Loaded;
@@ -448,10 +552,13 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Loads what depends on <paramref name="asset"/>, up to <paramref name="levels"/> levels, as
-    /// <see cref="FindDependentsAsync{TAsset}"/> finds it, each as the type its <c>.meta</c> names: their ids, or why
-    /// one could not be loaded.
+    /// Loads what depends on <paramref name="asset"/>, up to <paramref name="levels"/> levels: their ids, or why one
+    /// could not be loaded.
     /// </summary>
+    /// <remarks>
+    /// It finds them as <see cref="FindDependentsAsync{TAsset}"/> does, and loads each as the type its <c>.meta</c>
+    /// names.
+    /// </remarks>
     public async Task<Result<ImmutableArray<ulong>>> LoadDependentsAsync<TAsset>(
         Handle<TAsset> asset,
         int levels,
@@ -466,11 +573,14 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Writes <paramref name="asset"/> to <paramref name="file"/>, a path on the machine, through the
-    /// <see cref="IAssetExporter{T}"/> a gem provides for its type, else by Core itself for a type marked
-    /// <see cref="AssetFormatAttribute"/>, with no sidecar, so it is a file and not an asset: why not, when it was not
-    /// written. The path ends in the exporter's extension. Any thread.
+    /// Writes <paramref name="asset"/> to <paramref name="file"/>, a path on the machine, with no sidecar, or tells why
+    /// it could not.
     /// </summary>
+    /// <remarks>
+    /// With no sidecar, the file is not an asset. The <see cref="IAssetExporter{T}"/> that a gem gives for the type
+    /// writes it, or Core writes it for a type marked <see cref="AssetFormatAttribute"/>. The path ends in the
+    /// exporter's extension. Any thread.
+    /// </remarks>
     public async Task<Result> ExportAsync<T>(
         T asset,
         string file,
@@ -506,10 +616,13 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Adds <paramref name="directory"/> to the asset directories, after those added before it, which win a path it shares
-    /// with them, and before Magic's built-in one, which all of them win over; and indexes them, so what it holds is found
-    /// from now on, and watches it. One that does not exist, or is added already, is left out. Game thread.
+    /// Adds <paramref name="directory"/> to the asset directories, indexes them again, and watches it.
     /// </summary>
+    /// <remarks>
+    /// It comes after the directories added before it, which win a path that it shares with them, and before Magic's
+    /// built-in one, which all of them win over. A directory that does not exist, or that is added already, is left
+    /// out. Game thread.
+    /// </remarks>
     internal void Register(string directory)
     {
         directory = directory.TrimEnd('/', '\\');
@@ -537,17 +650,19 @@ public sealed class AssetManager : IDisposable
                 Database = Database with { Directories = directories, Index = index };
             }
 
-            Log.Verbose($"Indexed {index.ById.Count} assets under {directories.Length} folders.");
+            Log.Info($"Assets indexed: {directory}. {index.ById.Count} assets under {directories.Length} folders.");
 
             return;
         }
     }
 
     /// <summary>
-    /// Adds the asset types <paramref name="assembly"/> declares, Magic's or a gem's, so a <c>.meta</c> can name them and the
-    /// assets can be crawled without knowing them. A name another type has already stays that one's, and is an error. Game
-    /// thread.
+    /// Adds the asset types that <paramref name="assembly"/> declares, so a <c>.meta</c> can name them and a crawl can
+    /// read them.
     /// </summary>
+    /// <remarks>
+    /// A name that another type has already stays with that type, and is an error. Game thread.
+    /// </remarks>
     internal void Register(Assembly assembly)
     {
         List<AssetType> declared = [];
@@ -588,10 +703,13 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Has a load of an asset type one of <paramref name="parts"/>, the types of the gems' parts, reads, as its
-    /// <see cref="IAssetImporter{T}"/>s say, wait for that part until it registers (<see cref="Register(object)"/>) or
-    /// its gem stops the wait (<see cref="Drop"/>), as a gem made before it may load one. Game thread.
+    /// Makes a load of an asset type that one of <paramref name="parts"/> reads wait until that part registers.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="parts"/> are the types of the gems' parts; their <see cref="IAssetImporter{T}"/>s tell which
+    /// asset types they read. The wait ends at <see cref="Register(object)"/>, or when the gem stops it with
+    /// <see cref="Drop"/>. A gem made earlier can load such a type. Game thread.
+    /// </remarks>
     internal void Expect(IEnumerable<Type> parts)
     {
         List<KeyValuePair<Type, ImmutableArray<Type>>> expected =
@@ -605,10 +723,12 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Stops waiting for <paramref name="parts"/>, as their gem is made and its parts registered, or was not made: what
-    /// was asked for as a type only they would read and no part registered reads is read now, and fails as a type no gem
-    /// reads. Game thread.
+    /// Stops the wait for <paramref name="parts"/>, when their gem is made and its parts registered, or was not made.
     /// </summary>
+    /// <remarks>
+    /// An asset asked for as a type that only they would read, and that no registered part reads, is read now, and
+    /// fails as a type that no gem reads. Game thread.
+    /// </remarks>
     internal void Drop(IEnumerable<Type> parts)
     {
         lock (_gate)
@@ -618,11 +738,14 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Has <paramref name="part"/>, a gem's part, read each asset type it implements an <see cref="IAssetImporter{T}"/>
-    /// of, and write each it implements an <see cref="IAssetExporter{T}"/> of, until the subscription is disposed, as
-    /// the gem ends. A type another part reads or writes already stays that one's, and is an error. What was asked for
-    /// as a type it reads before anything read it starts now.
+    /// Makes the gem's <paramref name="part"/> read and write the asset types it imports and exports, until the
+    /// subscription is disposed when the gem ends.
     /// </summary>
+    /// <remarks>
+    /// The part imports a type when it implements <see cref="IAssetImporter{T}"/> of it, and exports a type when it
+    /// implements <see cref="IAssetExporter{T}"/> of it. A type that another part reads or writes already stays with
+    /// that part, and is an error. An asset asked for as a type that it reads, before anything read it, starts now.
+    /// </remarks>
     internal Subscription Register(object part)
     {
         ImmutableArray<Type> reads = GetAssetTypes(part.GetType(), typeof(IAssetImporter<>));
@@ -657,17 +780,26 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Takes in the asset directories as the watches had them read again, <paramref name="now"/>, after they saw
-    /// <paramref name="touched"/>, paths from their asset directories: each asset loaded and still held whose file
-    /// changed, is another file now, lists a folder that changed, or was made from one of those, and so on out, is read
-    /// again, each after what it was made from, as a load waits for those on their way; one nothing holds, or that
-    /// failed, is forgotten, so the next load reads it; one whose file is gone is let go, and its waiters told. Refused,
-    /// false, when the asset directories are no longer <paramref name="directories"/>, the ones read: a directory was
-    /// added meanwhile. Any thread.
+    /// Takes in <paramref name="now"/>, the asset directories indexed again after the watches saw
+    /// <paramref name="touched"/>, and makes the changed assets again.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <paramref name="touched"/> holds paths from their asset directories. A loaded asset that is still held is read
+    /// again when its file changed, is another file now, lists a folder that changed, or was made from one of those,
+    /// and so on out. Each is read after what it was made from, because a load waits for the loads in progress. An id
+    /// that failed because no file had it is read again too. An asset that nothing holds is forgotten, so the next load
+    /// reads it. An asset whose file is gone is let go, and its waiters are told.
+    /// </para>
+    /// <para>
+    /// It returns false and does nothing when the asset directories are no longer <paramref name="directories"/>,
+    /// because a directory was added during the read. Any thread.
+    /// </para>
+    /// </remarks>
     internal bool Reindex(ImmutableArray<string> directories, AssetIndex now, ImmutableHashSet<string> touched)
     {
         List<(TaskCompletionSource<Made> Waiter, Made Gone)> told = [];
+        List<string> unloaded = [];
         int reloading = 0;
         lock (_gate)
         {
@@ -695,6 +827,7 @@ public sealed class AssetManager : IDisposable
                 {
                     Made gone = Fail($"{before.ById[id].Path} is gone.");
                     told.AddRange(entry.Waiting.Select(waiter => (waiter, gone)));
+                    unloaded.Add(before.ById[id].Path);
                     loaded = loaded with { Entries = loaded.Entries.Remove(id) };
                     continue;
                 }
@@ -703,10 +836,11 @@ public sealed class AssetManager : IDisposable
                 if (entry.Stage == AssetStage.Wanted)
                     continue;
 
-                // One loaded that nothing holds, or that failed, is let go rather than read again: the next ask reads the
-                // file as it is.
-                if (entry.Stage == AssetStage.Loaded && entry.GetValue() is null)
+                // A loaded asset that nothing holds is let go, not read again: the next ask reads the file as it is. A
+                // failed one is read again, so its asker hears when it loads.
+                if (entry.Stage == AssetStage.Loaded && entry.GetValue() is null && entry.Error.Length == 0)
                 {
+                    unloaded.Add(database.GetName(id));
                     loaded = loaded with { Entries = loaded.Entries.Remove(id) };
 
                     continue;
@@ -729,6 +863,11 @@ public sealed class AssetManager : IDisposable
         foreach ((TaskCompletionSource<Made> waiter, Made gone) in told)
         {
             waiter.TrySetResult(gone);
+        }
+
+        foreach (string asset in unloaded)
+        {
+            Log.Verbose($"Asset unloaded: {asset}.");
         }
 
         if (reloading > 0)
@@ -784,11 +923,13 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Imports asset <paramref name="id"/> as a <typeparamref name="T"/> on a worker, for several assets at once, and says
-    /// what it made: reads the file and its <c>.meta</c>, looks in the cache, makes the asset, and keeps what it made in the
-    /// cache. It is made by the gem that reads its type, else by Core itself for a type marked
-    /// <see cref="AssetFormatAttribute"/>.
+    /// Imports asset <paramref name="id"/> as a <typeparamref name="T"/> on a worker, and says what it made.
     /// </summary>
+    /// <remarks>
+    /// It reads the file and its <c>.meta</c>, looks in the cache, makes the asset, and keeps it in the cache. The gem
+    /// that reads the type makes it, or Core makes it for a type marked <see cref="AssetFormatAttribute"/>. Several
+    /// imports run at the same time.
+    /// </remarks>
     internal async Task<Made> RunImportAsync<T>(
         ulong id,
         IndexedFile file,
@@ -861,10 +1002,13 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// <paramref name="settings"/>, a <c>.meta</c>'s, read as the values of <typeparamref name="T"/>'s
-    /// <see cref="AssetMetaAttribute"/> properties, each in the type of its property, one it leaves out its
-    /// initializer; or why they are not: a key no marked property has, or a value not of its property's type.
+    /// Reads <paramref name="settings"/>, from a <c>.meta</c>, as the values of the <see cref="AssetMetaAttribute"/>
+    /// properties of <typeparamref name="T"/>, or tells why they are not.
     /// </summary>
+    /// <remarks>
+    /// Each value has the type of its property, and a property that it leaves out takes its initializer. It fails on a
+    /// key that no marked property has, or on a value that is not of its property's type.
+    /// </remarks>
     private static Result<AssetMetadata> ReadSettings<T>(JsonElement settings)
         where T : IAsset<T>
     {
@@ -909,10 +1053,13 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// <paramref name="bytes"/> read by Core itself, in the <see cref="AssetFileFormat"/> its type is marked with, with
-    /// what its <c>.meta</c> sets, <paramref name="settings"/>, already read against the type's
-    /// <see cref="AssetMetaAttribute"/> properties, set over it; else no gem the project lists reads the type.
+    /// Reads <paramref name="bytes"/> in the <see cref="AssetFileFormat"/> that marks the type, and sets the
+    /// <c>.meta</c> values in <paramref name="settings"/> over it.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="settings"/> is already read against the <see cref="AssetMetaAttribute"/> properties of the type.
+    /// When the type has no <see cref="AssetFormatAttribute"/>, it fails: no gem that the project lists reads the type.
+    /// </remarks>
     private static Result<T> ReadCoreFormat<T>(ReadOnlyMemory<byte> bytes, JsonElement settings)
         where T : IAsset<T>
     {
@@ -949,10 +1096,13 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// <paramref name="asset"/> as Core writes its type itself, in the <see cref="AssetFileFormat"/> it is marked with: the
-    /// file <see cref="ReadCoreFormat{T}"/> reads back, without its <see cref="AssetMetaAttribute"/> properties, which its
-    /// <c>.meta</c> holds. Why not, when JSON can't hold it.
+    /// Writes <paramref name="asset"/> in the <see cref="AssetFileFormat"/> that marks its type: the file that
+    /// <see cref="ReadCoreFormat{T}"/> reads back.
     /// </summary>
+    /// <remarks>
+    /// It leaves out the <see cref="AssetMetaAttribute"/> properties, which the <c>.meta</c> holds. It fails when JSON
+    /// cannot hold the asset.
+    /// </remarks>
     private static Result<ReadOnlyMemory<byte>> WriteCoreFormat<T>(T asset, AssetFileFormat format)
     {
         Result<JsonElement> written = Json.Write(asset, typeof(T));
@@ -1009,14 +1159,20 @@ public sealed class AssetManager : IDisposable
     private static Made Fail(string error) => new(Result.Failure(error), 0);
 
     /// <summary>
+    /// The id of the asset registered at <paramref name="path"/>: a hash of it, in any case. A file with that id wins.
+    /// </summary>
+    private static ulong GetRegisteredId(string path) =>
+        XxHash64.HashToUInt64(Encoding.UTF8.GetBytes(path.ToUpperInvariant()));
+
+    /// <summary>
     /// Whether a load of <paramref name="type"/> waits for a gem: nothing reads it yet, and a gem not made yet will.
     /// </summary>
     private static bool WaitsForGem(Type type, LoadedAssets loaded) =>
         !CanImport(type, loaded) && loaded.Expected.Values.Any(reads => reads.Contains(type));
 
     /// <summary>
-    /// The asset types <paramref name="gem"/> implements <paramref name="contract"/> of, <see cref="IAssetImporter{T}"/>
-    /// or <see cref="IAssetExporter{T}"/>.
+    /// The asset types <paramref name="gem"/> implements <paramref name="contract"/> of,
+    /// <see cref="IAssetImporter{T}"/> or <see cref="IAssetExporter{T}"/>.
     /// </summary>
     private static ImmutableArray<Type> GetAssetTypes(Type gem, Type contract) =>
         [
@@ -1026,8 +1182,8 @@ public sealed class AssetManager : IDisposable
         ];
 
     /// <summary>
-    /// <paramref name="gems"/> with <paramref name="gem"/> as the one that has each of <paramref name="types"/> no other
-    /// gem has already.
+    /// <paramref name="gems"/> with <paramref name="gem"/> as the one that has each of <paramref name="types"/> no
+    /// other gem has already.
     /// </summary>
     private static ImmutableDictionary<Type, object> Claim(
         ImmutableDictionary<Type, object> gems,
@@ -1036,8 +1192,8 @@ public sealed class AssetManager : IDisposable
     ) => types.Aggregate(gems, (held, type) => held.ContainsKey(type) ? held : held.Add(type, gem));
 
     /// <summary>
-    /// <paramref name="gems"/> without <paramref name="gem"/> as the one that has each of <paramref name="types"/>, where
-    /// it is.
+    /// <paramref name="gems"/> without <paramref name="gem"/> as the one that has each of <paramref name="types"/>,
+    /// where it is.
     /// </summary>
     private static ImmutableDictionary<Type, object> Release(
         ImmutableDictionary<Type, object> gems,
@@ -1051,8 +1207,8 @@ public sealed class AssetManager : IDisposable
         );
 
     /// <summary>
-    /// Logs each of <paramref name="types"/> that <paramref name="gems"/>, as <see cref="Claim"/> left them, has another
-    /// gem than <paramref name="gem"/> for: that one <paramref name="verb"/> it, and this one does not.
+    /// Logs each of <paramref name="types"/> that <paramref name="gems"/>, as <see cref="Claim"/> left them, has
+    /// another gem than <paramref name="gem"/> for: that one <paramref name="verb"/> it, and this one does not.
     /// </summary>
     private static void LogClaimedByOthers(
         ImmutableDictionary<Type, object> gems,
@@ -1090,41 +1246,17 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// The built-in asset named <paramref name="name"/> in <paramref name="folder"/>, as
-    /// <see cref="AssetIndex.FindBuiltIn"/> finds it; <paramref name="what"/> says which kind of named asset it is when
-    /// it is missing, which is said once.
-    /// </summary>
-    private Handle<T> FindBuiltIn<T>(string folder, string name, string what)
-        where T : IAsset<T>
-    {
-        if (Database.Index.FindBuiltIn(folder, name) is { } found && found.Type == typeof(T).Name)
-            return new Handle<T>(found.Id);
-
-        lock (_gate)
-        {
-            LoadedAssets loaded = Loaded;
-            if (loaded.ReportedMissing.Contains($"{folder}/{name}"))
-                return Handle<T>.None;
-
-            Loaded = loaded with { ReportedMissing = loaded.ReportedMissing.Add($"{folder}/{name}") };
-        }
-
-        Log.Error(
-            $"There is no {what} {typeof(T).Name}: no {typeof(T).Name} is {folder}/{name} or {folder}/{name}/{name} "
-                + $"under {BuiltIn}."
-        );
-
-        return Handle<T>.None;
-    }
-
-    /// <summary>
     /// What an ask for asset <paramref name="id"/> as <paramref name="type"/> gets, and <paramref name="loaded"/> with
-    /// what it asked: a failure when no file has the id, when it is another type, or, asked for by asset
-    /// <paramref name="dependent"/>'s importer, when it depends on what asks for it; what loaded, while something holds
-    /// it; a wait with the others for a load on its way; else a new entry, read now, or once the gem expected to read its
-    /// type registers, as the one asking may be made before it. Cancelled once the run has ended, as nothing reads it then. Under
-    /// <see cref="_gate"/>.
+    /// the ask recorded.
     /// </summary>
+    /// <remarks>
+    /// It is a failure when no file has the id; the failure is kept, so the id is read when a file has it. It is a
+    /// failure when the asset is another type, or when the importer of <paramref name="dependent"/> asks for it and it
+    /// depends on <paramref name="dependent"/>. It is what loaded, while something holds it, or a wait with the others
+    /// for a load in progress. Else it is a new entry, read now, or when the gem that reads its type registers, because
+    /// the caller can be made before that gem. It is cancelled when the run has ended, because nothing reads it then.
+    /// Under <see cref="_gate"/>.
+    /// </remarks>
     private (LoadedAssets, Task<Made>) Request(
         AssetDatabase database,
         LoadedAssets loaded,
@@ -1160,8 +1292,20 @@ public sealed class AssetManager : IDisposable
             }
         }
 
+        // Kept as a failed entry, so Reindex reads it, and its asker hears, once a file with the id is added.
         if (!database.Index.ById.TryGetValue(id, out IndexedFile? file))
-            return (loaded, Task.FromResult(Fail($"No asset has the id {id}.")));
+        {
+            Made none = Fail($"No asset has the id {id}.");
+            AssetEntry failed = new()
+            {
+                Type = type,
+                Import = import,
+                Stage = AssetStage.Loaded,
+                Error = none.Value.Error,
+            };
+
+            return (loaded with { Entries = loaded.Entries.SetItem(id, failed) }, Task.FromResult(none));
+        }
 
         if (file.Type != type.Name)
             return (loaded, Task.FromResult(Fail($"{file.Path} is a {file.Type}, so it is not a {type.Name}.")));
@@ -1219,10 +1363,13 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// <paramref name="loaded"/> with asset <paramref name="id"/>'s <paramref name="entry"/> being read on a worker, by
-    /// the gem that reads its type when one does, to land by <see cref="Land"/>; forgetting what it was made from, as
-    /// its read records its own. Under <see cref="_gate"/>.
+    /// <paramref name="loaded"/> with the <paramref name="entry"/> of asset <paramref name="id"/> being read on a
+    /// worker, to land by <see cref="Land"/>.
     /// </summary>
+    /// <remarks>
+    /// The gem that reads its type reads it, when there is one. It forgets what the asset was made from, because the
+    /// read records that again. Under <see cref="_gate"/>.
+    /// </remarks>
     private LoadedAssets StartRead(AssetDatabase database, LoadedAssets loaded, ulong id, AssetEntry entry)
     {
         IndexedFile? file = database.Index.ById.GetValueOrDefault(id);
@@ -1270,6 +1417,8 @@ public sealed class AssetManager : IDisposable
             return;
         }
 
+        Log.Verbose($"Asset loading: {file.Path}.");
+        long started = Stopwatch.GetTimestamp();
         Made made;
         try
         {
@@ -1281,16 +1430,27 @@ public sealed class AssetManager : IDisposable
             made = Fail($"{file.Path} is not a {entry.Type.Name}: its importer threw: {ex}");
         }
 
+        if (made.Value.Ok)
+        {
+            Log.Verbose(
+                $"Asset loaded: {file.Path}, a {entry.Type.Name}, in {Stopwatch.GetElapsedTime(started).TotalMilliseconds:F0} ms."
+            );
+        }
+
         Land(id, made);
     }
 
     /// <summary>
-    /// Takes in what a worker's read of asset <paramref name="id"/> made: it is loaded, its waiters are told, what it
-    /// depends on goes in the database and, for a type a gem reads, the cache, by its file's version, so finding that
-    /// later doesn't load it; and one that had loaded and is still held is published as <see cref="AssetReloaded"/>. One
-    /// that failed while what it made before is still held leaves that in use, and says so. One whose file changed
-    /// meanwhile is read again instead; one gone meanwhile was told as it went, and one landing after the run is dropped.
+    /// Takes in what the read of asset <paramref name="id"/> on a worker made.
     /// </summary>
+    /// <remarks>
+    /// The asset is loaded and its waiters are told. What it depends on goes in the database and, for a type that a gem
+    /// reads, in the cache by its file's version, so a later search does not load it. An asset that had loaded and is
+    /// still held, or that had failed, is published as <see cref="AssetReloaded"/>. When a reload fails while the asset
+    /// made before is still held, that asset stays in use, and a message says so. An asset whose file changed during
+    /// the read is read again instead. An asset that went during the read was told when it went, and a read that lands
+    /// after the run is dropped.
+    /// </remarks>
     private void Land(ulong id, Made made)
     {
         AssetEntry? entry;
@@ -1344,7 +1504,7 @@ public sealed class AssetManager : IDisposable
             waiter.TrySetResult(outcome);
         }
 
-        if (before is not null && made.Value is { Ok: true, Value: { } asset })
+        if ((before is not null || entry.Error.Length > 0) && made.Value is { Ok: true, Value: { } asset })
             _events.Publish(new AssetReloaded(id, asset));
 
         // What a gem-read asset depends on is kept by its file's version, so finding that later doesn't load it.

@@ -3,11 +3,13 @@ using System.Diagnostics.CodeAnalysis;
 namespace Magic.Assets;
 
 /// <summary>
-/// An asset of type <typeparamref name="T"/>, by the id in its <c>.meta</c> sidecar: how a component, another asset or
-/// the project names one, written <c>{ "id": 3400 }</c>, so its file can move or be renamed. It is only the id, so a
-/// component holding one stays plain unmanaged data, and the type is the compiler's: a texture's cannot be passed where
-/// a model's is wanted.
+/// Names an asset of type <typeparamref name="T"/> by the id in its <c>.meta</c> sidecar, written
+/// <c>{ "id": 3400 }</c>, so that its file can move or get a new name.
 /// </summary>
+/// <remarks>
+/// It holds only the id, so a component that holds one stays plain unmanaged data. The compiler checks the type: a
+/// texture's handle cannot go where a model's handle is necessary.
+/// </remarks>
 public readonly record struct Handle<T>(ulong Id)
     where T : IAsset<T>
 {

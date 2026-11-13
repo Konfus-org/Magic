@@ -3,10 +3,12 @@ using System.Runtime.InteropServices;
 namespace Magic.SlangShaderCompiler;
 
 /// <summary>
-/// The compiler's API, bound by hand (docs/GEMS.md, SlangShaderCompiler): its C entry points, and its C++
-/// interfaces called through their tables of functions, each method at the index slang.h declares it. The
-/// indices and layouts are those of the tag the project builds; a new tag is checked against them.
+/// The compiler's API, bound by hand: its C entry points, and its C++ interfaces called through their function tables.
 /// </summary>
+/// <remarks>
+/// Each method is at the index that slang.h declares (docs/GEMS.md, SlangShaderCompiler). The indices and layouts are
+/// those of the tag that the project builds. Check a new tag against them.
+/// </remarks>
 internal static unsafe partial class Slang
 {
     private const string Library = "slang-compiler";
@@ -17,7 +19,7 @@ internal static unsafe partial class Slang
     private const long ApiVersion = 0;
 
     /// <summary>
-    /// What slang_createGlobalSession makes, or null; freed with <see cref="Release"/>.
+    /// Creates the global session, or null; free it with <see cref="Release"/>.
     /// </summary>
     public static void* CreateGlobalSession()
     {
@@ -40,7 +42,7 @@ internal static unsafe partial class Slang
         ((delegate* unmanaged<void*, byte*, int>)VTable(globalSession)[4])(globalSession, name);
 
     /// <summary>
-    /// The module, or null with <paramref name="outDiagnostics"/> saying why.
+    /// Loads the module, or null with <paramref name="outDiagnostics"/> saying why.
     /// </summary>
     public static void* LoadModuleFromSourceString(
         void* session,
@@ -140,7 +142,7 @@ internal static unsafe partial class Slang
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     public static partial void* spReflection_getEntryPointByIndex(void* programLayout, ulong index);
 
-    // The type layout reflection a material's row is packed from.
+    // The type layout reflection that a buffer's fields are read from.
     [LibraryImport(Library)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     public static partial void* spReflection_GetTypeLayout(void* programLayout, void* type, int rules);

@@ -6,12 +6,15 @@ using Magic.Utils;
 namespace Magic.Files;
 
 /// <summary>
-/// The one JSON dialect, for whatever reads a file: camelCase keys matched exactly, enums by their names in snake_case
-/// (<c>"clamp"</c>, <c>"masked"</c>), comments and trailing commas allowed, public fields read as properties are,
-/// a property with no setter left out as it is written, a float that is infinite or not a number written and read as <c>"Infinity"</c>, <c>"-Infinity"</c> or <c>"NaN"</c>,
-/// and a key the type does not have, a null where it allows none, or a missing required constructor parameter refused,
-/// so a misspelt or broken file fails loudly. Safe from any thread.
+/// The one JSON dialect for each file that the engine reads, which fails loudly on a misspelt or broken file.
 /// </summary>
+/// <remarks>
+/// Keys are camelCase and match exactly. Enums are their names in snake_case (<c>"clamp"</c>, <c>"masked"</c>).
+/// Comments and trailing commas are allowed. Public fields are read as properties are. A property with no setter is
+/// left out when it is written. A float that is infinite or not a number is written and read as <c>"Infinity"</c>,
+/// <c>"-Infinity"</c> or <c>"NaN"</c>. It refuses a key that the type does not have, a null where the type allows none,
+/// and a missing required constructor parameter. Safe from any thread.
+/// </remarks>
 public static class Json
 {
     /// <summary>
@@ -26,9 +29,11 @@ public static class Json
     internal static JsonSerializerOptions Indented { get; } = CreateIndented();
 
     /// <summary>
-    /// <paramref name="utf8"/> as a <typeparamref name="T"/>, or why it is not one. A byte order mark, which editors on
-    /// Windows may start a file with and JSON does not allow, is skipped.
+    /// <paramref name="utf8"/> as a <typeparamref name="T"/>, or why it is not one.
     /// </summary>
+    /// <remarks>
+    /// It skips a byte order mark, which editors on Windows can put at the start of a file and JSON does not allow.
+    /// </remarks>
     public static Result<T> Read<T>(ReadOnlySpan<byte> utf8)
     {
         ReadOnlySpan<byte> byteOrderMark = Encoding.UTF8.Preamble;

@@ -7,9 +7,11 @@ using Magic.Utils;
 namespace Magic.Debugging;
 
 /// <summary>
-/// Logs from any thread: each line goes to the terminal and to each sink a gem registers. The last lines are kept, so
-/// a sink that registers late and a crash file get them too.
+/// Logs from any thread to the terminal and to each registered sink.
 /// </summary>
+/// <remarks>
+/// The last lines are kept, so a sink that registers late and a crash file get them too.
+/// </remarks>
 public static class Log
 {
     private const int HistorySize = 10_000;
@@ -31,15 +33,15 @@ public static class Log
         get;
         set
         {
-            // Always log the verbosity change, even if it is the same as before, so that the log shows what was requested.
+            // Log the verbosity change even when it is the same, so that the log shows what was requested.
             field =
                 value;
-            Write(LoggingLevel.Info, $"Verbosity set to {value}", nameof(Verbosity), string.Empty, 0, false);
+            Write(LoggingLevel.Info, $"Verbosity set to {value}", nameof(Verbosity), string.Empty, 0, false, null);
         }
     } = VerbosityLevel.Normal;
 
     /// <summary>
-    /// How many errors have been logged; under --fail-on-error any at all make the exit code 2.
+    /// How many errors were logged. With --fail-on-error, one or more makes the exit code 2.
     /// </summary>
     public static int ErrorCount => Volatile.Read(ref _errorCount);
 
@@ -54,46 +56,54 @@ public static class Log
     )
     {
         if (Verbosity >= VerbosityLevel.Detailed)
-            Write(LoggingLevel.Verbose, message, member, file, line, false);
+            Write(LoggingLevel.Verbose, message, member, file, line, false, null);
     }
 
     /// <summary>
-    /// What happened, as it goes. With <paramref name="onScreen"/>, the debug UI shows it on screen for a while too.
+    /// What happened, as it goes. With <paramref name="onScreen"/>, the debug UI shows it on screen too, for
+    /// <paramref name="showForSec"/> seconds, or for the time its settings give when that is null.
     /// </summary>
     public static void Info(
         string message,
         bool onScreen = false,
+        float? showForSec = null,
         [CallerMemberName] string member = "",
         [CallerFilePath] string file = "",
         [CallerLineNumber] int line = 0
     )
     {
         if (Verbosity >= VerbosityLevel.Normal)
-            Write(LoggingLevel.Info, message, member, file, line, onScreen);
+            Write(LoggingLevel.Info, message, member, file, line, onScreen, showForSec);
     }
 
     /// <summary>
-    /// Something works, only worse. With <paramref name="onScreen"/>, the debug UI shows it on screen for a while too.
+    /// Something works, only worse. With <paramref name="onScreen"/>, the debug UI shows it on screen too, for
+    /// <paramref name="showForSec"/> seconds, or for the time its settings give when that is null.
     /// </summary>
     public static void Warn(
         string message,
         bool onScreen = false,
+        float? showForSec = null,
         [CallerMemberName] string member = "",
         [CallerFilePath] string file = "",
         [CallerLineNumber] int line = 0
     )
     {
         if (Verbosity >= VerbosityLevel.Minimal)
-            Write(LoggingLevel.Warn, message, member, file, line, onScreen);
+            Write(LoggingLevel.Warn, message, member, file, line, onScreen, showForSec);
     }
 
     /// <summary>
-    /// Something failed: what it was is skipped or stood in for, and the frame goes on. Counted as an error at any
-    /// verbosity. With <paramref name="onScreen"/>, the debug UI shows it on screen for a while too.
+    /// Something failed, and is skipped or replaced, and the frame goes on. Counted as an error at any verbosity.
     /// </summary>
+    /// <remarks>
+    /// With <paramref name="onScreen"/>, the debug UI shows it on screen too, for <paramref name="showForSec"/>
+    /// seconds, or for the time its settings give when that is null.
+    /// </remarks>
     public static void Error(
         string message,
         bool onScreen = false,
+        float? showForSec = null,
         [CallerMemberName] string member = "",
         [CallerFilePath] string file = "",
         [CallerLineNumber] int line = 0
@@ -101,12 +111,11 @@ public static class Log
     {
         Interlocked.Increment(ref _errorCount);
         if (Verbosity >= VerbosityLevel.Minimal)
-            Write(LoggingLevel.Error, message, member, file, line, onScreen);
+            Write(LoggingLevel.Error, message, member, file, line, onScreen, showForSec);
     }
 
     /// <summary>
-    /// Something failed that the run cannot recover from; the caller decides what happens next. Logged at any
-    /// verbosity, and counted as an error.
+    /// Something failed that the run cannot recover from; the caller decides what happens next. Counted as an error.
     /// </summary>
     public static void Critical(
         string message,
@@ -116,11 +125,11 @@ public static class Log
     )
     {
         Interlocked.Increment(ref _errorCount);
-        Write(LoggingLevel.Critical, message, member, file, line, false);
+        Write(LoggingLevel.Critical, message, member, file, line, false, null);
     }
 
     /// <summary>
-    /// Has every sink print what it was given so far. Called at exit, and before a crash.
+    /// Makes each sink write what it was given so far. Core calls it at exit and before a crash.
     /// </summary>
     [SuppressMessage(
         "Design",
@@ -148,24 +157,28 @@ public static class Log
     }
 
     /// <summary>
-    /// Sends every line logged from now on to <paramref name="sink"/> too, until the subscription is disposed, which
-    /// waits until the sink has been given every line logged before, so it can be closed straight after; never
-    /// disposed from inside the sink's own <see cref="ILogSink.Write"/>. Every sink added is given the last lines
-    /// logged first.
+    /// Sends each line logged from now on to <paramref name="sink"/>, until the subscription is disposed. The last
+    /// lines logged go first.
     /// </summary>
+    /// <remarks>
+    /// Disposal waits until the sink has each line logged before, so the sink can close after it. Do not dispose the
+    /// subscription inside the sink's <see cref="ILogSink.Write"/>.
+    /// </remarks>
     public static Subscription Register(ILogSink sink)
     {
         lock (_lock)
         {
             _sinks.Add(sink);
 
-            // A copy, since a sink that throws logs an error, which adds to the history.
+            // Copy, as a sink that throws logs an error, which adds to the history.
             foreach (Line line in _history.ToArray())
             {
                 if (!Write(line, sink))
                     break;
             }
         }
+
+        Info($"Log sink added: {GemRegistry.GetGemName(sink.GetType())}.");
 
         return new Subscription(() => Unregister(sink));
     }
@@ -185,7 +198,15 @@ public static class Log
             _sinks.Remove(sink);
     }
 
-    private static void Write(LoggingLevel level, string message, string member, string file, int line, bool onScreen)
+    private static void Write(
+        LoggingLevel level,
+        string message,
+        string member,
+        string file,
+        int line,
+        bool onScreen,
+        float? showForSec
+    )
     {
         Line logged = new(
             DateTime.Now,
@@ -195,7 +216,8 @@ public static class Log
             file,
             line,
             member,
-            onScreen
+            onScreen,
+            showForSec
         );
         lock (_lock)
         {
@@ -203,7 +225,7 @@ public static class Log
                 _history.Dequeue();
             _history.Enqueue(logged);
 
-            // A copy, since a sink that throws is dropped, and logs an error.
+            // Copy, as a sink that throws is removed and logs an error.
             foreach (ILogSink sink in _sinks.ToArray())
             {
                 Write(logged, sink);
@@ -227,7 +249,7 @@ public static class Log
         }
         catch (Exception ex)
         {
-            // Removed before the error is logged, so the sink isn't given the line about itself.
+            // Remove it before the error is logged, so the sink does not get the line about itself.
             _sinks.Remove(sink);
             Error($"The log sink of {GemRegistry.GetGemName(sink.GetType())} threw and was removed: {ex}");
             return false;
@@ -259,10 +281,12 @@ public static class Log
         string CallerFile,
         int CallerFileLineNumber,
         string CallerMemberName,
-        bool IsOnScreen
+        bool IsOnScreen,
+        float? ShowForSec
     )
     {
         public override string ToString() =>
-            $"[{Timestamp:HH:mm:ss.fff}] [{Level}] [thread {ThreadId}] {Message} ({Path.GetFileName(CallerFile)}:{CallerFileLineNumber} in {CallerMemberName})";
+            $"[{Timestamp:HH:mm:ss.fff}] [{Level}] [thread {ThreadId}] {Message} "
+            + $"({Path.GetFileName(CallerFile)}:{CallerFileLineNumber} in {CallerMemberName})";
     }
 }

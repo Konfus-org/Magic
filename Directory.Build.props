@@ -40,7 +40,6 @@
     <MagicRoot>$(MSBuildThisFileDirectory)</MagicRoot>
     <MagicSource>$([MSBuild]::MakeRelative('$(MSBuildThisFileDirectory)', '$(MSBuildProjectDirectory)').Replace('\', '/'))/</MagicSource>
     <MagicOutput Condition="$(MagicSource.StartsWith('src/Gems/'))">Gems/$(MSBuildProjectName)/</MagicOutput>
-    <MagicOutput Condition="$(MagicSource.StartsWith('src/Resources/'))">Resources/</MagicOutput>
     <MagicOutput Condition="$(MagicSource.StartsWith('samples/'))">Projects/$(MSBuildProjectName)/</MagicOutput>
     <MagicOutput Condition="$(MagicSource.StartsWith('samples/Shared/'))">Gems/$(MSBuildProjectName)/</MagicOutput>
     <MagicOutput Condition="$(MagicSource.StartsWith('tests/'))">Tests/$(MSBuildProjectName)/</MagicOutput>
@@ -58,9 +57,9 @@
   </PropertyGroup>
 
   <!-- Assets: a part's own are its Resources/ folder (MagicResources). A release copies them beside its assembly, their
-       READMEs and any project file left behind; any other build copies nothing and records the folder in the assembly
-       (Magic.Resources), so assets are read where they are written, and an edit reaches a running engine without a
-       build. -->
+       Markdown files and any project file left behind; any other build copies nothing and records the folder in the
+       assembly (Magic.Resources), so assets are read where they are written, and an edit reaches a running engine
+       without a build. -->
   <PropertyGroup>
     <MagicResources>$(MSBuildProjectDirectory)/Resources</MagicResources>
   </PropertyGroup>

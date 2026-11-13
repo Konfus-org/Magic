@@ -6,10 +6,12 @@ using Magic.Utils;
 namespace Magic.Ecs;
 
 /// <summary>
-/// A component held as <see cref="IComponent"/>, as JSON: its type's name and its values,
-/// <c>{ "type": "Transform", "values": { "position": { "x": 0, "y": 1, "z": 0 } } }</c>, the type found in the code loaded
-/// (<see cref="Assemblies.Get{T}"/>), so it outlives the code that made it. A type no code declares fails the read.
+/// Reads and writes a component held as <see cref="IComponent"/> as JSON: the name of its type and its values.
 /// </summary>
+/// <remarks>
+/// The JSON is <c>{ "type": "Transform", "values": { "position": { "x": 0, "y": 1, "z": 0 } } }</c>. The read finds the
+/// type in the loaded code, so the JSON outlives the code that wrote it. A type that no code declares fails the read.
+/// </remarks>
 internal sealed class ComponentJsonConverter : JsonConverter<IComponent>
 {
     public override IComponent Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)

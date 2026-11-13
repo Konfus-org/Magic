@@ -4,9 +4,11 @@ using Magic.Ecs.Components;
 namespace Magic.DeferredRendering.View;
 
 /// <summary>
-/// Everything a frame draws, copied on the game thread as its frame ends and published for the render thread, which
-/// reads nothing else of the game thread's. Filled whole each time, into the same lists.
+/// Everything a frame draws, copied on the game thread as its frame ends and published for the render thread.
 /// </summary>
+/// <remarks>
+/// The render thread reads nothing else of the game thread's. It is filled whole each time, into the same lists.
+/// </remarks>
 internal sealed class RenderInputs
 {
     public EcsSnapshot<Transform, Ecs.Components.Renderer> Renderers { get; } = new();
@@ -26,8 +28,10 @@ internal sealed class RenderInputs
     public EcsSnapshot<PostProcessing> PostProcessing { get; } = new();
 
     /// <summary>
-    /// The number of the world the frame is of, a new one each time a domain replaces it, so the render thread can tell
-    /// the first frame of another world.
+    /// The number of the world the frame is of, new each time a domain replaces it.
     /// </summary>
+    /// <remarks>
+    /// The render thread tells the first frame of another world by it.
+    /// </remarks>
     public int WorldNumber { get; set; }
 }

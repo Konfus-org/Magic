@@ -9,11 +9,13 @@ using Magic.Utils;
 namespace Magic.GlobalIllumination;
 
 /// <summary>
-/// The probe grid of diffuse light: a box of probes over the traced world's box, given rays in turn within each frame's
-/// budget, more as their light still changes, traced, and blended into each probe's light and distances. The box
-/// follows the world's slowly, so the probes' light moves with it. What the probes hold carries from frame to frame,
-/// from the first update on.
+/// The probe grid of diffuse light: a box of probes over the traced world's box. Each view has its own grid.
 /// </summary>
+/// <remarks>
+/// Probes get rays in turn within each frame's budget, more while their light still changes, and blend what the rays
+/// trace into their light and distances. The box follows the world's slowly, so the probes' light moves with it. What
+/// the probes hold carries from frame to frame, from the first update on.
+/// </remarks>
 internal sealed class Probes(AssetManager assets)
 {
     /// <summary>
@@ -40,9 +42,12 @@ internal sealed class Probes(AssetManager assets)
     private const int VarianceBytes = 16;
 
     /// <summary>
-    /// The metres the grid reaches past the traced world's box on every side, and how far towards it the grid moves a
-    /// frame once the probes hold light, so it doesn't shake their light as instances come and go.
+    /// The metres the grid reaches past the traced world's box on every side.
     /// </summary>
+    /// <remarks>
+    /// It is also how far the grid moves towards that box each frame once the probes hold light, so the grid does not
+    /// shake their light as instances come and go.
+    /// </remarks>
     private const float BoxMargin = 1;
     private const float BoxBlend = 0.01f;
 
@@ -56,21 +61,21 @@ internal sealed class Probes(AssetManager assets)
     private readonly ShaderEntry _blendShader = PassShaders.GetEntry(assets, "UpdateProbes", "BlendProbes");
 
     /// <summary>
-    /// The box the grid spans, where the last frame placed it, and its probes along x and z, and up y.
+    /// For each view, by its number: the box its grid spans, where the last frame placed it, and its probes along x
+    /// and z, and up y.
     /// </summary>
-    private (Vector3 Min, Vector3 Max) _box;
-
-    private (int Across, int Up) _size;
+    private readonly List<((Vector3 Min, Vector3 Max) Box, (int Across, int Up) Size)> _grids = [];
 
     public ImmutableArray<ShaderEntry> Shaders => [_askShader, _planShader, _listShader, _traceShader, _blendShader];
 
     /// <summary>
-    /// The grid's buffers and depth texture asked for at <paramref name="size"/>, from 2 probes a side up to the most,
-    /// named by the grid that shading reads and by the update's own constants, and the probes started at none while
-    /// they hold nothing or the size changed. The
-    /// grid is placed over <paramref name="box"/> with a margin: at once when the probes start afresh, else a little
-    /// nearer each frame.
+    /// Asks for the buffers and depth texture of the grid of the graph's view at <paramref name="size"/>, and places
+    /// the grid over <paramref name="box"/> with a margin.
     /// </summary>
+    /// <remarks>
+    /// The size goes from 2 probes a side up to the most. The probes start at none while they hold nothing or the size
+    /// changed. The grid moves to the box at once when the probes start afresh, else a little nearer each frame.
+    /// </remarks>
     public Result<(ProbeGridConstants Grid, ProbeUpdateConstants Update)> Prepare(
         RenderGraph graph,
         bool hasHistory,
@@ -79,8 +84,16 @@ internal sealed class Probes(AssetManager assets)
     )
     {
         size = (Math.Clamp(size.Across, 2, MaxProbesAcross), Math.Clamp(size.Up, 2, MaxProbesUp));
-        hasHistory &= size == _size;
-        _size = size;
+
+        // What the view's grid keeps from frame to frame, by the view's number.
+        while (_grids.Count <= graph.View)
+        {
+            _grids.Add(default);
+        }
+
+        (Vector3 Min, Vector3 Max) placed = _grids[graph.View].Box;
+        hasHistory &= size == _grids[graph.View].Size;
+        _grids[graph.View] = (placed, size);
         (int across, int up) = size;
         long probes = (long)across * up * across;
         Result<GpuBuffer> probeTable = graph.Buffer(new("Probes", probes * ProbeBytes));
@@ -102,10 +115,11 @@ internal sealed class Probes(AssetManager assets)
             return Result.Failure(asked.Error);
 
         (Vector3 Min, Vector3 Max) target = (box.Min - new Vector3(BoxMargin), box.Max + new Vector3(BoxMargin));
-        _box = hasHistory
-            ? (Vector3.Lerp(_box.Min, target.Min, BoxBlend), Vector3.Lerp(_box.Max, target.Max, BoxBlend))
+        placed = hasHistory
+            ? (Vector3.Lerp(placed.Min, target.Min, BoxBlend), Vector3.Lerp(placed.Max, target.Max, BoxBlend))
             : target;
-        Vector3 cellSize = (_box.Max - _box.Min) / new Vector3(across - 1, up - 1, across - 1);
+        _grids[graph.View] = (placed, size);
+        Vector3 cellSize = (placed.Max - placed.Min) / new Vector3(across - 1, up - 1, across - 1);
         ProbeGridConstants grid = new()
         {
             DimensionX = (uint)across,
@@ -114,7 +128,7 @@ internal sealed class Probes(AssetManager assets)
             Probes = probeTable.Value,
             Depth = depth.Value,
             DepthSampler = sampler.Value,
-            Origin = _box.Min,
+            Origin = placed.Min,
             CellSize = cellSize,
         };
         ProbeUpdateConstants update = new()
@@ -135,10 +149,12 @@ internal sealed class Probes(AssetManager assets)
     }
 
     /// <summary>
-    /// The rays the probes ask for given to them in turn while they fit in the frame's budget, the probe the next frame
-    /// starts at kept in the trace's arguments; traced through the world, lit by the lights and the sky, and blended
-    /// into the probes given them.
+    /// Traces the rays that the probes ask for through the world, and blends their light into the probes.
     /// </summary>
+    /// <remarks>
+    /// Probes get rays in turn while they fit in the frame's budget. The trace's arguments keep the probe that the next
+    /// frame starts at. The lights and the sky light the rays.
+    /// </remarks>
     public void Record(in GIView view, in ProbeGridConstants grid, in ProbeUpdateConstants update)
     {
         RenderGraph graph = view.Graph;

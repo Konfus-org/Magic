@@ -1,10 +1,12 @@
 namespace Magic.Configuration;
 
 /// <summary>
-/// One member of a gem's settings as <see cref="Settings.Options"/> lists it: its key, the category the key starts
-/// with, its value, the type it is declared as, its doc comment's summary (empty when the gem's doc file is missing),
-/// and whether changing it restarts the run.
+/// One member of the settings of a gem, as <see cref="Settings.Options"/> lists it.
 /// </summary>
+/// <remarks>
+/// It holds the key, the category at the start of the key, the value, the declared type, the summary of the doc
+/// comment, and whether a change restarts the run. The summary is empty when the doc file of the gem is missing.
+/// </remarks>
 public readonly record struct Setting(
     string Key,
     string Category,

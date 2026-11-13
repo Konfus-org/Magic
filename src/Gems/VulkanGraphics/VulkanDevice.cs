@@ -11,10 +11,12 @@ using static Vortice.Vulkan.Vulkan;
 namespace Magic.VulkanGraphics;
 
 /// <summary>
-/// The instance, the GPU picked and its device and queue, made once as the gem starts and freed last. Picks the
-/// fastest GPU that has every feature of the baseline (IGraphicsApi) and can show the window, and
-/// notes which optional ones it has. Throws when there is no such GPU: the gem can't exist without one.
+/// Holds the instance, the GPU that was picked, and its device and queue, from the start of the gem to its end.
 /// </summary>
+/// <remarks>
+/// It picks the fastest GPU that has every baseline feature of IGraphicsApi and can show the window, and records which
+/// optional features it has. If no GPU fits, the constructor throws, because the gem cannot run without one.
+/// </remarks>
 internal sealed unsafe class VulkanDevice : IDisposable
 {
     private const string ValidationLayer = "VK_LAYER_KHRONOS_validation";
@@ -34,6 +36,10 @@ internal sealed unsafe class VulkanDevice : IDisposable
     private const string DeferredHostOperationsExtension = "VK_KHR_deferred_host_operations";
 
     private const string MemoryBudgetExtension = "VK_EXT_memory_budget";
+
+    private const string FullScreenExclusiveExtension = "VK_EXT_full_screen_exclusive";
+
+    private const string SurfaceCapabilities2Extension = "VK_KHR_get_surface_capabilities2";
 
     /// <summary>
     /// The Vulkan loader's variables for which drivers it loads: the ones it leaves out, by their manifests' names, and
@@ -74,6 +80,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
         }
 
         WindowHandle handle = window?.Handle ?? default;
+        bool hasSurfaceCapabilities2;
         try
         {
             HasValidation = wantsValidation && HasLayer(ValidationLayer);
@@ -86,6 +93,11 @@ internal sealed unsafe class VulkanDevice : IDisposable
 
             if (hasPortability)
                 wantedExtensions.Add(PortabilityEnumerationExtension);
+
+            // The full-screen-exclusive device extension needs it.
+            hasSurfaceCapabilities2 = instanceExtensions.Contains(SurfaceCapabilities2Extension);
+            if (hasSurfaceCapabilities2)
+                wantedExtensions.Add(SurfaceCapabilities2Extension);
 
             Instance = CreateInstance(wantedExtensions, hasPortability);
         }
@@ -117,6 +129,8 @@ internal sealed unsafe class VulkanDevice : IDisposable
         InstanceApi.vkGetPhysicalDeviceMemoryProperties(PhysicalDevice, out VkPhysicalDeviceMemoryProperties memory);
         Memory = memory;
         HasMemoryBudget = picked.Extensions.Contains(MemoryBudgetExtension);
+        HasFullScreenExclusive =
+            hasSurfaceCapabilities2 && Surface.IsNotNull && picked.Extensions.Contains(FullScreenExclusiveExtension);
         Device = CreateDevice(picked);
         Api = new VkDeviceApi(InstanceApi, Device);
         Api.vkGetDeviceQueue(QueueFamily, 0, out VkQueue queue);
@@ -178,6 +192,11 @@ internal sealed unsafe class VulkanDevice : IDisposable
     /// </summary>
     public bool HasMemoryBudget { get; }
 
+    /// <summary>
+    /// Whether a swapchain can say that it must never own the display, as a window that fills it otherwise can.
+    /// </summary>
+    public bool HasFullScreenExclusive { get; }
+
     public void Dispose()
     {
         Api.vkDeviceWaitIdle();
@@ -193,7 +212,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
     }
 
     /// <summary>
-    /// A memory type with <paramref name="wanted"/> among those <paramref name="typeBits"/> allows; -1 when none.
+    /// Finds a memory type among <paramref name="typeBits"/> that has <paramref name="wanted"/>; -1 when none.
     /// </summary>
     public int FindMemoryType(uint typeBits, VkMemoryPropertyFlags wanted)
     {
@@ -209,9 +228,12 @@ internal sealed unsafe class VulkanDevice : IDisposable
     }
 
     /// <summary>
-    /// Bytes of device-local memory the driver says the process holds now: the resources, the window's images and the
-    /// driver's own. Only with <see cref="HasMemoryBudget"/>.
+    /// Gets the bytes of device-local memory that the process holds now, as the driver tells it.
     /// </summary>
+    /// <remarks>
+    /// The total includes the resources, the window's images and the driver's own memory. Call it only when
+    /// <see cref="HasMemoryBudget"/> is true.
+    /// </remarks>
     public long GetDeviceMemoryUsage()
     {
         VkPhysicalDeviceMemoryBudgetPropertiesEXT budget = new();
@@ -350,10 +372,12 @@ internal sealed unsafe class VulkanDevice : IDisposable
     }
 
     /// <summary>
-    /// The GPU to use: among those with the baseline that can show the window, the first whose name holds
-    /// <paramref name="named"/> when it isn't empty; else a discrete one, else an integrated, else whatever draws, a
-    /// software device last.
+    /// Picks the GPU to use among those that have the baseline and can show the window.
     /// </summary>
+    /// <remarks>
+    /// When <paramref name="named"/> is not empty, it picks the first GPU whose name contains it. Otherwise it picks a
+    /// discrete GPU, then an integrated GPU, then any GPU that draws, and a software device last.
+    /// </remarks>
     private Pick PickPhysicalDevice(string named)
     {
         InstanceApi.vkEnumeratePhysicalDevices(out uint count);
@@ -522,8 +546,8 @@ internal sealed unsafe class VulkanDevice : IDisposable
     }
 
     /// <summary>
-    /// A queue family that draws and computes, and shows the window when there is one; <see cref="uint.MaxValue"/>
-    /// when none.
+    /// Finds a queue family that draws and computes, and shows the window when there is one;
+    /// <see cref="uint.MaxValue"/> when none.
     /// </summary>
     private uint FindQueueFamily(VkPhysicalDevice device)
     {
@@ -574,6 +598,9 @@ internal sealed unsafe class VulkanDevice : IDisposable
 
         if (HasMemoryBudget)
             extensions.Add(MemoryBudgetExtension);
+
+        if (HasFullScreenExclusive)
+            extensions.Add(FullScreenExclusiveExtension);
 
         using NativeStrings extensionNames = new(extensions);
         VkPhysicalDeviceRayQueryFeaturesKHR rayQuery = new() { rayQuery = true };

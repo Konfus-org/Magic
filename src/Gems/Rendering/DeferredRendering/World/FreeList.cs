@@ -1,9 +1,11 @@
 namespace Magic.DeferredRendering.World;
 
 /// <summary>
-/// The free ranges of a pool of <c>capacity</c> elements, the first <c>taken</c> of them never free: a free list, handing
-/// out ranges first fit and merging a range given back with the free ranges it touches.
+/// The free ranges of a pool of <c>capacity</c> elements, the first <c>taken</c> of them never free.
 /// </summary>
+/// <remarks>
+/// A free list: it hands out ranges first fit, and merges a range given back with the free ranges it touches.
+/// </remarks>
 public sealed class FreeList(int capacity, int taken = 0)
 {
     /// <summary>
@@ -23,9 +25,10 @@ public sealed class FreeList(int capacity, int taken = 0)
     public bool CanAllocate(int length) => _free.Exists(range => range.Length >= length);
 
     /// <summary>
-    /// The start of <paramref name="length"/> elements taken from the first free range that holds them, which
+    /// Takes <paramref name="length"/> elements from the first free range that holds them, which
     /// <see cref="CanAllocate"/> says there is.
     /// </summary>
+    /// <returns>The start of the elements taken.</returns>
     public int Allocate(int length)
     {
         for (int i = 0; i < _free.Count; i++)
@@ -46,7 +49,8 @@ public sealed class FreeList(int capacity, int taken = 0)
     }
 
     /// <summary>
-    /// Gives back the <paramref name="length"/> elements from <paramref name="start"/> that <see cref="Allocate"/> took.
+    /// Gives back the <paramref name="length"/> elements from <paramref name="start"/> that <see cref="Allocate"/>
+    /// took.
     /// </summary>
     public void Free(int start, int length)
     {

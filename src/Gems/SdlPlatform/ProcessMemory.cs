@@ -5,11 +5,13 @@ using Magic.Files;
 namespace Magic.SdlPlatform;
 
 /// <summary>
-/// The memory this process alone holds in RAM, as the OS's own tools show it: Windows' private working set (Task
-/// Manager's Memory column), Linux's anonymous resident pages (RssAnon), macOS's physical footprint (Activity Monitor's
-/// Memory). Shared libraries' pages and memory paged out are not in it. .NET and SDL have no such number, so it is asked
-/// of the OS here.
+/// The memory that only this process holds in RAM, as the OS's own tools show it.
 /// </summary>
+/// <remarks>
+/// On Windows, it is the private working set (Task Manager's Memory column). On Linux, it is the anonymous resident
+/// pages (RssAnon). On macOS, it is the physical footprint (Activity Monitor's Memory). It does not include the pages
+/// of shared libraries or memory that is paged out. .NET and SDL do not give this number, so it asks the OS.
+/// </remarks>
 internal static unsafe partial class ProcessMemory
 {
     /// <summary>

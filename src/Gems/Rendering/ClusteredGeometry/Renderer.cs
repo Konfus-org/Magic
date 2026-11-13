@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using Magic.Assets;
-using Magic.Debugging;
 using Magic.DeferredRendering.View;
+using Magic.DeferredRendering.World;
 using Magic.Ecs;
 using Magic.Graphics;
 using Magic.Projects;
@@ -12,21 +12,34 @@ using Magic.Worlds;
 namespace Magic.ClusteredGeometry;
 
 /// <summary>
-/// What the cluster renderer takes each frame: the world as the GPU holds it.
+/// What the cluster renderer takes once a frame: the world as the GPU holds it, or null in a frame without one.
 /// </summary>
-public readonly record struct ClusteredGeometryInput(GpuView View);
+public readonly record struct ClusterPoolsInput(GpuWorld? World);
 
 /// <summary>
-/// Draws every model the world's view holds as a hierarchy of clusters, GPU-driven, and far away as its impostor: each
-/// frame its clusters culled, drawn into a visibility buffer and resolved by material into the view's GBuffer and glass
-/// targets, with its depth. As a model loads, its preprocessor clusters it once per change to its file and bakes its
+/// What the cluster renderer takes for each view of the frame: the view as the GPU holds it, or null where the view
+/// was not made, and the pools the frame's models are clustered in.
+/// </summary>
+public readonly record struct ClusteredGeometryInput(GpuView? View, ClusterPools Pools);
+
+/// <summary>
+/// Draws every model that the world holds as a hierarchy of clusters, GPU-driven, and far away as its impostor.
+/// </summary>
+/// <remarks>
+/// Once a frame it keeps the models clustered on the GPU, in one set of pools for every view. For each view it culls
+/// the clusters, draws them into a visibility buffer, and resolves them by material into the view's GBuffer and glass
+/// targets, with their depth. As a model loads, its preprocessor clusters it once per change to its file and bakes its
 /// impostor. As a domain loads, it holds the loading screen until the models it draws are clustered on the GPU and
 /// their resolve passes are built.
-/// </summary>
-public sealed class Renderer : IRenderFrom<ClusteredGeometryInput>, IHookIntoDomainLoading, IDisposable
+/// </remarks>
+public sealed class Renderer
+    : IRender<ClusterPoolsInput, ClusterPools>,
+        IRenderFrom<ClusteredGeometryInput>,
+        IHookIntoDomainLoading,
+        IDisposable
 {
     /// <summary>
-    /// When a model draws as its impostor. The game thread writes it, and <see cref="Render"/> reads it.
+    /// When a model draws as its impostor. The game thread writes it, and the step of a view reads it.
     /// </summary>
     private readonly ClusteredGeometrySettings _settings;
     private readonly Threads _threads;
@@ -35,18 +48,16 @@ public sealed class Renderer : IRenderFrom<ClusteredGeometryInput>, IHookIntoDom
     private readonly ClusterPasses _passes;
 
     /// <summary>
-    /// Whether the renderer draws: not once a shader, a pool or a frame's passes are not made. Render thread.
+    /// How many domains have loaded since the start. Render thread.
     /// </summary>
-    private bool _isRunning = true;
-
-    /// <summary>
-    /// How many domains have loaded since the start, and what the newest waits on before it shows: its models clustered
-    /// on the GPU and their resolve passes built, once the view counts it prepared. Render thread.
-    /// </summary>
+    /// <remarks>
+    /// The newest waits until its models are clustered on the GPU and their resolve passes are built, once the world
+    /// counts it prepared.
+    /// </remarks>
     private int _domainsLoaded;
     private TaskCompletionSource? _loading;
 
-    public Renderer(ClusteredGeometrySettings settings, AssetManager assets, Threads threads)
+    internal Renderer(ClusteredGeometrySettings settings, AssetManager assets, Threads threads)
     {
         _settings = settings;
         _threads = threads;
@@ -59,58 +70,83 @@ public sealed class Renderer : IRenderFrom<ClusteredGeometryInput>, IHookIntoDom
     public void Dispose()
     {
         _preprocessing.Dispose();
-        _loading?.TrySetResult();
-        _loading = null;
+        EndLoading();
     }
 
     /// <summary>
-    /// Keeps the models the view holds clustered on the GPU, and records the frame's passes in the geometry stage.
+    /// Keeps the models the world holds clustered on the GPU, once a frame for all its views, and makes the pools they
+    /// are in; none while the shaders build or after the pools were not made.
     /// </summary>
-    public void Render(in Frame frame, RenderGraph graph, in ClusteredGeometryInput input)
+    public ClusterPools? Render(in Frame frame, RenderGraph graph, in ClusterPoolsInput input)
     {
-        if (!_isRunning)
-            return;
+        // A frame without a world because its maker is out lets the loading domain show: the failure is already told.
+        // Otherwise the world is still loading, and the domain keeps waiting for the clusters.
+        if (input.World is not { } world)
+        {
+            if (graph.IsMakerOut<GpuWorld>())
+                EndLoading();
 
-        // The shaders are the GPU provider's to build, the first ask starting each; one that fails ends the start.
+            return null;
+        }
+
+        // The shaders are the GPU provider's to build, the first ask starting each.
         GpuState shaders = graph.GetState(_passes.Shaders.AsSpan());
         if (shaders == GpuState.Failed)
-            FailStart("a shader was not built.");
+            Fail(graph, RenderFailure.Shader, "a shader of the clusters was not built.");
 
         if (shaders != GpuState.Ready)
-            return;
+            return null;
 
-        GpuView gpu = input.View;
-        Result<ClusterPools> pools = _resources.Prepare(graph, gpu.Models.Span);
+        Result<ClusterPools> pools = _resources.Prepare(graph, world.Models.Span);
         if (!pools.Ok)
         {
-            FailStart(pools.Error);
+            Fail(graph, RenderFailure.Resource, pools.Error);
 
-            return;
+            return null;
         }
 
         // The loading domain shows once its models are clustered on the GPU and the resolve for each material shader is
         // built.
         if (
             _loading is not null
-            && gpu.PreparedDomains >= _domainsLoaded
+            && world.PreparedDomains >= _domainsLoaded
             && !_resources.IsLoading
-            && graph.GetState(_passes.GetResolveShaders(gpu.MaterialShaders)) != GpuState.Loading
+            && graph.GetState(_passes.GetResolveShaders(world.MaterialShaders)) != GpuState.Loading
         )
         {
-            _loading.TrySetResult();
-            _loading = null;
+            EndLoading();
         }
 
-        Result recorded = _passes.Record(graph, gpu, pools.Value, _settings);
-        if (!recorded.Ok)
-            FailStart(recorded.Error);
+        return pools.Value;
     }
 
     /// <summary>
-    /// Holds the domain loading until its models are clustered on the GPU and their resolve passes are built, once the
-    /// world's view counts what it draws on the GPU. One that comes while another waits ends that one. On the render
-    /// thread, whose count this is.
+    /// Records the passes of the view of this turn in the geometry stage, over the pools the frame made.
     /// </summary>
+    public void Render(in Frame frame, RenderGraph graph, in ClusteredGeometryInput input)
+    {
+        // A frame without a view because its maker is out lets the loading domain show: the failure is already told.
+        if (input.View is not { } gpu)
+        {
+            if (graph.IsMakerOut<GpuView>())
+                EndLoading();
+
+            return;
+        }
+
+        Result recorded = _passes.Record(graph, gpu, input.Pools, _settings);
+        if (!recorded.Ok)
+            Fail(graph, RenderFailure.Resource, recorded.Error);
+    }
+
+    /// <summary>
+    /// Holds the domain loading until its models are clustered on the GPU and their resolve passes are built. Render
+    /// thread.
+    /// </summary>
+    /// <remarks>
+    /// It waits until the world counts what it draws on the GPU. A loading that comes while another waits ends that
+    /// one.
+    /// </remarks>
     public async Task OnDomainLoadingAsync(
         ImmutableArray<ImmutableArray<IComponent>> entities,
         CancellationToken cancel
@@ -118,24 +154,27 @@ public sealed class Renderer : IRenderFrom<ClusteredGeometryInput>, IHookIntoDom
     {
         await _threads.Enter(EngineThread.Render);
         _domainsLoaded++;
-        _loading?.TrySetResult();
-        _loading = null;
-        if (!_isRunning)
-            return;
-
+        EndLoading();
         TaskCompletionSource loading = new(TaskCreationOptions.RunContinuationsAsynchronously);
         _loading = loading;
         await loading.Task.WaitAsync(cancel).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Ends the start as failed: the renderer draws nothing, and holds no domain back.
+    /// Tells the graph that the clusters are not drawn in this frame, and lets the loading domain show without them.
     /// </summary>
-    private void FailStart(string error)
+    private void Fail(RenderGraph graph, RenderFailure kind, string reason)
     {
-        Log.Error($"The clusters are not drawn: {error}");
+        graph.Fail(kind, "Clusters are not drawn", reason);
+        EndLoading();
+    }
+
+    /// <summary>
+    /// Lets the loading domain show, when one waits.
+    /// </summary>
+    private void EndLoading()
+    {
         _loading?.TrySetResult();
         _loading = null;
-        _isRunning = false;
     }
 }

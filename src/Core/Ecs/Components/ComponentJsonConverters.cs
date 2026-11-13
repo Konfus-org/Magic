@@ -6,9 +6,11 @@ using Magic.Assets;
 namespace Magic.Ecs.Components;
 
 /// <summary>
-/// An entity's tags as JSON: an array of their ids, as a saved world holds them. The serializer has no form for an inline
-/// array. Past <see cref="Tags.Capacity"/>, the rest are left out.
+/// Reads and writes the tags of an entity as JSON: an array of their ids, as a saved world holds them.
 /// </summary>
+/// <remarks>
+/// The serializer has no form for an inline array. The tags after <see cref="Tags.Capacity"/> are left out.
+/// </remarks>
 [SuppressMessage(
     "Performance",
     "CA1812:Avoid uninstantiated internal classes",
@@ -44,9 +46,12 @@ internal sealed class TagsJsonConverter : JsonConverter<Tags>
 }
 
 /// <summary>
-/// Material slots as JSON: an array of instances by slot, in the order the component lists them, so a prefab lists a
-/// model's materials in the order its meshes name them. Empty slots after the last filled one are left out.
+/// Reads and writes material slots as JSON: an array of instances by slot, in the order of the component.
 /// </summary>
+/// <remarks>
+/// A prefab lists the materials of a model in the order that its meshes name them. The empty slots after the last
+/// filled slot are left out.
+/// </remarks>
 [SuppressMessage(
     "Performance",
     "CA1812:Avoid uninstantiated internal classes",
@@ -122,9 +127,11 @@ internal sealed class MaterialSlotsJsonConverter : JsonConverter<MaterialSlots>
 }
 
 /// <summary>
-/// A renderer's material set as JSON: the array <see cref="MaterialSlotsJsonConverter"/> reads and writes, so a prefab
-/// lists a model's materials in the order its meshes name them. A set read is kept for the process.
+/// Reads and writes the material set of a renderer as JSON, as the array of <see cref="MaterialSlotsJsonConverter"/>.
 /// </summary>
+/// <remarks>
+/// The process keeps each set that it reads.
+/// </remarks>
 [SuppressMessage(
     "Performance",
     "CA1812:Avoid uninstantiated internal classes",
@@ -177,5 +184,44 @@ internal sealed class MaterialOverridesJsonConverter : JsonConverter<MaterialOve
         }
 
         writer.WriteEndObject();
+    }
+}
+
+/// <summary>
+/// Reads and writes <see cref="ScriptContainer"/> as an array of handles, with the free slots left out.
+/// </summary>
+[SuppressMessage(
+    "Performance",
+    "CA1812:Avoid uninstantiated internal classes",
+    Justification = "The serializer makes it, as a [JsonConverter] names it."
+)]
+internal sealed class ScriptContainerJsonConverter : JsonConverter<ScriptContainer>
+{
+    public override ScriptContainer Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType != JsonTokenType.StartArray)
+            throw new JsonException("A ScriptContainer is an array of handles.");
+
+        ScriptContainer scripts = default;
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+        {
+            Handle<Script> script = JsonSerializer.Deserialize<Handle<Script>>(ref reader, options);
+            if (!scripts.Add(script))
+                throw new JsonException($"An entity has at most {ScriptContainer.Capacity} scripts, each one time.");
+        }
+
+        return scripts;
+    }
+
+    public override void Write(Utf8JsonWriter writer, ScriptContainer value, JsonSerializerOptions options)
+    {
+        writer.WriteStartArray();
+        foreach (Handle<Script> script in value)
+        {
+            if (script != Handle<Script>.None)
+                JsonSerializer.Serialize(writer, script, options);
+        }
+
+        writer.WriteEndArray();
     }
 }

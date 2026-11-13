@@ -1,9 +1,19 @@
 # PreToolUse on git: a git commit in a worktree needs the slice-reviewer to have reviewed its branch, and a new review
 # once the slice grew by more than $Regrowth lines since; a git merge needs the merged branch reviewed. A swarm's
 # slice, which commits and merges into its root, needs no review: the root gets QA and the user's review as a whole.
+# A small slice needs no review either: one of $Small changed lines or fewer, or one validated as a Docs change.
 # Exits 2 with the reason on stderr to refuse, which the agent is shown.
 . (Join-Path $PSScriptRoot 'common.ps1')
 $Regrowth = 100
+$Small = 50
+
+# Whether a slice is small enough to need no review: it has a merge base, and $Small changed lines or fewer against
+# it, or its state was validated as a Docs change.
+function Test-SmallSlice($checkout, [string] $tree, $baseTree, [int] $lines) {
+    if ($baseTree -and $lines -le $Small) { return $true }
+    $stamp = Get-ValidationStamp $checkout $tree
+    return (Test-Path -LiteralPath $stamp) -and [string](Get-Content -LiteralPath $stamp -TotalCount 1) -eq 'Docs'
+}
 try {
     $hook = Read-HookInput
     $command = [string](Get-Field (Get-Field $hook 'tool_input') 'command')
@@ -27,6 +37,10 @@ try {
         if (-not (Invoke-Git $checkout.Top @('rev-parse', '--verify', '--quiet', "refs/heads/$branch"))) { exit 0 }
         if (Test-SwarmSlice $checkout $branch) { exit 0 }
         if (Test-Path -LiteralPath (Get-ReviewStamp $checkout $branch)) { exit 0 }
+        $base = [string](Invoke-Git $checkout.Top @('merge-base', 'HEAD', $branch))
+        $tree = [string](Invoke-Git $checkout.Top @('rev-parse', "$branch^{tree}"))
+        $lines = if ($base) { Measure-ChangedLines $checkout.Top @('diff', '--numstat', $base, $branch) } else { 0 }
+        if (Test-SmallSlice $checkout $tree $base $lines) { exit 0 }
         [Console]::Error.WriteLine("$branch was never reviewed: have the slice-reviewer subagent review it in its worktree first (AGENTS.md, Finish).")
         exit 2
     }
@@ -35,6 +49,8 @@ try {
     $branch = [string](Invoke-Git $checkout.Top @('branch', '--show-current'))
     if (-not $branch) { exit 0 }
     if (Test-SwarmSlice $checkout $branch) { exit 0 }
+    $state = Get-SliceState $checkout
+    if (Test-SmallSlice $checkout $state.Tree $state.BaseTree $state.Lines) { exit 0 }
     $stamp = Get-ReviewStamp $checkout $branch
     if (-not (Test-Path -LiteralPath $stamp)) {
         [Console]::Error.WriteLine("This slice ($branch) has no review: have the slice-reviewer subagent review it, naming the worktree, the merge target $($checkout.Target) and the slice, then commit (AGENTS.md, Finish).")
@@ -42,7 +58,7 @@ try {
     }
     $reviewed = 0
     [int]::TryParse([string](Get-Content -LiteralPath $stamp -TotalCount 1), [ref]$reviewed) | Out-Null
-    $now = (Get-SliceState $checkout).Lines
+    $now = $state.Lines
     if ($now -gt $reviewed + $Regrowth) {
         [Console]::Error.WriteLine("This slice grew from $reviewed to $now changed lines since its review, past the $Regrowth a fix may add without one: have the slice-reviewer review it again, then commit.")
         exit 2

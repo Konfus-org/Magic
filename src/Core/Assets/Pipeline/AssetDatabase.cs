@@ -3,9 +3,11 @@ using System.Collections.Immutable;
 namespace Magic.Assets.Pipeline;
 
 /// <summary>
-/// What assets there are, where they are, and how they depend on each other, in both directions. A value, replaced whole
-/// under the assets' lock, and read by any thread as it is.
+/// What assets there are, where they are, and how they depend on each other, in both directions.
 /// </summary>
+/// <remarks>
+/// It is a value: it is replaced whole under the assets' lock, and any thread can read it.
+/// </remarks>
 internal sealed record AssetDatabase
 {
     public static AssetDatabase Empty { get; } = new();
@@ -63,8 +65,8 @@ internal sealed record AssetDatabase
     public bool HasDependencies(ulong asset) => Dependencies.ContainsKey(asset);
 
     /// <summary>
-    /// What <paramref name="asset"/> depends on, as far as is known, down to <paramref name="levels"/> levels: 1 for its
-    /// own, <see cref="AssetManager.AllLevels"/> for everything under it.
+    /// What <paramref name="asset"/> depends on, as far as is known, down to <paramref name="levels"/> levels: 1 for
+    /// its own, <see cref="AssetManager.AllLevels"/> for everything under it.
     /// </summary>
     public HashSet<ulong> GetDependencies(ulong asset, int levels) =>
         Walk([asset], levels, id => Dependencies.GetValueOrDefault(id, []));

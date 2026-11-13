@@ -8,10 +8,12 @@ using Magic.Utils;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>bake</c>: loads every asset, so what their importers and preprocessors make is cached; then queues the lines that
-/// open every domain under <c>Domains/</c> in turn, wait for each to load and settle, so what drawing them makes is
-/// cached too, and exit.
+/// <c>bake</c>: loads each asset and opens each domain, so that what the importers, preprocessors and drawing make is
+/// cached, then exits.
 /// </summary>
+/// <remarks>
+/// It queues the lines that open each domain under <c>Domains/</c> in turn and wait for each to load and settle.
+/// </remarks>
 internal static class BakeCommand
 {
     public static Command Create(App app, AssetManager assets, CommandQueue queue)

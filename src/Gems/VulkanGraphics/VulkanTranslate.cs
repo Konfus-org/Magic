@@ -6,9 +6,12 @@ using Vortice.Vulkan;
 namespace Magic.VulkanGraphics;
 
 /// <summary>
-/// Core's GPU words as Vulkan's: formats, usages, accesses with the stage, access and layout each implies, and the
-/// throw for a Vulkan call that must succeed. Pure functions, one per word.
+/// Translates Core's GPU words into Vulkan's, with one pure function for each word.
 /// </summary>
+/// <remarks>
+/// It covers formats, usages, and accesses with the stage, access and layout that each implies. It also throws for a
+/// Vulkan call that must succeed.
+/// </remarks>
 internal static class VulkanTranslate
 {
     /// <summary>
@@ -238,8 +241,7 @@ internal static class VulkanTranslate
         };
 
     /// <summary>
-    /// Throws when a call the GPU cannot be used without did not succeed, naming <paramref name="what"/> it was to
-    /// make.
+    /// Throws if a call that the GPU cannot work without failed, and names <paramref name="what"/> it was to make.
     /// </summary>
     public static void ThrowIfFailed(this VkResult result, string what)
     {

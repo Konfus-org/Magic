@@ -7,9 +7,11 @@ using Magic.Utils;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>save settings</c>: saves the settings that differ from their defaults for this user and project, which the
-/// project opens with from then on.
+/// <c>save settings</c>: saves the settings that differ from their defaults for this user and project.
 /// </summary>
+/// <remarks>
+/// The project opens with them from then on.
+/// </remarks>
 internal static class SaveSettingsCommand
 {
     public static Command Create(Settings settings)

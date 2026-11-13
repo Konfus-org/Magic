@@ -1,4 +1,4 @@
-// The instance table: everything drawn this frame, C#'s GpuInstance, 248 bytes each, in the world; a position goes
+// The instance table: everything drawn this frame, C#'s GpuInstance, 248 bytes each, in the world. A position goes
 // camera-relative once transformed (Core/Frame's Relative).
 module "Scene/Instances";
 

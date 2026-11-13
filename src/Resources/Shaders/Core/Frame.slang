@@ -21,7 +21,7 @@ public struct FrameConstants
     public float4x4 inverseViewProjection;
 
     // The frustum's sides and near plane in the camera-relative world, xyz a unit normal pointing in and w the offset,
-    // so a point is inside where dot(xyz, p) + w >= 0 for every one; the sixth is the far plane, which never rejects.
+    // so a point is inside where dot(xyz, p) + w >= 0 for every one. The sixth is the far plane, which never rejects.
     public float4 frustumPlanes[6];
 
     // Where the camera is in the world: what every world position has taken off it before it is used, so positions

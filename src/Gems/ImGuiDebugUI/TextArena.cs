@@ -4,10 +4,12 @@ using System.Text;
 namespace Magic.ImGuiDebugUI;
 
 /// <summary>
-/// Text for ImGui as the NUL-terminated UTF-8 it reads. Strings go into blocks of unmanaged memory that never move, so a
-/// pointer handed out stays good for the rest of the frame however many follow it, and the blocks are reused from the
-/// start when the next frame begins: ImGui copies or hashes what it is handed within the call.
+/// Holds one frame's text for ImGui as the NUL-terminated UTF-8 that it reads.
 /// </summary>
+/// <remarks>
+/// A pointer handed out stays good until <see cref="Reset"/>, however many strings follow it. The blocks are used again
+/// from the start each frame, because ImGui copies or hashes what it gets within the call.
+/// </remarks>
 internal sealed unsafe class TextArena : IDisposable
 {
     private const int BlockBytes = 64 * 1024;

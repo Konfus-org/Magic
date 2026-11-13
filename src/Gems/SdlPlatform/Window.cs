@@ -12,13 +12,17 @@ using static Magic.SdlBindings.SDL3;
 namespace Magic.SdlPlatform;
 
 /// <summary>
-/// The window, through SDL3; headless, there is none. What the game thread sets on it is handed to the platform thread,
-/// which shows it.
-/// <para>
-/// It also paces the frames: <see cref="Update"/> waits out the frame rate its settings cap the frames at, one cap while
-/// the window has the focus and another while it hasn't.
-/// </para>
+/// The window through SDL3; there is none when headless.
 /// </summary>
+/// <remarks>
+/// <para>
+/// The platform thread shows what the game thread sets on it.
+/// </para>
+/// <para>
+/// It also paces the frames: <see cref="Update"/> waits out the frame cap of its settings. One cap applies while the
+/// window has the focus, and another while it does not.
+/// </para>
+/// </remarks>
 public sealed class Window : IWindow
 {
     private readonly SdlWindow _sdl;
@@ -78,8 +82,12 @@ public sealed class Window : IWindow
     }
 
     /// <summary>
-    /// Set on the game thread, it reaches the window once it and its image have loaded, unless another was set meanwhile.
+    /// The icon that the window shows.
     /// </summary>
+    /// <remarks>
+    /// Set it only on the game thread. It reaches the window after it and its image load, unless another icon was set
+    /// meanwhile.
+    /// </remarks>
     public unsafe Handle<Icon> Icon
     {
         get;
@@ -110,9 +118,11 @@ public sealed class Window : IWindow
     public WindowHandle Handle { get; }
 
     /// <summary>
-    /// Shows a new window mode, display or resizability of the settings on the platform thread, then waits out the frame
-    /// cap. Game thread.
+    /// Shows a changed window mode, display or resizability on the platform thread, then waits out the frame cap.
     /// </summary>
+    /// <remarks>
+    /// Call it only on the game thread.
+    /// </remarks>
     internal void Update()
     {
         Placement settings = new(_settings.Mode, _settings.Display, _settings.IsResizable);
@@ -136,7 +146,7 @@ public sealed class Window : IWindow
     }
 
     /// <summary>
-    /// The named pointer in a window's <paramref name="properties"/>; 0 when it has none.
+    /// Gets the named pointer in a window's <paramref name="properties"/>; 0 when there is none.
     /// </summary>
     private static unsafe nint GetPointer(uint properties, ReadOnlySpan<byte> name)
     {
@@ -147,10 +157,13 @@ public sealed class Window : IWindow
     }
 
     /// <summary>
-    /// Loads <paramref name="icon"/> and its image on workers, then gives the image's first level, which SDL copies, to
-    /// the window on the platform thread, unless the run ended or another icon was set meanwhile. One that does not load
-    /// or is compressed is a warning, and the window keeps what it shows.
+    /// Loads <paramref name="icon"/> and its image on workers, then gives the image's first level to the window on the
+    /// platform thread.
     /// </summary>
+    /// <remarks>
+    /// SDL copies the image. It does nothing if the run ended or another icon was set meanwhile. If the icon does not
+    /// load or is compressed, it logs a warning, and the window keeps its icon.
+    /// </remarks>
     private async Task ShowIconAsync(Handle<Icon> icon)
     {
         if (icon == Handle<Icon>.None)
@@ -199,8 +212,8 @@ public sealed class Window : IWindow
     }
 
     /// <summary>
-    /// Gives the window the display, mode and resizability <paramref name="settings"/> change from <paramref name="old"/>,
-    /// on the platform thread, unless the run ended meanwhile.
+    /// Gives the window the display, mode and resizability <paramref name="settings"/> change from
+    /// <paramref name="old"/>, on the platform thread, unless the run ended meanwhile.
     /// </summary>
     private async Task ShowWindowAsync(Placement old, Placement settings)
     {
@@ -231,9 +244,12 @@ public sealed class Window : IWindow
     }
 
     /// <summary>
-    /// Fullscreen fills the display without a border; maximized and windowed leave fullscreen first, as a fullscreen
-    /// window neither maximizes nor restores. Windowed returns the window to its last size.
+    /// Sets the window's mode.
     /// </summary>
+    /// <remarks>
+    /// Fullscreen fills the display without a border. Maximized and windowed leave fullscreen first, because a
+    /// fullscreen window neither maximizes nor restores. Windowed returns the window to its last size.
+    /// </remarks>
     private unsafe void SetMode(WindowMode mode)
     {
         SDL_SetWindowFullscreen(_sdl.Pointer, mode == WindowMode.Fullscreen);
@@ -244,7 +260,7 @@ public sealed class Window : IWindow
     }
 
     /// <summary>
-    /// What the OS knows the window by, which SDL keeps among its properties.
+    /// Reads what the OS knows the window by, from SDL's properties.
     /// </summary>
     private unsafe WindowHandle ReadHandle()
     {

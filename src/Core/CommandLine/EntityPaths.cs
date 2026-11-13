@@ -11,11 +11,13 @@ using Magic.Utils;
 namespace Magic.CommandLine;
 
 /// <summary>
-/// A value of an entity's, named by a path as the console takes it: <c>entity.component.member</c> and on to any depth,
-/// such as <c>player.transform.rotation.y</c>. The entity is a tag's name, which is every entity tagged so, or an id. A
-/// component or member is its name in any case, or its capitals' initials (<c>fov</c> for <c>FieldOfView</c>). The console's
-/// get reads one; its set writes one.
+/// Reads and writes a value of an entity, named by a console path such as <c>player.transform.rotation.y</c>.
 /// </summary>
+/// <remarks>
+/// A path is <c>entity.component.member</c>, to any depth. The entity is an id, or the name of a tag, which names each
+/// entity with that tag. A component or member is its name in any case, or the initials of its capitals (<c>fov</c>
+/// for <c>FieldOfView</c>). The get command of the console reads one, and its set command writes one.
+/// </remarks>
 internal static class EntityPaths
 {
     /// <summary>
@@ -47,9 +49,12 @@ internal static class EntityPaths
     }
 
     /// <summary>
-    /// Writes <paramref name="values"/> at <paramref name="path"/> on each entity it names that has the component: how
-    /// many it wrote, or why none.
+    /// Writes <paramref name="values"/> at <paramref name="path"/> on each entity that it names and that has the
+    /// component.
     /// </summary>
+    /// <remarks>
+    /// It returns how many it wrote, or why it wrote none.
+    /// </remarks>
     public static Result<int> Write(IEcs ecs, string path, ReadOnlySpan<string> values)
     {
         Result<ImmutableArray<(Entity Entity, IComponent Component)>> found = FindComponents(ecs, path);
@@ -157,9 +162,11 @@ internal static class EntityPaths
     }
 
     /// <summary>
-    /// Where in <paramref name="names"/> the one <paramref name="name"/> names is: by its name in any case first, then by
-    /// its initials, its first letter and each capital after it; -1 for none.
+    /// Returns the index in <paramref name="names"/> of the name that <paramref name="name"/> names, or -1 for none.
     /// </summary>
+    /// <remarks>
+    /// It matches the name in any case first, then the initials: the first letter and each capital after it.
+    /// </remarks>
     private static int FindName(string[] names, string name)
     {
         int index = Array.FindIndex(names, named => string.Equals(named, name, StringComparison.OrdinalIgnoreCase));
@@ -195,9 +202,12 @@ internal static class EntityPaths
     }
 
     /// <summary>
-    /// Writes <paramref name="values"/> at <paramref name="members"/> under <paramref name="owner"/>, a box, which it
-    /// changes: each value type on the way is a copy, written into the copy above it once changed.
+    /// Writes <paramref name="values"/> at <paramref name="members"/> under <paramref name="owner"/>, a box that it
+    /// changes.
     /// </summary>
+    /// <remarks>
+    /// Each value type on the way is a copy, which it writes into the copy above it after the change.
+    /// </remarks>
     private static Result WriteMembers(object owner, ReadOnlySpan<string> members, ReadOnlySpan<string> values)
     {
         if (FindMember(owner.GetType(), members[0]) is not { } member)

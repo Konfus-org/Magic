@@ -3,9 +3,11 @@ using System.Collections.Immutable;
 namespace Magic.Assets;
 
 /// <summary>
-/// How a <see cref="Texture"/>'s texels are stored. The BC7 formats are a 4 x 4 block of texels in each 16 bytes, a
-/// level smaller than a block taking one.
+/// How the texels of a <see cref="Texture"/> are stored.
 /// </summary>
+/// <remarks>
+/// A BC7 format stores a 4 x 4 block of texels in each 16 bytes. A level smaller than a block takes one block.
+/// </remarks>
 public enum TextureFormat : byte
 {
     /// <summary>
@@ -80,10 +82,11 @@ public enum TextureWrap : byte
 public readonly record struct TextureLevel(int Width, int Height, int Offset, int Size);
 
 /// <summary>
-/// An image, decoded and ready to upload: every mip level in <see cref="Pixels"/>, level 0 first, tightly packed. Its
-/// importer has already turned it into <see cref="Format"/> and made its mips, so whatever draws it copies bytes and
-/// nothing else.
+/// An image, decoded and ready to upload: every mip level in <see cref="Pixels"/>, level 0 first, tightly packed.
 /// </summary>
+/// <remarks>
+/// Its importer already converted it to <see cref="Format"/> and made its mips, so the renderer only copies bytes.
+/// </remarks>
 public sealed class Texture : IAsset<Texture>
 {
     public required int Width { get; init; }

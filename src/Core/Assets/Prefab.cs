@@ -4,9 +4,12 @@ using Magic.Ecs;
 namespace Magic.Assets;
 
 /// <summary>
-/// A bundle of entities, spawned together wherever it is put: a tree of parts, each one entity. A prefab it places is a
-/// part whose children are that prefab's parts. Positions are relative to where it is put. A gem reads its files.
+/// A bundle of entities, spawned together wherever it is put: a tree of parts, each one entity.
 /// </summary>
+/// <remarks>
+/// A prefab that it places is a part whose children are that prefab's parts. Positions are relative to where it is put.
+/// A gem reads its files.
+/// </remarks>
 public sealed class Prefab : IAsset<Prefab>
 {
     public required ImmutableArray<PrefabPart> Parts { get; init; }

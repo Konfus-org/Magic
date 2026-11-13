@@ -16,7 +16,7 @@ namespace Magic.CommandLine.Commands;
 internal static class CommandLookups
 {
     /// <summary>
-    /// Whether a project is open for a command that needs one to <paramref name="what"/>; it logs an error when none is.
+    /// Whether a project is open for a command that needs one to <paramref name="what"/>; it logs an error when not.
     /// </summary>
     public static bool IsProjectOpen(App app, string what)
     {
@@ -29,9 +29,12 @@ internal static class CommandLookups
     }
 
     /// <summary>
-    /// The <typeparamref name="T"/> at <paramref name="pathOrName"/>, or else the first whose file is named it, in any
-    /// case and without its extension (<c>Tree</c> for <c>Prefabs/Tree.prefab</c>); none when there is neither.
+    /// The <typeparamref name="T"/> at <paramref name="pathOrName"/>, or else the first whose file has that name.
     /// </summary>
+    /// <remarks>
+    /// The name is in any case and without its extension (<c>Tree</c> for <c>Prefabs/Tree.prefab</c>). It is none
+    /// when there is neither.
+    /// </remarks>
     public static Handle<T> FindAsset<T>(AssetManager assets, string pathOrName)
         where T : IAsset<T>
     {
