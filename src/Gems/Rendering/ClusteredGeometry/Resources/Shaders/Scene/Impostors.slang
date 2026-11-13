@@ -1,5 +1,5 @@
 // Octahedral impostors. An instance whose model baked an atlas as it was clustered (C#'s ImpostorBuilder) draws
-// as a quad fitted to its box once it is under a handoff's pixel radius on screen or past its distance, the three
+// as a quad fitted to what its views show once it is under a handoff's pixel radius on screen or past its distance, the three
 // views nearest the camera's direction blended. In the handoff its clusters draw too, each pixel shown by one of the
 // two by a dither on the fade, so nothing pops (Brucks, "Octahedral Impostors", 2018).
 module "Scene/Impostors";
@@ -32,7 +32,9 @@ public static const uint ImpostorInstanceMask = (1u << ImpostorSlotShift) - 1u;
 public uint EncodeImpostorId(uint instance, uint slot) { return ImpostorFlag | ((slot & 7u) << ImpostorSlotShift) | instance; }
 
 // One model's impostor, C#'s GpuImpostor: the box around the model in its frame, the heap id of its atlas and of the
-// atlas of the texture coordinates each texel shows.
+// atlas of the texture coordinates each texel shows. A row of the impostor table is this, then each view's bounds:
+// the texels it saw something at, the first column and row in the low two bytes, one past the last in the high two,
+// 0 for none.
 public struct GpuImpostor
 {
     public float3 boundsMin;
@@ -41,10 +43,25 @@ public struct GpuImpostor
     public uint uvAtlas;
 }
 
+static const uint ImpostorBytes = 32u;
+static const uint ImpostorRowBytes = ImpostorBytes + ImpostorViews * ImpostorViews * 4u;
+
 public GpuImpostor LoadImpostor(uint row)
 {
-    ArrayRef<GpuImpostor> impostors = { GetClusters().impostors };
-    return impostors[row];
+    BufferRef impostors = { GetClusters().impostors };
+    return impostors.Load<GpuImpostor>(row * ImpostorRowBytes);
+}
+
+// The bounds of the blend's three views, as the row packs them.
+public uint3 LoadImpostorViewBounds(uint row, ImpostorBlend blend)
+{
+    BufferRef impostors = { GetClusters().impostors };
+    uint at = row * ImpostorRowBytes + ImpostorBytes;
+    return uint3(
+        impostors.Load<uint>(at + blend.cells.x * 4u),
+        impostors.Load<uint>(at + blend.cells.y * 4u),
+        impostors.Load<uint>(at + blend.cells.z * 4u)
+    );
 }
 
 // How far into the handoff an instance is, 0 for clusters alone, 1 for the impostor alone.
@@ -94,9 +111,27 @@ ImpostorView CreateViewFrame(float3 forward)
 
 ImpostorView GetView(uint2 cell) { return CreateViewFrame(DecodeOctahedral(float2(cell) / float(ImpostorViews - 1u) * 2.0 - 1.0)); }
 
-// The quad an impostor draws as, camera-relative: the corner at uv in [0, 1]² of the box's outline as the camera sees
-// it, on the plane through the box's nearest corner, so the depth it writes is never nearer than the quad.
-public float3 GetImpostorCorner(FrameConstants frame, GpuInstance instance, GpuImpostor impostor, float2 uv)
+// A model point as the camera sees it: its spread across and up on the plane through the instance's centre, along its
+// line of sight, and how far along the view it is.
+float3 GetOnCenterPlane(FrameConstants frame, GpuInstance instance, float3 local, ImpostorView view, float centerAlong)
+{
+    float3 corner = ToCameraRelative(frame, ToWorld(instance.world, local));
+    float along = max(dot(corner, view.forward), 1e-3);
+    return float3(float2(dot(corner, view.right), dot(corner, view.up)) * (centerAlong / along), along);
+}
+
+// The quad an impostor draws as, camera-relative: the corner at uv in [0, 1]² of the outline of what the blend's views
+// can show, within the box's outline as the camera sees it, on the plane through the box's nearest corner, so the depth
+// it writes is never nearer than the quad. A pixel shows a view's texel only where its ray crosses that texel on the
+// view's plane, so the outline of the views' covered rectangles holds every pixel that can be kept.
+public float3 GetImpostorCorner(
+    FrameConstants frame,
+    GpuInstance instance,
+    GpuImpostor impostor,
+    ImpostorBlend blend,
+    uint3 viewBounds,
+    float2 uv
+)
 {
     float3 center = ToCameraRelative(frame, instance.boundsCenter);
     float centerAlong = length(center);
@@ -114,13 +149,41 @@ public float3 GetImpostorCorner(FrameConstants frame, GpuInstance instance, GpuI
             (i & 2u) != 0u ? impostor.boundsMax.y : impostor.boundsMin.y,
             (i & 4u) != 0u ? impostor.boundsMax.z : impostor.boundsMin.z
         );
-        float3 corner = ToCameraRelative(frame, ToWorld(instance.world, local));
-        float along = max(dot(corner, view.forward), 1e-3);
-        float2 onPlane = float2(dot(corner, view.right), dot(corner, view.up)) * (centerAlong / along);
-        low = min(low, onPlane);
-        high = max(high, onPlane);
-        nearest = min(nearest, along);
+        float3 seen = GetOnCenterPlane(frame, instance, local, view, centerAlong);
+        low = min(low, seen.xy);
+        high = max(high, seen.xy);
+        nearest = min(nearest, seen.z);
     }
+
+    // Each view's covered texels, a rectangle on its plane through the model's centre, as the trace places them.
+    float3 modelCenter = ToWorld(instance.inverseWorld, instance.boundsCenter);
+    float modelRadius = instance.boundsRadius / GetMaxScale(instance.world);
+    float2 viewLow = float2(1e30, 1e30);
+    float2 viewHigh = float2(-1e30, -1e30);
+    for (uint v = 0u; v < 3u; v++)
+    {
+        uint packed = viewBounds[v];
+        if (packed == 0u)
+            continue;
+
+        float4 texels = float4(packed & 0xFFu, (packed >> 8u) & 0xFFu, (packed >> 16u) & 0xFFu, packed >> 24u)
+            / float(ImpostorTile);
+        float2 stLow = float2(texels.x, 1.0 - texels.w) * 2.0 - 1.0;
+        float2 stHigh = float2(texels.z, 1.0 - texels.y) * 2.0 - 1.0;
+        ImpostorView baked = GetView(uint2(blend.cells[v] % ImpostorViews, blend.cells[v] / ImpostorViews));
+        for (uint i = 0u; i < 4u; i++)
+        {
+            float2 st = float2((i & 1u) != 0u ? stHigh.x : stLow.x, (i & 2u) != 0u ? stHigh.y : stLow.y);
+            float3 local = modelCenter + (baked.right * st.x + baked.up * st.y) * modelRadius;
+            float2 seen = GetOnCenterPlane(frame, instance, local, view, centerAlong).xy;
+            viewLow = min(viewLow, seen);
+            viewHigh = max(viewHigh, seen);
+        }
+    }
+
+    // Where the two outlines don't meet, or no view saw anything, the quad has no area and draws nothing.
+    low = max(low, viewLow);
+    high = max(min(high, viewHigh), low);
 
     // The outline on the centre's plane, slid along the lines of sight onto the nearest corner's.
     float2 at = lerp(low, high, uv);

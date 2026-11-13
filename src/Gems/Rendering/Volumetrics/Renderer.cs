@@ -34,6 +34,12 @@ public sealed class Renderer : IRender<VolumetricsInput, Air>, IRender, IHookInt
     private const int Slices = 64;
 
     /// <summary>
+    /// The slices each group of the scattering pass fills, one after another: the <c>FillAir</c> shader's
+    /// <c>GroupSlices</c>.
+    /// </summary>
+    private const int GroupSlices = 4;
+
+    /// <summary>
     /// The texels along each side of the clouds' picture of the sky.
     /// </summary>
     private const int CloudTexels = 512;
@@ -178,7 +184,7 @@ public sealed class Renderer : IRender<VolumetricsInput, Air>, IRender, IHookInt
             .Reads(traced)
             .Reads(gpu.Frame, gpu.LightTable, history.Value)
             .Writes(scattering.Value)
-            .DispatchOver(size.Width, size.Height, Slices);
+            .DispatchOver(size.Width, size.Height, Slices / GroupSlices);
         graph
             .Compute("Integrate air", _integrateShader, header, RenderStages.Light)
             .Reads(gpu.Frame, scattering.Value)

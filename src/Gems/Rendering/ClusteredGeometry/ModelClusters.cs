@@ -51,7 +51,16 @@ internal sealed class ModelClusters
     public required ImmutableArray<Half> ImpostorUv { get; init; }
 
     /// <summary>
-    /// The box around the whole model, in its frame: what an impostor's quad is fitted to.
+    /// The texels that each view of <see cref="Impostor"/> saw something at, view by view, row by row.
+    /// </summary>
+    /// <remarks>
+    /// A view's value holds its first column and row in the low two bytes, and one past its last column and row in the
+    /// high two. It is 0 for a view that saw nothing.
+    /// </remarks>
+    public required ImmutableArray<uint> ImpostorViewBounds { get; init; }
+
+    /// <summary>
+    /// The box around the whole model, in its frame: the outline that an impostor's quad stays inside.
     /// </summary>
     public required Vector3 BoundsMin { get; init; }
 

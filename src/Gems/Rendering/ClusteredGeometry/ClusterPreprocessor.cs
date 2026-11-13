@@ -20,7 +20,7 @@ internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClust
     /// <summary>
     /// Raised when the bytes written change shape, or the hierarchy is built otherwise.
     /// </summary>
-    public int Version => 2;
+    public int Version => 3;
 
     public ModelClusters Preprocess(Model asset) => ClusterBuilder.Build(asset);
 
@@ -35,6 +35,7 @@ internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClust
                 value.Clusters.Length,
                 value.Impostor.Length,
                 value.ImpostorUv.Length,
+                value.ImpostorViewBounds.Length,
                 value.BoundsMin,
                 value.BoundsMax
             )
@@ -45,6 +46,7 @@ internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClust
         bytes.Write(MemoryMarshal.AsBytes(value.Clusters.AsSpan()));
         bytes.Write(MemoryMarshal.AsBytes(value.Impostor.AsSpan()));
         bytes.Write(MemoryMarshal.AsBytes(value.ImpostorUv.AsSpan()));
+        bytes.Write(MemoryMarshal.AsBytes(value.ImpostorViewBounds.AsSpan()));
     }
 
     public Result<ModelClusters> Read(ReadOnlySpan<byte> bytes)
@@ -58,7 +60,8 @@ internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClust
             + ((long)header.IndexCount * sizeof(uint))
             + ((long)header.ClusterCount * GpuCluster.Bytes)
             + ((long)header.ImpostorHalves * sizeof(ushort))
-            + ((long)header.ImpostorUvHalves * sizeof(ushort));
+            + ((long)header.ImpostorUvHalves * sizeof(ushort))
+            + ((long)header.ImpostorViewBoundsCount * sizeof(uint));
         if (
             header.ModelVertexCount < 0
             || header.VertexCount < 0
@@ -66,6 +69,7 @@ internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClust
             || header.ClusterCount < 0
             || header.ImpostorHalves < 0
             || header.ImpostorUvHalves < 0
+            || header.ImpostorViewBoundsCount < 0
             || bytes.Length < needed
         )
             return Result.Failure("the entry is cut short.");
@@ -74,6 +78,7 @@ internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClust
         if (
             header.ImpostorHalves != ImpostorBuilder.Size * ImpostorBuilder.Size * 4
             || header.ImpostorUvHalves != ImpostorBuilder.Size * ImpostorBuilder.Size * 2
+            || header.ImpostorViewBoundsCount != ImpostorBuilder.Views * ImpostorBuilder.Views
         )
             return Result.Failure("its impostor is not the size of an atlas.");
 
@@ -85,6 +90,7 @@ internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClust
             Clusters = Packing.Read<GpuCluster>(ref bytes, header.ClusterCount),
             Impostor = Packing.Read<Half>(ref bytes, header.ImpostorHalves),
             ImpostorUv = Packing.Read<Half>(ref bytes, header.ImpostorUvHalves),
+            ImpostorViewBounds = Packing.Read<uint>(ref bytes, header.ImpostorViewBoundsCount),
             BoundsMin = header.BoundsMin,
             BoundsMax = header.BoundsMax,
         };
@@ -110,6 +116,7 @@ internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClust
         int ClusterCount,
         int ImpostorHalves,
         int ImpostorUvHalves,
+        int ImpostorViewBoundsCount,
         Vector3 BoundsMin,
         Vector3 BoundsMax
     );

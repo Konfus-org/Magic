@@ -168,10 +168,16 @@ internal record struct GpuCluster
 /// One model's impostor, 32 bytes: the twin of <c>Scene/Impostors.slang</c>'s: the box around the model in its
 /// frame, and the heap id of its atlas.
 /// </summary>
+/// <remarks>
+/// A row of the impostor table is this, then its views' bounds as <see cref="ModelClusters.ImpostorViewBounds"/> packs
+/// them.
+/// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct GpuImpostor
 {
     public const int Bytes = 32;
+
+    public const int RowBytes = Bytes + (ImpostorBuilder.Views * ImpostorBuilder.Views * sizeof(uint));
 
     public Vector3 BoundsMin;
 
