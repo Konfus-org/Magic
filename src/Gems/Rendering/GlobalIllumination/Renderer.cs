@@ -199,7 +199,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
             constants.Value,
             tracedSize,
             [.. sky, gpu.LightTable, gpu.Instances, gpu.Vertices, gpu.Indices, gpu.Meshes, traced.HitMaterials],
-            SkyTables.GetShading(input.Sky, _openSky)
+            SkyTables.GetSkyType(input.Sky, _openSky)
         );
         Result<(ProbeGridConstants Grid, ProbeUpdateConstants Update)> probes = _probes.Prepare(
             graph,

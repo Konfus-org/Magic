@@ -26,6 +26,12 @@ public readonly record struct SkyInput(GpuView View);
 /// </remarks>
 public sealed class Renderer : IRender<SkyInput, SkyTables>, IRender, IHookIntoDomainLoading
 {
+    private static readonly TextureDescription _transmittanceTable = GetTable("Sky transmittance", 256, 64);
+
+    private static readonly TextureDescription _multiScatteringTable = GetTable("Sky multi-scattering", 32, 32);
+
+    private static readonly TextureDescription _viewTable = GetTable("Sky view", 192, 108);
+
     /// <summary>
     /// Done once the sky's shaders are built or failed.
     /// </summary>
@@ -78,9 +84,9 @@ public sealed class Renderer : IRender<SkyInput, SkyTables>, IRender, IHookIntoD
         if (shaders != GpuState.Ready)
             return none;
 
-        Result<GpuTexture> transmittance = graph.Texture(GetTable("Sky transmittance", 256, 64));
-        Result<GpuTexture> multiScattering = graph.Texture(GetTable("Sky multi-scattering", 32, 32));
-        Result<GpuTexture> view = graph.Texture(GetTable("Sky view", 192, 108));
+        Result<GpuTexture> transmittance = graph.Texture(_transmittanceTable);
+        Result<GpuTexture> multiScattering = graph.Texture(_multiScatteringTable);
+        Result<GpuTexture> view = graph.Texture(_viewTable);
         if (Result.FindFailure(transmittance, multiScattering, view) is { Ok: false } failed)
         {
             graph.Fail(RenderFailure.Resource, "Sky is not drawn", failed.Error);
@@ -105,17 +111,17 @@ public sealed class Renderer : IRender<SkyInput, SkyTables>, IRender, IHookIntoD
             .Compute("Sky: transmittance", _transmittanceShader, header, RenderStage.Prepare)
             .Reads(gpu.Frame)
             .Writes(transmittance.Value)
-            .DispatchOver(256, 64);
+            .DispatchOver(_transmittanceTable.Width, _transmittanceTable.Height);
         graph
             .Compute("Sky: multi-scattering", _multiScatteringShader, header, RenderStage.Prepare)
             .Reads(gpu.Frame, transmittance.Value)
             .Writes(multiScattering.Value)
-            .DispatchOver(32, 32);
+            .DispatchOver(_multiScatteringTable.Width, _multiScatteringTable.Height);
         graph
             .Compute("Sky: view", _viewShader, header, RenderStage.Prepare)
             .Reads(gpu.Frame, transmittance.Value, multiScattering.Value)
             .Writes(view.Value)
-            .DispatchOver(192, 108);
+            .DispatchOver(_viewTable.Width, _viewTable.Height);
 
         return new SkyTables(_skyType, transmittance.Value, multiScattering.Value, view.Value);
     }

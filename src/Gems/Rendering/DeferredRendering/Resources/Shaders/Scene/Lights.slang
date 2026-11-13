@@ -1,6 +1,6 @@
-// The frame's lights: the sun, the sky's tables and the light table, every local light drawn this frame, C#'s GpuLight, 64 bytes
-// each, with for each tile of the screen a bit per light that reaches what the tile shows, so a pixel loops over its
-// tile's few lights and not the thousand in the world.
+// The frame's lights: the sun, the sky's tables and the light table, every local light drawn this frame, C#'s GpuLight,
+// 64 bytes each, with for each tile of the screen a bit per light that reaches what the tile shows, so a pixel loops
+// over its tile's few lights and not the thousand in the world.
 module "Scene/Lights";
 
 import Core.Heap;

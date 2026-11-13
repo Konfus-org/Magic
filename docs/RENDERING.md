@@ -2,7 +2,7 @@
 
 The rendering gems draw the world into the window. The renderer, `DeferredRendering`, keeps the world on the GPU and
 lights it. The other gems add parts of the picture: the geometry, the world as rays see it, shadows, indirect light,
-the air, the upscaling and the post effects. A project lists the gems that it wants in its `.magic` file.
+the sky, the air, the upscaling and the post effects. A project lists the gems that it wants in its `.magic` file.
 
 Each gem has a `Renderer` part with one or more render steps. Core runs a step after the steps that make its inputs.
 A step that takes `RenderViews`, or the output of such a step, runs one time for each view of the frame. This diagram
@@ -62,7 +62,7 @@ ECS, the model importer and the texture importer, with a gem that draws its geom
 - A model shows when it is on the GPU. A model that nothing drew for `Rendering.ModelKeepSec` leaves the GPU. It
   loads again when a frame draws it.
 - When a domain replaces the world, the loading screen stays until all that the new world draws is on the GPU or
-  failed. This includes the post effects and the passes of the gem.
+  failed. This includes the passes of the gem.
 
 ### Cameras
 
@@ -128,7 +128,7 @@ the views.
 - `GpuResources` reads a texture, material or model asset when a frame first asks for it.
 - `GpuPacker.Pack` in Core writes the row of a shader struct from its reflected fields and an `IGpuParams` source. The
   renderer packs its material rows with it, and the post-effects gem packs its effect rows with it. A gem gets the
-  heap ids of a material param's texture from `GpuWorld.Textures`.
+  heap ids of a material param's texture from `GpuWorld.GetTexture`.
 - A pass is one `RenderGraph.Compute` or `RenderGraph.Draw` call. The call names what the pass reads and writes.
 - A step draws nothing until each shader entry point that it runs is built.
 - Each frame, a pass asks the graph for its textures and buffers by name and description. The same name and
@@ -229,7 +229,8 @@ renderer. The renderer shades the sky, the sun's colour and the sky's light on t
 ## PostEffects
 
 Runs the post-processing chain over the lit picture. List it in the `.magic` file after the renderer. Without it, the
-renderer shows the lit picture with a simple tonemap and no other effects.
+renderer shows the lit picture with a simple tonemap and no other effects. A scene that bright local lights light is
+then almost white. Such a scene needs this gem.
 
 The effects of the first `PostProcessing` component run in order over the lit picture. Each effect is a material
 whose shader implements the pixel effect contract ([Shaders](SHADERS.md)). One time for each frame, the gem makes the

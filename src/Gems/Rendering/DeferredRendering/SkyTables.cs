@@ -32,7 +32,7 @@ public readonly record struct SkyTables(
     /// Gets the type a pass generic over the sky is specialised on in a frame: the sky's where it made its tables, else
     /// <paramref name="openSky"/>.
     /// </summary>
-    public static ImmutableArray<ShaderTypeArgument> GetShading(
+    public static ImmutableArray<ShaderTypeArgument> GetSkyType(
         in SkyTables? tables,
         ImmutableArray<ShaderTypeArgument> openSky
     ) => tables is { Transmittance.IsNone: false } sky ? sky.SkyType : openSky;

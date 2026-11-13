@@ -7,7 +7,7 @@ namespace Magic.PostEffects;
 /// needs.
 /// </summary>
 /// <remarks>
-/// It is ready when its material, textures and passes are. Its material's row is the view's effect row at its place.
+/// It is ready when its material, textures and passes are. Its material's row is the frame's effect row at its place.
 /// </remarks>
 internal readonly record struct GpuEffect(
     ulong Material,

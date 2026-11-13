@@ -313,9 +313,9 @@ public sealed class Renderer
         _instances.Fill(inputs.Renderers, frame.Index);
 
         // The loading domain shows once the models and materials it waits for are on the GPU, or failed: a model drawn
-        // as the failure cube, which is then waited for too; and once the shading's shaders are built, or failed, on the
-        // sky's type and on the open sky, as its frames take either. Its models are asked for here, as the pools only
-        // take them once they are made; an ask for one asked for already does nothing.
+        // as the failure cube, which is then waited for too; and once the shading's shaders are built, or failed, on
+        // the sky's type and on the open sky, as its frames take either. Its models are asked for here, as the pools
+        // only take them once they are made; an ask for one asked for already does nothing.
         if (_preparing is { } preparing)
         {
             bool isPrepared = !graph.IsAnyLoading(
@@ -430,7 +430,7 @@ public sealed class Renderer
             Models = _resources.Models,
             MaterialShaders = _resources.MaterialShaders,
             HeapTextures = _resources.GetHeapTextures(),
-            Textures = _textures,
+            GetTexture = _textures,
             PreparedDomains = _preparedDomains,
             Inputs = inputs,
             Picture = picture,
@@ -513,8 +513,8 @@ public sealed class Renderer
         int width = Math.Max(1, (int)MathF.Round(shown.Width * scale));
         int height = Math.Max(1, (int)MathF.Round(shown.Height * scale));
 
-        // The frame's buffer, the view's targets and its tiles asked for in that order; the glass
-        // targets only while a material draws translucent, so the graph frees them in a world with none.
+        // The frame's buffer, the view's targets and its tiles asked for in that order; the glass targets only while a
+        // material draws translucent, so the graph frees them in a world with none.
         bool hasGlass = _resources.HasTranslucent;
         TextureDescription depthTarget = new(
             "Depth",
@@ -661,10 +661,10 @@ public sealed class Renderer
     public FinalImage? Render(in Frame frame, RenderGraph graph, in ShadingInput input)
     {
         // The shading is specialised on the sky's type where it made its tables, else on the open sky. The shaders are
-        // the GPU provider's to build, the first ask starting each; while one failed, the shading draws nothing, and the
-        // banner tells it.
+        // the GPU provider's to build, the first ask starting each; while one failed, the shading draws nothing, and
+        // the banner tells it.
         _skyType = input.Sky?.SkyType ?? _openSky;
-        ImmutableArray<ShaderTypeArgument> sky = SkyTables.GetShading(input.Sky, _openSky);
+        ImmutableArray<ShaderTypeArgument> sky = SkyTables.GetSkyType(input.Sky, _openSky);
         ShaderEntry shadeShader = _shadeShader with { TypeArguments = sky };
         ShaderEntry translucentShader = _translucentShader with { TypeArguments = sky };
         GpuState shaders = graph.GetState(shadeShader, translucentShader, _lightViewShader, _showShader);

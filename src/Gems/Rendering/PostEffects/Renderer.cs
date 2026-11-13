@@ -27,8 +27,9 @@ public readonly record struct PostInput(GpuWorld World);
 /// </summary>
 /// <remarks>
 /// <para>
-/// The chain is the effects of the first entity's <see cref="PostProcessing"/>, or when no entity has one, the exposure,
-/// set by the exposure compensation, and the AgX tonemap. Each effect whose material the settings turn off is left out.
+/// The chain is the effects of the first entity's <see cref="PostProcessing"/>, or when no entity has one, the
+/// exposure, set by the exposure compensation, and the AgX tonemap. Each effect whose material the settings turn off
+/// is left out.
 /// </para>
 /// <para>
 /// Each view keeps its effects' histories. A domain loading waits until its effects are on the GPU, or failed.
@@ -138,7 +139,7 @@ public sealed class Renderer : IRender<PostInput, PictureEffects>, IRender, IHoo
             _effects.Forget(asset);
         }
 
-        TextureLookup textures = input.World.Textures;
+        TextureLookup textures = input.World.GetTexture;
         if (_preparing is { } preparing && !_effects.IsLoading(graph, preparing.Effects, textures))
             EndPreparing();
 

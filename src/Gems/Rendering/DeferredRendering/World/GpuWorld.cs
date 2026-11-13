@@ -66,7 +66,7 @@ public readonly record struct GpuWorld
     /// <summary>
     /// Gets a material param's texture in the heap, as <see cref="IGpuParams.GetTexture"/> asks for it.
     /// </summary>
-    public required TextureLookup Textures { get; init; }
+    public required TextureLookup GetTexture { get; init; }
 
     /// <summary>
     /// How many domains that loaded have had what they draw put on the GPU, as <see cref="GpuView.PreparedDomains"/>
