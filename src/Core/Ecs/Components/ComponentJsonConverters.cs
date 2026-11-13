@@ -229,14 +229,16 @@ internal sealed class ScriptContainerJsonConverter : JsonConverter<ScriptContain
                     held.Add(KeyValuePair.Create(value.Name, value.Value));
             }
 
+            // A save took the copy of this script after it started, so its keys are the state of that copy, which Keep
+            // puts in the slot. The keys of a prefab are the values that the script starts with.
             Handle<Script> script = new(asset);
-            ScriptValues values = ScriptValues.Of(CollectionsMarshal.AsSpan(held));
-            if (!scripts.Add(script, values))
+            bool isStarted =
+                slot.TryGetProperty("started", out JsonElement started) && started.ValueKind == JsonValueKind.True;
+            if (!scripts.Add(script, isStarted ? ScriptValues.None : ScriptValues.Of(CollectionsMarshal.AsSpan(held))))
                 throw new JsonException($"An entity has at most {ScriptContainer.Capacity} scripts, each one time.");
 
-            // A save took the copy of this script after it started.
-            if (slot.TryGetProperty("started", out JsonElement started) && started.ValueKind == JsonValueKind.True)
-                scripts.Keep(script, values);
+            if (isStarted)
+                scripts.Keep(script, CollectionsMarshal.AsSpan(held));
         }
 
         return scripts;

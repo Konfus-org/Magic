@@ -1,17 +1,22 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
-using System.Text;
 using System.Text.Json;
 
 namespace Magic.Ecs.Components;
 
 /// <summary>
-/// The values that a prefab gives one script of an entity, as JSON by name, such as <c>{ "depth": 0.5 }</c>.
+/// The values that a prefab gives one script of an entity, or the state that a save kept of a copy of it, as JSON by
+/// name, such as <c>{ "depth": 0.5 }</c>.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The process holds each set once, and no one changes it, so a <see cref="ScriptSlot"/> stays plain unmanaged data:
-/// it holds only the set's number. Equal values are one set. Any thread reads a set, as the importers run on workers.
+/// The process holds each set, and no one changes it, so a <see cref="ScriptSlot"/> stays plain unmanaged data: it
+/// holds only the set's number. Any thread reads a set, as the importers run on workers.
+/// </para>
+/// <para>
+/// A file's set lives while the process runs, as the file can be read into a new container at any time. A set that a
+/// save kept lives only while a slot holds it: a save makes one set for each copy that runs, and frees the sets that
+/// no slot holds any more.
 /// </para>
 /// <para>
 /// A value is JSON, so a set fits a script in any language, and the gem of the script's language gives it to the
@@ -26,9 +31,9 @@ public readonly struct ScriptValues : IEquatable<ScriptValues>
     private static readonly ConcurrentDictionary<int, ImmutableArray<KeyValuePair<string, JsonElement>>> _byId = [];
 
     /// <summary>
-    /// The number of each set by its JSON, so the same values read twice are one set.
+    /// The number of each set that a save kept, as the keys: the sets that <see cref="FreeUnheld"/> frees.
     /// </summary>
-    private static readonly ConcurrentDictionary<string, int> _ids = [];
+    private static readonly ConcurrentDictionary<int, byte> _ofSaves = [];
 
     private static int _lastId;
 
@@ -52,31 +57,13 @@ public readonly struct ScriptValues : IEquatable<ScriptValues>
     public static bool operator !=(ScriptValues left, ScriptValues right) => !left.Equals(right);
 
     /// <summary>
-    /// The set of <paramref name="values"/>, which the process then holds.
+    /// The set of <paramref name="values"/> that a file gives, which the process then holds.
     /// </summary>
-    public static ScriptValues Of(ReadOnlySpan<KeyValuePair<string, JsonElement>> values)
-    {
-        if (values.IsEmpty)
-            return None;
-
-        ImmutableArray<KeyValuePair<string, JsonElement>>.Builder set = ImmutableArray.CreateBuilder<
-            KeyValuePair<string, JsonElement>
-        >(values.Length);
-        StringBuilder json = new();
-        foreach ((string name, JsonElement value) in values)
-        {
-            // A clone outlives the document that read it, which the caller frees.
-            set.Add(KeyValuePair.Create(name, value.Clone()));
-            json.Append(name).Append(':').Append(value.GetRawText()).Append(';');
-        }
-
-        ImmutableArray<KeyValuePair<string, JsonElement>> all = set.MoveToImmutable();
-
-        return new ScriptValues(_ids.GetOrAdd(json.ToString(), _ => Add(all)));
-    }
+    public static ScriptValues Of(ReadOnlySpan<KeyValuePair<string, JsonElement>> values) =>
+        values.IsEmpty ? None : new ScriptValues(Add(values));
 
     /// <summary>
-    /// Whether both are the same set of values.
+    /// Whether both are the same set of values. Two sets read one by one are two sets, even with equal values.
     /// </summary>
     public bool Equals(ScriptValues other) => _id == other._id;
 
@@ -85,12 +72,52 @@ public readonly struct ScriptValues : IEquatable<ScriptValues>
     public override int GetHashCode() => _id;
 
     /// <summary>
+    /// The set of <paramref name="state"/>, the state that a save keeps of one copy of a script, which only the slot
+    /// that a <see cref="ScriptContainer.Keep"/> puts it in holds.
+    /// </summary>
+    internal static ScriptValues OfSave(ReadOnlySpan<KeyValuePair<string, JsonElement>> state)
+    {
+        if (state.IsEmpty)
+            return None;
+
+        int id = Add(state);
+        _ofSaves[id] = 0;
+
+        return new ScriptValues(id);
+    }
+
+    /// <summary>
+    /// Frees each set that a save made and that <paramref name="held"/> does not hold, so the state of a copy that
+    /// went goes with it. Call it on the game thread, with the sets of every slot of the world.
+    /// </summary>
+    internal static void FreeUnheld(IReadOnlySet<ScriptValues> held)
+    {
+        foreach (int id in _ofSaves.Keys)
+        {
+            if (held.Contains(new ScriptValues(id)))
+                continue;
+
+            _ofSaves.TryRemove(id, out _);
+            _byId.TryRemove(id, out _);
+        }
+    }
+
+    /// <summary>
     /// Holds <paramref name="values"/> as a new set and gives its number.
     /// </summary>
-    private static int Add(ImmutableArray<KeyValuePair<string, JsonElement>> values)
+    private static int Add(ReadOnlySpan<KeyValuePair<string, JsonElement>> values)
     {
+        ImmutableArray<KeyValuePair<string, JsonElement>>.Builder set = ImmutableArray.CreateBuilder<
+            KeyValuePair<string, JsonElement>
+        >(values.Length);
+        foreach ((string name, JsonElement value) in values)
+        {
+            // A clone outlives the document that read it, which the caller frees.
+            set.Add(KeyValuePair.Create(name, value.Clone()));
+        }
+
         int id = Interlocked.Increment(ref _lastId);
-        _byId[id] = values;
+        _byId[id] = set.MoveToImmutable();
 
         return id;
     }

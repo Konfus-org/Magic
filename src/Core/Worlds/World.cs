@@ -275,6 +275,8 @@ public sealed class World : IEcs, IDisposable
             hook.OnWorldSaving();
         }
 
+        FreeKeptScriptState();
+
         ImmutableArray<Handle<Domain>> open = Domains;
         ImmutableArray<DomainRead> domains = [.. open.Select(domain => _read[domain])];
         WorldState now = GetState();
@@ -808,6 +810,30 @@ public sealed class World : IEcs, IDisposable
         return new WorldState(placed, made.ToImmutable(), IsPaused, TimeScale);
     }
 
+    /// <summary>
+    /// Frees what the saves kept of the script copies that no entity of the world holds any more. Game thread.
+    /// </summary>
+    /// <remarks>
+    /// A save keeps the state of each copy that runs in the slot of its script, as a new set of values, so the sets of
+    /// the save before it, and of every copy whose entity or script went, are held by nothing.
+    /// </remarks>
+    private void FreeKeptScriptState()
+    {
+        HashSet<ScriptValues> held = [];
+        foreach (EcsChunk<ScriptContainer> chunk in Query<ScriptContainer>())
+        {
+            for (int i = 0; i < chunk.Entities.Length; i++)
+            {
+                foreach (ScriptSlot slot in chunk.First[i])
+                {
+                    held.Add(slot.Values);
+                }
+            }
+        }
+
+        ScriptValues.FreeUnheld(held);
+    }
+
     private string GetName(Handle<Domain> domain) => _assets.GetPath(domain) ?? "a domain";
 
     /// <summary>
@@ -905,6 +931,7 @@ public sealed class World : IEcs, IDisposable
             }
 
             DestroyEntities(leaving.ToImmutable());
+            FreeKeptScriptState();
             foreach (Entity entity in staying)
             {
                 Remove<Owner>(entity);

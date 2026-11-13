@@ -85,7 +85,7 @@ public sealed class Runner(World world, AssetManager assets, IServiceProvider se
                 continue;
 
             List<KeyValuePair<string, JsonElement>> state = _state.Read(copy.Script);
-            world.Mutate<ScriptContainer>(entity).Keep(script, ScriptValues.Of(CollectionsMarshal.AsSpan(state)));
+            world.Mutate<ScriptContainer>(entity).Keep(script, CollectionsMarshal.AsSpan(state));
         }
     }
 
