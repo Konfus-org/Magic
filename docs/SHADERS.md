@@ -14,8 +14,8 @@ to the library.
 - `Core/` has what each module needs: the heap that each resource is read through (`Heap`), the data of a pass
   (`Pass`), the data that each pass of a frame reads (`Frame`), math, colour, packing, sampling and hashing.
 - `Surface/` has the data that a material gets for a pixel, and the data that it gives back.
-- `Material/` has the material contract, `IMaterial`, and the materials of each project: `Standard`, and `Glass`,
-  which is translucent.
+- `Material/` has the material contract, `IMaterial`, and the materials of each project: `Standard`, which is
+  metal-roughness PBR, and `Glass`, which is translucent.
 - `Sky/` has the sky contract, `ISky`, and `OpenSky`, the sky of a frame that has no sky tables.
 
 The tables and techniques of a renderer are in the `Resources/Shaders/` folder of its gem ([Rendering](RENDERING.md)).
