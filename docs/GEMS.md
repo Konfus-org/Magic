@@ -72,6 +72,8 @@ How a script runs:
 - The constructor gets the `Entity` for an `Entity` parameter, and a service for each other parameter. Only keep them
   in the constructor. Do the first work in `Start`.
 - The values of the prefab are set on the copy before `Start`, so `Start` reads them.
+- Values that change in the slot later, as the `set` command of the console writes them, are set on the copy in
+  the frame after, so a script is tuned while it runs.
 - The hooks of the behaviours run on the game thread, in the order that the copies started, after the hooks of the
   gems listed before this gem.
 - A behaviour far from each camera of the player updates less often: every frame within 64 m, then one frame in n at

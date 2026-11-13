@@ -19,8 +19,8 @@ namespace Magic.CSharpScripting;
 /// the handle or the entity goes.
 /// </summary>
 /// <remarks>
-/// Each <see cref="Update"/> starts the C# scripts that have no copy, when the world is not loading. Each hook ends the
-/// copies whose entity or handle went. A script in another language is left to the gem for that language.
+/// Each <see cref="Update"/> starts the C# scripts that have no copy, when the world is not loading, and gives each
+/// copy the values of its slot that changed since it took them. Each hook ends the copies whose entity or handle went. A script in another language is left to the gem for that language.
 /// If a script's class is not found, cannot be made or started, or a hook throws, the error is logged and the handle is
 /// taken off the entity. A behaviour
 /// far from the player's cameras updates less often (<see cref="Pacing"/>), unless its entity is global. Game thread.
@@ -40,10 +40,10 @@ public sealed class Runner(World world, AssetManager assets, IServiceProvider se
     private readonly OrderedDictionary<(Entity Entity, Handle<Script> Script), Copy> _attached = [];
 
     /// <summary>
-    /// The scripts that an entity names and that have no copy, found in the query and started after it, as a start can
-    /// change the entities.
+    /// The slots whose copy is to be started or given the values that changed, found in the query and worked on after
+    /// it, as a start can change the entities.
     /// </summary>
-    private readonly List<(Entity Entity, ScriptSlot Slot)> _starting = [];
+    private readonly List<(Entity Entity, ScriptSlot Slot)> _matching = [];
 
     /// <summary>
     /// Where the cameras of the player are, as of this frame's <see cref="Update"/>.
@@ -63,7 +63,7 @@ public sealed class Runner(World world, AssetManager assets, IServiceProvider se
     public void Update(in Frame frame)
     {
         if (!world.IsLoading)
-            StartNew();
+            MatchSlots();
 
         FindCameras();
         Run(Hook.Update, frame);
@@ -116,35 +116,68 @@ public sealed class Runner(World world, AssetManager assets, IServiceProvider se
         ex is TargetInvocationException { InnerException: { } inner } ? inner : ex;
 
     /// <summary>
-    /// Starts a copy of each C# script that an entity names and has none of.
+    /// Makes the copies match the slots of the entities: a copy of each C# script that an entity names and has none
+    /// of, and the values of a slot that changed given to the copy that runs it.
     /// </summary>
-    private void StartNew()
+    private void MatchSlots()
     {
-        _starting.Clear();
+        _matching.Clear();
         foreach (EcsChunk<ScriptContainer> chunk in world.Query<ScriptContainer>())
         {
             for (int i = 0; i < chunk.Entities.Length; i++)
             {
                 foreach (ScriptSlot slot in chunk.First[i])
                 {
-                    if (slot.Script != Handle<Script>.None && !_attached.ContainsKey((chunk.Entities[i], slot.Script)))
-                        _starting.Add((chunk.Entities[i], slot));
+                    if (slot.Script != Handle<Script>.None && !IsTakenUp(chunk.Entities[i], slot))
+                        _matching.Add((chunk.Entities[i], slot));
                 }
             }
         }
 
-        foreach ((Entity entity, ScriptSlot slot) in _starting)
+        foreach ((Entity entity, ScriptSlot slot) in _matching)
         {
             // A start before this one can destroy the entity or take the handle off.
-            if (!IsNamed(entity, slot.Script) || FindClass(slot.Script) is not { } found)
+            if (!IsNamed(entity, slot.Script))
                 continue;
 
-            Result<IScript> started = found.Ok ? Start(found.Value, entity, slot) : Result.Failure(found.Error);
-            if (started.Ok)
-                _attached.Add((entity, slot.Script), new Copy(started.Value));
-            else
-                TakeOff(entity, slot.Script, $"is left off: {started.Error}");
+            if (_attached.TryGetValue((entity, slot.Script), out Copy? copy))
+                Tune(copy, slot, entity);
+            else if (FindClass(slot.Script) is { } found)
+                StartCopy(found, entity, slot);
         }
+    }
+
+    /// <summary>
+    /// Whether the copy of <paramref name="slot"/> runs on <paramref name="entity"/> with the values that the slot
+    /// holds now.
+    /// </summary>
+    /// <remarks>
+    /// The state that a save kept is no new values: the copy that came from the save took it up as it was made.
+    /// </remarks>
+    private bool IsTakenUp(Entity entity, ScriptSlot slot) =>
+        _attached.TryGetValue((entity, slot.Script), out Copy? copy) && (slot.Started || slot.Values == copy.Values);
+
+    /// <summary>
+    /// Gives <paramref name="copy"/> the values that its slot holds now, so a console line or a file that changed
+    /// them reaches the script while it runs.
+    /// </summary>
+    private void Tune(Copy copy, ScriptSlot slot, Entity entity)
+    {
+        _state.SetValues(slot.Values, copy.Script, entity);
+        copy.Values = slot.Values;
+    }
+
+    /// <summary>
+    /// Starts a copy of the class of <paramref name="slot"/> on <paramref name="entity"/>, or takes the handle off
+    /// when it does not start.
+    /// </summary>
+    private void StartCopy(Result<Type> found, Entity entity, ScriptSlot slot)
+    {
+        Result<IScript> started = found.Ok ? Start(found.Value, entity, slot) : Result.Failure(found.Error);
+        if (started.Ok)
+            _attached.Add((entity, slot.Script), new Copy(started.Value, slot.Values));
+        else
+            TakeOff(entity, slot.Script, $"is left off: {started.Error}");
     }
 
     /// <summary>
@@ -358,9 +391,14 @@ public sealed class Runner(World world, AssetManager assets, IServiceProvider se
     /// <summary>
     /// A copy of a script that runs on an entity, and how often it updates.
     /// </summary>
-    private sealed class Copy(IScript script)
+    private sealed class Copy(IScript script, ScriptValues values)
     {
         public IScript Script { get; } = script;
+
+        /// <summary>
+        /// The values of its slot that it took up last.
+        /// </summary>
+        public ScriptValues Values { get; set; } = values;
 
         /// <summary>
         /// The frames between two updates, as this frame's <see cref="Update"/> found.

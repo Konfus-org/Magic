@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using Magic.Assets;
 using Magic.CommandLine.Commands;
 using Magic.Configuration;
@@ -22,6 +23,12 @@ namespace Magic.CommandLine;
 /// </remarks>
 internal sealed class Cli
 {
+    /// <summary>
+    /// The quotes that hold a word of a command together: double quotes, and single quotes, which keep the double
+    /// quotes of a value in JSON.
+    /// </summary>
+    private const string Quotes = @"""'";
+
     private readonly CommandQueue _queue;
 
     private readonly RootCommand _cliCommands;
@@ -140,16 +147,14 @@ internal sealed class Cli
     /// </remarks>
     public Result Execute(string command)
     {
-        if (string.IsNullOrWhiteSpace(command))
+        string[] words = SplitWords(command);
+        if (words.Length == 0)
             return Result.Success();
 
-        string firstWord = command.Split(' ', 2)[0];
-        if (command.StartsWith('-') || _cliCommands.Subcommands.Any(subcommand => subcommand.Name == firstWord))
-            return Invoke(_cliCommands.Parse(command));
+        if (!words[0].StartsWith('-') && !_cliCommands.Subcommands.Any(subcommand => subcommand.Name == words[0]))
+            words[0] = (words[0].Length == 1 ? "-" : "--") + words[0];
 
-        string dashes = command.Length == 1 ? "-" : "--";
-
-        return Invoke(_cliCommands.Parse(dashes + command));
+        return Invoke(_cliCommands.Parse(words));
     }
 
     /// <summary>
@@ -163,6 +168,42 @@ internal sealed class Cli
         Result ran = Execute(line);
         if (!ran.Ok)
             Log.Error($"Couldn't run '{line}': {ran.Error}");
+    }
+
+    /// <summary>
+    /// <paramref name="command"/> in its words: a space ends a word, and a pair of quotes holds one together and goes
+    /// with it, as a shell does.
+    /// </summary>
+    /// <remarks>
+    /// A word in single quotes keeps its double quotes, so a value in JSON comes through whole:
+    /// <c>set sun.scriptcontainer '[{"id":100421}]'</c>.
+    /// </remarks>
+    private static string[] SplitWords(string command)
+    {
+        List<string> words = [];
+        StringBuilder word = new();
+        char quote = default;
+        foreach (char letter in command)
+        {
+            if (letter == quote)
+                quote = default;
+            else if (quote == default && Quotes.Contains(letter, StringComparison.Ordinal))
+                quote = letter;
+            else if (quote == default && char.IsWhiteSpace(letter))
+            {
+                if (word.Length > 0)
+                    words.Add(word.ToString());
+
+                word.Clear();
+            }
+            else
+                word.Append(letter);
+        }
+
+        if (word.Length > 0)
+            words.Add(word.ToString());
+
+        return [.. words];
     }
 
     /// <summary>
