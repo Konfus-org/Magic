@@ -143,6 +143,9 @@ the views.
 
 - `Renderer` has one `Render` method for each step. Each method is its step, in order from top to bottom.
 - `GpuResources` reads a texture, material or model asset when a frame first asks for it.
+- `GpuPacker.Pack` in Core writes the row of a shader struct from its reflected fields and an `IGpuParams` source. The
+  renderer packs its material rows with it, and the post part packs its effect rows with it. A gem gets the heap ids
+  of a material param's texture from `GpuWorld.Textures`.
 - A pass is one `RenderGraph.Compute` or `RenderGraph.Draw` call. The call names what the pass reads and writes.
 - A step draws nothing until each shader entry point that it runs is built.
 - Each frame, a pass asks the graph for its textures and buffers by name and description. The same name and

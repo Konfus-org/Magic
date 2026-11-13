@@ -117,9 +117,9 @@ public sealed class Renderer
     private readonly InstanceTable _instances;
 
     /// <summary>
-    /// Packs a material slot's row, which the world hands on, so a frame makes no delegate.
+    /// Gets a material param's texture, which the world hands on, so a frame makes no delegate.
     /// </summary>
-    private readonly MaterialPacker _packMaterial;
+    private readonly TextureLookup _textures;
 
     /// <summary>
     /// What each view keeps from frame to frame, by its number: where it looked last frame. Render thread.
@@ -228,7 +228,7 @@ public sealed class Renderer
             settings.Anisotropy,
             settings.DroppedTextureLevels
         );
-        _packMaterial = _resources.Pack;
+        _textures = _resources.Get;
         _instances = new InstanceTable(assets, _resources);
         _lightTiles = new LightTiles(assets);
         _banner = new FailureBanner(assets);
@@ -425,11 +425,11 @@ public sealed class Renderer
             Models = _resources.Models,
             MaterialShaders = _resources.MaterialShaders,
             HeapTextures = _resources.GetHeapTextures(),
+            Textures = _textures,
             PreparedDomains = _preparedDomains,
             Inputs = inputs,
             Picture = picture,
             Lights = lights.Value,
-            PackMaterial = _packMaterial,
             Screenshot = screenshot,
         };
 

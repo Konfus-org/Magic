@@ -1,9 +1,16 @@
 using System.Collections.Immutable;
 using System.Drawing;
+using Magic.Assets;
 using Magic.DeferredRendering.View;
 using Magic.Graphics;
 
 namespace Magic.DeferredRendering.World;
+
+/// <summary>
+/// Gets whether the texture that <paramref name="param"/> samples is on the GPU, and its heap ids and its sampler's
+/// when it is; the first ask starts reading it.
+/// </summary>
+public delegate GpuState TextureLookup(MaterialParam param, out uint texture, out uint sampler);
 
 /// <summary>
 /// The world as the GPU holds it this frame, whatever view it is seen through: what the world's step makes once a frame
@@ -57,6 +64,11 @@ public readonly record struct GpuWorld
     public required ImmutableArray<GpuResource> HeapTextures { get; init; }
 
     /// <summary>
+    /// Gets a material param's texture in the heap, as <see cref="IGpuParams.GetTexture"/> asks for it.
+    /// </summary>
+    public required TextureLookup Textures { get; init; }
+
+    /// <summary>
     /// How many domains that loaded have had what they draw put on the GPU, as <see cref="GpuView.PreparedDomains"/>
     /// counts them.
     /// </summary>
@@ -88,12 +100,6 @@ public readonly record struct GpuWorld
     internal Size Picture { get; init; }
 
     internal LightBuffers Lights { get; init; }
-
-    /// <summary>
-    /// Packs a material slot's params into its row, and gets whether its material, its shader's struct and its
-    /// textures are on the GPU.
-    /// </summary>
-    internal MaterialPacker PackMaterial { get; init; }
 
     /// <summary>
     /// The screenshot asked for in this frame; none in most.

@@ -1,12 +1,14 @@
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
+using System.Threading.Channels;
 using Magic.Assets;
 using Magic.DeferredRendering.Post;
 using Magic.DeferredRendering.View;
 using Magic.DeferredRendering.World;
 using Magic.Ecs;
 using Magic.Ecs.Components;
+using Magic.Events;
 using Magic.Graphics;
 using Magic.Projects;
 using Magic.Threading;
@@ -48,6 +50,13 @@ public sealed class PostRenderer : IRender<PostInput, PictureEffects>, IRender, 
     private readonly Mailbox<EcsSnapshot<PostProcessing>> _processing = new();
 
     /// <summary>
+    /// The assets read again, which the game thread hands on and the next frame lets go of.
+    /// </summary>
+    private readonly Channel<ulong> _reloaded = Channel.CreateUnbounded<ulong>(
+        new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
+    );
+
+    /// <summary>
     /// What is done to the picture when no entity has a <see cref="PostProcessing"/>: the exposure and the AgX tonemap.
     /// </summary>
     private readonly PostProcessing _defaultPost;
@@ -74,7 +83,13 @@ public sealed class PostRenderer : IRender<PostInput, PictureEffects>, IRender, 
     /// </summary>
     private (MaterialSlots Effects, TaskCompletionSource Done)? _preparing;
 
-    internal PostRenderer(DeferredRenderingSettings settings, AssetManager assets, IEcs ecs, Threads threads)
+    internal PostRenderer(
+        DeferredRenderingSettings settings,
+        IShaderCompiler shaders,
+        AssetManager assets,
+        IEcs ecs,
+        Threads threads
+    )
     {
         _settings = settings;
         _ecs = ecs;
@@ -82,7 +97,7 @@ public sealed class PostRenderer : IRender<PostInput, PictureEffects>, IRender, 
         _threads = threads;
         _defaultPost.Effects[0] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Exposure.mat") };
         _defaultPost.Effects[1] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Agx.mat") };
-        _effects = new Effects(assets);
+        _effects = new Effects(assets, shaders, threads);
         _made = new PictureEffects(false, Record);
     }
 
@@ -118,8 +133,13 @@ public sealed class PostRenderer : IRender<PostInput, PictureEffects>, IRender, 
     /// </returns>
     public PictureEffects? Render(in Frame frame, RenderGraph graph, in PostInput input)
     {
-        MaterialPacker pack = input.World.PackMaterial;
-        if (_preparing is { } preparing && !_effects.IsLoading(graph, preparing.Effects, pack))
+        while (_reloaded.Reader.TryRead(out ulong asset))
+        {
+            _effects.Forget(asset);
+        }
+
+        TextureLookup textures = input.World.Textures;
+        if (_preparing is { } preparing && !_effects.IsLoading(graph, preparing.Effects, textures))
             EndPreparing();
 
         // The first post processing's effects, or the engine's, exposed by the exposure compensation; each whose
@@ -143,10 +163,11 @@ public sealed class PostRenderer : IRender<PostInput, PictureEffects>, IRender, 
                 post[place] = default;
         }
 
-        Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> effects = _effects.Resolve(graph, post, pack);
+        Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> effects = _effects.Resolve(graph, post, textures);
         if (!effects.Ok)
         {
             graph.Fail(RenderFailure.PostEffect, "Effects are not drawn", effects.Error);
+            EndPreparing();
 
             return null;
         }
@@ -165,12 +186,16 @@ public sealed class PostRenderer : IRender<PostInput, PictureEffects>, IRender, 
     }
 
     /// <summary>
-    /// Publishes the world's post processing for the frame's effects.
+    /// Publishes the world's post processing for the frame's effects, and hands on the assets read again.
     /// </summary>
-    internal void PublishPostProcessing()
+    internal void PublishPostProcessing(in Frame frame)
     {
         _processing.Back.Fill(_ecs);
         _processing.Publish();
+        foreach (AssetReloaded reloaded in frame.Events.Get<AssetReloaded>())
+        {
+            _reloaded.Writer.TryWrite(reloaded.Id);
+        }
     }
 
     /// <summary>
