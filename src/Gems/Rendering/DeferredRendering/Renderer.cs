@@ -755,7 +755,7 @@ public sealed class Renderer
             effects.Record(graph, gpu, frame.Index);
 
         // The output drawn as the debug view asks, a Depth view black from its far distance, and the picture's middle
-        // tones shown at the gamma. A picture that no effects finished is exposed and tonemapped first.
+        // tones shown at the gamma. A picture that no effects finished is tonemapped first.
         graph
             .Compute(
                 "Show surface",

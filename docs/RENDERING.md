@@ -229,7 +229,7 @@ renderer. The renderer shades the sky, the sun's colour and the sky's light on t
 ## PostEffects
 
 Runs the post-processing chain over the lit picture. List it in the `.magic` file after the renderer. Without it, the
-renderer shows the lit picture at a fixed exposure, with a simple tonemap and no other effects.
+renderer shows the lit picture with a simple tonemap and no other effects.
 
 The effects of the first `PostProcessing` component run in order over the lit picture. Each effect is a material
 whose shader implements the pixel effect contract ([Shaders](SHADERS.md)). One time for each frame, the gem makes the
