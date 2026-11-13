@@ -472,7 +472,16 @@ internal sealed unsafe class VulkanRecorder(
                         dstSubresource = GetLayers(over, 0),
                     };
                     region.srcOffsets[1] = new VkOffset3D((int)sourceExtent.width, (int)sourceExtent.height, 1);
-                    region.dstOffsets[1] = new VkOffset3D((int)targetExtent.width, (int)targetExtent.height, 1);
+
+                    // Over the part the command names, x over y in its second offset and width over height in its
+                    // size, or over all of the target when the size is 0.
+                    (int x, int y) = ((int)(command.Offset2 >> 32), (int)(command.Offset2 & uint.MaxValue));
+                    (int width, int height) =
+                        command.Size == 0
+                            ? ((int)targetExtent.width, (int)targetExtent.height)
+                            : ((int)(command.Size >> 32), (int)(command.Size & uint.MaxValue));
+                    region.dstOffsets[0] = new VkOffset3D(x, y, 0);
+                    region.dstOffsets[1] = new VkOffset3D(x + width, y + height, 1);
                     api.vkCmdBlitImage(
                         cmd,
                         blitted.Image,

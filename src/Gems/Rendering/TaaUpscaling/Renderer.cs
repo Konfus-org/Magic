@@ -36,9 +36,9 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
     private readonly Upscaling _upscaling;
 
     /// <summary>
-    /// The picture the frame drawn last resolved, the next one's history, and its size.
+    /// The picture the frame drawn last resolved in each view, the next one's history, and its size.
     /// </summary>
-    private (GpuTexture Picture, int Width, int Height) _resolved;
+    private readonly List<(GpuTexture Picture, int Width, int Height)> _resolved = [];
 
     internal Renderer(AssetManager assets)
     {
@@ -94,10 +94,15 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
 
         // Last frame's resolved picture is this frame's history, where last frame drew this view at this size; the
         // shader reads none where the history it is handed is the picture it resolves.
+        while (_resolved.Count <= graph.View)
+        {
+            _resolved.Add(default);
+        }
+
         (GpuTexture history, GpuTexture resolved) =
-            _resolved.Picture == first.Value ? (first.Value, second.Value) : (second.Value, first.Value);
-        bool hasHistory = view.HasHistory && _resolved == (history, width, height);
-        _resolved = (resolved, width, height);
+            _resolved[graph.View].Picture == first.Value ? (first.Value, second.Value) : (second.Value, first.Value);
+        bool hasHistory = view.HasHistory && _resolved[graph.View] == (history, width, height);
+        _resolved[graph.View] = (resolved, width, height);
         ReadOnlySpan<GpuResource> past = hasHistory ? [history] : [];
         graph
             .Compute(

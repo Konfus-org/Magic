@@ -62,9 +62,9 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
     private readonly ShaderEntry _upsampleShader;
 
     /// <summary>
-    /// The size the frame drawn last traced at, which the next blends with only at the same size.
+    /// The size the frame drawn last traced each view at, which the next blends with only at the same size.
     /// </summary>
-    private (int Width, int Height) _traced;
+    private readonly List<(int Width, int Height)> _traced = [];
 
     internal Renderer(TracedShadowsSettings settings, AssetManager assets)
     {
@@ -84,10 +84,10 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
     /// </returns>
     public ShadowMask? Render(in Frame frame, RenderGraph graph, in TracedInput input)
     {
-        // Off, the history starts afresh once it is back on.
+        // Off, each view's history starts afresh once it is back on.
         if (!_settings.IsTracedShadowsOn)
         {
-            _traced = default;
+            _traced.Clear();
 
             return null;
         }
@@ -163,9 +163,14 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
             return null;
         }
 
-        // Last frame's mask and moments are this frame's history, at the same size only.
-        bool hasHistory = view.HasHistory && _traced == (width, height);
-        _traced = (width, height);
+        // Last frame's mask and moments of this view are this frame's history, at the same size only.
+        while (_traced.Count <= graph.View)
+        {
+            _traced.Add(default);
+        }
+
+        bool hasHistory = view.HasHistory && _traced[graph.View] == (width, height);
+        _traced[graph.View] = (width, height);
         ShadowDenoiseConstants denoise = new()
         {
             TileStates = tileStates.Value.Id,

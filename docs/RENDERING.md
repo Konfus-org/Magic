@@ -5,13 +5,18 @@ lights it. The other gems add parts of the picture: the geometry, the world as r
 the air and the upscaling. A project lists the gems that it wants in its `.magic` file.
 
 Each gem has a `Renderer` part with one or more render steps. Core runs a step after the steps that make its inputs.
-This diagram shows what each step makes and which steps take it.
+A step that takes `RenderViews`, or the output of such a step, runs one time for each view of the frame. This diagram
+shows what each step makes and which steps take it.
 
 ```mermaid
 flowchart LR
-    Taa[TaaUpscaling] -- Upscaling --> View[DeferredRendering view]
+    World[DeferredRendering world] -- GpuWorld, RenderViews --> View[DeferredRendering view]
+    World -- GpuWorld --> Pools[ClusteredGeometry pools]
+    World -- GpuWorld, GpuInstances --> Accel[AccelerationStructures]
+    Taa[TaaUpscaling] -- Upscaling --> View
+    Accel -- TracedWorld --> View
     View -- GpuView --> Clusters[ClusteredGeometry]
-    View -- GpuInstances --> Accel[AccelerationStructures]
+    Pools -- ClusterPools --> Clusters
     Accel -- TracedWorld --> Shadows[TracedShadows]
     Accel -- TracedWorld --> GI[GlobalIllumination]
     Accel -- TracedWorld --> Vol[Volumetrics]
@@ -33,13 +38,15 @@ flowchart LR
 
 ## DeferredRendering
 
-The renderer. Each frame it runs three render steps:
+The renderer. It has four render steps:
 
-1. The view: it puts the models, materials, textures, instances, lights and sky of the world on the GPU, and makes the
-   `GpuView` and the `GpuInstances` of the frame.
-2. The shading: it lights the GBuffer that a geometry gem drew, with the sun, the sky and the lights. Then it runs the
-   post effects and writes the picture into the window.
-3. The failure banner: it draws the render failures of the frame over the top of the window.
+1. The world, one time for each frame: it puts the models, materials, textures, render textures, instances and lights
+   of the world on the GPU. It makes the `GpuWorld`, the `GpuInstances` and the `RenderViews` of the frame.
+2. The view, one time for each view: it makes the targets, the frame buffer and the sky tables of the view, as its
+   `GpuView`.
+3. The shading, one time for each view: it lights the GBuffer that a geometry gem drew, with the sun, the sky and the
+   lights. Then it runs the post effects and writes the picture into the target of the view.
+4. The failure banner: it draws the render failures of the frame over the top of the window.
 
 The gem also holds the types that the rendering gems share. List it in the `.magic` file after the GPU provider, the
 ECS, the model importer and the texture importer, with a gem that draws its geometry. The settings are in
@@ -51,6 +58,16 @@ ECS, the model importer and the texture importer, with a gem that draws its geom
   loads again when a frame draws it.
 - When a domain replaces the world, the loading screen stays until all that the new world draws is on the GPU or
   failed. This includes its post effects and the passes of the gem.
+
+### Cameras
+
+- Each camera is a view. A camera draws into its section of the window, or into its render texture at the size of
+  the texture. Without a camera for the window, a camera at the origin draws into it.
+- A camera for a part of the window draws over the cameras for all of it. Cameras with different sections give a
+  split screen.
+- A camera for the window draws at `Rendering.FieldOfView` when that is more than 0.
+- A material samples a render texture when a texture param names it as `renderTexture`. The cameras for render
+  textures draw first, so the window shows the picture of this frame.
 
 ### Picture size
 
@@ -141,7 +158,8 @@ GBuffer and glass targets of the view. List it in the `.magic` file after the re
 - When a domain loads, the loading screen stays until the models are on the GPU and the resolve pass of each
   material shader is built.
 
-To change it, start at `Renderer.Render`, which is the frame in order. `ClusterResources` keeps the clusters of each
+To change it, start at `Renderer`, which has two steps. One step keeps the models clustered on the GPU, one time for
+each frame. The other step records the passes of each view, in order. `ClusterResources` keeps the clusters of each
 model on the GPU. `ClusterPasses` records the passes: the cull, the draws into the visibility buffer, the depth pyramid
 and the resolve of each material.
 

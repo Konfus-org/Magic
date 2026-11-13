@@ -35,6 +35,18 @@ internal sealed class Rendering
     private Dictionary<Type, Maker> _makers = [];
 
     /// <summary>
+    /// Where in <see cref="_steps"/> the steps that run once for each view are: after every step that runs once
+    /// before the views, and before every step that takes and makes nothing.
+    /// </summary>
+    private Range _viewSteps;
+
+    /// <summary>
+    /// Reads the views that the frame draws from the last run of the step that makes <see cref="RenderViews"/>; null
+    /// when no step makes them or it made nothing.
+    /// </summary>
+    private Func<RenderViews?> _getViews = static () => null;
+
+    /// <summary>
     /// Adds a step of the frame for each render form that <paramref name="part"/> implements, until the subscription
     /// ends.
     /// </summary>
@@ -79,61 +91,45 @@ internal sealed class Rendering
     /// Records each gem's steps of the frame in order into <paramref name="graph"/>, and times each gem one time.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// The steps before the views run once. Then the steps of a view run once for each view that the frame draws, and
+    /// a view's passes come after every pass of the view before. The steps that take and make nothing run last.
+    /// </para>
+    /// <para>
     /// A step that takes what no gem makes, or that threw less than <see cref="RetryPauseSec"/> ago, is skipped as a
     /// <see cref="RenderFailure.Pass"/> failure. What it makes stays unmade: a step that must take it is skipped too,
     /// and a step that can take it runs without it.
+    /// </para>
     /// </remarks>
-    [SuppressMessage(
-        "Design",
-        "CA1031:Do not catch general exception types",
-        Justification = "Whatever a gem throws, it is a failure of the frame and the gem leaves it; the others go on."
-    )]
     public void Pump(in Frame frame, RenderGraph graph)
     {
         graph.StartFailures();
-        foreach (Step step in _steps)
+        (int first, int count) = _viewSteps.GetOffsetAndLength(_steps.Count);
+        for (int i = 0; i < first; i++)
         {
-            long start = Metrics.HookDurations.Start();
-            int told = graph.ToldCount;
-            if (step.Missing is null && (step.RetrySec is not { } retry || frame.AppSec >= retry))
+            Run(_steps[i], _steps[i].Next, frame, graph);
+        }
+
+        // One view unless the step that makes the views, which ran before them, tells of more.
+        int views = _getViews()?.Count ?? 1;
+        for (int view = 0; view < views; view++)
+        {
+            if (view > 0)
+                graph.OrderPasses();
+
+            graph.View = view;
+            // A gem whose last step is one of a view is timed after the last view, for all of them.
+            for (int i = first; i < first + count; i++)
             {
-                try
-                {
-                    step.Run(frame, graph);
-                    step.RetrySec = null;
-                }
-                catch (Exception ex)
-                {
-                    // A step that throws again at a retry keeps the first throw's texts: only a new failure is logged.
-                    if (step.RetrySec is null)
-                        step.Failure = ($"{step.Gem} stopped rendering", $"It threw in Render: {ex}");
-
-                    step.RetrySec = frame.AppSec + RetryPauseSec;
-                    graph.LeaveOutOpenPass();
-                }
+                Step step = _steps[i];
+                Run(step, step.Next ?? (view < views - 1 ? step : null), frame, graph);
             }
+        }
 
-            // Tell the failure in each frame that the step is out. Fail logs it only when it is new.
-            bool isSkipped = step.Missing is not null || step.RetrySec is not null;
-            if (isSkipped)
-                graph.Fail(RenderFailure.Pass, step.Failure.What, step.Failure.Reason);
-
-            step.IsOut = isSkipped || (!step.HasMade && graph.ToldCount > told);
-
-            // A gem with several steps is timed once, by its last step, for the time of all of them.
-            long since = start == 0 ? 0 : start - step.Earlier;
-            step.Earlier = 0;
-            if (since != 0 && step.Next is { } next)
-            {
-                next.Earlier = Stopwatch.GetTimestamp() - since;
-                continue;
-            }
-
-            Metrics.HookDurations.RecordSince(
-                since,
-                new KeyValuePair<string, object?>(Metrics.GemNameTag, step.Gem),
-                new KeyValuePair<string, object?>(Metrics.HookTag, Hook)
-            );
+        graph.View = 0;
+        for (int i = first + count; i < _steps.Count; i++)
+        {
+            Run(_steps[i], _steps[i].Next, frame, graph);
         }
     }
 
@@ -165,6 +161,65 @@ internal sealed class Rendering
     }
 
     /// <summary>
+    /// Runs <paramref name="step"/>, unless it lacks an input or waits for its retry, and tells the frame when it is
+    /// out.
+    /// </summary>
+    /// <remarks>
+    /// Its time goes on to <paramref name="timedBy"/>, the step of its gem that runs after it. With none, the time is
+    /// recorded for the gem.
+    /// </remarks>
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Whatever a gem throws, it is a failure of the frame and the gem leaves it; the others go on."
+    )]
+    private static void Run(Step step, Step? timedBy, in Frame frame, RenderGraph graph)
+    {
+        long start = Metrics.HookDurations.Start();
+        int told = graph.ToldCount;
+        if (step.Missing is null && (step.RetrySec is not { } retry || frame.AppSec >= retry))
+        {
+            try
+            {
+                step.Run(frame, graph);
+                step.RetrySec = null;
+            }
+            catch (Exception ex)
+            {
+                // A step that throws again at a retry keeps the first throw's texts: only a new failure is logged.
+                if (step.RetrySec is null)
+                    step.Failure = ($"{step.Gem} stopped rendering", $"It threw in Render: {ex}");
+
+                step.RetrySec = frame.AppSec + RetryPauseSec;
+                graph.LeaveOutOpenPass();
+            }
+        }
+
+        // Tell the failure in each frame that the step is out. Fail logs it only when it is new.
+        bool isSkipped = step.Missing is not null || step.RetrySec is not null;
+        if (isSkipped)
+            graph.Fail(RenderFailure.Pass, step.Failure.What, step.Failure.Reason);
+
+        step.IsOut = isSkipped || (!step.HasMade && graph.ToldCount > told);
+
+        // A gem with several steps is timed once a frame, by the last run of its last step, for the time of all of
+        // them in every view.
+        long since = start == 0 ? 0 : start - step.Earlier;
+        step.Earlier = 0;
+        if (since != 0 && timedBy is { } next)
+        {
+            next.Earlier += Stopwatch.GetTimestamp() - since;
+            return;
+        }
+
+        Metrics.HookDurations.RecordSince(
+            since,
+            new KeyValuePair<string, object?>(Metrics.GemNameTag, step.Gem),
+            new KeyValuePair<string, object?>(Metrics.HookTag, Hook)
+        );
+    }
+
+    /// <summary>
     /// Replaces the steps with <paramref name="steps"/>, each after the steps that make what it takes, and binds each
     /// to its makers.
     /// </summary>
@@ -189,9 +244,35 @@ internal sealed class Rendering
             }
         }
 
+        // Each step that takes the views, and each that takes what such a step makes, runs once for each view.
+        HashSet<Step> viewSteps = [.. steps.Where(static step => step.Inputs.Contains(typeof(RenderViews)))];
+        Func<RenderViews?> getViews = makers.TryGetValue(typeof(RenderViews), out Maker views)
+            ? views.Step.CreateViewsReader(views.Item)
+            : static () => null;
+        while (
+            steps.Find(step =>
+                !viewSteps.Contains(step)
+                && step.Inputs.Any(input =>
+                    makers.TryGetValue(input, out Maker maker) && viewSteps.Contains(maker.Step)
+                )
+            )
+                is { } taker
+        )
+        {
+            viewSteps.Add(taker);
+        }
+
         // The first waiting gem whose makers are all placed goes next, so gems keep their order where it is free.
-        // A gem that takes and makes nothing waits at the end; the sort keeps the order of equals.
-        steps = [.. steps.OrderBy(static step => step.Inputs.IsEmpty && step.Outputs.IsEmpty)];
+        // The steps of a view wait for those before the views, and a gem that takes and makes nothing waits at the
+        // end; the sort keeps the order of equals.
+        steps =
+        [
+            .. steps.OrderBy(step =>
+                step.Inputs.IsEmpty && step.Outputs.IsEmpty ? 2
+                : viewSteps.Contains(step) ? 1
+                : 0
+            ),
+        ];
         List<Step> ordered = new(steps.Count);
         while (steps.Count > 0)
         {
@@ -215,6 +296,9 @@ internal sealed class Rendering
             step.Next = ordered.Skip(i + 1).FirstOrDefault(other => other.Part == step.Part);
         }
 
+        int firstViewStep = ordered.FindIndex(viewSteps.Contains);
+        _viewSteps = firstViewStep < 0 ? ^0.. : firstViewStep..(firstViewStep + viewSteps.Count);
+        _getViews = getViews;
         _steps.Clear();
         _steps.AddRange(ordered);
         _makers = makers;
@@ -293,6 +377,12 @@ internal sealed class Rendering
         /// Builds, one time, how each frame takes its input from the outputs of <paramref name="makers"/>.
         /// </summary>
         public abstract void Bind(IReadOnlyDictionary<Type, Maker> makers);
+
+        /// <summary>
+        /// Builds, once, how the <see cref="RenderViews"/> it made at its last run is read: the item of a tuple, or the
+        /// whole when <paramref name="item"/> is null.
+        /// </summary>
+        public abstract Func<RenderViews?> CreateViewsReader(string? item);
     }
 
     /// <summary>
@@ -434,6 +524,24 @@ internal sealed class Rendering
                         Expression.Default(typeof(TInput?))
                     );
             _take = Expression.Lambda<Func<TInput?>>(body).Compile();
+        }
+
+        public override Func<RenderViews?> CreateViewsReader(string? item)
+        {
+            Expression made = Expression.Property(Expression.Constant(this), nameof(Made));
+            Expression value = Expression.Property(made, nameof(Nullable<>.Value));
+            if (item is not null)
+                value = Expression.Field(value, item);
+
+            return Expression
+                .Lambda<Func<RenderViews?>>(
+                    Expression.Condition(
+                        Expression.Property(made, nameof(Nullable<>.HasValue)),
+                        Expression.Convert(value, typeof(RenderViews?)),
+                        Expression.Default(typeof(RenderViews?))
+                    )
+                )
+                .Compile();
         }
 
         /// <summary>

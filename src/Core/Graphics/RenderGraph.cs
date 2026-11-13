@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Drawing;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Assets;
@@ -28,6 +29,16 @@ public sealed class RenderGraph
 
     private readonly ImmutableArray<GpuCommand>.Builder _commands = ImmutableArray.CreateBuilder<GpuCommand>();
 
+    /// <summary>
+    /// The passes of the views before this one, in the order they run.
+    /// </summary>
+    private readonly ImmutableArray<GpuPass>.Builder _ordered = ImmutableArray.CreateBuilder<GpuPass>();
+
+    /// <summary>
+    /// A resource's name in each view after the first, made once, so a frame formats no text.
+    /// </summary>
+    private readonly Dictionary<(string Name, int View), string> _viewNames = [];
+
     private GpuPass? _pass;
 
     private List<(RenderFailure Kind, string What)> _failures = [];
@@ -52,6 +63,16 @@ public sealed class RenderGraph
     /// while there is no provider.
     /// </summary>
     public GpuTexture WindowTarget => Gpu?.WindowTarget ?? GpuTexture.None;
+
+    /// <summary>
+    /// The view that the recording step runs for, from 0 (<see cref="RenderViews"/>); 0 in a step that runs once a
+    /// frame.
+    /// </summary>
+    /// <remarks>
+    /// A texture, buffer or acceleration structure asked for in a view after the first is that view's own, under the
+    /// same name. A gem keeps what else it holds for each view by this.
+    /// </remarks>
+    public int View { get; internal set; }
 
     /// <summary>
     /// The GPU provider that the graph's names resolve through. Core sets it after the gems load; null while no gem
@@ -99,7 +120,8 @@ public sealed class RenderGraph
     /// for in a few frames is freed.
     /// </remarks>
     public Result<GpuTexture> Texture(in TextureDescription description) =>
-        Gpu?.GetTexture(description) ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
+        Gpu?.GetTexture(description with { Name = GetViewName(description.Name) })
+        ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
 
     /// <summary>
     /// Gets the buffer under the description's name, kept and freed as <see cref="Texture"/> keeps and frees a texture.
@@ -109,7 +131,8 @@ public sealed class RenderGraph
     /// Ask at the new size before any transfer into it in that frame: a transfer into the old buffer is lost.
     /// </remarks>
     public Result<GpuBuffer> Buffer(in BufferDescription description) =>
-        Gpu?.GetBuffer(description) ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
+        Gpu?.GetBuffer(description with { Name = GetViewName(description.Name) })
+        ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
 
     /// <summary>
     /// Gets the bottom-level acceleration structure under the description's name, kept and freed as
@@ -120,7 +143,7 @@ public sealed class RenderGraph
     /// with <see cref="BuildAcceleration"/> after its triangles are uploaded.
     /// </remarks>
     public Result<GpuAcceleration> Acceleration(in BottomLevelDescription description) =>
-        Gpu?.GetAcceleration(description)
+        Gpu?.GetAcceleration(description with { Name = GetViewName(description.Name) })
         ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
 
     /// <summary>
@@ -128,7 +151,7 @@ public sealed class RenderGraph
     /// <see cref="Texture"/> keeps and frees a texture. Only on a GPU that traces rays.
     /// </summary>
     public Result<GpuAcceleration> Acceleration(in TopLevelDescription description) =>
-        Gpu?.GetAcceleration(description)
+        Gpu?.GetAcceleration(description with { Name = GetViewName(description.Name) })
         ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
 
     /// <summary>
@@ -260,38 +283,17 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// Takes the frame's passes, stage by stage in the order recorded, and empties the graph for the next frame.
+    /// Takes the frame's passes, view by view and stage by stage in the order recorded, and empties the graph for the
+    /// next frame.
     /// </summary>
     /// <remarks>
     /// An open transfer pass ends. A compute or draw pass that was never ended is left out.
     /// </remarks>
     public GpuCommands Finish()
     {
-        EndOpenPass();
-        ImmutableArray<GpuPass>.Builder ordered = ImmutableArray.CreateBuilder<GpuPass>(_passes.Count);
-        // Each turn takes the lowest stage not yet taken, then its passes in the order they were recorded.
-        int taken = -1;
-        while (ordered.Count < _passes.Count)
-        {
-            int stage = byte.MaxValue;
-            foreach (GpuPass pass in _passes)
-            {
-                if (pass.Stage.Order > taken && pass.Stage.Order < stage)
-                    stage = pass.Stage.Order;
-            }
+        OrderPasses();
 
-            foreach (GpuPass pass in _passes)
-            {
-                if (pass.Stage.Order == stage)
-                    ordered.Add(pass);
-            }
-
-            taken = stage;
-        }
-
-        _passes.Clear();
-
-        return new(ordered.MoveToImmutable());
+        return new(_ordered.DrainToImmutable());
     }
 
     /// <summary>
@@ -395,7 +397,15 @@ public sealed class RenderGraph
     /// Stretches level 0 of <paramref name="from"/> over level 0 of <paramref name="to"/> with
     /// <paramref name="filter"/>. The formats can differ.
     /// </summary>
-    public void Blit(GpuTexture from, GpuTexture to, RenderStage stage, TextureFilter filter)
+    public void Blit(GpuTexture from, GpuTexture to, RenderStage stage, TextureFilter filter) =>
+        Blit(from, to, default, stage, filter);
+
+    /// <summary>
+    /// Level 0 of <paramref name="from"/> stretched over <paramref name="part"/> of level 0 of <paramref name="to"/>,
+    /// in pixels from its top left, or over all of it when the part is empty, read with <paramref name="filter"/>; the
+    /// formats may differ, in <paramref name="stage"/>.
+    /// </summary>
+    public void Blit(GpuTexture from, GpuTexture to, Rectangle part, RenderStage stage, TextureFilter filter)
     {
         UseInTransfer(GetUse(from, GpuAccess.CopySource), stage);
         UseInTransfer(GetUse(to, GpuAccess.CopyDestination), stage);
@@ -406,6 +416,8 @@ public sealed class RenderGraph
                 Id = from.Id,
                 Id2 = to.Id,
                 X = (uint)filter,
+                Offset2 = ((ulong)(uint)part.X << 32) | (uint)part.Y,
+                Size = ((ulong)(uint)part.Width << 32) | (uint)part.Height,
             }
         );
     }
@@ -460,6 +472,39 @@ public sealed class RenderGraph
         (_failedBefore, _failures) = (_failures, _failedBefore);
         _failures.Clear();
         ToldCount = 0;
+    }
+
+    /// <summary>
+    /// Puts the passes recorded since the last call in the order they run, after those of every call before: stage by
+    /// stage, and in the order they were recorded within one. Core calls it between two views, so a view's passes all
+    /// run before the next view's.
+    /// </summary>
+    internal void OrderPasses()
+    {
+        EndOpenPass();
+
+        // Each turn takes the lowest stage not yet taken, then its passes in the order they were recorded.
+        int end = _ordered.Count + _passes.Count;
+        int taken = -1;
+        while (_ordered.Count < end)
+        {
+            int stage = byte.MaxValue;
+            foreach (GpuPass pass in _passes)
+            {
+                if (pass.Stage.Order > taken && pass.Stage.Order < stage)
+                    stage = pass.Stage.Order;
+            }
+
+            foreach (GpuPass pass in _passes)
+            {
+                if (pass.Stage.Order == stage)
+                    _ordered.Add(pass);
+            }
+
+            taken = stage;
+        }
+
+        _passes.Clear();
     }
 
     internal void EndPass()
@@ -518,6 +563,23 @@ public sealed class RenderGraph
             Access = access,
             Level = level,
         };
+
+    /// <summary>
+    /// Gets <paramref name="name"/> in the first view, and a name of its own in each view after it.
+    /// </summary>
+    private string GetViewName(string name)
+    {
+        if (View == 0)
+            return name;
+
+        if (!_viewNames.TryGetValue((name, View), out string? viewName))
+        {
+            viewName = $"{name}, view {View}";
+            _viewNames[(name, View)] = viewName;
+        }
+
+        return viewName;
+    }
 
     /// <summary>
     /// Gets room for <paramref name="bytes"/> in the frame's upload ring. Without room or a provider, it gives none and

@@ -87,3 +87,11 @@ public interface IRender<TInput, TOutput>
     /// </remarks>
     TOutput? Render(in Frame frame, RenderGraph graph, in TInput input);
 }
+
+/// <summary>
+/// How many views the frame draws: each a camera drawn into a part of the window or into a render texture. One step
+/// makes it, once a frame. Each step that takes it, and each step that takes what such a step made, runs once for each
+/// view, in the views' order, and tells its view by <see cref="RenderGraph.View"/>. Every other step runs once a frame.
+/// A frame in which no step makes it has one view.
+/// </summary>
+public readonly record struct RenderViews(int Count);

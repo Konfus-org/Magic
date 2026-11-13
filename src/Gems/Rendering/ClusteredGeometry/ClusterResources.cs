@@ -424,13 +424,14 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
 }
 
 /// <summary>
-/// The cluster renderer's pools and tables this frame.
+/// The cluster renderer's pools and tables this frame, one set for every view.
 /// </summary>
 /// <remarks>
 /// They hold its vertex copies, indices and clusters, each model's clusters and impostor by its model index, the
-/// impostors, and every resident impostor's atlases.
+/// impostors, and every resident impostor's atlases. The renderer makes them once a frame for the step that draws each
+/// view.
 /// </remarks>
-internal readonly record struct ClusterPools(
+public readonly record struct ClusterPools(
     GpuBuffer Vertices,
     GpuBuffer Indices,
     GpuBuffer Clusters,

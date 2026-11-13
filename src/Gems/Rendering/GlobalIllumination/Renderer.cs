@@ -18,11 +18,12 @@ namespace Magic.GlobalIllumination;
 public readonly record struct GlobalIlluminationInput(GpuView? View, TracedWorld? Traced);
 
 /// <summary>
-/// Lights the view's surfaces indirectly through the world as rays see it, as the frame's <see cref="IndirectLight"/>.
+/// Lights each view's surfaces indirectly through the world as rays see it, as the view's
+/// <see cref="IndirectLight"/>.
 /// </summary>
 /// <remarks>
-/// It uses the probe grid, the traced diffuse light and the traced reflections, and writes into the frame's buffer.
-/// Shading takes the indirect light.
+/// It uses the probe grid, the traced diffuse light and the traced reflections, and writes into the view's frame
+/// buffer. Shading takes the indirect light. Each view has its own grid and history.
 /// </remarks>
 public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, IHookIntoDomainLoading
 {
@@ -52,14 +53,10 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
     private readonly TaskCompletionSource _built = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>
-    /// The size the history was last traced at; none while it holds nothing of the world. Render thread.
+    /// For each view, by its number: the size its history was last traced at, none while it holds nothing of the
+    /// world, and the size its reflections were last traced at, none while they are off. Render thread.
     /// </summary>
-    private (int Width, int Height)? _traced;
-
-    /// <summary>
-    /// The size the reflections were last traced at; none while they are off. Render thread.
-    /// </summary>
-    private (int Width, int Height)? _reflected;
+    private readonly List<((int Width, int Height)? Traced, (int Width, int Height)? Reflected)> _views = [];
 
     internal Renderer(GlobalIlluminationSettings settings, AssetManager assets, Threads threads, IGraphicsApi gpu)
     {
@@ -76,21 +73,27 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
     }
 
     /// <summary>
-    /// Traces the frame's indirect light and writes its row into the frame's buffer.
+    /// Traces the indirect light of the graph's view and writes its row into the view's frame buffer.
     /// </summary>
     /// <returns>
-    /// The frame's indirect light, or none while it is off, the shaders build, what they read and write is not made, or
+    /// The view's indirect light, or none while it is off, the shaders build, what they read and write is not made, or
     /// rays see no instance. With none, the surfaces take the sky's light.
     /// </returns>
     public IndirectLight? Render(in Frame frame, RenderGraph graph, in GlobalIlluminationInput input)
     {
         bool isReflectionsOn = _settings.IsReflectionsOn;
 
+        // What the view keeps from frame to frame, by its number.
+        while (_views.Count <= graph.View)
+        {
+            _views.Add(default);
+        }
+
         // Off, no domain waits for the passes, and the probes start afresh once it is back on.
         if (!_settings.IsIndirectLightOn)
         {
             _built.TrySetResult();
-            _traced = null;
+            _views[graph.View] = default;
 
             return null;
         }
@@ -110,7 +113,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         if (input.Traced is not { } traced)
         {
             _built.TrySetResult();
-            _traced = null;
+            _views[graph.View] = default;
 
             return null;
         }
@@ -135,14 +138,15 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         // Where rays see no instance, the probes start afresh once they do.
         if (traced.Structure.IsNone)
         {
-            _traced = null;
+            _views[graph.View] = default;
 
             return null;
         }
 
         Result<GpuBuffer> constants = graph.Buffer(new("GI constants", Unsafe.SizeOf<GIConstants>()));
         (int Width, int Height) tracedSize = gpu.Scaled(_settings.IndirectScale);
-        bool hasHistory = _traced == tracedSize;
+        ((int Width, int Height)? lastTraced, (int Width, int Height)? lastReflected) = _views[graph.View];
+        bool hasHistory = lastTraced == tracedSize;
         GIView view = new(
             graph,
             gpu,
@@ -161,13 +165,13 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         );
         Result<(ProbeGridConstants Grid, ProbeUpdateConstants Update)> probes = _probes.Prepare(
             graph,
-            _traced is not null,
+            lastTraced is not null,
             traced.Box,
             (_settings.ProbesAcross, _settings.ProbesUp)
         );
         Result<TracedDiffuseConstants> diffuse = TracedDiffuse.Prepare(view, frame.Index, hasHistory);
         Result<TracedReflectionConstants> reflections = isReflectionsOn
-            ? TracedReflections.Prepare(view, frame.Index, hasHistory && _reflected == tracedSize)
+            ? TracedReflections.Prepare(view, frame.Index, hasHistory && lastReflected == tracedSize)
             : Result.Success(default(TracedReflectionConstants));
         int written = (int)(frame.Index % 2);
         Result<GpuTexture> depth = graph.Texture(view.GetTraced(_depthNames[written], GpuFormat.R32Sfloat));
@@ -219,20 +223,20 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         if (isReflectionsOn)
             _reflections.Record(view, grid, gi);
 
-        _traced = tracedSize;
-        _reflected = isReflectionsOn ? tracedSize : null;
+        (int Width, int Height)? reflected = isReflectionsOn ? tracedSize : null;
+        _views[graph.View] = (tracedSize, reflected);
 
         return new IndirectLight(gi.Diffuse.Blend.Light, gi.Reflections.Blend.Light, grid.Probes, grid.Depth);
     }
 
     /// <summary>
-    /// Forgets what was traced of the world that left, so the probes and the history start afresh. Render thread,
+    /// Forgets what each view traced of the world that left, so the probes and the history start afresh. Render thread,
     /// between frames.
     /// </summary>
     public async Task OnDomainUnloadedAsync(CancellationToken cancel)
     {
         await _threads.Enter(EngineThread.Render);
-        _traced = null;
+        _views.Clear();
     }
 
     public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel) =>
