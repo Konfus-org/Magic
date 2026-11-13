@@ -86,8 +86,9 @@ things:
   `IAssetImporter<T>`. Add one when a gem first needs it.
 - A gem that keeps something for each entity compares what it holds with the entities each frame. It adds what came
   and drops what went, as the renderer does. A gem can also need to drop what it built up when the world is replaced,
-  or make ready what comes before the world shows. Such a gem has a part that implements `IHookIntoDomainLoading`. The
-  world awaits that part while the loading screen shows.
+  or make ready what comes before the world shows, or settle what it draws of the world that came. Such a gem has a
+  part that implements `IHookIntoDomainLoading`. The world awaits that part while the loading screen or the cover
+  shows.
 - `Program` sets up a run and owns its loop, which calls the `Pump` of each service in turn. `App` lasts for the whole
   process. What a run makes is new for that run. A restart keeps only the world, as JSON, and the settings of the gems.
 - A service starts in its constructor and ends in `Dispose`, not with paired start and stop calls. A step is a method.

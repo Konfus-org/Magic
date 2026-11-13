@@ -52,6 +52,16 @@ internal readonly record struct DomainRead(Handle<Domain> Domain, Domain Asset, 
 /// </remarks>
 public sealed class World : IEcs, IDisposable
 {
+    /// <summary>
+    /// How long the cover takes to fade in or out.
+    /// </summary>
+    private const double CoverFadeSec = 0.4; // PROTO
+
+    /// <summary>
+    /// How long the cover waits at most for the gems to settle the world that arrived.
+    /// </summary>
+    private const double SettleLimitSec = 5; // PROTO
+
     private readonly AssetManager _assets;
 
     private readonly IFileSystem _files;
@@ -133,15 +143,29 @@ public sealed class World : IEcs, IDisposable
     /// Whether a domain or a saved world replaces what is in the world.
     /// </summary>
     /// <remarks>
-    /// It is true from when the loading screen shows until a frame drew what replaced the world.
+    /// It is true from when the loading screen shows until the cover faded into what replaced the world.
     /// </remarks>
     public bool IsLoading { get; private set; }
+
+    /// <summary>
+    /// How much a cover of one colour hides the window: 0 shows the window, 1 hides it.
+    /// </summary>
+    /// <remarks>
+    /// It is 0 outside a load. During a load, the loading screen fades into the cover, the world changes behind the
+    /// full cover, and the cover fades into the world when the gems settled. Read it on any thread.
+    /// </remarks>
+    public float CoverOpacity
+    {
+        get => Volatile.Read(ref field);
+        private set => Volatile.Write(ref field, value);
+    }
 
     /// <summary>
     /// Whether the time of the world stands still, with no fixed steps, from the next frame.
     /// </summary>
     /// <remarks>
-    /// It is ignored during a load, because the gems can need steps to get ready.
+    /// It is ignored while the loading screen shows, because the gems can need steps to get ready. While the cover is
+    /// full, the time of the world stands still however it is set.
     /// </remarks>
     public bool IsPaused { get; set; }
 
@@ -149,7 +173,7 @@ public sealed class World : IEcs, IDisposable
     /// How fast the time of the world runs against real time, from the next frame.
     /// </summary>
     /// <remarks>
-    /// A value below 0 is 0. It is ignored during a load.
+    /// A value below 0 is 0. It is ignored while the loading screen shows or the cover is full.
     /// </remarks>
     public float TimeScale
     {
@@ -907,8 +931,9 @@ public sealed class World : IEcs, IDisposable
     /// <remarks>
     /// What is there leaves, the globals too when <paramref name="isClearingGlobals"/> is true. The gems clean up after
     /// it, and the loading screen shows while they prepare what comes. When they are ready and no asset is in load, the
-    /// loading screen leaves and the gems clean up after it. Then <paramref name="arrive"/> makes what comes, and the
-    /// replace ends after a frame drew it. <see cref="IsLoading"/> is true while it runs.
+    /// loading screen fades into the cover. Behind the full cover, the loading screen leaves, the gems clean up after it,
+    /// <paramref name="arrive"/> makes what comes, and the gems settle it. Then the cover fades into it.
+    /// <see cref="IsLoading"/> is true while it runs.
     /// </remarks>
     private async Task ReplaceAsync(
         ImmutableArray<ImmutableArray<IComponent>> arriving,
@@ -976,6 +1001,8 @@ public sealed class World : IEcs, IDisposable
                 await WaitForFrameAsync(cancel).ConfigureAwait(false);
             }
 
+            await FadeCoverAsync(0, 1, cancel).ConfigureAwait(false);
+
             await _threads.Enter(EngineThread.Game);
             DestroyEntities(loading);
             await RunHooksAsync(hooks => hooks.OnDomainUnloadedAsync(cancel), "cleaning up").ConfigureAwait(false);
@@ -996,17 +1023,50 @@ public sealed class World : IEcs, IDisposable
                 await WaitForFrameAsync(cancel).ConfigureAwait(false);
             }
 
+            ShowLoadingStep("Settling...");
+            try
+            {
+                await RunHooksAsync(hooks => hooks.OnDomainArrivedAsync(cancel), "settling")
+                    .WaitAsync(TimeSpan.FromSeconds(SettleLimitSec), cancel)
+                    .ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                Log.Warn($"The gems did not settle in {SettleLimitSec} s, so the world shows as it is.");
+            }
+
             // The low-latency GC Program asks for seldom collects gen 2, so what the load, the unloads and the gems'
             // first copies of the arrived world threw away would stay committed: one collection that compacts and
-            // decommits gives it back, once that world's first frame is drawn.
+            // decommits gives it back, behind the cover once that world's first frame is drawn.
             await _threads.Enter(EngineThread.Game);
             GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+
+            await FadeCoverAsync(1, 0, cancel).ConfigureAwait(false);
         }
         finally
         {
             IsLoading = false;
             IsShowingLoadingScreen = false;
+            CoverOpacity = 0;
         }
+    }
+
+    /// <summary>
+    /// Changes <see cref="CoverOpacity"/> from <paramref name="from"/> to <paramref name="to"/> frame by frame, over
+    /// <see cref="CoverFadeSec"/> seconds. Headless, nothing shows, so it changes at once.
+    /// </summary>
+    private async Task FadeCoverAsync(float from, float to, CancellationToken cancel)
+    {
+        long start = Stopwatch.GetTimestamp();
+        float done = 0;
+        while (!_app.IsHeadless && done < 1)
+        {
+            CoverOpacity = float.Lerp(from, to, done);
+            await WaitForFrameAsync(cancel).ConfigureAwait(false);
+            done = (float)(Stopwatch.GetElapsedTime(start).TotalSeconds / CoverFadeSec);
+        }
+
+        CoverOpacity = to;
     }
 
     /// <summary>

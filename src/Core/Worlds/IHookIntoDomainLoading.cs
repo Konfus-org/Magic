@@ -4,10 +4,11 @@ using Magic.Ecs;
 namespace Magic.Worlds;
 
 /// <summary>
-/// A gem that cleans up after what leaves the world and prepares what comes, while a domain or a save replaces it.
+/// A gem that cleans up after what leaves the world, prepares what comes and settles what came, while a domain or a
+/// save replaces it.
 /// </summary>
 /// <remarks>
-/// The loading screen shows while the hooks run. The world waits for the hook of each gem before it continues, so
+/// The loading screen or the cover shows while the hooks run. The world waits for the hook of each gem before it continues, so
 /// nothing left over shows and nothing half ready shows. Each hook starts on the game thread. Implement only the hooks
 /// that the gem needs.
 /// </remarks>
@@ -30,4 +31,13 @@ public interface IHookIntoDomainLoading
     /// </remarks>
     Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel) =>
         Task.CompletedTask;
+
+    /// <summary>
+    /// Returns when what the gem draws of the world that arrived has settled, such as its light and its history.
+    /// </summary>
+    /// <remarks>
+    /// It runs after the world arrived, while a cover hides the window and the time of the world stands still. The
+    /// frames continue while it runs. The cover fades into the world when the hook of each gem returned.
+    /// </remarks>
+    Task OnDomainArrivedAsync(CancellationToken cancel) => Task.CompletedTask;
 }
