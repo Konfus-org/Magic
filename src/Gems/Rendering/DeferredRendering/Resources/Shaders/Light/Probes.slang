@@ -25,8 +25,8 @@ public struct ProbeGridConstants
     public float3 cellSize;
 }
 
-// A probe as the GPU keeps it, C#'s Probes.ProbeBytes long: its light's spherical harmonics in xyz of each, and in xyz of offset
-// how far it moved from where it rests, as a part of half a cell, in w 1 once it has blended rays.
+// A probe as the GPU keeps it, C#'s Probes.ProbeBytes long: its light's spherical harmonics in xyz of each, and in xyz
+// of offset how far it moved from where it rests, as a part of half a cell, in w 1 once it has blended rays.
 public struct GpuProbe
 {
     public float4 radiance[4];

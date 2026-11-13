@@ -9,21 +9,31 @@ using Magic.Assets;
 namespace Magic.Ecs.Components;
 
 /// <summary>
-/// The params a slot (<see cref="MaterialInstance"/>) sets in place of its material's, by the names of the shader's
-/// fields, <c>slot.Overrides["color"] = new Color(1, 0, 0)</c>, which whatever draws it reads over the material's; one
-/// it doesn't set is the material's. Plain data in the slot, so a change is drawn from the next frame and saved with
-/// the world as the component differs from its prefab's: up to
-/// <see cref="Capacity"/> params, each named in up to <see cref="MaterialOverride.NameBytes"/> ASCII characters, a
-/// scalar, vector, colour or texture (a render texture or a curve is the material's alone). In a file, an object of
-/// params by name, <c>{ "color": { "r": 1, "a": 1 } }</c>.
+/// The params that a slot (<see cref="MaterialInstance"/>) sets over those of its material, by the names of the shader
+/// fields.
 /// </summary>
+/// <remarks>
+/// <para>
+/// Set one as <c>slot.Overrides["color"] = new Color(1, 0, 0)</c>. The part that draws the slot reads them over the
+/// params of the material. A param that the slot does not set comes from the material.
+/// </para>
+/// <para>
+/// It is plain data in the slot, so a change shows from the next frame and is saved with the world when the component
+/// differs from that of its prefab. It holds up to <see cref="Capacity"/> params, each with a name of up to
+/// <see cref="MaterialOverride.NameBytes"/> ASCII characters. A param is a scalar, vector, colour or texture; only the
+/// material can hold a render texture or a curve. In a file, it is an object of params by name,
+/// <c>{ "color": { "r": 1, "a": 1 } }</c>.
+/// </para>
+/// </remarks>
 [JsonConverter(typeof(MaterialOverridesJsonConverter))]
 public struct MaterialOverrides : IEquatable<MaterialOverrides>
 {
     /// <summary>
-    /// How many params one sets at most: a tint and a texture. // PROTO: every slot of every renderer carries them,
-    /// so more waits for a slot that needs them.
+    /// The most params that one sets: a tint and a texture.
     /// </summary>
+    /// <remarks>
+    /// // PROTO: every slot of every renderer carries them, so more waits for a slot that needs them.
+    /// </remarks>
     public const int Capacity = 2;
 
     private MaterialOverrideSlots _set;
@@ -49,10 +59,13 @@ public struct MaterialOverrides : IEquatable<MaterialOverrides>
     }
 
     /// <summary>
-    /// The param it sets by that name; reading one it doesn't set throws. Setting one replaces what it set under that
-    /// name, or takes a free place, and throws when every place is taken or the name is not ASCII of up to
-    /// <see cref="MaterialOverride.NameBytes"/> characters.
+    /// The param that it sets by that name.
     /// </summary>
+    /// <remarks>
+    /// A get throws for a name that it does not set. A set replaces the param with that name, or takes a free place.
+    /// A set throws when each place is taken, or when the name is not ASCII of up to
+    /// <see cref="MaterialOverride.NameBytes"/> characters.
+    /// </remarks>
     public MaterialParam this[string name]
     {
         readonly get =>
@@ -91,7 +104,7 @@ public struct MaterialOverrides : IEquatable<MaterialOverrides>
     }
 
     /// <summary>
-    /// Whether both set the same params: the same bytes, as the instance table compares renderers.
+    /// Whether both set the same params, compared by their bytes.
     /// </summary>
     public readonly bool Equals(MaterialOverrides other) => AsBytes(in this).SequenceEqual(AsBytes(in other));
 
@@ -141,9 +154,11 @@ public struct MaterialOverrides : IEquatable<MaterialOverrides>
 }
 
 /// <summary>
-/// One param a <see cref="MaterialOverrides"/> sets: the scalar, vector, colour or texture a
-/// <see cref="MaterialParam"/> holds, and its name as ASCII bytes, zero-padded, none in a free place.
+/// One param that a <see cref="MaterialOverrides"/> sets: the value of a <see cref="MaterialParam"/>, and its name.
 /// </summary>
+/// <remarks>
+/// The name is ASCII bytes, zero-padded. A free place has no name.
+/// </remarks>
 internal struct MaterialOverride
 {
     public const int NameBytes = 16;

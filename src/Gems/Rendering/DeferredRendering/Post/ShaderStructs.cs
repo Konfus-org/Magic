@@ -3,11 +3,14 @@ using System.Runtime.InteropServices;
 namespace Magic.DeferredRendering.Post;
 
 /// <summary>
-/// One pass of a pixel effect, the twin of <c>ApplyPixelEffect.slang</c>'s: the heap id of the effects' params table
-/// and the effect's row in it, the level of its target the pass fills, 0 for its apply, and the heap ids of the picture
-/// it reads, of what it writes, and of the effect's target and history, with whether the history holds last frame's
-/// target, and of the sampler that filters between texels.
+/// One pass of a pixel effect, the twin of <c>ApplyPixelEffect.slang</c>'s.
 /// </summary>
+/// <remarks>
+/// It holds the heap id of the effects' params table and the effect's row in it, and the level of its target the pass
+/// fills, 0 for its apply. It also holds the heap ids of the picture it reads, of what it writes, of the effect's
+/// target and history, and of the sampler that filters between texels, and whether the history holds last frame's
+/// target.
+/// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct GpuEffectPass
 {

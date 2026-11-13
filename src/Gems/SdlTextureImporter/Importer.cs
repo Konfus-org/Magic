@@ -18,11 +18,14 @@ using static Magic.SdlTextureImporter.bc7enc;
 namespace Magic.SdlTextureImporter;
 
 /// <summary>
-/// Reads image files into textures ready to upload, through SDL_image: decoded, their mip chain made by halving each level
-/// with SDL's linear scaling, and every level packed into BC7 blocks unless its <c>.meta</c> says otherwise, in sRGB for
-/// colour and linear for normals and masks. As an <see cref="ICache{T}"/> an image is made once per change. SDL_image
-/// needs no SDL started, so files load on any worker, several at once.
+/// Reads image files through SDL_image into textures that are ready to upload, with mip chains and BC7 blocks.
 /// </summary>
+/// <remarks>
+/// Each mip level is half the one above, made with SDL's linear scaling. Every level is packed into BC7 blocks unless
+/// its <c>.meta</c> says otherwise, in sRGB for colour and linear for normals and masks. As an
+/// <see cref="ICache{T}"/>, it makes an image once for each change. SDL_image needs no SDL started, so files load on
+/// any worker, several at once.
+/// </remarks>
 public sealed unsafe class Importer : IAssetImporter<Texture>, ICache<Texture>
 {
     private const int HeaderBytes = 16;
@@ -36,9 +39,12 @@ public sealed unsafe class Importer : IAssetImporter<Texture>, ICache<Texture>
     private const int BlockBytes = 16;
 
     /// <summary>
-    /// What the BC7 encoder is told for every block: every channel's error weighed alike, as most textures are data rather
-    /// than colour. Made, with the tables the encoder needs before its first block, once.
+    /// What the BC7 encoder is told for every block: the error of each channel weighs the same, as most textures are
+    /// data.
     /// </summary>
+    /// <remarks>
+    /// It is made once, with the tables that the encoder needs before its first block.
+    /// </remarks>
     private static readonly bc7enc_compress_block_params _blockOptions = CreateBlockOptions();
 
     internal Importer() { }
@@ -104,9 +110,13 @@ public sealed unsafe class Importer : IAssetImporter<Texture>, ICache<Texture>
     }
 
     /// <summary>
-    /// The image in <paramref name="file"/> as a texture, with the levels under it when its <c>.meta</c> asks, each half
-    /// the one above, all in one array. SDL itself is called first, so SDL_image binds to the SDL every gem shares.
+    /// Imports the image in <paramref name="file"/> as a texture, with its mip levels in one array when its
+    /// <c>.meta</c> asks.
     /// </summary>
+    /// <remarks>
+    /// Each level is half the one above. It calls SDL itself first, so SDL_image binds to the SDL that every gem
+    /// shares.
+    /// </remarks>
     private static Result<Texture> Import(in AssetFile file)
     {
         int size = file.Metadata.Get<int>(nameof(Texture.Size));

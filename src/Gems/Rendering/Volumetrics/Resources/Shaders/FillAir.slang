@@ -1,7 +1,7 @@
 // The air between the camera and what it sees, filled into a volume of cells over the view, each a part of the
 // picture's pixels across and down and a slice of the view away from the camera: each cell's haze and the light it
 // scatters towards the camera, the sky's, the sun's and a local light's where a ray through the world reaches each, at
-// a point that moves within the cell each frame, blended with the frames before where the cell was then; then summed
+// a point that moves within the cell each frame, blended with the frames before where the cell was then, then summed
 // along each column away from the camera, after Wronski, "Volumetric Fog", SIGGRAPH 2014, into what shading reads
 // through Light/Air. The pass header's x is the frame's buffer, which holds the lights and the air, y the scattering
 // written, z last frame's, 0 when it holds nothing, and w the air.

@@ -24,7 +24,7 @@ public enum BufferUsages : byte
     Indirect = 1 << 2,
 
     /// <summary>
-    /// Written by the CPU and copied from: host memory the GPU reads once. A buffer the frame's staging ring is made of.
+    /// Written by the CPU and copied from: host memory the GPU reads once.
     /// </summary>
     Upload = 1 << 3,
 
@@ -34,7 +34,7 @@ public enum BufferUsages : byte
     Readback = 1 << 4,
 
     /// <summary>
-    /// Holds an acceleration structure: what the GPU provider makes for each one the graph names.
+    /// Holds an acceleration structure.
     /// </summary>
     Acceleration = 1 << 5,
 }

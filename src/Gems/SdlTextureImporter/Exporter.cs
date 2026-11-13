@@ -24,8 +24,8 @@ public sealed unsafe class Exporter : IAssetExporter<Texture>
     ) => Task.FromResult(Export(asset));
 
     /// <summary>
-    /// The top level of <paramref name="texture"/> as a PNG file's bytes; why not for a block-compressed one, whose texels
-    /// are not there to write.
+    /// Exports the top level of <paramref name="texture"/> as a PNG file's bytes; why not for a block-compressed
+    /// texture, whose texels are not there to write.
     /// </summary>
     private static Result<ReadOnlyMemory<byte>> Export(Texture texture)
     {

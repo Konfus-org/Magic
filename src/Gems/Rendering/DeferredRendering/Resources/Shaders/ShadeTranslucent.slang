@@ -1,9 +1,9 @@
 // The nearest translucent surface of each pixel shaded over the lit picture: what is behind it, as shading left it,
-// through the pane's colour, and through any other pane between, which a ray finds on a GPU that traces rays; what it
-// reflects of the light around it, more of it at a grazing angle (Schlick's Fresnel); and the sun on it, its
-// highlight and what its body scatters; then the air in front of it, or in front of the opaque surface where no pane
+// through the pane's colour, and through any other pane between, which a ray finds on a GPU that traces rays, what it
+// reflects of the light around it, more of it at a grazing angle (Schlick's Fresnel), and the sun on it, its
+// highlight and what its body scatters. Then the air in front of it, or in front of the opaque surface where no pane
 // is. Each pane's surface is what the resolve left in the frame's glass targets, as its material decided it, and where
-// it is the glass depth; the entry is specialised to the sky. The pass header's x is the frame's buffer, which holds
+// it is the glass depth. The entry is specialised to the sky. The pass header's x is the frame's buffer, which holds
 // the lights, the probe grid's constants, whose probes are 0 where there are none, and the air.
 module "ShadeTranslucent";
 

@@ -6,10 +6,13 @@ using Vortice.Vulkan;
 namespace Magic.VulkanGraphics;
 
 /// <summary>
-/// Turns a frame's <see cref="GpuCommands"/> into Vulkan commands: a debug group and timestamps around each pass,
-/// the barriers its uses need as one, its draws inside dynamic rendering, and each command as the call it names. Keeps
-/// what each buffer and texture level was last used as, so a barrier knows what it moves from.
+/// Turns a frame's <see cref="GpuCommands"/> into Vulkan commands, with the barriers each pass needs.
 /// </summary>
+/// <remarks>
+/// It puts a debug group and timestamps around each pass, the barriers of its uses as one, its draws inside dynamic
+/// rendering, and each command as the call it names. It keeps what each buffer and texture level was last used as, so
+/// a barrier knows what it moves from.
+/// </remarks>
 internal sealed unsafe class VulkanRecorder(
     VulkanDevice device,
     VulkanResources resources,
@@ -62,7 +65,7 @@ internal sealed unsafe class VulkanRecorder(
     }
 
     /// <summary>
-    /// Moves every level of a texture to <paramref name="access"/>, as the end of a frame needs the window's image shown.
+    /// Moves every level of a texture to <paramref name="access"/>.
     /// </summary>
     public void TransitionTo(VkCommandBuffer cmd, VulkanTexture texture, GpuAccess access)
     {
@@ -73,8 +76,8 @@ internal sealed unsafe class VulkanRecorder(
     }
 
     /// <summary>
-    /// The first <paramref name="bytes"/> of <paramref name="from"/> copied into <paramref name="to"/>, once what used
-    /// <paramref name="from"/> before is done with it, as a buffer asked for at a new size keeps what it holds.
+    /// Copies the first <paramref name="bytes"/> of <paramref name="from"/> into <paramref name="to"/>, after the work
+    /// that used <paramref name="from"/> before is done with it.
     /// </summary>
     public void CopyBuffer(VkCommandBuffer cmd, VulkanBuffer from, VulkanBuffer to, ulong bytes)
     {
@@ -96,7 +99,7 @@ internal sealed unsafe class VulkanRecorder(
         new(texture.Description.Format.ToAspect(), 0, (uint)texture.Description.Levels, 0, 1);
 
     /// <summary>
-    /// Says a copy was not recorded: one of what it names has left the heap, so what it would have moved is lost.
+    /// Logs that a copy was not recorded because a resource it names has left the heap, so its data is lost.
     /// </summary>
     private static void LogMissing(string kind, in GpuCommand command) =>
         Log.Error(
@@ -130,7 +133,7 @@ internal sealed unsafe class VulkanRecorder(
     }
 
     /// <summary>
-    /// The barriers <paramref name="uses"/> need, from what each resource was last used as, put in as one.
+    /// Puts in, as one, the barriers that <paramref name="uses"/> need, from what each resource was last used as.
     /// </summary>
     private void Barrier(VkCommandBuffer cmd, ReadOnlySpan<GpuUse> uses)
     {
@@ -173,9 +176,11 @@ internal sealed unsafe class VulkanRecorder(
     }
 
     /// <summary>
-    /// A barrier for one level, or for every run of levels last used alike, from what they were last used as and the
-    /// layout that follows from it. A read after the same read needs none.
+    /// Adds a barrier for one level, or for each run of levels last used alike, from their last use and its layout.
     /// </summary>
+    /// <remarks>
+    /// A read after the same read needs no barrier.
+    /// </remarks>
     private void AddImageBarrier(VulkanTexture texture, int level, GpuAccess access)
     {
         bool isDepth = texture.Description.Format.IsDepth;
@@ -243,7 +248,7 @@ internal sealed unsafe class VulkanRecorder(
     }
 
     /// <summary>
-    /// Begins drawing into the pass's targets, the viewport and scissor the whole of them; false when a target is
+    /// Begins drawing into the pass's targets, with a viewport and scissor that cover them; false when a target is
     /// gone, which skips the pass's draws.
     /// </summary>
     private bool BeginRendering(VkCommandBuffer cmd, in GpuPass pass)
@@ -323,14 +328,17 @@ internal sealed unsafe class VulkanRecorder(
     }
 
     /// <summary>
-    /// A viewport with +Y up: Vulkan's grows downward, so it is flipped, which keeps clockwise triangles clockwise.
+    /// Sets a viewport with +Y up.
     /// </summary>
+    /// <remarks>
+    /// Vulkan's viewport grows downward, so it is flipped. This keeps clockwise triangles clockwise.
+    /// </remarks>
     private void SetViewport(VkCommandBuffer cmd, uint x, uint y, uint width, uint height) =>
         device.Api.vkCmdSetViewport(cmd, x, y + height, width, -(float)height, 0, 1);
 
     /// <summary>
-    /// Records <paramref name="command"/>, a dispatch of threads in groups of <paramref name="groupSize"/>: the pass's
-    /// shader's, one for a pass without one.
+    /// Records <paramref name="command"/>, a dispatch of threads in groups of <paramref name="groupSize"/>: the group
+    /// size of the pass's shader, or one for a pass without a shader.
     /// </summary>
     private void Run(VulkanFrames.Frame frame, in GpuCommand command, (uint X, uint Y, uint Z) groupSize)
     {
@@ -496,10 +504,12 @@ internal sealed unsafe class VulkanRecorder(
     }
 
     /// <summary>
-    /// Builds an acceleration structure between two barriers over everything: the copies that filled what it is
-    /// built over land first, and whatever traces through it afterwards waits for it. A bottom-level one then has the
-    /// size it compacts to queried, for a later frame to compact it.
+    /// Builds an acceleration structure between two barriers over all work.
     /// </summary>
+    /// <remarks>
+    /// The copies that filled its inputs land first, and what traces through it later waits for it. For a bottom-level
+    /// structure, it then queries the compacted size, so that a later frame can compact it.
+    /// </remarks>
     private void Build(VulkanFrames.Frame frame, VulkanAcceleration acceleration, uint instanceCount)
     {
         // A compacted copy is built already, over the same triangles, and has no scratch to build again with.

@@ -5,10 +5,12 @@ using Magic.DeferredRendering.View;
 namespace Magic.ClusteredGeometry;
 
 /// <summary>
-/// What the cluster passes read beyond the frame, 84 bytes, the twin of <c>Scene/Clusters.slang</c>'s: the cull's
-/// limits and buffers, the depth pyramid, the visibility ids, the impostor handoff and table, and the cluster budget,
-/// written once a frame into the constants buffer after <see cref="GpuAir"/>.
+/// What the cluster passes read beyond the frame, 84 bytes, the twin of <c>Scene/Clusters.slang</c>'s.
 /// </summary>
+/// <remarks>
+/// It holds the cull's limits and buffers, the depth pyramid, the visibility ids, the impostor handoff and table, and
+/// the cluster budget. It is written once a frame into the constants buffer after <see cref="GpuAir"/>.
+/// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct ClusterConstants
 {
@@ -61,9 +63,11 @@ internal record struct ClusterConstants
 }
 
 /// <summary>
-/// A model's clusters in the cluster pool and its row of the impostor table, 0 for none, the twin of
-/// <c>Scene/Clusters.slang</c>'s: the row of the cluster model table an instance's model index names.
+/// The row of the cluster model table that an instance's model index names, the twin of <c>Scene/Clusters.slang</c>'s.
 /// </summary>
+/// <remarks>
+/// It holds the model's clusters in the cluster pool and its row of the impostor table, 0 for none.
+/// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal readonly record struct GpuClusterModel(uint ClusterOffset, uint ClusterCount, uint Impostor)
 {
@@ -71,13 +75,15 @@ internal readonly record struct GpuClusterModel(uint ClusterOffset, uint Cluster
 }
 
 /// <summary>
-/// One cluster of a model's hierarchy as the GPU reads it from the cluster pool, 80 bytes: the twin of
-/// <c>Scene/Clusters.slang</c>'s. Its triangles are a run of the cluster index pool; its vertices are wherever those
-/// indices point in the vertex pool <see cref="IsCopy"/> names. The cut through the hierarchy is decided per cluster,
-/// with no walk: a cluster is drawn when its parent's error projects above the threshold and its own at or below it. A
-/// leaf's error is 0 and a root's parent error is the model's diameter, so some level draws until the whole model is
-/// under the threshold.
+/// One cluster of a model's hierarchy as the GPU reads it from the cluster pool, 80 bytes, the twin of
+/// <c>Scene/Clusters.slang</c>'s.
 /// </summary>
+/// <remarks>
+/// Its triangles are a run of the cluster index pool; its vertices are wherever those indices point in the vertex pool
+/// that <see cref="IsCopy"/> names. The cut through the hierarchy is decided per cluster, with no walk: a cluster draws
+/// when its parent's error projects above the threshold and its own at or below it. A leaf's error is 0 and a root's
+/// parent error is the model's diameter, so some level draws until the whole model is under the threshold.
+/// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal record struct GpuCluster
 {
@@ -104,9 +110,12 @@ internal record struct GpuCluster
     public float ParentRadius;
 
     /// <summary>
-    /// The sphere around the group the cluster was simplified from, the cluster's own for a leaf: what
-    /// <see cref="Error"/> is projected over, the same sphere the group's children project it over as their parent's.
+    /// The sphere around the group that the cluster was simplified from, or the cluster's own for a leaf.
     /// </summary>
+    /// <remarks>
+    /// <see cref="Error"/> is projected over it, the same sphere that the group's children project it over as their
+    /// parent's.
+    /// </remarks>
     public Vector3 DetailCenter;
 
     public float DetailRadius;
@@ -145,11 +154,13 @@ internal record struct GpuCluster
     public uint MaterialSlot;
 
     /// <summary>
-    /// 1 when the cluster's indices point into the cluster vertex pool, which holds each level's copies above the
-    /// leaves; 0 for a leaf, whose indices point into the models' vertex pool, as it draws the model's own vertices.
-    /// Written as the model is copied up; the cache holds the cluster's indices into
-    /// <see cref="ModelClusters.Vertices"/> with the model's own vertices before them.
+    /// 1 when the cluster's indices point into the cluster vertex pool, which holds each level's copies; 0 for a leaf.
     /// </summary>
+    /// <remarks>
+    /// A leaf's indices point into the models' vertex pool, as it draws the model's own vertices. It is written as the
+    /// model is copied up; the cache holds the cluster's indices into <see cref="ModelClusters.Vertices"/> with the
+    /// model's own vertices before them.
+    /// </remarks>
     public uint IsCopy;
 }
 

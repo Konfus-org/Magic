@@ -10,11 +10,13 @@ using Magic.Utils;
 namespace Magic.DebugTools;
 
 /// <summary>
-/// A window of every gem's settings, under a header per category, each with a control for its type: a checkbox, a
-/// number dragged, a choice of an enum's values, or a number per part of a size or vector. A change is set at once and
-/// the summary shows while the mouse rests on the control. A setting that restarts the run says so, and is set only
-/// when its button is clicked. Save writes them for this user and project.
+/// A window of every gem's settings, under a header per category, each with a control for its type.
 /// </summary>
+/// <remarks>
+/// A control is a checkbox, a dragged number, a choice of an enum's values, or a number per part of a size or vector. A
+/// change is set at once, and the setting's summary shows while the mouse rests on the control. A setting that restarts
+/// the run says so, and is set only when its button is clicked. Save writes the settings for this user and project.
+/// </remarks>
 internal sealed class SettingsWindow(IDebugUI ui, Settings settings)
 {
     /// <summary>
@@ -116,7 +118,7 @@ internal sealed class SettingsWindow(IDebugUI ui, Settings settings)
         Convert.ChangeType(value, type, CultureInfo.InvariantCulture);
 
     /// <summary>
-    /// A setting's control, and its button while a value that restarts the run waits.
+    /// Draws a setting's control, and its button while a value that restarts the run waits.
     /// </summary>
     private void Draw(Setting option)
     {
@@ -143,9 +145,9 @@ internal sealed class SettingsWindow(IDebugUI ui, Settings settings)
     }
 
     /// <summary>
-    /// The control for <paramref name="value"/>, with the setting's summary as its tooltip: the value it was changed
-    /// to, or null when unchanged.
+    /// Draws the control for <paramref name="value"/>, with the setting's summary as its tooltip.
     /// </summary>
+    /// <returns>The value it was changed to, or null when unchanged.</returns>
     private object? Edit(Setting option, Row row, object? value)
     {
         switch (value)

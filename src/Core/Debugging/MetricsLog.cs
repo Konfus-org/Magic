@@ -9,25 +9,33 @@ using Magic.Threading;
 namespace Magic.Debugging;
 
 /// <summary>
-/// Sums up what the <c>Magic.*</c> meters and .NET's <c>System.Runtime</c> measure over a stretch of time, once or
-/// logged every so many seconds: each instrument with the category as a part of its name, such as gpu in
-/// <c>magic.gems.vulkan_graphics.gpu.pass.duration</c>, or every one for all, a line for each of its sets of tags. A
-/// histogram shows its mean, how many a second and its most, a counter how much it rose and how much a second, and
-/// anything else its latest value; seconds show as milliseconds and bytes as megabytes. It listens only while it
-/// measures.
+/// Sums up what the <c>Magic.*</c> meters and .NET's <c>System.Runtime</c> measure over a time, one time or at an
+/// interval.
 /// </summary>
+/// <remarks>
+/// <para>
+/// It takes each instrument with the category as a part of its name, such as gpu in
+/// <c>magic.gems.&lt;gem&gt;.gpu.pass.duration</c>, or each instrument for <c>all</c>. It writes a line for each set
+/// of tags.
+/// </para>
+/// <para>
+/// A histogram shows its mean, its count a second and its maximum. A counter shows its rise and its rise a second.
+/// Other instruments show their latest value. Seconds show as milliseconds and bytes as megabytes. It listens only
+/// while it measures.
+/// </para>
+/// </remarks>
 internal static class MetricsLog
 {
     public const string All = "all";
 
     /// <summary>
-    /// Ends the log that runs, while one does.
+    /// Stops the running log; null while none runs.
     /// </summary>
     private static CancellationTokenSource? _stop;
 
     /// <summary>
-    /// Logs <paramref name="category"/> every <paramref name="everySec"/> seconds from now, in place of what it logged
-    /// before; 0 stops it.
+    /// Logs <paramref name="category"/> every <paramref name="everySec"/> seconds, in place of the log before. 0 stops
+    /// it.
     /// </summary>
     public static void Start(string category, double everySec)
     {
@@ -39,7 +47,7 @@ internal static class MetricsLog
     }
 
     /// <summary>
-    /// What <paramref name="category"/> measures over the next <paramref name="over"/>, as the lines a log prints.
+    /// Measures <paramref name="category"/> over the next <paramref name="over"/>, and gives the lines a log prints.
     /// </summary>
     public static async Task<string> SampleAsync(string category, TimeSpan over, CancellationToken cancel)
     {
@@ -50,7 +58,7 @@ internal static class MetricsLog
     }
 
     /// <summary>
-    /// One log until it is cancelled: each tick sums up what came since the last and logs it.
+    /// Runs one log until it is cancelled: each tick sums up and logs what came since the last tick.
     /// </summary>
     private static async Task LogAsync(string category, TimeSpan every, CancellationToken cancel)
     {
@@ -78,8 +86,8 @@ internal static class MetricsLog
     }
 
     /// <summary>
-    /// <paramref name="value"/> in <paramref name="unit"/>: seconds as milliseconds, bytes as megabytes, and a count's
-    /// unit, in braces, left out.
+    /// Formats <paramref name="value"/> in <paramref name="unit"/>: seconds as milliseconds, bytes as megabytes, and a
+    /// count without its unit in braces.
     /// </summary>
     private static string Format(double value, string unit) =>
         unit switch
@@ -91,8 +99,7 @@ internal static class MetricsLog
         };
 
     /// <summary>
-    /// One measurement, as the thread that recorded it hands it over: its instrument, its name with its tags' values,
-    /// and its value.
+    /// One measurement from the thread that recorded it: its instrument, its name with its tags' values, and its value.
     /// </summary>
     private readonly record struct Measured(Instrument Instrument, string Key, double Value);
 
@@ -102,9 +109,11 @@ internal static class MetricsLog
     private readonly record struct Sum(Instrument Instrument, int Count, double Total, double Max, double Latest);
 
     /// <summary>
-    /// Listens to one category's instruments from when it is made until it is disposed: the threads that record hand
-    /// each measurement over through a channel, and each summary sums up what came since the last.
+    /// Listens to one category's instruments until it is disposed, and sums up what came since the last summary.
     /// </summary>
+    /// <remarks>
+    /// The threads that record send each measurement through a channel.
+    /// </remarks>
     private sealed class Sampler : IDisposable
     {
         private readonly string _category;
@@ -139,7 +148,7 @@ internal static class MetricsLog
         public void Dispose() => _listener.Dispose();
 
         /// <summary>
-        /// What was measured since the last summary, or since the start, a line per instrument and set of tags.
+        /// Sums up what was measured since the last summary or the start: a line per instrument and set of tags.
         /// </summary>
         public string Summarize()
         {

@@ -1,10 +1,10 @@
 // The light each smooth surface reflects, traced at a part of the picture's size: from one pixel of each traced pixel's
 // footprint, a ray along a direction its specular reflects the view into, drawn by its roughness, bringing back the sky
-// where it hits nothing and the light of the surface it lands on, lit by one light at random and by the probes; then
+// where it hits nothing and the light of the surface it lands on, lit by one light at random and by the probes. Then
 // resolved over a few neighbours, each weighed by how much the pixel's own specular would reflect its ray, and blended
 // with the frames before where the surface, or what it reflects, was. Shading reads the result through Light/Indirect.
 // Adapted from Wicked Engine's ray-traced reflections and its stochastic screen-space reflection resolve. The pass
-// header's x is the frame's buffer, which holds the lights and the indirect light; its y is the GI buffer.
+// header's x is the frame's buffer, which holds the lights and the indirect light. Its y is the GI buffer.
 module "TraceReflections";
 
 import Core.Heap;

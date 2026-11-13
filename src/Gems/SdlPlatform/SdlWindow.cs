@@ -8,14 +8,18 @@ using static Magic.SdlBindings.SDL3;
 namespace Magic.SdlPlatform;
 
 /// <summary>
-/// SDL, started for the gem's run, with its window, and what the platform thread and the game thread hand each other
-/// over it: <see cref="Platform"/> pumps SDL's events and gives the window and clipboard what was set on them, and
+/// SDL for the gem's run, with its window and the data that the platform and game threads hand each other.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <see cref="Platform"/> pumps SDL's events and gives the window and clipboard what was set on them.
 /// <see cref="Window"/>, <see cref="Clipboard"/> and <see cref="Input"/> read and set the rest. Headless, it starts
-/// SDL's gamepads only and opens no window.
+/// only SDL's gamepads and opens no window.
+/// </para>
 /// <para>
 /// SDL's windows and events belong to the process's first thread, the platform thread, which makes the gem.
 /// </para>
-/// </summary>
+/// </remarks>
 internal sealed unsafe class SdlWindow : IDisposable
 {
     /// <summary>
@@ -29,8 +33,8 @@ internal sealed unsafe class SdlWindow : IDisposable
     public readonly void* MetalView;
 
     /// <summary>
-    /// SDL's events, pumped on the platform thread and applied on the game thread, each with the text SDL holds only until
-    /// the platform thread's next pump: the name of the keyboard or mouse it adds, or what was typed.
+    /// SDL's events, pumped on the platform thread and applied on the game thread, each with the text SDL holds only
+    /// until the platform thread's next pump: the name of the keyboard or mouse it adds, or what was typed.
     /// </summary>
     public readonly Channel<(SDL_Event Event, string Text)> Events = Channel.CreateUnbounded<(SDL_Event, string)>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
@@ -65,8 +69,11 @@ internal sealed unsafe class SdlWindow : IDisposable
     public float DisplayScale = 1;
 
     /// <summary>
-    /// Whether the window has the keyboard's focus, as its last focus event said; always, headless. Game thread.
+    /// Whether the window has the keyboard's focus, as its last focus event said; always true when headless.
     /// </summary>
+    /// <remarks>
+    /// Use it only on the game thread.
+    /// </remarks>
     public bool IsFocused = true;
 
     public SdlWindow(SdlPlatformSettings settings, string title, bool isHeadless)
@@ -150,8 +157,8 @@ internal sealed unsafe class SdlWindow : IDisposable
     }
 
     /// <summary>
-    /// SDL's id of the display at <paramref name="index"/> in its list; the main display, with a warning, when there is
-    /// no such display.
+    /// Finds SDL's id of the display at <paramref name="index"/> in its list; the main display, with a warning, when
+    /// there is no such display.
     /// </summary>
     public static uint FindDisplay(int index)
     {
@@ -166,9 +173,11 @@ internal sealed unsafe class SdlWindow : IDisposable
     }
 
     /// <summary>
-    /// What a worker calling this would get away with on some systems and crash on others; SDL's window and clipboard are the
-    /// game thread's.
+    /// Throws if the caller is not on the game thread, because SDL's window and clipboard belong to it.
     /// </summary>
+    /// <remarks>
+    /// On some systems, a call from a worker works, and on others it crashes.
+    /// </remarks>
     public static void ThrowIfNotOnGame(Threads threads)
     {
         if (!threads.IsCurrent(EngineThread.Game))
@@ -187,8 +196,11 @@ internal sealed unsafe class SdlWindow : IDisposable
     }
 
     /// <summary>
-    /// The window's size in pixels and its display's scale, written whole for any thread to read. Platform thread.
+    /// Reads the window's size in pixels and its display's scale, and writes them whole for any thread to read.
     /// </summary>
+    /// <remarks>
+    /// Call it only on the platform thread.
+    /// </remarks>
     public void ReadSize()
     {
         int width = 0;

@@ -10,10 +10,11 @@ using Magic.Utils;
 namespace Magic.ClusteredGeometry;
 
 /// <summary>
-/// Makes what the cluster renderer draws a model as, its cluster hierarchy and impostor, as the model loads, and says
-/// how the cache keeps it: <see cref="AssetManager"/> keeps it under the model's version, so a model is clustered once
-/// per change to its file.
+/// Makes what the cluster renderer draws a model as, its cluster hierarchy and impostor, as the model loads.
 /// </summary>
+/// <remarks>
+/// <see cref="AssetManager"/> caches it under the model's version, so a model is clustered once per change to its file.
+/// </remarks>
 internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClusters>
 {
     /// <summary>

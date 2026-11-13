@@ -19,16 +19,20 @@ namespace Magic.SlangShaderCompiler;
 internal readonly record struct SlangModule(string Name, string Path, string Source);
 
 /// <summary>
-/// What reflecting a struct found: its fields, or the integer constant asked of it, null when it declares none. Cached as
-/// a compiled shader is, so a run whose shaders are all cached never starts the compiler.
+/// What reflecting a struct found: its fields, or the integer constant asked of it, null when it declares none.
 /// </summary>
+/// <remarks>
+/// It is cached like a compiled shader, so a run whose shaders are all cached never starts the compiler.
+/// </remarks>
 internal readonly record struct Reflection(ImmutableArray<ShaderField> Fields, long? Constant);
 
 /// <summary>
-/// Compiles Slang entries to SPIR-V: the entry's module and every module it imports, found as <see cref="Shader"/>
-/// assets, go into a session in dependency order, and the entry comes out compiled and cached under a hash of the
-/// sources, so an unchanged entry never compiles twice.
+/// Compiles Slang entries to SPIR-V, and caches each result under a hash of its sources.
 /// </summary>
+/// <remarks>
+/// The entry's module and every module it imports, found as <see cref="Shader"/> assets, go into a session in
+/// dependency order. An unchanged entry never compiles twice.
+/// </remarks>
 public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledShader>, ICache<Reflection>, IDisposable
 {
     private const string ShadersFolder = "Shaders";
@@ -59,7 +63,7 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     private readonly CancellationToken _lifetime;
 
     /// <summary>
-    /// Releases the global session <see cref="IdleMs"/> after the last compile, each compile setting it off again: a
+    /// Releases the global session <see cref="IdleMs"/> after the last compile; each compile starts it again, as a
     /// debounce.
     /// </summary>
     [SuppressMessage(
@@ -158,7 +162,7 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     }
 
     /// <summary>
-    /// The fields of the struct <paramref name="type"/> names, as a buffer lays them out; or why not.
+    /// Reflects the fields of the struct that <paramref name="type"/> names, as a buffer lays them out; or why not.
     /// </summary>
     public async Task<Result<ImmutableArray<ShaderField>>> ReflectAsync(
         ShaderTypeArgument type,
@@ -171,8 +175,8 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     }
 
     /// <summary>
-    /// The integer constant the struct <paramref name="type"/> names declares under <paramref name="name"/>; or why
-    /// not.
+    /// Reflects the integer constant that the struct <paramref name="type"/> names declares under
+    /// <paramref name="name"/>; or why not.
     /// </summary>
     public async Task<Result<long>> ReflectConstantAsync(ShaderTypeArgument type, string name, CancellationToken cancel)
     {
@@ -225,7 +229,7 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     private static partial Regex ImportLine();
 
     /// <summary>
-    /// <paramref name="text"/> as its length in bytes, then its UTF-8.
+    /// Writes <paramref name="text"/> as its length in bytes, then its UTF-8 bytes.
     /// </summary>
     private static void WriteText(IBufferWriter<byte> bytes, string text)
     {
@@ -236,7 +240,7 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     }
 
     /// <summary>
-    /// What <see cref="WriteText"/> wrote at the start of <paramref name="bytes"/>, which moves past it.
+    /// Reads what <see cref="WriteText"/> wrote at the start of <paramref name="bytes"/>, and moves past it.
     /// </summary>
     private static string ReadText(ref ReadOnlySpan<byte> bytes)
     {
@@ -248,8 +252,7 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     }
 
     /// <summary>
-    /// What names one compile: the entry, its stage, its type arguments and the optimization level, each level cached
-    /// apart.
+    /// Gets the key of one compile from the entry, its stage, its type arguments and the optimization level.
     /// </summary>
     private static ulong GetKey(
         string entryPath,
@@ -273,7 +276,7 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     }
 
     /// <summary>
-    /// What the compile is made from: every module's text, in order.
+    /// Gets the version of what the compile is made from: the text of every module, in order.
     /// </summary>
     private static ulong GetVersion(ImmutableArray<SlangModule> modules)
     {
@@ -302,7 +305,8 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
         };
 
     /// <summary>
-    /// The diagnostics' text, the blob released and the pointer cleared for the next call; empty when there were none.
+    /// Takes the diagnostics' text, releases the blob and clears the pointer for the next call; empty when there are
+    /// none.
     /// </summary>
     private static unsafe string TakeDiagnostics(ref void* diagnostics)
     {
@@ -320,9 +324,11 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     }
 
     /// <summary>
-    /// The fields of the struct <paramref name="type"/> in <paramref name="layout"/>, as a buffer lays them out: each
-    /// one's name, offset and size, and a struct field's type's name.
+    /// Reads the fields of the struct <paramref name="type"/> in <paramref name="layout"/>, as a buffer lays them out.
     /// </summary>
+    /// <remarks>
+    /// Each field has its name, offset and size, and a struct field also has the name of its type.
+    /// </remarks>
     private static unsafe Reflection ReadFields(nint layout, nint type)
     {
         // Slang's SlangTypeKind of a struct, and its SlangParameterCategory of a field's bytes.
@@ -353,9 +359,12 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     }
 
     /// <summary>
-    /// The value of the integer constant <paramref name="name"/> the struct <paramref name="type"/> declares, a
-    /// <c>static const</c> whose initialiser is a literal; null when it declares none.
+    /// Reads the integer constant <paramref name="name"/> that the struct <paramref name="type"/> declares; null when
+    /// it declares none.
     /// </summary>
+    /// <remarks>
+    /// The constant is a <c>static const</c> whose initialiser is a literal.
+    /// </remarks>
     private static unsafe Reflection ReadConstant(nint layout, nint type, string name)
     {
         void* variable;
@@ -411,10 +420,13 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     }
 
     /// <summary>
-    /// One compile of one entry: a session over the global one, the modules loaded into it in dependency order, the
-    /// entry found, specialised, linked and turned into SPIR-V, and everything released. Pure over its inputs, apart from
-    /// the compiler it drives, so <see cref="_compiling"/> is all the thread safety it needs.
+    /// Compiles one entry to SPIR-V in a session over the global one, and releases everything after.
     /// </summary>
+    /// <remarks>
+    /// It loads the modules into the session in dependency order, then finds, specialises and links the entry. It is
+    /// pure over its inputs, apart from the compiler it drives, so <see cref="_compiling"/> is all the thread safety it
+    /// needs.
+    /// </remarks>
     private unsafe Result<CompiledShader> Compile(
         ImmutableArray<SlangModule> modules,
         string entryPath,
@@ -561,9 +573,11 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     }
 
     /// <summary>
-    /// <paramref name="work"/> on a worker, once the compiler is free: one at a time, as the global session allows. Work
-    /// that comes once the gem is disposed ends cancelled, as work still waiting for its turn does.
+    /// Runs <paramref name="work"/> on a worker when the compiler is free, one at a time, as the global session allows.
     /// </summary>
+    /// <remarks>
+    /// Work that comes after the gem is disposed ends cancelled, and so does work that still waits for its turn.
+    /// </remarks>
     private Task<T> RunAsync<T>(Func<T> work, CancellationToken cancel) =>
         Task.Run(
             async () =>
@@ -595,10 +609,13 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
         );
 
     /// <summary>
-    /// The session: SPIR-V 1.6, row-major, entry names kept, warnings as errors, buffers laid out scalar, as C# packs a
-    /// struct and the heap reads one, and <paramref name="optimization"/>. A change here, but to the level, raises
-    /// Version. It starts the compiler when it isn't running.
+    /// Creates a session at <paramref name="optimization"/>, and starts the compiler when it is not running.
     /// </summary>
+    /// <remarks>
+    /// The session uses SPIR-V 1.6, row-major matrices, kept entry names, warnings as errors, and scalar buffer layout,
+    /// because C# packs a struct and the heap reads one that way. A change here, other than to the level, must raise
+    /// Version.
+    /// </remarks>
     private unsafe Result<nint> CreateSession(ShaderOptimization optimization)
     {
         if (_globalSession == null)
@@ -651,9 +668,12 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     }
 
     /// <summary>
-    /// <paramref name="modules"/> loaded into <paramref name="session"/>, which owns and frees them with itself, by their
-    /// paths; or the first that does not compile.
+    /// Loads <paramref name="modules"/> into <paramref name="session"/>, by their paths; or the first module that does
+    /// not compile.
     /// </summary>
+    /// <remarks>
+    /// The session owns the modules, and frees them with itself.
+    /// </remarks>
     private unsafe Result<Dictionary<string, nint>> LoadModules(void* session, ImmutableArray<SlangModule> modules)
     {
         void* diagnostics = null;
@@ -681,10 +701,13 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     }
 
     /// <summary>
-    /// What <paramref name="read"/> reads of the struct <paramref name="type"/> names, in a session of its module and
-    /// what it imports, cached under the struct and the <paramref name="constant"/> asked of it, empty for its fields;
-    /// or why not.
+    /// Reads with <paramref name="read"/> the struct that <paramref name="type"/> names, in a session of its module and
+    /// its imports; or why not.
     /// </summary>
+    /// <remarks>
+    /// The result is cached under the struct and the <paramref name="constant"/> asked of it, which is empty for the
+    /// fields.
+    /// </remarks>
     private async Task<Result<Reflection>> ReflectAsync(
         ShaderTypeArgument type,
         string constant,
@@ -716,9 +739,12 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     }
 
     /// <summary>
-    /// What <paramref name="read"/> reads of <paramref name="typeName"/> in the module at <paramref name="typePath"/>,
-    /// handed the session's layout and the type, both alive until it returns.
+    /// Reads with <paramref name="read"/> the type <paramref name="typeName"/> in the module at
+    /// <paramref name="typePath"/>.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="read"/> gets the session's layout and the type, which both stay alive until it returns.
+    /// </remarks>
     private unsafe Result<Reflection> Reflect(
         ImmutableArray<SlangModule> modules,
         string typePath,
@@ -759,9 +785,11 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     }
 
     /// <summary>
-    /// The compiler stopped, its memory given back, for the next compile to start again; called holding
-    /// <see cref="_compiling"/>.
+    /// Stops the compiler and gives its memory back; the next compile starts it again.
     /// </summary>
+    /// <remarks>
+    /// Call it only while holding <see cref="_compiling"/>.
+    /// </remarks>
     private unsafe void ReleaseGlobalSession()
     {
         if (_globalSession == null)
@@ -772,8 +800,8 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
     }
 
     /// <summary>
-    /// The modules at <paramref name="roots"/> and everything they import, each once, imports before what imports
-    /// them.
+    /// Loads the modules at <paramref name="roots"/> and everything they import, each once, with imports before what
+    /// imports them.
     /// </summary>
     private async Task<Result<ImmutableArray<SlangModule>>> LoadModulesAsync(
         List<string> roots,

@@ -1,15 +1,15 @@
 // Temporal upscaling: the view's output, the finished picture at the render size, taken to the size it is shown at.
-// Each shown pixel is made from the picture's 3 by 3 texels around it, each weighted by how near this frame's sample fell
-// to the pixel, and blended with what the last frame resolved where its surface was, so the camera's jitter, a
+// Each shown pixel is made from the picture's 3 by 3 texels around it, each weighted by how near this frame's sample
+// fell to the pixel, and blended with what the last frame resolved where its surface was, so the camera's jitter, a
 // different point in each texel each frame, adds up to smooth edges and to detail finer than the picture's texels. The
 // history is held to the range of the 3 by 3 texels, so light that changed doesn't trail, and left out where the last
 // frame saw another surface there or the surface was off the screen. Adapted from Wicked Engine's temporal
 // anti-aliasing, with the weights from Karis, "High Quality Temporal Supersampling" (SIGGRAPH 2014).
 //
 // It works in the output's encoding for the screen, so the picture it resolves is the one the window shows. The pass
-// header's y names the history, last frame's resolved picture, or its z where there is none; z the picture this frame
-// resolves, the size it is shown at, with each pixel's view depth in alpha for the next frame's test; w the linear clamp
-// sampler the history is read through.
+// header's y names the history, last frame's resolved picture, or its z where there is none. Its z names the picture
+// this frame resolves, the size it is shown at, with each pixel's view depth in alpha for the next frame's test. Its w
+// names the linear clamp sampler the history is read through.
 module "TaaUpscaling";
 
 import Core.Heap;
@@ -47,7 +47,7 @@ void UpscalePicture(uint3 thread : SV_DispatchThreadID)
     float weight = exp(-SampleFalloff * dot(offset, offset));
 
     // The pixel as this frame sees it, the 3 by 3 texels each weighted by how near its sample fell, in the picture's
-    // texels, so a pixel is smooth rather than a texel's block; their range; and the nearest of them, whose velocity
+    // texels, so a pixel is smooth rather than a texel's block. Their range, and the nearest of them, whose velocity
     // the pixel takes so an edge moves with what is in front of it.
     float3 weighted = float3(0.0);
     float weights = 0.0;
@@ -101,7 +101,7 @@ void UpscalePicture(uint3 thread : SV_DispatchThreadID)
     }
 
     // The history read between pixels, which blurs, so the more the pixel moved off whole pixels the more of now it
-    // takes, by the weight of this frame's sample; all of now where its surface was off the screen.
+    // takes, by the weight of this frame's sample. All of now where its surface was off the screen.
     SamplerRef sampler = { header.w };
     float3 before = clamp(history.SampleLevel(sampler, historyUv, 0.0).rgb, low, high);
     float2 moved = abs(velocity) * float2(size);

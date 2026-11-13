@@ -9,9 +9,12 @@ using static Magic.ImGuiDebugUI.ImTextureStatus;
 namespace Magic.ImGuiDebugUI;
 
 /// <summary>
-/// The debug UI over the window's image: <see cref="Publish"/> copies each frame ImGui ended on the game thread, and
-/// <see cref="Render"/> records the newest copy in the overlay layer, so it shows over whatever drew the world.
+/// Draws the debug UI over the window's image.
 /// </summary>
+/// <remarks>
+/// <see cref="Publish"/> copies each frame that ImGui ended on the game thread. <see cref="Render"/> records the newest
+/// copy in the overlay layer, so it shows over whatever drew the world.
+/// </remarks>
 public sealed class Renderer : IRender
 {
     private readonly DebugUIOverlay _overlay;
@@ -32,13 +35,12 @@ public sealed class Renderer : IRender
     internal Renderer(AssetManager assets) => _overlay = new DebugUIOverlay(assets, _frames, _textureChanges.Reader);
 
     /// <summary>
-    /// The newest frame ImGui ended, over the window's image.
+    /// Records the newest frame that ImGui ended, over the window's image.
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph) => _overlay.Record(graph);
 
     /// <summary>
-    /// Publishes a copy of the frame ImGui just ended in <paramref name="frame"/> for the overlay. Its textures get their
-    /// ids before the copy, which reads them. Game thread.
+    /// Publishes a copy of the frame that ImGui just ended in <paramref name="frame"/> for the overlay. Game thread.
     /// </summary>
     internal unsafe void Publish(uint frame)
     {
@@ -49,10 +51,13 @@ public sealed class Renderer : IRender
     }
 
     /// <summary>
-    /// What ImGui asks of its textures, queued for the overlay with <paramref name="frame"/> and done as far as ImGui
-    /// knows: a new one given an id and filled, a changed one filled again, and one it let go of dropped once the frame
-    /// just ended draws nothing with it.
+    /// Queues what ImGui asks of its textures for the overlay with <paramref name="frame"/>, and tells ImGui it is
+    /// done.
     /// </summary>
+    /// <remarks>
+    /// A new texture gets an id and a fill, and a changed one a fill again. One that ImGui let go of is dropped once
+    /// the frame just ended draws nothing with it.
+    /// </remarks>
     private unsafe void QueueTextureChanges(ImDrawData_t* data, uint frame)
     {
         ImVector_ImTextureDataPtr_t* textures = data->Textures;

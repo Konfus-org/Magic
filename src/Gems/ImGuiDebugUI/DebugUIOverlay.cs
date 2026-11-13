@@ -12,13 +12,12 @@ using Magic.Utils;
 namespace Magic.ImGuiDebugUI;
 
 /// <summary>
-/// ImGui's frame drawn over the window's image from the newest copy the UI published, again until a newer comes, in the
-/// overlay layer so it shows over the picture whichever gem drew it: it takes in the texture changes queued up to that
-/// frame, uploads the vertices, indices and constants into buffers named on the graph, and draws each of ImGui's draws
-/// clipped to its rectangle in one draw pass, its shaders reading the vertices, the draw's texture and the constants
-/// through the heap. It asks the graph for ImGui's textures every frame while the UI holds them, and for its sampler.
-/// Render thread.
+/// Draws the newest ImGui frame that the UI published over the window's image, in the overlay layer. Render thread.
 /// </summary>
+/// <remarks>
+/// It draws the same frame again until a newer one comes. It asks the graph for ImGui's textures every frame while the
+/// UI holds them.
+/// </remarks>
 internal sealed class DebugUIOverlay
 {
     private const int MinBufferBytes = 16 * 1024;
@@ -51,9 +50,12 @@ internal sealed class DebugUIOverlay
     }
 
     /// <summary>
-    /// The newest frame the UI published over the window's image, the texture changes up to it taken in first, and
-    /// nothing drawn while there is no window or nothing to draw.
+    /// Takes in the texture changes up to the newest frame that the UI published, then draws that frame over the
+    /// window's image.
     /// </summary>
+    /// <remarks>
+    /// Draws nothing while there is no window or nothing to draw.
+    /// </remarks>
     public void Record(RenderGraph graph)
     {
         if (_frames.TakeNewest() is not { } frame)
@@ -116,8 +118,7 @@ internal sealed class DebugUIOverlay
         new(name, BitOperations.RoundUpToPowerOf2((uint)Math.Max(bytes, MinBufferBytes)), usage);
 
     /// <summary>
-    /// Every texture the UI holds asked for, so the GPU provider keeps it: each was made to its description when it was
-    /// filled and is asked for every frame since, so the ask hands back the same texture.
+    /// Asks for every texture that the UI holds, so the GPU provider keeps it and hands back the same texture.
     /// </summary>
     private void AskTextures(RenderGraph graph)
     {
@@ -128,9 +129,11 @@ internal sealed class DebugUIOverlay
     }
 
     /// <summary>
-    /// The texture changes queued up to <paramref name="frame"/>: a texture made or filled again, or destroyed. One let
-    /// go of in a later frame may still be drawn in this one, so later changes wait.
+    /// Takes in the texture changes queued up to <paramref name="frame"/>: a texture made, filled again or destroyed.
     /// </summary>
+    /// <remarks>
+    /// Later changes wait, because a texture let go of in a later frame can still draw in this one.
+    /// </remarks>
     private void TakeTextureChanges(uint frame, RenderGraph graph)
     {
         while (_textureChanges.TryPeek(out DebugUITextureChange change) && change.Frame <= frame)
@@ -147,9 +150,9 @@ internal sealed class DebugUIOverlay
     }
 
     /// <summary>
-    /// The texture asked for at the change's size, under a name of its own, and filled with <paramref name="pixels"/>
-    /// whole; false while the ring has no room for the pixels.
+    /// Asks for the texture at the change's size, under a name of its own, and fills it with <paramref name="pixels"/>.
     /// </summary>
+    /// <returns>False while the ring has no room for the pixels.</returns>
     private bool FillTexture(in DebugUITextureChange change, byte[] pixels, RenderGraph graph)
     {
         TextureDescription description = new(
@@ -173,8 +176,7 @@ internal sealed class DebugUIOverlay
     }
 
     /// <summary>
-    /// Each draw clipped to its rectangle, its vertices counted from its first and its texture read: a pass that draws
-    /// over what the target holds.
+    /// Records one pass that draws each draw over the target, clipped to its rectangle.
     /// </summary>
     private void RecordDraws(
         DebugUIFrame frame,
@@ -213,9 +215,9 @@ internal sealed class DebugUIOverlay
     }
 
     /// <summary>
-    /// The draw clipped to the target in whole pixels rounded out; none when nothing of it is left or its texture is not
-    /// made yet.
+    /// Gets the draw clipped to the target in whole pixels, rounded out.
     /// </summary>
+    /// <returns>False when nothing of the draw is left or its texture is not made yet.</returns>
     private bool TryGetDraw(
         in DebugUIDraw draw,
         GpuBuffer constants,

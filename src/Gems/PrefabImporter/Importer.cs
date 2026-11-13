@@ -13,10 +13,13 @@ using Magic.Utils;
 namespace Magic.PrefabImporter;
 
 /// <summary>
-/// Reads <c>.prefab</c> files into <see cref="Prefab"/>s: each entity a part, with its components read as their types by
-/// name, its tags as a <see cref="Tags"/>, and the entities under it, a prefab it places among them. What it loads as it
-/// reads one is what that one is made from, so it is read again when one of them changes.
+/// Reads <c>.prefab</c> files into <see cref="Prefab"/>s, with each entity as a part.
 /// </summary>
+/// <remarks>
+/// A part has its components, read as their types by name, its tags as a <see cref="Tags"/>, and the entities under
+/// it, which include a prefab that it places. A file is made from the prefabs that load as it is read, so it is read
+/// again when one of them changes.
+/// </remarks>
 public sealed class Importer : IAssetImporter<Prefab>
 {
     private readonly AssetManager _assets;
@@ -57,10 +60,12 @@ public sealed class Importer : IAssetImporter<Prefab>
     }
 
     /// <summary>
-    /// The part <paramref name="entity"/> is: its components, its tags among them, and the parts under it, those of the
-    /// prefab it places first. A component no code declares, or whose values aren't its, is an error logged, and the
-    /// part goes without it; a prefab it places that doesn't load fails the file.
+    /// Reads the part that <paramref name="entity"/> is: its components, its tags, and the parts under it.
     /// </summary>
+    /// <remarks>
+    /// The parts of the prefab that it places come first. A component that no code declares, or whose values do not fit
+    /// it, logs an error, and the part goes without it. A placed prefab that does not load fails the file.
+    /// </remarks>
     private async Task<Result<PrefabPart>> ReadPartAsync(
         PrefabFileEntity entity,
         AssetFile file,

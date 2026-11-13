@@ -3,7 +3,7 @@
 // real surface where a part of it failed, and the failure's text in a 5 by 7 font held here. The text is anchored to
 // the instance's origin on the screen, so it is upright and the same size on any mesh.
 //
-// A row of the failure table, 64 bytes; its C# twin copies this layout:
+// A row of the failure table, 64 bytes. Its C# twin copies this layout:
 //   bytes 0 to 3    the header: bits 0 to 7 the kind (FailureKind), bits 8 to 15 spare, bits 16 to 23 the length of
 //                   the text in characters, 0 to 56
 //   bytes 4 to 59   the text: 56 one-byte character codes, 4 in each uint, the first in the lowest byte
@@ -19,8 +19,8 @@ import Surface.Surface;
 
 public static const uint GpuFailureBytes = 64u;
 
-// What failed, C#'s twin; the low byte of a row's header. A part of a material, a param or a texture, is drawn in
-// stripes over the real surface; each other kind is drawn solid.
+// What failed, C#'s twin, the low byte of a row's header. A part of a material, a param or a texture, is drawn in
+// stripes over the real surface. Each other kind is drawn solid.
 public enum FailureKind : uint
 {
     Model = 0,
@@ -47,12 +47,12 @@ public static const float FailureTextGlow = 3.0;
 // How bright a failure's colour is at a time, as it flashes.
 public float GetFailurePulse(float timeSec) { return 0.55 + 0.45 * sin(TwoPi * PulsesPerSecond * timeSec); }
 
-// The width of a stripe, its dark edge and its gap together, in pixels across the diagonal; the stripe takes the first
+// The width of a stripe, its dark edge and its gap together, in pixels across the diagonal. The stripe takes the first
 // half of it, and the edge ends at this part of it.
 static const float StripePeriod = 32.0;
 static const float StripeEdgeEnd = 0.625;
 
-// The render pixels a dot of the font covers, and a character's cell and a text row's height, in dots; and the
+// The render pixels a dot of the font covers, and a character's cell and a text row's height, in dots, and the
 // characters of space after each copy of the text.
 public static const float FailureDotPixels = 2.0;
 public static const uint FailureCellWidth = 6u;
@@ -119,7 +119,7 @@ uint LoadCode(FailureRow failure, uint index)
     return (word >> ((index & 3u) * 8u)) & 0xFFu;
 }
 
-// Whether a dot of a character's cell, counted from the cell's top left, is set; a code outside the font has none.
+// Whether a dot of a character's cell, counted from the cell's top left, is set. A code outside the font has none.
 public bool IsGlyphDot(uint code, uint2 dot)
 {
     if (dot.x >= 5u || dot.y >= 7u || code < FirstCode || code > LastCode)
@@ -132,8 +132,8 @@ public bool IsGlyphDot(uint code, uint2 dot)
 
 // Whether a pixel, at an offset in pixels from the anchor, lies on a dot of the failure's text. The text flows in a
 // block a number of characters wide, centred on the anchor, its rows repeating down and up, with a gap after each
-// copy; a block as wide as a whole copy repeats across too. The dot moves by whole periods to be positive first,
-// because signed division and remainder of a negative number drew the rows above the anchor wrong on this target.
+// copy. A block as wide as a whole copy repeats across too. The dot moves by whole periods to be positive first,
+// because signed division and remainder of a negative number draw the rows above the anchor wrong on this target.
 bool IsTextPixel(FailureRow failure, float2 offset, uint columns)
 {
     uint period = failure.length + FailureCopyGap;
@@ -156,7 +156,7 @@ bool IsTextPixel(FailureRow failure, float2 offset, uint columns)
 
 // Where a failure's text is anchored, and how it moved: the instance's origin on this frame's jittered screen, in
 // texture coordinates, with a block as many characters wide as fit across the instance's bounds on the screen, at
-// least one and at most a whole copy; or, where the origin is behind the camera, the screen's top left, with blocks
+// least one and at most a whole copy. Where the origin is behind the camera, it is the screen's top left, with blocks
 // a whole copy wide repeating across. The move is the anchor's from where it was last frame, as a pixel's velocity.
 struct FailureAnchor
 {

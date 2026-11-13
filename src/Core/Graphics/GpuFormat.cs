@@ -1,9 +1,11 @@
 namespace Magic.Graphics;
 
 /// <summary>
-/// How a texture's texels are laid out, named as Vulkan names them, channel by channel with the bits of each. Only the
-/// formats the renderer needs, every one of which every GPU Magic runs on has.
+/// How a texture's texels are laid out, with Vulkan's names: channel by channel, with the bits of each.
 /// </summary>
+/// <remarks>
+/// Every GPU that Magic runs on has each of these formats.
+/// </remarks>
 public enum GpuFormat : byte
 {
     Unknown,
@@ -28,7 +30,7 @@ public static class GpuFormatExtensions
     extension(GpuFormat format)
     {
         /// <summary>
-        /// Whether the format holds depth, which a texture of it is drawn into as the depth target.
+        /// Whether the format holds depth, so that a texture of it is drawn into as the depth target.
         /// </summary>
         public bool IsDepth => format == GpuFormat.D32Sfloat;
 

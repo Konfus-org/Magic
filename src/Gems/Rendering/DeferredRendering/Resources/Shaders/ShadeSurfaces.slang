@@ -2,9 +2,10 @@
 // tile lists, each dimmed by the shadow mask, the sun also by the clouds and coloured by its tint through glass, and by
 // the light around it, traced on a GPU that traces rays and else the sky's, and what it reflects, traced where it is
 // smooth enough, its direct and indirect light summed over the shared BRDF and added to its own emissive light, which
-// the material resolve left in the picture; and the sky itself, with its clouds, where nothing was drawn, or the failure
-// of the sky or of its clouds where they failed. The pass header's x is the frame's buffer, which holds the lights, the
-// shadows, the indirect light, whose ids are 0 where nothing is traced, and the air; its y holds the failure bits.
+// the material resolve left in the picture. Where nothing was drawn, it is the sky itself, with its clouds, or the
+// failure of the sky or of its clouds where they failed. The pass header's x is the frame's buffer, which holds the
+// lights, the shadows, the indirect light, whose ids are 0 where nothing is traced, and the air. Its y holds the
+// failure bits.
 module "ShadeSurfaces";
 
 import Core.Heap;
@@ -50,7 +51,8 @@ bool IsFailureTextPixel(uint2 pixel, bool isWeather)
 }
 
 // The failure at a pixel where the sky or its clouds would draw: the band of the clouds in flashing green while they
-// failed, else the whole sky in flashing coral, with its text over it, white with a black shadow a pixel down and right.
+// failed, else the whole sky in flashing coral, with its text over it, white with a black shadow a pixel down and
+// right.
 float3 ShowSkyFailure(bool isWeather, uint2 pixel, float timeSec)
 {
     if (IsFailureTextPixel(pixel, isWeather))
@@ -64,10 +66,10 @@ float3 ShowSkyFailure(bool isWeather, uint2 pixel, float timeSec)
 
 // The light a surface at a pixel reflects of what reaches it indirectly. The diffuse is what a white diffuse surface
 // reflects, its irradiance over pi: the traced light where it was traced, which sees what shades and bounces the light
-// near the surface and the probes' beyond; else the open sky's over its hemisphere. The specular is the traced
-// reflections as far as they cover the pixel, where the surface is smooth enough for them. Elsewhere it is the sky along
-// the mirror direction, giving way to the diffuse as the surface roughens; where the diffuse is traced it is the diffuse
-// alone, so a closed room reflects none of the sky.
+// near the surface and the probes' beyond, else the open sky's over its hemisphere. The specular is the traced
+// reflections as far as they cover the pixel, where the surface is smooth enough for them. Elsewhere it is the sky
+// along the mirror direction, giving way to the diffuse as the surface roughens. Where the diffuse is traced it is the
+// diffuse alone, so a closed room reflects none of the sky.
 float3 ShadeIndirectLight<S : ISky>(
     FrameConstants frame,
     Lights lights,

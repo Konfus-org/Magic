@@ -39,6 +39,11 @@ Domains to open after the first screenshot, each by its asset path, a screenshot
 The name the window shows in its title bar, so a person can tell whose run it is: the branch checked out where the
 script is, which is the agent session's name. Empty sends no name.
 
+.PARAMETER Display
+The display that the window opens on, by its place in SDL's list of displays, where the main display is first. The
+default, 1, is the display after the main one, so that the run does not cover the user's work. With one display, the
+window opens on the main one.
+
 .PARAMETER AllowErrors
 Runs Magic without --fail-on-error, so a run that logs errors still takes its screenshots. The error lines of the log
 are shown again before the paths.
@@ -72,6 +77,8 @@ param(
     [string[]] $Commands = @(),
     [string[]] $Domains = @(),
     [string] $Name,
+    [ValidateRange(0, [int]::MaxValue)]
+    [int] $Display = 1,
     [switch] $AllowErrors,
     [switch] $Window
 )
@@ -107,6 +114,10 @@ foreach ($domain in $Domains) {
 $lines += 'exit'
 $arguments = @('open', "`"$projectPath`"")
 if (-not $AllowErrors) { $arguments += '--fail-on-error' }
+# The window opens on -Display, behind the window that has the focus, so that it does not interrupt the user's work.
+# SDL reads the hint from the environment, and Magic inherits it.
+$arguments += @('--configure', "Window.Display=$Display")
+$env:SDL_WINDOW_ACTIVATE_WHEN_SHOWN = '0'
 
 if ($Window) {
     Add-Type -AssemblyName System.Drawing

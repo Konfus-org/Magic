@@ -11,11 +11,13 @@ using Vortice.Vulkan;
 namespace Magic.VulkanGraphics;
 
 /// <summary>
-/// The GPU through Vulkan 1.3: one bindless heap, resources made from Core's descriptions, and one frame of commands
-/// submitted at a time. Core hands it each frame the gems recorded, and <see cref="Present"/> runs it, shows it and
-/// begins the next, as the first begins as it is made: waits for the frame two before, takes the window's image, and
-/// leaves the staging ring empty for what records next.
+/// Runs the GPU through Vulkan 1.3, with one bindless heap, and submits one frame of commands at a time.
 /// </summary>
+/// <remarks>
+/// Core gives it each frame that the gems recorded. <see cref="Present"/> runs the frame, shows it and begins the
+/// next frame. The first frame begins when the object is made. To begin a frame, it waits for the frame two before,
+/// gets the window's image, and empties the staging ring for what records next.
+/// </remarks>
 public sealed class GraphicsApi : IGraphicsApi, IDisposable
 {
     /// <summary>
@@ -312,11 +314,14 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
     }
 
     /// <summary>
-    /// Each bottom-level structure a finished frame built, copied into one of the size it compacts to at the start of
-    /// this frame's commands. Its name takes the copy, and the built one dies with its scratch once this frame has run.
-    /// The gem that asks for it gets the copy's address this frame and builds the instances over it again, before
-    /// anything traces the copy.
+    /// Copies each bottom-level structure that a finished frame built into a compacted one, at the start of this
+    /// frame's commands.
     /// </summary>
+    /// <remarks>
+    /// The name takes the copy. The built structure and its scratch are destroyed after this frame runs. The gem that
+    /// asks for the structure gets the copy's address this frame, and builds the instances over it again before
+    /// anything traces the copy.
+    /// </remarks>
     private void Compact()
     {
         foreach ((VulkanAcceleration built, ulong bytes) in _frames.Compactable)
@@ -344,10 +349,12 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
     }
 
     /// <summary>
-    /// The buffer under the description's name moved into one of its new size, as much of what it held as fits copied
-    /// across at the start of this frame's commands, before any pass; the name takes the new one, and the old one dies
-    /// once this frame has run.
+    /// Moves the named buffer into a new buffer of the description's size, and copies as much of its contents as fits.
     /// </summary>
+    /// <remarks>
+    /// The copy runs at the start of this frame's commands, before any pass. The name takes the new buffer. The old
+    /// buffer is destroyed after this frame runs.
+    /// </remarks>
     private Result<GpuBuffer> Resize(ref Named<BufferDescription, GpuBuffer> named, in BufferDescription description)
     {
         ThrowIfNotOnRender();
@@ -368,10 +375,13 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
     }
 
     /// <summary>
-    /// What <paramref name="description"/> makes, under <paramref name="key"/> in <paramref name="named"/>: made on the
-    /// first ask, the same one while the key is asked for with the same description, made again, the old one destroyed,
-    /// when the description changes, and marked asked for in this frame.
+    /// Gets the resource that <paramref name="description"/> makes under <paramref name="key"/> in
+    /// <paramref name="named"/>, and marks it as asked for in this frame.
     /// </summary>
+    /// <remarks>
+    /// It makes the resource on the first ask, and gives the same one while the description stays the same. When the
+    /// description changes, it destroys the old resource and makes a new one.
+    /// </remarks>
     private Result<T> GetNamed<TKey, TDescription, T>(
         Dictionary<TKey, Named<TDescription, T>> named,
         TKey key,

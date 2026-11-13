@@ -1,8 +1,8 @@
 // Each pixel's shadow mask as the rays leave it, which the denoiser then blends in place: a ray from its surface
 // towards the sun, and one towards each of the first lights its tile lists, each aimed at a random point of the light
-// so that a wider light casts a softer shadow; how much of the light gets through, 1 where nothing is in the way and 0
+// so that a wider light casts a softer shadow. How much of the light gets through, 1 where nothing is in the way and 0
 // past something opaque. The sun's rays also go into its tiles, for the denoiser, one bit a pixel: lit at random as
-// often as the light gets through; and the colour its light takes on through glass into the sun's tint. A thread is a
+// often as the light gets through, and the colour its light takes on through glass into the sun's tint. A thread is a
 // traced pixel, which traces from the picture's pixel at its footprint's corner. The pass header's x is the frame's
 // buffer, which holds the lights, and its y the denoiser's constants, with the traced targets.
 module "TraceShadows";

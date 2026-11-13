@@ -8,10 +8,13 @@ using Magic.Utils;
 namespace Magic.GlobalIllumination;
 
 /// <summary>
-/// On a GPU that traces rays, the light that reaches each surface indirectly, traced near it: two rays from a pixel of
-/// each traced pixel's footprint, lit where they land by the lights and the probes, and the probes' light where they
-/// reach nothing within range; filtered over neighbours and blended over frames, into the light shading reads.
+/// Traces the light that reaches each surface indirectly from near it, on a GPU that traces rays.
 /// </summary>
+/// <remarks>
+/// Two rays go from a pixel of each traced pixel's footprint. The lights and the probes light them where they land, and
+/// the probes' light is used where they reach nothing within range. The light is filtered over neighbours and blended
+/// over frames into the light that shading reads.
+/// </remarks>
 internal sealed class TracedDiffuse(AssetManager assets)
 {
     private static readonly string[] _blendNames = ["Diffuse light 0", "Diffuse light 1"];
@@ -26,9 +29,12 @@ internal sealed class TracedDiffuse(AssetManager assets)
     public ImmutableArray<ShaderEntry> Shaders => [_traceShader, _filterShader, _blendShader];
 
     /// <summary>
-    /// The textures asked for at the traced size, the blend's history holding the view as <paramref name="hasHistory"/>
-    /// says; the blended light is the indirect diffuse light shading reads.
+    /// Asks for the textures at the traced size, the blend's history holding the view as
+    /// <paramref name="hasHistory"/> says.
     /// </summary>
+    /// <remarks>
+    /// The blended light is the indirect diffuse light that shading reads.
+    /// </remarks>
     public static Result<TracedDiffuseConstants> Prepare(in GIView view, uint frameIndex, bool hasHistory)
     {
         RenderGraph graph = view.Graph;
@@ -49,9 +55,11 @@ internal sealed class TracedDiffuse(AssetManager assets)
     }
 
     /// <summary>
-    /// The rays traced from the view's surfaces through the world, lit by the lights, the sky and the probes, then
-    /// filtered and blended with the history; the blend also keeps the view depth for the next frame's.
+    /// Traces rays from the view's surfaces through the world, then filters them and blends them with the history.
     /// </summary>
+    /// <remarks>
+    /// The lights, the sky and the probes light the rays. The blend also keeps the view depth for the next frame.
+    /// </remarks>
     public void Record(in GIView view, in ProbeGridConstants grid, in GIConstants gi)
     {
         RenderGraph graph = view.Graph;

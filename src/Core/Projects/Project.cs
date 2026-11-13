@@ -29,7 +29,7 @@ public readonly record struct Project
     public Handle<Prefab> Player { get; init; }
 
     /// <summary>
-    /// The <c>.magic</c> file it was read from, which the open command gives it; never read from the file.
+    /// The <c>.magic</c> file it was read from, set by the open command. It is not stored in the file.
     /// </summary>
     [JsonIgnore]
     public string Path { get; init; }

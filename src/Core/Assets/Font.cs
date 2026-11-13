@@ -4,8 +4,11 @@ namespace Magic.Assets;
 
 /// <summary>
 /// One character of a <see cref="Font"/>: its rectangle in the atlas, and where it is drawn from the pen, all in
-/// pixels. One that draws nothing, a space, has an empty rectangle and still moves the pen.
+/// pixels.
 /// </summary>
+/// <remarks>
+/// A character that draws nothing, such as a space, has an empty rectangle and still moves the pen.
+/// </remarks>
 /// <param name="X">The rectangle's left edge in the atlas.</param>
 /// <param name="Y">The rectangle's top edge in the atlas.</param>
 /// <param name="Width">The rectangle's width.</param>
@@ -16,10 +19,12 @@ namespace Magic.Assets;
 public readonly record struct Glyph(int X, int Y, int Width, int Height, int BearingX, int BearingY, int Advance);
 
 /// <summary>
-/// A font, drawn once at <see cref="Size"/>: an atlas of its characters, white RGBA8 whose alpha
-/// is coverage, tightly packed, and where each character is in it. Whatever draws text uploads the atlas once and draws
-/// a quad per character, moving the pen by its <see cref="Glyph.Advance"/>.
+/// A font drawn once at <see cref="Size"/>: an atlas of its characters, and where each character is in it.
 /// </summary>
+/// <remarks>
+/// The atlas is white RGBA8, tightly packed, and its alpha is coverage. To draw text, upload the atlas once and draw a
+/// quad per character, then move the pen by its <see cref="Glyph.Advance"/>.
+/// </remarks>
 public sealed class Font : IAsset<Font>
 {
     /// <summary>

@@ -9,14 +9,21 @@ using Magic.Utils;
 namespace Magic.DeferredRendering.Post;
 
 /// <summary>
-/// The effects run over the lit picture before the output, in order: each a material whose shader implements the pixel
-/// effect contract, its row packed as a surface material's is, and passes of the entries specialised to its shader: one
-/// for each level of its own target it declares, then its apply, which reads the picture the effects before it left and
-/// writes the other of two, the last copied back into the HDR picture. An effect with levels has a target by its place
-/// in the list; one that declares a history has two, which swap each frame, so the one it filled last frame is its
-/// history. One that declares jitter has the camera jittered while it runs. An effect is left out while its material,
-/// its textures or its passes load, and when one of them failed.
+/// Runs the pixel effects over the lit picture before the output, in order, each a material whose shader implements the
+/// pixel effect contract.
 /// </summary>
+/// <remarks>
+/// <para>
+/// An effect's row is packed as a surface material's is. It runs one pass for each level of its own target it declares,
+/// then its apply, which reads the picture the effects before it left and writes the other of two. The last picture is
+/// copied back into the HDR picture.
+/// </para>
+/// <para>
+/// An effect with levels has a target by its place in the list. One that declares a history has two, which swap each
+/// frame, so the one it filled last frame is its history. One that declares jitter has the camera jittered while it
+/// runs. An effect is left out while its material, its textures or its passes load, and when one of them failed.
+/// </para>
+/// </remarks>
 internal sealed class PixelEffects
 {
     /// <summary>
@@ -34,7 +41,8 @@ internal sealed class PixelEffects
     ];
 
     /// <summary>
-    /// The material the effect at each place was last frame, 0 where none ran: whether its history is its own.
+    /// The material of the effect at each place last frame, 0 where none ran, which tells whether its history is its
+    /// own.
     /// </summary>
     private readonly ulong[] _lastFrame = new ulong[MaterialSlots.Capacity];
 
@@ -183,8 +191,8 @@ internal sealed class PixelEffects
             (picture, other) = (other, picture);
         }
 
-        // A table not staged leaves the picture without the effects where the passes wrote elsewhere; where the last pass
-        // wrote the picture itself, it read the table of the frame before.
+        // A table not staged leaves the picture without the effects where the passes wrote elsewhere; where the last
+        // pass wrote the picture itself, it read the table of the frame before.
         if (!graph.Upload(passTable.Value, passes[..pass]))
             return;
 

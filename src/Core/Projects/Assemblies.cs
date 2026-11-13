@@ -7,9 +7,11 @@ using Magic.Utils;
 namespace Magic.Projects;
 
 /// <summary>
-/// The code loaded in the process, Core's and each gem's, by the name of its types: how what a file names from code, such
-/// as a component's struct, is found. Any thread.
+/// The code loaded in the process, Core's and each gem's, by type name. Any thread.
 /// </summary>
+/// <remarks>
+/// It finds the code that a file names, such as a component's struct.
+/// </remarks>
 public static class Assemblies
 {
     private static ImmutableArray<Assembly> _assemblies = [typeof(Assemblies).Assembly];
@@ -20,8 +22,8 @@ public static class Assemblies
     private static FrozenDictionary<string, ImmutableArray<Type>> _byName = Index(_assemblies);
 
     /// <summary>
-    /// The one type named <paramref name="name"/> that is a <typeparamref name="T"/>; why not, when no code loaded
-    /// declares one or more than one does.
+    /// Gets the one <typeparamref name="T"/> named <paramref name="name"/>, or why not when none or more than one is
+    /// loaded.
     /// </summary>
     public static Result<Type> Get<T>(string name)
     {
@@ -33,15 +35,18 @@ public static class Assemblies
             1 => Result.Success(matching[0]),
             0 => Result.Failure($"no code loaded declares a {typeof(T).Name} named {name}."),
             _ => Result.Failure(
-                $"more than one {typeof(T).Name} is named {name}: {string.Join(", ", matching.Select(type => type.FullName))}."
+                $"more than one {typeof(T).Name} is named {name}: "
+                    + $"{string.Join(", ", matching.Select(type => type.FullName))}."
             ),
         };
     }
 
     /// <summary>
-    /// Adds a gem's <paramref name="assembly"/> until the subscription is disposed, which it must be for the gem's code to
-    /// unload. Game thread.
+    /// Adds a gem's <paramref name="assembly"/> until the subscription is disposed. Game thread.
     /// </summary>
+    /// <remarks>
+    /// Dispose the subscription, or the gem's code cannot unload.
+    /// </remarks>
     internal static Subscription Register(Assembly assembly)
     {
         _assemblies = _assemblies.Add(assembly);
@@ -55,7 +60,7 @@ public static class Assemblies
     }
 
     /// <summary>
-    /// The top-level types <paramref name="assemblies"/> hold, by their names.
+    /// Indexes the top-level types of <paramref name="assemblies"/> by name.
     /// </summary>
     private static FrozenDictionary<string, ImmutableArray<Type>> Index(ImmutableArray<Assembly> assemblies)
     {
@@ -78,8 +83,8 @@ public static class AssemblyExtensions
     extension(Assembly assembly)
     {
         /// <summary>
-        /// What the assembly's build recorded as <paramref name="key"/> (<c>&lt;AssemblyMetadata Include="key"&gt;</c>);
-        /// null when nothing, or an empty string, was.
+        /// Gets what the assembly's build recorded as <paramref name="key"/>
+        /// (<c>&lt;AssemblyMetadata Include="key"&gt;</c>); null when it is missing or empty.
         /// </summary>
         public string? GetMetadata(string key)
         {
@@ -96,7 +101,7 @@ public static class AssemblyExtensions
         }
 
         /// <summary>
-        /// Every type the assembly holds; those that load, when some don't.
+        /// Gets each type of the assembly that loads.
         /// </summary>
         internal Type[] GetLoadableTypes()
         {

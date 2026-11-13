@@ -4,7 +4,7 @@ using static Magic.SdlBindings.SDL3;
 namespace Magic.SdlBindings;
 
 /// <summary>
-/// What SDL says in C that its gems read as C#.
+/// SDL's C API, as C#.
 /// </summary>
 public static class Sdl
 {

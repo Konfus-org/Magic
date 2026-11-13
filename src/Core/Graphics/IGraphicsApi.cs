@@ -3,77 +3,97 @@ using Magic.Utils;
 namespace Magic.Graphics;
 
 /// <summary>
-/// The GPU, as a gem that provides it: resources made by name from descriptions into one bindless heap, and one
-/// <see cref="GpuCommands"/> a frame, recorded as data and submitted whole. Gems record their work and ask for their
-/// resources on Core's <see cref="RenderGraph"/>, which asks the provider for them, and Core presents each frame; a gem
-/// calls the provider itself only for what it has and for what a frame hands back. Render thread, but where a member
-/// says otherwise.
+/// The GPU: resources made by name into one bindless heap, and one <see cref="GpuCommands"/> a frame, submitted whole.
 /// </summary>
+/// <remarks>
+/// Gems record their work and ask for resources on <see cref="RenderGraph"/>, and Core presents each frame. A gem calls
+/// the provider itself only for what it has and for what a frame gives back. Call members on the render thread, unless
+/// a member says otherwise.
+/// </remarks>
 public interface IGraphicsApi
 {
     GpuFeatures Features { get; }
 
     /// <summary>
-    /// The window's image for this frame, to draw into until <see cref="Present"/> shows it; <see cref="GpuTexture.None"/>
-    /// headless, or while the window is minimised. A new one each frame. <see cref="RenderGraph.WindowTarget"/> asks for
-    /// it.
+    /// The window's image for this frame, to draw into until <see cref="Present"/> shows it.
     /// </summary>
+    /// <remarks>
+    /// It is a new texture each frame, and <see cref="GpuTexture.None"/> when headless or while the window is
+    /// minimised. Gems ask for it through <see cref="RenderGraph.WindowTarget"/>.
+    /// </remarks>
     GpuTexture WindowTarget { get; }
 
     TextureDescription GetDescription(GpuTexture texture);
 
     /// <summary>
-    /// The texture under the description's name: made on the first ask, the same one while the name is asked for with
-    /// the same description, so what it holds carries from frame to frame, made again, the old one destroyed, when the
-    /// description changes, and destroyed once no frame has asked for it in a few. <see cref="RenderGraph.Texture"/>
-    /// asks for it.
+    /// Gets the texture under the description's name, made on the first ask.
     /// </summary>
+    /// <remarks>
+    /// While the description stays the same, each ask gives the same texture, so its contents carry from frame to
+    /// frame.
+    /// A changed description makes a new texture and destroys the old one. A texture that no frame asked for in a few
+    /// frames is destroyed. Gems ask through <see cref="RenderGraph.Texture"/>.
+    /// </remarks>
     Result<GpuTexture> GetTexture(in TextureDescription description);
 
     /// <summary>
-    /// The buffer under the description's name, kept as <see cref="GetTexture"/> keeps a texture, except that one asked
-    /// for at another size alone keeps what it holds, as much as fits, copied into the new one before the frame's
-    /// passes.
-    /// <see cref="RenderGraph.Buffer"/> asks for it.
+    /// Gets the buffer under the description's name, kept as <see cref="GetTexture"/> keeps a texture.
     /// </summary>
+    /// <remarks>
+    /// When only the size changes, the new buffer gets as much of the old contents as fits, before the frame's passes.
+    /// Gems ask through <see cref="RenderGraph.Buffer"/>.
+    /// </remarks>
     Result<GpuBuffer> GetBuffer(in BufferDescription description);
 
     /// <summary>
-    /// The bottom-level acceleration structure under the description's name, its device address on the handle, kept as
-    /// <see cref="GetTexture"/> keeps a texture; only when <see cref="GpuFeatures.HasRayQuery"/>.
-    /// <see cref="RenderGraph.Acceleration(in BottomLevelDescription)"/> asks for it.
+    /// Gets the bottom-level acceleration structure under the description's name, kept as
+    /// <see cref="GetTexture"/> keeps a texture.
     /// </summary>
+    /// <remarks>
+    /// Call it only when <see cref="GpuFeatures.HasRayQuery"/> is true. The handle holds the device address. Gems ask
+    /// through <see cref="RenderGraph.Acceleration(in BottomLevelDescription)"/>.
+    /// </remarks>
     Result<GpuAcceleration> GetAcceleration(in BottomLevelDescription description);
 
     /// <summary>
-    /// The top-level acceleration structure under the description's name, kept as <see cref="GetTexture"/> keeps a
-    /// texture; only when <see cref="GpuFeatures.HasRayQuery"/>.
-    /// <see cref="RenderGraph.Acceleration(in TopLevelDescription)"/> asks for it.
+    /// Gets the top-level acceleration structure under the description's name, kept as <see cref="GetTexture"/> keeps a
+    /// texture.
     /// </summary>
+    /// <remarks>
+    /// Call it only when <see cref="GpuFeatures.HasRayQuery"/> is true. Gems ask through
+    /// <see cref="RenderGraph.Acceleration(in TopLevelDescription)"/>.
+    /// </remarks>
     Result<GpuAcceleration> GetAcceleration(in TopLevelDescription description);
 
     /// <summary>
-    /// The sampler <paramref name="description"/> makes, one for every ask with the same description, kept as
-    /// <see cref="GetTexture"/> keeps a texture. <see cref="RenderGraph.Sampler"/> asks for it.
+    /// Gets the sampler for <paramref name="description"/>: the same one for each ask with the same description.
     /// </summary>
+    /// <remarks>
+    /// It is kept as <see cref="GetTexture"/> keeps a texture. Gems ask through <see cref="RenderGraph.Sampler"/>.
+    /// </remarks>
     Result<GpuSampler> GetSampler(in SamplerDescription description);
 
     /// <summary>
-    /// Whether <paramref name="shader"/> is built for this GPU: a compute entry into its pipeline, a vertex or pixel
-    /// entry compiled. The first ask starts compiling it.
-    /// <see cref="RenderGraph.GetState(in ShaderEntry)"/> asks for it.
+    /// Whether <paramref name="shader"/> is built for this GPU. The first ask starts to compile it.
     /// </summary>
+    /// <remarks>
+    /// A compute entry is built into its pipeline; a vertex or pixel entry is compiled. Gems ask through
+    /// <see cref="RenderGraph.GetState(in ShaderEntry)"/>.
+    /// </remarks>
     GpuState GetState(in ShaderEntry shader);
 
     /// <summary>
-    /// Room for <paramref name="bytes"/> in this frame's staging ring, to fill and copy from in this frame's commands;
-    /// <c>default</c>, with <see cref="GpuBuffer.None"/> and no bytes, when the ring cannot grow to hold them.
+    /// Gets room for <paramref name="bytes"/> in this frame's staging ring, to fill and copy from in this frame's
+    /// commands.
     /// </summary>
+    /// <remarks>
+    /// Gives <c>default</c>, with <see cref="GpuBuffer.None"/> and no bytes, when the ring cannot grow to hold them.
+    /// </remarks>
     GpuUpload BeginUpload(int bytes);
 
     /// <summary>
-    /// The bytes of a <see cref="BufferUsages.Readback"/> buffer once the frame being recorded as it is called has
-    /// finished on the GPU. Any thread.
+    /// Reads the bytes of a <see cref="BufferUsages.Readback"/> buffer after the frame recorded at the call finishes on
+    /// the GPU. Any thread.
     /// </summary>
     Task<Result<ReadOnlyMemory<byte>>> ReadBackAsync(
         GpuBuffer buffer,
@@ -83,18 +103,20 @@ public interface IGraphicsApi
     );
 
     /// <summary>
-    /// Ends the frame, once a frame, after every gem has recorded into Core's graph: records the passes, each after
-    /// the barriers its uses need, submits them, shows the window's image, frees what no frame has asked for in a few,
-    /// and begins the next frame, waiting for the one two before and taking the window's next image. Core calls it; a
-    /// gem never does.
+    /// Submits the frame's passes, shows the window's image and begins the next frame. Only Core calls it.
     /// </summary>
+    /// <remarks>
+    /// It frees what no frame asked for in a few frames. The next frame waits for the frame two before it.
+    /// </remarks>
     void Present(in GpuCommands commands);
 }
 
 /// <summary>
-/// Room in this frame's staging ring to write into, and where the GPU reads it from: the buffer and offset a copy
-/// command names. Good for the frame it was begun in and gone after.
+/// Room in this frame's staging ring to write into, and the buffer and offset that a copy command reads it from.
 /// </summary>
+/// <remarks>
+/// Use it only in the frame that it was begun in.
+/// </remarks>
 public readonly ref struct GpuUpload(GpuBuffer buffer, ulong offset, Span<byte> bytes)
 {
     public GpuBuffer Buffer { get; } = buffer;

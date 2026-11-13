@@ -8,8 +8,7 @@ using Magic.Utils;
 namespace Magic.Assets.Pipeline;
 
 /// <summary>
-/// The asset directories' file watches, and reading the directories again for <paramref name="assets"/> once what they
-/// saw has settled.
+/// Watches the asset directories, and reads them again for <paramref name="assets"/> once the changes settle.
 /// </summary>
 internal sealed class AssetWatches(IFileSystem files, AssetManager assets) : IDisposable
 {
@@ -63,11 +62,13 @@ internal sealed class AssetWatches(IFileSystem files, AssetManager assets) : IDi
     }
 
     /// <summary>
-    /// Once the watches have seen nothing for <see cref="_settleTime"/>, reads the asset directories again and hands them
-    /// to the assets with the paths that led to it; again while they saw more meanwhile, or a directory was added as they
-    /// were read. A read that fails is logged as
-    /// a fault, and its paths are dropped: the next change is still taken in.
+    /// Reads the asset directories again once the watches see no change for <see cref="_settleTime"/>, and gives them
+    /// to the assets with the changed paths.
     /// </summary>
+    /// <remarks>
+    /// It reads again while the watches see more changes, or when a directory was added during the read. A failed read
+    /// is logged as a fault and its paths are dropped; the next change is still taken in.
+    /// </remarks>
     private async Task ReadOnceSettledAsync()
     {
         while (true)
@@ -92,14 +93,14 @@ internal sealed class AssetWatches(IFileSystem files, AssetManager assets) : IDi
             bool isTaken = assets.Reindex(directories, AssetIndex.Create(files, directories, assets.BuiltIn), touched);
             lock (_gate)
             {
-                // Read while a directory was added, they are read again with it.
+                // A directory was added during the read, so read again with it.
                 if (!isTaken)
                     _touched = _touched.Union(touched);
 
                 if (!_touched.IsEmpty)
                     continue;
 
-                // Done, as the next touch sees, so it starts a worker of its own.
+                // Done: the next touch sees this and starts a new worker.
                 _reading = Task.CompletedTask;
 
                 return;
@@ -108,9 +109,13 @@ internal sealed class AssetWatches(IFileSystem files, AssetManager assets) : IDi
     }
 
     /// <summary>
-    /// Keeps what a watch saw at <paramref name="fullPath"/> under <paramref name="directory"/>, as a path from the asset
-    /// directory, a sidecar's change being its file's, and has a worker read the directories once that settles.
+    /// Records the change that a watch saw at <paramref name="fullPath"/>, and starts a worker that reads the
+    /// directories once the changes settle.
     /// </summary>
+    /// <remarks>
+    /// It keeps the path relative to <paramref name="directory"/>. A change to a sidecar counts as a change to its
+    /// file.
+    /// </remarks>
     private void Touch(string directory, string fullPath)
     {
         if (fullPath.Length <= directory.Length)

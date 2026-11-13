@@ -13,7 +13,7 @@ namespace Magic.DeferredRendering.World;
 public static class Packing
 {
     /// <summary>
-    /// A model's vertex as the GPU reads it.
+    /// Encodes a model's vertex as the GPU reads it.
     /// </summary>
     public static GpuVertex EncodeVertex(in Vertex vertex) =>
         new()
@@ -26,8 +26,8 @@ public static class Packing
         };
 
     /// <summary>
-    /// The first <paramref name="count"/> values of <paramref name="bytes"/>, in native byte order, which then starts
-    /// after them.
+    /// Reads the first <paramref name="count"/> values of <paramref name="bytes"/>, in native byte order, and moves
+    /// <paramref name="bytes"/> past them.
     /// </summary>
     public static ImmutableArray<T> Read<T>(ref ReadOnlySpan<byte> bytes, int count)
         where T : struct
@@ -40,20 +40,20 @@ public static class Packing
     }
 
     /// <summary>
-    /// A unit vector as its octahedral point at 16 bits an axis (Cigolle et al., "A Survey of Efficient
+    /// Encodes a unit vector as its octahedral point at 16 bits an axis (Cigolle et al., "A Survey of Efficient
     /// Representations for Independent Unit Vectors", 2014).
     /// </summary>
     public static uint EncodeUnitVector(Vector3 unit) =>
         EncodeUnorm2x16((EncodeOctahedral(unit) * 0.5f) + new Vector2(0.5f));
 
     /// <summary>
-    /// The unit vector <see cref="EncodeUnitVector"/> packed.
+    /// Decodes the unit vector <see cref="EncodeUnitVector"/> packed.
     /// </summary>
     public static Vector3 DecodeUnitVector(uint packed) =>
         DecodeOctahedral((new Vector2(packed & 0xFFFF, packed >> 16) / 65535f * 2) - Vector2.One);
 
     /// <summary>
-    /// A unit vector as a point in [-1, 1]², the octahedron folded flat; the centre for no direction.
+    /// Encodes a unit vector as a point in [-1, 1]², the octahedron folded flat; the centre for no direction.
     /// </summary>
     public static Vector2 EncodeOctahedral(Vector3 unit)
     {
@@ -69,7 +69,7 @@ public static class Packing
     }
 
     /// <summary>
-    /// The unit vector at a point of the folded octahedron, as <c>Core/Pack.slang</c>'s DecodeOctahedral unfolds it.
+    /// Decodes the unit vector at a point of the folded octahedron, as <c>Core/Pack.slang</c>'s DecodeOctahedral does.
     /// </summary>
     public static Vector3 DecodeOctahedral(Vector2 flat)
     {
@@ -90,7 +90,7 @@ public static class Packing
     }
 
     /// <summary>
-    /// A number in [-1, 1] as a signed 16-bit fraction in the low half of a word.
+    /// Encodes a number in [-1, 1] as a signed 16-bit fraction in the low half of a word.
     /// </summary>
     public static uint EncodeSnorm16(float v) => (ushort)(short)MathF.Round(Math.Clamp(v, -1, 1) * 32767);
 }

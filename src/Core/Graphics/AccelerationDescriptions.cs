@@ -47,23 +47,25 @@ public readonly record struct TopLevelDescription
 }
 
 /// <summary>
-/// An instance of a bottom-level acceleration structure as the GPU reads it, 64 bytes: the world transform's top
-/// three rows for column vectors, a 24-bit index with an 8-bit mask above it, a 24-bit offset with 8 bits of flags
-/// above it, and the bottom-level structure's address.
+/// An instance of a bottom-level acceleration structure as the GPU reads it, 64 bytes.
 /// </summary>
+/// <remarks>
+/// The fields are the world transform's top three rows for column vectors, a 24-bit index with an 8-bit mask above
+/// it, a 24-bit offset with 8 bits of flags above it, and the bottom-level structure's address.
+/// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public record struct GpuAccelerationInstance
 {
     public const int Bytes = 64;
 
     /// <summary>
-    /// A ray landing on the instance's triangles sees it facing either way.
+    /// Lets a ray hit the instance's triangles from the front and from the back.
     /// </summary>
     public const uint FlagNoFaceCull = 1;
 
     /// <summary>
-    /// A ray query that doesn't make every hit opaque is handed each of the instance's triangles it lands on to decide
-    /// whether it stops the ray, as one through glass does.
+    /// Lets a ray query that does not make all hits opaque decide for each hit triangle whether it stops the ray, as
+    /// for glass.
     /// </summary>
     public const uint FlagNoOpaque = 8;
 

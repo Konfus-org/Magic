@@ -6,13 +6,15 @@ using Magic.Input;
 namespace Magic.DebugTools;
 
 /// <summary>
-/// The debug UI's lines and windows over what the meters measure, each shown by its setting
-/// (<see cref="DebugToolsSettings"/>), which its key, also a setting, turns on and off: the frame rate and memory line
-/// (F1), on from the start in a Debug build, the stats window (F3) and the window of every gem's settings (F4). It
-/// listens to the meters only while the counter or the stats window shows, and collects what they measured as often as
-/// <see cref="DebugToolsSettings.StatsCollectSec"/> says. They are drawn with <see cref="IDebugUI"/> in
-/// <see cref="Update"/>. Without input no key works.
+/// Draws the debug lines and windows over what the meters measure, each shown by its setting
+/// (<see cref="DebugToolsSettings"/>).
 /// </summary>
+/// <remarks>
+/// A key, also a setting, turns each on and off: the frame rate and memory line (F1), on from the start in a Debug
+/// build, the stats window (F3) and the window of every gem's settings (F4). Without input, no key works. It listens to
+/// the meters only while the counter or the stats window shows, and collects them as often as
+/// <see cref="DebugToolsSettings.StatsCollectSec"/> says.
+/// </remarks>
 internal sealed class DebugWindows(DebugToolsSettings settings, Settings allSettings, IDebugUI ui, IInput? input)
     : IDisposable
 {

@@ -8,10 +8,12 @@ using Vortice.Vulkan;
 namespace Magic.VulkanGraphics;
 
 /// <summary>
-/// What a frame in flight owns: its command buffer, the fence that says the GPU is done with it, its staging ring,
-/// its timestamps, what it threw away and what it promised to read back. Two of them take turns, so the CPU records
-/// frame n + 1 while the GPU draws frame n and never waits for more than one.
+/// Holds the frames in flight, each with its command buffer, fence, staging ring, timestamps, trash and readbacks.
 /// </summary>
+/// <remarks>
+/// Two frames take turns, so the CPU records frame n + 1 while the GPU draws frame n. The CPU never waits for more
+/// than one frame.
+/// </remarks>
 internal sealed unsafe class VulkanFrames : IDisposable
 {
     public const int InFlight = 2;
@@ -89,9 +91,12 @@ internal sealed unsafe class VulkanFrames : IDisposable
     }
 
     /// <summary>
-    /// Moves to the next frame: waits for the GPU to finish what that frame last held, frees its trash, finishes its
-    /// readbacks and reads its timestamps, then readies it to record. Render thread.
+    /// Moves to the next frame and makes it ready to record.
     /// </summary>
+    /// <remarks>
+    /// It waits for the GPU to finish what that frame last held, frees its trash, finishes its readbacks and reads its
+    /// timestamps. Call it only on the render thread.
+    /// </remarks>
     public void Begin()
     {
         _current = (_current + 1) % InFlight;
@@ -126,9 +131,12 @@ internal sealed unsafe class VulkanFrames : IDisposable
     }
 
     /// <summary>
-    /// Finishes every frame the GPU is done with, without waiting: what readbacks and trash wait for while no frame
-    /// begins, as during the awaited start of a run. Render thread.
+    /// Finishes every frame that the GPU is done with, without waiting.
     /// </summary>
+    /// <remarks>
+    /// It completes the readbacks and trash that wait while no frame begins, such as during the awaited start of a run.
+    /// Call it only on the render thread.
+    /// </remarks>
     public void Poll()
     {
         foreach (Frame frame in _frames)
@@ -142,10 +150,12 @@ internal sealed unsafe class VulkanFrames : IDisposable
     }
 
     /// <summary>
-    /// Room in the current frame's staging ring, grown when a frame needs more than it had. A grown ring shrinks back
-    /// in <see cref="Begin"/> once no frame has needed more than <see cref="StagingBytes"/> for a while. <c>default</c>
-    /// when the ring cannot grow; the render graph tells that failure.
+    /// Gets room in the current frame's staging ring, and grows the ring when the frame needs more.
     /// </summary>
+    /// <remarks>
+    /// A grown ring shrinks back in <see cref="Begin"/> after no frame needed more than <see cref="StagingBytes"/> for
+    /// a while. It returns <c>default</c> when the ring cannot grow, and the render graph tells that failure.
+    /// </remarks>
     public GpuUpload Upload(int bytes, int alignment)
     {
         Frame frame = Current;
@@ -175,9 +185,11 @@ internal sealed unsafe class VulkanFrames : IDisposable
     }
 
     /// <summary>
-    /// Promises <paramref name="bytes"/> of <paramref name="buffer"/> once the frames submitted so far are done.
-    /// Render thread.
+    /// Promises <paramref name="bytes"/> of <paramref name="buffer"/> for when the frames submitted so far are done.
     /// </summary>
+    /// <remarks>
+    /// Call it only on the render thread.
+    /// </remarks>
     public Task<Result<ReadOnlyMemory<byte>>> ReadBackAsync(uint id, VulkanBuffer buffer, long offset, int bytes)
     {
         TaskCompletionSource<Result<ReadOnlyMemory<byte>>> promise = new(
@@ -201,9 +213,12 @@ internal sealed unsafe class VulkanFrames : IDisposable
     }
 
     /// <summary>
-    /// Finishes what the GPU is done with: the readbacks up to its serial, then the frame's trash, so a buffer
-    /// destroyed after its readback was promised is read before it is freed, and its timestamps.
+    /// Finishes what the GPU is done with: the readbacks up to its serial, then the frame's trash and timestamps.
     /// </summary>
+    /// <remarks>
+    /// The readbacks come before the trash, so a buffer destroyed after its readback was promised is read before it is
+    /// freed.
+    /// </remarks>
     private void Complete(Frame frame)
     {
         _completedSerial = Math.Max(_completedSerial, frame.Serial);
@@ -254,7 +269,7 @@ internal sealed unsafe class VulkanFrames : IDisposable
     );
 
     /// <summary>
-    /// One frame's things.
+    /// Holds what one frame in flight owns.
     /// </summary>
     public sealed class Frame : IDisposable
     {
@@ -367,10 +382,12 @@ internal sealed unsafe class VulkanFrames : IDisposable
         }
 
         /// <summary>
-        /// A new staging ring of <paramref name="bytes"/>, in the heap; the old one, if any, is the caller's to free. A
-        /// ring that is not made keeps the old one, so only the first ring, which the constructor makes or throws, can
-        /// be missing.
+        /// Makes a new staging ring of <paramref name="bytes"/> in the heap. The caller frees the old ring, if any.
         /// </summary>
+        /// <remarks>
+        /// If it fails, the frame keeps the old ring. Thus only the first ring, which the constructor makes or throws,
+        /// can be missing.
+        /// </remarks>
         public Result Restage(long bytes)
         {
             Result<GpuBuffer> made = _resources.CreateBuffer(
@@ -400,9 +417,11 @@ internal sealed unsafe class VulkanFrames : IDisposable
         }
 
         /// <summary>
-        /// Queries the size a bottom-level structure just built compacts to, after its build's barrier; nothing when
-        /// the frame has no room for more, and the structure keeps its build's size.
+        /// Queries the compacted size of a bottom-level structure that was just built, after its build's barrier.
         /// </summary>
+        /// <remarks>
+        /// When the frame has no room for more queries, it does nothing, and the structure keeps its build's size.
+        /// </remarks>
         public void WriteCompactedSize(VulkanAcceleration built)
         {
             if (Built.Count >= VulkanHeap.Accelerations)
@@ -460,10 +479,13 @@ internal sealed unsafe class VulkanFrames : IDisposable
         }
 
         /// <summary>
-        /// Records the frame's time on the GPU into <paramref name="frameDuration"/>, from its first timestamp to its
-        /// last, and into <paramref name="passDuration"/> each pass's from its first timestamp to its last and each named
-        /// stamp's from its pass's first, under its name. A frame with no timestamps records nothing.
+        /// Records the frame's GPU time and the GPU time of each pass and named stamp.
         /// </summary>
+        /// <remarks>
+        /// <paramref name="frameDuration"/> gets the time from the first timestamp to the last.
+        /// <paramref name="passDuration"/> gets each pass's time from its first timestamp to its last, and each named
+        /// stamp's time from its pass's first, under its name. A frame with no timestamps records nothing.
+        /// </remarks>
         public void RecordTimings(Histogram<double> frameDuration, Histogram<double> passDuration)
         {
             int count = Timestamps.Count;

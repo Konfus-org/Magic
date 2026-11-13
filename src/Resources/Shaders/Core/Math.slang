@@ -40,7 +40,7 @@ public bool IsSphereTouchingBox(float3 center, float radius, float3 low, float3 
     return dot(outside, outside) <= radius * radius;
 }
 
-// Metres from the camera plane to what a reversed depth is, given the near plane in metres; infinity at depth 0.
+// Metres from the camera plane to what a reversed depth is, given the near plane in metres. Infinity at depth 0.
 public float ToViewDepth(float reversedDepth, float nearMetres) { return nearMetres / max(reversedDepth, 1e-20f); }
 
 // The reversed depth of a point viewDepth metres from the camera plane, given the near plane in metres.

@@ -7,7 +7,8 @@ using Magic.Worlds;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>load</c>: puts the game back as the save named <c>&lt;name&gt;</c> holds it, holding <c>wait loaded</c> meanwhile.
+/// <c>load</c>: puts the game back as the save named <c>&lt;name&gt;</c> holds it, and holds <c>wait loaded</c>
+/// meanwhile.
 /// </summary>
 internal static class LoadCommand
 {

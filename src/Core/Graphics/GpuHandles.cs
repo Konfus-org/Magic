@@ -1,9 +1,11 @@
 namespace Magic.Graphics;
 
 /// <summary>
-/// A buffer the GPU provider made, by its place in the bindless heap: the same number a shader reads it through, so a
-/// gem hands a shader the handle's id and binds nothing. <see cref="None"/> is no buffer.
+/// A buffer by its place in the bindless heap. A shader reads it through the same id, so nothing is bound.
 /// </summary>
+/// <remarks>
+/// <see cref="None"/> is no buffer.
+/// </remarks>
 public readonly record struct GpuBuffer(uint Id)
 {
     public static GpuBuffer None => default;
@@ -12,9 +14,12 @@ public readonly record struct GpuBuffer(uint Id)
 }
 
 /// <summary>
-/// A texture the GPU provider made, by its place in the bindless heap: one id reaches it however a shader reads it,
-/// sampled, as a storage image per level, or as unsigned integers. <see cref="None"/> is no texture.
+/// A texture by its place in the bindless heap. One id reaches it however a shader reads it.
 /// </summary>
+/// <remarks>
+/// A shader can sample it, read it as a storage image per level, or read it as unsigned integers.
+/// <see cref="None"/> is no texture.
+/// </remarks>
 public readonly record struct GpuTexture(uint Id)
 {
     public static GpuTexture None => default;
@@ -23,11 +28,13 @@ public readonly record struct GpuTexture(uint Id)
 }
 
 /// <summary>
-/// An acceleration structure of the heap, for the GPUs that trace rays: a model's triangles, or the instances of
-/// such, as <see cref="RenderGraph.Acceleration(in BottomLevelDescription)"/> and its top-level twin ask for them.
-/// Shaders reach it by the id; an instance of a bottom-level one refers to it by its device <paramref name="Address"/>.
-/// A bottom-level one can move once built, as the GPU provider compacts it: use the handle the latest ask gave.
+/// An acceleration structure in the heap: a model's triangles, or instances of them, on GPUs that trace rays.
 /// </summary>
+/// <remarks>
+/// Shaders reach it by the id. An instance of a bottom-level one refers to it by its device
+/// <paramref name="Address"/>. A bottom-level one can move after it is built, as the GPU provider compacts it: use the
+/// handle that the latest ask gave.
+/// </remarks>
 public readonly record struct GpuAcceleration(uint Id, ulong Address)
 {
     public static GpuAcceleration None => default;
@@ -36,7 +43,7 @@ public readonly record struct GpuAcceleration(uint Id, ulong Address)
 }
 
 /// <summary>
-/// A sampler the GPU provider made, by its place in the bindless heap. <see cref="None"/> is no sampler.
+/// A sampler by its place in the bindless heap. <see cref="None"/> is no sampler.
 /// </summary>
 public readonly record struct GpuSampler(uint Id)
 {

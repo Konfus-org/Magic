@@ -6,7 +6,8 @@ using Magic.Files;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>screenshot</c>: asks whatever draws the frame to save the next one as a PNG under <c>Screenshots/</c> beside Magic.
+/// <c>screenshot</c>: asks the part that draws the frame to save the next frame as a PNG under <c>Screenshots/</c>
+/// beside Magic.
 /// </summary>
 internal static class ScreenshotCommand
 {

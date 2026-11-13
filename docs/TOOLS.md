@@ -53,6 +53,9 @@ at that level or higher, the script stops at once.
 Runs a project for an agent, and names the window with the branch of the worktree. End `-Commands` with `exit` to end
 the run. The script does not build.
 
+The window opens on the display after the main one, behind the window that has the focus, so that it does not interrupt
+the user. Use `-Display` to select a different display. `Screenshot.ps1` does the same.
+
 ## Screenshot.ps1
 
 Runs a project with a window until its world loads. Then it takes a screenshot and prints the path of the image. The

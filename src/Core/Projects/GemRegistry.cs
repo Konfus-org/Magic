@@ -17,16 +17,22 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Magic.Projects;
 
 /// <summary>
-/// The gems a project lists, found and registered with the services as their class, their parts and every interface
-/// their parts provide, but not yet made. A gem that can't be found or registered is logged, and the others go on
-/// without it.
+/// Finds the gems that a project lists and registers their classes, parts and interfaces with the services, without
+/// making them.
 /// </summary>
+/// <remarks>
+/// A gem that cannot be found or registered is logged, and the others go on without it.
+/// </remarks>
 internal static class GemRegistry
 {
     /// <summary>
-    /// What the host takes itself and so no gem provides: any number of gems can be sinks or hook into domain loading,
-    /// and the assets say which gem reads or writes a type. A generic contract is held by its definition.
+    /// The contracts that the host collects from gems, so no gem provides them. A generic contract is held by its
+    /// definition.
     /// </summary>
+    /// <remarks>
+    /// Any number of gems can be sinks or hook into domain loading, and the assets say which gem reads or writes a
+    /// type.
+    /// </remarks>
     private static readonly HashSet<Type> _hostContracts =
     [
         typeof(IGem),
@@ -43,12 +49,20 @@ internal static class GemRegistry
     ];
 
     /// <summary>
-    /// Finds the gems <paramref name="listed"/> beside Magic and registers each with <paramref name="services"/>, which
-    /// already holds what the host provides: the gems to make, each after the gems its code references and whose parts
-    /// its constructor takes. A name listed twice, the wrong version, a referenced gem not listed, an interface already
-    /// provided or a cycle is refused. Each gem is made by the provider
-    /// built from <paramref name="services"/>, once: asked for again after it failed, it throws.
+    /// Finds the gems <paramref name="listed"/> beside Magic, registers each with <paramref name="services"/>, and
+    /// gives them in the order to make them.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <paramref name="services"/> already holds what the host provides. Each gem comes after the gems that its code
+    /// references and whose parts its constructor takes.
+    /// </para>
+    /// <para>
+    /// It refuses a name listed two times, the wrong version, a referenced gem that is not listed, an interface already
+    /// provided, and a cycle. The provider built from <paramref name="services"/> makes each gem one time; an ask after
+    /// a failure throws.
+    /// </para>
+    /// </remarks>
     public static List<RegisteredGem> Register(
         IFileSystem files,
         ImmutableArray<string> listed,
@@ -58,14 +72,13 @@ internal static class GemRegistry
         if (listed.Any())
             Log.Info($"Loading {string.Join(", ", listed)}.");
 
-        // Make where each listed gem beside Magic loads before loading any, so a gem's code finds a gem it references
-        // whatever order the project lists them in.
+        // Make each listed gem's context before any loads, so a gem's code finds a gem it references in any list order.
         Dictionary<string, GemLoadContext> contexts = new(StringComparer.OrdinalIgnoreCase);
         List<(string Name, string Wanted)> named = [];
         HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
         foreach (string listing in listed)
         {
-            // A gem is listed by its name, then @ and the version it must be where that matters.
+            // A listing is the gem's name, then optionally @ and the version it must have.
             int at = listing.IndexOf('@', StringComparison.Ordinal);
             string name = at < 0 ? listing : listing[..at];
             if (!names.Add(name))
@@ -85,8 +98,7 @@ internal static class GemRegistry
             named.Add((name, at < 0 ? string.Empty : listing[(at + 1)..]));
         }
 
-        // Load each, look at what it holds, and register it with the services as its class, its parts and every
-        // interface they provide.
+        // Register each gem with the services as its class, its parts and each interface they provide.
         List<RegisteredGem> registered = [];
         Dictionary<Type, RegisteredGem> providers = [];
         foreach ((string name, string wanted) in named)
@@ -125,8 +137,8 @@ internal static class GemRegistry
                 }
             );
 
-            // Each part is the value of its property on the made gem, but settings, which the gem is made with: what
-            // was set before over their defaults.
+            // Each part is its property's value on the made gem. Settings are the exception: the gem is made with
+            // them, as set before over their defaults.
             foreach (PropertyInfo part in gem.Parts)
             {
                 Type type = part.PropertyType;
@@ -160,9 +172,8 @@ internal static class GemRegistry
         if (providers.TryGetValue(typeof(IEcs), out RegisteredGem? ecs))
             providers[typeof(World)] = ecs;
 
-        // Sort each after the gems it needs: those its code references, and those whose part its constructor takes, by
-        // the part's class or an interface it provides. A gem in a cycle, or one that needs it, is logged and left out,
-        // since the provider hangs making a cycle.
+        // Sort each gem after the gems it needs: those its code references, and those whose part its constructor takes.
+        // A gem in a cycle, or one that needs it, is logged and left out, as the provider hangs on a cycle.
         Dictionary<string, RegisteredGem> byName = registered.ToDictionary(
             gem => gem.Name,
             StringComparer.OrdinalIgnoreCase
@@ -216,23 +227,26 @@ internal static class GemRegistry
     }
 
     /// <summary>
-    /// Where the gem <paramref name="name"/> is: <c>Gems/&lt;name&gt;/&lt;name&gt;.dll</c> beside Magic.
+    /// Gets the path of the gem <paramref name="name"/>: <c>Gems/&lt;name&gt;/&lt;name&gt;.dll</c> beside Magic.
     /// </summary>
     internal static string GetPath(IFileSystem files, string name) =>
         files.Combine(AppContext.BaseDirectory, "Gems", name, name + ".dll");
 
     /// <summary>
-    /// The name of the gem that declares <paramref name="type"/>, which is its assembly's name; the type's own name when
-    /// the assembly has none.
+    /// Gets the name of the gem that declares <paramref name="type"/>: its assembly's name, or the type's name when the
+    /// assembly has none.
     /// </summary>
     internal static string GetGemName(Type type) => type.Assembly.GetName().Name ?? type.Name;
 
     /// <summary>
-    /// The listed gem <paramref name="name"/>, loaded into its context of <paramref name="contexts"/>, or why it can't
-    /// be made: it must hold one <see cref="IGem"/> class with one public constructor, and the project must list every
-    /// gem it references. The class's public instance properties are the gem's parts, and what they implement is what
-    /// the gem provides; the class itself provides nothing.
+    /// Loads the listed gem <paramref name="name"/> into its context of <paramref name="contexts"/>, or gives why it
+    /// cannot be made.
     /// </summary>
+    /// <remarks>
+    /// A gem must hold one <see cref="IGem"/> class with one public constructor, and the project must list each gem
+    /// that it references. The class's public instance properties are its parts, and the gem provides what they
+    /// implement.
+    /// </remarks>
     private static Result<RegisteredGem> Find(
         IFileSystem files,
         string name,
@@ -253,8 +267,8 @@ internal static class GemRegistry
         if (!loaded.Ok)
             return Result.Failure($"Gem {name} could not be loaded from {path}: {loaded.Error}");
 
-        // An assembly it references named like a listed gem is that gem; one named like a gem beside Magic that it doesn't
-        // carry in its folder is a gem the project must list.
+        // A referenced assembly named like a listed gem is that gem. One named like a gem beside Magic, and not in this
+        // gem's folder, is a gem the project must list.
         Assembly assembly = loaded.Value;
         string folder = files.GetParent(path);
         List<string> references = [];
@@ -320,8 +334,8 @@ internal static class GemRegistry
     }
 
     /// <summary>
-    /// Whether <paramref name="version"/> matches each part <paramref name="wanted"/> gives (<c>1</c>, <c>1.2</c>,
-    /// <c>1.2.3</c>); anything but one to four numbers matches nothing.
+    /// Whether <paramref name="version"/> matches each part that <paramref name="wanted"/> gives, as <c>1</c>,
+    /// <c>1.2</c> or <c>1.2.3</c>. Text other than one to four numbers matches nothing.
     /// </summary>
     private static bool IsVersion(Version version, string wanted)
     {
@@ -341,9 +355,12 @@ internal static class GemRegistry
     }
 
     /// <summary>
-    /// Why <paramref name="gem"/> is refused when <paramref name="services"/> already provides an interface it does,
-    /// named by the gem of <paramref name="providers"/> whose part it is, or by the host's class; null when none.
+    /// Gets why <paramref name="gem"/> is refused when <paramref name="services"/> already provides one of its
+    /// interfaces; null when none does.
     /// </summary>
+    /// <remarks>
+    /// The reason names the providing gem of <paramref name="providers"/>, or the host's class.
+    /// </remarks>
     private static string? FindClash(
         ServiceCollection services,
         Dictionary<Type, RegisteredGem> providers,
@@ -374,7 +391,8 @@ internal static class GemRegistry
     }
 
     /// <summary>
-    /// <paramref name="type"/>'s name as C# writes it: <c>IAssetImporter&lt;Texture&gt;</c>, not <c>IAssetImporter`1</c>.
+    /// Gets the name of <paramref name="type"/> as C# writes it: <c>IAssetImporter&lt;Texture&gt;</c>, not
+    /// <c>IAssetImporter`1</c>.
     /// </summary>
     private static string GetName(Type type)
     {

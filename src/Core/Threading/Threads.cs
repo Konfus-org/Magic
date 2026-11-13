@@ -5,11 +5,13 @@ using Magic.Debugging;
 namespace Magic.Threading;
 
 /// <summary>
-/// The engine's threads, as somewhere an awaited flow can step onto: <c>await threads.Enter(EngineThread.Game)</c> goes
-/// on there, as that thread next pumps. For a flow whose steps must be there, such as an awaited pipeline. It makes and
-/// ends the engine's threads but the platform thread (<see cref="Start"/>). Any thread, but where a member says
-/// otherwise.
+/// The engine's threads, as places that an awaited flow can step onto: <c>await threads.Enter(EngineThread.Game)</c>.
 /// </summary>
+/// <remarks>
+/// The flow goes on there when that thread next pumps. Use it for a flow whose steps must run there, such as an awaited
+/// pipeline. It makes and ends the engine's threads, except the platform thread (<see cref="Start"/>). Any thread,
+/// except where a member says otherwise.
+/// </remarks>
 public sealed class Threads
 {
     /// <summary>
@@ -20,7 +22,8 @@ public sealed class Threads
     private readonly Channel<Action>[] _posted;
 
     /// <summary>
-    /// By <see cref="EngineThread"/>: the thread <see cref="Start"/> made for it, until <see cref="Stop"/> takes it away.
+    /// By <see cref="EngineThread"/>: the thread <see cref="Start"/> made for it, until <see cref="Stop"/> takes it
+    /// away.
     /// </summary>
     private readonly Thread?[] _running;
 
@@ -80,9 +83,12 @@ public sealed class Threads
     }
 
     /// <summary>
-    /// Ends the thread <see cref="Start"/> made for <paramref name="thread"/> once its frame is done, and waits for it:
-    /// the calling thread is <paramref name="thread"/> from then on, as for what ends after it.
+    /// Ends the thread that <see cref="Start"/> made for <paramref name="thread"/> once its frame is done, and waits
+    /// for it.
     /// </summary>
+    /// <remarks>
+    /// From then on, the calling thread is <paramref name="thread"/>, for what ends after it.
+    /// </remarks>
     internal void Stop(EngineThread thread)
     {
         Thread running =
@@ -95,8 +101,8 @@ public sealed class Threads
     }
 
     /// <summary>
-    /// Runs what was posted to <paramref name="thread"/>, and the flows that stepped onto it, each until it next leaves.
-    /// One that throws is logged, and the rest still run. On that thread.
+    /// Runs what was posted to <paramref name="thread"/>, and the flows that stepped onto it, each until it next
+    /// leaves. One that throws is logged, and the rest still run. On that thread.
     /// </summary>
     [SuppressMessage(
         "Design",

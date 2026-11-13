@@ -4,11 +4,13 @@ using Magic.DeferredRendering.World;
 namespace Magic.ClusteredGeometry;
 
 /// <summary>
-/// A model's octahedral impostor atlas, as <see cref="ModelClusters.Impostor"/> says, baked on the CPU from the
-/// clusters the hierarchy draws at an atlas texel's error, so a model of any size bakes from about as many triangles as
-/// its atlas can show: each view rasterises them orthographically into its tile, the nearest kept. This gem's
-/// <c>Scene/Impostors.slang</c> reads it with the same grid and view frames.
+/// Bakes a model's octahedral impostor atlas on the CPU, as <see cref="ModelClusters.Impostor"/> says.
 /// </summary>
+/// <remarks>
+/// It bakes from the clusters that the hierarchy draws at an atlas texel's error, so a model of any size bakes from
+/// about as many triangles as its atlas can show. Each view rasterises them orthographically into its tile, and keeps
+/// the nearest. The gem's <c>Scene/Impostors.slang</c> reads the atlas with the same grid and view frames.
+/// </remarks>
 internal static class ImpostorBuilder
 {
     /// <summary>
@@ -24,8 +26,7 @@ internal static class ImpostorBuilder
     public const int Size = Views * Tile;
 
     /// <summary>
-    /// The atlas as RGBA16F halves, and the texture coordinates of the same texels as RG16F halves, row by row, the views
-    /// baked in parallel.
+    /// Bakes the atlas as RGBA16F halves, and the texture coordinates of the same texels as RG16F halves, row by row.
     /// </summary>
     public static (Half[] Surface, Half[] Uv) Bake(
         IReadOnlyList<GpuVertex> vertices,
@@ -132,7 +133,7 @@ internal static class ImpostorBuilder
     }
 
     /// <summary>
-    /// The view at grid point x, y: the direction it looks from, towards the model, and its right and up.
+    /// Gets the view at grid point x, y: the direction it looks from, towards the model, and its right and up.
     /// </summary>
     private static (Vector3 Forward, Vector3 Right, Vector3 Up) GetViewFrame(int x, int y)
     {

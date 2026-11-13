@@ -12,10 +12,12 @@ using Magic.Utils;
 namespace Magic.Graphics;
 
 /// <summary>
-/// The gems that render, each render form after every form whose output it takes: register each gem's parts as the gem
-/// is made, then pump them once a frame on the render thread. A gem is named in what is logged and timed by its
-/// assembly, as the project lists it.
+/// The gems that render, each render form after each form whose output it takes.
 /// </summary>
+/// <remarks>
+/// Register each gem's parts as the gem is made, then pump them once a frame on the render thread. Logs and timings
+/// name a gem by its assembly, as the project lists it.
+/// </remarks>
 internal sealed class Rendering
 {
     private const string Hook = "Render";
@@ -33,11 +35,13 @@ internal sealed class Rendering
     private Dictionary<Type, Maker> _makers = [];
 
     /// <summary>
-    /// <paramref name="part"/>'s steps of the frame, one for each render form it implements, while it renders, until
-    /// the subscription ends; nothing when it doesn't. Throws, naming the gems and the type, when it makes what another gem
-    /// makes, or when it and others take what the others make round a cycle; the gems registered before go on as they
-    /// were.
+    /// Adds a step of the frame for each render form that <paramref name="part"/> implements, until the subscription
+    /// ends.
     /// </summary>
+    /// <remarks>
+    /// A part with no render form adds nothing. It throws, and names the gems and the type, when the part makes what
+    /// another gem makes, or when the inputs make a cycle. Then the gems registered before stay as they were.
+    /// </remarks>
     public Subscription Register(object part)
     {
         List<Step> steps =
@@ -60,24 +64,25 @@ internal sealed class Rendering
     }
 
     /// <summary>
-    /// Whether <paramref name="part"/>, a gem's part, must take what no gem registered makes; it doesn't render until a gem that makes
-    /// it registers.
+    /// Whether <paramref name="part"/> must take what no registered gem makes. It does not render until such a gem
+    /// registers.
     /// </summary>
     public bool HasMissingInput(object part) => _steps.Exists(step => step.Part == part && step.Missing is not null);
 
     /// <summary>
-    /// Whether no gem makes <paramref name="type"/>, or the step that makes it is out this frame, as
-    /// <see cref="RenderGraph.IsMakerOut{T}"/> tells.
+    /// Whether no gem makes <paramref name="type"/>, or its step is out this frame. See
+    /// <see cref="RenderGraph.IsMakerOut{T}"/>.
     /// </summary>
     public bool IsMakerOut(Type type) => !_makers.TryGetValue(type, out Maker maker) || maker.Step.IsOut;
 
     /// <summary>
-    /// Every gem's parts of the frame, in order, each gem timed once for all its parts, into <paramref name="graph"/>
-    /// emptied of the last frame's failures. A part that takes what no gem makes, or whose gem threw less than
-    /// <see cref="RetryPauseSec"/> ago, is skipped and is a <see cref="RenderFailure.Pass"/> failure in that frame; what
-    /// it would have made stays unmade, so a part that must take it is skipped too, and one that may take it runs
-    /// without it.
+    /// Records each gem's steps of the frame in order into <paramref name="graph"/>, and times each gem one time.
     /// </summary>
+    /// <remarks>
+    /// A step that takes what no gem makes, or that threw less than <see cref="RetryPauseSec"/> ago, is skipped as a
+    /// <see cref="RenderFailure.Pass"/> failure. What it makes stays unmade: a step that must take it is skipped too,
+    /// and a step that can take it runs without it.
+    /// </remarks>
     [SuppressMessage(
         "Design",
         "CA1031:Do not catch general exception types",
@@ -108,8 +113,7 @@ internal sealed class Rendering
                 }
             }
 
-            // Told each frame it is out, so the failure is logged once: when it first failed, or failed again after a
-            // frame it rendered in.
+            // Tell the failure in each frame that the step is out. Fail logs it only when it is new.
             bool isSkipped = step.Missing is not null || step.RetrySec is not null;
             if (isSkipped)
                 graph.Fail(RenderFailure.Pass, step.Failure.What, step.Failure.Reason);
@@ -134,8 +138,8 @@ internal sealed class Rendering
     }
 
     /// <summary>
-    /// What each render form <paramref name="part"/> implements takes and makes, <see cref="None"/> for either it lacks;
-    /// none when it renders nothing.
+    /// Gets what each render form of <paramref name="part"/> takes and makes, with <see cref="None"/> for a side it
+    /// lacks.
     /// </summary>
     private static IEnumerable<(Type Input, Type Output)> GetForms(object part)
     {
@@ -161,11 +165,14 @@ internal sealed class Rendering
     }
 
     /// <summary>
-    /// <paramref name="steps"/> in place of the gems before, each after every gem that makes what it takes, each that
-    /// takes and makes nothing after all the others, so it sees the whole frame's failures, in their own order
-    /// otherwise, and each bound to its makers. Throws before changing anything when two make one type, or when some
-    /// take what others among them make round a cycle.
+    /// Replaces the steps with <paramref name="steps"/>, each after the steps that make what it takes, and binds each
+    /// to its makers.
     /// </summary>
+    /// <remarks>
+    /// A step that takes and makes nothing goes last, so it sees all of the frame's failures. Other steps keep their
+    /// order where they can. It throws before it changes anything when two steps make one type, or the inputs make a
+    /// cycle.
+    /// </remarks>
     private void Order(List<Step> steps)
     {
         Dictionary<Type, Maker> makers = [];
@@ -224,8 +231,7 @@ internal sealed class Rendering
     private readonly record struct Maker(Type Type, Step Step, string? Item);
 
     /// <summary>
-    /// A gem's render form: what it takes, what it makes, and what it made at its last run, which the gems after it
-    /// take.
+    /// A gem's render form: what it takes, what it makes, and what it made at its last run for the gems after it.
     /// </summary>
     private abstract class Step(object part)
     {
@@ -244,7 +250,7 @@ internal sealed class Rendering
         public abstract ImmutableArray<Type> Inputs { get; }
 
         /// <summary>
-        /// A type it must take that no gem makes, once bound; it doesn't render until a gem that makes it registers.
+        /// A type it must take that no gem makes, after it is bound. It does not render until such a gem registers.
         /// </summary>
         public Type? Missing { get; protected set; }
 
@@ -254,13 +260,12 @@ internal sealed class Rendering
         public double? RetrySec { get; set; }
 
         /// <summary>
-        /// Why it doesn't render, made once when its input is missing or it throws, so a frame it is out in allocates
-        /// nothing for the texts.
+        /// Why it does not render, made one time when its input is missing or it throws, so a frame allocates no text.
         /// </summary>
         public (string What, string Reason) Failure { get; set; }
 
         /// <summary>
-        /// Whether it made nothing this frame and the frame was told why: it was skipped, or it told a failure itself.
+        /// Whether it made nothing this frame and told why: it was skipped, or it told a failure itself.
         /// </summary>
         public bool IsOut { get; set; }
 
@@ -270,7 +275,7 @@ internal sealed class Rendering
         public abstract bool HasMade { get; }
 
         /// <summary>
-        /// The gem's next step in the order, which is timed for both; null for its last.
+        /// The gem's next step in the order, which is timed for both; null for the gem's last step.
         /// </summary>
         public Step? Next { get; set; }
 
@@ -280,21 +285,23 @@ internal sealed class Rendering
         public long Earlier { get; set; }
 
         /// <summary>
-        /// Records the gem's passes, when every input it must take was made this frame, and keeps what it made.
+        /// Records the gem's passes when each input it must take was made this frame, and keeps what it made.
         /// </summary>
         public abstract void Run(in Frame frame, RenderGraph graph);
 
         /// <summary>
-        /// Builds, once, how its input is taken from <paramref name="makers"/>' outputs each frame.
+        /// Builds, one time, how each frame takes its input from the outputs of <paramref name="makers"/>.
         /// </summary>
         public abstract void Bind(IReadOnlyDictionary<Type, Maker> makers);
     }
 
     /// <summary>
-    /// A step whose input is built each frame from its makers' typed outputs by a compiled constructor call, so a frame
-    /// boxes nothing and reflects on nothing. Each render form is called as <see cref="IRender{TInput, TOutput}"/>,
-    /// with <see cref="None"/> for what it lacks.
+    /// A step whose input is built each frame from its makers' typed outputs.
     /// </summary>
+    /// <remarks>
+    /// A compiled constructor call builds the input, so a frame does not box or reflect. Each render form is called as
+    /// <see cref="IRender{TInput, TOutput}"/>, with <see cref="None"/> for what it lacks.
+    /// </remarks>
     private sealed class Step<TInput, TOutput>(object part) : Step(part)
         where TInput : struct
         where TOutput : struct
@@ -365,9 +372,11 @@ internal sealed class Rendering
         }
 
         /// <summary>
-        /// <c>input = madeA.HasValue &amp;&amp; ... ? new TInput(madeA.Value, madeB, ...) : null</c>, an item of a tuple
-        /// taken as <c>madeA.Value.Item1</c>, and a nullable input with no maker passed as null.
+        /// Builds <c>input = madeA.HasValue &amp;&amp; ... ? new TInput(madeA.Value, madeB, ...) : null</c>.
         /// </summary>
+        /// <remarks>
+        /// A tuple item is taken as <c>madeA.Value.Item1</c>. A nullable input with no maker is passed as null.
+        /// </remarks>
         public override void Bind(IReadOnlyDictionary<Type, Maker> makers)
         {
             Made = null;
@@ -428,7 +437,7 @@ internal sealed class Rendering
         }
 
         /// <summary>
-        /// The gem's render form called as <see cref="IRender{TInput, TOutput}"/>'s <c>Render</c>.
+        /// The gem's render form, called as <c>Render</c> of <see cref="IRender{TInput, TOutput}"/>.
         /// </summary>
         private delegate TOutput? Renders(in Frame frame, RenderGraph graph, in TInput input);
     }

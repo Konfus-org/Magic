@@ -6,10 +6,12 @@ using Magic.Utils;
 namespace Magic.Debugging;
 
 /// <summary>
-/// The terminal Magic runs in. Standard output holds only what a command gives back, such as <c>get</c>'s values or a
-/// screenshot's path, for the person or the script that ran Magic; the log, the progress bars and the prompt go to
-/// standard error, so piping one never mixes it with the other. Any thread.
+/// The terminal Magic runs in. Any thread.
 /// </summary>
+/// <remarks>
+/// Standard output holds only what a command gives back, such as the values of <c>get</c> or a screenshot's path. The
+/// log, the progress bars and the prompt go to standard error, so a pipe never mixes the two.
+/// </remarks>
 [SuppressMessage(
     "ApiDesign",
     "RS0030:Do not use banned APIs",
@@ -23,7 +25,7 @@ public static class Terminal
     private const string Prompt = "(∩^o^)⊃━☆ ";
 
     /// <summary>
-    /// A progress bar at its full width; a load that is part way shows that part of it.
+    /// A progress bar at its full width. A load that is part way shows that part of it.
     /// </summary>
     private const string FullBar = "✩₊˚.⋆☾⋆⁺₊✧✩₊˚.⋆☾⋆⁺₊✧";
 
@@ -43,10 +45,12 @@ public static class Terminal
     private static readonly StringBuilder _typing = new();
 
     /// <summary>
-    /// Sets the console to UTF-8, so the stars and the prompt show rather than question marks, greets a person at the
-    /// keyboard, and starts the thread that reads the typed lines. A constructor, so the runtime has run it before the
-    /// first line is written, which a property's initializer alone doesn't promise.
+    /// Sets the console to UTF-8, greets a person at the keyboard, and starts the thread that reads typed lines.
     /// </summary>
+    /// <remarks>
+    /// UTF-8 makes the stars and the prompt show, not question marks. It is a static constructor, so the runtime runs
+    /// it before the first line is written; a property initializer alone does not promise that.
+    /// </remarks>
     static Terminal()
     {
         Console.OutputEncoding = Encoding.UTF8;
@@ -60,8 +64,8 @@ public static class Terminal
     }
 
     /// <summary>
-    /// Draws how far a load is as a bar of stars on standard error, in place, each report over the last; nothing when
-    /// standard error is piped.
+    /// Draws a load's progress as a bar of stars on standard error, each report over the last. Nothing when standard
+    /// error is piped.
     /// </summary>
     public static IProgress<LoadProgress> Progress { get; } = new Bar();
 
@@ -71,9 +75,11 @@ public static class Terminal
     internal static ChannelReader<string> Typed { get; }
 
     /// <summary>
-    /// Writes <paramref name="line"/>, a command's result, to standard output, over any bar or prompt on the screen,
-    /// and the prompt and the line being typed again below it when a person is typing.
+    /// Writes <paramref name="line"/>, a command's result, to standard output, over any bar or prompt.
     /// </summary>
+    /// <remarks>
+    /// When a person is typing, the prompt and the typed line are drawn again below it.
+    /// </remarks>
     public static void Write(string line)
     {
         if (Console.IsErrorRedirected)
@@ -92,9 +98,11 @@ public static class Terminal
     }
 
     /// <summary>
-    /// Writes a logged line to standard error, coloured by its level when a person is reading it, over any bar or
-    /// prompt, and the prompt and the line being typed again below it when a person is typing.
+    /// Writes a logged line to standard error over any bar or prompt, coloured by its level when a person reads it.
     /// </summary>
+    /// <remarks>
+    /// When a person is typing, the prompt and the typed line are drawn again below it.
+    /// </remarks>
     internal static void Write(in Log.Line line)
     {
         string text = line.ToString();
@@ -110,9 +118,12 @@ public static class Terminal
     }
 
     /// <summary>
-    /// Hands <paramref name="lines"/> each line typed, until the input ends. Text piped in is read a line at a time.
-    /// A person's keys are read one by one and echoed here, so the line being typed is known and can be drawn again.
+    /// Writes each typed line to <paramref name="lines"/> until the input ends.
     /// </summary>
+    /// <remarks>
+    /// Piped text is read a line at a time. A person's keys are read one by one and echoed here, so the typed line can
+    /// be drawn again.
+    /// </remarks>
     private static void ReadTyped(ChannelWriter<string> lines)
     {
         if (Console.IsInputRedirected)
@@ -125,7 +136,7 @@ public static class Terminal
             return;
         }
 
-        // A keyboard never ends: the thread is a background one, which the process takes with it.
+        // A keyboard never ends: the thread is a background thread, so it ends with the process.
         while (true)
         {
             ConsoleKeyInfo key = Console.ReadKey(intercept: true);
@@ -152,7 +163,7 @@ public static class Terminal
     }
 
     /// <summary>
-    /// The prompt and the line being typed, for under what was just written; nothing when the lines are piped in.
+    /// Gets the prompt and the typed line, to draw below what was just written. Empty when the input is piped.
     /// </summary>
     private static string GetPromptLine() => Console.IsInputRedirected ? string.Empty : $"{Prompt}{_typing}";
 
@@ -168,8 +179,7 @@ public static class Terminal
         };
 
     /// <summary>
-    /// A load's progress as <c>[✩₊˚.⋆☾⋆⁺₊✧        ] Loading Models 3 of 9</c>, the stars as far along the bar as the
-    /// load is.
+    /// A load's progress as <c>[✩₊˚.⋆☾⋆⁺₊✧        ] Loading Models 3 of 9</c>, with stars as far along as the load.
     /// </summary>
     private sealed class Bar : IProgress<LoadProgress>
     {

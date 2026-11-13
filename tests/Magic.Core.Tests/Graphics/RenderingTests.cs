@@ -5,9 +5,12 @@ using Xunit;
 namespace Magic.Tests.Graphics;
 
 /// <summary>
-/// The gems' parts that render: ordered as they register from what each takes and makes, refused when two make one
-/// type or they form a cycle, and pumped so each takes what the parts before it made this frame.
+/// The gems' parts that render: how they are ordered, refused and pumped each frame.
 /// </summary>
+/// <remarks>
+/// Parts are ordered as they register, from what each takes and makes. They are refused when two make one type or they
+/// form a cycle. Each takes what the parts before it made this frame.
+/// </remarks>
 public sealed class RenderingTests
 {
     private static readonly Frame _frame = new()

@@ -1,5 +1,5 @@
 // The light that reaches the view's surfaces indirectly, as whatever traces it leaves it for a frame: the diffuse light
-// and the reflections at a part of the picture's size, and the probe grid around them; and how the picture reads them
+// and the reflections at a part of the picture's size, and the probe grid around them, and how the picture reads them
 // back at its own size, blurred where they are still noisy, which anything traced at a part of the picture's size can
 // read its own back with. It is a row of the frame's buffer, C#'s GpuIndirectLight, every id 0 where nothing traced it
 // this frame, and the surfaces are lit with the sky.
@@ -24,7 +24,7 @@ public struct IndirectLight
     public ProbeGridConstants grid;
 }
 
-// The frame's indirect light; every id 0 where nothing traced it.
+// The frame's indirect light, every id 0 where nothing traced it.
 public IndirectLight GetIndirectLight() { return LoadFrameRow<IndirectLight>(IndirectLightOffset); }
 
 public ProbeGridConstants GetProbeGrid() { return GetIndirectLight().grid; }
@@ -43,7 +43,7 @@ public uint2 GetTracedTexel(FrameConstants frame, uint2 pixel, uint2 tracedSize)
     return GetTexelAt(GetTexelCenterUv(pixel, uint2(frame.width, frame.height)), tracedSize);
 }
 
-// The roughest surface whose reflections are traced; a rougher one reflects its diffuse light, or the sky giving way
+// The roughest surface whose reflections are traced. A rougher one reflects its diffuse light, or the sky giving way
 // to its diffuse light where none is traced.
 public static const float TracedRoughness = 0.6;
 
@@ -92,7 +92,7 @@ float GetSurfaceWeight(FrameConstants frame, uint2 at, float depth, float3 relat
 // The four pixels traced at a size around a pixel of the picture, whose surface is at a camera-relative point facing a
 // unit normal at a view depth, weighed for blending by hand: each by its bilinear weight where its own pixel, the one
 // at a point of its footprint from 0 to 1 across and down, was traced, something drawn there no rougher than a
-// roughness, times how much it lies on the pixel's surface, so an edge takes in little of what lies off it; and not at
+// roughness, times how much it lies on the pixel's surface, so an edge takes in little of what lies off it, and not at
 // all where it wasn't traced.
 public TracedTaps GetTracedTaps(
     FrameConstants frame,

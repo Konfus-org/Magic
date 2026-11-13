@@ -16,9 +16,12 @@ namespace Magic.DeferredRendering.View;
 internal readonly record struct LightBuffers(GpuBuffer Table, GpuBuffer Tiles, int Count);
 
 /// <summary>
-/// The light table and the tiles of the screen each light reaches: the world's local lights uploaded each frame, and a
-/// pass that sets each tile's bit for every light that touches what the tile shows.
+/// Fills the light table and the tiles of the screen each light reaches.
 /// </summary>
+/// <remarks>
+/// It uploads the world's local lights each frame, and runs a pass that sets each tile's bit for every light that
+/// touches what the tile shows.
+/// </remarks>
 internal sealed class LightTiles(AssetManager assets)
 {
     /// <summary>
@@ -48,8 +51,8 @@ internal sealed class LightTiles(AssetManager assets)
     public ImmutableArray<ShaderEntry> Shaders => [_cullShader];
 
     /// <summary>
-    /// The table and the view's tiles asked for, and the world's lights into the table, point lights first, in the
-    /// frame's upload pass.
+    /// Asks for the table and the view's tiles, and writes the world's lights into the table, point lights first, in
+    /// the frame's upload pass.
     /// </summary>
     public Result<LightBuffers> Prepare(
         RenderGraph graph,
@@ -103,7 +106,7 @@ internal sealed class LightTiles(AssetManager assets)
     }
 
     /// <summary>
-    /// Each tile's lights, from the view's depth.
+    /// Records the pass that finds each tile's lights from the view's depth.
     /// </summary>
     public void Record(RenderGraph graph, in GpuView view)
     {

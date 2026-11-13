@@ -69,7 +69,7 @@ public float UnpackSnorm16(uint packed)
 
 // A number of 0 or more as the bits of a small float: a 5-bit exponent over a mantissa of mantissaBits, rounded to the
 // nearest from the 32-bit float's own bits, so no 16-bit type is needed. Under 2^-14 is 0, and the format's largest
-// finite value the most; a float of 0 or more orders as its bits do, so the bits' min is the value's.
+// finite value the most. A float of 0 or more orders as its bits do, so the bits' min is the value's.
 uint PackSmallFloat(float value, uint mantissaBits)
 {
     uint largest = ((30u + 112u) << 23u) | (((1u << mantissaBits) - 1u) << (23u - mantissaBits));

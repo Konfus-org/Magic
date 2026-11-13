@@ -25,10 +25,13 @@ public enum Motion : byte
 }
 
 /// <summary>
-/// What a <see cref="Physics"/> body collides as, fitted to the entity's model at the transform's scale: its bounds
-/// for a box, the largest extent for a sphere's diameter, the height and width for a capsule, and its triangles for a
-/// mesh, which only a static body can be. Without a model, a unit cube's.
+/// What a <see cref="Physics"/> body collides as, fitted to the model of the entity at the scale of its transform.
 /// </summary>
+/// <remarks>
+/// A box takes the bounds of the model, a sphere takes the largest extent as its diameter, a capsule takes the height
+/// and width, and a mesh takes the triangles. Only a static body can be a mesh. Without a model, the shape fits a unit
+/// cube.
+/// </remarks>
 public enum Shape : byte
 {
     Box,
@@ -41,13 +44,20 @@ public enum Shape : byte
 }
 
 /// <summary>
-/// A solid thing: what moves it, its shape and its mass. A new one, <c>{}</c> in a file, is a body that never moves,
-/// shaped like the entity's model; <c>{ "motion": "dynamic" }</c> is one that falls. The physics gem makes a body
-/// for every entity with a <see cref="Transform"/> and this, moves the transform as the body moves, and reads the
-/// fields back: a change to the transform of a body moves it there, and a change to <see cref="Velocity"/> launches
-/// it. The shape's size is the model's, times the transform's scale, so a unit cube scaled 2 is a 2 m box with no
-/// size written anywhere twice.
+/// A solid body: what moves it, its shape and its mass.
 /// </summary>
+/// <remarks>
+/// <para>
+/// A new one, <c>{}</c> in a file, is a body that never moves, with the shape of the model of the entity.
+/// <c>{ "motion": "dynamic" }</c> is one that falls.
+/// </para>
+/// <para>
+/// The physics gem makes a body for each entity with a <see cref="Transform"/> and this component. It moves the
+/// transform as the body moves, and reads the fields back: a change to the transform moves the body there, and a
+/// change to <see cref="Velocity"/> launches it. The size of the shape is that of the model times the scale of the
+/// transform, so a unit cube at scale 2 is a 2 m box.
+/// </para>
+/// </remarks>
 public record struct Physics : IComponent
 {
     /// <summary>

@@ -7,10 +7,12 @@ using Magic.Files;
 namespace Magic.Utils;
 
 /// <summary>
-/// A value as the console types it: one value in JSON, a bare word for text or a choice, one word per part of a value
-/// with several, in their order (<c>1 2 3</c> for a position, <c>2560 1440</c> for a size), or one word per element of
-/// a list (<c>Bloom Vignette</c>).
+/// A value as the console types it: JSON, or bare words for text, a choice, the parts of a value or a list.
 /// </summary>
+/// <remarks>
+/// Text or a choice is one bare word. A value with several parts is one word per part, in their order (<c>1 2 3</c>
+/// for a position, <c>2560 1440</c> for a size). A list is one word per element (<c>Bloom Vignette</c>).
+/// </remarks>
 internal static class ValueText
 {
     /// <summary>
@@ -148,16 +150,16 @@ internal static class ValueText
         type != typeof(string) && type.IsAssignableTo(typeof(System.Collections.IEnumerable));
 
     /// <summary>
-    /// Whether <paramref name="text"/> is JSON, as a value typed bare is not: a number, a literal, a string, an object or
-    /// an array.
+    /// Whether <paramref name="text"/> is JSON, as a value typed bare is not: a number, a literal, a string, an object
+    /// or an array.
     /// </summary>
     private static bool IsJson(string text) =>
         text is "true" or "false" or "null"
         || (text.Length > 0 && "-+.0123456789{[\"".Contains(text[0], StringComparison.Ordinal));
 
     /// <summary>
-    /// What a value of <paramref name="type"/> is made of, in their order: its public fields, or its settable properties
-    /// when it has no fields.
+    /// What a value of <paramref name="type"/> is made of, in their order: its public fields, or its settable
+    /// properties when it has no fields.
     /// </summary>
     private static MemberInfo[] GetParts(Type type)
     {

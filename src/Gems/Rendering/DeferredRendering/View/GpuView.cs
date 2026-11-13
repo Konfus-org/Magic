@@ -7,10 +7,12 @@ using Magic.Graphics;
 namespace Magic.DeferredRendering.View;
 
 /// <summary>
-/// The world as the GPU holds it this frame, and the view it is seen through: what the view's step makes each frame for
-/// the gems that draw it. The frame's buffer holds the library's <c>Core/Frame</c>, then the
-/// rows of <c>FrameRows.cs</c>; every target is at the picture's size.
+/// The world as the GPU holds it this frame, and the view it is seen through, which the view's step makes each frame.
 /// </summary>
+/// <remarks>
+/// The frame's buffer holds the library's <c>Core/Frame</c>, then the rows of <c>FrameRows.cs</c>. Every target is at
+/// the picture's size.
+/// </remarks>
 public readonly record struct GpuView
 {
     public required GpuBuffer Frame { get; init; }
@@ -91,10 +93,11 @@ public readonly record struct GpuView
     public required GpuBuffer Meshes { get; init; }
 
     /// <summary>
-    /// Each model on the GPU by its model index, the one its instances name, up to the last row in use, none where no
-    /// model is: what a gem that keeps a row for each model compares its own with each frame, dropping its rows past
-    /// the end.
+    /// Each model on the GPU by the model index its instances name, up to the last row in use, none where no model is.
     /// </summary>
+    /// <remarks>
+    /// A gem that keeps a row for each model compares its own with these each frame, and drops its rows past the end.
+    /// </remarks>
     public required ReadOnlyMemory<ModelPlace> Models { get; init; }
 
     /// <summary>
@@ -129,21 +132,25 @@ public readonly record struct GpuView
     public required GpuBuffer EffectRows { get; init; }
 
     /// <summary>
-    /// How many domains that loaded have had what they draw put on the GPU: a gem that waits for its own work before a
-    /// domain shows waits until this counts the domain it was told of.
+    /// How many domains that loaded have had what they draw put on the GPU.
     /// </summary>
+    /// <remarks>
+    /// A gem that waits for its own work before a domain shows waits until this counts the domain it was told of.
+    /// </remarks>
     public required int PreparedDomains { get; init; }
 
     /// <summary>
-    /// The atmosphere, for an entry generic over the sky it shades with.
+    /// Gets the atmosphere, for an entry generic over the sky it shades with.
     /// </summary>
     public static ShaderTypeArgument GetAtmosphere(AssetManager assets) =>
         new(assets.Find<Shader>("Shaders/Sky/Atmosphere.slang"), "Atmosphere");
 
     /// <summary>
-    /// The view's size times <paramref name="scale"/>, each side rounded and kept between one pixel and the view's:
-    /// the size of a pass drawn at a setting's fraction of the picture.
+    /// Gets the size of a pass drawn at a fraction of the picture: the view's size times <paramref name="scale"/>.
     /// </summary>
+    /// <remarks>
+    /// Each side is rounded and kept between one pixel and the view's.
+    /// </remarks>
     public (int Width, int Height) Scaled(float scale) =>
         (
             Math.Clamp((int)MathF.Round(Width * scale), 1, Width),
@@ -152,11 +159,13 @@ public readonly record struct GpuView
 }
 
 /// <summary>
-/// A model on the GPU: its asset, where its vertices are in the vertex pool, which its indices add, the box around it in
-/// its own frame, and where its meshes start in the mesh table with each one rays see: where its indices start in the
-/// index pool, its material slot and its triangles. It has no meshes on a GPU that traces no rays, or when the mesh
-/// table had no room for them.
+/// A model on the GPU: its asset, where its vertices are in the vertex pool, the box around it, and its meshes.
 /// </summary>
+/// <remarks>
+/// Its indices add to where its vertices start. The box is in its own frame. Its meshes start at a place in the mesh
+/// table, each one as rays see it: where its indices start in the index pool, its material slot and its triangles. It
+/// has no meshes on a GPU that traces no rays, or when the mesh table had no room for them.
+/// </remarks>
 public readonly record struct ModelPlace(
     Handle<Model> Model,
     uint VertexOffset,

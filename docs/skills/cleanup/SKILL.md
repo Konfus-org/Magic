@@ -29,9 +29,9 @@ more code than it adds. The rules are in [PROJECT.md](../PROJECT.md).
 
 1. **Find the target.** Name the files and members that the user means. If the target is too big for one slice, use
    the [simplify-review skill](../simplify-review/SKILL.md) first. Then do each of its slices with this skill.
-2. **Read before you change.** Read the target, its callers and the doc in `docs/` for its area. For a rendering gem
-   or the shader library, also read the `README.md` in its folder. Write down what the target does now, and the check
-   that shows it.
+2. **Read before you change.** Read the target, its callers and the doc in `docs/` for its area, such as
+   `docs/RENDERING.md` for a rendering gem or `docs/SHADERS.md` for the shader library. Write down what the target
+   does now, and the check that shows it.
 3. **Find the changes,** in this order:
    1. Remove what nothing needs:
       - Code that nothing calls, and members, parameters and overloads without a caller.

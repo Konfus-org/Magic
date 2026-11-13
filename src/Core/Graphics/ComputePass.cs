@@ -1,9 +1,12 @@
 namespace Magic.Graphics;
 
 /// <summary>
-/// A compute pass being recorded, begun by <see cref="RenderGraph.Compute"/>: say what it reads and writes, which the
-/// GPU provider puts the barriers in for, a <c>None</c> one left out, then end it with what it dispatches.
+/// A compute pass that <see cref="RenderGraph.Compute"/> begins: declare what it reads and writes, then end it with a
+/// dispatch.
 /// </summary>
+/// <remarks>
+/// The GPU provider puts in the barriers from these declarations. It ignores an access of <c>None</c>.
+/// </remarks>
 public readonly ref struct ComputePass
 {
     private readonly RenderGraph _graph;
@@ -45,8 +48,8 @@ public readonly ref struct ComputePass
     }
 
     /// <summary>
-    /// Dispatches a thread a pixel over <paramref name="width"/> by <paramref name="height"/>, in each of
-    /// <paramref name="depth"/> slices, in as many groups of the pass's shader as cover them.
+    /// Dispatches one thread per pixel over <paramref name="width"/> by <paramref name="height"/> in each of
+    /// <paramref name="depth"/> slices, in enough groups of the pass's shader to cover them.
     /// </summary>
     public void DispatchOver(int width, int height, int depth = 1)
     {

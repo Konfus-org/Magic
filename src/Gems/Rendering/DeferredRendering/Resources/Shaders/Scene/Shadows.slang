@@ -1,5 +1,5 @@
 // The shadow mask: for each pixel, how much of each light lighting it reaches it, 8 bits a light in 4 words. The sun is
-// the first slot and the first lights the pixel's tile lists, in the order of their bits, the rest; a light past the
+// the first slot and the first lights the pixel's tile lists, in the order of their bits, the rest. A light past the
 // last slot is unshadowed. Beside it, the sun's tint: the colour of the sun's light that reaches the pixel through
 // glass over how bright it is, which the sun's slot holds, so the two together give the light coloured.
 module "Scene/Shadows";
@@ -59,7 +59,7 @@ public float GetShadow(uint4 words, uint slot)
     return float((words[slot / 4u] >> ((slot % 4u) * 8u)) & 0xFFu) / 255.0;
 }
 
-// The words with a slot set to how much of its light reaches the pixel; every slot starts at 0.
+// The words with a slot set to how much of its light reaches the pixel. Every slot starts at 0.
 public uint4 EncodeShadow(uint4 words, uint slot, float shadow)
 {
     uint4 result = words;

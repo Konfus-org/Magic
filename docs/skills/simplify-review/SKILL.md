@@ -10,8 +10,8 @@ The rules, paths and commands are in [PROJECT.md](../PROJECT.md).
 1. **Select one area** with the user, as the project defines an area. A larger request is more than one review.
 2. **Read what you judge the area against:**
    - Simplest first and the code standards.
-   - The root README, and the doc in `docs/` for the area.
-   - For a rendering gem or the shader library, the `README.md` in its folder.
+   - The root README, and the doc in `docs/` for the area, such as `docs/RENDERING.md` for a rendering gem or
+     `docs/SHADERS.md` for the shader library.
 
    Then read each file in the area, and how the rest of the code calls it.
 3. **Look for less code that does the same job:**

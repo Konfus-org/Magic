@@ -19,9 +19,11 @@ public enum ScreenSection : byte
 }
 
 /// <summary>
-/// A perspective camera, looking along its entity's +Z, drawing into its <see cref="Target"/>. A new one has a 60
-/// degree field of view, sees from 5 cm away, sees without end, and draws into the whole window.
+/// A perspective camera that looks along the +Z of its entity and draws into its <see cref="Target"/>.
 /// </summary>
+/// <remarks>
+/// A new one has a 60 degree field of view, sees from 5 cm away, has no far limit, and draws into the whole window.
+/// </remarks>
 public record struct Camera : IComponent
 {
     public CameraTarget Target;
@@ -45,9 +47,11 @@ public record struct Camera : IComponent
 }
 
 /// <summary>
-/// What a <see cref="Camera"/> draws into: the window, in one <see cref="Section"/> of it, or a render texture.
-/// Whatever draws the camera turns it into a render target; the GPU never sees it.
+/// What a <see cref="Camera"/> draws into: one <see cref="Section"/> of the window, or a render texture.
 /// </summary>
+/// <remarks>
+/// The part that draws the camera changes it into a render target. The GPU never sees it.
+/// </remarks>
 public record struct CameraTarget
 {
     /// <summary>
@@ -56,8 +60,11 @@ public record struct CameraTarget
     public Handle<RenderTexture> Texture;
 
     /// <summary>
-    /// The part of the window drawn into, so split screen is cameras with sections; ignored for a render texture.
+    /// The part of the window to draw into.
     /// </summary>
+    /// <remarks>
+    /// Split screen is cameras with different sections. A render texture ignores it.
+    /// </remarks>
     public ScreenSection Section;
 
     public readonly bool IsWindow => Texture == Handle<RenderTexture>.None;

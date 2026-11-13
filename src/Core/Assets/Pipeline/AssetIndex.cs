@@ -10,10 +10,12 @@ using Magic.Utils;
 namespace Magic.Assets.Pipeline;
 
 /// <summary>
-/// What is under the asset directories at one moment: every file with a <c>.meta</c> sidecar, by its id, its path and
-/// its folder, and the built-in ones by their name besides. A value: indexing again makes a new one, and what differs
-/// between two is <see cref="Diff"/>.
+/// Every file with a <c>.meta</c> sidecar under the asset directories at one moment, by id, path and folder, and the
+/// built-in files by name.
 /// </summary>
+/// <remarks>
+/// It is a value: indexing again makes a new one, and <see cref="Diff"/> gives what differs between two.
+/// </remarks>
 internal sealed record AssetIndex
 {
     /// <summary>
@@ -49,10 +51,13 @@ internal sealed record AssetIndex
     public required FrozenDictionary<string, IndexedFile> BuiltIn { get; init; }
 
     /// <summary>
-    /// What <paramref name="directories"/> hold, read one by one, the first winning a path two of them have.
-    /// <paramref name="builtIn"/> is the one whose files are built in. A file with an id another has already is an
-    /// error and gives no asset, unless it is at that file's path in a later directory, which the first overrides.
+    /// What <paramref name="directories"/> hold, read one by one; when two hold the same path, the first wins.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="builtIn"/> is the directory whose files are built in. A file with an id that another file has
+    /// already is an error and gives no asset, unless it is at the same path in a later directory, which the first
+    /// overrides.
+    /// </remarks>
     public static AssetIndex Create(IFileSystem files, ImmutableArray<string> directories, string builtIn)
     {
         Dictionary<ulong, IndexedFile> byId = [];
@@ -118,10 +123,13 @@ internal sealed record AssetIndex
     }
 
     /// <summary>
-    /// The assets to make again once the index went from <paramref name="before"/> to <paramref name="now"/> after the
-    /// watches saw <paramref name="touched"/>, paths from their asset directories: those whose file is gone, is another
-    /// file now, or was touched, its <c>.meta</c> counting as its file.
+    /// The assets to make again after the index went from <paramref name="before"/> to <paramref name="now"/> and the
+    /// watches saw <paramref name="touched"/>.
     /// </summary>
+    /// <remarks>
+    /// These are the assets whose file is gone, is another file now, or was touched. <paramref name="touched"/> holds
+    /// paths from their asset directories, and a <c>.meta</c> counts as its file.
+    /// </remarks>
     public static HashSet<ulong> Diff(AssetIndex before, AssetIndex now, IReadOnlySet<string> touched)
     {
         HashSet<ulong> changed = [];

@@ -100,8 +100,8 @@ In Claude Code, the agent hooks in `.claude/settings.json` hold the workflow wit
 | [Tests](docs/TOOLS.md#tests) | Before running or touching tests |
 | [Tools](docs/TOOLS.md) | Before running a tool script |
 
-Before changing an area, read its doc in `docs/`, such as [Gems](docs/GEMS.md) or [Debugging](docs/DEBUGGING.md).
-A rendering gem and the shader library also have a `README.md` in their folder: read it too.
+Before changing an area, read its doc in `docs/`, such as [Gems](docs/GEMS.md), [Rendering](docs/RENDERING.md),
+[Shaders](docs/SHADERS.md) or [Debugging](docs/DEBUGGING.md).
 Read a long review file by the part you need: its index first, then only that part.
 
 ## Workflow

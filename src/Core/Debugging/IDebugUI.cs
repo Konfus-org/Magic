@@ -4,22 +4,22 @@ using Magic.Assets;
 namespace Magic.Debugging;
 
 /// <summary>
-/// What a gem or script shows the developer while the game runs, provided by a UI gem, which decides how it looks and
-/// when it shows.
-/// <para>
-/// What is reported with <c>Text</c>, and what <see cref="Log"/> is told to show on screen, shows over the game and
-/// outside any window: a few words at a place in the world, or a line on screen. Report it from any thread; it shows with
-/// the next frame drawn. Reporting the same text at the same place again while it shows keeps it up rather than adding
-/// another.
-/// </para>
-/// <para>
-/// Windows are drawn with the widgets, <see cref="Begin(string, bool)"/> to <see cref="MenuItem"/>, in immediate mode:
-/// what is called in a frame's Update is that frame's windows, so a window is drawn every frame it is open. They are the
-/// game thread's, called in Update by a gem made after the provider, as one that takes this is. A widget's label is drawn
-/// on its left, and the widget stretches to the width of what it is in; the part of a label from <c>##</c> on is not
-/// shown, and tells apart widgets that show the same label. A widget answers from the input of the frame it is called in.
-/// </para>
+/// What a gem or script shows the developer while the game runs. A UI gem provides it and decides how it looks.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <c>Text</c>, and what <see cref="Log"/> is told to show on screen, shows over the game and outside any window: a few
+/// words at a place in the world, or a line on screen. Report it from any thread; it shows with the next frame drawn.
+/// The same text at the same place again keeps it up, and does not add another.
+/// </para>
+/// <para>
+/// The widgets, <see cref="Begin(string, bool)"/> to <see cref="MenuItem"/>, draw windows in immediate mode: the calls
+/// in a frame's Update are that frame's windows, so draw a window in each frame that it is open. Call them only on the
+/// game thread, in Update of a gem made after the provider. A widget's label is drawn on its left, and the widget
+/// stretches to the width of its parent. The part of a label from <c>##</c> on is not shown, and tells apart widgets
+/// with the same label. A widget answers from the input of the frame it is called in.
+/// </para>
+/// </remarks>
 public interface IDebugUI
 {
     /// <summary>
@@ -28,32 +28,46 @@ public interface IDebugUI
     bool IsEnabled { get; }
 
     /// <summary>
-    /// <paramref name="text"/> at <paramref name="position"/> in the world, in the next frame drawn: call it every frame
-    /// it should show. A few words, a quick why: the log is where detail goes. <paramref name="tooltip"/> shows while the
-    /// mouse rests on the text; a null <paramref name="color"/> is the UI's own.
+    /// Shows <paramref name="text"/> at <paramref name="position"/> in the world in the next frame drawn. Call it in
+    /// each frame that it shows.
     /// </summary>
+    /// <remarks>
+    /// Write a few words; put detail in the log. <paramref name="tooltip"/> shows while the mouse rests on the text. A
+    /// null <paramref name="color"/> is the UI's own.
+    /// </remarks>
     void Text(Vector3 position, string text, Color? color = null, string? tooltip = null);
 
     /// <summary>
-    /// <paramref name="text"/> as a line on screen, in the next frame drawn, below the frame's lines called before it and
-    /// above the lines shown for a while: call it every frame it should show. Never logged.
+    /// Shows <paramref name="text"/> as a line on screen in the next frame drawn. Call it in each frame that it shows.
     /// </summary>
+    /// <remarks>
+    /// The line goes below the frame's earlier lines and above the lines shown for a while. It is not logged.
+    /// </remarks>
     void Text(string text, Color? color = null);
 
     /// <summary>
-    /// Opens a movable window titled <paramref name="title"/>, and what is drawn until <see cref="End"/> goes in it.
-    /// Called while another is open, it is a view nested in that one instead, as wide as its parent and as tall as the
-    /// room the parent has left after what follows the view. <paramref name="scrollable"/>: a window is sized by the user
-    /// and scrolls, where otherwise it fits what is in it; a nested view scrolls, and while it is scrolled to the bottom
-    /// it follows what is added there.
+    /// Opens a movable window titled <paramref name="title"/> that holds what is drawn until <see cref="End"/>.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// While another is open, it opens a view nested in that one, as wide as its parent and as tall as the room left
+    /// after what follows the view.
+    /// </para>
+    /// <para>
+    /// With <paramref name="scrollable"/>, the user sizes a window and it scrolls; otherwise it fits its contents. A
+    /// scrollable nested view follows what is added at the bottom while it is scrolled to the bottom.
+    /// </para>
+    /// </remarks>
     void Begin(string title, bool scrollable = false);
 
     /// <summary>
-    /// <see cref="Begin(string, bool)"/> for a window with a close button in its header, which sets
-    /// <paramref name="visible"/> to false when clicked: stop drawing the window from the next frame. This frame's
-    /// <see cref="End"/> is still owed. A nested view has no header, so no button.
+    /// Opens a window as <see cref="Begin(string, bool)"/> does, with a close button that sets
+    /// <paramref name="visible"/> to false.
     /// </summary>
+    /// <remarks>
+    /// After a click, stop drawing the window from the next frame, but still call this frame's <see cref="End"/>. A
+    /// nested view has no header, so it has no button.
+    /// </remarks>
     void Begin(string title, ref bool visible, bool scrollable = false);
 
     /// <summary>
@@ -72,17 +86,21 @@ public interface IDebugUI
     bool Button(string label);
 
     /// <summary>
-    /// A one-line text field editing <paramref name="text"/>; true when Enter was pressed in it. With
-    /// <paramref name="focus"/> it takes the keyboard when its window appears, as the one field a window is for does; any
-    /// field keeps the keyboard after Enter. <paramref name="hint"/> shows greyed in the field while it is empty, for a
-    /// field whose label is hidden to say what it takes.
+    /// Draws a one-line text field that edits <paramref name="text"/>. True when Enter was pressed in it.
     /// </summary>
+    /// <remarks>
+    /// With <paramref name="focus"/>, it takes the keyboard when its window appears. Each field keeps the keyboard
+    /// after Enter. <paramref name="hint"/> shows grey in the empty field, to say what a field with a hidden label
+    /// takes.
+    /// </remarks>
     bool Input(string label, ref string text, string? hint = null, bool focus = false);
 
     /// <summary>
-    /// Text of many lines editing <paramref name="text"/>, as tall as its lines; <paramref name="readOnly"/> text can
-    /// still be selected and copied. True when changed.
+    /// Draws a field of many lines that edits <paramref name="text"/>, as tall as its lines. True when changed.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="readOnly"/> text can still be selected and copied.
+    /// </remarks>
     bool Document(string label, ref string text, bool readOnly = false);
 
     /// <summary>
@@ -91,9 +109,12 @@ public interface IDebugUI
     bool Checkbox(string label, ref bool value);
 
     /// <summary>
-    /// A number dragged left and right, or typed after a double-click, kept within <paramref name="min"/> to
-    /// <paramref name="max"/>; equal bounds, as by default, are none. True when changed.
+    /// Draws a number to drag left and right, or to type after a double-click. True when changed.
     /// </summary>
+    /// <remarks>
+    /// The value stays within <paramref name="min"/> to <paramref name="max"/>. Equal bounds, the default, set no
+    /// limit.
+    /// </remarks>
     bool Slider(string label, ref float value, float min = 0f, float max = 0f);
 
     /// <summary>
@@ -102,30 +123,39 @@ public interface IDebugUI
     bool Choice(string label, ref int index, ReadOnlySpan<string> options);
 
     /// <summary>
-    /// A row of tabs across the window, one of <paramref name="options"/> selected by index: what is drawn after it is
-    /// the selected tab's. <paramref name="label"/> only tells the rows of one window apart. True when changed.
+    /// Draws a row of tabs, one of <paramref name="options"/> selected by index. True when changed.
     /// </summary>
+    /// <remarks>
+    /// What is drawn after it belongs to the selected tab. <paramref name="label"/> only tells the rows of one window
+    /// apart.
+    /// </remarks>
     bool Tabs(string label, ref int index, ReadOnlySpan<string> options);
 
     /// <summary>
-    /// A header that folds away what is drawn under it, open at first as <paramref name="isOpenAtStart"/> says and as
-    /// clicked after. True while open: draw what is under it only then. <paramref name="depth"/> nests it under the
-    /// headers before it: it and what follows it are indented a step for each, until the next header in the window or
-    /// view.
+    /// Draws a header that folds away what is under it. True while open: draw what is under it only then.
     /// </summary>
+    /// <remarks>
+    /// It starts open as <paramref name="isOpenAtStart"/> says, then toggles on a click. <paramref name="depth"/> nests
+    /// it under the headers before it: it and what follows are indented one step for each, until the next header.
+    /// </remarks>
     bool Header(string label, bool isOpenAtStart = true, int depth = 0);
 
     /// <summary>
-    /// Opens a table headed by <paramref name="columns"/>, whose rows are drawn with <see cref="Row"/> until
-    /// <see cref="EndTable"/>: each column as wide as its widest cell, and resized by dragging its edge.
-    /// <paramref name="label"/> only tells the tables of one window apart.
+    /// Opens a table headed by <paramref name="columns"/>. Draw rows with <see cref="Row"/>, then call
+    /// <see cref="EndTable"/>.
     /// </summary>
+    /// <remarks>
+    /// Each column is as wide as its widest cell, and its edge drags to resize it. <paramref name="label"/> only tells
+    /// the tables of one window apart.
+    /// </remarks>
     void Table(string label, ReadOnlySpan<string> columns);
 
     /// <summary>
-    /// A row of the table open, a cell per column in order, the rest empty when there are fewer. The row is what was drawn
-    /// last, so a <see cref="Tooltip"/> after it shows while the mouse rests anywhere on it.
+    /// Draws a row of the open table, a cell per column in order. Missing cells are empty.
     /// </summary>
+    /// <remarks>
+    /// A <see cref="Tooltip"/> after it shows while the mouse rests anywhere on the row.
+    /// </remarks>
     void Row(ReadOnlySpan<string> cells);
 
     /// <summary>
@@ -134,13 +164,12 @@ public interface IDebugUI
     void EndTable();
 
     /// <summary>
-    /// <paramref name="text"/> shown while the mouse rests on what was drawn last.
+    /// Shows <paramref name="text"/> while the mouse rests on what was drawn last.
     /// </summary>
     void Tooltip(string text);
 
     /// <summary>
-    /// An item of the menu a right-click anywhere in the window or nested view it is called in opens, in the order called.
-    /// True in the frame it is clicked.
+    /// Adds an item to the right-click menu of the current window or nested view. True in the frame it is clicked.
     /// </summary>
     bool MenuItem(string label);
 }

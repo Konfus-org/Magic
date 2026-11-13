@@ -5,9 +5,12 @@ using Magic.Events;
 namespace Magic.CommandLine;
 
 /// <summary>
-/// The lines the console runs next, and what holds them back. Lines a command queues run before the terminal's, in
-/// the order queued. A hold keeps every line after the one that set it back until its condition says no. Game thread.
+/// The lines that the console runs next, and what holds them back.
 /// </summary>
+/// <remarks>
+/// Lines that a command queues run before the lines of the terminal, in queue order. A hold keeps back each line after
+/// the line that set it, until its condition says no. Use it on the game thread.
+/// </remarks>
 internal sealed class CommandQueue(EventCoordinator events)
 {
     private readonly Queue<string> _queued = new();
@@ -51,9 +54,12 @@ internal sealed class CommandQueue(EventCoordinator events)
     }
 
     /// <summary>
-    /// The next line to run, once no hold keeps it back: a queued one, else one typed into the terminal. False while a
-    /// hold keeps it, or when no line is waiting. Once a frame, after the frame's messages were taken.
+    /// Gets the next line to run when no hold keeps it back: a queued line, else a line typed into the terminal.
     /// </summary>
+    /// <remarks>
+    /// It returns false while a hold keeps the line, or when no line waits. Call it once a frame, after the messages of
+    /// the frame were taken.
+    /// </remarks>
     public bool TryDequeue([NotNullWhen(true)] out string? line)
     {
         line = null;

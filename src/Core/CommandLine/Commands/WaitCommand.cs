@@ -7,9 +7,12 @@ using Magic.Worlds;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>wait</c>: holds the lines after it for a number of frames, or of seconds ending in <c>s</c>; for <c>loaded</c>,
-/// until the world has content and is not loading; for <c>drawn</c>, until the first frame is drawn.
+/// <c>wait</c>: holds the lines after it for a number of frames, or of seconds that end in <c>s</c>.
 /// </summary>
+/// <remarks>
+/// With <c>loaded</c>, it holds until the world has content and does not load. With <c>drawn</c>, it holds until the
+/// first frame is drawn.
+/// </remarks>
 internal static class WaitCommand
 {
     public static Command Create(CommandQueue queue, World world)

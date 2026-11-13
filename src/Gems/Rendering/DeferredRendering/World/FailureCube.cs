@@ -5,10 +5,12 @@ namespace Magic.DeferredRendering.World;
 
 /// <summary>
 /// The cube that a model that failed draws in its place: one metre a side about its origin, its faces flat and wound
-/// outward. It is made in code, so that a failure reads nothing from disk. It is in the model table under
-/// <see cref="Handle"/>, which is no asset's, and a gem that makes its own data of a model makes it from
-/// <see cref="Model"/> for that handle.
+/// outward.
 /// </summary>
+/// <remarks>
+/// It is made in code, so that a failure reads nothing from disk. It is in the model table under <see cref="Handle"/>,
+/// which is no asset's. A gem that makes its own data of a model makes it from <see cref="Model"/> for that handle.
+/// </remarks>
 public static class FailureCube
 {
     public static Handle<Model> Handle { get; } = new(ulong.MaxValue);

@@ -4,10 +4,12 @@ using System.Runtime.InteropServices;
 namespace Magic.Graphics;
 
 /// <summary>
-/// A frame's commands as a value: passes in the order they run, each with what it uses. The gems record it into
-/// Core's <see cref="RenderGraph"/> and Core hands it to <see cref="IGraphicsApi.Present"/>; the GPU provider
-/// turns it into its API's calls and nothing else decides what the GPU does.
+/// A frame's commands as a value: passes in the order they run, each with what it uses.
 /// </summary>
+/// <remarks>
+/// Gems record it into <see cref="RenderGraph"/> and Core hands it to <see cref="IGraphicsApi.Present"/>. Only the GPU
+/// provider turns it into API calls.
+/// </remarks>
 public readonly record struct GpuCommands(ImmutableArray<GpuPass> Passes)
 {
     public static GpuCommands None => new([]);
@@ -24,8 +26,8 @@ public enum GpuPassKind : byte
     Compute,
 
     /// <summary>
-    /// Draws with <see cref="GpuPass.DrawShaders"/> into <see cref="GpuPass.Targets"/>, with the constants, scissors and
-    /// index buffer they take.
+    /// Draws with <see cref="GpuPass.DrawShaders"/> into <see cref="GpuPass.Targets"/>, with the constants, scissors
+    /// and index buffer they take.
     /// </summary>
     Draw,
 
@@ -36,9 +38,11 @@ public enum GpuPassKind : byte
 }
 
 /// <summary>
-/// One pass: a debug group the GPU provider times, what it uses, which the provider puts the barriers in for before
-/// anything in it runs, and its commands.
+/// One pass: a timed debug group with the resources it uses and its commands.
 /// </summary>
+/// <remarks>
+/// The GPU provider puts in the barriers for its uses before any of its commands runs.
+/// </remarks>
 public readonly record struct GpuPass
 {
     public GpuPass() { }
@@ -65,41 +69,43 @@ public readonly record struct GpuPass
     public GpuRenderTargets Targets { get; init; }
 
     /// <summary>
-    /// The compute shader the GPU provider binds before the commands, built from the entry; the pass is left out of a
-    /// frame while the shader is not built.
+    /// The compute shader bound before the commands. The frame leaves the pass out while the shader is not built.
     /// </summary>
     public ShaderEntry? Shader { get; init; }
 
     /// <summary>
-    /// What a draw pass draws with, which the GPU provider binds before the commands as <see cref="Shader"/> is bound.
+    /// The shaders of a draw pass, bound before the commands.
     /// </summary>
     public DrawShaders? DrawShaders { get; init; }
 }
 
 /// <summary>
-/// Where a pass runs in the frame: every pass of a lower <see cref="Order"/> runs before every pass of a higher one,
-/// whichever gem recorded it first, and passes of one order run in the order they were recorded. Core names the first
-/// and the last; a renderer names the stages between them.
+/// Where a pass runs in the frame: passes of a lower <see cref="Order"/> run first.
 /// </summary>
+/// <remarks>
+/// Passes of one order run in the order they were recorded, whichever gem records them. Core names the first and the
+/// last stage; a renderer names the stages between them.
+/// </remarks>
 public readonly record struct RenderStage(byte Order)
 {
     /// <summary>
-    /// What the frame's CPU data goes up as: uploads, clears and acceleration structures, and what is worked out from
-    /// them before anything draws.
+    /// The first stage: uploads, clears, acceleration structures, and the work on them that must come before any draw.
     /// </summary>
     public static readonly RenderStage Prepare = new(0);
 
     /// <summary>
-    /// What draws over the finished picture, as a debug UI does.
+    /// The last stage: draws over the finished picture, as a debug UI does.
     /// </summary>
     public static readonly RenderStage Overlay = new(byte.MaxValue);
 }
 
 /// <summary>
-/// A resource a pass touches and how. The GPU provider knows the access it was left in, by the pass before or the
-/// frame before, and puts in the barrier between the two; a read after the same read needs none. A texture's covers
-/// one level, or every level when <see cref="Level"/> is -1.
+/// A resource a pass touches and how.
 /// </summary>
+/// <remarks>
+/// The GPU provider puts in the barrier from the access before, which can be in the frame before. A read after the
+/// same read needs none. A texture's use covers one level, or every level when <see cref="Level"/> is -1.
+/// </remarks>
 public readonly record struct GpuUse
 {
     public GpuUse() { }
@@ -141,9 +147,11 @@ public enum TargetLoad : byte
 }
 
 /// <summary>
-/// One colour or depth target of a draw pass: a texture's level, and what to do with what it holds. A clear is to
-/// zero, which is black, or infinitely far as depth is reversed.
+/// One colour or depth target of a draw pass: a texture's level, and what to do with what it holds.
 /// </summary>
+/// <remarks>
+/// A clear writes zero: black for colour, infinitely far for depth, as depth is reversed.
+/// </remarks>
 public readonly record struct GpuTarget
 {
     public GpuTarget() { }
@@ -168,16 +176,22 @@ public readonly record struct GpuRenderTargets
 }
 
 /// <summary>
-/// The 16 bytes a pass pushes to its shaders, read there as <c>Core/Pass.slang</c>'s header with the same four names:
-/// what a small pass needs, or in <see cref="X"/> the heap id of the buffer its constants struct is in.
+/// The 16 bytes a pass pushes to its shaders: a small pass's values, or in <see cref="X"/> the heap id of its
+/// constants.
 /// </summary>
+/// <remarks>
+/// Shaders read them as the header of <c>Core/Pass.slang</c>, with the same four names.
+/// </remarks>
 [StructLayout(LayoutKind.Sequential)]
 public readonly record struct GpuConstants(uint X, uint Y = 0, uint Z = 0, uint W = 0);
 
 /// <summary>
-/// Which command a <see cref="GpuCommand"/> is; the fields each reads are on the method of <see cref="RenderGraph"/>,
-/// <see cref="ComputePass"/> or <see cref="DrawPass"/> that records it.
+/// Which command a <see cref="GpuCommand"/> is.
 /// </summary>
+/// <remarks>
+/// The method of <see cref="RenderGraph"/>, <see cref="ComputePass"/> or <see cref="DrawPass"/> that records a kind
+/// shows the fields it reads.
+/// </remarks>
 public enum GpuCommandKind : byte
 {
     PushConstants,
@@ -197,9 +211,11 @@ public enum GpuCommandKind : byte
 }
 
 /// <summary>
-/// One command, as plain fields a kind reads its own way: a resource's id and a second's, two byte offsets, a size,
-/// four numbers and a block of constants. The graph and its passes fill them; the GPU provider reads them.
+/// One command, as plain fields that each <see cref="GpuCommandKind"/> reads its own way.
 /// </summary>
+/// <remarks>
+/// The fields are two resource ids, two byte offsets, a size, four numbers and a block of constants.
+/// </remarks>
 public readonly record struct GpuCommand
 {
     public required GpuCommandKind Kind { get; init; }

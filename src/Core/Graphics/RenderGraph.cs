@@ -8,13 +8,18 @@ using Magic.Utils;
 namespace Magic.Graphics;
 
 /// <summary>
-/// A frame's passes as data: a compute or draw pass named by its shaders, told what it reads and ended by what it
-/// dispatches or draws, and transfers (uploads, clears, blits, readbacks and builds), which the graph gathers into
-/// passes of their own; take the frame with <see cref="Finish"/>. Core holds one, every gem's Render records into it,
-/// and Core hands what it finishes to <see cref="IGraphicsApi.Present"/>, which puts in the barriers the uses need.
-/// Each method's parameters say which of a <see cref="GpuCommand"/>'s fields its kind reads. A gem that cannot record
-/// a part of its frame tells <see cref="Fail"/> and goes on. Render thread.
+/// A frame's passes as data: compute and draw passes, and transfers that the graph gathers into passes of their own.
 /// </summary>
+/// <remarks>
+/// <para>
+/// Core holds one graph. Each gem's step records into it, and Core gives the result of <see cref="Finish"/> to
+/// <see cref="IGraphicsApi.Present"/>. Transfers are uploads, clears, blits, readbacks and builds.
+/// </para>
+/// <para>
+/// Each method's parameters show which fields of a <see cref="GpuCommand"/> its kind reads. A gem that cannot record a
+/// part of its frame tells <see cref="Fail"/> and goes on. Use it only on the render thread.
+/// </para>
+/// </remarks>
 public sealed class RenderGraph
 {
     private readonly List<GpuPass> _passes = [];
@@ -30,9 +35,11 @@ public sealed class RenderGraph
     private List<(RenderFailure Kind, string What)> _failedBefore = [];
 
     /// <summary>
-    /// What failed in this frame, each once, in the order first told to <see cref="Fail"/>: for a gem that draws them
-    /// late in the frame.
+    /// What failed in this frame, each one time, in the order first told to <see cref="Fail"/>.
     /// </summary>
+    /// <remarks>
+    /// Read it late in the frame, after the other gems have recorded.
+    /// </remarks>
     public ReadOnlySpan<(RenderFailure Kind, string What)> Failures => CollectionsMarshal.AsSpan(_failures);
 
     /// <summary>
@@ -47,32 +54,36 @@ public sealed class RenderGraph
     public GpuTexture WindowTarget => Gpu?.WindowTarget ?? GpuTexture.None;
 
     /// <summary>
-    /// The GPU provider the graph's names resolve through, set by Core once the gems are loaded; none while
-    /// no gem provides the GPU.
+    /// The GPU provider that the graph's names resolve through. Core sets it after the gems load; null while no gem
+    /// provides the GPU.
     /// </summary>
     internal IGraphicsApi? Gpu { get; set; }
 
     /// <summary>
-    /// The gems' steps that record into the graph, set by Core once the gems are loaded.
+    /// The gems' steps that record into the graph. Core sets it after the gems load.
     /// </summary>
     internal Rendering? Rendering { get; set; }
 
     /// <summary>
-    /// How many times <see cref="Fail"/> was told in this frame, a failure already in <see cref="Failures"/> too: what
-    /// tells that a part failed though its failure repeats an earlier part's.
+    /// How many times <see cref="Fail"/> was told in this frame, repeats included.
     /// </summary>
+    /// <remarks>
+    /// It shows that a step failed when its failure repeats an earlier step's.
+    /// </remarks>
     internal int ToldCount { get; private set; }
 
     /// <summary>
-    /// Whether <typeparamref name="T"/> will not come this frame because its maker is out: no gem makes it, or the
-    /// step that makes it threw and waits for its retry, lacks an input, or told a failure and made nothing. A gem
-    /// that waits for <typeparamref name="T"/> to let a loading domain show asks it, late in the frame.
+    /// Whether no step makes <typeparamref name="T"/> this frame. Ask it late in the frame.
     /// </summary>
+    /// <remarks>
+    /// The maker is out when no gem makes it, or when its step threw and waits for a retry, lacks an input, or told a
+    /// failure and made nothing.
+    /// </remarks>
     public bool IsMakerOut<T>()
         where T : struct => Rendering?.IsMakerOut(typeof(T)) ?? true;
 
     /// <summary>
-    /// What <paramref name="texture"/> was made to, the window's image included.
+    /// Gets the description that <paramref name="texture"/> was made from, the window's image included.
     /// </summary>
     public TextureDescription GetDescription(GpuTexture texture) =>
         (Gpu ?? throw new InvalidOperationException("There is no GPU provider to describe a texture.")).GetDescription(
@@ -80,55 +91,63 @@ public sealed class RenderGraph
         );
 
     /// <summary>
-    /// The texture under the description's name, its heap id known at once to write into constants: made by the GPU
-    /// provider on the first ask, kept while every frame asks for it with the same description, so what it holds
-    /// carries from frame to frame, and freed once no frame has asked for it in a few. Ask every frame that reads it.
+    /// Gets the texture under the description's name. Ask in each frame that uses it.
     /// </summary>
+    /// <remarks>
+    /// The heap id is known at once, to write into constants. The texture is made on the first ask and kept while each
+    /// frame asks with the same description, so its contents carry from frame to frame. A texture that no frame asked
+    /// for in a few frames is freed.
+    /// </remarks>
     public Result<GpuTexture> Texture(in TextureDescription description) =>
         Gpu?.GetTexture(description) ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
 
     /// <summary>
-    /// The buffer under the description's name, kept and freed as <see cref="Texture"/> keeps and frees a texture. Asked
-    /// for at another size alone, it keeps what it holds, as much as fits, copied before the frame's passes. Ask for it at
-    /// its new size before any transfer into it in that frame, as a transfer recorded into the old buffer is lost.
+    /// Gets the buffer under the description's name, kept and freed as <see cref="Texture"/> keeps and frees a texture.
     /// </summary>
+    /// <remarks>
+    /// When only the size changes, the new buffer gets as much of the old contents as fits, before the frame's passes.
+    /// Ask at the new size before any transfer into it in that frame: a transfer into the old buffer is lost.
+    /// </remarks>
     public Result<GpuBuffer> Buffer(in BufferDescription description) =>
         Gpu?.GetBuffer(description) ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
 
     /// <summary>
-    /// The bottom-level acceleration structure under the description's name, its device address on the handle for the
-    /// instances that refer to it, kept and freed as <see cref="Texture"/> keeps and frees a texture; only on a GPU that
-    /// traces rays. Build it with <see cref="BuildAcceleration"/> once its triangles are uploaded.
+    /// Gets the bottom-level acceleration structure under the description's name, kept and freed as
+    /// <see cref="Texture"/> keeps and frees a texture.
     /// </summary>
+    /// <remarks>
+    /// Use it only on a GPU that traces rays. The handle holds the device address that instances refer to. Build it
+    /// with <see cref="BuildAcceleration"/> after its triangles are uploaded.
+    /// </remarks>
     public Result<GpuAcceleration> Acceleration(in BottomLevelDescription description) =>
         Gpu?.GetAcceleration(description)
         ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
 
     /// <summary>
-    /// The top-level acceleration structure under the description's name, kept and freed as <see cref="Texture"/>
-    /// keeps and frees a texture; only on a GPU that traces rays.
+    /// Gets the top-level acceleration structure under the description's name, kept and freed as
+    /// <see cref="Texture"/> keeps and frees a texture. Only on a GPU that traces rays.
     /// </summary>
     public Result<GpuAcceleration> Acceleration(in TopLevelDescription description) =>
         Gpu?.GetAcceleration(description)
         ?? Result.Failure($"there is no GPU provider to make the {description.Name}.");
 
     /// <summary>
-    /// The sampler <paramref name="description"/> makes, one for every ask with the same description, kept and freed
-    /// as <see cref="Texture"/> keeps and frees a texture.
+    /// Gets the sampler for <paramref name="description"/>: the same one for each ask with the same description.
     /// </summary>
     public Result<GpuSampler> Sampler(in SamplerDescription description) =>
         Gpu?.GetSampler(description) ?? Result.Failure("there is no GPU provider to make a sampler.");
 
     /// <summary>
-    /// Whether the GPU provider has built <paramref name="shader"/>, the first ask starting it; failed while there is no
-    /// provider.
+    /// Whether <paramref name="shader"/> is built. The first ask starts the build; failed while there is no provider.
     /// </summary>
     public GpuState GetState(in ShaderEntry shader) => Gpu?.GetState(shader) ?? GpuState.Failed;
 
     /// <summary>
-    /// Where <paramref name="shaders"/> are: failed if any failed, loading while any loads, else ready. Each is asked,
-    /// so the first ask starts them all.
+    /// Gets the state of all <paramref name="shaders"/>: failed if any failed, loading while any loads, else ready.
     /// </summary>
+    /// <remarks>
+    /// Each is asked, so the first ask starts all of their builds.
+    /// </remarks>
     public GpuState GetState(params ReadOnlySpan<ShaderEntry> shaders)
     {
         GpuState all = GpuState.Ready;
@@ -145,10 +164,11 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// Whether the GPU provider still builds one of <paramref name="shaders"/>, asked in their order up to the first
-    /// that does. One that failed hides none that still builds, as it does in
-    /// <see cref="GetState(ReadOnlySpan{ShaderEntry})"/>.
+    /// Whether one of <paramref name="shaders"/> still builds. It stops at the first that does.
     /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="GetState(ReadOnlySpan{ShaderEntry})"/>, a failed shader does not hide one that still builds.
+    /// </remarks>
     public bool IsAnyLoading(params ReadOnlySpan<ShaderEntry> shaders)
     {
         foreach (ShaderEntry shader in shaders)
@@ -161,11 +181,13 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// Tells that <paramref name="what"/> failed in this frame, so it shows in the picture: a short constant text, as
-    /// "Shadows are not traced". The first frame it fails in after one it didn't logs it once, with
-    /// <paramref name="reason"/>, the full error. A gem that fails tells it every frame it fails in, and tries again
-    /// in the next.
+    /// Tells that <paramref name="what"/> failed in this frame, so that it shows in the picture.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="what"/> is a short constant text, such as "Shadows are not traced". The first failed frame after
+    /// a good one logs it one time, with <paramref name="reason"/>, the full error. Tell it in each frame that fails,
+    /// and try again in the next.
+    /// </remarks>
     public void Fail(RenderFailure kind, string what, string reason)
     {
         ToldCount++;
@@ -179,10 +201,12 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// Begins a compute pass running <paramref name="shader"/> with <paramref name="constants"/> pushed to it: say what
-    /// it reads and writes on what this returns, then dispatch, which ends it. The GPU provider leaves the pass out of a
-    /// frame while the shader is not built.
+    /// Begins a compute pass that runs <paramref name="shader"/> with <paramref name="constants"/>. A dispatch ends it.
     /// </summary>
+    /// <remarks>
+    /// Declare what it reads and writes on the returned pass, then dispatch. The frame leaves the pass out while the
+    /// shader is not built.
+    /// </remarks>
     public ComputePass Compute(string name, in ShaderEntry shader, in GpuConstants constants, RenderStage stage)
     {
         Begin(
@@ -199,10 +223,12 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// Begins a draw pass in <paramref name="stage"/> with <paramref name="shaders"/> into <paramref name="targets"/>,
-    /// with <paramref name="constants"/> pushed to it: say what it reads on what this returns, then draw, which ends it.
-    /// The GPU provider leaves the pass out of a frame while the shaders are not built.
+    /// Begins a draw pass with <paramref name="shaders"/> into <paramref name="targets"/>. A draw ends it.
     /// </summary>
+    /// <remarks>
+    /// Declare what it reads on the returned pass, then draw. The frame leaves the pass out while the shaders are not
+    /// built.
+    /// </remarks>
     public DrawPass Draw(
         string name,
         in DrawShaders shaders,
@@ -234,9 +260,11 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// The frame's passes, stage by stage and in the order they were recorded within one, and the graph empty for the
-    /// next frame. The transfers still open end their pass; a compute or draw pass never ended is left out.
+    /// Takes the frame's passes, stage by stage in the order recorded, and empties the graph for the next frame.
     /// </summary>
+    /// <remarks>
+    /// An open transfer pass ends. A compute or draw pass that was never ended is left out.
+    /// </remarks>
     public GpuCommands Finish()
     {
         EndOpenPass();
@@ -267,10 +295,12 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// Copies <paramref name="rows"/> into <paramref name="to"/> from <paramref name="offset"/> bytes on, staged through
-    /// the frame's upload ring, in a transfer pass; false, and nothing copied, when the ring has no room for them: the
-    /// caller keeps them as not sent.
+    /// Copies <paramref name="rows"/> into <paramref name="to"/> at <paramref name="offset"/> bytes, through the
+    /// frame's upload ring.
     /// </summary>
+    /// <returns>
+    /// False when the ring has no room. Then nothing is copied, and the caller keeps the rows as not sent.
+    /// </returns>
     public bool Upload<T>(GpuBuffer to, ReadOnlySpan<T> rows, ulong offset = 0)
         where T : unmanaged
     {
@@ -284,11 +314,13 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// <paramref name="rows"/> rows of the frame's upload ring to write into, copied into <paramref name="to"/> from
-    /// <paramref name="offset"/> bytes on in a transfer pass: write them before the frame is presented. No rows record
-    /// nothing. None when the ring has no room for them: the upload fails (<see cref="Fail"/>), and the caller keeps them
-    /// as not sent.
+    /// Gets <paramref name="rows"/> rows of the upload ring to write, copied into <paramref name="to"/> at
+    /// <paramref name="offset"/> bytes.
     /// </summary>
+    /// <remarks>
+    /// Write them before the frame is presented. Zero rows record nothing. When the ring has no room, it gives an empty
+    /// span and tells <see cref="Fail"/>, and the caller keeps the rows as not sent.
+    /// </remarks>
     public Span<T> Upload<T>(GpuBuffer to, int rows, ulong offset = 0)
         where T : unmanaged
     {
@@ -318,10 +350,15 @@ public sealed class RenderGraph
 
     /// <summary>
     /// Copies <paramref name="pixels"/>, a whole level of the first layer tightly packed, into <paramref name="to"/>'s
-    /// <paramref name="level"/>, staged as <see cref="Upload{T}(GpuBuffer, ReadOnlySpan{T}, ulong)"/> stages, in a
-    /// transfer pass. The same level filled twice in a frame gets a pass each. False, and nothing copied, when the ring
-    /// has no room for them: the caller keeps them as not sent.
+    /// <paramref name="level"/>.
     /// </summary>
+    /// <remarks>
+    /// It stages as <see cref="Upload{T}(GpuBuffer, ReadOnlySpan{T}, ulong)"/> does. The same level filled two times in
+    /// a frame gets a pass each.
+    /// </remarks>
+    /// <returns>
+    /// False when the ring has no room. Then nothing is copied, and the caller keeps the pixels as not sent.
+    /// </returns>
     public bool Upload(GpuTexture to, ReadOnlySpan<byte> pixels, int level = 0)
     {
         GpuUpload upload = BeginUpload(pixels.Length);
@@ -344,7 +381,7 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// Every byte of <paramref name="buffer"/> set to 0, in a transfer pass of its own, as it writes the whole buffer.
+    /// Sets each byte of <paramref name="buffer"/> to 0, in a transfer pass of its own.
     /// </summary>
     public void Clear(GpuBuffer buffer)
     {
@@ -355,8 +392,8 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// Level 0 of <paramref name="from"/> stretched over level 0 of <paramref name="to"/>, read with
-    /// <paramref name="filter"/>; the formats may differ, in <paramref name="stage"/>.
+    /// Stretches level 0 of <paramref name="from"/> over level 0 of <paramref name="to"/> with
+    /// <paramref name="filter"/>. The formats can differ.
     /// </summary>
     public void Blit(GpuTexture from, GpuTexture to, RenderStage stage, TextureFilter filter)
     {
@@ -374,10 +411,12 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// Level 0 of the first layer of <paramref name="from"/> copied, tightly packed, into <paramref name="into"/>, a
-    /// <see cref="BufferUsages.Readback"/> buffer the host may read once the frame has finished on the GPU, in
-    /// <paramref name="stage"/>.
+    /// Copies level 0 of the first layer of <paramref name="from"/>, tightly packed, into the
+    /// <see cref="BufferUsages.Readback"/> buffer <paramref name="into"/>.
     /// </summary>
+    /// <remarks>
+    /// The host can read the buffer after the frame finishes on the GPU.
+    /// </remarks>
     public void ReadBack(GpuTexture from, GpuBuffer into, RenderStage stage)
     {
         UseInTransfer(GetUse(from, GpuAccess.CopySource), stage);
@@ -395,9 +434,11 @@ public sealed class RenderGraph
 
     /// <summary>
     /// Builds an acceleration structure: a bottom-level one over its triangles, a top-level one over the first
-    /// <paramref name="instanceCount"/> instances of its instance buffer. The build waits for every command before
-    /// it and every command after waits for the build.
+    /// <paramref name="instanceCount"/> instances of its instance buffer.
     /// </summary>
+    /// <remarks>
+    /// The build waits for each command before it, and each command after it waits for the build.
+    /// </remarks>
     public void BuildAcceleration(GpuAcceleration acceleration, uint instanceCount = 0)
     {
         BeginTransfer(RenderStage.Prepare);
@@ -412,7 +453,7 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// Empties <see cref="Failures"/> for a new frame, and keeps the last frame's to tell which failures are new.
+    /// Empties <see cref="Failures"/> for a new frame, and keeps the last frame's to find which failures are new.
     /// </summary>
     internal void StartFailures()
     {
@@ -438,14 +479,15 @@ public sealed class RenderGraph
         Add(new() { Kind = GpuCommandKind.PushConstants, Constants = constants });
 
     /// <summary>
-    /// Says the open pass touches <paramref name="resource"/> as <paramref name="access"/>, every level of a texture or
-    /// <paramref name="level"/> alone.
+    /// Declares that the open pass touches <paramref name="resource"/> as <paramref name="access"/>: all levels of a
+    /// texture, or <paramref name="level"/> only.
     /// </summary>
     internal void Use(GpuResource resource, GpuAccess access, int level = -1) =>
         AddUse(GetUse(resource, access, level));
 
     /// <summary>
-    /// Says the pass touches each of <paramref name="resources"/> as <paramref name="access"/>, every level of a texture.
+    /// Declares that the open pass touches each of <paramref name="resources"/> as <paramref name="access"/>, all
+    /// levels of a texture.
     /// </summary>
     internal void Use(scoped ReadOnlySpan<GpuResource> resources, GpuAccess access)
     {
@@ -456,7 +498,7 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// Leaves out the compute or draw pass open, with no word: for a gem that threw in it, whose failure is told.
+    /// Silently leaves out the open compute or draw pass of a gem that threw, as its failure is already told.
     /// </summary>
     internal void LeaveOutOpenPass()
     {
@@ -478,8 +520,8 @@ public sealed class RenderGraph
         };
 
     /// <summary>
-    /// Room for <paramref name="bytes"/> in the frame's upload ring; none, and the upload told as failed, when the GPU
-    /// provider has no room or there is no provider.
+    /// Gets room for <paramref name="bytes"/> in the frame's upload ring. Without room or a provider, it gives none and
+    /// tells the upload as failed.
     /// </summary>
     private GpuUpload BeginUpload(int bytes)
     {
@@ -501,7 +543,7 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// The open transfer pass ended, or a compute or draw pass a gem began and never ended left out.
+    /// Ends the open transfer pass, or leaves out a compute or draw pass that a gem began and never ended.
     /// </summary>
     private void EndOpenPass()
     {
@@ -520,7 +562,7 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// A transfer pass of <paramref name="stage"/> open for the next transfer: the one open, or a new one.
+    /// Makes sure that a transfer pass of <paramref name="stage"/> is open: the one open, or a new one.
     /// </summary>
     private void BeginTransfer(RenderStage stage)
     {
@@ -529,10 +571,12 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// Adds <paramref name="use"/> to a transfer pass of <paramref name="stage"/>: the open one, or a new one when the
-    /// open one uses the same resource another way or has written the same texture level, as a pass's barriers all come
-    /// before its commands. Uploads into one buffer share a pass, as each writes its own range.
+    /// Adds <paramref name="use"/> to a transfer pass of <paramref name="stage"/>: the open one, or a new one.
     /// </summary>
+    /// <remarks>
+    /// A pass's barriers all come before its commands. So a new pass starts when the open one uses the same resource in
+    /// another way or wrote the same texture level. Uploads into one buffer share a pass, as each writes its own range.
+    /// </remarks>
     private void UseInTransfer(in GpuUse use, RenderStage stage)
     {
         if (_pass is { Kind: GpuPassKind.Transfer } && IsUsedOtherwise(use))
@@ -559,8 +603,7 @@ public sealed class RenderGraph
     }
 
     /// <summary>
-    /// The use added to the open pass, unless it is of a <c>None</c> resource, which has nothing to wait for, or the pass
-    /// holds the same one, which would only put in a barrier between the two.
+    /// Adds the use to the open pass, unless its resource is <c>None</c> or the pass already holds the same use.
     /// </summary>
     private void AddUse(in GpuUse use)
     {

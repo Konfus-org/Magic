@@ -1,6 +1,6 @@
 // Bloom: light brighter than "threshold" after the exposure spread around where it is, as a lens scatters it, and
 // "strength" times the spread added to the picture. The first level is what is over the threshold, each level after
-// it the one before blurred to half its size; the picture adds the coarser levels back. Adapted from Wicked Engine's
+// it the one before blurred to half its size. The picture adds the coarser levels back. Adapted from Wicked Engine's
 // bloom.
 module "Post/Bloom";
 

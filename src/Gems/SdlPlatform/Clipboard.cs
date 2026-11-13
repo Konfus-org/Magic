@@ -4,9 +4,11 @@ using Magic.Threading;
 namespace Magic.SdlPlatform;
 
 /// <summary>
-/// The window's clipboard, through SDL3. Headless, it keeps its text to itself. What the game thread sets is handed to
-/// the platform thread, which gives it to the OS.
+/// Reads and sets the window's clipboard text through SDL3.
 /// </summary>
+/// <remarks>
+/// Headless, it keeps its text to itself. The platform thread gives the OS what the game thread sets.
+/// </remarks>
 public sealed class Clipboard : IClipboard
 {
     private readonly SdlWindow _sdl;

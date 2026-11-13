@@ -7,8 +7,7 @@ using Magic.Utils;
 namespace Magic.VulkanGraphics;
 
 /// <summary>
-/// A shader as the provider holds it: where its build is, and a compute shader's pipeline and the threads a group of it
-/// runs.
+/// A shader as the provider holds it: where its build is, and for a compute shader, its pipeline and group size.
 /// </summary>
 internal sealed class VulkanShader
 {
@@ -25,10 +24,13 @@ internal sealed class VulkanShader
 }
 
 /// <summary>
-/// The shaders the graph's passes name, each compiled for Vulkan on its first ask, a compute shader then built into its
-/// pipeline; and the draw pipelines, each built on the first draw with its shaders into targets of its formats. Render
-/// thread, but the compile on its worker.
+/// Compiles the shaders that the graph's passes name, and builds their compute and draw pipelines on the first ask.
 /// </summary>
+/// <remarks>
+/// Each shader compiles for Vulkan on its first ask, and a compute shader is then built into its pipeline. Each draw
+/// pipeline is built on its first draw, with its shaders and its target formats. Call it only on the render thread.
+/// The compiles run on a worker.
+/// </remarks>
 internal sealed class VulkanShaders(IShaderCompiler compiler, VulkanResources resources, Threads threads) : IDisposable
 {
     private readonly Dictionary<ShaderEntry, VulkanShader> _shaders = [];
@@ -53,15 +55,18 @@ internal sealed class VulkanShaders(IShaderCompiler compiler, VulkanResources re
     public GpuState GetState(in ShaderEntry entry) => GetOrStart(entry).State;
 
     /// <summary>
-    /// The shader once it is built; null while it compiles or after it failed.
+    /// Gets the shader after it is built; null while it compiles or after it failed.
     /// </summary>
     public VulkanShader? Get(in ShaderEntry entry) =>
         GetOrStart(entry) is { State: GpuState.Ready } shader ? shader : null;
 
     /// <summary>
-    /// The pipeline <paramref name="shaders"/> draw into <paramref name="targets"/> with, built on the first ask once
-    /// both are compiled; none until then, and after a build that failed, which fails the pixel shader too.
+    /// Gets the pipeline that <paramref name="shaders"/> draw into <paramref name="targets"/> with, and builds it on
+    /// the first ask after both shaders are compiled.
     /// </summary>
+    /// <remarks>
+    /// It gives none until then, and after a failed build. A failed build also fails the pixel shader.
+    /// </remarks>
     public GpuPipeline Get(in DrawShaders shaders, in GpuRenderTargets targets)
     {
         if (Get(shaders.Vertex)?.Compiled is not { } vertex || Get(shaders.Pixel)?.Compiled is not { } pixel)
@@ -155,7 +160,7 @@ internal sealed class VulkanShaders(IShaderCompiler compiler, VulkanResources re
     }
 
     /// <summary>
-    /// <paramref name="compiled"/> put in <paramref name="shader"/>, with a compute shader's pipeline and group size.
+    /// Puts <paramref name="compiled"/> in <paramref name="shader"/>, with a compute shader's pipeline and group size.
     /// </summary>
     private Result Build(in ShaderEntry entry, CompiledShader compiled, VulkanShader shader)
     {

@@ -9,20 +9,31 @@ using Magic.Utils;
 namespace Magic.Projects;
 
 /// <summary>
-/// Where one gem's assemblies load: the gem and its NuGet and native dependencies, from its folder. Magic and the
-/// framework come from the host, so every gem shares one <see cref="IGem"/>, and two gems can carry different versions
-/// of one package. Another listed gem it references comes from that gem's own context, so both see one set of its
-/// types. A native library is found through the gem's dependency file, else under its
-/// <c>runtimes/&lt;rid&gt;/native/</c>. Managed assemblies are read into memory, so a build can replace their files while
-/// the gem runs. It is collectible: it unloads once nothing refers to the gem's types, or once
-/// <see cref="AssemblyLoadContext.Unload"/> is called, and its assemblies are freed after that.
+/// Where one gem's assemblies load from its folder: the gem and its NuGet and native dependencies.
 /// </summary>
+/// <remarks>
+/// <para>
+/// Magic and the framework come from the host, so all gems share one <see cref="IGem"/>, and two gems can carry
+/// different versions of one package. A listed gem that it references comes from that gem's own context, so both see
+/// one set of its types.
+/// </para>
+/// <para>
+/// A native library is found through the gem's dependency file, else under its <c>runtimes/&lt;rid&gt;/native/</c>.
+/// Managed assemblies are read into memory, so a build can replace their files while the gem runs.
+/// </para>
+/// <para>
+/// It is collectible: it unloads when nothing refers to the gem's types, or after
+/// <see cref="AssemblyLoadContext.Unload"/>.
+/// </para>
+/// </remarks>
 internal sealed class GemLoadContext : AssemblyLoadContext
 {
     /// <summary>
-    /// Native libraries by name, loaded once for every gem and never freed: two copies would each keep their own state,
-    /// so a window one opened would mean nothing to the other.
+    /// Native libraries by name, loaded one time for all gems and never freed.
     /// </summary>
+    /// <remarks>
+    /// Two copies would each keep their own state, so a window that one opened would mean nothing to the other.
+    /// </remarks>
     private static readonly Dictionary<string, nint> _natives = new(StringComparer.Ordinal);
     private static readonly Lock _loadingNative = new();
 
@@ -31,7 +42,7 @@ internal sealed class GemLoadContext : AssemblyLoadContext
     private readonly AssemblyDependencyResolver _resolver;
 
     /// <summary>
-    /// The contexts of every gem the project lists, this one's among them, by the gems' names.
+    /// The contexts of all gems that the project lists, this one included, by gem name.
     /// </summary>
     private readonly IReadOnlyDictionary<string, GemLoadContext> _gems;
 
@@ -48,8 +59,7 @@ internal sealed class GemLoadContext : AssemblyLoadContext
     }
 
     /// <summary>
-    /// The gem's own assembly, loaded the first time it is asked for, by the gem or a gem that references it; or why its
-    /// file could not be read.
+    /// Gets the gem's own assembly, loaded on the first ask, or why its file could not be read.
     /// </summary>
     internal Result<Assembly> LoadGem()
     {
@@ -92,8 +102,8 @@ internal sealed class GemLoadContext : AssemblyLoadContext
     private static void LogUnloaded(AssemblyLoadContext context) => Log.Info($"Gem {context.Name} unloaded.");
 
     /// <summary>
-    /// The assembly <paramref name="loaded"/> holds, or null when it failed, which is logged with <paramref name="what"/>
-    /// it is.
+    /// Gets the assembly of <paramref name="loaded"/>, or null when it failed. A failure is logged with
+    /// <paramref name="what"/>.
     /// </summary>
     private static Assembly? Resolve(Result<Assembly> loaded, string what)
     {
@@ -106,11 +116,14 @@ internal sealed class GemLoadContext : AssemblyLoadContext
     }
 
     /// <summary>
-    /// The assembly at <paramref name="path"/>, with its symbols when they are beside it, read into memory; or why its file
-    /// could not be read. Read rather than loaded by path, since <see cref="AssemblyLoadContext.LoadFromAssemblyPath"/>
-    /// maps the file and locks it on Windows while the gem runs, so a build could not write it and the run could not
-    /// restart on the new code. The symbols keep the files and lines in the gem's stack traces.
+    /// Reads the assembly at <paramref name="path"/> into memory, with its symbols when they are beside it, or gives
+    /// why not.
     /// </summary>
+    /// <remarks>
+    /// <see cref="AssemblyLoadContext.LoadFromAssemblyPath"/> locks the file on Windows while the gem runs, so a build
+    /// could not write it and the run could not restart on the new code. The symbols keep files and lines in stack
+    /// traces.
+    /// </remarks>
     private Result<Assembly> LoadFromBytes(string path)
     {
         Result<byte[]> assembly = _files.ReadBytes(path);
@@ -128,7 +141,7 @@ internal sealed class GemLoadContext : AssemblyLoadContext
     }
 
     /// <summary>
-    /// The file under the gem's <c>runtimes/&lt;rid&gt;/native/</c> named like the library, with or without Unix's
+    /// Finds the library's file under the gem's <c>runtimes/&lt;rid&gt;/native/</c>, with or without the Unix
     /// <c>lib</c> prefix; null when there is none.
     /// </summary>
     private string? FindCarried(string name)

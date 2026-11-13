@@ -15,7 +15,7 @@ public static const uint TranslucentBit = 0x80000000u;
 
 // The shader word's bits for the material shader's number, and where its failure index starts and the bits it takes.
 // A project numbers each material shader it draws once, and each takes a pipeline and a resolve pass a frame, so
-// 4096 is far more than one draws; the failure table has a row for each thing that failed.
+// 4096 is far more than one draws. The failure table has a row for each thing that failed.
 static const uint MaterialShaderMask = 0xFFFu;
 static const uint FailureIndexShift = 12u;
 static const uint FailureIndexMask = 0x7FFFFu;

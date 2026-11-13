@@ -1,4 +1,4 @@
-// What the gem's passes share: the GI buffer; the light a ray brings back from what it lands on; and for the light
+// What the gem's passes share: the GI buffer. The light a ray brings back from what it lands on, and for the light
 // traced at a part of the picture's size, the diffuse and the reflections alike, which pixel of each traced pixel's
 // footprint traces this frame, how a pass averages its neighbours' light, and its history found where the surface was
 // last frame. C#'s GIConstants is the GI buffer, the pass header's y.
@@ -50,7 +50,7 @@ public struct TracedReflectionConstants
 }
 
 // What the probe update reads beyond the grid: the frame's rays, the list of which probe traces each, the trace's
-// arguments, each probe's count of rays and where they start, and each probe texel's variance; and how far a probe's
+// arguments, each probe's count of rays and where they start, and each probe texel's variance, and how far a probe's
 // depth reaches, one and a half cells.
 public struct ProbeUpdateConstants
 {
@@ -172,7 +172,7 @@ public NeighbourLight AddNeighbour(NeighbourLight neighbours, float3 light, floa
     return neighbours;
 }
 
-// The neighbours' light averaged and brought back out of the curve, with its brightness's variance in alpha; where none
+// The neighbours' light averaged and brought back out of the curve, with its brightness's variance in alpha. Where none
 // weighed anything, the pixel's own light with none.
 public float4 GetNeighbourAverage(NeighbourLight neighbours, float3 own)
 {

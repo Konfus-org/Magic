@@ -18,10 +18,12 @@ namespace Magic.GlobalIllumination;
 public readonly record struct GlobalIlluminationInput(GpuView? View, TracedWorld? Traced);
 
 /// <summary>
-/// Lights the view's surfaces indirectly, through the world as rays see it: the probe grid, the traced diffuse light and
-/// the traced reflections, recorded in the light stage, written into the frame's buffer and made as the frame's
-/// <see cref="IndirectLight"/>, which shading takes.
+/// Lights the view's surfaces indirectly through the world as rays see it, as the frame's <see cref="IndirectLight"/>.
 /// </summary>
+/// <remarks>
+/// It uses the probe grid, the traced diffuse light and the traced reflections, and writes into the frame's buffer.
+/// Shading takes the indirect light.
+/// </remarks>
 public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, IHookIntoDomainLoading
 {
     /// <summary>
@@ -42,8 +44,11 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
 
     /// <summary>
     /// Ends once the passes' shaders are built or failed, once a frame with a view has no world as rays see it, or on
-    /// a GPU that doesn't trace rays: what a domain loading waits for, so its first frame is lit as the ones after.
+    /// a GPU that doesn't trace rays.
     /// </summary>
+    /// <remarks>
+    /// A domain loading waits for it, so its first frame is lit as the ones after.
+    /// </remarks>
     private readonly TaskCompletionSource _built = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>
@@ -71,9 +76,12 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
     }
 
     /// <summary>
-    /// The frame's indirect light, while it is on, the passes' shaders are built, what they read and write is made,
-    /// and rays see an instance; none otherwise, and the surfaces take the sky's light.
+    /// Traces the frame's indirect light and writes its row into the frame's buffer.
     /// </summary>
+    /// <returns>
+    /// The frame's indirect light, or none while it is off, the shaders build, what they read and write is not made, or
+    /// rays see no instance. With none, the surfaces take the sky's light.
+    /// </returns>
     public IndirectLight? Render(in Frame frame, RenderGraph graph, in GlobalIlluminationInput input)
     {
         bool isReflectionsOn = _settings.IsReflectionsOn;
@@ -212,8 +220,8 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
     }
 
     /// <summary>
-    /// Forgets what was traced of the world that left, on the render thread between frames, so the probes and the
-    /// history start afresh in what comes.
+    /// Forgets what was traced of the world that left, so the probes and the history start afresh. Render thread,
+    /// between frames.
     /// </summary>
     public async Task OnDomainUnloadedAsync(CancellationToken cancel)
     {

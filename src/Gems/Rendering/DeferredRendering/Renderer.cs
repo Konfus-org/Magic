@@ -26,10 +26,12 @@ namespace Magic.DeferredRendering;
 public readonly record struct ViewInput(Upscaling? Upscaling);
 
 /// <summary>
-/// What the shading's step takes each frame: the world as the GPU holds it, and, where a gem makes them, the world as
-/// rays see it, each pixel's shadows, the light that reaches the surfaces indirectly, the air between the camera and
-/// them, and the output's upscaling.
+/// What the shading's step takes each frame: the world as the GPU holds it, and the inputs that other gems make.
 /// </summary>
+/// <remarks>
+/// Where a gem makes them, it also takes the world as rays see it, each pixel's shadows, the light that reaches the
+/// surfaces indirectly, the air between the camera and them, and the output's upscaling.
+/// </remarks>
 public readonly record struct ShadingInput(
     GpuView View,
     TracedWorld? Traced,
@@ -40,18 +42,29 @@ public readonly record struct ShadingInput(
 );
 
 /// <summary>
-/// The renderer, in three steps a frame. The view's step keeps the world on the GPU for the gems that draw it:
-/// <see cref="PublishInputs"/> copies what the frame draws out of the entities and publishes it; on the render thread the step
-/// takes the newest published, puts the models, materials, textures, instances, lights and sky's tables on the GPU,
-/// uploads the frame's rows, and makes the frame's <see cref="GpuView"/> and its <see cref="GpuInstances"/>. The
-/// shading's step lights that world, deferred: from the view and the GBuffer a geometry gem drew into it, the shading,
-/// shadowed by the frame's shadow mask where there is one, the nearest glass over it, the effects, a debug view where
-/// one is asked for, and the output into the window and any screenshot asked for. The banner's step draws the frame's
-/// render failures over the top of the window, even when the view was not made. Where nothing made the world as rays
-/// see it, the shadows, the indirect light or the air, their rows of the frame's buffer are 0. As a domain replaces the
-/// world, it forgets the view's history and holds the loading screen until what comes is on the GPU and the shading's
-/// shaders are built.
+/// Keeps the world on the GPU for the gems that draw it, and lights it with deferred shading, in three steps a frame.
 /// </summary>
+/// <remarks>
+/// <para>
+/// The view's step: <see cref="PublishInputs"/> copies what the frame draws out of the entities and publishes it. On
+/// the render thread, the step takes the newest published, puts the models, materials, textures, instances, lights and
+/// sky's tables on the GPU, uploads the frame's rows, and makes the frame's <see cref="GpuView"/> and its <see
+/// cref="GpuInstances"/>.
+/// </para>
+/// <para>
+/// The shading's step lights that world from the view and the GBuffer a geometry gem drew into it. It shades the
+/// surfaces, shadowed by the frame's shadow mask where there is one, then draws the nearest glass over them, the
+/// effects, a debug view where one is asked for, and the output into the window and any screenshot asked for.
+/// </para>
+/// <para>
+/// The banner's step draws the frame's render failures over the top of the window, even when the view was not made.
+/// </para>
+/// <para>
+/// Where nothing made the world as rays see it, the shadows, the indirect light or the air, their rows of the frame's
+/// buffer are 0. As a domain replaces the world, the renderer forgets the view's history and holds the loading screen
+/// until what comes is on the GPU and the shading's shaders are built.
+/// </para>
+/// </remarks>
 public sealed class Renderer
     : IRender,
         IRender<ViewInput, (GpuView, GpuInstances)>,
@@ -137,7 +150,8 @@ public sealed class Renderer
     );
 
     /// <summary>
-    /// The ids of the assets read again, heard on the game thread, which the view's step lets go of on the render thread.
+    /// The ids of the assets read again, heard on the game thread, which the view's step lets go of on the render
+    /// thread.
     /// </summary>
     private readonly Channel<ulong> _reloaded = Channel.CreateUnbounded<ulong>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
@@ -146,9 +160,12 @@ public sealed class Renderer
     private readonly Subscription _preprocessing;
 
     /// <summary>
-    /// The number of the world the frames <see cref="PublishInputs"/> publishes are of, a new one each time a domain
-    /// replaces it, so the view's step forgets the view's history at the first frame of what comes. Game thread.
+    /// The number of the world that <see cref="PublishInputs"/> publishes frames of, new each time a domain replaces
+    /// it. Game thread.
     /// </summary>
+    /// <remarks>
+    /// A new number makes the view's step forget the view's history at the first frame of what comes.
+    /// </remarks>
     private int _worldNumber;
 
     /// <summary>
@@ -229,9 +246,12 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// The newest inputs published, or the last again when none are newer, on the GPU, and the frame's view of them and
-    /// its instances; none while the shaders build, the pools are not made, or nothing was published yet.
+    /// Puts the newest inputs published, or the last again when none are newer, on the GPU, and makes the frame's view.
     /// </summary>
+    /// <returns>
+    /// The frame's view and its instances; none while the shaders build, the pools are not made, or nothing was
+    /// published yet.
+    /// </returns>
     public (GpuView, GpuInstances)? Render(in Frame frame, RenderGraph graph, in ViewInput input)
     {
         // The shaders are the GPU provider's to build, the first ask starting each.
@@ -242,7 +262,8 @@ public sealed class Renderer
         if (shaders != GpuState.Ready)
             return null;
 
-        // What was made from an asset read again is let go, so the next ask loads it anew and its failure is found again.
+        // What was made from an asset read again is let go, so the next ask loads it anew and its failure is found
+        // again.
         while (_reloaded.Reader.TryRead(out ulong asset))
         {
             _resources.Forget(asset);
@@ -561,8 +582,9 @@ public sealed class Renderer
             ? [light.Diffuse, light.Reflections, light.Probes, light.ProbeDepth]
             : [];
 
-        // Every pixel's surface shaded from the sky's tables, its tile's lights, the shadows where there are any and the
-        // indirect light, or the sky where nothing traced it, or the failure of the sky or its clouds where they failed.
+        // Every pixel's surface shaded from the sky's tables, its tile's lights, the shadows where there are any and
+        // the indirect light, or the sky where nothing traced it, or the failure of the sky or its clouds where they
+        // failed.
         ComputePass shade = graph
             .Compute(
                 "Shade surfaces",
@@ -725,9 +747,12 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// Numbers the world anew, so the view's step forgets the view's history at the first frame of what comes. On
-    /// the game thread, without leaving it, so the world goes on to what comes before another frame is published.
+    /// Numbers the world anew, so the view's step forgets the view's history at the first frame of what comes.
     /// </summary>
+    /// <remarks>
+    /// It runs on the game thread and does not leave it, so the world goes on to what comes before another frame is
+    /// published.
+    /// </remarks>
     public Task OnDomainUnloadedAsync(CancellationToken cancel)
     {
         _worldNumber++;
@@ -736,12 +761,15 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// Holds the domain loading until it can show: asks for every model and material <paramref name="entities"/> draw,
-    /// and the effects of their first post processing, or the default's, and waits until they are on the GPU, or failed
-    /// and drawn as the failure or left out, and until the shading's and the sky's shaders are built or failed.
-    /// Materials are asked for at once; models once the pools are made, and the effects, by the view's step. One that
-    /// comes while another waits ends that one. On the render thread, whose tables and counts these are.
+    /// Holds the domain loading until what <paramref name="entities"/> draw is on the GPU and the shaders are built.
     /// </summary>
+    /// <remarks>
+    /// It asks for every model and material the entities draw, and the effects of their first post processing, or the
+    /// default's. It waits until they are on the GPU, or failed and drawn as the failure or left out, and until the
+    /// shading's and the sky's shaders are built or failed. Materials are asked for at once; models once the pools are
+    /// made, and the effects, by the view's step. One that comes while another waits ends that one. Render thread,
+    /// whose tables and counts these are.
+    /// </remarks>
     public async Task OnDomainLoadingAsync(
         ImmutableArray<ImmutableArray<IComponent>> entities,
         CancellationToken cancel
@@ -814,7 +842,8 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// The failure bits of <c>ShadeSurfaces.slang</c>'s pass header: 1 while the sky failed, 2 while its clouds failed.
+    /// Gets the failure bits of <c>ShadeSurfaces.slang</c>'s pass header: 1 while the sky failed, 2 while its clouds
+    /// failed.
     /// </summary>
     private static uint GetSkyFailures(ReadOnlySpan<(RenderFailure Kind, string What)> failures)
     {
@@ -831,10 +860,14 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// The directional light the frame is lit by: the sun while it is up, else the moon while it is up, else the first
-    /// there is, else a white light from above: towards it, unit, and its colour times its intensity, in lux, above the
-    /// air.
+    /// Gets the directional light the frame is lit by.
     /// </summary>
+    /// <remarks>
+    /// The sun while it is up, else the moon while it is up, else the first there is, else a white light from above.
+    /// </remarks>
+    /// <returns>
+    /// The unit direction towards the light, and its colour times its intensity, in lux, above the air.
+    /// </returns>
     private static (Vector3 Direction, Vector3 Illuminance) GetSun(EcsSnapshot<Transform, DirectionalLight> lights)
     {
         (Vector3 Direction, Vector3 Illuminance) sun = (Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One);
@@ -884,9 +917,12 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// Writes what was read back to <paramref name="path"/> once the GPU is done with it, opaque as the window shows it,
-    /// as a texture through the gem that writes them.
+    /// Writes what was read back to <paramref name="path"/> once the GPU is done with it, opaque as the window shows
+    /// it.
     /// </summary>
+    /// <remarks>
+    /// The gem that writes textures writes the file.
+    /// </remarks>
     private async Task SaveScreenshotAsync(GpuBuffer readback, string path, int width, int height)
     {
         Result<ReadOnlyMemory<byte>> pixels = await _gpu.ReadBackAsync(

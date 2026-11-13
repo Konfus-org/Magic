@@ -22,7 +22,7 @@ public static const uint HeapAccelerations = 256u;
 [[vk::binding(6, 0)]] [[vk::image_format("unknown")]] RWTexture2D<float4> heapStorage2D[];
 [[vk::binding(8, 0)]] [[vk::image_format("unknown")]] RWTexture3D<float4> heapStorage3D[];
 [[vk::binding(10, 0)]] SamplerState heapSamplers[];
-// Only on a GPU that traces rays; a shader that traces is only built there.
+// Only on a GPU that traces rays. A shader that traces is built only there.
 [[vk::binding(11, 0)]] RaytracingAccelerationStructure heapAccelerations[];
 
 uint ClampBufferId(uint id) { return min(id, HeapBuffers - 1u); }

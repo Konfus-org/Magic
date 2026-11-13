@@ -3,9 +3,11 @@ using System.Numerics;
 namespace Magic.Ecs.Components;
 
 /// <summary>
-/// Turns its entity's <see cref="Transform"/> in place at a steady rate, in the world's time, so it stands still while
-/// the world is paused. A new one turns about +Y, once a minute.
+/// Turns the <see cref="Transform"/> of its entity in place at a steady rate, in the time of the world.
 /// </summary>
+/// <remarks>
+/// It stands still while the world is paused. A new one turns about +Y, once a minute.
+/// </remarks>
 public record struct Spin : IComponent
 {
     /// <summary>
@@ -21,9 +23,11 @@ public record struct Spin : IComponent
     public Spin() { }
 
     /// <summary>
-    /// <paramref name="rotation"/> turned on by <paramref name="deltaSec"/> of this spin; unchanged for an axis of no
-    /// length.
+    /// Returns <paramref name="rotation"/> turned on by <paramref name="deltaSec"/> of this spin.
     /// </summary>
+    /// <remarks>
+    /// An axis of no length leaves the rotation as it is.
+    /// </remarks>
     public readonly Quaternion Turn(Quaternion rotation, float deltaSec)
     {
         float length = Axis.Length();

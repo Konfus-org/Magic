@@ -1,7 +1,7 @@
 // Each material row as a ray hit reads it: the material evaluated once over its whole texture, so a texture reads its
 // average colour, into the hit materials table. A ray may land on any material, and a pass can only call the one it is
 // specialised to, so the entry is specialised to one material shader, numbered in the pass header's z, and fills the
-// rows that shader draws. A thread a row; the header's x is the frame's constants, y the hit materials table and w the
+// rows that shader draws. A thread a row. The header's x is the frame's constants, y the hit materials table and w the
 // rows.
 module "AverageMaterials";
 
