@@ -47,11 +47,16 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
     private const int CloudBlock = 4;
 
     /// <summary>
-    /// The frames a view's volume blends before its air is settled: each takes 0.03 of now (<c>FillAir.slang</c>'s
-    /// <c>NewWeight</c>), so after 76 the first frames of a world weigh less than a tenth. The clouds' picture is
-    /// whole after 16.
+    /// How much of each frame's cell the blend over frames takes in, once the view's volume settled.
     /// </summary>
-    private const int SettleFrames = 76;
+    private const float NewWeight = 0.03f;
+
+    /// <summary>
+    /// The frames a view's volume blends before its air is settled. Until then each frame takes as much as each before
+    /// it since the history started afresh, so after 16 each of the world's frames weighs about a sixteenth, and the
+    /// clouds' picture is whole.
+    /// </summary>
+    private const int SettleFrames = 16; // PROTO
 
     private static readonly TextureDescription _cloudsDescription = new(
         "Clouds",
@@ -191,20 +196,27 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
 
         // Each cell's light and haze, blended with last frame's where the cell was then, then summed along each column
         // away from the camera. The pass header's x is the frame's buffer, y the scattering written, z last frame's, 0
-        // when it holds nothing, and w the air. A view whose history was forgotten, as in a world that arrived, holds
-        // nothing.
+        // when it holds nothing. A view whose history was forgotten, as in a world that arrived, holds nothing.
         bool hasHistory = gpu.HasHistory && filled == size;
         blended = hasHistory ? blended + 1 : 0;
         if (blended >= SettleFrames)
             _settling?.TrySetResult();
 
+        // The scattering pass's w is the weight of this frame's cell, the integrating pass's the air.
         uint last = hasHistory ? history.Value.Id : 0;
+        float weight = blended < SettleFrames ? 1f / (blended + 1) : NewWeight;
+        GpuConstants scatterHeader = new(
+            gpu.Frame.Id,
+            scattering.Value.Id,
+            last,
+            BitConverter.SingleToUInt32Bits(weight)
+        );
         GpuConstants header = new(gpu.Frame.Id, scattering.Value.Id, last, air.Value.Id);
         ReadOnlySpan<GpuResource> traced = input.Traced is { } world
             ? [world.HitMaterials, gpu.Instances, gpu.Meshes]
             : [];
         graph
-            .Compute("Scatter air", _scatterShader, header, RenderStages.Light)
+            .Compute("Scatter air", _scatterShader, scatterHeader, RenderStages.Light)
             .Reads(traced)
             .Reads(gpu.Frame, gpu.LightTable, history.Value)
             .Writes(scattering.Value)

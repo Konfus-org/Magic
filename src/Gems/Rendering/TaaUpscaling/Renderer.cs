@@ -1,4 +1,6 @@
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
@@ -24,10 +26,11 @@ namespace Magic.TaaUpscaling;
 public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
 {
     /// <summary>
-    /// The frames a view's history blends before its picture is settled: each takes at least 0.05 of now
-    /// (<c>TaaUpscaling.slang</c>), so after 45 the first frames of a world weigh less than a tenth.
+    /// The frames a view's history blends before its picture is settled. Until then each frame takes at least as much
+    /// as each before it since the history started afresh, so after 16 each of the world's frames weighs at most a
+    /// sixteenth.
     /// </summary>
-    private const int SettleFrames = 45;
+    private const int SettleFrames = 16; // PROTO
 
     /// <summary>
     /// Done once the shader is built or failed, which a domain loading waits for, so a shader that fails is told and
@@ -117,7 +120,8 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
         Result<GpuSampler> sampler = graph.Sampler(
             new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
         );
-        if (Result.FindFailure(first, second, sampler) is { Ok: false } failed)
+        Result<GpuBuffer> constants = graph.Buffer(new("Upscale constants", Unsafe.SizeOf<UpscaleConstants>()));
+        if (Result.FindFailure(first, second, sampler, constants) is { Ok: false } failed)
         {
             graph.Fail(RenderFailure.Resource, "Picture is not upscaled", failed.Error);
 
@@ -140,19 +144,44 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
         if (blended >= SettleFrames)
             _settling?.TrySetResult();
 
+        UpscaleConstants upscale = new()
+        {
+            Sampler = sampler.Value.Id,
+            LeastBlend = blended < SettleFrames ? 1f / (blended + 1) : 0,
+        };
+        if (!graph.Upload(constants.Value, [upscale]))
+            return GpuTexture.None;
+
         ReadOnlySpan<GpuResource> past = hasHistory ? [history] : [];
         graph
             .Compute(
                 "Upscale picture",
                 _shader,
-                new GpuConstants(view.Frame.Id, hasHistory ? history.Id : resolved.Id, resolved.Id, sampler.Value.Id),
+                new GpuConstants(view.Frame.Id, hasHistory ? history.Id : resolved.Id, resolved.Id, constants.Value.Id),
                 RenderStages.Post
             )
-            .Reads(view.Frame, view.Output, view.Depth, view.Velocity)
+            .Reads(view.Frame, constants.Value, view.Output, view.Depth, view.Velocity)
             .Reads(past)
             .Writes(resolved)
             .DispatchOver(width, height);
 
         return resolved;
     }
+}
+
+/// <summary>
+/// The upscaling pass's sampler and how much of now it takes at least, the twin of <c>TaaUpscaling.slang</c>'s.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+internal record struct UpscaleConstants
+{
+    /// <summary>
+    /// The linear clamp sampler the history is read through.
+    /// </summary>
+    public uint Sampler;
+
+    /// <summary>
+    /// How much of now each pixel takes at least where the history is on the screen: more while the history settles.
+    /// </summary>
+    public float LeastBlend;
 }

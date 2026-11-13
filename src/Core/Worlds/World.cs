@@ -58,9 +58,12 @@ public sealed class World : IEcs, IDisposable
     private const double CoverFadeSec = 0.4; // PROTO
 
     /// <summary>
-    /// How long the cover waits at most for the gems to settle the world that arrived.
+    /// How long the cover waits at most for the gems to settle the world that arrived: until both this time passed and
+    /// this many frames were drawn, so a gem that never settles ends the wait, and a low frame rate alone doesn't.
     /// </summary>
     private const double SettleLimitSec = 5; // PROTO
+
+    private const uint SettleLimitFrames = 120; // PROTO
 
     private readonly AssetManager _assets;
 
@@ -1051,22 +1054,37 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Waits until the hook of each gem settled what arrived, for at most <see cref="SettleLimitSec"/> seconds.
+    /// Waits until the hook of each gem settled what arrived, for at most <see cref="SettleLimitSec"/> seconds and
+    /// <see cref="SettleLimitFrames"/> frames, whichever ends later.
     /// </summary>
     /// <remarks>
-    /// At the limit, the hooks are cancelled and the world shows as it is.
+    /// At the limit, the hooks are cancelled and the world shows as it is. Game thread.
     /// </remarks>
     private async Task SettleAsync(CancellationToken cancel)
     {
         using CancellationTokenSource limit = CancellationTokenSource.CreateLinkedTokenSource(cancel);
-        limit.CancelAfter(TimeSpan.FromSeconds(SettleLimitSec));
+        Task settled = RunHooksAsync(hooks => hooks.OnDomainArrivedAsync(limit.Token), "settling");
+        long start = Stopwatch.GetTimestamp();
+        uint lastFrame = DrawnFrame + SettleLimitFrames;
+        while (
+            !settled.IsCompleted
+            && (Stopwatch.GetElapsedTime(start).TotalSeconds < SettleLimitSec || DrawnFrame < lastFrame)
+        )
+        {
+            await Task.WhenAny(settled, _frameStarting.Task).WaitAsync(cancel).ConfigureAwait(false);
+            await _threads.Enter(EngineThread.Game);
+        }
+
+        await limit.CancelAsync().ConfigureAwait(false);
         try
         {
-            await RunHooksAsync(hooks => hooks.OnDomainArrivedAsync(limit.Token), "settling").ConfigureAwait(false);
+            await settled.ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
         {
-            Log.Warn($"The gems did not settle in {SettleLimitSec} s, so the world shows as it is.");
+            Log.Warn(
+                $"The gems did not settle in {SettleLimitSec} s and {SettleLimitFrames} frames, so the world shows as it is."
+            );
         }
     }
 

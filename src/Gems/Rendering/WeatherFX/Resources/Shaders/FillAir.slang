@@ -4,7 +4,8 @@
 // a point that moves within the cell each frame, blended with the frames before where the cell was then, then summed
 // along each column away from the camera, after Wronski, "Volumetric Fog", SIGGRAPH 2014, into what shading reads
 // through Light/Air. The pass header's x is the frame's buffer, which holds the lights and the air, y the scattering
-// written, z last frame's, 0 when it holds nothing, and w the air.
+// written, z last frame's, 0 when it holds nothing, and w, as a float, how much of each frame's cell the blend over
+// frames takes in when scattering, the air when integrating.
 module "FillAir";
 
 import Core.Heap;
@@ -18,9 +19,6 @@ import Scene.Lights;
 import Trace.HitSurface;
 import Light.Air;
 import Light.LocalLights;
-
-// How much of each frame's cell the blend over frames takes in.
-static const float NewWeight = 0.03;
 
 // The directions over the sky a cell asks in turn whether its light gets through.
 static const uint SkyDirections = 16u;
@@ -169,7 +167,7 @@ void ScatterAir(uint3 thread : SV_DispatchThreadID, uint3 group : SV_GroupID, ui
             {
                 VolumeRef history = { header.z };
                 SamplerRef sampler = { air.sampler };
-                cell = lerp(history.SampleLevel(sampler, at, 0.0), cell, NewWeight);
+                cell = lerp(history.SampleLevel(sampler, at, 0.0), cell, asfloat(header.w));
             }
         }
 
