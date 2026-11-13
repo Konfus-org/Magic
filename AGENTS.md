@@ -97,7 +97,7 @@ In Claude Code, the agent hooks in `.claude/settings.json` hold the workflow wit
 | [README](README.md) | Once per session |
 | [Code Standards](docs/CODE_STANDARDS.md) | Before editing any `.cs` file: "How we write code" and "Ground rules", then each other section the change needs |
 | [Shader Standards](docs/SHADER_STANDARDS.md) | Before editing any `.slang` file, or a C# struct that a shader shares |
-| [Tests](docs/TOOLS.md#tests) | Before running or touching tests |
+| [Tests](docs/TESTS.md) | Before running or touching tests |
 | [Tools](docs/TOOLS.md) | Before running a tool script |
 
 Before changing an area, read its doc in `docs/`, such as [Gems](docs/GEMS.md), [Rendering](docs/RENDERING.md),
@@ -239,7 +239,7 @@ Agents tend to over-build. Less is more: the best change often removes more code
 - **Data-oriented, explicit data flow.** Only the inheritance, interfaces and indirection the problem needs.
 - **Dependencies come from NuGet.** Never vendor or copy external code.
 - **Tests:** don't write new tests unless asked. Run the existing tests that cover what you changed. When a test is
-  asked for with a fix, write it first and see it fail ([Tests](docs/TOOLS.md#tests)).
+  asked for with a fix, write it first and see it fail ([Tests](docs/TESTS.md)).
 
 ## Documentation Rules
 

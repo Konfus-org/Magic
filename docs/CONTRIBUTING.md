@@ -14,7 +14,7 @@ Follow the [Code of Conduct](CODE_OF_CONDUCT.md) in every space of the project.
 8. Run `tools/Scripts/Validate.ps1`. All its steps must pass ([Tools](TOOLS.md)).
 9. Open a pull request from your fork into `dev`.
 
-Code follows the [Code Standards](CODE_STANDARDS.md). Tests follow [Tests](TOOLS.md#tests). Docs follow the
+Code follows the [Code Standards](CODE_STANDARDS.md). Tests follow [Tests](TESTS.md). Docs follow the
 [Documentation Rules](../AGENTS.md#documentation-rules).
 
 ## Pull requests

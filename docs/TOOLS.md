@@ -151,10 +151,4 @@ once for each clone. `AgentTaskComplete.ps1` also sets it ([Commits](../AGENTS.m
 
 ## Tests
 
-The unit tests are in `tests/`. There is one project for each gem or library under test, with the name
-`<Gem>.Tests`. The tests use xunit on the Microsoft testing platform, which `global.json` selects.
-
-- To run all the tests, run `dotnet test --solution src/Magic.slnx`.
-- To run one project, run `dotnet test --project tests/<Gem>.Tests/<Gem>.Tests.csproj`.
-- A test project sees the internal members of its gem through `InternalsVisibleTo` in the csproj of the gem.
-- A test makes the data that it checks in the test itself. It never reads an asset from disk.
+The commands that run the tests, and the rules for tests, are in [Tests](TESTS.md).
