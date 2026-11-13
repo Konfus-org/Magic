@@ -1,4 +1,5 @@
 {
     // Shown while another domain replaces the world, when the project names no loading screen of its own. It has no
-    // chunks, only its globals: a camera in a black void.
+    // chunks, only its globals: a camera in a black void. A light of no intensity keeps the void black, because the
+    // renderer lights a world with no light by a white sun, and draws its open sky from that sun.
 }
