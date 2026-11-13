@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using Magic.Assets;
@@ -52,6 +53,11 @@ internal sealed class Cli
             },
             Options =
             {
+                CreateOption<string[]>(
+                    "--owner",
+                    "Run for an app on this computer, as --owner Wizard 1234, and exit when it stops sending",
+                    values => app.Owner = ParseOwner(values)
+                ),
                 CreateOption<bool>("--headless", "Run without a GUI (headless mode)", value => app.IsHeadless = value),
                 CreateOption<Log.VerbosityLevel>(
                     "--verbosity",
@@ -88,6 +94,23 @@ internal sealed class Cli
             option.Action = new OptionAction(parsed => apply(parsed.GetRequiredValue(option)));
 
             return option;
+        }
+
+        // An owner is a name and a port, as --owner Wizard 5211.
+        static AppOwner? ParseOwner(string[] values)
+        {
+            if (
+                values.Length == 2
+                && int.TryParse(values[1], CultureInfo.InvariantCulture, out int port)
+                && port is > 0 and <= ushort.MaxValue
+            )
+                return new AppOwner(values[0], port);
+
+            Log.Error(
+                $"--owner {string.Join(' ', values)} was not set: give a name and a port, as --owner Wizard 1234."
+            );
+
+            return null;
         }
     }
 

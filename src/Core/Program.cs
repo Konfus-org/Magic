@@ -102,6 +102,10 @@ internal static class Program
                 Log.Critical($"Couldn't run the command line: {ran.Error}");
                 return (1, null);
             }
+
+            // Only the command line gives the owner, so Magic watches it from the first pass to the end.
+            if (app.Owner is { } owner)
+                AppOwnerLink.WatchAsync(app, owner).FireAndForget();
         }
 
         if (app.HasFailed)
