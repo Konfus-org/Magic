@@ -109,6 +109,12 @@ public sealed class World : IEcs, IDisposable
     /// </summary>
     private ImmutableArray<IHookIntoWorldSave> _saveHooks = [];
 
+    /// <summary>
+    /// The last save's write of the world it took, which runs on a worker and reads the sets of script values of that
+    /// world. Game thread.
+    /// </summary>
+    private Task _saving = Task.CompletedTask;
+
     internal World(AssetManager assets, IFileSystem files, EventCoordinator events, Threads threads, App app)
     {
         _assets = assets;
@@ -270,23 +276,22 @@ public sealed class World : IEcs, IDisposable
                 Result.Failure(IsLoading ? "the world is loading." : "no domain is open.")
             );
 
-        foreach (IHookIntoWorldSave hook in _saveHooks)
-        {
-            hook.OnWorldSaving();
-        }
-
+        RunSaveHooks();
         FreeKeptScriptState();
 
         ImmutableArray<Handle<Domain>> open = Domains;
         ImmutableArray<DomainRead> domains = [.. open.Select(domain => _read[domain])];
         WorldState now = GetState();
 
-        return Task.Run(Result<byte[]> () =>
+        Task<Result<byte[]>> saving = Task.Run(Result<byte[]> () =>
         {
             Result<JsonNode?> changes = Diff(GetBaseState(domains), now);
 
             return changes.Ok ? ToBytes(new SaveFile(open, changes.Value)) : Result.Failure(changes.Error);
         });
+        _saving = saving;
+
+        return saving;
     }
 
     /// <summary>
@@ -815,10 +820,15 @@ public sealed class World : IEcs, IDisposable
     /// </summary>
     /// <remarks>
     /// A save keeps the state of each copy that runs in the slot of its script, as a new set of values, so the sets of
-    /// the save before it, and of every copy whose entity or script went, are held by nothing.
+    /// the save before it, and of every copy whose entity or script went, are held by nothing. While a save still
+    /// writes, it reads the sets of the world it took, so this frees nothing and the next call frees them. Only the
+    /// game thread starts a save, so none starts while this runs.
     /// </remarks>
     private void FreeKeptScriptState()
     {
+        if (!_saving.IsCompleted)
+            return;
+
         HashSet<ScriptValues> held = [];
         foreach (EcsChunk<ScriptContainer> chunk in Query<ScriptContainer>())
         {
@@ -832,6 +842,18 @@ public sealed class World : IEcs, IDisposable
         }
 
         ScriptValues.FreeUnheld(held);
+    }
+
+    /// <summary>
+    /// Has each gem write what it holds of the world's entities into their components, so what reads the components
+    /// next reads the state of now. Game thread.
+    /// </summary>
+    private void RunSaveHooks()
+    {
+        foreach (IHookIntoWorldSave hook in _saveHooks)
+        {
+            hook.OnWorldSaving();
+        }
     }
 
     private string GetName(Handle<Domain> domain) => _assets.GetPath(domain) ?? "a domain";
@@ -931,7 +953,6 @@ public sealed class World : IEcs, IDisposable
             }
 
             DestroyEntities(leaving.ToImmutable());
-            FreeKeptScriptState();
             foreach (Entity entity in staying)
             {
                 Remove<Owner>(entity);
@@ -962,6 +983,10 @@ public sealed class World : IEcs, IDisposable
             await _threads.Enter(EngineThread.Game);
             arrive();
             IsShowingLoadingScreen = false;
+
+            // The world that came holds the sets of script state that its copies take up, so the sweep waits for it:
+            // what the old world held is held by nothing now.
+            FreeKeptScriptState();
 
             // The next frame publishes what came, wherever this went on in the frame; it has shown once that one is
             // drawn.
@@ -1151,6 +1176,10 @@ public sealed class World : IEcs, IDisposable
 
             return;
         }
+
+        // What the gems hold of the entities goes into their components first, so the entities that come again take up
+        // the state of now and not that of the last save.
+        RunSaveHooks();
 
         // The domain's entities as they are, by their keys.
         ImmutableArray<Entity>.Builder leaving = ImmutableArray.CreateBuilder<Entity>();

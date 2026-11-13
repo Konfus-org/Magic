@@ -75,7 +75,7 @@ public sealed class Runner(World world, AssetManager assets, IServiceProvider se
 
     /// <summary>
     /// Writes the state of each copy that runs into its slot of the entity's <see cref="ScriptContainer"/>, so the save
-    /// keeps it and a copy that the save makes takes it up in place of a start.
+    /// or the domain that opens again keeps it and the copy that comes from it takes it up in place of a start.
     /// </summary>
     public void OnWorldSaving()
     {

@@ -4,8 +4,9 @@ namespace Magic.Worlds;
 /// A gem that holds state of the world's entities outside their components, and writes it into them for a save.
 /// </summary>
 /// <remarks>
-/// The hook runs on the game thread, just before a save takes the world, so what it writes is in the save. A gem
-/// whose state is in the components already does not need it.
+/// The hook runs on the game thread, just before a save takes the world, and before a domain that changed opens
+/// again, so what it writes is in the save and in the entities that come again. A gem whose state is in the
+/// components already does not need it.
 /// </remarks>
 public interface IHookIntoWorldSave
 {

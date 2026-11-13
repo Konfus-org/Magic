@@ -1,5 +1,7 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Text;
 using System.Text.Json;
 
 namespace Magic.Ecs.Components;
@@ -14,9 +16,9 @@ namespace Magic.Ecs.Components;
 /// holds only the set's number. Any thread reads a set, as the importers run on workers.
 /// </para>
 /// <para>
-/// A file's set lives while the process runs, as the file can be read into a new container at any time. A set that a
-/// save kept lives only while a slot holds it: a save makes one set for each copy that runs, and frees the sets that
-/// no slot holds any more.
+/// A file's set lives while the process runs, as the file can be read into a new container at any time, and the sets
+/// of equal JSON are one set, so reading the same file again adds none. A set that a save kept lives only while a slot
+/// holds it: a save makes one set for each copy that runs, and frees the sets that no slot holds any more.
 /// </para>
 /// <para>
 /// A value is JSON, so a set fits a script in any language, and the gem of the script's language gives it to the
@@ -29,6 +31,12 @@ public readonly struct ScriptValues : IEquatable<ScriptValues>
     /// The sets by their number, which any thread reads; 0, no values, is none of them.
     /// </summary>
     private static readonly ConcurrentDictionary<int, ImmutableArray<KeyValuePair<string, JsonElement>>> _byId = [];
+
+    /// <summary>
+    /// The number of each set that a file gave, by the JSON of its values, so one set serves every file of equal
+    /// values.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, int> _ofFiles = [];
 
     /// <summary>
     /// The number of each set that a save kept, as the keys: the sets that <see cref="FreeUnheld"/> frees.
@@ -59,11 +67,27 @@ public readonly struct ScriptValues : IEquatable<ScriptValues>
     /// <summary>
     /// The set of <paramref name="values"/> that a file gives, which the process then holds.
     /// </summary>
-    public static ScriptValues Of(ReadOnlySpan<KeyValuePair<string, JsonElement>> values) =>
-        values.IsEmpty ? None : new ScriptValues(Add(values));
+    public static ScriptValues Of(ReadOnlySpan<KeyValuePair<string, JsonElement>> values)
+    {
+        if (values.IsEmpty)
+            return None;
+
+        string json = GetJson(values);
+        if (_ofFiles.TryGetValue(json, out int shared))
+            return new ScriptValues(shared);
+
+        // Another thread can read the same values at the same time; the set that loses the race is held by nothing.
+        int made = Add(values);
+        shared = _ofFiles.GetOrAdd(json, made);
+        if (shared != made)
+            _byId.TryRemove(made, out _);
+
+        return new ScriptValues(shared);
+    }
 
     /// <summary>
-    /// Whether both are the same set of values. Two sets read one by one are two sets, even with equal values.
+    /// Whether both are the same set of values: the files of equal values give one set, and each set that a save kept
+    /// is its own.
     /// </summary>
     public bool Equals(ScriptValues other) => _id == other._id;
 
@@ -100,6 +124,26 @@ public readonly struct ScriptValues : IEquatable<ScriptValues>
             _ofSaves.TryRemove(id, out _);
             _byId.TryRemove(id, out _);
         }
+    }
+
+    /// <summary>
+    /// The JSON object of <paramref name="values"/>, which tells one set of values from every other set.
+    /// </summary>
+    private static string GetJson(ReadOnlySpan<KeyValuePair<string, JsonElement>> values)
+    {
+        ArrayBufferWriter<byte> json = new();
+        using Utf8JsonWriter writer = new(json);
+        writer.WriteStartObject();
+        foreach ((string name, JsonElement value) in values)
+        {
+            writer.WritePropertyName(name);
+            value.WriteTo(writer);
+        }
+
+        writer.WriteEndObject();
+        writer.Flush();
+
+        return Encoding.UTF8.GetString(json.WrittenSpan);
     }
 
     /// <summary>
