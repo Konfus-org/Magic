@@ -84,20 +84,22 @@ flowchart TD
 
    To start a worker, make a UUID for its session and write it in the plan. From the repository root, in bash, run
    this in the background:
-   `timeout -k 10 1h claude -p "<prompt>" --session-id <UUID> --model <model> --effort <effort> <permission flags> --output-format json`
+   `timeout -k 10 1h claude -p "<prompt>" --session-id <UUID> --model <model> --effort <effort> <permission flags> --output-format json < /dev/null`
 
    To send a message to a worker, run the same command with `--resume <UUID> "<message>"` in place of `--session-id`.
    When the worker stops, its result comes to you as a new turn. In a tool without headless sessions, use a background
    agent with the same limit.
 
    The prompt of a coder gives the brief of the slice, in the format of the slice skill. It also gives its branch, the
-   root, the decisions, and the other slices that run, with their scopes. It tells the coder:
+   root, the decisions, and the other slices that run, with their scopes. When the change affects how a run behaves,
+   its check is a run that shows the fix, not the build alone. It tells the coder:
    - Make your worktree with `git worktree add --track -b <branch> <worktree folder>/<branch> <root>`. Claim your
      scope.
    - Follow the slice skill from step 3, and each skill that the work needs, such as investigate, cleanup, profiling
      and timeouts. Do not use the finish skill.
-   - Build only. Run the build and stamp command. Do not run tests, headless runs, screenshots or reviews. Do not run
-     the app, except to profile in a profiling turn.
+   - Build, then run the one check that the brief names, headless or as a screenshot, with its time limit. Run the
+     stamp command. Do not run tests, full validations or reviews. Do not run the app in a window, except to profile
+     in a profiling turn.
    - When the slice builds, commit on its branch and end with `STATE: done`. For a spike, release its claim, write its
      summary and end with `STATE: answered`.
    - Do not ask the user anything. When a skill tells you to ask the user or to stop, end with `STATE: blocked`. Add
@@ -141,6 +143,9 @@ flowchart TD
    **Profiling turns.** Only profiling waits for a turn. Give the turns one at a time, in the order of the queue.
    Resume the first coder with "Your profiling turn starts now." The turn ends when that coder stops. If it stopped
    without a release, run the command that releases a profiling turn, in its worktree.
+
+   **One ready slice.** If the merge queue has one slice that is on the root's tip and stamped at that state,
+   fast-forward the root to it yourself. Then release its claim and remove its worktree and branch. It needs no train.
 
    **Merge trains.** Start a train worker with five slices or fewer when no train runs and one of these is true:
    - The merge queue has two or more slices.
