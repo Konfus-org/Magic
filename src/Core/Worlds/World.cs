@@ -929,9 +929,9 @@ public sealed class World : IEcs, IDisposable
     /// Puts <paramref name="arriving"/> in place of the world, and shows nothing half ready or left from the old world.
     /// </summary>
     /// <remarks>
-    /// What is there leaves, the globals too when <paramref name="isClearingGlobals"/> is true. The gems clean up after
-    /// it, and the loading screen shows while they prepare what comes. When they are ready and no asset is in load, the
-    /// loading screen fades into the cover. Behind the full cover, the loading screen leaves, the gems clean up after it,
+    /// What is there leaves, the globals too when <paramref name="isClearingGlobals"/> is true, and the loading screen
+    /// comes in its place. The gems clean up after what left and prepare what comes. When they are ready and no asset
+    /// is in load, the loading screen fades into the cover, or goes to it at once when the world was empty. Behind the full cover, the loading screen leaves, the gems clean up after it,
     /// <paramref name="arrive"/> makes what comes, and the gems settle it. Then the cover fades into it.
     /// <see cref="IsLoading"/> is true while it runs.
     /// </remarks>
@@ -977,6 +977,8 @@ public sealed class World : IEcs, IDisposable
                 }
             }
 
+            // An empty world showed nothing, so the loading screen goes to the cover at once, without a fade.
+            bool wasShowing = leaving.Count > 0 || staying.Count > 0;
             DestroyEntities(leaving.ToImmutable());
             foreach (Entity entity in staying)
             {
@@ -985,11 +987,13 @@ public sealed class World : IEcs, IDisposable
 
             _read.Clear();
             Domains = [];
+
+            // In the same turn as the destroy, so no frame shows an empty world while the gems clean up.
+            ImmutableArray<Entity> loading = CreateEntities(screen);
+            IsShowingLoadingScreen = true;
             await RunHooksAsync(hooks => hooks.OnDomainUnloadedAsync(cancel), "cleaning up").ConfigureAwait(false);
 
             await _threads.Enter(EngineThread.Game);
-            ImmutableArray<Entity> loading = CreateEntities(screen);
-            IsShowingLoadingScreen = true;
             ShowLoadingStep($"Preparing {arriving.Length} entities...");
             await RunHooksAsync(hooks => hooks.OnDomainLoadingAsync(arriving, cancel), "preparing")
                 .ConfigureAwait(false);
@@ -1001,7 +1005,10 @@ public sealed class World : IEcs, IDisposable
                 await WaitForFrameAsync(cancel).ConfigureAwait(false);
             }
 
-            await FadeCoverAsync(0, 1, cancel).ConfigureAwait(false);
+            if (wasShowing)
+                await FadeCoverAsync(0, 1, cancel).ConfigureAwait(false);
+            else
+                CoverOpacity = 1;
 
             await _threads.Enter(EngineThread.Game);
             DestroyEntities(loading);
@@ -1024,16 +1031,7 @@ public sealed class World : IEcs, IDisposable
             }
 
             ShowLoadingStep("Settling...");
-            try
-            {
-                await RunHooksAsync(hooks => hooks.OnDomainArrivedAsync(cancel), "settling")
-                    .WaitAsync(TimeSpan.FromSeconds(SettleLimitSec), cancel)
-                    .ConfigureAwait(false);
-            }
-            catch (TimeoutException)
-            {
-                Log.Warn($"The gems did not settle in {SettleLimitSec} s, so the world shows as it is.");
-            }
+            await SettleAsync(cancel).ConfigureAwait(false);
 
             // The low-latency GC Program asks for seldom collects gen 2, so what the load, the unloads and the gems'
             // first copies of the arrived world threw away would stay committed: one collection that compacts and
@@ -1041,6 +1039,7 @@ public sealed class World : IEcs, IDisposable
             await _threads.Enter(EngineThread.Game);
             GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
 
+            _loadingStep = null;
             await FadeCoverAsync(1, 0, cancel).ConfigureAwait(false);
         }
         finally
@@ -1048,6 +1047,26 @@ public sealed class World : IEcs, IDisposable
             IsLoading = false;
             IsShowingLoadingScreen = false;
             CoverOpacity = 0;
+        }
+    }
+
+    /// <summary>
+    /// Waits until the hook of each gem settled what arrived, for at most <see cref="SettleLimitSec"/> seconds.
+    /// </summary>
+    /// <remarks>
+    /// At the limit, the hooks are cancelled and the world shows as it is.
+    /// </remarks>
+    private async Task SettleAsync(CancellationToken cancel)
+    {
+        using CancellationTokenSource limit = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        limit.CancelAfter(TimeSpan.FromSeconds(SettleLimitSec));
+        try
+        {
+            await RunHooksAsync(hooks => hooks.OnDomainArrivedAsync(limit.Token), "settling").ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
+        {
+            Log.Warn($"The gems did not settle in {SettleLimitSec} s, so the world shows as it is.");
         }
     }
 
