@@ -193,6 +193,12 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
             Sampler = sampler.Value,
             TracedWidth = (uint)tracedSize.Width,
             TracedHeight = (uint)tracedSize.Height,
+            DiffuseRayCount = (uint)Math.Clamp(_settings.IndirectRayCount, 1, 8),
+            DiffuseRayRange = Math.Max(_settings.IndirectRayRange, 0),
+            ReflectionRayRange = Math.Max(_settings.ReflectionRayRange, 0),
+            DiffuseHistory = Math.Clamp(_settings.IndirectHistory, 0, 1),
+            ReflectionHistory = Math.Clamp(_settings.ReflectionHistory, 0, 1),
+            ProbeBlend = Math.Clamp(_settings.ProbeUpdateSpeed, 0, 1),
         };
         // Not staged: nothing is recorded, and the frame's row stays the view's default, which the shaders read as none.
         if (!graph.Upload(view.Constants, [gi]))

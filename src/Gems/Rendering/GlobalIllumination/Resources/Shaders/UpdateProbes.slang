@@ -56,8 +56,7 @@ ProbeSh ProjectOntoSh(float3 direction, float3 value)
 static const uint IrradianceTexelCount = IrradianceTexels * IrradianceTexels;
 static const uint DepthTexelCount = DepthTexels * DepthTexels;
 
-// How fast a probe's light follows its rays, and its distances and its place theirs.
-static const float IrradianceBlend = 0.1;
+// How fast a probe's distances and its place follow its rays; the gem's constants say how fast its light does.
 static const float DepthBlend = 0.02;
 static const float OffsetBlend = 0.01;
 
@@ -450,7 +449,7 @@ void BlendProbes(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID, uint 
             data.inconsistency = 1.0;
         }
 
-        data = EstimateMean(data, sum, IrradianceBlend);
+        data = EstimateMean(data, sum, GetGIConstants().probeBlend);
         variance[texel] = EncodeProbeVariance(data);
         groupMeans[index] = data.mean;
     }

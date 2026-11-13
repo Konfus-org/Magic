@@ -11,7 +11,7 @@ namespace Magic.GlobalIllumination;
 /// Traces the light that reaches each surface indirectly from near it, on a GPU that traces rays.
 /// </summary>
 /// <remarks>
-/// Two rays go from a pixel of each traced pixel's footprint. The lights and the probes light them where they land, and
+/// A few rays go from a pixel of each traced pixel's footprint. The lights and the probes light them where they land, and
 /// the probes' light is used where they reach nothing within range. The light is filtered over neighbours and blended
 /// over frames into the light that shading reads.
 /// </remarks>

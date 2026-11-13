@@ -1,5 +1,5 @@
 // The light that reaches each surface indirectly, traced at a part of the picture's size: from one pixel of each traced
-// pixel's footprint, two rays over its hemisphere as the diffuse lobe weighs it, each bringing back the light of the
+// pixel's footprint, a few rays over its hemisphere as the diffuse lobe weighs it, each bringing back the light of the
 // surface it lands on, lit by one light at random and by the probes, or the probes' light at the pixel where it reaches
 // nothing within range, then filtered over its neighbours, and blended with the frames before where they saw the same
 // surface. Shading reads the result through Light/Indirect. Adapted from Wicked Engine's ray-traced diffuse. The pass
@@ -19,17 +19,12 @@ import Sky.ISky;
 import Trace.HitSurface;
 import Scene.Models;
 
-// The rays a traced pixel sends, and how far each reaches before the probes' light stands for what lies beyond.
-static const uint RayCount = 2u;
-static const float RayRange = 10.0;
-
 // How far in traced pixels the filter reaches, and how many neighbours it reads there.
 static const float FilterSpread = 8.0;
 static const uint FilterSamples = 4u;
 
-// How much of the history a pixel keeps a frame, how many of its neighbours' deviations the history is held within,
-// and how much of the variance's history it keeps.
-static const float HistoryBlend = 0.98;
+// How many of its neighbours' deviations a pixel's history is held within, and how much of the variance's history it
+// keeps.
 static const float HistorySpread = 0.9;
 static const float VarianceBlend = 0.6;
 
@@ -63,10 +58,10 @@ void TraceDiffuse<S : ISky>(uint3 thread : SV_DispatchThreadID)
     float3x3 basis = CreateBasis(normal);
     RaytracingAccelerationStructure scene = GetTracedAcceleration();
     float3 sum = float3(0.0);
-    for (uint i = 0u; i < RayCount; i++)
+    for (uint i = 0u; i < gi.diffuseRayCount; i++)
     {
         float3 direction = ToWorld(basis, SampleCosineHemisphere(GetRandom(thread.xy, frame.frameIndex, 1u + i).xy));
-        RayHit hit = GetClosestHit(scene, origin, direction, RayRange, RAY_FLAG_CULL_BACK_FACING_TRIANGLES);
+        RayHit hit = GetClosestHit(scene, origin, direction, gi.diffuseRayRange, RAY_FLAG_CULL_BACK_FACING_TRIANGLES);
         if (!hit.isHit)
         {
             sum += beyond;
@@ -74,11 +69,11 @@ void TraceDiffuse<S : ISky>(uint3 thread : SV_DispatchThreadID)
         }
 
         HitSurface surface = LoadHitSurface(hit, origin, direction);
-        float3 xi = GetRandom(thread.xy, frame.frameIndex, 1u + RayCount + i);
+        float3 xi = GetRandom(thread.xy, frame.frameIndex, 1u + gi.diffuseRayCount + i);
         sum += GetHitLight<S>(lights, grid, scene, surface, xi);
     }
 
-    traced.Store(thread.xy, float4(sum / float(RayCount), 1.0));
+    traced.Store(thread.xy, float4(sum / float(gi.diffuseRayCount), 1.0));
 }
 
 // A thread a traced pixel: its light filtered over a few neighbours spread at random through the 8 by 8 traced pixels
@@ -161,5 +156,5 @@ void BlendDiffuse(uint3 thread : SV_DispatchThreadID)
     float2 uv = GetTexelCenterUv(thread.xy, size) + velocity.xy;
     light.Store(
         thread.xy,
-        BlendHistory(gi, blend, current, neighbourhood, velocity.z, uv, HistoryBlend, HistorySpread, VarianceBlend));
+        BlendHistory(gi, blend, current, neighbourhood, velocity.z, uv, gi.diffuseHistory, HistorySpread, VarianceBlend));
 }
