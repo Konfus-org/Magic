@@ -66,7 +66,9 @@ public sealed class GemRegistryTests
     {
         await CreateGemsAsync("Lender", "Borrower").ConfigureAwait(true);
 
-        List<RegisteredGem> gems = GemRegistry.Register(_files, ["Lender", "Borrower"], []);
+        using Assemblies assemblies = new(_files);
+
+        List<RegisteredGem> gems = GemRegistry.Register(assemblies, _files, ["Lender", "Borrower"], []);
 
         Type lender = Assert.Single(gems.Single(gem => gem.Name == "Lender").PartTypes);
         Type borrower = gems.Single(gem => gem.Name == "Borrower").Type;
@@ -78,7 +80,9 @@ public sealed class GemRegistryTests
     {
         await CreateGemsAsync("Lender", "Borrower").ConfigureAwait(true);
 
-        List<RegisteredGem> gems = GemRegistry.Register(_files, ["Borrower", "Lender"], []);
+        using Assemblies assemblies = new(_files);
+
+        List<RegisteredGem> gems = GemRegistry.Register(assemblies, _files, ["Borrower", "Lender"], []);
 
         Assert.Equal(["Lender", "Borrower"], gems.ConvertAll(gem => gem.Name));
     }
@@ -88,7 +92,9 @@ public sealed class GemRegistryTests
     {
         await CreateGemsAsync("Absent", "Orphan").ConfigureAwait(true);
 
-        List<RegisteredGem> gems = GemRegistry.Register(_files, ["Orphan"], []);
+        using Assemblies assemblies = new(_files);
+
+        List<RegisteredGem> gems = GemRegistry.Register(assemblies, _files, ["Orphan"], []);
 
         Assert.Empty(gems);
         Assert.Contains(
@@ -105,7 +111,9 @@ public sealed class GemRegistryTests
         await WriteGemAsync("Parted", Compile("Parted", PartedSource, [])).ConfigureAwait(true);
         ServiceCollection services = [];
 
-        RegisteredGem gem = Assert.Single(GemRegistry.Register(_files, ["Parted"], services));
+        using Assemblies assemblies = new(_files);
+
+        RegisteredGem gem = Assert.Single(GemRegistry.Register(assemblies, _files, ["Parted"], services));
 
         using ServiceProvider provider = services.BuildServiceProvider();
         object? part = Assert.Single(gem.Parts).GetValue(provider.GetRequiredService(gem.Type));

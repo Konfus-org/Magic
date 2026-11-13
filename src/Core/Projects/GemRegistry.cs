@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Globalization;
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using Magic.Assets;
@@ -64,6 +63,7 @@ internal static class GemRegistry
     /// </para>
     /// </remarks>
     public static List<RegisteredGem> Register(
+        Assemblies assemblies,
         IFileSystem files,
         ImmutableArray<string> listed,
         ServiceCollection services
@@ -72,8 +72,7 @@ internal static class GemRegistry
         if (listed.Any())
             Log.Info($"Loading {string.Join(", ", listed)}.");
 
-        // Make each listed gem's context before any loads, so a gem's code finds a gem it references in any list order.
-        Dictionary<string, GemLoadContext> contexts = new(StringComparer.OrdinalIgnoreCase);
+        // Add each listed gem's code before any loads, so a gem's code finds a gem it references in any list order.
         List<(string Name, string Wanted)> named = [];
         HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
         foreach (string listing in listed)
@@ -94,7 +93,7 @@ internal static class GemRegistry
                 continue;
             }
 
-            contexts[name] = new GemLoadContext(path, files, contexts);
+            assemblies.Add(path);
             named.Add((name, at < 0 ? string.Empty : listing[(at + 1)..]));
         }
 
@@ -103,7 +102,7 @@ internal static class GemRegistry
         Dictionary<Type, RegisteredGem> providers = [];
         foreach ((string name, string wanted) in named)
         {
-            Result<RegisteredGem> found = Find(files, name, contexts);
+            Result<RegisteredGem> found = Find(assemblies, files, name);
             if (!found.Ok)
             {
                 Log.Error(found.Error);
@@ -239,31 +238,17 @@ internal static class GemRegistry
     internal static string GetGemName(Type type) => type.Assembly.GetName().Name ?? type.Name;
 
     /// <summary>
-    /// Loads the listed gem <paramref name="name"/> into its context of <paramref name="contexts"/>, or gives why it
-    /// cannot be made.
+    /// Loads the listed gem <paramref name="name"/> from <paramref name="assemblies"/>, or gives why it cannot be made.
     /// </summary>
     /// <remarks>
     /// A gem must hold one <see cref="IGem"/> class with one public constructor, and the project must list each gem
     /// that it references. The class's public instance properties are its parts, and the gem provides what they
     /// implement.
     /// </remarks>
-    private static Result<RegisteredGem> Find(
-        IFileSystem files,
-        string name,
-        Dictionary<string, GemLoadContext> contexts
-    )
+    private static Result<RegisteredGem> Find(Assemblies assemblies, IFileSystem files, string name)
     {
         string path = GetPath(files, name);
-        Result<Assembly> loaded;
-        try
-        {
-            loaded = contexts[name].LoadGem();
-        }
-        catch (Exception ex) when (ex is BadImageFormatException or FileLoadException or IOException)
-        {
-            loaded = Result.Failure(ex.Message);
-        }
-
+        Result<Assembly> loaded = assemblies.Load(name);
         if (!loaded.Ok)
             return Result.Failure($"Gem {name} could not be loaded from {path}: {loaded.Error}");
 
@@ -278,7 +263,7 @@ internal static class GemRegistry
                 continue;
 
             bool isCarried = files.FileExists(files.Combine(folder, referenced + ".dll"));
-            if (contexts.ContainsKey(referenced))
+            if (assemblies.Has(referenced))
                 references.Add(referenced);
             else if (!isCarried && files.FileExists(GetPath(files, referenced)))
                 return Result.Failure(
@@ -327,8 +312,7 @@ internal static class GemRegistry
                 provides,
                 references,
                 hasResources ? resources : null,
-                folder,
-                contexts[name]
+                folder
             )
         );
     }

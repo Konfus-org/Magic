@@ -1,6 +1,5 @@
 using System.Linq;
 using System.Reflection;
-using System.Runtime.Loader;
 
 namespace Magic.Projects;
 
@@ -17,9 +16,6 @@ namespace Magic.Projects;
 /// <param name="References">The listed gems its code references, which it loads after.</param>
 /// <param name="Resources">The folder of its own assets; null when it has none.</param>
 /// <param name="Folder">The folder its assemblies load from.</param>
-/// <param name="Context">
-/// Where its assemblies load. Only this reference keeps it alive; if it is collected, the gem starts to unload.
-/// </param>
 internal sealed record RegisteredGem(
     string Name,
     string Author,
@@ -30,8 +26,7 @@ internal sealed record RegisteredGem(
     IReadOnlyList<Type> Provides,
     IReadOnlyList<string> References,
     string? Resources,
-    string Folder,
-    AssemblyLoadContext Context
+    string Folder
 )
 {
     /// <summary>

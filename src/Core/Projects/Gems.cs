@@ -1,7 +1,7 @@
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using Magic.Assets;
@@ -20,8 +20,8 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Magic.Projects;
 
 /// <summary>
-/// The run's gems: makes the ones registered, in their order, as it is made, drives them through the frame, restarts
-/// the run once a build of one has settled, and ends them as it is disposed. A gem that can't be made is logged, and the
+/// The run's gems: makes the ones registered, in their order, as it is made, drives them through the frame, and ends
+/// them as it is disposed. A gem that can't be made is logged, and the
 /// others go on without it; one that throws in an update hook is logged and leaves those hooks, one that throws in
 /// <c>Render</c> is a failure of the frame and is run again after a pause, and the frame goes on.
 /// </summary>
@@ -36,11 +36,6 @@ internal sealed class Gems : IDisposable
     /// The most fixed steps a frame runs; what the simulation owes past them is dropped.
     /// </summary>
     private const int MaxFixedSteps = 4;
-
-    /// <summary>
-    /// How long a gem's files must have been left alone after a build wrote them.
-    /// </summary>
-    private static readonly TimeSpan _settleTime = TimeSpan.FromSeconds(1);
 
     /// <summary>
     /// Each <see cref="Hook"/>'s name, made once, as its metric's tag.
@@ -82,13 +77,6 @@ internal sealed class Gems : IDisposable
 
     private readonly Rendering _rendering = new();
 
-    private readonly Subscriptions _watches = [];
-
-    /// <summary>
-    /// What ends the project's own code: its place among the code and the assets, and its load context.
-    /// </summary>
-    private readonly Subscriptions _projectCode = [];
-
     /// <summary>
     /// The frame every gem's Render records into, which the GPU provider presents. Render thread.
     /// </summary>
@@ -108,11 +96,6 @@ internal sealed class Gems : IDisposable
     /// The gem whose part is the GPU provider, which presents the frame; null when no gem provides one.
     /// </summary>
     private readonly LoadedGem? _gpuProvider;
-
-    /// <summary>
-    /// When a watch last saw a build write a gem's files, 0 when none has: written whole from the watches' threads.
-    /// </summary>
-    private long _buildTimestamp;
 
     /// <summary>
     /// When the last wait for the render thread ended, 0 before the first frame's: where a frame's work starts.
@@ -140,9 +123,9 @@ internal sealed class Gems : IDisposable
     private Frame _renderFrame;
 
     /// <summary>
-    /// Registers the gems that <paramref name="project"/> lists with <paramref name="services"/>, loads the project's own
-    /// code, makes the gems through the provider built from those, and starts the render thread. Each gem's folder is watched for a build, and
-    /// what it brings is registered before it is made, so its constructor can find it: its folder of assets, its asset
+    /// Registers the gems <paramref name="listed"/> with <paramref name="services"/>, their code with
+    /// <paramref name="assemblies"/>, makes the gems through the provider built from those, and starts the render
+    /// thread. What a gem brings is registered before it is made, so its constructor can find it: its folder of assets, its asset
     /// types and its code, which goes when it does. Then the gem is set up: the app's window for as long as it lasts
     /// when it provides one, the world's ECS, its settings, its place on the log when it is a sink, the asset types it
     /// reads and writes, and its part of the frame; and, once every gem is made, its hooks into domain loading, unless
@@ -154,7 +137,8 @@ internal sealed class Gems : IDisposable
         Justification = "Whatever a gem's constructor throws, it is logged and the gem is not made; the others go on."
     )]
     public Gems(
-        Project project,
+        ImmutableArray<string> listed,
+        Assemblies assemblies,
         ServiceCollection services,
         App app,
         Settings settings,
@@ -169,7 +153,7 @@ internal sealed class Gems : IDisposable
         _world = world;
         _events = events;
         _threads = threads;
-        List<RegisteredGem> registered = GemRegistry.Register(files, project.Gems, services);
+        List<RegisteredGem> registered = GemRegistry.Register(assemblies, files, listed, services);
 
         // Never disposed, since its singletons are the gems, which Dispose ends.
         services.MakeReadOnly();
@@ -177,10 +161,8 @@ internal sealed class Gems : IDisposable
 
         // A constructor may load an asset of a type a gem made after it reads.
         assets.Expect(registered.SelectMany(gem => gem.PartTypes));
-        LoadProjectCode(files, assets, project, registered);
         foreach (RegisteredGem gem in registered)
         {
-            WatchBuilds(files, gem.Folder, $"Gem {gem.Name}");
             if (gem.Resources is not null)
                 assets.Register(gem.Resources);
 
@@ -206,7 +188,7 @@ internal sealed class Gems : IDisposable
                 made,
                 [],
                 gem.Name,
-                [new Subscription(gem.Context.Unload), new Subscription(() => (made as IDisposable)?.Dispose()), code]
+                [new Subscription(() => (made as IDisposable)?.Dispose()), code]
             );
             _loaded.Add(loaded);
             foreach (PropertyInfo property in gem.Parts)
@@ -304,10 +286,6 @@ internal sealed class Gems : IDisposable
     {
         _threads.Stop(EngineThread.Render);
         _drawn.Dispose();
-        _watches.Dispose();
-
-        // The project's code references the gems, so it goes first.
-        _projectCode.Dispose();
         for (int i = _loaded.Count - 1; i >= 0; i--)
         {
             Log.Info($"Unloading {_loaded[i].Name}.");
@@ -318,22 +296,13 @@ internal sealed class Gems : IDisposable
     }
 
     /// <summary>
-    /// One frame: restarts the run if a gem was built, works out the clocks, runs every gem's hooks but
+    /// One frame: works out the clocks, runs every gem's hooks but
     /// Render in order with the fixed steps the simulation owes, and tells the world the frame is published. Then it waits
     /// until the render thread has drawn the frame before, so the next frame is worked out while this one draws, and the
     /// frames run at the render thread's pace. Time begins with the first frame, not with what was loaded before it.
     /// </summary>
     public void Pump()
     {
-        // A build writes each gem and its dependencies in turn, so the run restarts once it left the files alone a
-        // while.
-        long built = Volatile.Read(ref _buildTimestamp);
-        if (built != 0 && Stopwatch.GetElapsedTime(built) >= _settleTime)
-        {
-            Log.Info("A gem's code changed, so the run restarts.");
-            _app.Restart();
-        }
-
         // While the loading screen shows, time runs as it is, so it moves however the world it replaces was paused.
         bool isPaused = _world.IsPaused && !_world.IsShowingLoadingScreen;
         float timeScale = _world.IsShowingLoadingScreen ? 1 : _world.TimeScale;
@@ -405,66 +374,6 @@ internal sealed class Gems : IDisposable
             SimSec = last.SimSec + simDeltaSec,
             SimDeltaSec = simDeltaSec,
         };
-    }
-
-    /// <summary>
-    /// Loads the project's own code, when its build is there: <c>Projects/&lt;name&gt;/&lt;name&gt;.dll</c> beside Magic,
-    /// with the name of the csproj next to the <c>.magic</c> file. It finds the listed gems that it references, and it
-    /// is registered with the code and the assets, like a gem's.
-    /// </summary>
-    private void LoadProjectCode(
-        IFileSystem files,
-        AssetManager assets,
-        Project project,
-        List<RegisteredGem> registered
-    )
-    {
-        Result<string[]> csprojs = files.EnumerateFiles(files.GetParent(project.Path), "*.csproj", recursive: false);
-        if (csprojs is not { Ok: true, Value: [string csproj] })
-            return;
-
-        string name = Path.GetFileNameWithoutExtension(csproj);
-        string path = files.Combine(AppContext.BaseDirectory, "Projects", name, name + ".dll");
-        if (!files.FileExists(path))
-            return;
-
-        Dictionary<string, GemLoadContext> gems = registered.ToDictionary(
-            gem => gem.Name,
-            gem => (GemLoadContext)gem.Context,
-            StringComparer.OrdinalIgnoreCase
-        );
-        GemLoadContext context = new(path, files, gems);
-        Result<Assembly> code = context.LoadGem();
-        if (!code.Ok)
-        {
-            Log.Error($"The code of {project.Name} was not loaded from {path}: {code.Error}");
-            context.Unload();
-
-            return;
-        }
-
-        WatchBuilds(files, files.GetParent(path), $"The code of {project.Name}");
-        assets.Register(code.Value);
-        _projectCode.Add(Assemblies.Register(code.Value));
-        _projectCode.Add(new Subscription(context.Unload));
-        Log.Info($"Loaded the code of {project.Name} from {path}.");
-    }
-
-    /// <summary>
-    /// Watches <paramref name="folder"/> for a build that writes its assemblies, which restarts the run once it has
-    /// settled. A folder that can't be watched is warned about as <paramref name="what"/>.
-    /// </summary>
-    private void WatchBuilds(IFileSystem files, string folder, string what)
-    {
-        Result<IDisposable> watched = files.Watch(
-            folder,
-            "*.dll",
-            _ => Volatile.Write(ref _buildTimestamp, Stopwatch.GetTimestamp())
-        );
-        if (watched.Ok)
-            _watches.Add(new Subscription(watched.Value.Dispose));
-        else
-            Log.Warn($"{what} is not watched, so a build of it won't restart the run: {watched.Error}");
     }
 
     /// <summary>

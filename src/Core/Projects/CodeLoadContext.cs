@@ -9,24 +9,24 @@ using Magic.Utils;
 namespace Magic.Projects;
 
 /// <summary>
-/// Where one gem's assemblies load from its folder: the gem and its NuGet and native dependencies.
+/// Where the code of one gem or project loads from its folder: its assembly and its NuGet and native dependencies.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Magic and the framework come from the host, so all gems share one <see cref="IGem"/>, and two gems can carry
-/// different versions of one package. A listed gem that it references comes from that gem's own context, so both see
-/// one set of its types.
+/// different versions of one package. Other code of the run that it references, such as a listed gem, comes from that
+/// code's own context, so both see one set of its types.
 /// </para>
 /// <para>
-/// A native library is found through the gem's dependency file, else under its <c>runtimes/&lt;rid&gt;/native/</c>.
-/// Managed assemblies are read into memory, so a build can replace their files while the gem runs.
+/// A native library is found through the dependency file, else under <c>runtimes/&lt;rid&gt;/native/</c>. Managed
+/// assemblies are read into memory, so a build can replace their files while the code runs.
 /// </para>
 /// <para>
-/// It is collectible: it unloads when nothing refers to the gem's types, or after
+/// It is collectible: it unloads when nothing refers to its types, or after
 /// <see cref="AssemblyLoadContext.Unload"/>.
 /// </para>
 /// </remarks>
-internal sealed class GemLoadContext : AssemblyLoadContext
+internal sealed class CodeLoadContext : AssemblyLoadContext
 {
     /// <summary>
     /// Native libraries by name, loaded one time for all gems and never freed.
@@ -37,31 +37,31 @@ internal sealed class GemLoadContext : AssemblyLoadContext
     private static readonly Dictionary<string, nint> _natives = new(StringComparer.Ordinal);
     private static readonly Lock _loadingNative = new();
 
-    private readonly string _gemPath;
+    private readonly string _path;
     private readonly IFileSystem _files;
     private readonly AssemblyDependencyResolver _resolver;
 
     /// <summary>
-    /// The contexts of all gems that the project lists, this one included, by gem name.
+    /// The contexts of all the code that the run can load, this one included, by assembly name.
     /// </summary>
-    private readonly IReadOnlyDictionary<string, GemLoadContext> _gems;
+    private readonly IReadOnlyDictionary<string, CodeLoadContext> _code;
 
-    internal GemLoadContext(string gemPath, IFileSystem files, IReadOnlyDictionary<string, GemLoadContext> gems)
-        : base(Path.GetFileNameWithoutExtension(gemPath), isCollectible: true)
+    internal CodeLoadContext(string path, IFileSystem files, IReadOnlyDictionary<string, CodeLoadContext> code)
+        : base(Path.GetFileNameWithoutExtension(path), isCollectible: true)
     {
-        _gemPath = gemPath;
+        _path = path;
         _files = files;
-        _gems = gems;
-        _resolver = new AssemblyDependencyResolver(gemPath);
+        _code = code;
+        _resolver = new AssemblyDependencyResolver(path);
 
-        // A static method, so the handler keeps no reference to the gem.
+        // A static method, so the handler keeps no reference to the code.
         Unloading += LogUnloaded;
     }
 
     /// <summary>
-    /// Gets the gem's own assembly, loaded on the first ask, or why its file could not be read.
+    /// Gets its own assembly, loaded on the first ask, or why its file could not be read.
     /// </summary>
-    internal Result<Assembly> LoadGem()
+    internal Result<Assembly> LoadCode()
     {
         foreach (Assembly loaded in Assemblies)
         {
@@ -69,13 +69,13 @@ internal sealed class GemLoadContext : AssemblyLoadContext
                 return Result.Success(loaded);
         }
 
-        return LoadFromBytes(_gemPath);
+        return LoadFromBytes(_path);
     }
 
     protected override Assembly? Load(AssemblyName assemblyName)
     {
-        if (assemblyName.Name is { } name && _gems.TryGetValue(name, out GemLoadContext? gem))
-            return Resolve(gem.LoadGem(), name);
+        if (assemblyName.Name is { } name && _code.TryGetValue(name, out CodeLoadContext? code))
+            return Resolve(code.LoadCode(), name);
 
         return _resolver.ResolveAssemblyToPath(assemblyName) is { } path ? Resolve(LoadFromBytes(path), path) : null;
     }
@@ -99,7 +99,7 @@ internal sealed class GemLoadContext : AssemblyLoadContext
         }
     }
 
-    private static void LogUnloaded(AssemblyLoadContext context) => Log.Info($"Gem {context.Name} unloaded.");
+    private static void LogUnloaded(AssemblyLoadContext context) => Log.Info($"{context.Name} unloaded.");
 
     /// <summary>
     /// Gets the assembly of <paramref name="loaded"/>, or null when it failed. A failure is logged with
@@ -132,12 +132,17 @@ internal sealed class GemLoadContext : AssemblyLoadContext
 
         using MemoryStream image = new(assembly.Value);
         Result<byte[]> symbols = _files.ReadBytes(Path.ChangeExtension(path, ".pdb"));
-        if (!symbols.Ok)
-            return Result.Success(LoadFromStream(image));
+        using MemoryStream? pdb = symbols.Ok ? new MemoryStream(symbols.Value) : null;
 
-        using MemoryStream pdb = new(symbols.Value);
-
-        return Result.Success(LoadFromStream(image, pdb));
+        // A build that is still writing the file leaves a half image.
+        try
+        {
+            return Result.Success(LoadFromStream(image, pdb));
+        }
+        catch (Exception ex) when (ex is BadImageFormatException or FileLoadException or IOException)
+        {
+            return Result.Failure(ex.Message);
+        }
     }
 
     /// <summary>
@@ -147,7 +152,7 @@ internal sealed class GemLoadContext : AssemblyLoadContext
     private string? FindCarried(string name)
     {
         string folder = _files.Combine(
-            _files.GetParent(_gemPath),
+            _files.GetParent(_path),
             "runtimes",
             RuntimeInformation.RuntimeIdentifier,
             "native"

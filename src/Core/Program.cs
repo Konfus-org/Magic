@@ -1,4 +1,6 @@
 using System.Diagnostics.Metrics;
+using System.IO;
+using System.Reflection;
 using System.Runtime;
 using Magic.Assets;
 using Magic.CommandLine;
@@ -26,6 +28,35 @@ internal static class Program
         "s",
         "One step of Core's own in the run's loop."
     );
+
+    /// <summary>
+    /// Loads the project's own code from <paramref name="path"/>, which <paramref name="assemblies"/> has, and registers
+    /// it with the code and the assets until the subscription is disposed. Null when it has no code, or the code does not
+    /// load.
+    /// </summary>
+    private static Subscription? LoadProjectCode(
+        Project project,
+        string? path,
+        AssetManager assets,
+        Assemblies assemblies
+    )
+    {
+        if (path is null)
+            return null;
+
+        Result<Assembly> code = assemblies.Load(Path.GetFileNameWithoutExtension(path));
+        if (!code.Ok)
+        {
+            Log.Error($"The code of {project.Name} was not loaded from {path}: {code.Error}");
+
+            return null;
+        }
+
+        assets.Register(code.Value);
+        Log.Info($"Loaded the code of {project.Name} from {path}.");
+
+        return Assemblies.Register(code.Value);
+    }
 
     private static int Main(string[] commandLine)
     {
@@ -133,7 +164,17 @@ internal static class Program
         Log.Info($"Running {project.Name} in {(app.IsHeadless ? "headless" : "GUI")} mode.");
 
         app.StartRun();
-        using Gems gems = new(project, services, app, settings, files, assets, world, events, threads);
+
+        // The code of the run, which outlives the gems and the project's code that use it.
+        using Assemblies assemblies = new(files);
+
+        // The project's code is added before the gems' code can load, so each finds the other.
+        string? projectCodePath = project.FindCodePath(files);
+        if (projectCodePath is not null)
+            assemblies.Add(projectCodePath);
+
+        using Gems gems = new(project.Gems, assemblies, services, app, settings, files, assets, world, events, threads);
+        using Subscription? projectCode = LoadProjectCode(project, projectCodePath, assets, assemblies);
         settings.ReportUnknownKeys();
         world.StartAsync(worldRestorePoint?.WaitAsync(app.Lifetime), Terminal.Progress, app.Lifetime).FireAndForget();
 
@@ -148,7 +189,7 @@ internal static class Program
 
         // The frames run on the game thread, while this one, the platform thread, pumps the OS's events until the
         // run ends; then the game thread's last frame finishes, and this thread is the game thread for what ends.
-        threads.Start(EngineThread.Game, () => RunFrame(app, world, gems, cli));
+        threads.Start(EngineThread.Game, () => RunFrame(app, world, assemblies, gems, cli));
         while (!app.Lifetime.IsCancellationRequested)
         {
             threads.Pump(EngineThread.Platform);
@@ -172,10 +213,16 @@ internal static class Program
         // One frame on the game thread, after what was posted to it: Core's own steps are timed for whatever listens,
         // and the pump of the gems times their hooks itself. Under --fail-on-error, the first error logged ends the
         // run, and the exit code says so.
-        static void RunFrame(App app, World world, Gems gems, Cli cli)
+        static void RunFrame(App app, World world, Assemblies assemblies, Gems gems, Cli cli)
         {
             if (app.HasFailed)
                 app.Exit();
+
+            if (assemblies.IsBuilt)
+            {
+                Log.Info("Code of the run was built again, so the run restarts.");
+                app.Restart();
+            }
 
             // The platform thread ends the game thread once it next wakes; until then no frame runs for an ended run.
             if (app.Lifetime.IsCancellationRequested)
