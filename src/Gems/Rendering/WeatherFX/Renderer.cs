@@ -63,8 +63,6 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
     /// </remarks>
     private readonly TaskCompletionSource _built = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    private readonly WeatherFXSettings _settings;
-
     private readonly IEcs _ecs;
 
     private readonly Mailbox<EcsSnapshot<Weather>> _weather = new();
@@ -82,9 +80,8 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
     /// </summary>
     private readonly List<((int Width, int Height)? Filled, GpuTexture? DrawnClouds)> _views = [];
 
-    internal Renderer(WeatherFXSettings settings, AssetManager assets, IEcs ecs)
+    internal Renderer(AssetManager assets, IEcs ecs)
     {
-        _settings = settings;
         _ecs = ecs;
         _scatterShader = PassShaders.GetEntry(assets, "FillAir", "ScatterAir");
         _integrateShader = PassShaders.GetEntry(assets, "FillAir", "IntegrateAir");
@@ -106,7 +103,7 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
 
         if (
             _weather.TakeNewest() is not { First: [var weather, ..] }
-            || weather is { FogDensity: <= 0, CloudCover: <= 0 }
+            || weather is { Fog.Density: <= 0, Clouds.Cover: <= 0 }
             || shaders != GpuState.Ready
         )
         {
@@ -117,7 +114,7 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
 
         // Two scattering volumes swap every frame, the other holding last frame's, which this frame's blends with.
         GpuView gpu = input.View;
-        (int Width, int Height) size = gpu.Scaled(_settings.VolumeScale);
+        (int Width, int Height) size = gpu.Scaled(weather.Fog.VolumeScale);
         int written = (int)(frame.Index % 2);
         Result<GpuTexture> scattering = graph.Texture(GetVolume(_scatteringNames[written], size));
         Result<GpuTexture> history = graph.Texture(GetVolume(_scatteringNames[1 - written], size));
@@ -132,7 +129,7 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
 
         GpuTexture? cloudy = null;
         GpuState cloudShader = graph.GetState(_cloudShader);
-        if (weather.CloudCover > 0)
+        if (weather.Clouds.Cover > 0)
         {
             if (cloudShader == GpuState.Failed)
             {
@@ -152,15 +149,15 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
         {
             Volume = air.Value.Id,
             Sampler = sampler.Value.Id,
-            Distance = _settings.VolumeDistance,
-            Density = weather.FogDensity,
-            Height = weather.FogHeight,
-            HalfHeight = weather.FogHalfHeight,
-            Anisotropy = weather.FogAnisotropy,
-            Color = new Vector3(weather.FogColor.R, weather.FogColor.G, weather.FogColor.B),
+            Distance = weather.Fog.VolumeDistance,
+            Density = weather.Fog.Density,
+            Height = weather.Fog.Height,
+            HalfHeight = weather.Fog.HalfHeight,
+            Anisotropy = weather.Fog.Anisotropy,
+            Color = new Vector3(weather.Fog.Color.R, weather.Fog.Color.G, weather.Fog.Color.B),
             Clouds = cloudy?.Id ?? 0,
-            CloudCover = weather.CloudCover,
-            CloudHeight = weather.CloudHeight,
+            CloudCover = weather.Clouds.Cover,
+            CloudHeight = weather.Clouds.Height,
             Wind = new Vector2(weather.Wind.X, weather.Wind.Z),
         };
         // Not staged: nothing is recorded, and the frame's row stays the view's default, which the shaders read as none.

@@ -203,18 +203,17 @@ the reflections.
 ## WeatherFX
 
 Fills the air between the camera and the surfaces with the haze of the world. The sky, the sun and the local lights
-light the haze. On a GPU that traces rays, the light falls in shafts through gaps. The settings are in
-`WeatherFXSettings`.
+light the haze. On a GPU that traces rays, the light falls in shafts through gaps. The gem has no settings.
 
-To use it, list `WeatherFX` in the `.magic` file, and give the `Weather` of the world a `FogDensity` or a
-`CloudCover` above 0. With the AccelerationStructures gem, the haze has shadows. Without it, the sun lights all of the
-haze.
+To use it, list `WeatherFX` in the `.magic` file, and give the `Fog` of the world's `Weather` a `Density`, or its
+`Clouds` a `Cover`, above 0. With the AccelerationStructures gem, the haze has shadows. Without it, the sun lights all
+of the haze.
 
-- The `Weather` component sets the haze: its density at a height, how fast it thins above it, its colour and how
-  much it scatters towards the sun. A script can change it while the world runs.
-- The volume goes to `Rendering.VolumeDistance` from the camera. Past it, the haze has no shadows.
-- `CloudCover` fills the sky with clouds from `CloudHeight` up for 2 km. The `Wind` moves them. The clouds look
-  correct from the ground, not from inside them. Their shadow falls on the ground and in the haze.
+- The `Fog` of the `Weather` component sets the haze: its density at a height, how fast it thins above it, its
+  colour and how much it scatters towards the sun. A script can change it while the world runs.
+- The volume goes to the `VolumeDistance` of the `Fog` from the camera. Past it, the haze has no shadows.
+- The `Cover` of the `Clouds` fills the sky with clouds from their `Height` up for 2 km. The `Wind` moves them. The
+  clouds look correct from the ground, not from inside them. Their shadow falls on the ground and in the haze.
 - Clear air costs nothing.
 
 ## ProceduralSky
