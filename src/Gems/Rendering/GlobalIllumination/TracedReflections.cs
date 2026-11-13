@@ -19,14 +19,6 @@ internal sealed class TracedReflections(AssetManager assets)
 {
     private static readonly string[] _blendNames = ["Reflection light 0", "Reflection light 1"];
 
-    private readonly ShaderEntry _traceShader = PassShaders.GetEntry(
-        assets,
-        "TraceReflections",
-        "TraceReflections"
-    ) with
-    {
-        TypeArguments = [GpuView.GetAtmosphere(assets)],
-    };
     private readonly ShaderEntry _resolveShader = PassShaders.GetEntry(
         assets,
         "TraceReflections",
@@ -34,7 +26,12 @@ internal sealed class TracedReflections(AssetManager assets)
     );
     private readonly ShaderEntry _blendShader = PassShaders.GetEntry(assets, "TraceReflections", "BlendReflections");
 
-    public ImmutableArray<ShaderEntry> Shaders => [_traceShader, _resolveShader, _blendShader];
+    /// <summary>
+    /// The trace's entry, generic over the sky, which the renderer specialises on the frame's sky.
+    /// </summary>
+    public ShaderEntry TraceShader { get; } = PassShaders.GetEntry(assets, "TraceReflections", "TraceReflections");
+
+    public ImmutableArray<ShaderEntry> Shaders => [_resolveShader, _blendShader];
 
     /// <summary>
     /// Asks for the textures at the traced size, the blend's history holding the view as
@@ -83,7 +80,7 @@ internal sealed class TracedReflections(AssetManager assets)
         (int width, int height) = view.TracedSize;
         GpuConstants header = view.Header;
         graph
-            .Compute("Trace reflections", _traceShader, header, RenderStages.Light)
+            .Compute("Trace reflections", TraceShader with { TypeArguments = view.SkyType }, header, RenderStages.Light)
             .Reads(view.World.AsSpan())
             .Reads(view.Gpu.Frame, view.Constants, view.Gpu.Depth, view.Gpu.GBufferNormal, view.Gpu.GBufferSurface)
             .Reads(grid.Probes, grid.Depth)

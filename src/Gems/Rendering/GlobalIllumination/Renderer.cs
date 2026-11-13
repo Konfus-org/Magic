@@ -45,6 +45,11 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
     private readonly ImmutableArray<ShaderEntry> _shaders;
 
     /// <summary>
+    /// The open sky, which the traces are specialised on in a frame without the sky's tables.
+    /// </summary>
+    private readonly ImmutableArray<ShaderTypeArgument> _openSky;
+
+    /// <summary>
     /// Ends once the passes' shaders are built or failed, once a frame with a view has no world as rays see it, or on
     /// a GPU that doesn't trace rays.
     /// </summary>
@@ -66,7 +71,25 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         _probes = new Probes(assets);
         _diffuse = new TracedDiffuse(assets);
         _reflections = new TracedReflections(assets);
-        _shaders = [.. _probes.Shaders, .. _diffuse.Shaders, .. _reflections.Shaders];
+        _openSky = SkyTables.GetOpenSky(assets);
+        _shaders =
+        [
+            .. _probes.Shaders,
+            .. _diffuse.Shaders,
+            .. _reflections.Shaders,
+            _probes.TraceShader with
+            {
+                TypeArguments = _openSky,
+            },
+            _diffuse.TraceShader with
+            {
+                TypeArguments = _openSky,
+            },
+            _reflections.TraceShader with
+            {
+                TypeArguments = _openSky,
+            },
+        ];
 
         // Without rays nothing is traced, so the renderer holds no domain back.
         if (!gpu.Features.HasRayQuery)
@@ -120,7 +143,26 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         }
 
         // The shaders are the GPU provider's to build, the first ask starting each; one that fails holds no domain back.
+        // The traces on the sky's type and on the open sky are both built, as a domain's frames take either.
+        ImmutableArray<ShaderTypeArgument> skyType = input.Sky?.SkyType ?? _openSky;
         GpuState shaders = graph.GetState(_shaders.AsSpan());
+        GpuState skyShaders = graph.GetState(
+            _probes.TraceShader with
+            {
+                TypeArguments = skyType,
+            },
+            _diffuse.TraceShader with
+            {
+                TypeArguments = skyType,
+            },
+            _reflections.TraceShader with
+            {
+                TypeArguments = skyType,
+            }
+        );
+        if (skyShaders != GpuState.Ready && shaders != GpuState.Failed)
+            shaders = skyShaders;
+
         if (shaders != GpuState.Loading)
             _built.TrySetResult();
 
@@ -148,13 +190,16 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         (int Width, int Height) tracedSize = gpu.Scaled(_settings.IndirectScale);
         ((int Width, int Height)? lastTraced, (int Width, int Height)? lastReflected) = _views[graph.View];
         bool hasHistory = lastTraced == tracedSize;
-        ReadOnlySpan<GpuResource> sky = input.Sky is { } tables ? [tables.Transmittance, tables.View] : [];
+        ReadOnlySpan<GpuResource> sky = input.Sky is { Transmittance.IsNone: false } tables
+            ? [tables.Transmittance, tables.View]
+            : [];
         GIView view = new(
             graph,
             gpu,
             constants.Value,
             tracedSize,
-            [.. sky, gpu.LightTable, gpu.Instances, gpu.Vertices, gpu.Indices, gpu.Meshes, traced.HitMaterials]
+            [.. sky, gpu.LightTable, gpu.Instances, gpu.Vertices, gpu.Indices, gpu.Meshes, traced.HitMaterials],
+            SkyTables.GetShading(input.Sky, _openSky)
         );
         Result<(ProbeGridConstants Grid, ProbeUpdateConstants Update)> probes = _probes.Prepare(
             graph,

@@ -52,28 +52,20 @@ public SkyTables GetSkyTables() { return LoadFrameRow<SkyTables>(SkyTablesOffset
 // Whether a sky entity draws the sky: its tables are made.
 public bool HasSky(SkyTables tables) { return tables.transmittance != 0u; }
 
-// PROTO: the open sky's light where no sky entity draws the sky, as the shading draws a missing sky, until the
-// sky's tables are handed on.
+// The open sky's light, which the air and the clouds take also where a sky entity draws the sky, as they are not
+// generic over the sky.
 public float3 GetOpenSkyRadiance(Lights lights) { return lights.skyRadiance.rgb * lights.sunIlluminance.r; }
 
-// The sun's light where it reaches the camera: through the sky's air where a sky entity draws the sky, else as it is.
+// The sun's light where it reaches the camera, through the sky's air.
 public float3 GetSunIlluminance<S : ISky>(Lights lights)
 {
-    SkyTables tables = GetSkyTables();
-    if (!HasSky(tables))
-        return lights.sunIlluminance.rgb;
-
-    return S.GetSunIlluminance(CreateSkyInputs(lights, tables, lights.sunDirection.xyz, false));
+    return S.GetSunIlluminance(CreateSkyInputs(lights, GetSkyTables(), lights.sunDirection.xyz, false));
 }
 
 // The sky along a direction, without the sun's disc, whose light the sun's own rays bring.
 public float3 GetSkyRadiance<S : ISky>(Lights lights, float3 direction)
 {
-    SkyTables tables = GetSkyTables();
-    if (!HasSky(tables))
-        return GetOpenSkyRadiance(lights);
-
-    return S.Evaluate(CreateSkyInputs(lights, tables, direction, false));
+    return S.Evaluate(CreateSkyInputs(lights, GetSkyTables(), direction, false));
 }
 
 // What a sky is handed to answer for a direction from the camera.
@@ -85,6 +77,8 @@ public SkyInputs CreateSkyInputs(Lights lights, SkyTables tables, float3 directi
     sky.hasSunDisc = hasSunDisc;
     sky.sunIlluminance = lights.sunIlluminance.rgb;
     sky.altitude = lights.cameraAltitude;
+    sky.openSkyRadiance = lights.skyRadiance.rgb;
+    sky.screenY = 0.5;
     sky.transmittanceLut = tables.transmittance;
     sky.skyViewLut = tables.view;
     sky.sampler = lights.lutSampler;

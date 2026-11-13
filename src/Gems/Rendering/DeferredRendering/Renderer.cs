@@ -139,9 +139,15 @@ public sealed class Renderer
     private readonly ShaderEntry _showShader;
 
     /// <summary>
-    /// Every shader the shading's passes run, which the GPU provider builds before the step draws.
+    /// The open sky, which the shading is specialised on in a frame without the sky's tables.
     /// </summary>
-    private readonly ImmutableArray<ShaderEntry> _shadingShaders;
+    private readonly ImmutableArray<ShaderTypeArgument> _openSky;
+
+    /// <summary>
+    /// The sky's shader type that the shading was last handed, or the open sky before it was. A loading domain waits
+    /// for the shading on it and on the open sky. Render thread.
+    /// </summary>
+    private ImmutableArray<ShaderTypeArgument> _skyType;
 
     private readonly FailureBanner _banner;
 
@@ -229,18 +235,12 @@ public sealed class Renderer
 
         _gpu = gpu;
         _events = events;
-        ImmutableArray<ShaderTypeArgument> atmosphere = [GpuView.GetAtmosphere(assets)];
-        _shadeShader = PassShaders.GetEntry(assets, "ShadeSurfaces", "ShadeSurfaces") with
-        {
-            TypeArguments = atmosphere,
-        };
-        _translucentShader = PassShaders.GetEntry(assets, "ShadeTranslucent", "ShadeTranslucent") with
-        {
-            TypeArguments = atmosphere,
-        };
+        _shadeShader = PassShaders.GetEntry(assets, "ShadeSurfaces", "ShadeSurfaces");
+        _translucentShader = PassShaders.GetEntry(assets, "ShadeTranslucent", "ShadeTranslucent");
         _lightViewShader = PassShaders.GetEntry(assets, "ShowSurface", "ShowLight");
         _showShader = PassShaders.GetEntry(assets, "ShowSurface", "ShowSurface");
-        _shadingShaders = [_shadeShader, _translucentShader, _lightViewShader, _showShader];
+        _openSky = SkyTables.GetOpenSky(assets);
+        _skyType = _openSky;
     }
 
     public void Dispose()
@@ -308,13 +308,33 @@ public sealed class Renderer
 
         // The loading domain shows once the models, materials and effects it waits for are on the GPU, or failed: a
         // model drawn as the failure cube, which is then waited for too, or, for an effect, left out; and once the
-        // shading's shaders are built, or failed. Its models are asked for here, as the pools only take
-        // them once they are made; an ask for one asked for already does nothing.
+        // shading's shaders are built, or failed, on the sky's type and on the open sky, as its frames take either. Its
+        // models are asked for here, as the pools only take them once they are made; an ask for one asked for already
+        // does nothing.
         if (_preparing is { } preparing)
         {
             bool isPrepared =
                 !_effects.IsLoading(graph, preparing.Effects)
-                && graph.GetState(_shadingShaders.AsSpan()) != GpuState.Loading;
+                && !graph.IsAnyLoading(
+                    _shadeShader with
+                    {
+                        TypeArguments = _skyType,
+                    },
+                    _translucentShader with
+                    {
+                        TypeArguments = _skyType,
+                    },
+                    _shadeShader with
+                    {
+                        TypeArguments = _openSky,
+                    },
+                    _translucentShader with
+                    {
+                        TypeArguments = _openSky,
+                    },
+                    _lightViewShader,
+                    _showShader
+                );
             foreach (Handle<Model> model in preparing.Models)
             {
                 _resources.Get(model);
@@ -666,9 +686,14 @@ public sealed class Renderer
     /// </summary>
     public FinalImage? Render(in Frame frame, RenderGraph graph, in ShadingInput input)
     {
-        // The shaders are the GPU provider's to build, the first ask starting each; while one failed, the shading
-        // draws nothing, and the banner tells it.
-        GpuState shaders = graph.GetState(_shadingShaders.AsSpan());
+        // The shading is specialised on the sky's type where it made its tables, else on the open sky. The shaders are
+        // the GPU provider's to build, the first ask starting each; while one failed, the shading draws nothing, and the
+        // banner tells it.
+        _skyType = input.Sky?.SkyType ?? _openSky;
+        ImmutableArray<ShaderTypeArgument> sky = SkyTables.GetShading(input.Sky, _openSky);
+        ShaderEntry shadeShader = _shadeShader with { TypeArguments = sky };
+        ShaderEntry translucentShader = _translucentShader with { TypeArguments = sky };
+        GpuState shaders = graph.GetState(shadeShader, translucentShader, _lightViewShader, _showShader);
         if (shaders == GpuState.Failed)
             graph.Fail(RenderFailure.Shader, "Surfaces are not shaded", "a shader of the shading was not built.");
 
@@ -682,7 +707,9 @@ public sealed class Renderer
         ReadOnlySpan<GpuResource> indirect = input.Light is { } light
             ? [light.Diffuse, light.Reflections, light.Probes, light.ProbeDepth]
             : [];
-        ReadOnlySpan<GpuResource> sky = input.Sky is { } tables ? [tables.Transmittance, tables.View] : [];
+        ReadOnlySpan<GpuResource> tables = input.Sky is { Transmittance.IsNone: false } made
+            ? [made.Transmittance, made.View]
+            : [];
 
         // Every pixel's surface shaded from the sky's tables, its tile's lights, the shadows where there are any and
         // the indirect light, or the sky where nothing traced it, or the failure of the sky or its clouds where they
@@ -690,11 +717,11 @@ public sealed class Renderer
         ComputePass shade = graph
             .Compute(
                 "Shade surfaces",
-                _shadeShader,
+                shadeShader,
                 new GpuConstants(gpu.Frame.Id, GetSkyFailures(graph.Failures)),
                 RenderStages.Shade
             )
-            .Reads(sky)
+            .Reads(tables)
             .Reads(
                 gpu.Frame,
                 gpu.LightTable,
@@ -720,8 +747,8 @@ public sealed class Renderer
         if (!gpu.GlassDepth.IsNone || input.Air is not null)
         {
             ComputePass translucent = graph
-                .Compute("Shade translucent", _translucentShader, new GpuConstants(gpu.Frame.Id), RenderStages.Shade)
-                .Reads(sky)
+                .Compute("Shade translucent", translucentShader, new GpuConstants(gpu.Frame.Id), RenderStages.Shade)
+                .Reads(tables)
                 .Reads(gpu.Frame, gpu.Depth, gpu.GlassDepth, gpu.GlassBase, gpu.GlassNormal, gpu.GlassSurface)
                 .Reads(indirect);
             if (input.Traced is { } traced)

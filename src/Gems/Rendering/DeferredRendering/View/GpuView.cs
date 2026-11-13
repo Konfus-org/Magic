@@ -159,12 +159,6 @@ public readonly record struct GpuView
     public required int PreparedDomains { get; init; }
 
     /// <summary>
-    /// Gets the atmosphere, for an entry generic over the sky it shades with.
-    /// </summary>
-    public static ShaderTypeArgument GetAtmosphere(AssetManager assets) =>
-        new(assets.Find<Shader>("Shaders/Sky/Atmosphere.slang"), "Atmosphere");
-
-    /// <summary>
     /// Gets the size of a pass drawn at a fraction of the picture: the view's size times <paramref name="scale"/>.
     /// </summary>
     /// <remarks>

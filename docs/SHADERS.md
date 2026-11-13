@@ -16,7 +16,7 @@ to the library.
 - `Surface/` has the data that a material gets for a pixel, and the data that it gives back.
 - `Material/` has the material contract, `IMaterial`, and the materials of each project: `Standard`, and `Glass`,
   which is translucent.
-- `Sky/` has the sky contract, `ISky`.
+- `Sky/` has the sky contract, `ISky`, and `OpenSky`, the sky of a frame that has no sky tables.
 - `Post/` has the pixel effect contract, `IPixelEffect`, and the post effects of the engine.
 
 The tables and techniques of a renderer are in the `Resources/Shaders/` folder of its gem ([Rendering](RENDERING.md)).
@@ -30,6 +30,9 @@ To add a material, a sky or a post effect to a game:
 
 1. Implement the contract in a module of the game.
 2. Name the module in the asset that uses it.
+
+A sky step hands on its type with its tables. A pass that is generic over `ISky` uses that type where there are
+tables, and `OpenSky` where there are none. It has the two built before a domain shows.
 
 ## Post effects
 

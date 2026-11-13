@@ -66,10 +66,10 @@ float3 ShowSkyFailure(bool isWeather, uint2 pixel, float timeSec)
 
 // The light a surface at a pixel reflects of what reaches it indirectly. The diffuse is what a white diffuse surface
 // reflects, its irradiance over pi: the traced light where it was traced, which sees what shades and bounces the light
-// near the surface and the probes' beyond, else the open sky's over its hemisphere. The specular is the traced
-// reflections as far as they cover the pixel, where the surface is smooth enough for them. Elsewhere it is the sky
-// along the mirror direction, giving way to the diffuse as the surface roughens. Where the diffuse is traced it is the
-// diffuse alone, so a closed room reflects none of the sky.
+// near the surface and the probes' beyond, else the sky's over its hemisphere. The specular is the traced reflections
+// as far as they cover the pixel, where the surface is smooth enough for them. Elsewhere, where a sky entity draws the
+// sky, it is the sky along the mirror direction, giving way to the diffuse as the surface roughens. Where the diffuse
+// is traced, or the sky is the open sky, it is the diffuse alone, so a closed room reflects none of the sky.
 float3 ShadeIndirectLight<S : ISky>(
     FrameConstants frame,
     Lights lights,
@@ -87,10 +87,8 @@ float3 ShadeIndirectLight<S : ISky>(
     float3 diffuse;
     if (isTraced)
         diffuse = SampleIndirectDiffuse(frame, indirect.diffuse, pixel, relative, normal);
-    else if (HasSky(tables))
-        diffuse = S.GetAmbient(CreateSkyInputs(lights, tables, normal, false), normal) * InvPi;
     else
-        diffuse = lights.sunIlluminance.rgb * 0.1 * (0.5 + 0.5 * normal.y) * InvPi;
+        diffuse = S.GetAmbient(CreateSkyInputs(lights, tables, normal, false), normal) * InvPi;
 
     float3 specular = diffuse;
     if (!isTraced && HasSky(tables))
@@ -129,11 +127,9 @@ void ShadeSurfaces<S : ISky>(uint3 thread : SV_DispatchThreadID)
     // Nothing drawn here leaves the depth as cleared, at the far plane's 0: the sky shows.
     if (depth == 0.0)
     {
-        SkyTables tables = GetSkyTables();
-        float3 sky = HasSky(tables)
-            ? S.Evaluate(CreateSkyInputs(lights, tables, -view, true))
-            : GetOpenSkyRadiance(lights) * lerp(0.6, 1.4, 1.0 - uv.y);
-        float3 color = ApplyClouds(sky, -view);
+        SkyInputs seen = CreateSkyInputs(lights, GetSkyTables(), -view, true);
+        seen.screenY = uv.y;
+        float3 color = ApplyClouds(S.Evaluate(seen), -view);
         uint failed = GetPassHeader().y;
         bool isWeather = (failed & WeatherFailed) != 0u && -view.y >= CloudBand.x && -view.y <= CloudBand.y;
         if (isWeather || (failed & SkyFailed) != 0u)
