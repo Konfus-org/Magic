@@ -2,29 +2,18 @@ using System.Collections.Immutable;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Magic.Assets;
 
-namespace Magic.DeferredRendering.World;
+namespace Magic.Graphics;
 
 /// <summary>
-/// Values packed as <c>Core/Pack.slang</c> unpacks them, the CPU side of the same bits, and read back from the cache's
-/// bytes.
+/// Packs values into the words that shaders read, as <c>Core/Pack.slang</c> unpacks them, and reads them back from a
+/// cache's bytes.
 /// </summary>
-public static class Packing
+/// <remarks>
+/// It holds no state, and allocates only in <see cref="Read{T}"/>.
+/// </remarks>
+public static class GpuPacker
 {
-    /// <summary>
-    /// Encodes a model's vertex as the GPU reads it.
-    /// </summary>
-    public static GpuVertex EncodeVertex(in Vertex vertex) =>
-        new()
-        {
-            Position = vertex.Position,
-            Normal = EncodeUnitVector(vertex.Normal),
-            Tangent = EncodeUnitVector(new Vector3(vertex.Tangent.X, vertex.Tangent.Y, vertex.Tangent.Z)),
-            TangentSign = vertex.Tangent.W < 0 ? -1 : 1,
-            Uv = vertex.Uv,
-        };
-
     /// <summary>
     /// Reads the first <paramref name="count"/> values of <paramref name="bytes"/>, in native byte order, and moves
     /// <paramref name="bytes"/> past them.

@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.Debugging;
 using Magic.DeferredRendering.World;
+using Magic.Graphics;
 using static Magic.ClusteredGeometry.meshoptimizer;
 
 namespace Magic.ClusteredGeometry;
@@ -58,7 +59,7 @@ internal static unsafe class ClusterBuilder
             firstVertices.Add((uint)vertices.Count);
             foreach (Vertex vertex in mesh.Vertices.Span)
             {
-                vertices.Add(Packing.EncodeVertex(vertex));
+                vertices.Add(GpuVertex.Encode(vertex));
             }
         }
 
@@ -504,8 +505,8 @@ internal static unsafe class ClusterBuilder
                         DetailRadius = bounds.radius,
                         Error = error,
                         TriangleCount = meshlet.triangle_count,
-                        ConeAxis = Packing.EncodeUnitVector(coneAxis),
-                        ConeCutoff = Packing.EncodeSnorm16(bounds.cone_cutoff),
+                        ConeAxis = GpuPacker.EncodeUnitVector(coneAxis),
+                        ConeCutoff = GpuPacker.EncodeSnorm16(bounds.cone_cutoff),
                         MaterialSlot = (uint)materialSlot,
                     },
                 }
@@ -585,7 +586,7 @@ internal static unsafe class ClusterBuilder
                     vertex.Normal = Vector3.Normalize(groups[key.group].Sum);
 
                 pool[corner] = (uint)vertices.Count;
-                vertices.Add(Packing.EncodeVertex(vertex));
+                vertices.Add(GpuVertex.Encode(vertex));
                 poolOf[key] = pool[corner];
             }
         }
