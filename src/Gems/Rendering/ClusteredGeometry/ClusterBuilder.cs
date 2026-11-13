@@ -70,7 +70,7 @@ internal static unsafe class ClusterBuilder
             BuildMesh(model.Meshes[i], firstVertices[i], vertices, indices, clusters);
         }
 
-        // The box around the model, which its impostor's quad is fitted to, and the sphere around it: its centre the
+        // The box around the model, which its impostor's quad stays inside, and the sphere around it: its centre the
         // box's middle, 0 for a model with no vertices, its radius the farthest vertex from there.
         Vector3 boundsMin = new(float.MaxValue);
         Vector3 boundsMax = new(float.MinValue);
@@ -113,7 +113,13 @@ internal static unsafe class ClusterBuilder
         }
 
         // Every model stands far away as an impostor once it is a few pixels across.
-        (Half[] Surface, Half[] Uv) impostor = ImpostorBuilder.Bake(vertices, indices, clusters, center, radius);
+        (Half[] Surface, Half[] Uv, uint[] ViewBounds) impostor = ImpostorBuilder.Bake(
+            vertices,
+            indices,
+            clusters,
+            center,
+            radius
+        );
 
         return new ModelClusters
         {
@@ -123,6 +129,7 @@ internal static unsafe class ClusterBuilder
             Clusters = [.. clusters],
             Impostor = [.. impostor.Surface],
             ImpostorUv = [.. impostor.Uv],
+            ImpostorViewBounds = [.. impostor.ViewBounds],
             BoundsMin = boundsMin,
             BoundsMax = boundsMax,
         };

@@ -26,9 +26,10 @@ internal static class ImpostorBuilder
     public const int Size = Views * Tile;
 
     /// <summary>
-    /// Bakes the atlas as RGBA16F halves, and the texture coordinates of the same texels as RG16F halves, row by row.
+    /// Bakes the atlas as RGBA16F halves, the texture coordinates of the same texels as RG16F halves, row by row, and
+    /// each view's silhouette bounds as <see cref="ModelClusters.ImpostorViewBounds"/> says.
     /// </summary>
-    public static (Half[] Surface, Half[] Uv) Bake(
+    public static (Half[] Surface, Half[] Uv, uint[] ViewBounds) Bake(
         IReadOnlyList<GpuVertex> vertices,
         IReadOnlyList<uint> indices,
         IReadOnlyList<GpuCluster> clusters,
@@ -38,13 +39,14 @@ internal static class ImpostorBuilder
     {
         Half[] texels = new Half[Size * Size * 4];
         Half[] uvs = new Half[Size * Size * 2];
+        uint[] viewBounds = new uint[Views * Views];
 
         // The cut the GPU's cull makes when the error it may show is a texel of a view: a cluster whose own error is
         // under it and whose parent group's is over it.
         float texelError = 2 * radius / Tile;
         Parallel.For(0, Views * Views, view => BakeView(view % Views, view / Views));
 
-        return (texels, uvs);
+        return (texels, uvs, viewBounds);
 
         void BakeView(int viewX, int viewY)
         {
@@ -67,6 +69,8 @@ internal static class ImpostorBuilder
                     );
                 }
             }
+
+            viewBounds[(viewY * Views) + viewX] = GetBounds(depth);
 
             void DrawTriangle(GpuVertex a, GpuVertex b, GpuVertex c, uint slot)
             {
@@ -130,6 +134,32 @@ internal static class ImpostorBuilder
                 return new Vector3((s + 1) * 0.5f * Tile, (1 - t) * 0.5f * Tile, (radius - along) / (2 * radius));
             }
         }
+    }
+
+    /// <summary>
+    /// Gets the texels that a view saw something at, as <see cref="ModelClusters.ImpostorViewBounds"/> packs them.
+    /// </summary>
+    private static uint GetBounds(float[] depth)
+    {
+        int minX = Tile;
+        int minY = Tile;
+        int endX = 0;
+        int endY = 0;
+        for (int y = 0; y < Tile; y++)
+        {
+            for (int x = 0; x < Tile; x++)
+            {
+                if (depth[(y * Tile) + x] == float.MaxValue)
+                    continue;
+
+                minX = Math.Min(minX, x);
+                minY = Math.Min(minY, y);
+                endX = Math.Max(endX, x + 1);
+                endY = Math.Max(endY, y + 1);
+            }
+        }
+
+        return endX == 0 ? 0 : (uint)(minX | (minY << 8) | (endX << 16) | (endY << 24));
     }
 
     /// <summary>

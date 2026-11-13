@@ -100,7 +100,9 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
         Result<GpuBuffer> table = graph.Buffer(
             new("Cluster model table", (long)_rows.Capacity * GpuClusterModel.Bytes)
         );
-        Result<GpuBuffer> impostors = graph.Buffer(new("Impostor table", (long)ImpostorCapacity * GpuImpostor.Bytes));
+        Result<GpuBuffer> impostors = graph.Buffer(
+            new("Impostor table", (long)ImpostorCapacity * GpuImpostor.RowBytes)
+        );
         if (Result.FindFailure(table, impostors) is { Ok: false } failedTable)
             return Result.Failure(failedTable.Error);
 
@@ -365,7 +367,11 @@ internal sealed class ClusterResources(ClusterPreprocessor clusters, AssetManage
             BoundsMax = made.BoundsMax,
             UvAtlas = uvAtlas.Value.Id,
         };
-        if (graph.Upload(impostors, [impostor], (ulong)row.ImpostorRow * GpuImpostor.Bytes))
+        ulong rowOffset = (ulong)row.ImpostorRow * GpuImpostor.RowBytes;
+        if (
+            graph.Upload(impostors, [impostor], rowOffset)
+            && graph.Upload(impostors, made.ImpostorViewBounds.AsSpan(), rowOffset + GpuImpostor.Bytes)
+        )
             return row;
 
         _impostorRows.Free((int)row.ImpostorRow, 1);
