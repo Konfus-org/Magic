@@ -99,6 +99,11 @@ public sealed class Renderer
     private const int AutoRenderHeight = 1080;
 
     /// <summary>
+    /// Set in the output pass's view when no effects finished the picture, the twin of <c>ShowSurface.slang</c>'s.
+    /// </summary>
+    private const uint NoEffects = 0x80000000u;
+
+    /// <summary>
     /// How the world is drawn and what the renderer shows, which the debug window also sets on the game thread. Both
     /// steps read it on the render thread.
     /// </summary>
@@ -750,14 +755,14 @@ public sealed class Renderer
             effects.Record(graph, gpu, frame.Index);
 
         // The output drawn as the debug view asks, a Depth view black from its far distance, and the picture's middle
-        // tones shown at the gamma.
+        // tones shown at the gamma. A picture that no effects finished is exposed and tonemapped first.
         graph
             .Compute(
                 "Show surface",
                 _showShader,
                 new GpuConstants(
                     gpu.Frame.Id,
-                    (uint)renderView,
+                    (uint)renderView | (input.Effects is null ? NoEffects : 0),
                     BitConverter.SingleToUInt32Bits(_settings.DepthViewFar),
                     BitConverter.SingleToUInt32Bits(Math.Clamp(_settings.Gamma, 0.5f, 2f))
                 ),
