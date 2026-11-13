@@ -1,4 +1,4 @@
-﻿namespace Magic.Ecs;
+namespace Magic.Ecs;
 
 /// <summary>
 /// The entity world: the entities and the components that they have.

@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -38,11 +38,6 @@ public sealed class Ecs : IEcs, IDisposable
     /// for a chunk never written.
     /// </summary>
     private readonly Dictionary<Archetype, List<long>> _written = [];
-
-    /// <summary>
-    /// The chunks of the parallel run that is open, gathered on the world's thread before its workers start.
-    /// </summary>
-    private readonly List<Chunk> _parallelChunks = [];
 
     /// <summary>
     /// How many query loops are open: while any is, an entity's components can't change, as that would move it out
@@ -292,12 +287,19 @@ public sealed class Ecs : IEcs, IDisposable
         where TChunk : allows ref struct
     {
         ThrowIfNotWorldThread();
-        _parallelChunks.Clear();
+        if (_openLoops != 0)
+        {
+            throw new InvalidOperationException(
+                "A parallel run cannot start while a query's loop is open: run it once the loop ends."
+            );
+        }
+
+        List<Chunk> chunks = [];
         foreach (Archetype archetype in _world.Query(in description).GetArchetypeIterator())
         {
             for (int index = 0; index < archetype.ChunkCount; index++)
             {
-                _parallelChunks.Add(archetype.GetChunk(index));
+                chunks.Add(archetype.GetChunk(index));
             }
         }
 
@@ -308,7 +310,7 @@ public sealed class Ecs : IEcs, IDisposable
         _openLoops++;
         try
         {
-            Parallel.For(0, _parallelChunks.Count, index => run(in held, cut(_parallelChunks[index])));
+            Parallel.For(0, chunks.Count, index => run(in held, cut(chunks[index])));
         }
         finally
         {

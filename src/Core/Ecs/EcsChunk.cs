@@ -1,4 +1,4 @@
-﻿namespace Magic.Ecs;
+namespace Magic.Ecs;
 
 /// <summary>
 /// A function over one chunk, with the state its caller gives it.
