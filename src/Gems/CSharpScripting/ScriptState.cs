@@ -15,10 +15,10 @@ namespace Magic.CSharpScripting;
 /// </summary>
 /// <remarks>
 /// A field that is no data of the copy's own is left out, as a copy gets it again when it is made: its entity, a
-/// service of a gem, a delegate, a task or a disposable. A member that JSON cannot hold, or that the class no longer
-/// has, goes to the log one time. Game thread.
+/// thing that its constructor is handed, a delegate, a task or a disposable. A member that JSON cannot hold, or that
+/// the class no longer has, goes to the log one time. Game thread.
 /// </remarks>
-internal sealed class ScriptState(IServiceProvider services)
+internal sealed class ScriptState
 {
     private const BindingFlags AnyField = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
 
@@ -43,9 +43,10 @@ internal sealed class ScriptState(IServiceProvider services)
             Read(state, type, GetKey(value), value.PropertyType, value.GetValue(script));
         }
 
+        Type[] handed = GetHandedTypes(type);
         foreach (FieldInfo field in type.GetFields(AnyField))
         {
-            if (!backing.Contains(field.Name) && !IsHanded(field.FieldType))
+            if (!backing.Contains(field.Name) && !IsHanded(field.FieldType, handed))
                 Read(state, type, GetFieldName(field), field.FieldType, field.GetValue(script));
         }
 
@@ -53,32 +54,28 @@ internal sealed class ScriptState(IServiceProvider services)
     }
 
     /// <summary>
-    /// Sets each value of <paramref name="values"/> on the member of <paramref name="script"/> of that name: the
-    /// public settable property, whatever the case of its first letter, else the field.
+    /// Sets each value of <paramref name="values"/>, which a prefab gives, on the public settable property of
+    /// <paramref name="script"/> of that name, whatever the case of its first letter.
     /// </summary>
-    /// <remarks>
-    /// A value that the script has no such member for, or that the member's type cannot hold, goes to the log and is
-    /// left out, so the rest of the script still runs.
-    /// </remarks>
-    public void Write(ScriptValues values, IScript script, Entity entity)
+    public void SetValues(ScriptValues values, IScript script, Entity entity)
     {
         Type type = script.GetType();
         foreach ((string name, JsonElement value) in values.All)
         {
-            if (FindValue(type, name) is { } property)
-            {
-                if (TryRead(type, name, value, property.PropertyType, out object? held))
-                    property.SetValue(script, held);
-            }
-            else if (FindField(type, name) is { } field)
-            {
-                if (TryRead(type, name, value, field.FieldType, out object? held))
-                    field.SetValue(script, held);
-            }
-            else
-            {
-                LogOnce(type, name, $"Script {type.Name} on {entity} has no settable {name}, so {value} is left out.");
-            }
+            Set(script, entity, name, value, FindValue(type, name));
+        }
+    }
+
+    /// <summary>
+    /// Sets each member of <paramref name="state"/>, which a save holds, on <paramref name="script"/>: the public
+    /// settable property of that name, else the field of that name, which only a save sets.
+    /// </summary>
+    public void Restore(ScriptValues state, IScript script, Entity entity)
+    {
+        Type type = script.GetType();
+        foreach ((string name, JsonElement value) in state.All)
+        {
+            Set(script, entity, name, value, (MemberInfo?)FindValue(type, name) ?? FindField(type, name));
         }
     }
 
@@ -136,15 +133,56 @@ internal sealed class ScriptState(IServiceProvider services)
     }
 
     /// <summary>
-    /// Whether a field of <paramref name="type"/> is no data of the copy's own, so a save leaves it out: its entity, a
-    /// service that a gem gives, a delegate, a task or a disposable, which a copy gets again when it is made.
+    /// The types that a copy of <paramref name="type"/> is handed when it is made: the parameters of the one public
+    /// constructor that a script has.
     /// </summary>
-    private bool IsHanded(Type type) =>
+    private static Type[] GetHandedTypes(Type type)
+    {
+        ConstructorInfo[] constructors = type.GetConstructors();
+
+        return constructors.Length == 1
+            ? Array.ConvertAll(constructors[0].GetParameters(), parameter => parameter.ParameterType)
+            : [];
+    }
+
+    /// <summary>
+    /// Whether a field of <paramref name="type"/> is no data of the copy's own, so a save leaves it out: its entity, a
+    /// delegate, a task, a disposable, or one of the <paramref name="handed"/> types, which a copy gets again when it
+    /// is made.
+    /// </summary>
+    private static bool IsHanded(Type type, Type[] handed) =>
         type == typeof(Entity)
         || typeof(Delegate).IsAssignableFrom(type)
         || typeof(Task).IsAssignableFrom(type)
         || typeof(IDisposable).IsAssignableFrom(type)
-        || (!type.IsValueType && services.GetService(type) is not null);
+        || (!type.IsValueType && Array.Exists(handed, given => type.IsAssignableFrom(given)));
+
+    /// <summary>
+    /// Sets <paramref name="value"/>, which a file names <paramref name="name"/>, on <paramref name="member"/> of
+    /// <paramref name="script"/>.
+    /// </summary>
+    /// <remarks>
+    /// A value that the script has no member of that name for, or that the member's type cannot hold, goes to the log
+    /// and is left out, so the rest of the script still runs.
+    /// </remarks>
+    private void Set(IScript script, Entity entity, string name, JsonElement value, MemberInfo? member)
+    {
+        Type type = script.GetType();
+        switch (member)
+        {
+            case PropertyInfo property:
+                if (TryRead(type, name, value, property.PropertyType, out object? held))
+                    property.SetValue(script, held);
+                break;
+            case FieldInfo field:
+                if (TryRead(type, name, value, field.FieldType, out object? kept))
+                    field.SetValue(script, kept);
+                break;
+            default:
+                LogOnce(type, name, $"Script {type.Name} on {entity} has no settable {name}, so {value} is left out.");
+                break;
+        }
+    }
 
     /// <summary>
     /// Writes <paramref name="value"/>, the member <paramref name="name"/> of <paramref name="type"/>, into

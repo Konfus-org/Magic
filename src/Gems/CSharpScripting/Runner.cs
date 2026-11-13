@@ -32,7 +32,7 @@ public sealed class Runner(World world, AssetManager assets, IServiceProvider se
     /// <summary>
     /// The state of a copy as JSON, which a save keeps and a copy from a save takes up.
     /// </summary>
-    private readonly ScriptState _state = new(services);
+    private readonly ScriptState _state = new();
 
     /// <summary>
     /// The copies that run, by their entity and script, in the order that they started.
@@ -217,7 +217,8 @@ public sealed class Runner(World world, AssetManager assets, IServiceProvider se
     /// <remarks>
     /// Its one public constructor gets the entity for an <see cref="Entity"/> parameter, a service for each other
     /// parameter, and a parameter's default when no service is there. A slot that a save marked started holds the state
-    /// of the copy it took, so this copy takes that state up and goes on from it, without a start of its own.
+    /// of the copy it took, so this copy takes that state up and <see cref="IScript.Resume"/> remakes what the save
+    /// does not hold, in place of <see cref="IScript.Start"/>.
     /// </remarks>
     [SuppressMessage(
         "Design",
@@ -252,9 +253,16 @@ public sealed class Runner(World world, AssetManager assets, IServiceProvider se
             if (constructors[0].Invoke(arguments) is not IScript script)
                 return Result.Failure("it is not an IScript.");
 
-            _state.Write(slot.Values, script, entity);
-            if (!slot.Started)
+            if (slot.Started)
+            {
+                _state.Restore(slot.Values, script, entity);
+                script.Resume();
+            }
+            else
+            {
+                _state.SetValues(slot.Values, script, entity);
                 script.Start();
+            }
 
             return Result.Success(script);
         }
