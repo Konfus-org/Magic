@@ -5,6 +5,7 @@ using Magic.DeferredRendering.View;
 using Magic.Ecs;
 using Magic.Graphics;
 using Magic.Projects;
+using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
 
@@ -49,12 +50,15 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
 
     /// <summary>
     /// The wait of the world that arrived for the resolved picture to settle, which the frame that blends enough frames
-    /// or upscales nothing completes. Set on the game thread, completed on the render thread.
+    /// or upscales nothing completes. Render thread.
     /// </summary>
     private TaskCompletionSource? _settling;
 
-    internal Renderer(AssetManager assets)
+    private readonly Threads _threads;
+
+    internal Renderer(AssetManager assets, Threads threads)
     {
+        _threads = threads;
         _shader = PassShaders.GetEntry(assets, "TaaUpscaling", "UpscalePicture");
         _upscaling = new Upscaling(Record);
     }
@@ -84,12 +88,12 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
     /// Returns once the resolved picture of a view blended enough frames of the world that arrived, or at once while it
     /// upscales nothing.
     /// </summary>
-    public Task OnDomainArrivedAsync(CancellationToken cancel)
+    public async Task OnDomainArrivedAsync(CancellationToken cancel)
     {
+        await _threads.Enter(EngineThread.Render);
         TaskCompletionSource settling = new(TaskCreationOptions.RunContinuationsAsynchronously);
         _settling = settling;
-
-        return settling.Task.WaitAsync(cancel);
+        await settling.Task.WaitAsync(cancel).ConfigureAwait(false);
     }
 
     private static TextureDescription GetResolved(string name, int width, int height) =>

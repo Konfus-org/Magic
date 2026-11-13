@@ -89,12 +89,15 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
 
     /// <summary>
     /// The wait of the world that arrived for the air to settle, which the frame that blends enough frames or fills no
-    /// air completes. Set on the game thread, completed on the render thread.
+    /// air completes. Render thread.
     /// </summary>
     private TaskCompletionSource? _settling;
 
-    internal Renderer(AssetManager assets, IEcs ecs)
+    private readonly Threads _threads;
+
+    internal Renderer(AssetManager assets, IEcs ecs, Threads threads)
     {
+        _threads = threads;
         _ecs = ecs;
         _scatterShader = PassShaders.GetEntry(assets, "FillAir", "ScatterAir");
         _integrateShader = PassShaders.GetEntry(assets, "FillAir", "IntegrateAir");
@@ -251,12 +254,12 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
     /// Returns once the volume of a view blended enough frames of the world that arrived, or at once while it fills no
     /// air.
     /// </summary>
-    public Task OnDomainArrivedAsync(CancellationToken cancel)
+    public async Task OnDomainArrivedAsync(CancellationToken cancel)
     {
+        await _threads.Enter(EngineThread.Render);
         TaskCompletionSource settling = new(TaskCreationOptions.RunContinuationsAsynchronously);
         _settling = settling;
-
-        return settling.Task.WaitAsync(cancel);
+        await settling.Task.WaitAsync(cancel).ConfigureAwait(false);
     }
 
     /// <summary>

@@ -7,6 +7,7 @@ using Magic.DeferredRendering.View;
 using Magic.Ecs;
 using Magic.Graphics;
 using Magic.Projects;
+using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
 
@@ -76,12 +77,15 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
 
     /// <summary>
     /// The wait of the world that arrived for the shadows to settle, which the frame that blends enough frames or
-    /// traces none completes. Set on the game thread, completed on the render thread.
+    /// traces none completes. Render thread.
     /// </summary>
     private TaskCompletionSource? _settling;
 
-    internal Renderer(TracedShadowsSettings settings, AssetManager assets)
+    private readonly Threads _threads;
+
+    internal Renderer(TracedShadowsSettings settings, AssetManager assets, Threads threads)
     {
+        _threads = threads;
         _settings = settings;
         _traceShader = PassShaders.GetEntry(assets, "TraceShadows", "TraceShadows");
         _classifyShader = PassShaders.GetEntry(assets, "DenoiseShadows", "ClassifyShadows");
@@ -334,12 +338,12 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
     /// Returns once the shadows of a view blended enough frames of the world that arrived, or at once while it traces
     /// none.
     /// </summary>
-    public Task OnDomainArrivedAsync(CancellationToken cancel)
+    public async Task OnDomainArrivedAsync(CancellationToken cancel)
     {
+        await _threads.Enter(EngineThread.Render);
         TaskCompletionSource settling = new(TaskCreationOptions.RunContinuationsAsynchronously);
         _settling = settling;
-
-        return settling.Task.WaitAsync(cancel);
+        await settling.Task.WaitAsync(cancel).ConfigureAwait(false);
     }
 }
 
