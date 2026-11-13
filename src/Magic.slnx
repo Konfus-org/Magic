@@ -1,4 +1,9 @@
 <Solution>
+  <Configurations>
+    <BuildType Name="Debug" />
+    <BuildType Name="Optimize" />
+    <BuildType Name="Release" />
+  </Configurations>
   <Folder Name="/Core/">
     <File Path="../README.md" />
     <Project Path="Core/Magic.Core.csproj" />
