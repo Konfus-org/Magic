@@ -74,7 +74,8 @@ public readonly record struct ShadingInput(
 /// effects, a debug view where one is asked for, and the output into the view's target and any screenshot asked for.
 /// </para>
 /// <para>
-/// The banner's step draws the frame's render failures over the top of the window, even when no view was made.
+/// The banner's step draws the cover of a load over the window, then the frame's render failures over the top of
+/// it, even when no view was made.
 /// </para>
 /// <para>
 /// Where nothing made the world as rays see it, the shadows, the indirect light or the air, their rows of the view's
@@ -154,6 +155,13 @@ public sealed class Renderer
 
     private readonly FailureBanner _banner;
 
+    private readonly Cover _cover;
+
+    /// <summary>
+    /// Whose <see cref="Worlds.World.CoverOpacity"/> the cover draws at, read on the render thread.
+    /// </summary>
+    private readonly Worlds.World _world;
+
     private readonly IGraphicsApi _gpu;
 
     private readonly EventCoordinator _events;
@@ -210,12 +218,14 @@ public sealed class Renderer
         IGraphicsApi gpu,
         AssetManager assets,
         IEcs ecs,
+        Worlds.World world,
         Threads threads,
         EventCoordinator events
     )
     {
         _settings = settings;
         _ecs = ecs;
+        _world = world;
         _assets = assets;
         _threads = threads;
         ModelPreprocessor models = new();
@@ -231,6 +241,7 @@ public sealed class Renderer
         _instances = new InstanceTable(assets, _resources);
         _lightTiles = new LightTiles(assets);
         _banner = new FailureBanner(assets);
+        _cover = new Cover(assets);
         _viewShaders = _lightTiles.Shaders;
 
         _gpu = gpu;
@@ -743,8 +754,10 @@ public sealed class Renderer
                 .DispatchOver(gpu.Width, gpu.Height);
         }
 
+        // Behind the full cover, the effects start their history anew each frame, so the exposure takes each frame's
+        // value at once while the world settles, and adapts from the settled picture once the cover fades.
         if (input.Effects is { } effects)
-            effects.Record(graph, gpu, frame.Index);
+            effects.Record(graph, _world.CoverOpacity >= 1 ? gpu with { HasHistory = false } : gpu, frame.Index);
 
         // The output drawn as the debug view asks, a Depth view black from its far distance, and the picture's middle
         // tones shown at the gamma. A picture that no effects finished is tonemapped first.
@@ -847,6 +860,7 @@ public sealed class Renderer
     {
         await _threads.Enter(EngineThread.Render);
         EndPreparing();
+        _cover.PickColor(entities);
         Ecs.Components.Renderer[] renderers =
         [
             .. entities
@@ -1015,6 +1029,7 @@ public sealed class Renderer
         if (graph.IsMakerOut<GpuWorld>() || graph.IsMakerOut<GpuView>())
             EndPreparing();
 
+        _cover.Record(graph, _world.CoverOpacity);
         _banner.Record(graph, frame);
     }
 

@@ -63,6 +63,11 @@ ECS, the model importer and the texture importer, with a gem that draws its geom
   loads again when a frame draws it.
 - When a domain replaces the world, the loading screen stays until all that the new world draws is on the GPU or
   failed. This includes the passes of the gem.
+- During a load, the renderer draws one colour over the window at the world's cover opacity. The debug UI and the
+  failure banner show over it. The colour is black when the sun or the moon of the new world gives little light,
+  and an off-white when it gives much light.
+- While the cover is full, the post effects keep no history, so the exposure takes the value of each frame. When the
+  cover fades, the exposure adapts from the settled picture.
 
 ### Cameras
 
