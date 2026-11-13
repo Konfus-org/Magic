@@ -1,5 +1,6 @@
 using System.Numerics;
 using Magic.Assets;
+using Magic.DeferredRendering.World;
 using Magic.Ecs.Components;
 using Magic.Graphics;
 using Magic.Projects;
@@ -51,20 +52,21 @@ internal sealed class FrameView
     /// </summary>
     /// <remarks>
     /// The rows are the view's constants, with the camera shifted by <paramref name="jitter"/>; the models, the
-    /// instance and material tables; the lights: the sun, the open sky at <paramref name="skyBrightness"/>, the sky's
-    /// tables, and the light table's <paramref name="lightCount"/> lights and its tiles; and, at 0, the rows the gems
-    /// after the view write.
+    /// instance and material tables of <paramref name="world"/>; the lights: the sun, the open sky at
+    /// <paramref name="skyBrightness"/>, the sky's tables, and the light table's lights and its tiles; the world as
+    /// rays see it, <paramref name="traced"/>; and, at 0, the rows the gems after the view write.
     /// </remarks>
     public Result Upload(
         RenderGraph graph,
         in GpuView view,
-        int lightCount,
+        in GpuWorld world,
         (Transform Transform, Camera Camera) camera,
         in Frame frame,
         Vector2 jitter,
         (Vector3 Direction, Vector3 Illuminance) sun,
         bool hasSky,
-        float skyBrightness
+        float skyBrightness,
+        GpuTracedWorld traced
     )
     {
         Result<GpuSampler> sampler = graph.Sampler(
@@ -109,16 +111,6 @@ internal sealed class FrameView
             FrameIndex = frame.Index,
             Jitter = jitter,
         };
-        GpuModels models = new()
-        {
-            Instances = view.Instances.Id,
-            Count = (uint)view.InstanceCount,
-            Vertices = view.Vertices.Id,
-            Indices = view.Indices.Id,
-            Materials = view.Materials.Id,
-            Meshes = view.Meshes.Id,
-            Failures = view.Failures.Id,
-        };
         GpuLights frameLights = new()
         {
             SunDirection = new Vector4(sun.Direction, 0),
@@ -131,7 +123,7 @@ internal sealed class FrameView
             LutSampler = sampler.Value.Id,
             HasSky = hasSky ? 1u : 0u,
             Table = view.LightTable.Id,
-            Count = (uint)lightCount,
+            Count = (uint)world.Lights.Count,
             Tiles = view.LightTiles.Id,
         };
 
@@ -157,12 +149,12 @@ internal sealed class FrameView
                 : (unjittered, constants.CameraPosition);
         _previous = (unjittered, constants.CameraPosition, width, height);
         bool isSent = graph.Upload(view.Frame, [constants]);
-        isSent &= graph.Upload(view.Frame, [models], GpuModels.Offset);
+        isSent &= graph.Upload(view.Frame, [world.ModelsRow], GpuModels.Offset);
         isSent &= graph.Upload(view.Frame, [frameLights], GpuLights.Offset);
 
-        // The rows the gems after the view write, 0 until one does, so the shaders that read them trace, shadow and
-        // light nothing indirectly, the sky lights the surfaces, and the air changes nothing.
-        isSent &= graph.Upload(view.Frame, [default(GpuTracedWorld)], GpuTracedWorld.Offset);
+        // The rows the gems after the view write, 0 until one does, so the shaders that read them shadow and light
+        // nothing indirectly, the sky lights the surfaces, and the air changes nothing.
+        isSent &= graph.Upload(view.Frame, [traced], GpuTracedWorld.Offset);
         isSent &= graph.Upload(view.Frame, [default(GpuShadows)], GpuShadows.Offset);
         isSent &= graph.Upload(view.Frame, [default(GpuIndirectLight)], GpuIndirectLight.Offset);
         isSent &= graph.Upload(view.Frame, [default(GpuAir)], GpuAir.Offset);

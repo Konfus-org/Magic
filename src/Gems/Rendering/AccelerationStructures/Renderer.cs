@@ -14,7 +14,7 @@ namespace Magic.AccelerationStructures;
 /// <summary>
 /// What the acceleration structures take each frame: the world as the GPU holds it, and its instances as the CPU does.
 /// </summary>
-public readonly record struct AccelerationStructuresInput(GpuView View, GpuInstances Instances);
+public readonly record struct AccelerationStructuresInput(GpuWorld World, GpuInstances Instances);
 
 /// <summary>
 /// Builds the world as rays see it each frame, on a GPU that traces rays, and makes the frame's
@@ -34,9 +34,9 @@ public readonly record struct AccelerationStructuresInput(GpuView View, GpuInsta
 /// material shader each frame.
 /// </para>
 /// <para>
-/// Each frame it writes them into the frame's buffer; on a GPU that doesn't trace rays it makes none. The models, the
-/// instances and the material rows are the renderer's, taken as its <see cref="GpuView"/> and
-/// <see cref="GpuInstances"/>.
+/// The renderer writes the frame's <see cref="TracedWorld"/> into each view's buffer; on a GPU that doesn't trace rays
+/// it makes none. The models, the instances and the material rows are the renderer's, taken as its
+/// <see cref="GpuWorld"/> and <see cref="GpuInstances"/>.
 /// </para>
 /// </remarks>
 public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
@@ -81,8 +81,7 @@ public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
     }
 
     /// <summary>
-    /// Builds the world as rays see it this frame, again when the instances or the models' structures changed, and
-    /// writes it into the frame's buffer.
+    /// Builds the world as rays see it this frame, again when the instances or the models' structures changed.
     /// </summary>
     /// <returns>
     /// The world as rays see it; none on a GPU that doesn't trace rays, or while what it is built into is not made.
@@ -92,16 +91,16 @@ public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
         if (!graph.Features.HasRayQuery)
             return null;
 
-        GpuView view = input.View;
-        GpuInstances world = input.Instances;
+        GpuWorld world = input.World;
+        GpuInstances drawn = input.Instances;
 
-        // Each model's structure asked for every frame, so the GPU provider keeps it, row for row with the view's
+        // Each model's structure asked for every frame, so the GPU provider keeps it, row for row with the world's
         // models. A row whose model changed lets the old structure go, and has the new model's made and built over its
         // meshes in the pools; one the provider compacted comes back moved, holding what it held. Either builds the
-        // instances again. A row past the view's last row in use is dropped, and its structure, no longer asked for,
+        // instances again. A row past the world's last row in use is dropped, and its structure, no longer asked for,
         // goes.
-        bool isChanged = world.Version != _built.Version;
-        ReadOnlySpan<ModelPlace> models = view.Models.Span;
+        bool isChanged = drawn.Version != _built.Version;
+        ReadOnlySpan<ModelPlace> models = world.Models.Span;
         if (_models.Count > models.Length)
             _models.RemoveRange(models.Length, _models.Count - models.Length);
 
@@ -126,11 +125,11 @@ public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
                         Geometries =
                         [
                             .. place.Meshes.Select(mesh => new TriangleGeometry(
-                                view.Vertices,
+                                world.Vertices,
                                 0,
                                 GpuVertex.Bytes,
                                 place.VertexOffset + place.VertexCount,
-                                view.Indices,
+                                world.Indices,
                                 (ulong)mesh.Mesh.IndexOffset * sizeof(uint),
                                 mesh.Triangles
                             )),
@@ -162,19 +161,19 @@ public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
             _models[index] = row;
         }
 
-        // The structure over the view's instances and its instances asked for every frame, so the structure built last
+        // The structure over the world's instances and its instances asked for every frame, so the structure built last
         // stays, and the hit materials table with a row for each of the material table's.
         Result<GpuBuffer> hitMaterials = graph.Buffer(
-            new("Hit materials", (long)world.MaterialCapacity * HitMaterialBytes)
+            new("Hit materials", (long)drawn.MaterialCapacity * HitMaterialBytes)
         );
         Result<GpuBuffer> instances = graph.Buffer(
-            new("Acceleration instances", (long)view.InstanceCapacity * GpuAccelerationInstance.Bytes)
+            new("Acceleration instances", (long)world.InstanceCapacity * GpuAccelerationInstance.Bytes)
         );
         Result<GpuAcceleration> topLevel = instances.Ok
             ? graph.Acceleration(
                 new TopLevelDescription
                 {
-                    MaxInstances = view.InstanceCapacity,
+                    MaxInstances = world.InstanceCapacity,
                     Instances = instances.Value,
                     Name = "World acceleration",
                 }
@@ -192,7 +191,7 @@ public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
         // before they are written. None is built for no instance.
         if (isChanged)
         {
-            ReadOnlySpan<GpuInstance> rows = world.Rows.Span;
+            ReadOnlySpan<GpuInstance> rows = drawn.Rows.Span;
             int count = 0;
             (Vector3 Min, Vector3 Max) box = (new Vector3(float.MaxValue), new Vector3(float.MinValue));
             foreach (GpuInstance instance in rows)
@@ -239,14 +238,14 @@ public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
                 graph.BuildAcceleration(topLevel.Value, (uint)count);
             }
 
-            _built = (world.Version, count, box);
+            _built = (drawn.Version, count, box);
         }
 
         // Each material row averaged into the hit materials, a pass for each material shader, which fills the rows it
         // draws.
-        for (int shader = _averageShaders.Count; shader < view.MaterialShaders.Count; shader++)
+        for (int shader = _averageShaders.Count; shader < world.MaterialShaders.Count; shader++)
         {
-            _averageShaders.Add(_averageShader with { TypeArguments = [view.MaterialShaders[shader]] });
+            _averageShaders.Add(_averageShader with { TypeArguments = [world.MaterialShaders[shader]] });
         }
 
         for (int shader = 0; shader < _averageShaders.Count; shader++)
@@ -255,24 +254,18 @@ public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
                 .Compute(
                     "Average materials",
                     _averageShaders[shader],
-                    new GpuConstants(view.Frame.Id, hitMaterials.Value.Id, (uint)shader, (uint)world.MaterialCount),
+                    new GpuConstants(world.Frame.Id, hitMaterials.Value.Id, (uint)shader, (uint)drawn.MaterialCount),
                     RenderStage.Prepare
                 )
-                .Reads(view.Frame, view.Materials)
-                .Reads(view.HeapTextures.AsSpan())
+                .Reads(world.Frame, world.Materials)
+                .Reads(world.HeapTextures.AsSpan())
                 .Writes(hitMaterials.Value)
-                .DispatchOver(world.MaterialCount, 1);
+                .DispatchOver(drawn.MaterialCount, 1);
         }
 
         GpuAcceleration acceleration = _built.Count == 0 ? GpuAcceleration.None : topLevel.Value;
-        bool isSent = graph.Upload(
-            view.Frame,
-            [new GpuTracedWorld { Acceleration = acceleration.Id, HitMaterials = hitMaterials.Value.Id }],
-            GpuTracedWorld.Offset
-        );
 
-        // The frame's row of the traced world not staged: no ray is traced in this frame.
-        return !isSent ? null : new TracedWorld(acceleration, hitMaterials.Value, _built.Box);
+        return new TracedWorld(acceleration, hitMaterials.Value, _built.Box);
     }
 
     /// <summary>

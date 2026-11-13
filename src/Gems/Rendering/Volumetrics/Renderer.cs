@@ -76,14 +76,11 @@ public sealed class Renderer : IRender<VolumetricsInput, Air>, IRender, IHookInt
     private readonly ShaderEntry _cloudShader;
 
     /// <summary>
-    /// The volume's size when it was last filled; none while its history holds nothing. Render thread.
+    /// What each view keeps from frame to frame, by its number: its volume's size when it was last filled, none while
+    /// its history holds nothing, and its clouds' picture as it was last drawn, none while it holds nothing. Render
+    /// thread.
     /// </summary>
-    private (int Width, int Height)? _filled;
-
-    /// <summary>
-    /// The clouds' picture as it was last drawn; none while it holds nothing. Render thread.
-    /// </summary>
-    private GpuTexture? _drawnClouds;
+    private readonly List<((int Width, int Height)? Filled, GpuTexture? DrawnClouds)> _views = [];
 
     internal Renderer(VolumetricsSettings settings, AssetManager assets, IEcs ecs)
     {
@@ -113,8 +110,7 @@ public sealed class Renderer : IRender<VolumetricsInput, Air>, IRender, IHookInt
             || shaders != GpuState.Ready
         )
         {
-            _filled = null;
-            _drawnClouds = null;
+            _views.Clear();
 
             return null;
         }
@@ -171,10 +167,18 @@ public sealed class Renderer : IRender<VolumetricsInput, Air>, IRender, IHookInt
         if (!graph.Upload(gpu.Frame, [row], GpuAir.Offset))
             return null;
 
+        // What the view keeps from frame to frame, by its number.
+        while (_views.Count <= graph.View)
+        {
+            _views.Add(default);
+        }
+
+        ((int Width, int Height)? filled, GpuTexture? drawnClouds) = _views[graph.View];
+
         // Each cell's light and haze, blended with last frame's where the cell was then, then summed along each column
         // away from the camera. The pass header's x is the frame's buffer, y the scattering written, z last frame's, 0
         // when it holds nothing, and w the air.
-        uint last = _filled == size ? history.Value.Id : 0;
+        uint last = filled == size ? history.Value.Id : 0;
         GpuConstants header = new(gpu.Frame.Id, scattering.Value.Id, last, air.Value.Id);
         ReadOnlySpan<GpuResource> traced = input.Traced is { } world
             ? [world.HitMaterials, gpu.Instances, gpu.Meshes]
@@ -190,13 +194,12 @@ public sealed class Renderer : IRender<VolumetricsInput, Air>, IRender, IHookInt
             .Reads(gpu.Frame, scattering.Value)
             .Writes(air.Value)
             .DispatchOver(size.Width, size.Height);
-        _filled = size;
 
         // The clouds' picture of the sky: all of it when it holds nothing yet, else a sixteenth a frame, each texel the
         // next of its 4 by 4 block. The pass header's z is the block's side.
         if (cloudy is { } picture)
         {
-            int block = _drawnClouds == picture ? CloudBlock : 1;
+            int block = drawnClouds == picture ? CloudBlock : 1;
             graph
                 .Compute(
                     "Draw clouds",
@@ -209,7 +212,7 @@ public sealed class Renderer : IRender<VolumetricsInput, Air>, IRender, IHookInt
                 .DispatchOver(CloudTexels / block, CloudTexels / block);
         }
 
-        _drawnClouds = cloudy;
+        _views[graph.View] = (size, cloudy);
 
         return new Air(air.Value, cloudy);
     }

@@ -401,6 +401,22 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
+    /// The render texture on the GPU, which a camera draws into and a material samples as it would a texture, or none
+    /// until it is made; the first ask starts reading its size. It is among the textures, under its own id.
+    /// </summary>
+    public GpuTexture Get(Handle<RenderTexture> handle)
+    {
+        if (!_textures.TryGetValue(handle.Id, out TextureEntry? entry))
+        {
+            entry = new TextureEntry();
+            _textures[handle.Id] = entry;
+            LoadAsync(handle, entry).FireAndForget();
+        }
+
+        return entry.State == GpuState.Ready ? entry.Texture : GpuTexture.None;
+    }
+
+    /// <summary>
     /// Whether the material, its shader's struct and the textures it names are on the GPU, or one of them failed; the
     /// first ask starts loading it.
     /// </summary>
@@ -492,7 +508,8 @@ internal sealed class GpuResources(
             // A texture given to a field that is no texture, or numbers to one that is, fits nothing.
             bool isTexture = field.Struct == "TextureRef";
             bool hasNumbers = param.X != 0 || param.Y != 0 || param.Z != 0 || param.W != 0 || IsColor(param);
-            if (isTexture ? param.Texture == Handle<Texture>.None && hasNumbers : param.Texture != Handle<Texture>.None)
+            Handle<Texture> sampled = GetSampled(param);
+            if (isTexture ? sampled == Handle<Texture>.None && hasNumbers : sampled != Handle<Texture>.None)
             {
                 misfit ??= field.Name;
 
@@ -502,9 +519,9 @@ internal sealed class GpuResources(
             Span<uint> into = words.Slice((int)field.Offset / 4, (int)field.Size / 4);
             if (isTexture)
             {
-                GpuState texture = PackTexture(layout, field.Name, param.Texture, words);
+                GpuState texture = PackTexture(layout, field.Name, sampled, words);
                 if (texture == GpuState.Failed && failedTexture == Handle<Texture>.None)
-                    failedTexture = param.Texture;
+                    failedTexture = sampled;
                 else if (texture == GpuState.Loading)
                     state = GpuState.Loading;
 
@@ -809,7 +826,10 @@ internal sealed class GpuResources(
             _materials
                 .Where(asked =>
                     asked.Value is { Ok: true } loaded
-                    && (loaded.Value.Shader.Id == id || loaded.Value.Params.Values.Any(param => param.Texture.Id == id))
+                    && (
+                        loaded.Value.Shader.Id == id
+                        || loaded.Value.Params.Values.Any(param => GetSampled(param).Id == id)
+                    )
                 )
                 .Select(asked => assets.GetPath(new Handle<Material>(asked.Key)) ?? $"id {asked.Key}")
         );
@@ -835,8 +855,9 @@ internal sealed class GpuResources(
 
         foreach (MaterialParam param in material.Params.Values)
         {
-            if (param.Texture != Handle<Texture>.None)
-                Get(param.Texture, out _, out _);
+            Handle<Texture> sampled = GetSampled(param);
+            if (sampled != Handle<Texture>.None)
+                Get(sampled, out _, out _);
         }
     }
 
@@ -872,6 +893,51 @@ internal sealed class GpuResources(
             Anisotropy = asset.Filter == TextureFilter.Linear ? anisotropy : 1,
         };
         _arrivedTextures.Add((asset, first, entry));
+    }
+
+    /// <summary>
+    /// The texture a param samples: its render texture, which is among the textures under its own id and is asked for
+    /// here, or else its texture.
+    /// </summary>
+    private Handle<Texture> GetSampled(MaterialParam param)
+    {
+        if (param.RenderTexture == Handle<RenderTexture>.None)
+            return param.Texture;
+
+        Get(param.RenderTexture);
+
+        return new Handle<Texture>(param.RenderTexture.Id);
+    }
+
+    private async Task LoadAsync(Handle<RenderTexture> handle, TextureEntry entry)
+    {
+        Result<RenderTexture> loaded = await assets
+            .LoadAsync(handle, null, CancellationToken.None)
+            .ConfigureAwait(false);
+        await threads.Enter(EngineThread.Render);
+        string name = assets.GetPath(handle) ?? $"id {handle.Id}";
+        if (!loaded.Ok)
+        {
+            Log.Error($"Render texture {name} is drawn as a failure, and no camera draws into it: {loaded.Error}");
+            entry.State = GpuState.Failed;
+
+            return;
+        }
+
+        // The next upload asks for the texture and its sampler, and a camera's view fills it.
+        // PROTO: 8 bits a channel as the picture is shown, which a material reads as it does a linear texture.
+        entry.Description = new TextureDescription(
+            name,
+            Math.Max(1, loaded.Value.Width),
+            Math.Max(1, loaded.Value.Height),
+            GpuFormat.R8G8B8A8Unorm,
+            TextureUsages.Sampled | TextureUsages.CopyDestination
+        );
+        entry.SamplerDescription = new SamplerDescription
+        {
+            Wrap = TextureWrap.Clamp,
+            MipFilter = TextureFilter.Nearest,
+        };
     }
 
     private async Task LoadAsync(Handle<Model> model, ModelEntry entry)

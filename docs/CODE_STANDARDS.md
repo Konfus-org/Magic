@@ -73,6 +73,8 @@ things:
   is made for the gems that take it.
 - Core runs each gem after the gems whose output it takes. Gems pass what they draw to one another in this way, as
   data. They never pass it through a gem in a constructor.
+- A step that takes `RenderViews`, or the output of such a step, runs one time for each view of the frame. It keeps
+  what it holds for a view by `RenderGraph.View`.
 - `EntryPoint.LateUpdate` calls a method of `Renderer` that publishes what `Render` draws, as data. `Renderer` owns
   the hand-off. The newest value goes through a `Mailbox<T>`, and what must not be lost goes through a `Channel<T>`.
 - `Render` reads the gem's settings directly. Core writes them one member at a time, so a frame can see one old

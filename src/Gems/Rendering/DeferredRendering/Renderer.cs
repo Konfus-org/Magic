@@ -21,18 +21,22 @@ using Magic.Worlds;
 namespace Magic.DeferredRendering;
 
 /// <summary>
-/// What the view's step takes each frame: the upscaling, where a gem makes it.
+/// What the view's step takes for each view: the world as the GPU holds it, the frame's views, and, where a gem makes
+/// them, the world as rays see it and the upscaling.
 /// </summary>
-public readonly record struct ViewInput(Upscaling? Upscaling);
+public readonly record struct ViewInput(GpuWorld World, RenderViews Views, TracedWorld? Traced, Upscaling? Upscaling);
 
 /// <summary>
-/// What the shading's step takes each frame: the world as the GPU holds it, and the inputs that other gems make.
+/// What the shading's step takes for each view: the world as the GPU holds it, the frame's views, the view, and the
+/// inputs that other gems make.
 /// </summary>
 /// <remarks>
 /// Where a gem makes them, it also takes the world as rays see it, each pixel's shadows, the light that reaches the
 /// surfaces indirectly, the air between the camera and them, and the output's upscaling.
 /// </remarks>
 public readonly record struct ShadingInput(
+    GpuWorld World,
+    RenderViews Views,
     GpuView View,
     TracedWorld? Traced,
     ShadowMask? Shadows,
@@ -42,32 +46,39 @@ public readonly record struct ShadingInput(
 );
 
 /// <summary>
-/// Keeps the world on the GPU for the gems that draw it, and lights it with deferred shading, in three steps a frame.
+/// Keeps the world on the GPU for the gems that draw it, and lights it with deferred shading, in four steps.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The view's step: <see cref="PublishInputs"/> copies what the frame draws out of the entities and publishes it. On
-/// the render thread, the step takes the newest published, puts the models, materials, textures, instances, lights and
-/// sky's tables on the GPU, uploads the frame's rows, and makes the frame's <see cref="GpuView"/> and its <see
-/// cref="GpuInstances"/>.
+/// The world's step runs once a frame: <see cref="PublishInputs"/> copies what the frame draws out of the entities and
+/// publishes it. On the render thread, the step takes the newest published, puts the models, materials, textures,
+/// render textures, instances and lights on the GPU, and makes the frame's <see cref="GpuWorld"/>, its
+/// <see cref="GpuInstances"/> and its <see cref="RenderViews"/>. There is a view for each camera that draws into a
+/// render texture, then one for each camera that draws into the window, each in its section, or one at the origin when
+/// no camera does.
+/// </para>
+/// <para>
+/// The view's step and the shading's step run once for each view. The view's step uploads the view's rows and makes
+/// its <see cref="GpuView"/>.
 /// </para>
 /// <para>
 /// The shading's step lights that world from the view and the GBuffer a geometry gem drew into it. It shades the
-/// surfaces, shadowed by the frame's shadow mask where there is one, then draws the nearest glass over them, the
-/// effects, a debug view where one is asked for, and the output into the window and any screenshot asked for.
+/// surfaces, shadowed by the view's shadow mask where there is one, then draws the nearest glass over them, the
+/// effects, a debug view where one is asked for, and the output into the view's target and any screenshot asked for.
 /// </para>
 /// <para>
-/// The banner's step draws the frame's render failures over the top of the window, even when the view was not made.
+/// The banner's step draws the frame's render failures over the top of the window, even when no view was made.
 /// </para>
 /// <para>
-/// Where nothing made the world as rays see it, the shadows, the indirect light or the air, their rows of the frame's
-/// buffer are 0. As a domain replaces the world, the renderer forgets the view's history and holds the loading screen
+/// Where nothing made the world as rays see it, the shadows, the indirect light or the air, their rows of the view's
+/// buffer are 0. As a domain replaces the world, the renderer forgets each view's history and holds the loading screen
 /// until what comes is on the GPU and the shading's shaders are built.
 /// </para>
 /// </remarks>
 public sealed class Renderer
     : IRender,
-        IRender<ViewInput, (GpuView, GpuInstances)>,
+        IRenderInto<(GpuWorld, GpuInstances, RenderViews)>,
+        IRender<ViewInput, GpuView>,
         IRenderFrom<ShadingInput>,
         IHookIntoDomainLoading,
         IDisposable
@@ -103,7 +114,11 @@ public sealed class Renderer
     /// </summary>
     private readonly PostProcessing _defaultPost;
 
-    private readonly FrameView _frameView;
+    /// <summary>
+    /// What each view keeps from frame to frame, by its number: where it looked last frame, and its effects'
+    /// histories. Render thread.
+    /// </summary>
+    private readonly List<(FrameView Frame, PixelEffects Effects)> _views = [];
 
     private readonly SkyLuts _sky;
 
@@ -134,8 +149,6 @@ public sealed class Renderer
     /// </summary>
     private readonly ImmutableArray<ShaderEntry> _shadingShaders;
 
-    private readonly PixelEffects _pixelEffects = new();
-
     private readonly FailureBanner _banner;
 
     private readonly IGraphicsApi _gpu;
@@ -143,14 +156,15 @@ public sealed class Renderer
     private readonly EventCoordinator _events;
 
     /// <summary>
-    /// The screenshots asked for on the game thread, which the shading's step takes on the render thread.
+    /// The screenshots asked for on the game thread. The world's step looks at the first, and the shading's step of
+    /// the last view takes it, on the render thread.
     /// </summary>
     private readonly Channel<ScreenshotRequested> _screenshots = Channel.CreateUnbounded<ScreenshotRequested>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = true }
     );
 
     /// <summary>
-    /// The ids of the assets read again, heard on the game thread, which the view's step lets go of on the render
+    /// The ids of the assets read again, heard on the game thread, which the world's step lets go of on the render
     /// thread.
     /// </summary>
     private readonly Channel<ulong> _reloaded = Channel.CreateUnbounded<ulong>(
@@ -164,17 +178,17 @@ public sealed class Renderer
     /// it. Game thread.
     /// </summary>
     /// <remarks>
-    /// A new number makes the view's step forget the view's history at the first frame of what comes.
+    /// A new number makes the world's step forget each view's history at the first frame of what comes.
     /// </remarks>
     private int _worldNumber;
 
     /// <summary>
-    /// The number of the world the view's step drew last, none before the first frame. Render thread.
+    /// The number of the world the world's step drew last, none before the first frame. Render thread.
     /// </summary>
     private int? _drawnWorldNumber;
 
     /// <summary>
-    /// What a domain loading needs on the GPU before it shows, until the view's step has uploaded it all. Render
+    /// What a domain loading needs on the GPU before it shows, until the world's step has uploaded it all. Render
     /// thread.
     /// </summary>
     private Preparing? _preparing;
@@ -214,7 +228,6 @@ public sealed class Renderer
         _defaultPost.Effects[0] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Exposure.mat") };
         _defaultPost.Effects[1] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Agx.mat") };
         _instances = new InstanceTable(assets, _resources);
-        _frameView = new FrameView();
         _sky = new SkyLuts(assets);
         _lightTiles = new LightTiles(assets);
         _effects = new Effects(assets, _resources);
@@ -246,13 +259,14 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// Puts the newest inputs published, or the last again when none are newer, on the GPU, and makes the frame's view.
+    /// Puts the newest inputs published, or the last again when none are newer, on the GPU, and counts the frame's
+    /// views.
     /// </summary>
     /// <returns>
-    /// The frame's view and its instances; none while the shaders build, the pools are not made, or nothing was
-    /// published yet.
+    /// The world, its instances and the frame's views; none while the shaders build, the pools are not made, or nothing
+    /// was published yet.
     /// </returns>
-    public (GpuView, GpuInstances)? Render(in Frame frame, RenderGraph graph, in ViewInput input)
+    public (GpuWorld, GpuInstances, RenderViews)? Render(in Frame frame, RenderGraph graph)
     {
         // The shaders are the GPU provider's to build, the first ask starting each.
         GpuState shaders = graph.GetState(_viewShaders.AsSpan());
@@ -284,15 +298,15 @@ public sealed class Renderer
         if (_inputs.TakeNewest() is not { } inputs)
             return null;
 
-        Size resolution = _settings.Resolution;
-        float renderScale = _settings.RenderScale;
-        float fieldOfView = _settings.FieldOfView;
-
-        // The first frame of another world forgets last frame's camera and size, so nothing drawn before carries
-        // into it.
+        // The first frame of another world forgets each view's camera and size of last frame, so nothing drawn before
+        // carries into it.
         if (inputs.WorldNumber != _drawnWorldNumber)
         {
-            _frameView.ClearHistory();
+            foreach ((FrameView frameView, _) in _views)
+            {
+                frameView.ClearHistory();
+            }
+
             _drawnWorldNumber = inputs.WorldNumber;
         }
 
@@ -359,16 +373,146 @@ public sealed class Renderer
         Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> effects = _effects.Resolve(graph, post);
         Result<(GpuBuffer Rows, GpuBuffer Materials, GpuBuffer Failures)> tables = _instances.Upload(graph);
 
-        // The finished picture at the resolution, or at the window's size when it has no side, and 1280 by 720 with no
-        // window; the world drawn at the render scale of it, or when that is auto at the most that fits 1920 by 1080,
-        // never more than all of it.
-        Size shown = resolution;
-        if (shown.Width <= 0 || shown.Height <= 0)
+        // The whole finished picture at the resolution, or at the window's size when it has no side, and 1280 by 720
+        // with no window.
+        Size picture = _settings.Resolution;
+        if (picture.Width <= 0 || picture.Height <= 0)
         {
             TextureDescription window = graph.WindowTarget.IsNone ? default : graph.GetDescription(graph.WindowTarget);
-            shown = window.Width > 0 ? new Size(window.Width, window.Height) : new Size(DefaultWidth, DefaultHeight);
+            picture = window.Width > 0 ? new Size(window.Width, window.Height) : new Size(DefaultWidth, DefaultHeight);
         }
 
+        Result<GpuBuffer> constants = graph.Buffer(new("World constants", 1024));
+        Result<LightBuffers> lights = _lightTiles.Prepare(
+            graph,
+            inputs.PointLights,
+            inputs.SpotLights,
+            inputs.RectLights
+        );
+        Result asked = Result.FindFailure(effects, tables, constants, lights);
+        if (!asked.Ok)
+        {
+            Fail(graph, RenderFailure.Resource, asked.Error);
+
+            return null;
+        }
+
+        // One readback buffer, so one screenshot a frame: the first asked for, of the whole picture at 8 bits a
+        // channel, which each view of the window is copied into. The request stays until the shading's step of the
+        // last view reads the picture back, so a frame that cannot draw loses none.
+        Screenshot? screenshot = null;
+        if (_screenshots.Reader.TryPeek(out ScreenshotRequested saved))
+        {
+            Result<GpuBuffer> readback = graph.Buffer(
+                new("Output readback", (long)picture.Width * picture.Height * 4, BufferUsages.Readback)
+            );
+            Result<GpuTexture> copy = graph.Texture(
+                new(
+                    "Screenshot copy",
+                    picture.Width,
+                    picture.Height,
+                    GpuFormat.R8G8B8A8Unorm,
+                    TextureUsages.CopyDestination | TextureUsages.CopySource
+                )
+            );
+            if (Result.FindFailure(readback, copy) is { Ok: false } failed)
+            {
+                Log.Error($"The screenshot was not taken: {failed.Error}");
+                _screenshots.Reader.TryRead(out _);
+            }
+            else
+                screenshot = new Screenshot(saved.Path, copy.Value, readback.Value);
+        }
+
+        GpuWorld world = new()
+        {
+            Frame = constants.Value,
+            Instances = tables.Value.Rows,
+            InstanceCount = _instances.Count,
+            InstanceCapacity = _instances.Capacity,
+            Materials = tables.Value.Materials,
+            Failures = tables.Value.Failures,
+            Vertices = _resources.VertexPool,
+            Indices = _resources.IndexPool,
+            Meshes = _resources.Meshes,
+            Models = _resources.Models,
+            MaterialShaders = _resources.MaterialShaders,
+            HeapTextures = _resources.GetHeapTextures(),
+            PreparedDomains = _preparedDomains,
+            Inputs = inputs,
+            Picture = picture,
+            Lights = lights.Value,
+            Effects = effects.Value.Effects,
+            EffectRows = effects.Value.Rows,
+            Screenshot = screenshot,
+        };
+
+        // The world's buffer holds the models' row alone, where a view's holds it: what a pass that reads the world's
+        // tables through no view takes.
+        if (!graph.Upload(world.Frame, [world.ModelsRow], GpuModels.Offset))
+        {
+            Fail(graph, RenderFailure.Resource, "the world's constants were not staged.");
+
+            return null;
+        }
+
+        // A view for each camera that draws into a render texture, then one for each that draws into the window, or
+        // one for the window when none does.
+        int windows = 0;
+        for (int i = 0; i < inputs.Cameras.Count; i++)
+        {
+            if (inputs.Cameras.Second[i].Target.IsWindow)
+                windows++;
+        }
+
+        int views = inputs.Cameras.Count - windows + Math.Max(1, windows);
+
+        return (world, _instances.Instances, new RenderViews(views));
+    }
+
+    /// <summary>
+    /// The view of this turn on the GPU: its camera's targets at its size, the frame's rows in its own buffer, the
+    /// sky's tables and its tiles' lights; none while the render texture its camera draws into is not made.
+    /// </summary>
+    public GpuView? Render(in Frame frame, RenderGraph graph, in ViewInput input)
+    {
+        GpuWorld world = input.World;
+        if (world.Inputs is not { } inputs)
+            return null;
+
+        float renderScale = _settings.RenderScale;
+        float fieldOfView = _settings.FieldOfView;
+
+        // The view's camera, what it draws into, and where the view is in the whole picture: a section of the window,
+        // at the field of view of the settings when that is more than 0, or all of a render texture.
+        (Transform Transform, Camera Camera) camera = GetCamera(inputs.Cameras, graph.View);
+        CameraTarget into = camera.Camera.Target;
+        GpuTexture target = graph.WindowTarget;
+        Rectangle shown = GetSection(into.Section, world.Picture);
+        Rectangle part = default;
+        if (!into.IsWindow)
+        {
+            target = _resources.Get(into.Texture);
+            if (target.IsNone)
+                return null;
+
+            TextureDescription texture = graph.GetDescription(target);
+            shown = new Rectangle(0, 0, texture.Width, texture.Height);
+        }
+        else
+        {
+            if (!target.IsNone)
+            {
+                TextureDescription window = graph.GetDescription(target);
+                part = GetSection(into.Section, new Size(window.Width, window.Height));
+            }
+
+            if (fieldOfView > 0)
+                camera.Camera = camera.Camera with { FieldOfView = fieldOfView };
+        }
+
+        // The world drawn at the render scale of the size the view is shown at, or when that is auto at the most that
+        // fits 1920 by 1080, never more than all of it.
         float scale = MathF.Min(
             1,
             renderScale > 0
@@ -378,9 +522,8 @@ public sealed class Renderer
         int width = Math.Max(1, (int)MathF.Round(shown.Width * scale));
         int height = Math.Max(1, (int)MathF.Round(shown.Height * scale));
 
-        // The frame's buffer, the view's targets, the light table and its tiles, and the sky's tables asked for in that
-        // order; the glass targets only while a material draws translucent, so the graph frees them in a world with
-        // none.
+        // The frame's buffer, the view's targets, its tiles and the sky's tables asked for in that order; the glass
+        // targets only while a material draws translucent, so the graph frees them in a world with none.
         bool hasGlass = _resources.HasTranslucent;
         TextureDescription depthTarget = new(
             "Depth",
@@ -420,20 +563,11 @@ public sealed class Renderer
                 TextureUsages.Storage | TextureUsages.ColorTarget | TextureUsages.Sampled | TextureUsages.CopySource
             )
         );
-        Result<LightBuffers> lights = _lightTiles.Prepare(
-            graph,
-            width,
-            height,
-            inputs.PointLights,
-            inputs.SpotLights,
-            inputs.RectLights
-        );
+        Result<GpuBuffer> tiles = LightTiles.PrepareTiles(graph, width, height);
         Result<GpuTexture> transmittance = graph.Texture(GetSkyTable("Sky transmittance", 256, 64));
         Result<GpuTexture> multiScattering = graph.Texture(GetSkyTable("Sky multi-scattering", 32, 32));
         Result<GpuTexture> skyView = graph.Texture(GetSkyTable("Sky view", 192, 108));
         Result asked = Result.FindFailure(
-            effects,
-            tables,
             constants,
             depth,
             glassDepth,
@@ -446,7 +580,7 @@ public sealed class Renderer
             velocity,
             hdr,
             output,
-            lights,
+            tiles,
             transmittance,
             multiScattering,
             skyView
@@ -458,14 +592,22 @@ public sealed class Renderer
             return null;
         }
 
+        // What the view keeps from frame to frame, by its number.
+        while (_views.Count <= graph.View)
+        {
+            _views.Add((new FrameView(), new PixelEffects()));
+        }
+
+        FrameView frameView = _views[graph.View].Frame;
         GpuView view = new()
         {
             Frame = constants.Value,
             Width = width,
             Height = height,
-            ShownWidth = shown.Width,
-            ShownHeight = shown.Height,
-            HasHistory = _frameView.HasHistory(width, height),
+            ShownPart = shown,
+            Target = target,
+            TargetPart = part,
+            HasHistory = frameView.HasHistory(width, height),
             Depth = depth.Value,
             GBufferNormal = normal.Value,
             GBufferBase = baseColor.Value,
@@ -477,41 +619,26 @@ public sealed class Renderer
             GlassSurface = glassSurface.Value,
             Hdr = hdr.Value,
             Output = output.Value,
-            Instances = tables.Value.Rows,
-            InstanceCount = _instances.Count,
-            InstanceCapacity = _instances.Capacity,
-            Materials = tables.Value.Materials,
-            Failures = tables.Value.Failures,
-            Vertices = _resources.VertexPool,
-            Indices = _resources.IndexPool,
-            Meshes = _resources.Meshes,
-            Models = _resources.Models,
-            MaterialShaders = _resources.MaterialShaders,
-            HeapTextures = _resources.GetHeapTextures(),
-            LightTable = lights.Value.Table,
-            LightTiles = lights.Value.Tiles,
+            Instances = world.Instances,
+            InstanceCount = world.InstanceCount,
+            InstanceCapacity = world.InstanceCapacity,
+            Materials = world.Materials,
+            Failures = world.Failures,
+            Vertices = world.Vertices,
+            Indices = world.Indices,
+            Meshes = world.Meshes,
+            Models = world.Models,
+            MaterialShaders = world.MaterialShaders,
+            HeapTextures = world.HeapTextures,
+            LightTable = world.Lights.Table,
+            LightTiles = tiles.Value,
             SkyTransmittance = transmittance.Value,
             SkyMultiScattering = multiScattering.Value,
             SkyView = skyView.Value,
-            Effects = effects.Value.Effects,
-            EffectRows = effects.Value.Rows,
-            PreparedDomains = _preparedDomains,
+            Effects = world.Effects,
+            EffectRows = world.EffectRows,
+            PreparedDomains = world.PreparedDomains,
         };
-
-        // The first camera that draws into the window, else one at the origin, at the field of view of the settings
-        // when that is more than 0.
-        (Transform Transform, Camera Camera) camera = (new Transform(), new Camera());
-        for (int i = 0; i < inputs.Cameras.Count; i++)
-        {
-            if (!inputs.Cameras.Second[i].Target.IsWindow)
-                continue;
-
-            camera = (inputs.Cameras.First[i], inputs.Cameras.Second[i]);
-            break;
-        }
-
-        if (fieldOfView > 0)
-            camera.Camera = camera.Camera with { FieldOfView = fieldOfView };
 
         // The camera jitters while one of the effects asks for it, or while a gem upscales.
         bool isJittered = input.Upscaling is not null;
@@ -526,16 +653,19 @@ public sealed class Renderer
             graph.Fail(RenderFailure.Sky, "Sky is not drawn", "a shader of the sky was not built.");
 
         bool hasSky = inputs.Skies.Count > 0 && skyShaders == GpuState.Ready;
-        Result uploaded = _frameView.Upload(
+        Result uploaded = frameView.Upload(
             graph,
             view,
-            lights.Value.Count,
+            world,
             camera,
             frame,
             isJittered ? FrameView.GetJitter(frame.Index) : Vector2.Zero,
             GetSun(inputs.DirectionalLights),
             hasSky,
-            _settings.SkyBrightness
+            _settings.SkyBrightness,
+            input.Traced is { } traced
+                ? new GpuTracedWorld { Acceleration = traced.Structure.Id, HitMaterials = traced.HitMaterials.Id }
+                : default
         );
         if (!uploaded.Ok)
         {
@@ -549,7 +679,8 @@ public sealed class Renderer
             _sky.Record(graph, view);
 
         _lightTiles.Record(graph, view);
-        return (view, _instances.Instances);
+
+        return view;
 
         TextureDescription GetTarget(string name, GpuFormat format) => new(name, width, height, format);
 
@@ -561,7 +692,7 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// Records the frame's passes, each in its stage, from the view the view's step made.
+    /// Records the view's passes, each in its stage, from the view the view's step made.
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph, in ShadingInput input)
     {
@@ -657,7 +788,7 @@ public sealed class Renderer
                 .DispatchOver(gpu.Width, gpu.Height);
         }
 
-        _pixelEffects.Record(graph, gpu, frame.Index);
+        _views[graph.View].Effects.Record(graph, gpu, frame.Index);
 
         // The output drawn as the debug view asks, a Depth view black from its far distance, and the picture's middle
         // tones shown at the gamma.
@@ -677,51 +808,25 @@ public sealed class Renderer
             .Writes(gpu.Output)
             .DispatchOver(gpu.Width, gpu.Height);
 
-        // What the window and a screenshot show: the output as a gem upscaled it to the size it is shown at, or the
-        // output itself, stretched over the window with the upscale filter.
+        // What the view's target and a screenshot show: the output as a gem upscaled it to the size it is shown at, or
+        // the output itself, stretched over the view's part of the target with the upscale filter.
         GpuTexture upscaled = input.Upscaling is { } upscaling ? upscaling.Record(graph, gpu) : GpuTexture.None;
         GpuTexture shown = upscaled.IsNone ? gpu.Output : upscaled;
-        GpuTexture target = graph.WindowTarget;
-        if (!target.IsNone)
-            graph.Blit(shown, target, RenderStages.Post, upscaleFilter);
+        if (!gpu.Target.IsNone)
+            graph.Blit(shown, gpu.Target, gpu.TargetPart, RenderStages.Post, upscaleFilter);
 
-        // One readback buffer, so one screenshot a frame: the last asked for, read back at the size it is shown at, and
-        // through a copy stretched to it with the upscale filter, of 8 bits a channel, where the shown picture is
-        // another size or has more; written once the GPU is done with it.
-        ScreenshotRequested? shot = null;
-        while (_screenshots.Reader.TryRead(out ScreenshotRequested asked))
+        // The screenshot asked for: each view of the window copied into the whole picture at its part, stretched to it
+        // with the upscale filter, and the picture read back after the last view, which is one of the window; written
+        // once the GPU is done with it.
+        if (input.World.Screenshot is { } shot && gpu.Target == graph.WindowTarget)
         {
-            shot = asked;
-        }
-
-        if (shot is { } saved)
-        {
-            (int width, int height) = (gpu.ShownWidth, gpu.ShownHeight);
-            TextureDescription drawn = graph.GetDescription(shown);
-            Result<GpuBuffer> readback = graph.Buffer(
-                new("Output readback", (long)width * height * 4, BufferUsages.Readback)
-            );
-            Result<GpuTexture> read =
-                drawn.Format == GpuFormat.R8G8B8A8Unorm && drawn.Width == width && drawn.Height == height
-                    ? Result.Success(shown)
-                    : graph.Texture(
-                        new(
-                            "Screenshot copy",
-                            width,
-                            height,
-                            GpuFormat.R8G8B8A8Unorm,
-                            TextureUsages.CopyDestination | TextureUsages.CopySource
-                        )
-                    );
-            if (Result.FindFailure(readback, read) is { Ok: false } failed)
-                Log.Error($"The screenshot was not taken: {failed.Error}");
-            else
+            graph.Blit(shown, shot.Copy, gpu.ShownPart, RenderStages.Post, upscaleFilter);
+            if (graph.View == input.Views.Count - 1)
             {
-                if (read.Value != shown)
-                    graph.Blit(shown, read.Value, RenderStages.Post, upscaleFilter);
-
-                graph.ReadBack(read.Value, readback.Value, RenderStages.Post);
-                SaveScreenshotAsync(readback.Value, saved.Path, width, height).FireAndForget();
+                Size picture = input.World.Picture;
+                _screenshots.Reader.TryRead(out _);
+                graph.ReadBack(shot.Copy, shot.Readback, RenderStages.Post);
+                SaveScreenshotAsync(shot.Readback, shot.Path, picture.Width, picture.Height).FireAndForget();
             }
         }
 
@@ -733,21 +838,7 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// Lets the loading domain show when the view's step is out, and draws the frame's render failures over the
-    /// window; nothing when none failed.
-    /// </summary>
-    public void Render(in Frame frame, RenderGraph graph)
-    {
-        // A view step that threw never reaches its own release; while it renders, it releases when it is ready, so
-        // nothing pops in.
-        if (graph.IsMakerOut<GpuView>())
-            EndPreparing();
-
-        _banner.Record(graph, frame);
-    }
-
-    /// <summary>
-    /// Numbers the world anew, so the view's step forgets the view's history at the first frame of what comes.
+    /// Numbers the world anew, so the world's step forgets each view's history at the first frame of what comes.
     /// </summary>
     /// <remarks>
     /// It runs on the game thread and does not leave it, so the world goes on to what comes before another frame is
@@ -767,7 +858,7 @@ public sealed class Renderer
     /// It asks for every model and material the entities draw, and the effects of their first post processing, or the
     /// default's. It waits until they are on the GPU, or failed and drawn as the failure or left out, and until the
     /// shading's and the sky's shaders are built or failed. Materials are asked for at once; models once the pools are
-    /// made, and the effects, by the view's step. One that comes while another waits ends that one. Render thread,
+    /// made, and the effects, by the world's step. One that comes while another waits ends that one. Render thread,
     /// whose tables and counts these are.
     /// </remarks>
     public async Task OnDomainLoadingAsync(
@@ -813,8 +904,8 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// Copies what the frame draws out of the entities and publishes it for the view's step, hands the view's step the
-    /// assets read again, and the shading's step the screenshots asked for.
+    /// Copies what the frame draws out of the entities and publishes it for the world's step, and hands that step the
+    /// assets read again and the screenshots asked for.
     /// </summary>
     internal void PublishInputs(in Frame frame)
     {
@@ -839,6 +930,56 @@ public sealed class Renderer
         {
             _screenshots.Writer.TryWrite(asked);
         }
+    }
+
+    /// <summary>
+    /// The camera of view <paramref name="view"/>. Those that draw into a render texture come first, in the entities'
+    /// order, so a material that samples one in a view of the window shows this frame's picture. Then come those that
+    /// draw into all of the window, then those that draw into a part of it, which so show over the others. One at the
+    /// origin draws into the window when no camera does.
+    /// </summary>
+    private static (Transform Transform, Camera Camera) GetCamera(EcsSnapshot<Transform, Camera> cameras, int view)
+    {
+        int place = view;
+        for (int turn = 0; turn < 3; turn++)
+        {
+            for (int i = 0; i < cameras.Count; i++)
+            {
+                CameraTarget target = cameras.Second[i].Target;
+                int cameraTurn =
+                    !target.IsWindow ? 0
+                    : target.Section == ScreenSection.Full ? 1
+                    : 2;
+                if (cameraTurn == turn && place-- == 0)
+                    return (cameras.First[i], cameras.Second[i]);
+            }
+        }
+
+        return (new Transform(), new Camera());
+    }
+
+    /// <summary>
+    /// The part of a picture of <paramref name="size"/> that <paramref name="section"/> is, in pixels from its top
+    /// left; the middle pixel of an odd side goes to the right and the bottom parts.
+    /// </summary>
+    private static Rectangle GetSection(ScreenSection section, Size size)
+    {
+        int left = size.Width / 2;
+        int top = size.Height / 2;
+
+        return section switch
+        {
+            ScreenSection.Full => new(0, 0, size.Width, size.Height),
+            ScreenSection.TopLeft => new(0, 0, left, top),
+            ScreenSection.TopRight => new(left, 0, size.Width - left, top),
+            ScreenSection.BottomLeft => new(0, top, left, size.Height - top),
+            ScreenSection.BottomRight => new(left, top, size.Width - left, size.Height - top),
+            ScreenSection.Top => new(0, 0, size.Width, top),
+            ScreenSection.Bottom => new(0, top, size.Width, size.Height - top),
+            ScreenSection.Left => new(0, 0, left, size.Height),
+            ScreenSection.Right => new(left, 0, size.Width - left, size.Height),
+            _ => throw new ArgumentOutOfRangeException(nameof(section), section, "There is no such section."),
+        };
     }
 
     /// <summary>
@@ -895,6 +1036,20 @@ public sealed class Renderer
     }
 
     /// <summary>
+    /// Lets the loading domain show when the world's or the view's step is out, and draws the frame's render failures
+    /// over the window; nothing when none failed.
+    /// </summary>
+    void IRender.Render(in Frame frame, RenderGraph graph)
+    {
+        // A step that threw never reaches its own release; while it renders, it releases when it is ready, so
+        // nothing pops in.
+        if (graph.IsMakerOut<GpuWorld>() || graph.IsMakerOut<GpuView>())
+            EndPreparing();
+
+        _banner.Record(graph, frame);
+    }
+
+    /// <summary>
     /// Lets the domain waiting on what it draws show, and counts it prepared.
     /// </summary>
     private void EndPreparing()
@@ -908,7 +1063,8 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// Tells the graph that the view is not made in this frame, and lets the loading domain show without it.
+    /// Tells the graph that the world or a view is not made in this frame, and lets the loading domain show without
+    /// it.
     /// </summary>
     private void Fail(RenderGraph graph, RenderFailure kind, string reason)
     {

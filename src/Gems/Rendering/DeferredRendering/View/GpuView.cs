@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Drawing;
 using System.Numerics;
 using Magic.Assets;
 using Magic.DeferredRendering.World;
@@ -7,7 +8,8 @@ using Magic.Graphics;
 namespace Magic.DeferredRendering.View;
 
 /// <summary>
-/// The world as the GPU holds it this frame, and the view it is seen through, which the view's step makes each frame.
+/// The world as the GPU holds it this frame, and one view it is seen through, which the view's step makes for each view
+/// of the frame.
 /// </summary>
 /// <remarks>
 /// The frame's buffer holds the library's <c>Core/Frame</c>, then the rows of <c>FrameRows.cs</c>. Every target is at
@@ -25,9 +27,26 @@ public readonly record struct GpuView
     /// The size the finished picture is shown at, which the output is upscaled or stretched to: the window's, or one
     /// set.
     /// </summary>
-    public required int ShownWidth { get; init; }
+    public int ShownWidth => ShownPart.Width;
 
-    public required int ShownHeight { get; init; }
+    public int ShownHeight => ShownPart.Height;
+
+    /// <summary>
+    /// Where the view is in the whole finished picture, which the views of the window share: all of it for a view
+    /// that is alone in the window or draws into a render texture.
+    /// </summary>
+    public required Rectangle ShownPart { get; init; }
+
+    /// <summary>
+    /// What the finished picture is drawn into: the window's image or a render texture, and none for a view of the
+    /// window when there is no window.
+    /// </summary>
+    public required GpuTexture Target { get; init; }
+
+    /// <summary>
+    /// The part of <see cref="Target"/> the view is drawn over, in pixels; empty for all of it.
+    /// </summary>
+    public required Rectangle TargetPart { get; init; }
 
     /// <summary>
     /// Whether last frame drew this view at this size, in this world: what its targets hold is last frame's.

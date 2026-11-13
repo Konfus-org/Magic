@@ -37,6 +37,10 @@ internal sealed unsafe class VulkanDevice : IDisposable
 
     private const string MemoryBudgetExtension = "VK_EXT_memory_budget";
 
+    private const string FullScreenExclusiveExtension = "VK_EXT_full_screen_exclusive";
+
+    private const string SurfaceCapabilities2Extension = "VK_KHR_get_surface_capabilities2";
+
     /// <summary>
     /// The Vulkan loader's variables for which drivers it loads: the ones it leaves out, by their manifests' names, and
     /// the only ones it loads.
@@ -76,6 +80,7 @@ internal sealed unsafe class VulkanDevice : IDisposable
         }
 
         WindowHandle handle = window?.Handle ?? default;
+        bool hasSurfaceCapabilities2;
         try
         {
             HasValidation = wantsValidation && HasLayer(ValidationLayer);
@@ -88,6 +93,11 @@ internal sealed unsafe class VulkanDevice : IDisposable
 
             if (hasPortability)
                 wantedExtensions.Add(PortabilityEnumerationExtension);
+
+            // The full-screen-exclusive device extension needs it.
+            hasSurfaceCapabilities2 = instanceExtensions.Contains(SurfaceCapabilities2Extension);
+            if (hasSurfaceCapabilities2)
+                wantedExtensions.Add(SurfaceCapabilities2Extension);
 
             Instance = CreateInstance(wantedExtensions, hasPortability);
         }
@@ -119,6 +129,8 @@ internal sealed unsafe class VulkanDevice : IDisposable
         InstanceApi.vkGetPhysicalDeviceMemoryProperties(PhysicalDevice, out VkPhysicalDeviceMemoryProperties memory);
         Memory = memory;
         HasMemoryBudget = picked.Extensions.Contains(MemoryBudgetExtension);
+        HasFullScreenExclusive =
+            hasSurfaceCapabilities2 && Surface.IsNotNull && picked.Extensions.Contains(FullScreenExclusiveExtension);
         Device = CreateDevice(picked);
         Api = new VkDeviceApi(InstanceApi, Device);
         Api.vkGetDeviceQueue(QueueFamily, 0, out VkQueue queue);
@@ -179,6 +191,11 @@ internal sealed unsafe class VulkanDevice : IDisposable
     /// <see cref="GetDeviceMemoryUsage"/>.
     /// </summary>
     public bool HasMemoryBudget { get; }
+
+    /// <summary>
+    /// Whether a swapchain can say that it must never own the display, as a window that fills it otherwise can.
+    /// </summary>
+    public bool HasFullScreenExclusive { get; }
 
     public void Dispose()
     {
@@ -581,6 +598,9 @@ internal sealed unsafe class VulkanDevice : IDisposable
 
         if (HasMemoryBudget)
             extensions.Add(MemoryBudgetExtension);
+
+        if (HasFullScreenExclusive)
+            extensions.Add(FullScreenExclusiveExtension);
 
         using NativeStrings extensionNames = new(extensions);
         VkPhysicalDeviceRayQueryFeaturesKHR rayQuery = new() { rayQuery = true };
