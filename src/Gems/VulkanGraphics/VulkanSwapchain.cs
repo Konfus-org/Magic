@@ -180,6 +180,15 @@ internal sealed unsafe class VulkanSwapchain(VulkanDevice device, VulkanResource
             presentMode = presentMode,
             clipped = true,
         };
+        // The driver must not own the display, even when the window fills it: the NVIDIA driver then crashes in
+        // vkDestroyDevice at exit.
+        VkSurfaceFullScreenExclusiveInfoEXT notExclusive = new()
+        {
+            fullScreenExclusive = VkFullScreenExclusiveEXT.Disallowed,
+        };
+        if (device.HasFullScreenExclusive)
+            createInfo.pNext = &notExclusive;
+
         VkResult result = device.Api.vkCreateSwapchainKHR(&createInfo, out VkSwapchainKHR swapchain);
         if (result != VkResult.Success)
         {
