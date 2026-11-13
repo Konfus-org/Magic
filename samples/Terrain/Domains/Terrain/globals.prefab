@@ -33,6 +33,9 @@
         },
         {
             "name": "Sun",
+            "tags": [
+                "sun"
+            ],
             "components": {
                 "Transform": {
                     "rotation": {
@@ -50,7 +53,8 @@
                         "b": 0.9
                     },
                     "intensity": 3
-                }
+                },
+                "ScriptContainer": [ { "id": 100421, "hour": 9.5, "hoursPerMinute": 1 } ]
             }
         }
     ]
