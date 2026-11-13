@@ -39,10 +39,10 @@
             "components": {
                 "Transform": {
                     "rotation": {
-                        "x": 0.41554,
-                        "y": 0.2661,
-                        "z": -0.12854,
-                        "w": 0.86023
+                        "x": 0,
+                        "y": -0.13053,
+                        "z": 0,
+                        "w": 0.99144
                     }
                 },
                 "DirectionalLight": {
@@ -54,7 +54,7 @@
                     },
                     "intensity": 3
                 },
-                "ScriptContainer": [ { "id": 100421, "hour": 9.5, "hoursPerMinute": 1 } ]
+                "ScriptContainer": [ { "id": 100421, "hour": 16, "hoursPerMinute": 1 } ]
             }
         }
     ]
