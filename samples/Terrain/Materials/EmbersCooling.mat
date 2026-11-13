@@ -1,0 +1,9 @@
+{
+    // The coals at the edge of the bed, cooling: the same lumps with a fifth of the glow.
+    "shader": { "id": 10001 },
+    "params": {
+        "color": { "r": 0.008, "g": 0.007, "b": 0.006, "a": 1 },
+        "roughness": { "x": 1 },
+        "emissive": { "x": 0.0015, "y": 0.0002, "z": 2e-05 }
+    }
+}

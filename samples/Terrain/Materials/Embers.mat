@@ -1,8 +1,10 @@
 {
-    // The fire's embers: almost black coals that glow hot, the brightest thing in the firebox.
+    // The fire's hottest coals: almost black lumps that glow orange, the brightest thing in the firebox. The green of
+    // the glow stays far under its red, or the tonemapper washes the hot coals to cream.
     "shader": { "id": 10001 },
     "params": {
-        "color": { "r": 0.02, "g": 0.02, "b": 0.02, "a": 1 },
-        "emissive": { "x": 0.1, "y": 0.02, "z": 0.001 }
+        "color": { "r": 0.008, "g": 0.007, "b": 0.006, "a": 1 },
+        "roughness": { "x": 1 },
+        "emissive": { "x": 0.035, "y": 0.0022, "z": 0.0002 }
     }
 }
