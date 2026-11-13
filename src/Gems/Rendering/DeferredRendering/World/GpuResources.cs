@@ -925,12 +925,12 @@ internal sealed class GpuResources(
         }
 
         // The next upload asks for the texture and its sampler, and a camera's view fills it.
-        // PROTO: 8 bits a channel as the picture is shown, which a material reads as it does a linear texture.
+        // It is sRGB: it holds the picture as it is shown, and a material reads linear colour from it.
         entry.Description = new TextureDescription(
             name,
             Math.Max(1, loaded.Value.Width),
             Math.Max(1, loaded.Value.Height),
-            GpuFormat.R8G8B8A8Unorm,
+            GpuFormat.R8G8B8A8Srgb,
             TextureUsages.Sampled | TextureUsages.CopyDestination
         );
         entry.SamplerDescription = new SamplerDescription

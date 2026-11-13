@@ -423,6 +423,28 @@ public sealed class RenderGraph
     }
 
     /// <summary>
+    /// Copies level 0 of <paramref name="from"/> into level 0 of <paramref name="to"/>, texel for texel, with the bytes
+    /// unchanged.
+    /// </summary>
+    /// <remarks>
+    /// The two textures have the same size, and formats with texels of the same size. No colour is converted, so a
+    /// picture encoded for the screen goes into an sRGB texture as it is.
+    /// </remarks>
+    public void Copy(GpuTexture from, GpuTexture to, RenderStage stage)
+    {
+        UseInTransfer(GetUse(from, GpuAccess.CopySource), stage);
+        UseInTransfer(GetUse(to, GpuAccess.CopyDestination), stage);
+        Add(
+            new()
+            {
+                Kind = GpuCommandKind.CopyTexture,
+                Id = from.Id,
+                Id2 = to.Id,
+            }
+        );
+    }
+
+    /// <summary>
     /// Copies level 0 of the first layer of <paramref name="from"/>, tightly packed, into the
     /// <see cref="BufferUsages.Readback"/> buffer <paramref name="into"/>.
     /// </summary>
