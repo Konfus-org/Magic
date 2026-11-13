@@ -1,12 +1,13 @@
 using System.Linq;
 using System.Runtime.CompilerServices;
 using Magic.Assets;
+using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
 using Magic.Ecs.Components;
 using Magic.Graphics;
 using Magic.Utils;
 
-namespace Magic.DeferredRendering.Post;
+namespace Magic.PostEffects;
 
 /// <summary>
 /// Runs the pixel effects over the lit picture before the output, in order, each a material whose shader implements the

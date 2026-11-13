@@ -10,7 +10,7 @@ using Magic.Graphics;
 using Magic.Threading;
 using Magic.Utils;
 
-namespace Magic.DeferredRendering.View;
+namespace Magic.PostEffects;
 
 /// <summary>
 /// Resolves the effects a frame runs over the lit picture, each at its place.

@@ -17,7 +17,6 @@ to the library.
 - `Material/` has the material contract, `IMaterial`, and the materials of each project: `Standard`, and `Glass`,
   which is translucent.
 - `Sky/` has the sky contract, `ISky`, and `OpenSky`, the sky of a frame that has no sky tables.
-- `Post/` has the pixel effect contract, `IPixelEffect`, and the post effects of the engine.
 
 The tables and techniques of a renderer are in the `Resources/Shaders/` folder of its gem ([Rendering](RENDERING.md)).
 
@@ -36,7 +35,8 @@ are tables, and `OpenSky` where there are none. It has the two built before a do
 
 ## Post effects
 
-A post effect implements `IPixelEffect`. The effects run in the order of their list.
+A post effect implements `IPixelEffect`. The post-effects gem has the contract, in `Post/IPixelEffect`, and its own
+effects in `Post/`. The effects run in the order of their list.
 
 - An effect before `Exposure` works in the light of the world. An effect after it works in exposed light. An effect
   after the tonemap works in the colours of the screen.
@@ -46,4 +46,4 @@ A post effect implements `IPixelEffect`. The effects run in the order of their l
 - An effect that blends frames declares jitter. `TemporalAntiAliasing` shows this.
 - An effect reads the frame and its lights itself.
 
-Code from another engine keeps its licence, in `src/Resources/Shaders/THIRD-PARTY-NOTICES.md`.
+Code from another engine keeps its licence, in the `THIRD-PARTY-NOTICES.md` of its gem.

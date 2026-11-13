@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Drawing;
 using Magic.Assets;
@@ -66,17 +65,6 @@ public sealed class DeferredRenderingSettings : ISettings
     /// </remarks>
     [RequireRestart]
     public int DroppedTextureLevels { get; set; }
-
-    /// <summary>
-    /// How many stops brighter the picture is exposed, or darker below 0, when the world has no post processing of its
-    /// own: the brightness.
-    /// </summary>
-    public float ExposureCompensation { get; set; }
-
-    /// <summary>
-    /// The post effects left out of every frame, by their material's file name, as Bloom Vignette.
-    /// </summary>
-    public ImmutableArray<string> DisabledEffects { get; set; } = [];
 
     /// <summary>
     /// The part of the frame the window shows: Final is the finished frame, any other one part of the GBuffer or the

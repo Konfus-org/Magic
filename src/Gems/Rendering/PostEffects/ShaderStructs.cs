@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace Magic.DeferredRendering.Post;
+namespace Magic.PostEffects;
 
 /// <summary>
 /// One pass of a pixel effect, the twin of <c>ApplyPixelEffect.slang</c>'s.

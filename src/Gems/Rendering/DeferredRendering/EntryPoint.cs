@@ -36,15 +36,9 @@ public sealed class EntryPoint(
 
     public Renderer Renderer { get; } = new(settings, shaders, gpu, assets, ecs, threads, events);
 
-    public PostRenderer PostRenderer { get; } = new(settings, shaders, assets, ecs, threads);
-
     public void Dispose() => Renderer.Dispose();
 
     public void Update(in Frame frame) => _debugWindow?.Update(Settings);
 
-    public void LateUpdate(in Frame frame)
-    {
-        Renderer.PublishInputs(frame);
-        PostRenderer.PublishPostProcessing(frame);
-    }
+    public void LateUpdate(in Frame frame) => Renderer.PublishInputs(frame);
 }

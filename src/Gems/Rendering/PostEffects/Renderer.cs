@@ -3,7 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Channels;
 using Magic.Assets;
-using Magic.DeferredRendering.Post;
+using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
 using Magic.DeferredRendering.World;
 using Magic.Ecs;
@@ -15,7 +15,7 @@ using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
 
-namespace Magic.DeferredRendering;
+namespace Magic.PostEffects;
 
 /// <summary>
 /// What the frame's effects are resolved from: the world as the GPU holds it.
@@ -34,12 +34,12 @@ public readonly record struct PostInput(GpuWorld World);
 /// Each view keeps its effects' histories. A domain loading waits until its effects are on the GPU, or failed.
 /// </para>
 /// </remarks>
-public sealed class PostRenderer : IRender<PostInput, PictureEffects>, IRender, IHookIntoDomainLoading
+public sealed class Renderer : IRender<PostInput, PictureEffects>, IRender, IHookIntoDomainLoading
 {
     /// <summary>
-    /// The exposure compensation and the effects turned off, which the debug window also sets on the game thread.
+    /// The exposure compensation and the effects turned off, which the console also sets on the game thread.
     /// </summary>
-    private readonly DeferredRenderingSettings _settings;
+    private readonly PostEffectsSettings _settings;
 
     private readonly IEcs _ecs;
 
@@ -83,8 +83,8 @@ public sealed class PostRenderer : IRender<PostInput, PictureEffects>, IRender, 
     /// </summary>
     private (MaterialSlots Effects, TaskCompletionSource Done)? _preparing;
 
-    internal PostRenderer(
-        DeferredRenderingSettings settings,
+    internal Renderer(
+        PostEffectsSettings settings,
         IShaderCompiler shaders,
         AssetManager assets,
         IEcs ecs,

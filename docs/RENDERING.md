@@ -2,7 +2,7 @@
 
 The rendering gems draw the world into the window. The renderer, `DeferredRendering`, keeps the world on the GPU and
 lights it. The other gems add parts of the picture: the geometry, the world as rays see it, shadows, indirect light,
-the air and the upscaling. A project lists the gems that it wants in its `.magic` file.
+the air, the upscaling and the post effects. A project lists the gems that it wants in its `.magic` file.
 
 Each gem has a `Renderer` part with one or more render steps. Core runs a step after the steps that make its inputs.
 A step that takes `RenderViews`, or the output of such a step, runs one time for each view of the frame. This diagram
@@ -13,7 +13,7 @@ flowchart LR
     World[DeferredRendering world] -- GpuWorld, RenderViews --> View[DeferredRendering view]
     World -- GpuWorld --> Pools[ClusteredGeometry pools]
     World -- GpuWorld, GpuInstances --> Accel[AccelerationStructures]
-    World -- GpuWorld --> Post[DeferredRendering post]
+    World -- GpuWorld --> Post[PostEffects]
     Taa[TaaUpscaling] -- Upscaling --> View
     Post -- PictureEffects --> View
     Accel -- TracedWorld --> View
@@ -53,8 +53,6 @@ The renderer. It has four render steps:
    lights. Then it runs the `PictureEffects` of the frame and writes the picture into the target of the view.
 4. The failure banner: it draws the render failures of the frame over the top of the window.
 
-Its `PostRenderer` part runs the post effects ([Post effects](#post-effects)).
-
 The gem also holds the types that the rendering gems share. List it in the `.magic` file after the GPU provider, the
 ECS, the model importer and the texture importer, with a gem that draws its geometry. The settings are in
 `DeferredRenderingSettings`.
@@ -64,7 +62,7 @@ ECS, the model importer and the texture importer, with a gem that draws its geom
 - A model shows when it is on the GPU. A model that nothing drew for `Rendering.ModelKeepSec` leaves the GPU. It
   loads again when a frame draws it.
 - When a domain replaces the world, the loading screen stays until all that the new world draws is on the GPU or
-  failed. This includes its post effects and the passes of the gem.
+  failed. This includes the post effects and the passes of the gem.
 
 ### Cameras
 
@@ -106,21 +104,6 @@ A translucent material, such as the `Glass` material, draws over the lit picture
 pixel lets the light behind it through, by its colour. Where a gem builds the world as rays see it, the light also
 goes through the panes behind it. The pane reflects the light around it, and the sun lights it.
 
-### Post effects
-
-The effects of the first `PostProcessing` component run in order over the lit picture. Each effect is a material
-whose shader implements the pixel effect contract ([Shaders](SHADERS.md)). One time for each frame, the
-`PostRenderer` part of the gem makes the effects of the frame as its `PictureEffects`. The shading runs them.
-
-- Without a `PostProcessing`, the picture gets the `Exposure` and `Agx` materials of the engine.
-  `Rendering.DisabledEffects` names effects to leave out.
-- A `PostProcessing` lists each effect that it wants. To use a different tonemap, put its material in the place of
-  `Agx`.
-- The `Exposure` effect measures the picture each frame and adapts in about one second. Its `compensation` param
-  adds stops.
-- While an effect that declares jitter runs, the camera moves to a different point in each pixel each frame.
-- An effect shows when its material and its passes are built.
-
 ### Failures
 
 A model that does not load draws as a flashing teal cube of one metre, with "Model failed" and its path. Other
@@ -144,8 +127,8 @@ the views.
 - `Renderer` has one `Render` method for each step. Each method is its step, in order from top to bottom.
 - `GpuResources` reads a texture, material or model asset when a frame first asks for it.
 - `GpuPacker.Pack` in Core writes the row of a shader struct from its reflected fields and an `IGpuParams` source. The
-  renderer packs its material rows with it, and the post part packs its effect rows with it. A gem gets the heap ids
-  of a material param's texture from `GpuWorld.Textures`.
+  renderer packs its material rows with it, and the post-effects gem packs its effect rows with it. A gem gets the
+  heap ids of a material param's texture from `GpuWorld.Textures`.
 - A pass is one `RenderGraph.Compute` or `RenderGraph.Draw` call. The call names what the pass reads and writes.
 - A step draws nothing until each shader entry point that it runs is built.
 - Each frame, a pass asks the graph for its textures and buffers by name and description. The same name and
@@ -242,6 +225,25 @@ renderer. The renderer shades the sky, the sun's colour and the sky's light on t
   has a sky, it also makes the three sky tables of the view.
 - Its `Sky` material is the material for the `Sky` component.
 - Without the gem, the world is lit by the open sky.
+
+## PostEffects
+
+Runs the post-processing chain over the lit picture. List it in the `.magic` file after the renderer. Without it, the
+renderer shows the lit picture with no effects.
+
+The effects of the first `PostProcessing` component run in order over the lit picture. Each effect is a material
+whose shader implements the pixel effect contract ([Shaders](SHADERS.md)). One time for each frame, the gem makes the
+effects of the frame as its `PictureEffects`. The shading of the renderer runs them.
+
+- Without a `PostProcessing`, the picture gets the `Exposure` and `Agx` materials of the gem.
+  `Rendering.ExposureCompensation` sets the brightness. `Rendering.DisabledEffects` names effects to leave out. The
+  settings are in `PostEffectsSettings`.
+- A `PostProcessing` lists each effect that it wants. To use a different tonemap, put its material in the place of
+  `Agx`.
+- The `Exposure` effect measures the picture each frame and adapts in about one second. Its `compensation` param
+  adds stops.
+- While an effect that declares jitter runs, the camera moves to a different point in each pixel each frame.
+- An effect shows when its material and its passes are built. A domain shows when its effects are built or failed.
 
 ## TaaUpscaling
 

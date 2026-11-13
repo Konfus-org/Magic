@@ -1,6 +1,6 @@
 using Magic.Graphics;
 
-namespace Magic.DeferredRendering.View;
+namespace Magic.PostEffects;
 
 /// <summary>
 /// An effect at its place in a frame's list: its material, its passes' entries specialised to its shader, and its
@@ -9,7 +9,7 @@ namespace Magic.DeferredRendering.View;
 /// <remarks>
 /// It is ready when its material, textures and passes are. Its material's row is the view's effect row at its place.
 /// </remarks>
-public readonly record struct GpuEffect(
+internal readonly record struct GpuEffect(
     ulong Material,
     GpuState State,
     ShaderEntry Apply,
@@ -21,4 +21,4 @@ public readonly record struct GpuEffect(
 /// What an effect's shader declares it needs: levels of a target of its own, last frame's target as its history, and
 /// the camera jittered.
 /// </summary>
-public readonly record struct EffectNeeds(int Levels, bool HasHistory, bool HasJitter);
+internal readonly record struct EffectNeeds(int Levels, bool HasHistory, bool HasJitter);
