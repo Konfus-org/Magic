@@ -3,6 +3,8 @@
     "params": {
         "color": { "r": 1, "g": 1, "b": 1, "a": 1 },
         "roughness": { "x": 1 },
-        "colorMap": { "texture": { "id": 300081 } }
+        "colorMap": { "texture": { "id": 300081 } },
+        "normalMap": { "texture": { "id": 300107 } },
+        "ormMap": { "texture": { "id": 300108 } }
     }
 }
