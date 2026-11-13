@@ -381,8 +381,8 @@ internal sealed class GpuResources(
             _modelRows.Free((int)where.ModelIndex, 1);
             _models[where.ModelIndex] = default;
             _modelEntries.Remove(id);
-            Log.Info(
-                $"{assets.GetPath(new Handle<Model>(id)) ?? $"model {id}"} left the GPU: nothing asked for it in {keepSec} s."
+            Log.Verbose(
+                $"Model unloaded from the GPU: {assets.GetPath(new Handle<Model>(id)) ?? $"id {id}"}, asked for by nothing in {keepSec} s."
             );
         }
     }
