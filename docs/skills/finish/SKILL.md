@@ -10,7 +10,7 @@ The commands and rules are in [PROJECT.md](../PROJECT.md).
 This diagram shows the flow from validation to the merge.
 
 ```mermaid
-flowchart LR
+flowchart TD
     Validate --> Review[Review in a fresh context] --> Summary --> UserReview[The user's review]
     Review -- findings --> Validate
     UserReview -- comments --> Validate

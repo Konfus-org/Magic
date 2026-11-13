@@ -10,7 +10,7 @@ Find the cause first. Then fix it as a slice. The commands, paths and rules are 
 This diagram shows the steps from the report to the fix.
 
 ```mermaid
-flowchart LR
+flowchart TD
     Say[Say what is wrong] --> Repro[Reproduce] --> Evidence[Read the logs] --> Cause[Name the cause] --> Fix[Fix as a slice]
     Repro -- no repro --> Ask[Ask for the steps]
 ```

@@ -54,8 +54,8 @@ more code than it adds. The rules are in [PROJECT.md](../PROJECT.md).
    The plan has:
    - Each change in one line, with its reason.
    - Code before and after each important change, short enough to read quickly.
-   - When the change moves types, layers or calls: a Mermaid diagram of the architecture before and after. Do not draw
-     a diagram with ASCII characters.
+   - When the change moves types, layers or calls: a Mermaid diagram of the architecture before and after. Draw it
+     as the [ste-docs skill](../ste-docs/SKILL.md), section 7, says.
    - An estimate of the lines that it removes.
    - The decisions that need the user's yes. These are a change to a public API, a file format or a plugin
      interface, and the removal of a feature that a user can see.
@@ -68,6 +68,7 @@ more code than it adds. The rules are in [PROJECT.md](../PROJECT.md).
 7. **Report:**
    - The net change in lines, as measured.
    - What you removed, merged, made flat and renamed, one line each.
-   - If the architecture changed, the Mermaid diagram of the architecture after the change.
+   - If the architecture changed, the Mermaid diagram of the architecture after the change. Draw it as the
+     [ste-docs skill](../ste-docs/SKILL.md), section 7, says.
    - Each change in behavior that the user approved.
    - What you saw but did not change, and why: too big, out of scope, or a decision for the user.

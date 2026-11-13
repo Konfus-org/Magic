@@ -183,12 +183,42 @@ Use a diagram when it shows a flow, a sequence, states or a structure better tha
   states.
 - Keep each label to a few words in STE. Use the names from the code.
 - Keep a diagram to about 12 nodes. Split a larger one.
+- Use `flowchart TD` (top to bottom) when the flow has more than 4 nodes. A wide `LR` diagram shrinks to fit the
+  page, and then the reader cannot read the labels.
+- Do not put subgraphs side by side. Stack them from top to bottom.
 - Write one sentence before the diagram that says what it shows.
+
+### Full-size view
+
+The reader must be able to open each diagram at full size:
+
+1. If your tool can show a diagram that the reader can expand or zoom, use it.
+2. If not, also write the diagram to an HTML file and give the reader the file path. Put the file in a temporary
+   folder, not in the repository. A browser shows the diagram at full width, and the reader can zoom it.
+3. In a document in the repository, use only the `mermaid` code block. The document viewer shows it.
+
+HTML file for a diagram:
+
+```html
+<!doctype html>
+<meta charset="utf-8">
+<title>Diagram</title>
+<style>body { margin: 0 } .mermaid svg { width: 100vw; max-width: none; height: auto }</style>
+<pre class="mermaid">
+flowchart TD
+    Brief --> Build --> Validate --> Review --> Merge
+    Review -- findings --> Build
+</pre>
+<script type="module">
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    mermaid.initialize({ startOnLoad: true });
+</script>
+```
 
 Example:
 
 ```mermaid
-flowchart LR
+flowchart TD
     Brief --> Build --> Validate --> Review --> Merge
     Review -- findings --> Build
 ```

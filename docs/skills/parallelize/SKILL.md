@@ -18,7 +18,7 @@ met. Do not ask the user if you must continue.
 This diagram shows the flow of a swarm, from the plan to the merge.
 
 ```mermaid
-flowchart LR
+flowchart TD
     Plan --> Coders[Coders build slices] --> Trains[Merge trains into the root]
     Trains --> QA --> Fixes[Fix slices] --> Cleanup --> Review[Review of the root] --> UserReview[The user's review] --> Merge
 ```

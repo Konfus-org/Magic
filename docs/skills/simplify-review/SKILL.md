@@ -43,8 +43,8 @@ The rules, paths and commands are in [PROJECT.md](../PROJECT.md).
       - Its `file:line` and what is wrong.
       - The simpler version, in a few lines.
       - The lines that it removes, and its risk.
-      - When it moves types, layers or calls: a Mermaid diagram of the architecture before and after. Do not draw a
-        diagram with ASCII characters.
+      - When it moves types, layers or calls: a Mermaid diagram of the architecture before and after. Draw it as the
+        [ste-docs skill](../ste-docs/SKILL.md), section 7, says.
 6. **Give it to the user:**
    - Give the total lines that it removes, and the decisions that wait for the owner.
    - Offer to run the slices that need no decision. Run them at the same time where their files do not overlap

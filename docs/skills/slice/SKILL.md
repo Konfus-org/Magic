@@ -10,7 +10,7 @@ The rules and commands are in [PROJECT.md](../PROJECT.md).
 This diagram shows how a request becomes a built slice or a proposal.
 
 ```mermaid
-flowchart LR
+flowchart TD
     Request --> Size{Too big?}
     Size -- yes --> Split[Propose 2-4 slices]
     Size -- no --> Check[Examine the request] --> Brief
@@ -66,7 +66,8 @@ flowchart LR
    2. The smallest version that can work, the alternatives, and why the selected one is the simplest.
    3. For a new thing, the libraries and tools that exist and that you examined.
    4. The assumption with the most risk, what you did not check, and what can change your recommendation.
-   5. For a sweeping change, code before and after, and a data-flow diagram in Mermaid.
+   5. For a sweeping change, code before and after, and a data-flow diagram in Mermaid. Draw it as the
+      [ste-docs skill](../ste-docs/SKILL.md), section 7, says.
 
    In Claude Code, write the proposal in plan mode. In other tools, write it in the chat and wait.
 7. When the slice is built, use the [finish skill](../finish/SKILL.md).
