@@ -21,11 +21,14 @@ public struct Standard : IMaterial
     // up the surface, as the maps of glTF and OpenGL do.
     public TextureRef normalMap;
     public SamplerRef normalMapSampler;
-    // The mask map and the sampler it is read with. An id of 0 means none. It holds the occlusion in its red channel,
-    // the roughness in its green and the metalness in its blue, as glTF packs them, and each multiplies the factor
-    // beside it.
-    public TextureRef maskMap;
-    public SamplerRef maskMapSampler;
+    // The occlusion-roughness-metalness map and the sampler it is read with. An id of 0 means none. It holds the
+    // occlusion in its red channel, the roughness in its green and the metalness in its blue, as glTF packs them,
+    // and each multiplies the factor beside it.
+    public TextureRef ormMap;
+    public SamplerRef ormMapSampler;
+    // The emissive map and the sampler it is read with. An id of 0 means none. It tints the emissive colour.
+    public TextureRef emissiveMap;
+    public SamplerRef emissiveMapSampler;
 
     public SurfaceOutputs Evaluate(SurfaceInputs inputs)
     {
@@ -42,18 +45,22 @@ public struct Standard : IMaterial
             normal = NormalizeSafe(shaded, inputs.normal);
         }
 
-        float3 mask = float3(1.0);
-        if (maskMap.id != 0u)
-            mask = maskMap.SampleGrad(maskMapSampler, inputs.uv, inputs.uvDdx, inputs.uvDdy).rgb;
+        float3 orm = float3(1.0);
+        if (ormMap.id != 0u)
+            orm = ormMap.SampleGrad(ormMapSampler, inputs.uv, inputs.uvDdx, inputs.uvDdy).rgb;
+
+        float3 glow = emissive;
+        if (emissiveMap.id != 0u)
+            glow *= emissiveMap.SampleGrad(emissiveMapSampler, inputs.uv, inputs.uvDdx, inputs.uvDdy).rgb;
 
         SurfaceOutputs surface;
         surface.baseColor = base.rgb;
         surface.alpha = base.a;
         surface.normal = normal;
-        surface.roughness = roughness * mask.g;
-        surface.metalness = metalness * mask.b;
-        surface.emissive = emissive;
-        surface.occlusion = mask.r;
+        surface.roughness = roughness * orm.g;
+        surface.metalness = metalness * orm.b;
+        surface.emissive = glow;
+        surface.occlusion = orm.r;
         return surface;
     }
 }

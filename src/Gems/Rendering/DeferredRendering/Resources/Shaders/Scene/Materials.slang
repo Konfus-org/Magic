@@ -1,4 +1,4 @@
-// The material table: a row per material slot drawn, C#'s GpuMaterial, 64 bytes each: the shader word, then the
+// The material table: a row per material slot drawn, C#'s GpuMaterial, 80 bytes each: the shader word, then the
 // struct of the material shader that draws the row, its params, as the renderer packed them from the shader's
 // reflection. The shader word holds the number of that shader in bits 0 to 11, the index of the row's failure in the
 // failure table in bits 12 to 30, 0 where nothing failed (Scene/Failures), and the translucent bit in bit 31. Row 0 is
@@ -7,7 +7,7 @@ module "Scene/Materials";
 
 import Core.Heap;
 
-public static const uint GpuMaterialBytes = 64u;
+public static const uint GpuMaterialBytes = 80u;
 
 // The shader word's bit for a translucent shader's row, C#'s GpuMaterial.TranslucentBit: drawn over the lit picture,
 // not with the opaque surfaces.
