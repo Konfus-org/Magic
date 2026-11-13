@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Magic.Debugging;
 using Magic.Ecs;
@@ -34,34 +35,24 @@ internal sealed class ScriptState(IServiceProvider services)
     private readonly IServiceProviderIsService? _given = services as IServiceProviderIsService;
 
     /// <summary>
+    /// The members of each script class, searched the first time a copy of it is read or written.
+    /// </summary>
+    /// <remarks>
+    /// The table holds its key weakly, so a class that a build of the project's code replaces goes, and its entry
+    /// with it.
+    /// </remarks>
+    private readonly ConditionalWeakTable<Type, Members> _members = [];
+
+    /// <summary>
     /// The state of <paramref name="script"/> as it is now, for a save.
     /// </summary>
     public List<KeyValuePair<string, JsonElement>> Read(IScript script)
     {
         Type type = script.GetType();
         List<KeyValuePair<string, JsonElement>> state = [];
-
-        // The values first, each one's backing field noted, so the fields below do not write it a second time.
-        HashSet<string> backing = new(StringComparer.Ordinal);
-        foreach (PropertyInfo value in GetValues(type))
+        foreach (SavedMember member in GetMembers(type).Saved)
         {
-            backing.Add($"<{value.Name}>k__BackingField");
-
-            // A value is saved by the name that a prefab gives it.
-            string key = JsonNamingPolicy.CamelCase.ConvertName(value.Name);
-            Add(state, type, key, value.PropertyType, value.GetValue(script));
-        }
-
-        // The types that a copy is handed when it is made: the parameters of the one public constructor of a script.
-        ConstructorInfo[] constructors = type.GetConstructors();
-        Type[] handed =
-            constructors.Length == 1
-                ? Array.ConvertAll(constructors[0].GetParameters(), parameter => parameter.ParameterType)
-                : [];
-        foreach (FieldInfo field in type.GetFields(AnyField))
-        {
-            if (!backing.Contains(field.Name) && !IsHanded(field.FieldType, handed))
-                Add(state, type, GetFieldName(field), field.FieldType, field.GetValue(script));
+            Add(state, type, member.Name, member.Type, member.Get(script));
         }
 
         return state;
@@ -73,10 +64,10 @@ internal sealed class ScriptState(IServiceProvider services)
     /// </summary>
     public void SetValues(ScriptValues values, IScript script, Entity entity)
     {
-        Type type = script.GetType();
+        Members members = GetMembers(script.GetType());
         foreach ((string name, JsonElement value) in values.All)
         {
-            Set(script, entity, name, value, FindValue(type, name));
+            Set(script, entity, name, value, members.Values.GetValueOrDefault(name));
         }
     }
 
@@ -86,47 +77,16 @@ internal sealed class ScriptState(IServiceProvider services)
     /// </summary>
     public void Restore(ScriptValues state, IScript script, Entity entity)
     {
-        Type type = script.GetType();
+        Members members = GetMembers(script.GetType());
         foreach ((string name, JsonElement value) in state.All)
         {
             // Else the field: its own of that name, or the one that the compiler made for a property or a primary
             // constructor parameter of that name.
             MemberInfo? member =
-                (MemberInfo?)FindValue(type, name)
-                ?? type.GetField(name, AnyField)
-                ?? type.GetField($"<{name}>k__BackingField", AnyField)
-                ?? type.GetField($"<{name}>P", AnyField);
+                (MemberInfo?)members.Values.GetValueOrDefault(name) ?? members.Fields.GetValueOrDefault(name);
             Set(script, entity, name, value, member);
         }
     }
-
-    /// <summary>
-    /// The values of <paramref name="type"/>: its public properties that have both a getter and a setter, which a
-    /// prefab sets.
-    /// </summary>
-    private static List<PropertyInfo> GetValues(Type type)
-    {
-        List<PropertyInfo> values = [];
-        foreach (PropertyInfo property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
-        {
-            if (
-                property.GetMethod is { IsPublic: true }
-                && property.SetMethod is { IsPublic: true }
-                && property.GetIndexParameters().Length == 0
-            )
-            {
-                values.Add(property);
-            }
-        }
-
-        return values;
-    }
-
-    /// <summary>
-    /// The value of <paramref name="type"/> that a file names <paramref name="name"/>, or null when it has none.
-    /// </summary>
-    private static PropertyInfo? FindValue(Type type, string name) =>
-        GetValues(type).Find(value => value.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// The name that a field is saved as: its own, or for one that the compiler made, the name between the angle
@@ -137,6 +97,59 @@ internal sealed class ScriptState(IServiceProvider services)
         int end = field.Name.IndexOf('>', StringComparison.Ordinal);
 
         return field.Name.StartsWith('<') && end > 1 ? field.Name[1..end] : field.Name;
+    }
+
+    /// <summary>
+    /// The members of <paramref name="type"/>: searched the first time, and the same ones for every copy after.
+    /// </summary>
+    private Members GetMembers(Type type)
+    {
+        if (_members.TryGetValue(type, out Members? found))
+            return found;
+
+        Members members = new();
+
+        // The values first, each one's backing field noted, so the fields below do not write it a second time.
+        HashSet<string> backing = new(StringComparer.Ordinal);
+        foreach (PropertyInfo property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            if (
+                property.GetMethod is not { IsPublic: true }
+                || property.SetMethod is not { IsPublic: true }
+                || property.GetIndexParameters().Length != 0
+            )
+            {
+                continue;
+            }
+
+            members.Values.TryAdd(property.Name, property);
+            backing.Add($"<{property.Name}>k__BackingField");
+
+            // A value is saved by the name that a prefab gives it.
+            string key = JsonNamingPolicy.CamelCase.ConvertName(property.Name);
+            members.Saved.Add(new SavedMember(key, property.PropertyType, property.GetValue));
+        }
+
+        // The types that a copy is handed when it is made: the parameters of the one public constructor of a script.
+        ConstructorInfo[] constructors = type.GetConstructors();
+        Type[] handed =
+            constructors.Length == 1
+                ? Array.ConvertAll(constructors[0].GetParameters(), parameter => parameter.ParameterType)
+                : [];
+        foreach (FieldInfo field in type.GetFields(AnyField))
+        {
+            // A field of the class's own wins over one that the compiler made for a member of the same name.
+            string name = GetFieldName(field);
+            if (name == field.Name || !members.Fields.ContainsKey(name))
+                members.Fields[name] = field;
+
+            if (!backing.Contains(field.Name) && !IsHanded(field.FieldType, handed))
+                members.Saved.Add(new SavedMember(name, field.FieldType, field.GetValue));
+        }
+
+        _members.Add(type, members);
+
+        return members;
     }
 
     /// <summary>
@@ -249,5 +262,32 @@ internal sealed class ScriptState(IServiceProvider services)
     {
         if (_logged.Add($"{type.FullName}.{name}"))
             Log.Error(message);
+    }
+
+    /// <summary>
+    /// A member that a save keeps: the name it is saved as, the type it holds, and how to read it out of a copy.
+    /// </summary>
+    private readonly record struct SavedMember(string Name, Type Type, Func<IScript, object?> Get);
+
+    /// <summary>
+    /// The members of one script class that a prefab and a save reach.
+    /// </summary>
+    private sealed class Members
+    {
+        /// <summary>
+        /// The values, which a prefab sets: the public properties that have both a public getter and setter, by name,
+        /// whatever the case of its first letter.
+        /// </summary>
+        public Dictionary<string, PropertyInfo> Values { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Every field by the name it is saved as, for the state that only a save sets.
+        /// </summary>
+        public Dictionary<string, FieldInfo> Fields { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// What a save keeps of a copy: the values, then the fields that are data of the copy's own.
+        /// </summary>
+        public List<SavedMember> Saved { get; } = [];
     }
 }
