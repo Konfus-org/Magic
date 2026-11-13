@@ -117,7 +117,7 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
 
         // Two scattering volumes swap every frame, the other holding last frame's, which this frame's blends with.
         GpuView gpu = input.View;
-        (int Width, int Height) size = gpu.Scaled(_settings.VolumetricsScale);
+        (int Width, int Height) size = gpu.Scaled(_settings.VolumeScale);
         int written = (int)(frame.Index % 2);
         Result<GpuTexture> scattering = graph.Texture(GetVolume(_scatteringNames[written], size));
         Result<GpuTexture> history = graph.Texture(GetVolume(_scatteringNames[1 - written], size));
@@ -152,7 +152,7 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
         {
             Volume = air.Value.Id,
             Sampler = sampler.Value.Id,
-            Distance = _settings.VolumetricsDistance,
+            Distance = _settings.VolumeDistance,
             Density = weather.FogDensity,
             Height = weather.FogHeight,
             HalfHeight = weather.FogHalfHeight,

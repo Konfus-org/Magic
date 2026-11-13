@@ -190,7 +190,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         (int Width, int Height) tracedSize = gpu.Scaled(_settings.IndirectScale);
         ((int Width, int Height)? lastTraced, (int Width, int Height)? lastReflected) = _views[graph.View];
         bool hasHistory = lastTraced == tracedSize;
-        ReadOnlySpan<GpuResource> sky = input.Sky is { Transmittance.IsNone: false } tables
+        ReadOnlySpan<GpuResource> sky = input.Sky is { HasTables: true } tables
             ? [tables.Transmittance, tables.View]
             : [];
         GIView view = new(

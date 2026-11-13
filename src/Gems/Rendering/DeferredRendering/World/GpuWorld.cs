@@ -1,16 +1,9 @@
 using System.Collections.Immutable;
 using System.Drawing;
-using Magic.Assets;
 using Magic.DeferredRendering.View;
 using Magic.Graphics;
 
 namespace Magic.DeferredRendering.World;
-
-/// <summary>
-/// Gets whether the texture that <paramref name="param"/> samples is on the GPU, and its heap ids and its sampler's
-/// when it is; the first ask starts reading it.
-/// </summary>
-public delegate GpuState TextureLookup(MaterialParam param, out uint texture, out uint sampler);
 
 /// <summary>
 /// The world as the GPU holds it this frame, whatever view it is seen through: what the world's step makes once a frame

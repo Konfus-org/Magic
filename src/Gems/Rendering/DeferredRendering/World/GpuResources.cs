@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Numerics;
@@ -163,6 +162,12 @@ internal sealed class GpuResources(
             return false;
         }
     }
+
+    /// <summary>
+    /// Gets a material param's texture, its render texture or else its texture, as the one delegate that the world
+    /// hands on and each row is packed with, so a frame makes no delegate.
+    /// </summary>
+    public TextureLookup GetTexture => field ??= Get;
 
     /// <summary>
     /// Gets every material's texture on the GPU, which shaders read through the heap by the id in a row.
@@ -417,13 +422,6 @@ internal sealed class GpuResources(
     }
 
     /// <summary>
-    /// Whether the texture that <paramref name="param"/> samples is on the GPU, its render texture or else its texture,
-    /// and its heap ids when it is; the first ask starts reading it.
-    /// </summary>
-    public GpuState Get(MaterialParam param, out uint texture, out uint sampler) =>
-        Get(GetSampled(param), out texture, out sampler);
-
-    /// <summary>
     /// Whether the material, its shader's struct and the textures it names are on the GPU, or one of them failed; the
     /// first ask starts loading it.
     /// </summary>
@@ -597,6 +595,13 @@ internal sealed class GpuResources(
         };
 
     /// <summary>
+    /// Whether the texture that <paramref name="param"/> samples is on the GPU, its render texture or else its texture,
+    /// and its heap ids when it is; the first ask starts reading it.
+    /// </summary>
+    private GpuState Get(MaterialParam param, out uint texture, out uint sampler) =>
+        Get(GetSampled(param), out texture, out sampler);
+
+    /// <summary>
     /// Packs the slot's params into the row, and gets whether its material, its shader's struct and its textures are on
     /// the GPU.
     /// </summary>
@@ -645,17 +650,14 @@ internal sealed class GpuResources(
             return GpuState.Failed;
         }
 
-        MaterialOverrides overrides = slot.Overrides;
-        GpuPacked packed = GpuPacker.Pack(layout.Fields, new SlotParams(this, material, overrides), row.Params);
+        MaterialParams source = new(material, slot.Overrides, GetTexture);
+        GpuPacked packed = GpuPacker.Pack(layout.Fields, source, row.Params);
 
         // A param of the material or of the slot that names no field, looked for once for the slot.
         string? misfit = packed.Misfit;
         if (misfit is null && !_misfits.TryGetValue(slot, out misfit))
         {
-            misfit = GpuPacker.FindUnnamed(
-                layout.Fields,
-                material.Params.Keys.Concat(overrides.Params.Select(param => param.Key))
-            );
+            misfit = source.FindUnusedParam(layout.Fields);
             _misfits[slot] = misfit;
         }
 
@@ -895,19 +897,6 @@ internal sealed class GpuResources(
         ShaderTypeArgument Shader,
         bool IsTranslucent
     );
-
-    /// <summary>
-    /// A slot's params over its material's, with its textures asked of the resources.
-    /// </summary>
-    private readonly struct SlotParams(GpuResources resources, Material material, MaterialOverrides overrides)
-        : IGpuParams
-    {
-        public bool TryGetParam(string name, [MaybeNullWhen(false)] out MaterialParam param) =>
-            overrides.TryGet(name, out param) || material.Params.TryGetValue(name, out param);
-
-        public GpuState GetTexture(MaterialParam param, out uint texture, out uint sampler) =>
-            resources.Get(param, out texture, out sampler);
-    }
 
     /// <summary>
     /// A model asked for: where it is in the loading, when it was last asked, in

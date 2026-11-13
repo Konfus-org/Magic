@@ -1,10 +1,8 @@
 using System.Collections.Immutable;
-using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using Magic.Assets;
 using Magic.Debugging;
-using Magic.DeferredRendering.World;
 using Magic.Ecs.Components;
 using Magic.Graphics;
 using Magic.Threading;
@@ -215,17 +213,14 @@ internal sealed class Effects(AssetManager assets, IShaderCompiler shaders, Thre
             return GpuState.Failed;
         }
 
-        MaterialOverrides overrides = slot.Overrides;
-        GpuPacked packed = GpuPacker.Pack(layout.Fields, new SlotParams(material, overrides, textures), words);
+        MaterialParams source = new(material, slot.Overrides, textures);
+        GpuPacked packed = GpuPacker.Pack(layout.Fields, source, words);
 
         // A param of the material or of the slot that names no field, looked for once for the slot.
         string? misfit = packed.Misfit;
         if (misfit is null && !_misfits.TryGetValue(slot, out misfit))
         {
-            misfit = GpuPacker.FindUnnamed(
-                layout.Fields,
-                material.Params.Keys.Concat(overrides.Params.Select(param => param.Key))
-            );
+            misfit = source.FindUnusedParam(layout.Fields);
             _misfits[slot] = misfit;
         }
 
@@ -337,17 +332,4 @@ internal sealed class Effects(AssetManager assets, IShaderCompiler shaders, Thre
         ShaderTypeArgument Shader,
         EffectNeeds Needs
     );
-
-    /// <summary>
-    /// A slot's params over its material's, with its textures got through the world's lookup.
-    /// </summary>
-    private readonly struct SlotParams(Material material, MaterialOverrides overrides, TextureLookup textures)
-        : IGpuParams
-    {
-        public bool TryGetParam(string name, [MaybeNullWhen(false)] out MaterialParam param) =>
-            overrides.TryGet(name, out param) || material.Params.TryGetValue(name, out param);
-
-        public GpuState GetTexture(MaterialParam param, out uint texture, out uint sampler) =>
-            textures(param, out texture, out sampler);
-    }
 }

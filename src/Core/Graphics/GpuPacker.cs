@@ -1,5 +1,4 @@
 using System.Collections.Immutable;
-using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -12,7 +11,7 @@ namespace Magic.Graphics;
 /// from its params, and reads values back from a cache's bytes.
 /// </summary>
 /// <remarks>
-/// It holds no state, and allocates only in <see cref="Read{T}"/> and <see cref="FindUnnamed"/>.
+/// It holds no state, and allocates only in <see cref="Read{T}"/>.
 /// </remarks>
 public static class GpuPacker
 {
@@ -80,15 +79,6 @@ public static class GpuPacker
 
         return new GpuPacked(state, failedTexture, misfit);
     }
-
-    /// <summary>
-    /// Finds the first of <paramref name="names"/> that names no field of <paramref name="fields"/>, null for none.
-    /// </summary>
-    /// <remarks>
-    /// It allocates: keep its result until an asset is read again.
-    /// </remarks>
-    public static string? FindUnnamed(ImmutableArray<ShaderField> fields, IEnumerable<string> names) =>
-        names.FirstOrDefault(name => !fields.Any(field => field.Name == name));
 
     /// <summary>
     /// Reads the first <paramref name="count"/> values of <paramref name="bytes"/>, in native byte order, and moves

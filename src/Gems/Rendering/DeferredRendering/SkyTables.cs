@@ -23,6 +23,11 @@ public readonly record struct SkyTables(
 )
 {
     /// <summary>
+    /// Whether the sky made its tables: false where no entity has a sky.
+    /// </summary>
+    public bool HasTables => !Transmittance.IsNone;
+
+    /// <summary>
     /// Gets the open sky, as the type arguments of an entry generic over the sky, for a frame without tables.
     /// </summary>
     public static ImmutableArray<ShaderTypeArgument> GetOpenSky(AssetManager assets) =>
@@ -35,5 +40,5 @@ public readonly record struct SkyTables(
     public static ImmutableArray<ShaderTypeArgument> GetSkyType(
         in SkyTables? tables,
         ImmutableArray<ShaderTypeArgument> openSky
-    ) => tables is { Transmittance.IsNone: false } sky ? sky.SkyType : openSky;
+    ) => tables is { HasTables: true } sky ? sky.SkyType : openSky;
 }

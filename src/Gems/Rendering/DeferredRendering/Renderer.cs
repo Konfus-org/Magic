@@ -122,11 +122,6 @@ public sealed class Renderer
     private readonly InstanceTable _instances;
 
     /// <summary>
-    /// Gets a material param's texture, which the world hands on, so a frame makes no delegate.
-    /// </summary>
-    private readonly TextureLookup _textures;
-
-    /// <summary>
     /// What each view keeps from frame to frame, by its number: where it looked last frame. Render thread.
     /// </summary>
     private readonly List<FrameView> _views = [];
@@ -233,7 +228,6 @@ public sealed class Renderer
             settings.Anisotropy,
             settings.DroppedTextureLevels
         );
-        _textures = _resources.Get;
         _instances = new InstanceTable(assets, _resources);
         _lightTiles = new LightTiles(assets);
         _banner = new FailureBanner(assets);
@@ -430,7 +424,7 @@ public sealed class Renderer
             Models = _resources.Models,
             MaterialShaders = _resources.MaterialShaders,
             HeapTextures = _resources.GetHeapTextures(),
-            GetTexture = _textures,
+            GetTexture = _resources.GetTexture,
             PreparedDomains = _preparedDomains,
             Inputs = inputs,
             Picture = picture,
@@ -681,9 +675,7 @@ public sealed class Renderer
         ReadOnlySpan<GpuResource> indirect = input.Light is { } light
             ? [light.Diffuse, light.Reflections, light.Probes, light.ProbeDepth]
             : [];
-        ReadOnlySpan<GpuResource> tables = input.Sky is { Transmittance.IsNone: false } made
-            ? [made.Transmittance, made.View]
-            : [];
+        ReadOnlySpan<GpuResource> tables = input.Sky is { HasTables: true } made ? [made.Transmittance, made.View] : [];
 
         // Every pixel's surface shaded from the sky's tables, its tile's lights, the shadows where there are any and
         // the indirect light, or the sky where nothing traced it, or the failure of the sky or its clouds where they
