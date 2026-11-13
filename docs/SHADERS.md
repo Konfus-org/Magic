@@ -47,4 +47,4 @@ run in the order of their list.
 - An effect that blends frames declares jitter. `TemporalAntiAliasing` shows this.
 - An effect reads the frame and its lights itself.
 
-Code from another engine keeps its licence, in the `THIRD-PARTY-NOTICES.md` of its gem.
+Code from another engine keeps its licence, in the `THIRD-PARTY-NOTICES.md` beside it: the library's, or its gem's.
