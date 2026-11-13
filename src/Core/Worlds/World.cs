@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Text;
@@ -79,6 +80,16 @@ public sealed class World : IEcs, IDisposable
     /// The ECS a gem provides, from when it is made until it goes; null while none does.
     /// </summary>
     private IEcs? _ecs;
+
+    /// <summary>
+    /// The debug UI a gem provides, from when it is made until it goes; null while none does.
+    /// </summary>
+    private IDebugUI? _debugUI;
+
+    /// <summary>
+    /// What the load that runs does now, as the debug UI shows it each frame; null while none runs. Any thread.
+    /// </summary>
+    private volatile string? _loadingStep;
 
     /// <summary>
     /// What a replace waits on frame by frame. Game thread.
@@ -381,6 +392,8 @@ public sealed class World : IEcs, IDisposable
         if (_ecs is { } ecs)
             MaterialSet.SweepIfDue(ecs);
 
+        DrawLoadingStep();
+
         // Let a replace waiting for this frame go on.
         TaskCompletionSource starting = _frameStarting;
         _frameStarting = new TaskCompletionSource();
@@ -395,6 +408,16 @@ public sealed class World : IEcs, IDisposable
         _ecs = ecs;
 
         return new Subscription(() => _ecs = null);
+    }
+
+    /// <summary>
+    /// Has <paramref name="debugUI"/> show what a load does, until the subscription is disposed. Game thread.
+    /// </summary>
+    internal Subscription Register(IDebugUI debugUI)
+    {
+        _debugUI = debugUI;
+
+        return new Subscription(() => _debugUI = null);
     }
 
     /// <summary>
@@ -683,6 +706,7 @@ public sealed class World : IEcs, IDisposable
         }
         finally
         {
+            _loadingStep = null;
             _turn.Release();
         }
     }
@@ -786,6 +810,7 @@ public sealed class World : IEcs, IDisposable
         if (!HasEcs)
             return Result.Failure("no gem the project lists provides the ECS.");
 
+        ShowLoadingStep($"Loading {GetName(domain)}...");
         Result<DomainRead> read = await ReadDomainAsync(domain, progress, cancel).ConfigureAwait(false);
         if (!read.Ok)
             return Result.Failure(read.Error);
@@ -876,10 +901,12 @@ public sealed class World : IEcs, IDisposable
             await _threads.Enter(EngineThread.Game);
             ImmutableArray<Entity> loading = CreateEntities(screen);
             IsShowingLoadingScreen = true;
+            ShowLoadingStep($"Preparing {arriving.Length} entities...");
             await RunHooksAsync(hooks => hooks.OnDomainLoadingAsync(arriving, cancel), "preparing")
                 .ConfigureAwait(false);
 
             // A gem that doesn't hook into domain loading may still be loading what comes.
+            ShowLoadingStep("Waiting for the assets in load...");
             while (_assets.HasLoadsInFlight)
             {
                 await WaitForFrameAsync(cancel).ConfigureAwait(false);
@@ -912,6 +939,27 @@ public sealed class World : IEcs, IDisposable
             IsLoading = false;
             IsShowingLoadingScreen = false;
         }
+    }
+
+    /// <summary>
+    /// Has the debug UI show what the load that runs does now, in this frame. Debug builds only, as the lines logged
+    /// to show on screen.
+    /// </summary>
+    [Conditional("DEBUG")]
+    private void DrawLoadingStep()
+    {
+        if (_loadingStep is { } step)
+            _debugUI?.Text(step);
+    }
+
+    /// <summary>
+    /// Logs <paramref name="step"/>, what the load does from now, and has the debug UI show it each frame until the
+    /// next step or the end of the load.
+    /// </summary>
+    private void ShowLoadingStep(string step)
+    {
+        Log.Info(step);
+        _loadingStep = step;
     }
 
     /// <summary>
@@ -972,6 +1020,7 @@ public sealed class World : IEcs, IDisposable
         ImmutableArray<DomainRead>.Builder reading = ImmutableArray.CreateBuilder<DomainRead>(saved.Domains.Length);
         foreach (Handle<Domain> domain in saved.Domains)
         {
+            ShowLoadingStep($"Loading {GetName(domain)}...");
             Result<DomainRead> read = await ReadDomainAsync(domain, progress, cancel).ConfigureAwait(false);
             if (!read.Ok)
                 return Result.Failure($"{GetName(domain)} does not open: {read.Error}");

@@ -260,6 +260,9 @@ internal sealed class Gems : IDisposable
                 if (part is IEcs ecs)
                     loaded.Ends.Add(_world.Register(ecs));
 
+                if (part is IDebugUI debugUI)
+                    loaded.Ends.Add(_world.Register(debugUI));
+
                 // A gem that makes what another makes, or closes a cycle, renders nothing; the others go on.
                 try
                 {

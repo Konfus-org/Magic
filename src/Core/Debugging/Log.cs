@@ -36,7 +36,7 @@ public static class Log
             // Log the verbosity change even when it is the same, so that the log shows what was requested.
             field =
                 value;
-            Write(LoggingLevel.Info, $"Verbosity set to {value}", nameof(Verbosity), string.Empty, 0, false);
+            Write(LoggingLevel.Info, $"Verbosity set to {value}", nameof(Verbosity), string.Empty, 0, false, null);
         }
     } = VerbosityLevel.Normal;
 
@@ -56,48 +56,54 @@ public static class Log
     )
     {
         if (Verbosity >= VerbosityLevel.Detailed)
-            Write(LoggingLevel.Verbose, message, member, file, line, false);
+            Write(LoggingLevel.Verbose, message, member, file, line, false, null);
     }
 
     /// <summary>
-    /// What happened, as it goes. With <paramref name="onScreen"/>, the debug UI shows it on screen for a while too.
+    /// What happened, as it goes. With <paramref name="onScreen"/>, the debug UI shows it on screen too, for
+    /// <paramref name="showForSec"/> seconds, or for the time its settings give when that is null.
     /// </summary>
     public static void Info(
         string message,
         bool onScreen = false,
+        float? showForSec = null,
         [CallerMemberName] string member = "",
         [CallerFilePath] string file = "",
         [CallerLineNumber] int line = 0
     )
     {
         if (Verbosity >= VerbosityLevel.Normal)
-            Write(LoggingLevel.Info, message, member, file, line, onScreen);
+            Write(LoggingLevel.Info, message, member, file, line, onScreen, showForSec);
     }
 
     /// <summary>
-    /// Something works, only worse. With <paramref name="onScreen"/>, the debug UI shows it on screen for a while too.
+    /// Something works, only worse. With <paramref name="onScreen"/>, the debug UI shows it on screen too, for
+    /// <paramref name="showForSec"/> seconds, or for the time its settings give when that is null.
     /// </summary>
     public static void Warn(
         string message,
         bool onScreen = false,
+        float? showForSec = null,
         [CallerMemberName] string member = "",
         [CallerFilePath] string file = "",
         [CallerLineNumber] int line = 0
     )
     {
         if (Verbosity >= VerbosityLevel.Minimal)
-            Write(LoggingLevel.Warn, message, member, file, line, onScreen);
+            Write(LoggingLevel.Warn, message, member, file, line, onScreen, showForSec);
     }
 
     /// <summary>
     /// Something failed, and is skipped or replaced, and the frame goes on. Counted as an error at any verbosity.
     /// </summary>
     /// <remarks>
-    /// With <paramref name="onScreen"/>, the debug UI shows it on screen for a while too.
+    /// With <paramref name="onScreen"/>, the debug UI shows it on screen too, for <paramref name="showForSec"/>
+    /// seconds, or for the time its settings give when that is null.
     /// </remarks>
     public static void Error(
         string message,
         bool onScreen = false,
+        float? showForSec = null,
         [CallerMemberName] string member = "",
         [CallerFilePath] string file = "",
         [CallerLineNumber] int line = 0
@@ -105,7 +111,7 @@ public static class Log
     {
         Interlocked.Increment(ref _errorCount);
         if (Verbosity >= VerbosityLevel.Minimal)
-            Write(LoggingLevel.Error, message, member, file, line, onScreen);
+            Write(LoggingLevel.Error, message, member, file, line, onScreen, showForSec);
     }
 
     /// <summary>
@@ -119,7 +125,7 @@ public static class Log
     )
     {
         Interlocked.Increment(ref _errorCount);
-        Write(LoggingLevel.Critical, message, member, file, line, false);
+        Write(LoggingLevel.Critical, message, member, file, line, false, null);
     }
 
     /// <summary>
@@ -192,7 +198,15 @@ public static class Log
             _sinks.Remove(sink);
     }
 
-    private static void Write(LoggingLevel level, string message, string member, string file, int line, bool onScreen)
+    private static void Write(
+        LoggingLevel level,
+        string message,
+        string member,
+        string file,
+        int line,
+        bool onScreen,
+        float? showForSec
+    )
     {
         Line logged = new(
             DateTime.Now,
@@ -202,7 +216,8 @@ public static class Log
             file,
             line,
             member,
-            onScreen
+            onScreen,
+            showForSec
         );
         lock (_lock)
         {
@@ -266,7 +281,8 @@ public static class Log
         string CallerFile,
         int CallerFileLineNumber,
         string CallerMemberName,
-        bool IsOnScreen
+        bool IsOnScreen,
+        float? ShowForSec
     )
     {
         public override string ToString() =>
