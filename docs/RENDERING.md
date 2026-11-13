@@ -16,7 +16,7 @@ flowchart LR
     Taa[TaaUpscaling] -- Upscaling --> View
     Accel -- TracedWorld --> View
     View -- GpuView --> Clusters[ClusteredGeometry]
-    View -- GpuView --> Sky[DeferredRendering sky]
+    View -- GpuView --> Sky[ProceduralSky]
     Sky -- SkyTables --> GI
     Sky -- SkyTables --> Shading
     Pools -- ClusterPools --> Clusters
@@ -49,9 +49,6 @@ The renderer. It has four render steps:
 3. The shading, one time for each view: it lights the GBuffer that a geometry gem drew, with the sun, the sky and the
    lights. Then it runs the post effects and writes the picture into the target of the view.
 4. The failure banner: it draws the render failures of the frame over the top of the window.
-
-Its `SkyRenderer` part has one more step, one time for each view: it hands on the shader type of the sky, as its
-`SkyTables`. While an entity has a sky, it also makes the three sky tables of the view.
 
 The gem also holds the types that the rendering gems share. List it in the `.magic` file after the GPU provider, the
 ECS, the model importer and the texture importer, with a gem that draws its geometry. The settings are in
@@ -87,8 +84,8 @@ ECS, the model importer and the texture importer, with a gem that draws its geom
 ### Lights and the sky
 
 - A pixel with no geometry shows the sky. The material of a sky entity draws the sky.
-- Without a sky entity, there are no sky tables. The shading and the indirect light then use `OpenSky`, and the open
-  sky lights the world at `Rendering.SkyBrightness`.
+- A sky gem makes the sky tables. Without a sky entity or a sky gem, there are no sky tables. The shading and the
+  indirect light then use `OpenSky`, and the open sky lights the world at `Rendering.SkyBrightness`.
 - The directional light is the sun while it is above the horizon. Else it is the moon while the moon is above the
   horizon. Else it is the first directional light.
 - Lights use physical units: lux for the sun, candela for point, spot and rect lights. A frame draws the first 1024
@@ -226,6 +223,16 @@ haze.
 - `CloudCover` fills the sky with clouds from `CloudHeight` up for 2 km. The `Wind` moves them. The clouds look
   correct from the ground, not from inside them. Their shadow falls on the ground and in the haze.
 - Clear air costs nothing.
+
+## ProceduralSky
+
+Makes the sky of the Earth's air: Rayleigh and Mie scattering and ozone. List it in the `.magic` file after the
+renderer. The renderer shades the sky, the sun's colour and the sky's light on the world from its tables.
+
+- One time for each view, it hands on the shader type of the sky, `Atmosphere`, as its `SkyTables`. While an entity
+  has a sky, it also makes the three sky tables of the view.
+- Its `Sky` material is the material for the `Sky` component.
+- Without the gem, the world is lit by the open sky.
 
 ## TaaUpscaling
 

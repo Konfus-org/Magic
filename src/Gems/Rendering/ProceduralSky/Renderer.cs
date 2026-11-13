@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using Magic.Assets;
+using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
 using Magic.Ecs;
 using Magic.Ecs.Components;
@@ -9,7 +10,7 @@ using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
 
-namespace Magic.DeferredRendering;
+namespace Magic.ProceduralSky;
 
 /// <summary>
 /// What the sky's tables are made for: the view.
@@ -23,7 +24,7 @@ public readonly record struct SkyInput(GpuView View);
 /// It hands on the sky's shader type each frame, with no tables while there are none. Shading and the indirect light
 /// take them. Without tables, they light the world with the open sky.
 /// </remarks>
-public sealed class SkyRenderer : IRender<SkyInput, SkyTables>, IRender, IHookIntoDomainLoading
+public sealed class Renderer : IRender<SkyInput, SkyTables>, IRender, IHookIntoDomainLoading
 {
     /// <summary>
     /// Done once the sky's shaders are built or failed.
@@ -48,7 +49,7 @@ public sealed class SkyRenderer : IRender<SkyInput, SkyTables>, IRender, IHookIn
     /// </summary>
     private readonly ImmutableArray<ShaderTypeArgument> _skyType;
 
-    internal SkyRenderer(AssetManager assets, IEcs ecs)
+    internal Renderer(AssetManager assets, IEcs ecs)
     {
         _ecs = ecs;
         _transmittanceShader = PassShaders.GetEntry(assets, "SkyLuts", "FillSkyTransmittance");

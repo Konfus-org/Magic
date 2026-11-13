@@ -31,8 +31,8 @@ To add a material, a sky or a post effect to a game:
 1. Implement the contract in a module of the game.
 2. Name the module in the asset that uses it.
 
-A sky step hands on its type with its tables. A pass that is generic over `ISky` uses that type where there are
-tables, and `OpenSky` where there are none. It has the two built before a domain shows.
+The step of a sky gem hands on its type with its tables. A pass that is generic over `ISky` uses that type where there
+are tables, and `OpenSky` where there are none. It has the two built before a domain shows.
 
 ## Post effects
 

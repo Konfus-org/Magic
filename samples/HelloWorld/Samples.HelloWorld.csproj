@@ -94,6 +94,12 @@
       SkipGetTargetFrameworkProperties="true"
     />
     <ProjectReference
+      Include="$(MagicRoot)src/Gems/Rendering/ProceduralSky/ProceduralSky.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      SkipGetTargetFrameworkProperties="true"
+    />
+    <ProjectReference
       Include="$(MagicRoot)src/Gems/Rendering/GlobalIllumination/GlobalIllumination.csproj"
       ReferenceOutputAssembly="false"
       Private="false"
