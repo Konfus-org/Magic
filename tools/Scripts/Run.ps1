@@ -26,6 +26,11 @@ Runs without a window, and ends the run at the first error logged.
 .PARAMETER Seconds
 The longest the run may last, in seconds: a ceiling, not a wait. A run still going then is killed.
 
+.PARAMETER Display
+The display that the window opens on, by its place in SDL's list of displays, where the main display is first. The
+default, 1, is the display after the main one, so that the run does not cover the user's work. With one display, the
+window opens on the main one.
+
 .PARAMETER Name
 The window's name: the worktree's branch, the session's name, when left out.
 
@@ -44,6 +49,8 @@ param(
     [switch] $Headless,
     [ValidateRange(1, [int]::MaxValue)]
     [int] $Seconds = 600,
+    [ValidateRange(0, [int]::MaxValue)]
+    [int] $Display = 1,
     [string] $Name
 )
 
@@ -67,7 +74,14 @@ $projectPath = if ([System.IO.Path]::IsPathRooted($Project)) { $Project } else {
 # The window shows whose run it is from the start. A headless run has no window to name.
 $lines = @(if ($Name -and -not $Headless) { "name `"$Name`"" }) + $Commands
 $arguments = @('open', "`"$projectPath`"")
-if ($Headless) { $arguments += @('--headless', 'true', '--fail-on-error') }
+if ($Headless) {
+    $arguments += @('--headless', 'true', '--fail-on-error')
+} else {
+    # The window opens on -Display, behind the window that has the focus, so that it does not interrupt the user's work.
+    # SDL reads the hint from the environment, and Magic inherits it.
+    $arguments += @('--configure', "Window.Display=$Display")
+    $env:SDL_WINDOW_ACTIVATE_WHEN_SHOWN = '0'
+}
 
 # Magic runs with its console lines, its output and its log in files, so a run still going after -Seconds can be
 # killed. The log is shown as it comes; the output is written once the run ends.
