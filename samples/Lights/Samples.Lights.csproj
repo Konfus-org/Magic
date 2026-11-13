@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- The sample's own code, beside its .magic file. Its Run is Magic opening the sample headless. -->
+  <!-- The sample's own code, beside its .magic file, which Magic loads with it. Its Run is Magic opening the sample headless. -->
   <PropertyGroup>
     <RunCommand>$(MagicBin)Magic</RunCommand>
     <RunCommand Condition="$([MSBuild]::IsOSPlatform('Windows'))">$(MagicBin)Magic.exe</RunCommand>
@@ -7,14 +7,9 @@
     <RunWorkingDirectory>$(MagicRoot)</RunWorkingDirectory>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Built before the sample so its Run has a Magic, and the gems it lists, to start; nothing of them is referenced
-         or copied. -->
-    <ProjectReference
-      Include="$(MagicRoot)src/Core/Magic.Core.csproj"
-      ReferenceOutputAssembly="false"
-      Private="false"
-      SkipGetTargetFrameworkProperties="true"
-    />
+    <!-- Built before the sample so its Run has a Magic, and the gems it lists, to start. Its code is built against Magic
+         and the scripting gem, and nothing of them is copied. -->
+    <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" Private="false" />
     <ProjectReference
       Include="$(MagicRoot)src/Gems/SdlPlatform/SdlPlatform.csproj"
       ReferenceOutputAssembly="false"
@@ -111,12 +106,7 @@
       Private="false"
       SkipGetTargetFrameworkProperties="true"
     />
-    <ProjectReference
-      Include="$(MagicRoot)src/Gems/CSharpScripting/CSharpScripting.csproj"
-      ReferenceOutputAssembly="false"
-      Private="false"
-      SkipGetTargetFrameworkProperties="true"
-    />
+    <ProjectReference Include="$(MagicRoot)src/Gems/CSharpScripting/CSharpScripting.csproj" Private="false" />
     <ProjectReference
       Include="$(MagicRoot)samples/Shared/SamplesShared.csproj"
       ReferenceOutputAssembly="false"

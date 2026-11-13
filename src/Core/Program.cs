@@ -133,7 +133,7 @@ internal static class Program
         Log.Info($"Running {project.Name} in {(app.IsHeadless ? "headless" : "GUI")} mode.");
 
         app.StartRun();
-        using Gems gems = new(project.Gems, services, app, settings, files, assets, world, events, threads);
+        using Gems gems = new(project, services, app, settings, files, assets, world, events, threads);
         settings.ReportUnknownKeys();
         world.StartAsync(worldRestorePoint?.WaitAsync(app.Lifetime), Terminal.Progress, app.Lifetime).FireAndForget();
 

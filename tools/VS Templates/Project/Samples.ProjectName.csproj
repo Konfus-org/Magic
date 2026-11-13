@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- The project's own code, beside its .magic file. Its Run is Magic opening the project headless. -->
+  <!-- The project's own code, beside its .magic file, which Magic loads with it. Its Run is Magic opening the project
+       headless. -->
   <PropertyGroup>
     <RunCommand>$(MagicBin)Magic</RunCommand>
     <RunCommand Condition="$([MSBuild]::IsOSPlatform('Windows'))">$(MagicBin)Magic.exe</RunCommand>
@@ -7,12 +8,8 @@
     <RunWorkingDirectory>$(MagicRoot)</RunWorkingDirectory>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Built before the project so its Run has a Magic to start; nothing of it is referenced or copied. -->
-    <ProjectReference
-      Include="$(MagicRoot)src/Core/Magic.Core.csproj"
-      ReferenceOutputAssembly="false"
-      Private="false"
-      SkipGetTargetFrameworkProperties="true"
-    />
+    <!-- Built against, never copied: the project's code uses the Magic that loads it. Built before the project, so its
+         Run has a Magic to start. Kept when no code uses it yet. -->
+    <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" Private="false" TreatAsUsed="true" />
   </ItemGroup>
 </Project>
