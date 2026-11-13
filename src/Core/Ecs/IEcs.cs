@@ -1,4 +1,4 @@
-namespace Magic.Ecs;
+﻿namespace Magic.Ecs;
 
 /// <summary>
 /// The entity world: the entities and the components that they have.
@@ -124,6 +124,27 @@ public interface IEcs
     /// <see cref="Mutate{T1}()"/> over the entities that have both components.
     /// </summary>
     EcsMutation<T1, T2> Mutate<T1, T2>()
+        where T1 : unmanaged, IComponent
+        where T2 : unmanaged, IComponent;
+
+    /// <summary>
+    /// Runs <paramref name="run"/> over the chunks of <see cref="Mutate{T1}()"/> on the worker threads, one chunk
+    /// per thread at a time, and returns once every chunk is done. Each chunk is marked written.
+    /// </summary>
+    /// <remarks>
+    /// Call it from the thread of the world. A chunk goes to one thread alone, so <paramref name="run"/> writes only
+    /// through the chunk it gets: it must not touch the world, another chunk or state that another chunk's thread
+    /// writes.
+    /// </remarks>
+    /// <param name="state">What <paramref name="run"/> needs, the same for every chunk.</param>
+    /// <param name="run">What to do with one chunk.</param>
+    void MutateParallel<TState, T1>(in TState state, EcsChunkRun<TState, EcsMutableChunk<T1>> run)
+        where T1 : unmanaged, IComponent;
+
+    /// <summary>
+    /// <see cref="MutateParallel{TState, T1}"/> over the entities that have both components.
+    /// </summary>
+    void MutateParallel<TState, T1, T2>(in TState state, EcsChunkRun<TState, EcsMutableChunk<T1, T2>> run)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent;
 }

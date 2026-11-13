@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -38,6 +38,11 @@ public sealed class Ecs : IEcs, IDisposable
     /// for a chunk never written.
     /// </summary>
     private readonly Dictionary<Archetype, List<long>> _written = [];
+
+    /// <summary>
+    /// The chunks of the parallel run that is open, gathered on the world's thread before its workers start.
+    /// </summary>
+    private readonly List<Chunk> _parallelChunks = [];
 
     /// <summary>
     /// How many query loops are open: while any is, an entity's components can't change, as that would move it out
@@ -225,6 +230,15 @@ public sealed class Ecs : IEcs, IDisposable
         return new(walk);
     }
 
+    public void MutateParallel<TState, T1>(in TState state, EcsChunkRun<TState, EcsMutableChunk<T1>> run)
+        where T1 : unmanaged, IComponent =>
+        RunParallel(All<T1>.Description, in state, run, static chunk => All<T1>.CutMutable(chunk));
+
+    public void MutateParallel<TState, T1, T2>(in TState state, EcsChunkRun<TState, EcsMutableChunk<T1, T2>> run)
+        where T1 : unmanaged, IComponent
+        where T2 : unmanaged, IComponent =>
+        RunParallel(All<T1, T2>.Description, in state, run, static chunk => All<T1, T2>.CutMutable(chunk));
+
     /// <summary>
     /// Gets a chunk's live entities as Magic's, because Arch's arrays run past the last entity to the chunk's capacity.
     /// </summary>
@@ -259,6 +273,47 @@ public sealed class Ecs : IEcs, IDisposable
         walk ??= new Walk<TChunk>(this, description, cut);
 
         return (Walk<TChunk>)walk;
+    }
+
+    /// <summary>
+    /// Runs <paramref name="run"/> over the chunks that <paramref name="description"/> matches, each on a thread of
+    /// the thread pool, and returns once every chunk is done.
+    /// </summary>
+    /// <remarks>
+    /// The chunks are gathered first, because a worker thread may not walk the world. They stay current: a structural
+    /// change throws while the run is open, as it does during a loop.
+    /// </remarks>
+    private void RunParallel<TState, TChunk>(
+        in QueryDescription description,
+        in TState state,
+        EcsChunkRun<TState, TChunk> run,
+        Func<Chunk, TChunk> cut
+    )
+        where TChunk : allows ref struct
+    {
+        ThrowIfNotWorldThread();
+        _parallelChunks.Clear();
+        foreach (Archetype archetype in _world.Query(in description).GetArchetypeIterator())
+        {
+            for (int index = 0; index < archetype.ChunkCount; index++)
+            {
+                _parallelChunks.Add(archetype.GetChunk(index));
+            }
+        }
+
+        Stamp(in description);
+
+        // The run holds the state, because a function the workers share cannot take it by reference.
+        TState held = state;
+        _openLoops++;
+        try
+        {
+            Parallel.For(0, _parallelChunks.Count, index => run(in held, cut(_parallelChunks[index])));
+        }
+        finally
+        {
+            _openLoops--;
+        }
     }
 
     private long GetWritten(Archetype archetype, int chunk) =>

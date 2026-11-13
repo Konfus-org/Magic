@@ -1,4 +1,4 @@
-using System.Collections.Immutable;
+﻿using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
@@ -363,6 +363,15 @@ public sealed class World : IEcs, IDisposable
     public EcsMutation<T1, T2> Mutate<T1, T2>()
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent => Ecs.Mutate<T1, T2>();
+
+    /// <inheritdoc/>
+    public void MutateParallel<TState, T1>(in TState state, EcsChunkRun<TState, EcsMutableChunk<T1>> run)
+        where T1 : unmanaged, IComponent => Ecs.MutateParallel(in state, run);
+
+    /// <inheritdoc/>
+    public void MutateParallel<TState, T1, T2>(in TState state, EcsChunkRun<TState, EcsMutableChunk<T1, T2>> run)
+        where T1 : unmanaged, IComponent
+        where T2 : unmanaged, IComponent => Ecs.MutateParallel(in state, run);
 
     /// <summary>
     /// Changes the world for the assets read again, frees the material sets that no renderer holds, and lets a waiting
