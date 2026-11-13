@@ -1,5 +1,4 @@
 using System.Reflection;
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Magic.Debugging;
 using Magic.Ecs;
@@ -37,11 +36,7 @@ internal sealed class ScriptState(IServiceProvider services)
     /// <summary>
     /// The members of each script class, searched the first time a copy of it is read or written.
     /// </summary>
-    /// <remarks>
-    /// The table holds its key weakly, so a class that a build of the project's code replaces goes, and its entry
-    /// with it.
-    /// </remarks>
-    private readonly ConditionalWeakTable<Type, Members> _members = [];
+    private readonly Dictionary<Type, Members> _members = [];
 
     /// <summary>
     /// The state of <paramref name="script"/> as it is now, for a save.
