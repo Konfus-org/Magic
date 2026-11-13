@@ -461,6 +461,32 @@ internal sealed unsafe class VulkanRecorder(
                     LogMissing("CopyTextureToBuffer", command);
 
                 break;
+            case GpuCommandKind.CopyTexture:
+                if (
+                    resources.Textures[command.Id] is { } copiedFrom
+                    && resources.Textures[command.Id2] is { } copiedInto
+                )
+                {
+                    VkImageCopy region = new()
+                    {
+                        srcSubresource = GetLayers(copiedFrom, 0),
+                        dstSubresource = GetLayers(copiedInto, 0),
+                        extent = GetExtent(copiedFrom, 0),
+                    };
+                    api.vkCmdCopyImage(
+                        cmd,
+                        copiedFrom.Image,
+                        VkImageLayout.TransferSrcOptimal,
+                        copiedInto.Image,
+                        VkImageLayout.TransferDstOptimal,
+                        1,
+                        &region
+                    );
+                }
+                else
+                    LogMissing("CopyTexture", command);
+
+                break;
             case GpuCommandKind.BlitTexture:
                 if (resources.Textures[command.Id] is { } blitted && resources.Textures[command.Id2] is { } over)
                 {

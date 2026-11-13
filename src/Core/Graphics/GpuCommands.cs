@@ -205,6 +205,7 @@ public enum GpuCommandKind : byte
     CopyBufferToTexture,
     CopyTextureToBuffer,
     BlitTexture,
+    CopyTexture,
     FillBuffer,
     BuildAcceleration,
     DispatchThreads,

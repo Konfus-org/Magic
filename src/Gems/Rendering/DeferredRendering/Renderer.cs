@@ -812,7 +812,29 @@ public sealed class Renderer
         // the output itself, stretched over the view's part of the target with the upscale filter.
         GpuTexture upscaled = input.Upscaling is { } upscaling ? upscaling.Record(graph, gpu) : GpuTexture.None;
         GpuTexture shown = upscaled.IsNone ? gpu.Output : upscaled;
-        if (!gpu.Target.IsNone)
+        if (gpu.Target != graph.WindowTarget)
+        {
+            // A render texture is sRGB, so a material reads linear colour from it. The picture is encoded for the
+            // screen already: it is stretched into a texture of the same size, then copied with its bytes unchanged.
+            TextureDescription target = graph.GetDescription(gpu.Target);
+            Result<GpuTexture> picture = graph.Texture(
+                new(
+                    "Render texture picture",
+                    target.Width,
+                    target.Height,
+                    GpuFormat.R8G8B8A8Unorm,
+                    TextureUsages.CopyDestination | TextureUsages.CopySource
+                )
+            );
+            if (picture.Ok)
+            {
+                graph.Blit(shown, picture.Value, RenderStages.Post, upscaleFilter);
+                graph.Copy(picture.Value, gpu.Target, RenderStages.Post);
+            }
+            else
+                graph.Fail(RenderFailure.Resource, "Render texture is not drawn", picture.Error);
+        }
+        else if (!gpu.Target.IsNone)
             graph.Blit(shown, gpu.Target, gpu.TargetPart, RenderStages.Post, upscaleFilter);
 
         // The screenshot asked for: each view of the window copied into the whole picture at its part, stretched to it
