@@ -349,7 +349,6 @@ internal sealed class Gems : IDisposable
         if (_frameStart != 0)
             _frameDuration.Record(frame.AppDeltaSec);
 
-        _world.TurnSpins((float)frame.SimDeltaSec);
         long hooksStart = Stopwatch.GetTimestamp();
         RunHook(Hook.Update, frame);
 

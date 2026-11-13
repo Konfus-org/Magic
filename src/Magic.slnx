@@ -20,6 +20,7 @@
     <Project Path="Gems/VulkanGraphics/VulkanGraphics.csproj" />
     <Project Path="Gems/ImGuiDebugUI/ImGuiDebugUI.csproj" />
     <Project Path="Gems/DebugTools/DebugTools.csproj" />
+    <Project Path="Gems/CSharpScripting/CSharpScripting.csproj" />
     <Project Path="Gems/Rendering/AccelerationStructures/AccelerationStructures.csproj" />
     <Project Path="Gems/Rendering/ClusteredGeometry/ClusteredGeometry.csproj" />
     <Project Path="Gems/Rendering/DeferredRendering/DeferredRendering.csproj" />

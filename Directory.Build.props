@@ -40,7 +40,6 @@
     <MagicRoot>$(MSBuildThisFileDirectory)</MagicRoot>
     <MagicSource>$([MSBuild]::MakeRelative('$(MSBuildThisFileDirectory)', '$(MSBuildProjectDirectory)').Replace('\', '/'))/</MagicSource>
     <MagicOutput Condition="$(MagicSource.StartsWith('src/Gems/'))">Gems/$(MSBuildProjectName)/</MagicOutput>
-    <MagicOutput Condition="$(MagicSource.StartsWith('src/Resources/'))">Resources/</MagicOutput>
     <MagicOutput Condition="$(MagicSource.StartsWith('samples/'))">Projects/$(MSBuildProjectName)/</MagicOutput>
     <MagicOutput Condition="$(MagicSource.StartsWith('samples/Shared/'))">Gems/$(MSBuildProjectName)/</MagicOutput>
     <MagicOutput Condition="$(MagicSource.StartsWith('tests/'))">Tests/$(MSBuildProjectName)/</MagicOutput>

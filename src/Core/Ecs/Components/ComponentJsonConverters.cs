@@ -186,3 +186,42 @@ internal sealed class MaterialOverridesJsonConverter : JsonConverter<MaterialOve
         writer.WriteEndObject();
     }
 }
+
+/// <summary>
+/// Reads and writes <see cref="ScriptContainer"/> as an array of handles, with the free slots left out.
+/// </summary>
+[SuppressMessage(
+    "Performance",
+    "CA1812:Avoid uninstantiated internal classes",
+    Justification = "The serializer makes it, as a [JsonConverter] names it."
+)]
+internal sealed class ScriptContainerJsonConverter : JsonConverter<ScriptContainer>
+{
+    public override ScriptContainer Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType != JsonTokenType.StartArray)
+            throw new JsonException("A ScriptContainer is an array of handles.");
+
+        ScriptContainer scripts = default;
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+        {
+            Handle<Script> script = JsonSerializer.Deserialize<Handle<Script>>(ref reader, options);
+            if (!scripts.Add(script))
+                throw new JsonException($"An entity has at most {ScriptContainer.Capacity} scripts, each one time.");
+        }
+
+        return scripts;
+    }
+
+    public override void Write(Utf8JsonWriter writer, ScriptContainer value, JsonSerializerOptions options)
+    {
+        writer.WriteStartArray();
+        foreach (Handle<Script> script in value)
+        {
+            if (script != Handle<Script>.None)
+                JsonSerializer.Serialize(writer, script, options);
+        }
+
+        writer.WriteEndArray();
+    }
+}

@@ -2,7 +2,7 @@
   <!-- A gem: Magic loads it from Gems/SamplesShared/SamplesShared.dll when a project lists SamplesShared. -->
   <PropertyGroup>
     <!-- Shown beside the gem as Magic starts it. -->
-    <Description>The assets the samples share, such as their player.</Description>
+    <Description>The assets and scripts the samples share, such as their player.</Description>
     <Version>1.0.0</Version>
     <Authors>Konfus</Authors>
     <EnableDynamicLoading>true</EnableDynamicLoading>
@@ -10,5 +10,7 @@
   <ItemGroup>
     <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its interfaces. -->
     <ProjectReference Include="$(MagicRoot)src/Core/Magic.Core.csproj" Private="false" />
+    <!-- The scripts' contract: Magic gives the gem the scripting gem's copy, which each sample lists. -->
+    <ProjectReference Include="$(MagicRoot)src/Gems/CSharpScripting/CSharpScripting.csproj" Private="false" />
   </ItemGroup>
 </Project>

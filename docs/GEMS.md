@@ -47,6 +47,36 @@ The entity world, through [Arch](https://github.com/genaray/Arch). Provides `IEc
 - A query gives spans over the components and allocates nothing.
 - A use of a dead entity, or a structural change inside a query loop, throws.
 
+### CSharpScripting
+
+Runs the C# scripts of the entities: the `Script` assets in an entity's `ScriptContainer` that are `.cs` files. A
+`Script` asset in another language is for the gem of that language.
+
+To write a script:
+
+1. In the csproj of the code that holds the script, reference the project of this gem with `Private="false"`
+   ([Gems that use other gems](#gems-that-use-other-gems)).
+2. Write a class that implements `IBehavior`. Give the file the name of the class.
+3. Give the file a `.meta` file with an id and `"type": "Script"`.
+4. Give an entity the script in its `ScriptContainer`, as `"ScriptContainer": [ { "id": <the id> } ]` in a prefab.
+
+How a script runs:
+
+- Each entity gets its own copy of each script in its `ScriptContainer`. The copy starts in a later frame, when the
+  world is not loading.
+- The constructor gets the `Entity` for an `Entity` parameter, and a service for each other parameter. Only keep them
+  in the constructor. Do the first work in `Start`.
+- The hooks of the behaviours run on the game thread, in the order that the copies started, after the hooks of the
+  gems listed before this gem.
+- A behaviour far from each camera of the player updates less often: every frame within 64 m, then one frame in n at
+  n times that distance, up to one frame in 32. Its frame then gives the time since its last update as the deltas.
+  `FixedUpdate` runs at each step. A behaviour on an entity tagged `global`, or on an entity without a `Transform`,
+  updates each frame.
+- When the handle goes from the `ScriptContainer`, or the entity is destroyed, the copy ends. If the copy is
+  `IDisposable`, it is disposed.
+- If a script cannot start, or a hook throws, the error goes to the log, and the handle goes from the `ScriptContainer`.
+- A build of the code that holds a script restarts the run.
+
 ### DomainImporter
 
 Reads `.domain` files into domains. Provides `IAssetImporter<Domain>`.

@@ -434,23 +434,6 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Turns each entity with a <see cref="Spin"/> by <paramref name="deltaSec"/> of world time. Game thread.
-    /// </summary>
-    internal void TurnSpins(float deltaSec)
-    {
-        if (deltaSec <= 0)
-            return;
-
-        foreach (EcsMutableChunk<Transform, Spin> chunk in Mutate<Transform, Spin>())
-        {
-            for (int i = 0; i < chunk.Entities.Length; i++)
-            {
-                chunk.First[i].Rotation = chunk.Second[i].Turn(chunk.First[i].Rotation, deltaSec);
-            }
-        }
-    }
-
-    /// <summary>
     /// Puts back the world as the last run saved it, <paramref name="restorePoint"/>, when that save is done.
     /// </summary>
     /// <remarks>
