@@ -29,6 +29,26 @@ public readonly record struct GlobalIlluminationInput(GpuView? View, TracedWorld
 public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, IHookIntoDomainLoading
 {
     /// <summary>
+    /// What a view takes while it settles, after it starts afresh: the most diffuse rays, a history that keeps 0.8 a
+    /// frame, so 0.8^14 &lt; 5% of the start is left after 14 frames, and probes that take half of their rays' light.
+    /// </summary>
+    private const int SettleRayCount = 8; // PROTO
+    private const float SettleHistory = 0.8f; // PROTO
+    private const int SettleHistoryFrames = 14; // PROTO
+    private const float SettleProbeBlend = 0.5f; // PROTO
+
+    /// <summary>
+    /// How many times each probe gets its first rays before the probes count as settled: the first gives them the
+    /// light that bounced once, the second the light that bounced off what the first lit.
+    /// </summary>
+    private const int SettleProbeSweeps = 2; // PROTO
+
+    /// <summary>
+    /// How often <see cref="OnDomainArrivedAsync"/> looks whether the first view settled: about a frame.
+    /// </summary>
+    private const int SettleCheckMs = 15;
+
+    /// <summary>
     /// The view depth's two textures: the even frames write the first and the odd the second, the other being the
     /// history both blends read.
     /// </summary>
@@ -60,9 +80,11 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
 
     /// <summary>
     /// For each view, by its number: the size its history was last traced at, none while it holds nothing of the
-    /// world, and the size its reflections were last traced at, none while they are off. Render thread.
+    /// world, the size its reflections were last traced at, none while they are off, and the frames traced since the
+    /// history started afresh. Render thread.
     /// </summary>
-    private readonly List<((int Width, int Height)? Traced, (int Width, int Height)? Reflected)> _views = [];
+    private readonly List<((int Width, int Height)? Traced, (int Width, int Height)? Reflected, int Frames)> _views =
+    [];
 
     internal Renderer(GlobalIlluminationSettings settings, AssetManager assets, Threads threads, IGraphicsApi gpu)
     {
@@ -188,11 +210,15 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
 
         Result<GpuBuffer> constants = graph.Buffer(new("GI constants", Unsafe.SizeOf<GIConstants>()));
         (int Width, int Height) tracedSize = gpu.Scaled(_settings.IndirectScale);
-        ((int Width, int Height)? lastTraced, (int Width, int Height)? lastReflected) = _views[graph.View];
+        ((int Width, int Height)? lastTraced, (int Width, int Height)? lastReflected, int lastFrames) = _views[
+            graph.View
+        ];
         bool hasHistory = lastTraced == tracedSize;
         ReadOnlySpan<GpuResource> sky = input.Sky is { HasTables: true } tables
             ? [tables.Transmittance, tables.View]
             : [];
+        int frames = hasHistory ? lastFrames + 1 : 1;
+        bool isSettling = frames <= GetSettleFrames();
         GIView view = new(
             graph,
             gpu,
@@ -235,12 +261,24 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
             Sampler = sampler.Value,
             TracedWidth = (uint)tracedSize.Width,
             TracedHeight = (uint)tracedSize.Height,
-            DiffuseRayCount = (uint)Math.Clamp(_settings.IndirectRayCount, 1, 8),
+            DiffuseRayCount = (uint)Math.Clamp(isSettling ? SettleRayCount : _settings.IndirectRayCount, 1, 8),
             DiffuseRayRange = Math.Max(_settings.IndirectRayRange, 0),
             ReflectionRayRange = Math.Max(_settings.ReflectionRayRange, 0),
-            DiffuseHistory = Math.Clamp(_settings.IndirectHistory, 0, 1),
-            ReflectionHistory = Math.Clamp(_settings.ReflectionHistory, 0, 1),
-            ProbeBlend = Math.Clamp(_settings.ProbeUpdateSpeed, 0, 1),
+            DiffuseHistory = Math.Clamp(
+                isSettling ? Math.Min(SettleHistory, _settings.IndirectHistory) : _settings.IndirectHistory,
+                0,
+                1
+            ),
+            ReflectionHistory = Math.Clamp(
+                isSettling ? Math.Min(SettleHistory, _settings.ReflectionHistory) : _settings.ReflectionHistory,
+                0,
+                1
+            ),
+            ProbeBlend = Math.Clamp(
+                isSettling ? Math.Max(SettleProbeBlend, _settings.ProbeUpdateSpeed) : _settings.ProbeUpdateSpeed,
+                0,
+                1
+            ),
         };
         // Not staged: nothing is recorded, and the frame's row stays the view's default, which the shaders read as none.
         if (!graph.Upload(view.Constants, [gi]))
@@ -262,7 +300,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
             _reflections.Record(view, grid, gi);
 
         (int Width, int Height)? reflected = isReflectionsOn ? tracedSize : null;
-        _views[graph.View] = (tracedSize, reflected);
+        _views[graph.View] = (tracedSize, reflected, frames);
 
         return new IndirectLight(gi.Diffuse.Blend.Light, gi.Reflections.Blend.Light, grid.Probes, grid.Depth);
     }
@@ -279,4 +317,28 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
 
     public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel) =>
         _built.Task.WaitAsync(cancel);
+
+    /// <summary>
+    /// Returns once the first view was traced for <see cref="GetSettleFrames"/> frames since it started afresh, or
+    /// traces nothing: no view, no rays, indirect light off, or no instance that rays see.
+    /// </summary>
+    public async Task OnDomainArrivedAsync(CancellationToken cancel)
+    {
+        await _threads.Enter(EngineThread.Render);
+        while (_views is [({ }, _, int frames), ..] && frames < GetSettleFrames())
+        {
+            await Task.Delay(SettleCheckMs, cancel).ConfigureAwait(false);
+            await _threads.Enter(EngineThread.Render);
+        }
+    }
+
+    /// <summary>
+    /// The frames a view takes to settle after it starts afresh: as many as its probes need to get their first rays
+    /// <see cref="SettleProbeSweeps"/> times, and at least as many as its history needs.
+    /// </summary>
+    private int GetSettleFrames() =>
+        Math.Max(
+            SettleHistoryFrames,
+            SettleProbeSweeps * Probes.GetSweepFrames((_settings.ProbesAcross, _settings.ProbesUp))
+        );
 }
