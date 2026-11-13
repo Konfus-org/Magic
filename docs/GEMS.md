@@ -60,10 +60,10 @@ To write a script:
    class.
 3. Give the file a `.meta` file with an id and `"type": "Script"`.
 4. Give an entity the script in its `ScriptContainer`, as `"ScriptContainer": [ { "id": <the id> } ]` in a prefab.
-5. To give the script values, write them beside its id: `{ "id": <the id>, "depth": 0.5 }`. Each key but `id` is
-   a value, and the gem sets it on the public settable property of that name, whatever the case of the first
-   letter. A value that the script has no property for, or that its type cannot hold, goes to the log and is left
-   out.
+5. To give the script values, write them beside its id: `{ "id": <the id>, "depth": 0.5 }`. Each key but `id` and
+   `started` is a value, and the gem sets it on the public settable property of that name, whatever the case of the
+   first letter. A value that the script has no property for, or that its type cannot hold, goes to the log and is
+   left out.
 
 How a script runs:
 
@@ -87,6 +87,15 @@ How a script runs:
   `IDisposable`, it is disposed.
 - If a script cannot start, or a hook throws, the error goes to the log, and the handle goes from the `ScriptContainer`.
 - A build of the code that holds a script restarts the run.
+
+What a save and a restart keep:
+
+- Each save writes the state of every copy that runs into its slot: its values, by the name a prefab gives them, and
+  the other fields that it keeps for itself, by name. Left out are the fields that a copy gets again when it is made:
+  its entity, a service of a gem, a delegate, a task and a disposable. A member that JSON cannot hold goes to the log,
+  and a copy from the save starts over without it.
+- A copy that a save made takes that state up and goes on from it: its slot is marked `started`, so the gem does not
+  call `Start` on it a second time. A spawner spawns once, and a light keeps the depth that it had.
 
 ### DomainImporter
 

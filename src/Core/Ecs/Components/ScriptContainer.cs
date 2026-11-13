@@ -15,7 +15,8 @@ namespace Magic.Ecs.Components;
 /// </para>
 /// <para>
 /// As JSON, it is an array of slots, each the handle of the script with the values of the script beside it:
-/// <c>"ScriptContainer": [ { "id": 3312, "height": 1 } ]</c>.
+/// <c>"ScriptContainer": [ { "id": 3312, "height": 1 } ]</c>. <c>id</c> and <c>started</c> are the names that a slot
+/// itself takes, so they are no values for a script.
 /// </para>
 /// </remarks>
 [InlineArray(Capacity)]
@@ -69,6 +70,23 @@ public struct ScriptContainer : IComponent, IEquatable<ScriptContainer>
     }
 
     /// <summary>
+    /// Puts <paramref name="values"/> in the slot of <paramref name="script"/> and marks the copy of it started, so a
+    /// save keeps the state of the copy and a copy made from that save takes it up instead of starting over; false
+    /// when the script is not there.
+    /// </summary>
+    public bool Keep(Handle<Script> script, ScriptValues values)
+    {
+        Span<ScriptSlot> held = this;
+        int slot = Slot(script);
+        if (script == Handle<Script>.None || slot < 0)
+            return false;
+
+        held[slot] = new ScriptSlot(script, values, Started: true);
+
+        return true;
+    }
+
+    /// <summary>
     /// Removes <paramref name="script"/> and its values; false when it is not there.
     /// </summary>
     public bool Remove(Handle<Script> script)
@@ -100,6 +118,7 @@ public struct ScriptContainer : IComponent, IEquatable<ScriptContainer>
 }
 
 /// <summary>
-/// One script of an entity: the <see cref="Script"/> asset, and the values that a prefab gives it.
+/// One script of an entity: the <see cref="Script"/> asset, the values that a prefab gives it or that a save kept of
+/// its copy, and whether that copy had started when the save took it.
 /// </summary>
-public readonly record struct ScriptSlot(Handle<Script> Script, ScriptValues Values);
+public readonly record struct ScriptSlot(Handle<Script> Script, ScriptValues Values, bool Started = false);

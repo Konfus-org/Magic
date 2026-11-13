@@ -193,8 +193,8 @@ internal sealed class MaterialOverridesJsonConverter : JsonConverter<MaterialOve
 /// values beside it, with the free slots left out.
 /// </summary>
 /// <remarks>
-/// In a slot, <c>id</c> is the handle of the script, and every other key is a value for the script:
-/// <c>{ "id": 3312, "height": 1 }</c>.
+/// In a slot, <c>id</c> is the handle of the script and <c>started</c> says that a save took the copy of it after it
+/// started. Every other key is a value for the script: <c>{ "id": 3312, "height": 1 }</c>.
 /// </remarks>
 [SuppressMessage(
     "Performance",
@@ -213,8 +213,13 @@ internal sealed class ScriptContainerJsonConverter : JsonConverter<ScriptContain
         {
             // The slot holds keys that no one type takes, so it is read key by key.
             using JsonDocument slot = JsonDocument.ParseValue(ref reader);
-            if (!scripts.Add(ReadHandle(slot.RootElement), ReadValues(slot.RootElement)))
+            Handle<Script> script = ReadHandle(slot.RootElement);
+            ScriptValues values = ReadValues(slot.RootElement);
+            if (!scripts.Add(script, values))
                 throw new JsonException($"An entity has at most {ScriptContainer.Capacity} scripts, each one time.");
+
+            if (ReadStarted(slot.RootElement))
+                scripts.Keep(script, values);
         }
 
         return scripts;
@@ -230,6 +235,9 @@ internal sealed class ScriptContainerJsonConverter : JsonConverter<ScriptContain
 
             writer.WriteStartObject();
             writer.WriteNumber("id", slot.Script.Id);
+            if (slot.Started)
+                writer.WriteBoolean("started", true);
+
             foreach ((string name, JsonElement held) in slot.Values.All)
             {
                 writer.WritePropertyName(name);
@@ -260,14 +268,20 @@ internal sealed class ScriptContainerJsonConverter : JsonConverter<ScriptContain
     }
 
     /// <summary>
-    /// The values of <paramref name="slot"/>: every key of it but <c>id</c>.
+    /// Whether <paramref name="slot"/> says that a save took the copy of its script after it started.
+    /// </summary>
+    private static bool ReadStarted(JsonElement slot) =>
+        slot.TryGetProperty("started", out JsonElement started) && started.ValueKind == JsonValueKind.True;
+
+    /// <summary>
+    /// The values of <paramref name="slot"/>: every key of it but <c>id</c> and <c>started</c>.
     /// </summary>
     private static ScriptValues ReadValues(JsonElement slot)
     {
         List<KeyValuePair<string, JsonElement>> values = [];
         foreach (JsonProperty value in slot.EnumerateObject())
         {
-            if (!value.NameEquals("id"))
+            if (!value.NameEquals("id") && !value.NameEquals("started"))
                 values.Add(KeyValuePair.Create(value.Name, value.Value));
         }
 

@@ -104,6 +104,11 @@ public sealed class World : IEcs, IDisposable
     /// </summary>
     private ImmutableArray<IHookIntoDomainLoading> _hooks = [];
 
+    /// <summary>
+    /// The gems that write what they hold into the components for a save, in the order they were made. Game thread.
+    /// </summary>
+    private ImmutableArray<IHookIntoWorldSave> _saveHooks = [];
+
     internal World(AssetManager assets, IFileSystem files, EventCoordinator events, Threads threads, App app)
     {
         _assets = assets;
@@ -264,6 +269,11 @@ public sealed class World : IEcs, IDisposable
             return Task.FromResult<Result<byte[]>>(
                 Result.Failure(IsLoading ? "the world is loading." : "no domain is open.")
             );
+
+        foreach (IHookIntoWorldSave hooks in _saveHooks)
+        {
+            hooks.OnWorldSaving();
+        }
 
         ImmutableArray<Handle<Domain>> open = Domains;
         ImmutableArray<DomainRead> domains = [.. open.Select(domain => _read[domain])];
@@ -440,6 +450,20 @@ public sealed class World : IEcs, IDisposable
         _hooks = _hooks.Add(hooks);
 
         return new Subscription(() => _hooks = _hooks.Remove(hooks));
+    }
+
+    /// <summary>
+    /// Has <paramref name="hooks"/> write what it holds into the components before each save, until the subscription
+    /// is disposed.
+    /// </summary>
+    /// <remarks>
+    /// Call it on the game thread.
+    /// </remarks>
+    internal Subscription Register(IHookIntoWorldSave hooks)
+    {
+        _saveHooks = _saveHooks.Add(hooks);
+
+        return new Subscription(() => _saveHooks = _saveHooks.Remove(hooks));
     }
 
     /// <summary>
