@@ -35,6 +35,22 @@ internal record struct GIConstants
     public uint TracedWidth;
 
     public uint TracedHeight;
+
+    /// <summary>
+    /// The diffuse light's rays a traced pixel and how far they reach, the reflections' reach, how much of its history
+    /// each keeps a frame, and how much of its rays' light a probe takes.
+    /// </summary>
+    public uint DiffuseRayCount;
+
+    public float DiffuseRayRange;
+
+    public float ReflectionRayRange;
+
+    public float DiffuseHistory;
+
+    public float ReflectionHistory;
+
+    public float ProbeBlend;
 }
 
 /// <summary>

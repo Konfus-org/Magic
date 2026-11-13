@@ -21,18 +21,14 @@ import Surface.Brdf;
 import Trace.HitSurface;
 import Scene.Models;
 
-// How far a ray reaches, and the distance a ray that hits nothing counts as having gone.
-static const float RayRange = 10000.0;
-
 // How far in traced pixels the resolve reaches, from the smoothest surface to one a fifth rough, and how many
 // neighbours it reads there.
 static const float ResolveSpreadSmooth = 2.0;
 static const float ResolveSpreadRough = 8.0;
 static const uint ResolveSamples = 4u;
 
-// How much of the history a pixel keeps a frame, how many of its neighbours' deviations the history is held within,
-// and how much of the variance's history it keeps.
-static const float HistoryBlend = 0.95;
+// How many of its neighbours' deviations a pixel's history is held within, and how much of the variance's history it
+// keeps.
 static const float HistorySpread = 2.0;
 static const float VarianceBlend = 0.9;
 
@@ -73,7 +69,7 @@ void TraceReflections<S : ISky>(uint3 thread : SV_DispatchThreadID)
     ReflectingSurface surface;
     if (!LoadReflectingSurface(frame, GetTracedPixel(frame, thread.xy, gi.tracedSize), surface))
     {
-        traced.Store(thread.xy, float4(0.0, 0.0, 0.0, RayRange));
+        traced.Store(thread.xy, float4(0.0, 0.0, 0.0, gi.reflectionRayRange));
         rays.Store(thread.xy, float4(0.0));
         return;
     }
@@ -83,9 +79,9 @@ void TraceReflections<S : ISky>(uint3 thread : SV_DispatchThreadID)
     float3 world = surface.relative + frame.cameraPosition.xyz;
     float3 origin = world + surface.normal * GetRayOffset(frame, surface.relative);
     RaytracingAccelerationStructure scene = GetTracedAcceleration();
-    RayHit hit = GetClosestHit(scene, origin, ray.xyz, RayRange, RAY_FLAG_CULL_BACK_FACING_TRIANGLES);
+    RayHit hit = GetClosestHit(scene, origin, ray.xyz, gi.reflectionRayRange, RAY_FLAG_CULL_BACK_FACING_TRIANGLES);
     Lights lights = GetLights();
-    float4 light = float4(GetSkyRadiance<S>(lights, ray.xyz), RayRange);
+    float4 light = float4(GetSkyRadiance<S>(lights, ray.xyz), gi.reflectionRayRange);
     if (hit.isHit)
     {
         HitSurface landed = LoadHitSurface(hit, origin, ray.xyz);
@@ -131,7 +127,7 @@ void ResolveReflections(uint3 thread : SV_DispatchThreadID)
     if (!LoadReflectingSurface(frame, GetPicturePixel(frame, thread.xy, size, float2(0.0)), surface))
     {
         resolved.Store(thread.xy, float4(0.0));
-        distance.Store(thread.xy, float4(RayRange, 0.0, 0.0, 0.0));
+        distance.Store(thread.xy, float4(gi.reflectionRayRange, 0.0, 0.0, 0.0));
         return;
     }
 
@@ -207,5 +203,5 @@ void BlendReflections(uint3 thread : SV_DispatchThreadID)
     float2 uv = surfaceGap < reflectedGap ? surfaceUv : reflectedUv;
     light.Store(
         thread.xy,
-        BlendHistory(gi, blend, current, neighbourhood, velocity.z, uv, HistoryBlend, HistorySpread, VarianceBlend));
+        BlendHistory(gi, blend, current, neighbourhood, velocity.z, uv, gi.reflectionHistory, HistorySpread, VarianceBlend));
 }

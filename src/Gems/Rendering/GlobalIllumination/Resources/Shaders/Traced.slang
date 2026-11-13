@@ -74,6 +74,14 @@ public struct GIConstants
     public uint sampler;
     // The traced textures' size.
     public uint2 tracedSize;
+    // The diffuse light's rays a traced pixel and how far they reach, the reflections' reach, how much of its history
+    // each keeps a frame, and how much of its rays' light a probe takes.
+    public uint diffuseRayCount;
+    public float diffuseRayRange;
+    public float reflectionRayRange;
+    public float diffuseHistory;
+    public float reflectionHistory;
+    public float probeBlend;
 }
 
 public GIConstants GetGIConstants() { return LoadConstants<GIConstants>(GetPassHeader().y); }
