@@ -23,8 +23,6 @@ internal sealed class RenderInputs
 
     public EcsSnapshot<Transform, RectLight> RectLights { get; } = new();
 
-    public EcsSnapshot<PostProcessing> PostProcessing { get; } = new();
-
     /// <summary>
     /// The number of the world the frame is of, new each time a domain replaces it.
     /// </summary>

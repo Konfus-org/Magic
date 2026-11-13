@@ -141,16 +141,6 @@ public readonly record struct GpuView
     public required GpuBuffer LightTiles { get; init; }
 
     /// <summary>
-    /// The effects run over the lit picture this frame, by their place in the post processing's list.
-    /// </summary>
-    public required ReadOnlyMemory<GpuEffect> Effects { get; init; }
-
-    /// <summary>
-    /// Each effect's material row, by its place, packed as a surface material's is.
-    /// </summary>
-    public required GpuBuffer EffectRows { get; init; }
-
-    /// <summary>
     /// How many domains that loaded have had what they draw put on the GPU.
     /// </summary>
     /// <remarks>

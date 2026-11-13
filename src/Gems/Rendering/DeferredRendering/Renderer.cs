@@ -1,12 +1,10 @@
 using System.Collections.Immutable;
 using System.Drawing;
-using System.IO;
 using System.Linq;
 using System.Numerics;
 using System.Threading.Channels;
 using Magic.Assets;
 using Magic.Debugging;
-using Magic.DeferredRendering.Post;
 using Magic.DeferredRendering.View;
 using Magic.DeferredRendering.World;
 using Magic.Ecs;
@@ -22,9 +20,15 @@ namespace Magic.DeferredRendering;
 
 /// <summary>
 /// What the view's step takes for each view: the world as the GPU holds it, the frame's views, and, where a gem makes
-/// them, the world as rays see it and the upscaling.
+/// them, the world as rays see it, the upscaling and the picture's effects.
 /// </summary>
-public readonly record struct ViewInput(GpuWorld World, RenderViews Views, TracedWorld? Traced, Upscaling? Upscaling);
+public readonly record struct ViewInput(
+    GpuWorld World,
+    RenderViews Views,
+    TracedWorld? Traced,
+    Upscaling? Upscaling,
+    PictureEffects? Effects
+);
 
 /// <summary>
 /// What the shading's step takes for each view: the world as the GPU holds it, the frame's views, the view, and the
@@ -32,7 +36,8 @@ public readonly record struct ViewInput(GpuWorld World, RenderViews Views, Trace
 /// </summary>
 /// <remarks>
 /// Where a gem makes them, it also takes the world as rays see it, the sky's tables, each pixel's shadows, the light
-/// that reaches the surfaces indirectly, the air between the camera and them, and the output's upscaling.
+/// that reaches the surfaces indirectly, the air between the camera and them, the picture's effects and the output's
+/// upscaling.
 /// </remarks>
 public readonly record struct ShadingInput(
     GpuWorld World,
@@ -43,6 +48,7 @@ public readonly record struct ShadingInput(
     ShadowMask? Shadows,
     IndirectLight? Light,
     Air? Air,
+    PictureEffects? Effects,
     Upscaling? Upscaling
 );
 
@@ -111,19 +117,16 @@ public sealed class Renderer
     private readonly InstanceTable _instances;
 
     /// <summary>
-    /// What is done to the picture when no entity has a <see cref="PostProcessing"/>: the exposure and the AgX tonemap.
+    /// Packs a material slot's row, which the world hands on, so a frame makes no delegate.
     /// </summary>
-    private readonly PostProcessing _defaultPost;
+    private readonly MaterialPacker _packMaterial;
 
     /// <summary>
-    /// What each view keeps from frame to frame, by its number: where it looked last frame, and its effects'
-    /// histories. Render thread.
+    /// What each view keeps from frame to frame, by its number: where it looked last frame. Render thread.
     /// </summary>
-    private readonly List<(FrameView Frame, PixelEffects Effects)> _views = [];
+    private readonly List<FrameView> _views = [];
 
     private readonly LightTiles _lightTiles;
-
-    private readonly Effects _effects;
 
     /// <summary>
     /// Every shader the view's passes run, which the GPU provider builds before the frame is made.
@@ -194,7 +197,7 @@ public sealed class Renderer
     private Preparing? _preparing;
 
     /// <summary>
-    /// The domains that loaded whose models, materials and effects are on the GPU, or failed: what
+    /// The domains that loaded whose models and materials are on the GPU, or failed: what
     /// <see cref="GpuView.PreparedDomains"/> counts. Render thread.
     /// </summary>
     private int _preparedDomains;
@@ -225,11 +228,9 @@ public sealed class Renderer
             settings.Anisotropy,
             settings.DroppedTextureLevels
         );
-        _defaultPost.Effects[0] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Exposure.mat") };
-        _defaultPost.Effects[1] = new MaterialInstance { Handle = assets.Find<Material>("Materials/Agx.mat") };
+        _packMaterial = _resources.Pack;
         _instances = new InstanceTable(assets, _resources);
         _lightTiles = new LightTiles(assets);
-        _effects = new Effects(assets, _resources);
         _banner = new FailureBanner(assets);
         _viewShaders = _lightTiles.Shaders;
 
@@ -294,7 +295,7 @@ public sealed class Renderer
         // carries into it.
         if (inputs.WorldNumber != _drawnWorldNumber)
         {
-            foreach ((FrameView frameView, _) in _views)
+            foreach (FrameView frameView in _views)
             {
                 frameView.ClearHistory();
             }
@@ -306,35 +307,32 @@ public sealed class Renderer
         // their rows built again, and the materials' rows are made again at upload.
         _instances.Fill(inputs.Renderers, frame.Index);
 
-        // The loading domain shows once the models, materials and effects it waits for are on the GPU, or failed: a
-        // model drawn as the failure cube, which is then waited for too, or, for an effect, left out; and once the
-        // shading's shaders are built, or failed, on the sky's type and on the open sky, as its frames take either. Its
-        // models are asked for here, as the pools only take them once they are made; an ask for one asked for already
-        // does nothing.
+        // The loading domain shows once the models and materials it waits for are on the GPU, or failed: a model drawn
+        // as the failure cube, which is then waited for too; and once the shading's shaders are built, or failed, on the
+        // sky's type and on the open sky, as its frames take either. Its models are asked for here, as the pools only
+        // take them once they are made; an ask for one asked for already does nothing.
         if (_preparing is { } preparing)
         {
-            bool isPrepared =
-                !_effects.IsLoading(graph, preparing.Effects)
-                && !graph.IsAnyLoading(
-                    _shadeShader with
-                    {
-                        TypeArguments = _skyType,
-                    },
-                    _translucentShader with
-                    {
-                        TypeArguments = _skyType,
-                    },
-                    _shadeShader with
-                    {
-                        TypeArguments = _openSky,
-                    },
-                    _translucentShader with
-                    {
-                        TypeArguments = _openSky,
-                    },
-                    _lightViewShader,
-                    _showShader
-                );
+            bool isPrepared = !graph.IsAnyLoading(
+                _shadeShader with
+                {
+                    TypeArguments = _skyType,
+                },
+                _translucentShader with
+                {
+                    TypeArguments = _skyType,
+                },
+                _shadeShader with
+                {
+                    TypeArguments = _openSky,
+                },
+                _translucentShader with
+                {
+                    TypeArguments = _openSky,
+                },
+                _lightViewShader,
+                _showShader
+            );
             foreach (Handle<Model> model in preparing.Models)
             {
                 _resources.Get(model);
@@ -360,28 +358,6 @@ public sealed class Renderer
         _resources.EvictUnusedModels(inputs.Renderers.Second[.._instances.Count], frameStart, _settings.ModelKeepSec);
         _resources.Upload(graph);
 
-        // The picture's effects: the first post processing's, or the engine's, exposed by the exposure compensation;
-        // each whose material the settings turn off left out, which most frames name none of.
-        MaterialSlots post;
-        if (inputs.PostProcessing.Count > 0)
-            post = inputs.PostProcessing.First[0].Effects;
-        else
-        {
-            post = _defaultPost.Effects;
-            post[0].Overrides["compensation"] = _settings.ExposureCompensation;
-        }
-
-        ImmutableArray<string> disabled = _settings.DisabledEffects;
-        for (int place = 0; place < MaterialSlots.Capacity && !disabled.IsEmpty; place++)
-        {
-            if (
-                _assets.GetPath(post[place].Handle) is { } path
-                && disabled.Contains(Path.GetFileNameWithoutExtension(path))
-            )
-                post[place] = default;
-        }
-
-        Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> effects = _effects.Resolve(graph, post);
         Result<(GpuBuffer Rows, GpuBuffer Materials, GpuBuffer Failures)> tables = _instances.Upload(graph);
 
         // The whole finished picture at the resolution, or at the window's size when it has no side, and 1280 by 720
@@ -400,7 +376,7 @@ public sealed class Renderer
             inputs.SpotLights,
             inputs.RectLights
         );
-        Result asked = Result.FindFailure(effects, tables, constants, lights);
+        Result asked = Result.FindFailure(tables, constants, lights);
         if (!asked.Ok)
         {
             Fail(graph, RenderFailure.Resource, asked.Error);
@@ -453,8 +429,7 @@ public sealed class Renderer
             Inputs = inputs,
             Picture = picture,
             Lights = lights.Value,
-            Effects = effects.Value.Effects,
-            EffectRows = effects.Value.Rows,
+            PackMaterial = _packMaterial,
             Screenshot = screenshot,
         };
 
@@ -600,10 +575,10 @@ public sealed class Renderer
         // What the view keeps from frame to frame, by its number.
         while (_views.Count <= graph.View)
         {
-            _views.Add((new FrameView(), new PixelEffects()));
+            _views.Add(new FrameView());
         }
 
-        FrameView frameView = _views[graph.View].Frame;
+        FrameView frameView = _views[graph.View];
         GpuView view = new()
         {
             Frame = constants.Value,
@@ -638,17 +613,11 @@ public sealed class Renderer
             HeapTextures = world.HeapTextures,
             LightTable = world.Lights.Table,
             LightTiles = tiles.Value,
-            Effects = world.Effects,
-            EffectRows = world.EffectRows,
             PreparedDomains = world.PreparedDomains,
         };
 
-        // The camera jitters while one of the effects asks for it, or while a gem upscales.
-        bool isJittered = input.Upscaling is not null;
-        foreach (GpuEffect effect in view.Effects.Span)
-        {
-            isJittered |= effect.State == GpuState.Ready && effect.Needs.HasJitter;
-        }
+        // The camera jitters while the picture's effects ask for it, or while a gem upscales.
+        bool isJittered = input.Upscaling is not null || input.Effects is { IsJittered: true };
 
         Result uploaded = frameView.Upload(
             graph,
@@ -777,7 +746,8 @@ public sealed class Renderer
                 .DispatchOver(gpu.Width, gpu.Height);
         }
 
-        _views[graph.View].Effects.Record(graph, gpu, frame.Index);
+        if (input.Effects is { } effects)
+            effects.Record(graph, gpu, frame.Index);
 
         // The output drawn as the debug view asks, a Depth view black from its far distance, and the picture's middle
         // tones shown at the gamma.
@@ -868,10 +838,9 @@ public sealed class Renderer
     /// Holds the domain loading until what <paramref name="entities"/> draw is on the GPU and the shaders are built.
     /// </summary>
     /// <remarks>
-    /// It asks for every model and material the entities draw, and the effects of their first post processing, or the
-    /// default's. It waits until they are on the GPU, or failed and drawn as the failure or left out, and until the
-    /// shading's shaders are built or failed. Materials are asked for at once; models once the pools are
-    /// made, and the effects, by the world's step. One that comes while another waits ends that one. Render thread,
+    /// It asks for every model and material the entities draw. It waits until they are on the GPU, or failed and drawn
+    /// as the failure, and until the shading's shaders are built or failed. Materials are asked for at once; models
+    /// once the pools are made, by the world's step. One that comes while another waits ends that one. Render thread,
     /// whose tables and counts these are.
     /// </remarks>
     public async Task OnDomainLoadingAsync(
@@ -899,17 +868,9 @@ public sealed class Renderer
             _resources.Get(material);
         }
 
-        // The effects as Render runs them: the first post processing's, or the default's.
-        MaterialSlots post = entities
-            .SelectMany(entity => entity.OfType<PostProcessing>())
-            .Select(processing => processing.Effects)
-            .DefaultIfEmpty(_defaultPost.Effects)
-            .First();
-
         Preparing preparing = new(
             [.. renderers.Select(renderer => renderer.Model).Distinct()],
             materials,
-            post,
             new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
         );
         _preparing = preparing;
@@ -929,7 +890,6 @@ public sealed class Renderer
         back.PointLights.Fill(_ecs);
         back.SpotLights.Fill(_ecs);
         back.RectLights.Fill(_ecs);
-        back.PostProcessing.Fill(_ecs);
         back.WorldNumber = _worldNumber;
         _inputs.Publish();
 
@@ -1132,13 +1092,11 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// The models and materials a domain loading draws, the effects its frames run, and what ends once they are all on
-    /// the GPU.
+    /// The models and materials a domain loading draws, and what ends once they are all on the GPU.
     /// </summary>
     private sealed record Preparing(
         ImmutableArray<Handle<Model>> Models,
         ImmutableArray<Handle<Material>> Materials,
-        MaterialSlots Effects,
         TaskCompletionSource Done
     );
 }

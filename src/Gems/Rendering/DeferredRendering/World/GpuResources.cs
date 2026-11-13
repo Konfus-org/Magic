@@ -14,6 +14,16 @@ using Magic.Utils;
 namespace Magic.DeferredRendering.World;
 
 /// <summary>
+/// Packs a material slot's params into its row, as <see cref="GpuResources.Pack"/> does.
+/// </summary>
+internal delegate GpuState MaterialPacker(
+    in MaterialInstance slot,
+    out GpuMaterial row,
+    out GpuResources.MaterialLayout layout,
+    out (FailureKind Kind, ulong Asset, string? Param)? failure
+);
+
+/// <summary>
 /// The GPU resources the gem draws with: textures, materials and models by their handles, each read once on its first
 /// ask.
 /// </summary>

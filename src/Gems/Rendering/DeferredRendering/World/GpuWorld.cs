@@ -90,11 +90,10 @@ public readonly record struct GpuWorld
     internal LightBuffers Lights { get; init; }
 
     /// <summary>
-    /// The effects run over each view's lit picture, and their material rows.
+    /// Packs a material slot's params into its row, and gets whether its material, its shader's struct and its
+    /// textures are on the GPU.
     /// </summary>
-    internal ReadOnlyMemory<GpuEffect> Effects { get; init; }
-
-    internal GpuBuffer EffectRows { get; init; }
+    internal MaterialPacker PackMaterial { get; init; }
 
     /// <summary>
     /// The screenshot asked for in this frame; none in most.

@@ -13,7 +13,9 @@ flowchart LR
     World[DeferredRendering world] -- GpuWorld, RenderViews --> View[DeferredRendering view]
     World -- GpuWorld --> Pools[ClusteredGeometry pools]
     World -- GpuWorld, GpuInstances --> Accel[AccelerationStructures]
+    World -- GpuWorld --> Post[DeferredRendering post]
     Taa[TaaUpscaling] -- Upscaling --> View
+    Post -- PictureEffects --> View
     Accel -- TracedWorld --> View
     View -- GpuView --> Clusters[ClusteredGeometry]
     View -- GpuView --> Sky[ProceduralSky]
@@ -26,6 +28,7 @@ flowchart LR
     Shadows -- ShadowMask --> Shading[DeferredRendering shading]
     GI -- IndirectLight --> Shading
     Vol -- Air --> Shading
+    Post -- PictureEffects --> Shading
     Clusters -. GBuffer .-> Shading
     Shading --> Banner[Failure banner]
 ```
@@ -47,8 +50,10 @@ The renderer. It has four render steps:
    of the world on the GPU. It makes the `GpuWorld`, the `GpuInstances` and the `RenderViews` of the frame.
 2. The view, one time for each view: it makes the targets and the frame buffer of the view, as its `GpuView`.
 3. The shading, one time for each view: it lights the GBuffer that a geometry gem drew, with the sun, the sky and the
-   lights. Then it runs the post effects and writes the picture into the target of the view.
+   lights. Then it runs the `PictureEffects` of the frame and writes the picture into the target of the view.
 4. The failure banner: it draws the render failures of the frame over the top of the window.
+
+Its `PostRenderer` part runs the post effects ([Post effects](#post-effects)).
 
 The gem also holds the types that the rendering gems share. List it in the `.magic` file after the GPU provider, the
 ECS, the model importer and the texture importer, with a gem that draws its geometry. The settings are in
@@ -104,7 +109,8 @@ goes through the panes behind it. The pane reflects the light around it, and the
 ### Post effects
 
 The effects of the first `PostProcessing` component run in order over the lit picture. Each effect is a material
-whose shader implements the pixel effect contract ([Shaders](SHADERS.md)).
+whose shader implements the pixel effect contract ([Shaders](SHADERS.md)). One time for each frame, the
+`PostRenderer` part of the gem makes the effects of the frame as its `PictureEffects`. The shading runs them.
 
 - Without a `PostProcessing`, the picture gets the `Exposure` and `Agx` materials of the engine.
   `Rendering.DisabledEffects` names effects to leave out.

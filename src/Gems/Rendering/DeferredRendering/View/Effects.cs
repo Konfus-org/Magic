@@ -14,7 +14,7 @@ namespace Magic.DeferredRendering.View;
 /// shader, and what it declares it needs. An effect is ready once its material, its textures and its passes are, and
 /// failed when one of them failed.
 /// </remarks>
-internal sealed class Effects(AssetManager assets, GpuResources resources)
+internal sealed class Effects(AssetManager assets)
 {
     /// <summary>
     /// The places in the list a frame runs, the post processing's.
@@ -37,9 +37,13 @@ internal sealed class Effects(AssetManager assets, GpuResources resources)
     private readonly GpuMaterial[] _rows = new GpuMaterial[Places];
 
     /// <summary>
-    /// Resolves each place of <paramref name="list"/> and uploads their rows.
+    /// Resolves each place of <paramref name="list"/>, its row packed by <paramref name="pack"/>, and uploads their rows.
     /// </summary>
-    public Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> Resolve(RenderGraph graph, MaterialSlots list)
+    public Result<(ReadOnlyMemory<GpuEffect> Effects, GpuBuffer Rows)> Resolve(
+        RenderGraph graph,
+        MaterialSlots list,
+        MaterialPacker pack
+    )
     {
         Result<GpuBuffer> rows = graph.Buffer(new("Effect rows", Places * GpuMaterial.Bytes));
         if (!rows.Ok)
@@ -47,7 +51,7 @@ internal sealed class Effects(AssetManager assets, GpuResources resources)
 
         for (int place = 0; place < Places; place++)
         {
-            (_resolved[place], _rows[place]) = Resolve(graph, list[place]);
+            (_resolved[place], _rows[place]) = Resolve(graph, list[place], pack);
         }
 
         if (!graph.Upload(rows.Value, _rows.AsSpan()))
@@ -59,23 +63,27 @@ internal sealed class Effects(AssetManager assets, GpuResources resources)
     /// <summary>
     /// Whether any of <paramref name="list"/>'s effects is still loading, its material, its textures or its passes.
     /// </summary>
-    public bool IsLoading(RenderGraph graph, MaterialSlots list)
+    public bool IsLoading(RenderGraph graph, MaterialSlots list, MaterialPacker pack)
     {
         bool isLoading = false;
         foreach (MaterialInstance slot in list)
         {
-            isLoading |= Resolve(graph, slot).Effect.State == GpuState.Loading;
+            isLoading |= Resolve(graph, slot, pack).Effect.State == GpuState.Loading;
         }
 
         return isLoading;
     }
 
-    private (GpuEffect Effect, GpuMaterial Row) Resolve(RenderGraph graph, in MaterialInstance slot)
+    private (GpuEffect Effect, GpuMaterial Row) Resolve(
+        RenderGraph graph,
+        in MaterialInstance slot,
+        MaterialPacker pack
+    )
     {
         if (slot.Handle == Handle<Material>.None)
             return (new GpuEffect(0, GpuState.Failed, default, default, default), default);
 
-        GpuState material = resources.Pack(
+        GpuState material = pack(
             slot,
             out GpuMaterial row,
             out GpuResources.MaterialLayout layout,

@@ -47,13 +47,19 @@ internal sealed class PixelEffects
     private readonly ulong[] _lastFrame = new ulong[MaterialSlots.Capacity];
 
     /// <summary>
-    /// Runs the view's effects that are ready, in order, on frame <paramref name="frameIndex"/>.
+    /// Runs the effects that are ready, in order, over the view's picture on frame <paramref name="frameIndex"/>, each
+    /// with its material's row in <paramref name="rows"/> at its place.
     /// </summary>
-    public void Record(RenderGraph graph, in GpuView gpu, uint frameIndex)
+    public void Record(
+        RenderGraph graph,
+        in GpuView gpu,
+        ReadOnlySpan<GpuEffect> effects,
+        GpuBuffer rows,
+        uint frameIndex
+    )
     {
         // With no effect ready, none runs and the picture stays in the HDR target, so nothing is asked for. A failed
         // effect is skipped and reported; an empty place, material 0, is skipped alone.
-        ReadOnlySpan<GpuEffect> effects = gpu.Effects.Span;
         bool isAnyReady = false;
         foreach (GpuEffect effect in effects)
         {
@@ -94,7 +100,7 @@ internal sealed class PixelEffects
         ReadOnlySpan<GpuResource> surface =
         [
             gpu.Frame,
-            gpu.EffectRows,
+            rows,
             passTable.Value,
             gpu.Depth,
             gpu.GBufferNormal,
@@ -144,7 +150,7 @@ internal sealed class PixelEffects
             _lastFrame[place] = material;
             GpuEffectPass shared = new()
             {
-                Rows = gpu.EffectRows.Id,
+                Rows = rows.Id,
                 Row = (uint)place,
                 Picture = picture.Id,
                 Target = target.Value.Id,
