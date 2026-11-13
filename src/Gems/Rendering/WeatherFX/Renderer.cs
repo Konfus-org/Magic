@@ -11,12 +11,12 @@ using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
 
-namespace Magic.Volumetrics;
+namespace Magic.WeatherFX;
 
 /// <summary>
 /// What the air is filled from: the view, and, where a gem makes it, the world as rays see it, which shadows the air.
 /// </summary>
-public readonly record struct VolumetricsInput(GpuView View, TracedWorld? Traced);
+public readonly record struct WeatherFXInput(GpuView View, TracedWorld? Traced);
 
 /// <summary>
 /// Fills the air between the camera and what it sees with the world's haze, as the frame's <see cref="Air"/>.
@@ -26,7 +26,7 @@ public readonly record struct VolumetricsInput(GpuView View, TracedWorld? Traced
 /// world reaches it. It blends the volume over frames and sums it away from the camera. It also draws the clouds over
 /// the sky. Shading takes the air. Clear air makes none.
 /// </remarks>
-public sealed class Renderer : IRender<VolumetricsInput, Air>, IRender, IHookIntoDomainLoading
+public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoDomainLoading
 {
     /// <summary>
     /// The volume's slices away from the camera, the twin of <c>AirSlices</c> in the renderer's <c>Light/Air.slang</c>.
@@ -63,7 +63,7 @@ public sealed class Renderer : IRender<VolumetricsInput, Air>, IRender, IHookInt
     /// </remarks>
     private readonly TaskCompletionSource _built = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    private readonly VolumetricsSettings _settings;
+    private readonly WeatherFXSettings _settings;
 
     private readonly IEcs _ecs;
 
@@ -82,7 +82,7 @@ public sealed class Renderer : IRender<VolumetricsInput, Air>, IRender, IHookInt
     /// </summary>
     private readonly List<((int Width, int Height)? Filled, GpuTexture? DrawnClouds)> _views = [];
 
-    internal Renderer(VolumetricsSettings settings, AssetManager assets, IEcs ecs)
+    internal Renderer(WeatherFXSettings settings, AssetManager assets, IEcs ecs)
     {
         _settings = settings;
         _ecs = ecs;
@@ -98,7 +98,7 @@ public sealed class Renderer : IRender<VolumetricsInput, Air>, IRender, IHookInt
     /// The frame's air, or none while the shaders build, what they read and write is not made, or the weather holds no
     /// haze or clouds. With none, the air changes nothing.
     /// </returns>
-    public Air? Render(in Frame frame, RenderGraph graph, in VolumetricsInput input)
+    public Air? Render(in Frame frame, RenderGraph graph, in WeatherFXInput input)
     {
         GpuState shaders = graph.GetState(_scatterShader, _integrateShader);
         if (shaders == GpuState.Failed)

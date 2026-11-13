@@ -1,13 +1,13 @@
 using System.ComponentModel;
 using Magic.Configuration;
 
-namespace Magic.Volumetrics;
+namespace Magic.WeatherFX;
 
 /// <summary>
 /// How finely the air is filled, which sets what it costs; the world's weather says how it looks.
 /// </summary>
 [Category("Rendering")]
-public sealed class VolumetricsSettings : ISettings
+public sealed class WeatherFXSettings : ISettings
 {
     /// <summary>
     /// The volume's cells across and down, as a part of the picture's size along each side, from 0 to 1. Smaller is

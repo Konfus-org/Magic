@@ -19,7 +19,7 @@ flowchart LR
     Pools -- ClusterPools --> Clusters
     Accel -- TracedWorld --> Shadows[TracedShadows]
     Accel -- TracedWorld --> GI[GlobalIllumination]
-    Accel -- TracedWorld --> Vol[Volumetrics]
+    Accel -- TracedWorld --> Vol[WeatherFX]
     Shadows -- ShadowMask --> Shading[DeferredRendering shading]
     GI -- IndirectLight --> Shading
     Vol -- Air --> Shading
@@ -203,13 +203,13 @@ the reflections.
 - The gem traces at `Rendering.IndirectScale` of the picture size.
 - The `IndirectDiffuse` and `Reflections` debug views show what the gem traced.
 
-## Volumetrics
+## WeatherFX
 
 Fills the air between the camera and the surfaces with the haze of the world. The sky, the sun and the local lights
 light the haze. On a GPU that traces rays, the light falls in shafts through gaps. The settings are in
-`VolumetricsSettings`.
+`WeatherFXSettings`.
 
-To use it, list `Volumetrics` in the `.magic` file, and give the `Weather` of the world a `FogDensity` or a
+To use it, list `WeatherFX` in the `.magic` file, and give the `Weather` of the world a `FogDensity` or a
 `CloudCover` above 0. With the AccelerationStructures gem, the haze has shadows. Without it, the sun lights all of the
 haze.
 
