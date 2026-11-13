@@ -23,6 +23,12 @@ namespace Magic.TaaUpscaling;
 public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
 {
     /// <summary>
+    /// The frames a view's history blends before its picture is settled: each takes at least 0.05 of now
+    /// (<c>TaaUpscaling.slang</c>), so after 45 the first frames of a world weigh less than a tenth.
+    /// </summary>
+    private const int SettleFrames = 45;
+
+    /// <summary>
     /// Done once the shader is built or failed, which a domain loading waits for, so a shader that fails is told and
     /// logged before the world shows.
     /// </summary>
@@ -36,9 +42,16 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
     private readonly Upscaling _upscaling;
 
     /// <summary>
-    /// The picture the frame drawn last resolved in each view, the next one's history, and its size.
+    /// The picture the frame drawn last resolved in each view, the next one's history, its size, and the frames its
+    /// history blended.
     /// </summary>
-    private readonly List<(GpuTexture Picture, int Width, int Height)> _resolved = [];
+    private readonly List<(GpuTexture Picture, int Width, int Height, int Blended)> _resolved = [];
+
+    /// <summary>
+    /// The wait of the world that arrived for the resolved picture to settle, which the frame that blends enough frames
+    /// or upscales nothing completes. Set on the game thread, completed on the render thread.
+    /// </summary>
+    private TaskCompletionSource? _settling;
 
     internal Renderer(AssetManager assets)
     {
@@ -58,11 +71,26 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
         if (state != GpuState.Loading)
             _built.TrySetResult();
 
+        if (state != GpuState.Ready)
+            _settling?.TrySetResult();
+
         return state == GpuState.Ready ? _upscaling : null;
     }
 
     public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel) =>
         _built.Task.WaitAsync(cancel);
+
+    /// <summary>
+    /// Returns once the resolved picture of a view blended enough frames of the world that arrived, or at once while it
+    /// upscales nothing.
+    /// </summary>
+    public Task OnDomainArrivedAsync(CancellationToken cancel)
+    {
+        TaskCompletionSource settling = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _settling = settling;
+
+        return settling.Task.WaitAsync(cancel);
+    }
 
     private static TextureDescription GetResolved(string name, int width, int height) =>
         new(
@@ -99,10 +127,15 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
             _resolved.Add(default);
         }
 
+        (GpuTexture lastPicture, int lastWidth, int lastHeight, int blended) = _resolved[graph.View];
         (GpuTexture history, GpuTexture resolved) =
-            _resolved[graph.View].Picture == first.Value ? (first.Value, second.Value) : (second.Value, first.Value);
-        bool hasHistory = view.HasHistory && _resolved[graph.View] == (history, width, height);
-        _resolved[graph.View] = (resolved, width, height);
+            lastPicture == first.Value ? (first.Value, second.Value) : (second.Value, first.Value);
+        bool hasHistory = view.HasHistory && (lastPicture, lastWidth, lastHeight) == (history, width, height);
+        blended = hasHistory ? blended + 1 : 0;
+        _resolved[graph.View] = (resolved, width, height, blended);
+        if (blended >= SettleFrames)
+            _settling?.TrySetResult();
+
         ReadOnlySpan<GpuResource> past = hasHistory ? [history] : [];
         graph
             .Compute(

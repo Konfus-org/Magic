@@ -46,6 +46,13 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
 
     private const int CloudBlock = 4;
 
+    /// <summary>
+    /// The frames a view's volume blends before its air is settled: each takes 0.03 of now (<c>FillAir.slang</c>'s
+    /// <c>NewWeight</c>), so after 76 the first frames of a world weigh less than a tenth. The clouds' picture is
+    /// whole after 16.
+    /// </summary>
+    private const int SettleFrames = 76;
+
     private static readonly TextureDescription _cloudsDescription = new(
         "Clouds",
         CloudTexels,
@@ -75,10 +82,16 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
 
     /// <summary>
     /// What each view keeps from frame to frame, by its number: its volume's size when it was last filled, none while
-    /// its history holds nothing, and its clouds' picture as it was last drawn, none while it holds nothing. Render
-    /// thread.
+    /// its history holds nothing, its clouds' picture as it was last drawn, none while it holds nothing, and the frames
+    /// its volume blended. Render thread.
     /// </summary>
-    private readonly List<((int Width, int Height)? Filled, GpuTexture? DrawnClouds)> _views = [];
+    private readonly List<((int Width, int Height)? Filled, GpuTexture? DrawnClouds, int Blended)> _views = [];
+
+    /// <summary>
+    /// The wait of the world that arrived for the air to settle, which the frame that blends enough frames or fills no
+    /// air completes. Set on the game thread, completed on the render thread.
+    /// </summary>
+    private TaskCompletionSource? _settling;
 
     internal Renderer(AssetManager assets, IEcs ecs)
     {
@@ -108,6 +121,7 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
         )
         {
             _views.Clear();
+            _settling?.TrySetResult();
 
             return null;
         }
@@ -170,12 +184,18 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
             _views.Add(default);
         }
 
-        ((int Width, int Height)? filled, GpuTexture? drawnClouds) = _views[graph.View];
+        ((int Width, int Height)? filled, GpuTexture? drawnClouds, int blended) = _views[graph.View];
 
         // Each cell's light and haze, blended with last frame's where the cell was then, then summed along each column
         // away from the camera. The pass header's x is the frame's buffer, y the scattering written, z last frame's, 0
-        // when it holds nothing, and w the air.
-        uint last = filled == size ? history.Value.Id : 0;
+        // when it holds nothing, and w the air. A view whose history was forgotten, as in a world that arrived, holds
+        // nothing.
+        bool hasHistory = gpu.HasHistory && filled == size;
+        blended = hasHistory ? blended + 1 : 0;
+        if (blended >= SettleFrames)
+            _settling?.TrySetResult();
+
+        uint last = hasHistory ? history.Value.Id : 0;
         GpuConstants header = new(gpu.Frame.Id, scattering.Value.Id, last, air.Value.Id);
         ReadOnlySpan<GpuResource> traced = input.Traced is { } world
             ? [world.HitMaterials, gpu.Instances, gpu.Meshes]
@@ -209,7 +229,7 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
                 .DispatchOver(CloudTexels / block, CloudTexels / block);
         }
 
-        _views[graph.View] = (size, cloudy);
+        _views[graph.View] = (size, cloudy, blended);
 
         return new Air(air.Value, cloudy);
     }
@@ -226,6 +246,18 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
 
     public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel) =>
         _built.Task.WaitAsync(cancel);
+
+    /// <summary>
+    /// Returns once the volume of a view blended enough frames of the world that arrived, or at once while it fills no
+    /// air.
+    /// </summary>
+    public Task OnDomainArrivedAsync(CancellationToken cancel)
+    {
+        TaskCompletionSource settling = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _settling = settling;
+
+        return settling.Task.WaitAsync(cancel);
+    }
 
     /// <summary>
     /// Publishes the world's weather for the frame's air.
