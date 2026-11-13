@@ -5,6 +5,7 @@ using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Files;
 using Magic.Utils;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Magic.CSharpScripting;
 
@@ -15,10 +16,10 @@ namespace Magic.CSharpScripting;
 /// </summary>
 /// <remarks>
 /// A field that is no data of the copy's own is left out, as a copy gets it again when it is made: its entity, a
-/// thing that its constructor is handed, a delegate, a task or a disposable. A member that JSON cannot hold, or that
-/// the class no longer has, goes to the log one time. Game thread.
+/// thing that its constructor is handed, a service, a delegate, a task or a disposable. A member that JSON cannot
+/// hold, or that the class no longer has, goes to the log one time. Game thread.
 /// </remarks>
-internal sealed class ScriptState
+internal sealed class ScriptState(IServiceProvider services)
 {
     private const BindingFlags AnyField = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
 
@@ -26,6 +27,11 @@ internal sealed class ScriptState
     /// The members that did not go into a save or come back out of one, as <c>Class.member</c>, each logged one time.
     /// </summary>
     private readonly HashSet<string> _logged = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Answers which types the provider gives, to leave a service that a copy took out of a save.
+    /// </summary>
+    private readonly IServiceProviderIsService? _given = services as IServiceProviderIsService;
 
     /// <summary>
     /// The state of <paramref name="script"/> as it is now, for a save.
@@ -147,15 +153,24 @@ internal sealed class ScriptState
 
     /// <summary>
     /// Whether a field of <paramref name="type"/> is no data of the copy's own, so a save leaves it out: its entity, a
-    /// delegate, a task, a disposable, or one of the <paramref name="handed"/> types, which a copy gets again when it
-    /// is made.
+    /// delegate, a task, a disposable, one of the <paramref name="handed"/> types, or a service, each of which a copy
+    /// gets again when it is made.
     /// </summary>
-    private static bool IsHanded(Type type, Type[] handed) =>
+    private bool IsHanded(Type type, Type[] handed) =>
         type == typeof(Entity)
         || typeof(Delegate).IsAssignableFrom(type)
         || typeof(Task).IsAssignableFrom(type)
         || typeof(IDisposable).IsAssignableFrom(type)
-        || (!type.IsValueType && Array.Exists(handed, given => type.IsAssignableFrom(given)));
+        || (!type.IsValueType && Array.Exists(handed, given => given == type))
+        || IsGiven(type);
+
+    /// <summary>
+    /// Whether the provider gives <paramref name="type"/>, which a copy asks it for again. A sequence is left out, as
+    /// the provider answers for every <see cref="IEnumerable{T}"/>, and a copy's own list is its data.
+    /// </summary>
+    private bool IsGiven(Type type) =>
+        !(type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IEnumerable<>))
+        && _given?.IsService(type) == true;
 
     /// <summary>
     /// Sets <paramref name="value"/>, which a file names <paramref name="name"/>, on <paramref name="member"/> of

@@ -32,7 +32,7 @@ public sealed class Runner(World world, AssetManager assets, IServiceProvider se
     /// <summary>
     /// The state of a copy as JSON, which a save keeps and a copy from a save takes up.
     /// </summary>
-    private readonly ScriptState _state = new();
+    private readonly ScriptState _state = new(services);
 
     /// <summary>
     /// The copies that run, by their entity and script, in the order that they started.

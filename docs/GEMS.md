@@ -92,13 +92,13 @@ What a save and a restart keep:
 
 - Each save writes the state of every copy that runs into its slot: its values, by the name a prefab gives them, and
   the other fields that it keeps for itself, by name. Left out are the fields that a copy gets again when it is made:
-  its entity, a thing that its constructor is handed, a delegate, a task and a disposable. A member that JSON cannot
-  hold goes to the log, and a copy from the save starts over without it.
+  its entity, a thing that its constructor is handed, a service that a gem gives, a delegate, a task and a
+  disposable. A member that JSON cannot hold goes to the log, and a copy from the save starts over without it.
 - A copy that a save made takes that state up and goes on from it: its slot is marked `started`, so the gem sets the
   saved properties and fields on it and calls `Resume` in place of `Start`. A spawner spawns once, and a light keeps
   the depth that it had.
 - Write in `Resume` what the save does not hold and `Start` would have made: a subscription to an event, a delegate, a
-  task, and the first work with a service that the constructor kept. Without it, such a field is null after a restart.
+  task, and the first work with a service that the copy kept. Without it, such a field is null after a restart.
 
 ### DomainImporter
 
