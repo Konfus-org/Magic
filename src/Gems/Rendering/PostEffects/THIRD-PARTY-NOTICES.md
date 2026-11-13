@@ -1,7 +1,7 @@
 # Third-party notices
 
-This gem's temporal anti-aliasing and bloom, `Post/TemporalAntiAliasing` and `Post/Bloom`, are adapted from Wicked
-Engine (https://github.com/turanszkij/WickedEngine), under this licence:
+This gem's bloom, `Post/Bloom`, is adapted from Wicked Engine (https://github.com/turanszkij/WickedEngine), under
+this licence:
 
 ```
 The MIT License (MIT)

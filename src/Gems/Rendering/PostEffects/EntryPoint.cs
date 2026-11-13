@@ -17,6 +17,11 @@ public sealed class EntryPoint(
     Threads threads
 ) : IGem
 {
+    /// <summary>
+    /// The brightness and the post effects left out, which the renderer reads each frame. Game thread.
+    /// </summary>
+    public PostEffectsSettings Settings { get; } = settings;
+
     public Renderer Renderer { get; } = new(settings, shaders, assets, ecs, threads);
 
     public void LateUpdate(in Frame frame) => Renderer.PublishPostProcessing(frame);

@@ -35,8 +35,9 @@ are tables, and `OpenSky` where there are none. It has the two built before a do
 
 ## Post effects
 
-A post effect implements `IPixelEffect`. The post-effects gem has the contract, in `Post/IPixelEffect`, and its own
-effects in `Post/`. The effects run in the order of their list.
+A post effect implements `IPixelEffect`. The library has the contract, in `Post/IPixelEffect`, and the temporal
+anti-aliasing, which the upscaling gem also uses. The post-effects gem has its other effects in `Post/`. The effects
+run in the order of their list.
 
 - An effect before `Exposure` works in the light of the world. An effect after it works in exposed light. An effect
   after the tonemap works in the colours of the screen.
