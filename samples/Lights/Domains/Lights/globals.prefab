@@ -1,6 +1,12 @@
 {
     "entities": [
         {
+            "name": "Bob",
+            "components": {
+                "ScriptContainer": [ { "id": 100331 } ]
+            }
+        },
+        {
             "name": "Spawn",
             "tags": [
                 "spawn"

@@ -56,7 +56,8 @@ To write a script:
 
 1. In the csproj of the code that holds the script, reference the project of this gem with `Private="false"`
    ([Gems that use other gems](#gems-that-use-other-gems)).
-2. Write a class that implements `IBehavior`. Give the file the name of the class.
+2. Write a class that implements `IBehavior`, or `ISystem` for work over many entities. Give the file the name of the
+   class.
 3. Give the file a `.meta` file with an id and `"type": "Script"`.
 4. Give an entity the script in its `ScriptContainer`, as `"ScriptContainer": [ { "id": <the id> } ]` in a prefab.
 
@@ -72,6 +73,8 @@ How a script runs:
   n times that distance, up to one frame in 32. Its frame then gives the time since its last update as the deltas.
   `FixedUpdate` runs at each step. A behaviour on an entity tagged `global`, or on an entity without a `Transform`,
   updates each frame.
+- A system runs in `Update`, each frame, wherever its own entity is. `ISystem<T1>` and `ISystem<T1, T2>` give it the
+  entities that have those components, and it can change them. Give a system an entity of its own.
 - When the handle goes from the `ScriptContainer`, or the entity is destroyed, the copy ends. If the copy is
   `IDisposable`, it is disposed.
 - If a script cannot start, or a hook throws, the error goes to the log, and the handle goes from the `ScriptContainer`.

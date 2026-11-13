@@ -262,33 +262,13 @@ internal sealed class Runner(World world, AssetManager assets, IServiceProvider 
                 continue;
             }
 
-            if (copy.Script is not IBehavior behavior)
-                continue;
-
-            // Update works out how often the behaviour is due, and LateUpdate keeps to what Update found.
-            if (hook == Hook.Update)
-                copy.IntervalFrames = GetIntervalFrames(entity);
-
-            if (hook != Hook.FixedUpdate && !Pacing.IsDue(entity, frame.Index, copy.IntervalFrames))
-                continue;
-
             try
             {
-                switch (hook)
-                {
-                    case Hook.Update:
-                        behavior.Update(copy.GetCallFrame(frame));
-                        break;
-                    case Hook.FixedUpdate:
-                        behavior.FixedUpdate(frame);
-                        break;
-                    case Hook.LateUpdate:
-                        behavior.LateUpdate(copy.GetCallFrame(frame));
-                        copy.LastCalled = frame;
-                        break;
-                    default:
-                        throw new ArgumentOutOfRangeException(nameof(hook), hook, "There is no such hook.");
-                }
+                // A system works over many entities, so it runs each frame, wherever its own entity is.
+                if (copy.Script is ISystem system && hook == Hook.Update)
+                    system.Run(frame, world);
+                else if (copy.Script is IBehavior behavior)
+                    RunBehavior(hook, entity, copy, behavior, frame);
             }
             catch (Exception ex)
             {
@@ -297,6 +277,35 @@ internal sealed class Runner(World world, AssetManager assets, IServiceProvider 
                 i--;
                 TakeOff(entity, script, $"threw in {hook} and ends: {ex}");
             }
+        }
+    }
+
+    /// <summary>
+    /// Calls <paramref name="hook"/> on <paramref name="behavior"/>, when it is due in this frame.
+    /// </summary>
+    private void RunBehavior(Hook hook, Entity entity, Copy copy, IBehavior behavior, in Frame frame)
+    {
+        // Update works out how often the behaviour is due, and LateUpdate keeps to what Update found.
+        if (hook == Hook.Update)
+            copy.IntervalFrames = GetIntervalFrames(entity);
+
+        if (hook != Hook.FixedUpdate && !Pacing.IsDue(entity, frame.Index, copy.IntervalFrames))
+            return;
+
+        switch (hook)
+        {
+            case Hook.Update:
+                behavior.Update(copy.GetCallFrame(frame));
+                break;
+            case Hook.FixedUpdate:
+                behavior.FixedUpdate(frame);
+                break;
+            case Hook.LateUpdate:
+                behavior.LateUpdate(copy.GetCallFrame(frame));
+                copy.LastCalled = frame;
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(hook), hook, "There is no such hook.");
         }
     }
 
