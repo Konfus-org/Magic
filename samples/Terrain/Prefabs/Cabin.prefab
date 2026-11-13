@@ -9,6 +9,6 @@
         {"name": "Lantern", "components": {"Transform": {"position": {"x": 1.55, "y": 1, "z": 0.6}, "rotation": {"x": 0, "y": 1, "z": 0, "w": 0}, "scale": {"x": 1.6, "y": 1.6, "z": 1.6}}, "Renderer": {"model": {"id": 300055}, "materials": [{"id": 300069}, {"id": 300070}], "isShadowless": true}}},
         {"name": "Lantern light", "components": {"Transform": {"position": {"x": 1.55, "y": 1.17, "z": 0.6}}, "PointLight": {"color": {"r": 1, "g": 0.72, "b": 0.42}, "intensity": 2, "range": 9}, "ScriptContainer": [{"id": 100330, "depth": 0.1}]}},
         {"name": "Embers", "components": {"Transform": {"position": {"x": 3.45, "y": 0.53, "z": 0}, "scale": {"x": 0.18, "y": 0.04, "z": 0.3}}, "Renderer": {"model": {"id": 517}, "materials": [{"id": 300071}]}}},
-        {"name": "Fire", "tags": ["fire"], "components": {"Transform": {"position": {"x": 3.2, "y": 0.9, "z": 0}}, "PointLight": {"color": {"r": 1, "g": 0.55, "b": 0.25}, "intensity": 5, "range": 12}, "ScriptContainer": [{"id": 100330, "depth": 0.4}]}}
+        {"name": "Fire", "tags": ["fire"], "components": {"Transform": {"position": {"x": 3.0, "y": 0.7, "z": 0}}, "PointLight": {"color": {"r": 1, "g": 0.36, "b": 0.09}, "intensity": 0.2, "range": 12, "radius": 0.15}, "ScriptContainer": [{"id": 100330, "depth": 0.4}]}}
     ]
 }
