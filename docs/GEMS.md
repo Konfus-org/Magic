@@ -80,6 +80,9 @@ How a script runs:
   updates each frame.
 - A system runs in `Update`, each frame, wherever its own entity is. `ISystem<T1>` and `ISystem<T1, T2>` give it the
   entities that have those components, and it can change them. Give a system an entity of its own.
+- A system whose work on each entity reads and writes only that entity's chunk can be an `IParallelSystem<T1>` or an
+  `IParallelSystem<T1, T2>` instead: its `Run` gets one chunk, and the chunks run at the same time on the worker
+  threads. Each other system stays an `ISystem`, because its `Run` gets the world and runs on the game thread alone.
 - When the handle goes from the `ScriptContainer`, or the entity is destroyed, the copy ends. If the copy is
   `IDisposable`, it is disposed.
 - If a script cannot start, or a hook throws, the error goes to the log, and the handle goes from the `ScriptContainer`.
