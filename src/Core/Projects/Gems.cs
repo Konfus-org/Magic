@@ -241,6 +241,9 @@ internal sealed class Gems : IDisposable
                 if (part is IDebugUI debugUI)
                     loaded.Ends.Add(_world.Register(debugUI));
 
+                if (part is IHookIntoWorldSave saving)
+                    loaded.Ends.Add(_world.Register(saving));
+
                 // A gem that makes what another makes, or closes a cycle, renders nothing; the others go on.
                 try
                 {

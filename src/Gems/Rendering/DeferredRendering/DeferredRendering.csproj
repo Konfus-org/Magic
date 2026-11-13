@@ -2,7 +2,7 @@
   <!-- A gem: Magic loads it from Gems/DeferredRendering/DeferredRendering.dll when a project lists DeferredRendering. -->
   <PropertyGroup>
     <!-- Shown beside the gem as Magic starts it. -->
-    <Description>The renderer: keeps the world on the GPU each frame for the gems that draw it, and lights it, deferred: the shading of the GBuffer, shadowed, the glass over it, the post effects and the output.</Description>
+    <Description>The renderer: keeps the world on the GPU each frame for the gems that draw it, and lights it, deferred: the shading of the GBuffer, shadowed, the glass over it, and the output.</Description>
     <Version>1.0.0</Version>
     <Authors>Konfus</Authors>
     <!-- Copies the gem's own NuGet dependencies next to it, where its load context finds them. -->

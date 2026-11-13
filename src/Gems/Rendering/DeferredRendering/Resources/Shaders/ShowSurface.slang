@@ -5,7 +5,7 @@
 // A view of light alone first writes it into the picture in place of the lit one, so the effects finish it as they
 // would the picture: the traced diffuse light as shading reads it, which a white diffuse surface would reflect, or the
 // traced reflections' light, which it reads from the frame's indirect light, whose ids are 0 where nothing is
-// traced.
+// traced. With no effects, which the header's y tells with its top bit, the picture is first tonemapped.
 module "ShowSurface";
 
 import Core.Heap;
@@ -29,6 +29,9 @@ enum DebugView : uint
     IndirectDiffuse,
     Reflections,
 }
+
+// Set in the pass header's y, over the view, when no effects finished the picture; C#'s Renderer.NoEffects.
+static const uint NoEffects = 0x80000000u;
 
 // The view of a pixel's surface. A depth view is black from depthViewFar metres away.
 float3 GetSurfaceView(FrameConstants frame, DebugView view, float depthViewFar, uint2 pixel)
@@ -111,13 +114,18 @@ void ShowSurface(uint3 thread : SV_DispatchThreadID)
         return;
 
     PassHeader header = GetPassHeader();
-    DebugView view = (DebugView)header.y;
+    DebugView view = (DebugView)(header.y & ~NoEffects);
     float depthViewFar = asfloat(header.z);
     float gamma = asfloat(header.w);
     bool isPicture = view == DebugView.Final || view == DebugView.IndirectDiffuse || view == DebugView.Reflections;
     TextureRef picture = { frame.hdr };
+    float3 light = picture.Load(thread.xy, 0u).rgb;
+    // Tonemapped as Reinhard does, so no light is above white.
+    if ((header.y & NoEffects) != 0u)
+        light /= 1.0 + light;
+
     float3 color = isPicture
-        ? pow(saturate(ToSrgb(picture.Load(thread.xy, 0u).rgb)), 1.0 / gamma)
+        ? pow(saturate(ToSrgb(light)), 1.0 / gamma)
         : GetSurfaceView(frame, view, depthViewFar, thread.xy);
     StorageRef output = { frame.output, 0u };
     output.Store(thread.xy, float4(color, 1.0));

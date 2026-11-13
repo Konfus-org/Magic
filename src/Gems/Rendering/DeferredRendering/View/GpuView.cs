@@ -134,27 +134,11 @@ public readonly record struct GpuView
     public required ImmutableArray<GpuResource> HeapTextures { get; init; }
 
     /// <summary>
-    /// The local lights, each tile's lights and the sky's tables.
+    /// The local lights and each tile's lights.
     /// </summary>
     public required GpuBuffer LightTable { get; init; }
 
     public required GpuBuffer LightTiles { get; init; }
-
-    public required GpuTexture SkyTransmittance { get; init; }
-
-    public required GpuTexture SkyMultiScattering { get; init; }
-
-    public required GpuTexture SkyView { get; init; }
-
-    /// <summary>
-    /// The effects run over the lit picture this frame, by their place in the post processing's list.
-    /// </summary>
-    public required ReadOnlyMemory<GpuEffect> Effects { get; init; }
-
-    /// <summary>
-    /// Each effect's material row, by its place, packed as a surface material's is.
-    /// </summary>
-    public required GpuBuffer EffectRows { get; init; }
 
     /// <summary>
     /// How many domains that loaded have had what they draw put on the GPU.
@@ -163,12 +147,6 @@ public readonly record struct GpuView
     /// A gem that waits for its own work before a domain shows waits until this counts the domain it was told of.
     /// </remarks>
     public required int PreparedDomains { get; init; }
-
-    /// <summary>
-    /// Gets the atmosphere, for an entry generic over the sky it shades with.
-    /// </summary>
-    public static ShaderTypeArgument GetAtmosphere(AssetManager assets) =>
-        new(assets.Find<Shader>("Shaders/Sky/Atmosphere.slang"), "Atmosphere");
 
     /// <summary>
     /// Gets the size of a pass drawn at a fraction of the picture: the view's size times <paramref name="scale"/>.

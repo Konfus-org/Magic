@@ -60,6 +60,10 @@ To write a script:
    class.
 3. Give the file a `.meta` file with an id and `"type": "Script"`.
 4. Give an entity the script in its `ScriptContainer`, as `"ScriptContainer": [ { "id": <the id> } ]` in a prefab.
+5. To give the script values, write them beside its id: `{ "id": <the id>, "depth": 0.5 }`. Each key but `id` and
+   `started` is a value, and the gem sets it on the public settable property of that name, whatever the case of the
+   first letter. A value that the script has no property for, or that its type cannot hold, goes to the log and is
+   left out.
 
 How a script runs:
 
@@ -67,6 +71,7 @@ How a script runs:
   world is not loading.
 - The constructor gets the `Entity` for an `Entity` parameter, and a service for each other parameter. Only keep them
   in the constructor. Do the first work in `Start`.
+- The values of the prefab are set on the copy before `Start`, so `Start` reads them.
 - The hooks of the behaviours run on the game thread, in the order that the copies started, after the hooks of the
   gems listed before this gem.
 - A behaviour far from each camera of the player updates less often: every frame within 64 m, then one frame in n at
@@ -75,10 +80,25 @@ How a script runs:
   updates each frame.
 - A system runs in `Update`, each frame, wherever its own entity is. `ISystem<T1>` and `ISystem<T1, T2>` give it the
   entities that have those components, and it can change them. Give a system an entity of its own.
+- A system whose work on each entity reads and writes only that entity's chunk can be an `IParallelSystem<T1>` or an
+  `IParallelSystem<T1, T2>` instead: its `Run` gets one chunk, and the chunks run at the same time on the worker
+  threads. Each other system stays an `ISystem`, because its `Run` gets the world and runs on the game thread alone.
 - When the handle goes from the `ScriptContainer`, or the entity is destroyed, the copy ends. If the copy is
   `IDisposable`, it is disposed.
 - If a script cannot start, or a hook throws, the error goes to the log, and the handle goes from the `ScriptContainer`.
 - A build of the code that holds a script restarts the run.
+
+What a save and a restart keep:
+
+- Each save writes the state of every copy that runs into its slot: its values, by the name a prefab gives them, and
+  the other fields that it keeps for itself, by name. Left out are the fields that a copy gets again when it is made:
+  its entity, a thing that its constructor is handed, a service that a gem gives, a delegate, a task and a
+  disposable. A member that JSON cannot hold goes to the log, and a copy from the save starts over without it.
+- A copy that a save made takes that state up and goes on from it: its slot is marked `started`, so the gem sets the
+  saved properties and fields on it and calls `Resume` in place of `Start`. A spawner spawns once, and a light keeps
+  the depth that it had.
+- Write in `Resume` what the save does not hold and `Start` would have made: a subscription to an event, a delegate, a
+  task, and the first work with a service that the copy kept. Without it, such a field is null after a restart.
 
 ### DomainImporter
 

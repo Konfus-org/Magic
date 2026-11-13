@@ -38,6 +38,7 @@ internal static class GemRegistry
         typeof(IDisposable),
         typeof(ILogSink),
         typeof(IHookIntoDomainLoading),
+        typeof(IHookIntoWorldSave),
         typeof(IRender),
         typeof(IAssetImporter<>),
         typeof(IAssetExporter<>),

@@ -3,6 +3,7 @@ using System.IO;
 using System.Numerics;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
@@ -24,8 +25,15 @@ namespace Magic.CSharpScripting;
 /// taken off the entity. A behaviour
 /// far from the player's cameras updates less often (<see cref="Pacing"/>), unless its entity is global. Game thread.
 /// </remarks>
-internal sealed class Runner(World world, AssetManager assets, IServiceProvider services) : IDisposable
+public sealed class Runner(World world, AssetManager assets, IServiceProvider services)
+    : IHookIntoWorldSave,
+        IDisposable
 {
+    /// <summary>
+    /// The state of a copy as JSON, which a save keeps and a copy from a save takes up.
+    /// </summary>
+    private readonly ScriptState _state = new(services);
+
     /// <summary>
     /// The copies that run, by their entity and script, in the order that they started.
     /// </summary>
@@ -35,7 +43,7 @@ internal sealed class Runner(World world, AssetManager assets, IServiceProvider 
     /// The scripts that an entity names and that have no copy, found in the query and started after it, as a start can
     /// change the entities.
     /// </summary>
-    private readonly List<(Entity Entity, Handle<Script> Script)> _starting = [];
+    private readonly List<(Entity Entity, ScriptSlot Slot)> _starting = [];
 
     /// <summary>
     /// Where the cameras of the player are, as of this frame's <see cref="Update"/>.
@@ -64,6 +72,22 @@ internal sealed class Runner(World world, AssetManager assets, IServiceProvider 
     public void FixedUpdate(in Frame frame) => Run(Hook.FixedUpdate, frame);
 
     public void LateUpdate(in Frame frame) => Run(Hook.LateUpdate, frame);
+
+    /// <summary>
+    /// Writes the state of each copy that runs into its slot of the entity's <see cref="ScriptContainer"/>, so the save
+    /// keeps it and a copy that the save makes takes it up in place of a start.
+    /// </summary>
+    public void OnWorldSaving()
+    {
+        foreach (((Entity entity, Handle<Script> script), Copy copy) in _attached)
+        {
+            if (!IsNamed(entity, script))
+                continue;
+
+            List<KeyValuePair<string, JsonElement>> state = _state.Read(copy.Script);
+            world.Mutate<ScriptContainer>(entity).Keep(script, ScriptValues.Of(CollectionsMarshal.AsSpan(state)));
+        }
+    }
 
     [SuppressMessage(
         "Design",
@@ -101,25 +125,25 @@ internal sealed class Runner(World world, AssetManager assets, IServiceProvider 
         {
             for (int i = 0; i < chunk.Entities.Length; i++)
             {
-                foreach (Handle<Script> script in chunk.First[i])
+                foreach (ScriptSlot slot in chunk.First[i])
                 {
-                    if (script != Handle<Script>.None && !_attached.ContainsKey((chunk.Entities[i], script)))
-                        _starting.Add((chunk.Entities[i], script));
+                    if (slot.Script != Handle<Script>.None && !_attached.ContainsKey((chunk.Entities[i], slot.Script)))
+                        _starting.Add((chunk.Entities[i], slot));
                 }
             }
         }
 
-        foreach ((Entity entity, Handle<Script> handle) in _starting)
+        foreach ((Entity entity, ScriptSlot slot) in _starting)
         {
             // A start before this one can destroy the entity or take the handle off.
-            if (!IsNamed(entity, handle) || FindClass(handle) is not { } found)
+            if (!IsNamed(entity, slot.Script) || FindClass(slot.Script) is not { } found)
                 continue;
 
-            Result<IScript> started = found.Ok ? Start(found.Value, entity) : Result.Failure(found.Error);
+            Result<IScript> started = found.Ok ? Start(found.Value, entity, slot) : Result.Failure(found.Error);
             if (started.Ok)
-                _attached.Add((entity, handle), new Copy(started.Value));
+                _attached.Add((entity, slot.Script), new Copy(started.Value));
             else
-                TakeOff(entity, handle, $"is left off: {started.Error}");
+                TakeOff(entity, slot.Script, $"is left off: {started.Error}");
         }
     }
 
@@ -187,18 +211,21 @@ internal sealed class Runner(World world, AssetManager assets, IServiceProvider 
     }
 
     /// <summary>
-    /// Makes a copy of <paramref name="type"/> for <paramref name="entity"/> and starts it, or gives why not.
+    /// Makes a copy of <paramref name="type"/> for <paramref name="entity"/>, sets the values of
+    /// <paramref name="slot"/> on it and starts it, or gives why not.
     /// </summary>
     /// <remarks>
     /// Its one public constructor gets the entity for an <see cref="Entity"/> parameter, a service for each other
-    /// parameter, and a parameter's default when no service is there.
+    /// parameter, and a parameter's default when no service is there. A slot that a save marked started holds the state
+    /// of the copy it took, so this copy takes that state up and <see cref="IScript.Resume"/> remakes what the save
+    /// does not hold, in place of <see cref="IScript.Start"/>.
     /// </remarks>
     [SuppressMessage(
         "Design",
         "CA1031:Do not catch general exception types",
         Justification = "Whatever a script throws as it is made or started, the entity goes without it."
     )]
-    private Result<IScript> Start(Type type, Entity entity)
+    private Result<IScript> Start(Type type, Entity entity, ScriptSlot slot)
     {
         ConstructorInfo[] constructors = type.GetConstructors();
         if (constructors.Length != 1)
@@ -226,7 +253,16 @@ internal sealed class Runner(World world, AssetManager assets, IServiceProvider 
             if (constructors[0].Invoke(arguments) is not IScript script)
                 return Result.Failure("it is not an IScript.");
 
-            script.Start();
+            if (slot.Started)
+            {
+                _state.Restore(slot.Values, script, entity);
+                script.Resume();
+            }
+            else
+            {
+                _state.SetValues(slot.Values, script, entity);
+                script.Start();
+            }
 
             return Result.Success(script);
         }

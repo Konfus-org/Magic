@@ -1,5 +1,6 @@
 using System.Numerics;
 using Magic.DeferredRendering.World;
+using Magic.Graphics;
 
 namespace Magic.ClusteredGeometry;
 
@@ -85,9 +86,9 @@ internal static class ImpostorBuilder
                 int maxX = Math.Min((int)MathF.Ceiling(MathF.Max(pa.X, MathF.Max(pb.X, pc.X))), Tile - 1);
                 int minY = Math.Max((int)MathF.Floor(MathF.Min(pa.Y, MathF.Min(pb.Y, pc.Y))), 0);
                 int maxY = Math.Min((int)MathF.Ceiling(MathF.Max(pa.Y, MathF.Max(pb.Y, pc.Y))), Tile - 1);
-                Vector3 na = Packing.DecodeUnitVector(a.Normal);
-                Vector3 nb = Packing.DecodeUnitVector(b.Normal);
-                Vector3 nc = Packing.DecodeUnitVector(c.Normal);
+                Vector3 na = GpuPacker.DecodeUnitVector(a.Normal);
+                Vector3 nb = GpuPacker.DecodeUnitVector(b.Normal);
+                Vector3 nc = GpuPacker.DecodeUnitVector(c.Normal);
 
                 // A triangle facing away from the view is left out, as the cluster draw culls it, so the impostor
                 // shows what the clusters it hands off from show.
@@ -110,7 +111,7 @@ internal static class ImpostorBuilder
 
                         depth[(y * Tile) + x] = z;
                         Vector3 normal = Vector3.Normalize((wa * na) + (wb * nb) + (wc * nc));
-                        Vector2 flat = Packing.EncodeOctahedral(normal);
+                        Vector2 flat = GpuPacker.EncodeOctahedral(normal);
                         int texel = ((((viewY * Tile) + y) * Size) + (viewX * Tile) + x) * 4;
                         texels[texel] = (Half)flat.X;
                         texels[texel + 1] = (Half)flat.Y;
@@ -168,7 +169,7 @@ internal static class ImpostorBuilder
     private static (Vector3 Forward, Vector3 Right, Vector3 Up) GetViewFrame(int x, int y)
     {
         Vector2 flat = (new Vector2(x, y) / (Views - 1) * 2) - Vector2.One;
-        Vector3 forward = Packing.DecodeOctahedral(flat);
+        Vector3 forward = GpuPacker.DecodeOctahedral(flat);
         Vector3 up0 = MathF.Abs(forward.Y) < 0.999f ? Vector3.UnitY : Vector3.UnitZ;
         Vector3 right = Vector3.Normalize(Vector3.Cross(up0, forward));
         Vector3 up = Vector3.Cross(forward, right);

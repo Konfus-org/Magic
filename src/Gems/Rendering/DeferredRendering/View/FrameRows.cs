@@ -129,7 +129,7 @@ public record struct GpuTracedWorld
 }
 
 /// <summary>
-/// The frame's lights: the sun, the sky's tables and the light table.
+/// The frame's lights: the sun, the open sky, the sampler of the sky's tables and the light table.
 /// </summary>
 /// <remarks>
 /// The twin of <c>Scene/Lights.slang</c>, written once a frame into the frame's buffer after
@@ -140,7 +140,7 @@ public record struct GpuLights
 {
     public const int Offset = GpuTracedWorld.Offset + GpuTracedWorld.Bytes;
 
-    public const int Bytes = 84;
+    public const int Bytes = 68;
 
     public Vector4 SunDirection;
 
@@ -150,15 +150,7 @@ public record struct GpuLights
 
     public float CameraAltitude;
 
-    public uint TransmittanceLut;
-
-    public uint MultiScatteringLut;
-
-    public uint SkyViewLut;
-
     public uint LutSampler;
-
-    public uint HasSky;
 
     public uint Table;
 
@@ -168,16 +160,37 @@ public record struct GpuLights
 }
 
 /// <summary>
+/// The heap ids of the sky's tables.
+/// </summary>
+/// <remarks>
+/// The twin of <c>Scene/Lights.slang</c> SkyTables, written once a frame into the frame's buffer after
+/// <see cref="GpuLights"/> by what makes the tables, and all 0 where nothing does, which the shaders read as no sky.
+/// </remarks>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public record struct GpuSkyTables
+{
+    public const int Offset = GpuLights.Offset + GpuLights.Bytes;
+
+    public const int Bytes = 12;
+
+    public uint Transmittance;
+
+    public uint MultiScattering;
+
+    public uint View;
+}
+
+/// <summary>
 /// The frame's shadows: the mask and the sun's tint.
 /// </summary>
 /// <remarks>
-/// The twin of <c>Scene/Shadows.slang</c>, written once a frame into the frame's buffer after <see cref="GpuLights"/>
-/// by what traces them, and all 0 where nothing does.
+/// The twin of <c>Scene/Shadows.slang</c>, written once a frame into the frame's buffer after
+/// <see cref="GpuSkyTables"/> by what traces them, and all 0 where nothing does.
 /// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public record struct GpuShadows
 {
-    public const int Offset = GpuLights.Offset + GpuLights.Bytes;
+    public const int Offset = GpuSkyTables.Offset + GpuSkyTables.Bytes;
 
     public const int Bytes = 8;
 

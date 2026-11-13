@@ -1,7 +1,9 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Magic.Assets;
 using Magic.Ecs.Components;
+using Magic.Graphics;
 
 namespace Magic.DeferredRendering.World;
 
@@ -159,6 +161,19 @@ public record struct GpuVertex
     public float TangentSign;
 
     public Vector2 Uv;
+
+    /// <summary>
+    /// Encodes a model's vertex as the GPU reads it.
+    /// </summary>
+    public static GpuVertex Encode(in Vertex vertex) =>
+        new()
+        {
+            Position = vertex.Position,
+            Normal = GpuPacker.EncodeUnitVector(vertex.Normal),
+            Tangent = GpuPacker.EncodeUnitVector(new Vector3(vertex.Tangent.X, vertex.Tangent.Y, vertex.Tangent.Z)),
+            TangentSign = vertex.Tangent.W < 0 ? -1 : 1,
+            Uv = vertex.Uv,
+        };
 }
 
 /// <summary>

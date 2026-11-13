@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.Assets.Pipeline;
+using Magic.Graphics;
 using Magic.Utils;
 
 namespace Magic.DeferredRendering.World;
@@ -35,7 +36,7 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
             meshes.Add(new GpuMesh((uint)indices.Count, (uint)mesh.MaterialSlot));
             foreach (Vertex vertex in mesh.Vertices.Span)
             {
-                vertices.Add(Packing.EncodeVertex(vertex));
+                vertices.Add(GpuVertex.Encode(vertex));
                 boundsMin = Vector3.Min(boundsMin, vertex.Position);
                 boundsMax = Vector3.Max(boundsMax, vertex.Position);
             }
@@ -101,9 +102,9 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
 
         MeshDerived made = new()
         {
-            Vertices = Packing.Read<GpuVertex>(ref bytes, header.VertexCount),
-            Indices = Packing.Read<uint>(ref bytes, header.IndexCount),
-            Meshes = Packing.Read<GpuMesh>(ref bytes, header.MeshCount),
+            Vertices = GpuPacker.Read<GpuVertex>(ref bytes, header.VertexCount),
+            Indices = GpuPacker.Read<uint>(ref bytes, header.IndexCount),
+            Meshes = GpuPacker.Read<GpuMesh>(ref bytes, header.MeshCount),
             BoundsCenter = header.BoundsCenter,
             BoundsRadius = header.BoundsRadius,
             BoundsMin = header.BoundsMin,

@@ -16,8 +16,7 @@ to the library.
 - `Surface/` has the data that a material gets for a pixel, and the data that it gives back.
 - `Material/` has the material contract, `IMaterial`, and the materials of each project: `Standard`, and `Glass`,
   which is translucent.
-- `Sky/` has the sky contract, `ISky`.
-- `Post/` has the pixel effect contract, `IPixelEffect`, and the post effects of the engine.
+- `Sky/` has the sky contract, `ISky`, and `OpenSky`, the sky of a frame that has no sky tables.
 
 The tables and techniques of a renderer are in the `Resources/Shaders/` folder of its gem ([Rendering](RENDERING.md)).
 
@@ -31,9 +30,14 @@ To add a material, a sky or a post effect to a game:
 1. Implement the contract in a module of the game.
 2. Name the module in the asset that uses it.
 
+The step of a sky gem hands on its type with its tables. A pass that is generic over `ISky` uses that type where there
+are tables, and `OpenSky` where there are none. It has the two built before a domain shows.
+
 ## Post effects
 
-A post effect implements `IPixelEffect`. The effects run in the order of their list.
+A post effect implements `IPixelEffect`. The library has the contract, in `Post/IPixelEffect`, and the temporal
+anti-aliasing, which the upscaling gem also uses. The post-effects gem has its other effects in `Post/`. The effects
+run in the order of their list.
 
 - An effect before `Exposure` works in the light of the world. An effect after it works in exposed light. An effect
   after the tonemap works in the colours of the screen.
@@ -43,4 +47,4 @@ A post effect implements `IPixelEffect`. The effects run in the order of their l
 - An effect that blends frames declares jitter. `TemporalAntiAliasing` shows this.
 - An effect reads the frame and its lights itself.
 
-Code from another engine keeps its licence, in `src/Resources/Shaders/THIRD-PARTY-NOTICES.md`.
+Code from another engine keeps its licence, in the `THIRD-PARTY-NOTICES.md` beside it: the library's, or its gem's.

@@ -10,14 +10,15 @@ namespace Magic.GlobalIllumination;
 /// <remarks>
 /// The view's frame buffer holds the indirect light, and its depth and GBuffer are at the picture's size. The gem's
 /// constants are the pass header's y, after the frame buffer's x. A ray reads the sky's tables, the lights and the
-/// models.
+/// models. A pass generic over the sky is specialised on <paramref name="SkyType"/>.
 /// </remarks>
 internal readonly record struct GIView(
     RenderGraph Graph,
     GpuView Gpu,
     GpuBuffer Constants,
     (int Width, int Height) TracedSize,
-    ImmutableArray<GpuResource> World
+    ImmutableArray<GpuResource> World,
+    ImmutableArray<ShaderTypeArgument> SkyType
 )
 {
     public GpuConstants Header => new(Gpu.Frame.Id, Constants.Id);

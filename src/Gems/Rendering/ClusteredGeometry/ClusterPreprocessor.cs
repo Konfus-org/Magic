@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using Magic.Assets;
 using Magic.Assets.Pipeline;
 using Magic.DeferredRendering.World;
+using Magic.Graphics;
 using Magic.Utils;
 
 namespace Magic.ClusteredGeometry;
@@ -85,12 +86,12 @@ internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClust
         ModelClusters clusters = new()
         {
             ModelVertexCount = header.ModelVertexCount,
-            Vertices = Packing.Read<GpuVertex>(ref bytes, header.VertexCount),
-            Indices = Packing.Read<uint>(ref bytes, header.IndexCount),
-            Clusters = Packing.Read<GpuCluster>(ref bytes, header.ClusterCount),
-            Impostor = Packing.Read<Half>(ref bytes, header.ImpostorHalves),
-            ImpostorUv = Packing.Read<Half>(ref bytes, header.ImpostorUvHalves),
-            ImpostorViewBounds = Packing.Read<uint>(ref bytes, header.ImpostorViewBoundsCount),
+            Vertices = GpuPacker.Read<GpuVertex>(ref bytes, header.VertexCount),
+            Indices = GpuPacker.Read<uint>(ref bytes, header.IndexCount),
+            Clusters = GpuPacker.Read<GpuCluster>(ref bytes, header.ClusterCount),
+            Impostor = GpuPacker.Read<Half>(ref bytes, header.ImpostorHalves),
+            ImpostorUv = GpuPacker.Read<Half>(ref bytes, header.ImpostorUvHalves),
+            ImpostorViewBounds = GpuPacker.Read<uint>(ref bytes, header.ImpostorViewBoundsCount),
             BoundsMin = header.BoundsMin,
             BoundsMax = header.BoundsMax,
         };

@@ -19,14 +19,15 @@ internal sealed class TracedDiffuse(AssetManager assets)
 {
     private static readonly string[] _blendNames = ["Diffuse light 0", "Diffuse light 1"];
 
-    private readonly ShaderEntry _traceShader = PassShaders.GetEntry(assets, "TraceDiffuse", "TraceDiffuse") with
-    {
-        TypeArguments = [GpuView.GetAtmosphere(assets)],
-    };
     private readonly ShaderEntry _filterShader = PassShaders.GetEntry(assets, "TraceDiffuse", "FilterDiffuse");
     private readonly ShaderEntry _blendShader = PassShaders.GetEntry(assets, "TraceDiffuse", "BlendDiffuse");
 
-    public ImmutableArray<ShaderEntry> Shaders => [_traceShader, _filterShader, _blendShader];
+    /// <summary>
+    /// The trace's entry, generic over the sky, which the renderer specialises on the frame's sky.
+    /// </summary>
+    public ShaderEntry TraceShader { get; } = PassShaders.GetEntry(assets, "TraceDiffuse", "TraceDiffuse");
+
+    public ImmutableArray<ShaderEntry> Shaders => [_filterShader, _blendShader];
 
     /// <summary>
     /// Asks for the textures at the traced size, the blend's history holding the view as
@@ -67,7 +68,7 @@ internal sealed class TracedDiffuse(AssetManager assets)
         (int width, int height) = view.TracedSize;
         GpuConstants header = view.Header;
         graph
-            .Compute("Trace diffuse", _traceShader, header, RenderStages.Light)
+            .Compute("Trace diffuse", TraceShader with { TypeArguments = view.SkyType }, header, RenderStages.Light)
             .Reads(view.World.AsSpan())
             .Reads(view.Gpu.Frame, view.Constants, view.Gpu.Depth, view.Gpu.GBufferNormal)
             .Reads(grid.Probes, grid.Depth)

@@ -25,9 +25,11 @@
     <Project Path="Gems/Rendering/ClusteredGeometry/ClusteredGeometry.csproj" />
     <Project Path="Gems/Rendering/DeferredRendering/DeferredRendering.csproj" />
     <Project Path="Gems/Rendering/GlobalIllumination/GlobalIllumination.csproj" />
+    <Project Path="Gems/Rendering/PostEffects/PostEffects.csproj" />
+    <Project Path="Gems/Rendering/ProceduralSky/ProceduralSky.csproj" />
     <Project Path="Gems/Rendering/TaaUpscaling/TaaUpscaling.csproj" />
     <Project Path="Gems/Rendering/TracedShadows/TracedShadows.csproj" />
-    <Project Path="Gems/Rendering/Volumetrics/Volumetrics.csproj" />
+    <Project Path="Gems/Rendering/WeatherFX/WeatherFX.csproj" />
   </Folder>
   <Folder Name="/Docs/">
     <File Path="../AGENTS.md" />

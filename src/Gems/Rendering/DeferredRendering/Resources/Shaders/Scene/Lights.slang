@@ -1,6 +1,6 @@
-// The frame's lights: the sun, the sky and the light table, every local light drawn this frame, C#'s GpuLight, 64 bytes
-// each, with for each tile of the screen a bit per light that reaches what the tile shows, so a pixel loops over its
-// tile's few lights and not the thousand in the world.
+// The frame's lights: the sun, the sky's tables and the light table, every local light drawn this frame, C#'s GpuLight,
+// 64 bytes each, with for each tile of the screen a bit per light that reaches what the tile shows, so a pixel loops
+// over its tile's few lights and not the thousand in the world.
 module "Scene/Lights";
 
 import Core.Heap;
@@ -14,7 +14,7 @@ public static const float SunAngularRadius = 0.00465;
 
 // Where the lights are in the frame's buffer, right after the world as rays see it, and their bytes: C#'s GpuLights.
 public static const uint LightsOffset = TracedWorldOffset + TracedWorldBytes;
-public static const uint LightsBytes = 84u;
+public static const uint LightsBytes = 68u;
 
 public struct Lights
 {
@@ -25,12 +25,8 @@ public struct Lights
     public float4 skyRadiance;
     // Metres above the ground.
     public float cameraAltitude;
-    // The sky's tables and the sampler that clamps them, and whether a sky entity draws the sky.
-    public uint transmittanceLut;
-    public uint multiScatteringLut;
-    public uint skyViewLut;
+    // The sampler that clamps the sky's tables.
     public uint lutSampler;
-    public uint hasSky;
     // The light table, the lights in it and their tiles.
     public uint table;
     public uint count;
@@ -39,30 +35,41 @@ public struct Lights
 
 public Lights GetLights() { return LoadFrameRow<Lights>(LightsOffset); }
 
-// PROTO: the open sky's light where no sky entity draws the sky, as the shading draws a missing sky, until the
-// sky's tables are handed on.
+// Where the sky's tables are in the frame's buffer, right after the lights, and their bytes: C#'s GpuSkyTables.
+public static const uint SkyTablesOffset = LightsOffset + LightsBytes;
+public static const uint SkyTablesBytes = 12u;
+
+// The heap ids of the sky's three tables, all 0 where no sky entity draws the sky.
+public struct SkyTables
+{
+    public uint transmittance;
+    public uint multiScattering;
+    public uint view;
+}
+
+public SkyTables GetSkyTables() { return LoadFrameRow<SkyTables>(SkyTablesOffset); }
+
+// Whether a sky entity draws the sky: its tables are made.
+public bool HasSky(SkyTables tables) { return tables.transmittance != 0u; }
+
+// The open sky's light, which the air and the clouds take also where a sky entity draws the sky, as they are not
+// generic over the sky.
 public float3 GetOpenSkyRadiance(Lights lights) { return lights.skyRadiance.rgb * lights.sunIlluminance.r; }
 
-// The sun's light where it reaches the camera: through the sky's air where a sky entity draws the sky, else as it is.
+// The sun's light where it reaches the camera, through the sky's air.
 public float3 GetSunIlluminance<S : ISky>(Lights lights)
 {
-    if (lights.hasSky == 0u)
-        return lights.sunIlluminance.rgb;
-
-    return S.GetSunIlluminance(CreateSkyInputs(lights, lights.sunDirection.xyz, false));
+    return S.GetSunIlluminance(CreateSkyInputs(lights, GetSkyTables(), lights.sunDirection.xyz, false));
 }
 
 // The sky along a direction, without the sun's disc, whose light the sun's own rays bring.
 public float3 GetSkyRadiance<S : ISky>(Lights lights, float3 direction)
 {
-    if (lights.hasSky == 0u)
-        return GetOpenSkyRadiance(lights);
-
-    return S.Evaluate(CreateSkyInputs(lights, direction, false));
+    return S.Evaluate(CreateSkyInputs(lights, GetSkyTables(), direction, false));
 }
 
 // What a sky is handed to answer for a direction from the camera.
-public SkyInputs CreateSkyInputs(Lights lights, float3 direction, bool hasSunDisc)
+public SkyInputs CreateSkyInputs(Lights lights, SkyTables tables, float3 direction, bool hasSunDisc)
 {
     SkyInputs sky;
     sky.viewDirection = direction;
@@ -70,8 +77,10 @@ public SkyInputs CreateSkyInputs(Lights lights, float3 direction, bool hasSunDis
     sky.hasSunDisc = hasSunDisc;
     sky.sunIlluminance = lights.sunIlluminance.rgb;
     sky.altitude = lights.cameraAltitude;
-    sky.transmittanceLut = lights.transmittanceLut;
-    sky.skyViewLut = lights.skyViewLut;
+    sky.openSkyRadiance = lights.skyRadiance.rgb;
+    sky.screenY = 0.5;
+    sky.transmittanceLut = tables.transmittance;
+    sky.skyViewLut = tables.view;
     sky.sampler = lights.lutSampler;
     return sky;
 }

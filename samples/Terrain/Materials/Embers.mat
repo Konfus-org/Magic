@@ -1,0 +1,8 @@
+{
+    // The fire's embers: almost black coals that glow hot, the brightest thing in the firebox.
+    "shader": { "id": 10001 },
+    "params": {
+        "color": { "r": 0.02, "g": 0.02, "b": 0.02, "a": 1 },
+        "emissive": { "x": 0.1, "y": 0.02, "z": 0.001 }
+    }
+}

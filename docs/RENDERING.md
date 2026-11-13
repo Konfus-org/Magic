@@ -2,7 +2,7 @@
 
 The rendering gems draw the world into the window. The renderer, `DeferredRendering`, keeps the world on the GPU and
 lights it. The other gems add parts of the picture: the geometry, the world as rays see it, shadows, indirect light,
-the air and the upscaling. A project lists the gems that it wants in its `.magic` file.
+the sky, the air, the upscaling and the post effects. A project lists the gems that it wants in its `.magic` file.
 
 Each gem has a `Renderer` part with one or more render steps. Core runs a step after the steps that make its inputs.
 A step that takes `RenderViews`, or the output of such a step, runs one time for each view of the frame. This diagram
@@ -13,16 +13,22 @@ flowchart LR
     World[DeferredRendering world] -- GpuWorld, RenderViews --> View[DeferredRendering view]
     World -- GpuWorld --> Pools[ClusteredGeometry pools]
     World -- GpuWorld, GpuInstances --> Accel[AccelerationStructures]
+    World -- GpuWorld --> Post[PostEffects]
     Taa[TaaUpscaling] -- Upscaling --> View
+    Post -- PictureEffects --> View
     Accel -- TracedWorld --> View
     View -- GpuView --> Clusters[ClusteredGeometry]
+    View -- GpuView --> Sky[ProceduralSky]
+    Sky -- SkyTables --> GI
+    Sky -- SkyTables --> Shading
     Pools -- ClusterPools --> Clusters
     Accel -- TracedWorld --> Shadows[TracedShadows]
     Accel -- TracedWorld --> GI[GlobalIllumination]
-    Accel -- TracedWorld --> Vol[Volumetrics]
+    Accel -- TracedWorld --> Vol[WeatherFX]
     Shadows -- ShadowMask --> Shading[DeferredRendering shading]
     GI -- IndirectLight --> Shading
     Vol -- Air --> Shading
+    Post -- PictureEffects --> Shading
     Clusters -. GBuffer .-> Shading
     Shading --> Banner[Failure banner]
 ```
@@ -42,10 +48,9 @@ The renderer. It has four render steps:
 
 1. The world, one time for each frame: it puts the models, materials, textures, render textures, instances and lights
    of the world on the GPU. It makes the `GpuWorld`, the `GpuInstances` and the `RenderViews` of the frame.
-2. The view, one time for each view: it makes the targets, the frame buffer and the sky tables of the view, as its
-   `GpuView`.
+2. The view, one time for each view: it makes the targets and the frame buffer of the view, as its `GpuView`.
 3. The shading, one time for each view: it lights the GBuffer that a geometry gem drew, with the sun, the sky and the
-   lights. Then it runs the post effects and writes the picture into the target of the view.
+   lights. Then it runs the `PictureEffects` of the frame and writes the picture into the target of the view.
 4. The failure banner: it draws the render failures of the frame over the top of the window.
 
 The gem also holds the types that the rendering gems share. List it in the `.magic` file after the GPU provider, the
@@ -57,7 +62,7 @@ ECS, the model importer and the texture importer, with a gem that draws its geom
 - A model shows when it is on the GPU. A model that nothing drew for `Rendering.ModelKeepSec` leaves the GPU. It
   loads again when a frame draws it.
 - When a domain replaces the world, the loading screen stays until all that the new world draws is on the GPU or
-  failed. This includes its post effects and the passes of the gem.
+  failed. This includes the passes of the gem.
 
 ### Cameras
 
@@ -82,6 +87,8 @@ ECS, the model importer and the texture importer, with a gem that draws its geom
 ### Lights and the sky
 
 - A pixel with no geometry shows the sky. The material of a sky entity draws the sky.
+- A sky gem makes the sky tables. Without a sky entity or a sky gem, there are no sky tables. The shading and the
+  indirect light then use `OpenSky`, and the open sky lights the world at `Rendering.SkyBrightness`.
 - The directional light is the sun while it is above the horizon. Else it is the moon while the moon is above the
   horizon. Else it is the first directional light.
 - Lights use physical units: lux for the sun, candela for point, spot and rect lights. A frame draws the first 1024
@@ -96,20 +103,6 @@ ECS, the model importer and the texture importer, with a gem that draws its geom
 A translucent material, such as the `Glass` material, draws over the lit picture. The nearest pane in front of each
 pixel lets the light behind it through, by its colour. Where a gem builds the world as rays see it, the light also
 goes through the panes behind it. The pane reflects the light around it, and the sun lights it.
-
-### Post effects
-
-The effects of the first `PostProcessing` component run in order over the lit picture. Each effect is a material
-whose shader implements the pixel effect contract ([Shaders](SHADERS.md)).
-
-- Without a `PostProcessing`, the picture gets the `Exposure` and `Agx` materials of the engine.
-  `Rendering.DisabledEffects` names effects to leave out.
-- A `PostProcessing` lists each effect that it wants. To use a different tonemap, put its material in the place of
-  `Agx`.
-- The `Exposure` effect measures the picture each frame and adapts in about one second. Its `compensation` param
-  adds stops.
-- While an effect that declares jitter runs, the camera moves to a different point in each pixel each frame.
-- An effect shows when its material and its passes are built.
 
 ### Failures
 
@@ -133,6 +126,10 @@ the views.
 
 - `Renderer` has one `Render` method for each step. Each method is its step, in order from top to bottom.
 - `GpuResources` reads a texture, material or model asset when a frame first asks for it.
+- `GpuPacker.Pack` in Core writes the row of a shader struct from its reflected fields and an `IGpuParams` source. The
+  renderer packs its material rows with it, and the post-effects gem packs its effect rows with it. `MaterialParams`
+  is the source for a slot of a material. A gem gets the heap ids of a material param's texture from
+  `GpuWorld.GetTexture`.
 - A pass is one `RenderGraph.Compute` or `RenderGraph.Draw` call. The call names what the pass reads and writes.
 - A step draws nothing until each shader entry point that it runs is built.
 - Each frame, a pass asks the graph for its textures and buffers by name and description. The same name and
@@ -203,22 +200,52 @@ the reflections.
 - The gem traces at `Rendering.IndirectScale` of the picture size.
 - The `IndirectDiffuse` and `Reflections` debug views show what the gem traced.
 
-## Volumetrics
+## WeatherFX
 
 Fills the air between the camera and the surfaces with the haze of the world. The sky, the sun and the local lights
 light the haze. On a GPU that traces rays, the light falls in shafts through gaps. The settings are in
-`VolumetricsSettings`.
+`WeatherFXSettings`.
 
-To use it, list `Volumetrics` in the `.magic` file, and give the `Weather` of the world a `FogDensity` or a
+To use it, list `WeatherFX` in the `.magic` file, and give the `Weather` of the world a `FogDensity` or a
 `CloudCover` above 0. With the AccelerationStructures gem, the haze has shadows. Without it, the sun lights all of the
 haze.
 
 - The `Weather` component sets the haze: its density at a height, how fast it thins above it, its colour and how
   much it scatters towards the sun. A script can change it while the world runs.
-- The volume goes to `Rendering.VolumetricsDistance` from the camera. Past it, the haze has no shadows.
+- The volume goes to `Rendering.VolumeDistance` from the camera. Past it, the haze has no shadows.
 - `CloudCover` fills the sky with clouds from `CloudHeight` up for 2 km. The `Wind` moves them. The clouds look
   correct from the ground, not from inside them. Their shadow falls on the ground and in the haze.
 - Clear air costs nothing.
+
+## ProceduralSky
+
+Makes the sky of the Earth's air: Rayleigh and Mie scattering and ozone. List it in the `.magic` file after the
+renderer. The renderer shades the sky, the sun's colour and the sky's light on the world from its tables.
+
+- One time for each view, it hands on the shader type of the sky, `Atmosphere`, as its `SkyTables`. While an entity
+  has a sky, it also makes the three sky tables of the view.
+- Its `Sky` material is the material for the `Sky` component.
+- Without the gem, the world is lit by the open sky.
+
+## PostEffects
+
+Runs the post-processing chain over the lit picture. List it in the `.magic` file after the renderer. Without it, the
+renderer shows the lit picture with a simple tonemap and no other effects. A scene that bright local lights light is
+then almost white. Such a scene needs this gem.
+
+The effects of the first `PostProcessing` component run in order over the lit picture. Each effect is a material
+whose shader implements the pixel effect contract ([Shaders](SHADERS.md)). One time for each frame, the gem makes the
+effects of the frame as its `PictureEffects`. The shading of the renderer runs them.
+
+- Without a `PostProcessing`, the picture gets the `Exposure` and `Agx` materials of the gem.
+  `Rendering.ExposureCompensation` sets the brightness. `Rendering.DisabledEffects` names effects to leave out. The
+  settings are in `PostEffectsSettings`.
+- A `PostProcessing` lists each effect that it wants. To use a different tonemap, put its material in the place of
+  `Agx`.
+- The `Exposure` effect measures the picture each frame and adapts in about one second. Its `compensation` param
+  adds stops.
+- While an effect that declares jitter runs, the camera moves to a different point in each pixel each frame.
+- An effect shows when its material and its passes are built. A domain shows when its effects are built or failed.
 
 ## TaaUpscaling
 

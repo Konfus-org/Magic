@@ -53,8 +53,8 @@ internal sealed class FrameView
     /// <remarks>
     /// The rows are the view's constants, with the camera shifted by <paramref name="jitter"/>; the models, the
     /// instance and material tables of <paramref name="world"/>; the lights: the sun, the open sky at
-    /// <paramref name="skyBrightness"/>, the sky's tables, and the light table's lights and its tiles; the world as
-    /// rays see it, <paramref name="traced"/>; and, at 0, the rows the gems after the view write.
+    /// <paramref name="skyBrightness"/>, the sampler of the sky's tables, and the light table's lights and its tiles;
+    /// the world as rays see it, <paramref name="traced"/>; and, at 0, the rows the gems after the view write.
     /// </remarks>
     public Result Upload(
         RenderGraph graph,
@@ -64,7 +64,6 @@ internal sealed class FrameView
         in Frame frame,
         Vector2 jitter,
         (Vector3 Direction, Vector3 Illuminance) sun,
-        bool hasSky,
         float skyBrightness,
         GpuTracedWorld traced
     )
@@ -117,11 +116,7 @@ internal sealed class FrameView
             SunIlluminance = new Vector4(sun.Illuminance, 0),
             SkyRadiance = new Vector4(skyBrightness * 0.8f, skyBrightness * 0.9f, skyBrightness, 0),
             CameraAltitude = Math.Max(camera.Transform.Position.Y, 0),
-            TransmittanceLut = view.SkyTransmittance.Id,
-            MultiScatteringLut = view.SkyMultiScattering.Id,
-            SkyViewLut = view.SkyView.Id,
             LutSampler = sampler.Value.Id,
-            HasSky = hasSky ? 1u : 0u,
             Table = view.LightTable.Id,
             Count = (uint)world.Lights.Count,
             Tiles = view.LightTiles.Id,
@@ -153,8 +148,9 @@ internal sealed class FrameView
         isSent &= graph.Upload(view.Frame, [frameLights], GpuLights.Offset);
 
         // The rows the gems after the view write, 0 until one does, so the shaders that read them shadow and light
-        // nothing indirectly, the sky lights the surfaces, and the air changes nothing.
+        // nothing indirectly, the open sky lights the surfaces, and the air changes nothing.
         isSent &= graph.Upload(view.Frame, [traced], GpuTracedWorld.Offset);
+        isSent &= graph.Upload(view.Frame, [default(GpuSkyTables)], GpuSkyTables.Offset);
         isSent &= graph.Upload(view.Frame, [default(GpuShadows)], GpuShadows.Offset);
         isSent &= graph.Upload(view.Frame, [default(GpuIndirectLight)], GpuIndirectLight.Offset);
         isSent &= graph.Upload(view.Frame, [default(GpuAir)], GpuAir.Offset);

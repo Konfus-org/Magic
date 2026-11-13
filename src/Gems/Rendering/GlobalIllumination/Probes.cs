@@ -54,10 +54,6 @@ internal sealed class Probes(AssetManager assets)
     private readonly ShaderEntry _askShader = PassShaders.GetEntry(assets, "UpdateProbes", "AskProbeRays");
     private readonly ShaderEntry _planShader = PassShaders.GetEntry(assets, "UpdateProbes", "PlanProbeRays");
     private readonly ShaderEntry _listShader = PassShaders.GetEntry(assets, "UpdateProbes", "ListProbeRays");
-    private readonly ShaderEntry _traceShader = PassShaders.GetEntry(assets, "UpdateProbes", "TraceProbes") with
-    {
-        TypeArguments = [GpuView.GetAtmosphere(assets)],
-    };
     private readonly ShaderEntry _blendShader = PassShaders.GetEntry(assets, "UpdateProbes", "BlendProbes");
 
     /// <summary>
@@ -66,7 +62,12 @@ internal sealed class Probes(AssetManager assets)
     /// </summary>
     private readonly List<((Vector3 Min, Vector3 Max) Box, (int Across, int Up) Size)> _grids = [];
 
-    public ImmutableArray<ShaderEntry> Shaders => [_askShader, _planShader, _listShader, _traceShader, _blendShader];
+    /// <summary>
+    /// The trace's entry, generic over the sky, which the renderer specialises on the frame's sky.
+    /// </summary>
+    public ShaderEntry TraceShader { get; } = PassShaders.GetEntry(assets, "UpdateProbes", "TraceProbes");
+
+    public ImmutableArray<ShaderEntry> Shaders => [_askShader, _planShader, _listShader, _blendShader];
 
     /// <summary>
     /// Asks for the buffers and depth texture of the grid of the graph's view at <paramref name="size"/>, and places
@@ -176,7 +177,7 @@ internal sealed class Probes(AssetManager assets)
             .Writes(update.RayList)
             .Dispatch(probeCount);
         graph
-            .Compute("Trace probes", _traceShader, header, RenderStages.Light)
+            .Compute("Trace probes", TraceShader with { TypeArguments = view.SkyType }, header, RenderStages.Light)
             .Reads(view.World.AsSpan())
             .Reads(view.Gpu.Frame, view.Constants, grid.Probes, update.RayList, update.RayCounts, grid.Depth)
             .Writes(update.Rays)

@@ -1,6 +1,17 @@
 namespace Magic.Ecs;
 
 /// <summary>
+/// A function over one chunk, with the state its caller gives it.
+/// </summary>
+/// <remarks>
+/// The state is one value for the whole run, so a caller makes the function once instead of a closure per call.
+/// </remarks>
+/// <typeparam name="TState">What the function needs from its caller.</typeparam>
+/// <typeparam name="TChunk">The chunk it gets, such as an <see cref="EcsMutableChunk{T1}"/>.</typeparam>
+public delegate void EcsChunkRun<TState, TChunk>(in TState state, TChunk chunk)
+    where TChunk : allows ref struct;
+
+/// <summary>
 /// Entities that the ECS stores together, as an <see cref="EcsQuery"/> gives them out, over the storage of the ECS.
 /// </summary>
 /// <remarks>
