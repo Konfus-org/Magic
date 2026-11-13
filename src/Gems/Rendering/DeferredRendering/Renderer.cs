@@ -79,7 +79,7 @@ public sealed class Renderer
     : IRender,
         IRenderInto<(GpuWorld, GpuInstances, RenderViews)>,
         IRender<ViewInput, GpuView>,
-        IRenderFrom<ShadingInput>,
+        IRender<ShadingInput, FinalImage>,
         IHookIntoDomainLoading,
         IDisposable
 {
@@ -607,6 +607,7 @@ public sealed class Renderer
             ShownPart = shown,
             Target = target,
             TargetPart = part,
+            RenderTexture = into.Texture,
             HasHistory = frameView.HasHistory(width, height),
             Depth = depth.Value,
             GBufferNormal = normal.Value,
@@ -694,7 +695,7 @@ public sealed class Renderer
     /// <summary>
     /// Records the view's passes, each in its stage, from the view the view's step made.
     /// </summary>
-    public void Render(in Frame frame, RenderGraph graph, in ShadingInput input)
+    public FinalImage? Render(in Frame frame, RenderGraph graph, in ShadingInput input)
     {
         // The shaders are the GPU provider's to build, the first ask starting each; while one failed, the shading
         // draws nothing, and the banner tells it.
@@ -703,7 +704,7 @@ public sealed class Renderer
             graph.Fail(RenderFailure.Shader, "Surfaces are not shaded", "a shader of the shading was not built.");
 
         if (shaders != GpuState.Ready)
-            return;
+            return null;
 
         GpuView gpu = input.View;
         DebugView renderView = _settings.RenderView;
@@ -857,6 +858,8 @@ public sealed class Renderer
             _hasDrawn = true;
             _events.Publish(new FirstFrameDrawn());
         }
+
+        return new(shown, gpu.ShownWidth, gpu.ShownHeight, gpu.RenderTexture);
     }
 
     /// <summary>

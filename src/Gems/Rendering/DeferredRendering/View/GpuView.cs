@@ -49,6 +49,11 @@ public readonly record struct GpuView
     public required Rectangle TargetPart { get; init; }
 
     /// <summary>
+    /// The render texture that the camera of the view draws into, or none for the window.
+    /// </summary>
+    public required Handle<RenderTexture> RenderTexture { get; init; }
+
+    /// <summary>
     /// Whether last frame drew this view at this size, in this world: what its targets hold is last frame's.
     /// </summary>
     public required bool HasHistory { get; init; }
@@ -63,6 +68,7 @@ public readonly record struct GpuView
 
     public required GpuTexture Velocity { get; init; }
 
+    //TODO(Konfus): Glass should not be a deferred rendering concept, transparency yes, glass no. Perhaps these just need a rename, or perhaps they need a rethink?
     /// <summary>
     /// The nearest glass's depth and surface, in front of the opaque surfaces; none while no material draws
     /// translucent.
