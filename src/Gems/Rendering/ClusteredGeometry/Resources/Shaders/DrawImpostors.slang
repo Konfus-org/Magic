@@ -1,5 +1,5 @@
 // The impostors the cull left, one indirect draw each of a quad fitted to the instance's box, its instance in
-// the draw's first instance. The vertices pick the atlas views the instance blends; a pixel traces them, writes the
+// the draw's first instance. The vertices pick the atlas views the instance blends. A pixel traces them, writes the
 // impostor's id and the depth of what it sees, and shows the impostor's share of the handoff's dither, or all of it
 // when the first instance carries ImpostorWhole.
 module "DrawImpostors";

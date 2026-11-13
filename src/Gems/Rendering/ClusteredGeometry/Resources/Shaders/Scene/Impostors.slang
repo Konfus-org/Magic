@@ -1,6 +1,6 @@
 // Octahedral impostors. An instance whose model baked an atlas as it was clustered (C#'s ImpostorBuilder) draws
 // as a quad fitted to its box once it is under a handoff's pixel radius on screen or past its distance, the three
-// views nearest the camera's direction blended; in the handoff its clusters draw too, each pixel shown by one of the
+// views nearest the camera's direction blended. In the handoff its clusters draw too, each pixel shown by one of the
 // two by a dither on the fade, so nothing pops (Brucks, "Octahedral Impostors", 2018).
 module "Scene/Impostors";
 
@@ -15,7 +15,7 @@ public static const uint ImpostorViews = 12u;
 public static const uint ImpostorTile = 64u;
 
 // The handoff runs from the frame's impostorPixels, a pixel radius on screen, down to three quarters of it, and from
-// its impostorDistance, in metres to the instance's sphere, out to a quarter past it; whichever is further along
+// its impostorDistance, in metres to the instance's sphere, out to a quarter past it. Whichever is further along
 // counts, and a 0 draws no impostors by that one.
 public static const float ImpostorBand = 0.25;
 
@@ -162,8 +162,8 @@ public ImpostorBlend GetImpostorBlend(FrameConstants frame, GpuInstance instance
 
 // What the ray from origin along direction, in the model's frame, sees of the impostor: a model point and normal and
 // the material slot, isHit false where less than minCoverage of the views' weight sees something. The draw asks for
-// half, so a silhouette is where the views agree; the resolve, whose ray can differ from the draw's by rounding, for any,
-// so a pixel the draw kept always finds its surface.
+// half, so a silhouette is where the views agree. The resolve, whose ray can differ from the draw's by rounding, asks
+// for any, so a pixel the draw kept always finds its surface.
 public struct ImpostorHit
 {
     public bool isHit;
@@ -255,7 +255,7 @@ public ImpostorUv LoadImpostorUv(GpuImpostor impostor, uint2 texel)
 }
 
 // How the texture coordinates change a texel along step: towards the neighbour the view also saw a surface at, else
-// from the one opposite; none at a texel alone.
+// from the one opposite. None at a texel alone.
 float2 GetUvStep(GpuImpostor impostor, uint2 texel, int2 step, float2 uv)
 {
     TextureRef atlas = { impostor.atlas };

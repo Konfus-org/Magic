@@ -15,12 +15,12 @@ public enum EngineThread : byte
     Platform,
 
     /// <summary>
-    /// Where the frames, the ECS and every gem hook except Render run.
+    /// Where the frames, the ECS and every gem hook run.
     /// </summary>
     Game,
 
     /// <summary>
-    /// What the gems' Render hooks run on, at the GPU's pace, and whose the GPU is.
+    /// Where the render steps of the gems run, at the GPU's pace. This thread owns the GPU.
     /// </summary>
     Render,
 }

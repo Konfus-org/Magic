@@ -35,7 +35,8 @@ public static class Assemblies
             1 => Result.Success(matching[0]),
             0 => Result.Failure($"no code loaded declares a {typeof(T).Name} named {name}."),
             _ => Result.Failure(
-                $"more than one {typeof(T).Name} is named {name}: {string.Join(", ", matching.Select(type => type.FullName))}."
+                $"more than one {typeof(T).Name} is named {name}: "
+                    + $"{string.Join(", ", matching.Select(type => type.FullName))}."
             ),
         };
     }

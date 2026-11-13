@@ -51,8 +51,8 @@ struct DrawArguments
 
 // The draw arguments' regions, C#'s DrawRegion, each as many draws as the visible list has rows and counted at word
 // region * 4 of the counts buffer: the clusters the old depth pyramid shows, then those the retest finds the new one
-// shows; the same two of the clusters in the impostor handoff, which draw with the dither; the translucent clusters
-// from both; and the impostors of both.
+// shows, then the same two of the clusters in the impostor handoff, which draw with the dither, then the translucent
+// clusters from both, and the impostors of both.
 enum DrawRegion
 {
     Visible,
@@ -124,7 +124,7 @@ void CountClusters(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID)
     counts.InterlockedAdd(DemandBinsOffset + GetDemandBin(frame, instance) * 4u, passedCount);
 }
 
-// From the nearest bin out, the first whose rows no longer fit the list after the bins before it; and every row asked
+// From the nearest bin out, the first whose rows no longer fit the list after the bins before it, and every row asked
 // for, which the cluster budget reads.
 [shader("compute")]
 [numthreads(1, 1, 1)]
@@ -147,7 +147,7 @@ void FitClusters()
     counts.Store<uint>(CountFitBins, fitBins);
 }
 
-// Gives an instance in a bin with room the rows it counted, in one go, and puts its clusters in them; one past them
+// Gives an instance in a bin with room the rows it counted, in one go, and puts its clusters in them. One past them
 // draws its impostor whole, and one in the handoff its impostor's share of the dither too.
 [shader("compute")]
 [numthreads(64, 1, 1)]
@@ -243,7 +243,7 @@ void RetestClusters(uint3 thread : SV_DispatchThreadID)
     AddClusterDraw(instance, cluster.cluster, entry.index, isFading ? DrawRegion.RetestedFading : DrawRegion.Retested);
 }
 
-// Whether the instance is in the frustum and at least five pixels across on screen; one smaller draws nothing,
+// Whether the instance is in the frustum and at least five pixels across on screen. One smaller draws nothing,
 // neither clusters nor impostor.
 bool IsInView(FrameConstants frame, GpuInstance instance)
 {
@@ -316,7 +316,7 @@ bool TryAddRetest(uint index, uint cluster)
 }
 
 // Appends the draw of the cluster at row to region, its pass's region of the draws with or without the handoff's
-// dither; a translucent cluster to the glass's, from either pass.
+// dither. A translucent cluster goes to the glass's, from either pass.
 void AddClusterDraw(GpuInstance instance, uint clusterIndex, uint row, DrawRegion region)
 {
     GpuCluster cluster = LoadCluster(GetClusters().clusters, clusterIndex);
@@ -326,7 +326,7 @@ void AddClusterDraw(GpuInstance instance, uint clusterIndex, uint row, DrawRegio
 }
 
 // Appends the instance's impostor to region, the impostors of its pass, with firstInstance its draw's first instance,
-// which says whether it draws whole; or, when the old depth pyramid hides it, to the retest list, and with no room
+// which says whether it draws whole, or, when the old depth pyramid hides it, to the retest list, and with no room
 // there it draws now. On the retest, a hidden impostor draws nothing.
 void TestImpostor(FrameConstants frame, GpuInstance instance, uint firstInstance, DrawRegion region)
 {
@@ -340,7 +340,7 @@ void TestImpostor(FrameConstants frame, GpuInstance instance, uint firstInstance
 }
 
 // Appends a draw to region of the draws, counted at the region's word of the counts. A cluster's row draws once, so
-// no region of clusters outgrows the visible list; past it an impostor goes undrawn.
+// no region of clusters outgrows the visible list. Past it an impostor goes undrawn.
 void AddDraw(DrawRegion region, DrawArguments arguments)
 {
     ClusterConstants clusters = GetClusters();

@@ -7,7 +7,7 @@
 //
 // An effect that needs more than the picture keeps a target of its own: the struct declares how many levels it has,
 // as `static const uint Levels = 2;` does, each half the size of the one before, the first the picture's. Before
-// Apply, Level runs over every texel of each level in turn, the first first; Apply then reads them. An effect that reads
+// Apply, Level runs over every texel of each level in turn, the first first. Apply then reads them. An effect that reads
 // last frame's target declares `static const uint History = 1;`: its target lasts from frame to frame, two of them
 // swapping, so last frame's is the effect's history. One that doesn't declare it has no history.
 //
@@ -46,7 +46,7 @@ public struct PixelEffectInputs
 
 public interface IPixelEffect
 {
-    // One texel of the effect's target at inputs.level; an effect without levels has none.
+    // One texel of the effect's target at inputs.level. An effect without levels has none.
     float4 Level(PixelEffectInputs inputs) { return float4(0.0); }
 
     // The pixel's colour after the effect, from its colour before it.

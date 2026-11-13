@@ -268,6 +268,7 @@ public static class Log
     )
     {
         public override string ToString() =>
-            $"[{Timestamp:HH:mm:ss.fff}] [{Level}] [thread {ThreadId}] {Message} ({Path.GetFileName(CallerFile)}:{CallerFileLineNumber} in {CallerMemberName})";
+            $"[{Timestamp:HH:mm:ss.fff}] [{Level}] [thread {ThreadId}] {Message} "
+            + $"({Path.GetFileName(CallerFile)}:{CallerFileLineNumber} in {CallerMemberName})";
     }
 }

@@ -2,7 +2,7 @@
 // camera's jitter, a different point in the pixel each frame, adds up to smooth edges over frames. The history is held
 // to the range of the pixel's 3 by 3 neighbours, so light that changed doesn't trail, and left out where the last frame
 // saw another surface there or the surface was off the screen. Adapted from Wicked Engine's temporal AA. The resolved
-// picture is the effect's one level, so it is next frame's history; each texel keeps its view depth in alpha, 0 for
+// picture is the effect's one level, so it is next frame's history. Each texel keeps its view depth in alpha, 0 for
 // the sky, for the next frame's test.
 module "Post/TemporalAntiAliasing";
 
@@ -74,7 +74,7 @@ public struct TemporalAntiAliasing : IPixelEffect
             return float4(current, viewDepth);
 
         // The history read between texels, which blurs, so the more the pixel moved off whole texels the more of now
-        // it takes; all of now where its surface was off the screen.
+        // it takes. It takes all of now where its surface was off the screen.
         float3 before = clamp(inputs.history.SampleLevel(inputs.sampler, historyUv, 0.0).rgb, low, high);
         float2 moved = abs(velocity) * float2(inputs.size);
         float blend = isOnScreen ? lerp(0.05, 0.8, frac(max(moved.x, moved.y)) * 0.5) : 1.0;
@@ -93,7 +93,7 @@ public struct TemporalAntiAliasing : IPixelEffect
 }
 
 // A colour in Reinhard's curve after an exposure that brings its neighbours to a middle grey, where the blend is done,
-// so a bright pixel doesn't outweigh the neighbours it is averaged with, wherever the effect is in the list; and back.
+// so a bright pixel doesn't outweigh the neighbours it is averaged with, wherever the effect is in the list, and back.
 float3 ToBlendSpace(float3 color, float exposure)
 {
     float3 exposed = color * exposure;

@@ -32,11 +32,13 @@ public record struct Weather : IComponent
     public float FogDensity;
 
     /// <summary>
-    /// The height in metres where the haze is as thick as <see cref="FogDensity"/> says, and the metres above it at
-    /// which it is half as thick.
+    /// The height in metres where the haze is as thick as <see cref="FogDensity"/> says.
     /// </summary>
     public float FogHeight;
 
+    /// <summary>
+    /// The metres above <see cref="FogHeight"/> at which the haze is half as thick.
+    /// </summary>
     public float FogHalfHeight = 20;
 
     /// <summary>

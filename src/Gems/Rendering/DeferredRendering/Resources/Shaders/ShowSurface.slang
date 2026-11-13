@@ -1,7 +1,7 @@
 // What the output shows, as the view the pass header's y names asks: the picture as its effects finished it, encoded
 // for the screen with its middle tones raised to the gamma the header's w holds, or each pixel's GBuffer, so a
 // roughness of a half reads as a half and an albedo as the colour it is. A GBuffer view is black where nothing was
-// drawn, but for the velocity, which the sky has too; a depth view is also black from the metres the header's z holds.
+// drawn, but for the velocity, which the sky has too. A depth view is also black from the metres the header's z holds.
 // A view of light alone first writes it into the picture in place of the lit one, so the effects finish it as they
 // would the picture: the traced diffuse light as shading reads it, which a white diffuse surface would reflect, or the
 // traced reflections' light, which it reads from the frame's indirect light, whose ids are 0 where nothing is
@@ -30,7 +30,7 @@ enum DebugView : uint
     Reflections,
 }
 
-// The view of a pixel's surface; a depth view is black from depthViewFar metres away.
+// The view of a pixel's surface. A depth view is black from depthViewFar metres away.
 float3 GetSurfaceView(FrameConstants frame, DebugView view, float depthViewFar, uint2 pixel)
 {
     if (view == DebugView.Velocity)

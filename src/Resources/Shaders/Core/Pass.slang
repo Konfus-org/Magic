@@ -1,5 +1,5 @@
 // What a pass is handed: the 16 bytes pushed with it, C#'s GpuConstants, as the same four words. A pass whose
-// constants fit the header uses the words as it likes; one with more puts the heap id of its constants buffer in x
+// constants fit the header uses the words as it likes. One with more puts the heap id of its constants buffer in x
 // and loads its struct from it with LoadConstants.
 module "Core/Pass";
 import Core.Heap;

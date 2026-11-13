@@ -1,9 +1,9 @@
 // The light that reaches each surface indirectly, traced at a part of the picture's size: from one pixel of each traced
 // pixel's footprint, two rays over its hemisphere as the diffuse lobe weighs it, each bringing back the light of the
 // surface it lands on, lit by one light at random and by the probes, or the probes' light at the pixel where it reaches
-// nothing within range; then filtered over its neighbours, and blended with the frames before where they saw the same
+// nothing within range, then filtered over its neighbours, and blended with the frames before where they saw the same
 // surface. Shading reads the result through Light/Indirect. Adapted from Wicked Engine's ray-traced diffuse. The pass
-// header's x is the frame's buffer, which holds the lights and the indirect light; its y is the GI buffer.
+// header's x is the frame's buffer, which holds the lights and the indirect light. Its y is the GI buffer.
 module "TraceDiffuse";
 
 import Core.Heap;

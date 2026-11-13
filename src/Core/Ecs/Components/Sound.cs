@@ -119,9 +119,6 @@ public record struct Sound : IComponent
     /// <summary>
     /// How fast it plays, which raises its pitch as it goes faster: 2 is an octave up, 0.5 an octave down.
     /// </summary>
-    /// <remarks>
-    /// The value is held between 0.5 and 2.
-    /// </remarks>
     public float Pitch = 1;
 
     /// <summary>

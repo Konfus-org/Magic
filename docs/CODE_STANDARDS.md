@@ -255,7 +255,7 @@ by what the caller does:
 
 | The caller | Shape | How |
 | --- | --- | --- |
-| Describes what should exist: settings, a description, an asset | Declarative | Plain data set in an object initializer, `required { get; init; }` for what must be given and `with` for a changed copy. The default. |
+| Describes what must exist: settings, a description, an asset | Declarative | Plain data set in an object initializer, `required { get; init; }` for what must be given and `with` for a changed copy. The default. |
 | Changes a value in a known order | Steps | Named methods that take a value and return one, called in order and assigned. |
 | Says what it wants in one sentence, such as a query or a chain of setup | Fluent | Each method returns its receiver, or a struct's new value, so the chain reads as `subject.Verb(x).Verb(y)`. |
 | Builds what is valid only once complete, over many calls or across members | Builder | Calls collect into the builder, and `Build()` checks them and returns the finished, immutable value. Only where an initializer with `required` can't express it. |

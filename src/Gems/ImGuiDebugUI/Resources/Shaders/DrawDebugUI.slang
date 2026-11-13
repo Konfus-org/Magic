@@ -1,8 +1,8 @@
 // The debug UI over a finished picture: 2D triangles in target pixels, +Y down from the top left corner, each vertex
-// with its texture coordinate and an RGBA8 colour, read from the UI's vertices by index, then the draw's texture (ImGui's
-// atlas of characters, with a white texel for solid shapes) times the vertex colour, blended over the target by its
-// alpha. ImGui's colours are already encoded, as a target holding encoded values wants them. The pass header's x is the
-// constants, y the draw's first vertex, which its indices count from, and z its texture.
+// with its texture coordinate and an RGBA8 colour, read from the UI's vertices by index, then the draw's texture
+// (ImGui's atlas of characters, with a white texel for solid shapes) times the vertex colour, blended over the target
+// by its alpha. ImGui's colours are already encoded, as a target holding encoded values wants them. The pass header's
+// x is the constants, y the draw's first vertex, which its indices count from, and z its texture.
 module "DrawDebugUI";
 
 import Core.Heap;

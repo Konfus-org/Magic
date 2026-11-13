@@ -28,7 +28,7 @@ static const uint HeapBuffers = 16384u;
 
 static const uint LineBytes = 128u;
 
-// The window pixels a dot of the font covers; a character's cell and a line's height, in dots; and where the text
+// The window pixels a dot of the font covers, a character's cell and a line's height in dots, and where the text
 // starts in its line, in dots from the line's top left.
 static const uint DotPixels = 2u;
 static const uint CellWidth = 6u;
@@ -95,7 +95,7 @@ uint LoadLine(uint line)
     return LoadWord(line * LineBytes);
 }
 
-// Whether a pixel, in window pixels from its line's top left, lies on a dot of the line's text; a pixel left of or
+// Whether a pixel, in window pixels from its line's top left, lies on a dot of the line's text. A pixel left of or
 // above the line does not.
 bool IsTextPixel(uint line, int2 pixel)
 {
@@ -123,7 +123,7 @@ bool IsTextPixel(uint line, int2 pixel)
     return (((bit < 32u) ? (glyph.x >> bit) : (glyph.y >> (bit - 32u))) & 1u) != 0u;
 }
 
-// One triangle over the whole window; the pass's scissor keeps it to the banner's lines, or to the whole window while
+// One triangle over the whole window. The pass's scissor keeps it to the banner's lines, or to the whole window while
 // the post effect's line follows them.
 [shader("vertex")]
 float4 DrawFailureBannerVertex(uint index : SV_VertexID) : SV_Position
