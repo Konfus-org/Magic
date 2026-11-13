@@ -1,10 +1,6 @@
-using System.Collections.Immutable;
 using System.Drawing;
-using System.Linq;
 using System.Numerics;
 using Magic.Assets;
-using Magic.Ecs;
-using Magic.Ecs.Components;
 using Magic.Graphics;
 using Magic.Utils;
 
@@ -33,7 +29,7 @@ internal sealed class Cover(AssetManager assets)
     private static readonly RenderStage _stage = new(5);
 
     /// <summary>
-    /// The colour over a bright world: an off-white, encoded for the screen.
+    /// The colour over a bright world: an off-white, as the screen shows it.
     /// </summary>
     private static readonly Vector3 _bright = new(0.9f); // PROTO
 
@@ -47,34 +43,27 @@ internal sealed class Cover(AssetManager assets)
     };
 
     /// <summary>
-    /// The colour of the cover, picked from the world that loads last. Black before the first load.
+    /// The colour of the cover as the screen shows it, picked from the world that loads last. Black before the first
+    /// load.
     /// </summary>
     private Vector3 _color;
 
     /// <summary>
-    /// Picks the colour of the cover from the directional lights of <paramref name="entities"/>: black when the most
-    /// light that reaches the world is dark, off-white when it is bright, and a blend between.
+    /// Picks the colour of the cover from <paramref name="sun"/>, the light that the world is lit by: black when it
+    /// is dark, off-white when it is bright, and a blend between.
     /// </summary>
     /// <remarks>
-    /// A sun or a moon below the horizon gives no light. With no directional light, the cover is black.
+    /// A light below the horizon gives no light. With no light (null), the renderer's white sun lights the open
+    /// default sky, which shows bright, so the cover is off-white.
     /// </remarks>
-    public void PickColor(ImmutableArray<ImmutableArray<IComponent>> entities)
+    public void PickColor((Vector3 Direction, Vector3 Illuminance)? sun)
     {
-        float lux = 0;
-        foreach (ImmutableArray<IComponent> entity in entities)
+        float lux = sun switch
         {
-            foreach (DirectionalLight light in entity.OfType<DirectionalLight>())
-            {
-                Transform transform = entity.OfType<Transform>().FirstOrDefault();
-                Vector3 towards = -Vector3.Transform(Vector3.UnitZ, transform.Rotation);
-                if (light.Mode != DirectionalLightMode.Default && towards.Y <= 0)
-                    continue;
-
-                float luminance = (0.2126f * light.Color.R) + (0.7152f * light.Color.G) + (0.0722f * light.Color.B);
-                lux = MathF.Max(lux, luminance * light.Intensity);
-            }
-        }
-
+            null => BrightLux,
+            { Direction.Y: > 0 } up => Vector3.Dot(up.Illuminance, new Vector3(0.2126f, 0.7152f, 0.0722f)),
+            _ => 0,
+        };
         float bright = Math.Clamp(
             MathF.Log10(MathF.Max(lux, DarkLux) / DarkLux) / MathF.Log10(BrightLux / DarkLux),
             0,
@@ -84,7 +73,7 @@ internal sealed class Cover(AssetManager assets)
     }
 
     /// <summary>
-    /// Records the cover over the window at <paramref name="opacity"/>.
+    /// Records the cover over the window at <paramref name="opacity"/>, which the shader makes even to the eye.
     /// </summary>
     public void Record(RenderGraph graph, float opacity)
     {

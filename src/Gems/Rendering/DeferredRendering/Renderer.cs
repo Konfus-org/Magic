@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Drawing;
 using System.Linq;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Magic.Assets;
 using Magic.Debugging;
@@ -103,6 +104,14 @@ public sealed class Renderer
     /// Set in the output pass's view when no effects finished the picture, the twin of <c>ShowSurface.slang</c>'s.
     /// </summary>
     private const uint NoEffects = 0x80000000u;
+
+    /// <summary>
+    /// The light of a world with no directional light: white, of 1 lux, from above.
+    /// </summary>
+    private static readonly (Vector3 Direction, Vector3 Illuminance) _whiteSun = (
+        Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)),
+        Vector3.One
+    );
 
     /// <summary>
     /// How the world is drawn and what the renderer shows, which the debug window also sets on the game thread. Both
@@ -636,7 +645,7 @@ public sealed class Renderer
             camera,
             frame,
             isJittered ? FrameView.GetJitter(frame.Index) : Vector2.Zero,
-            GetSun(inputs.DirectionalLights),
+            GetSun(inputs.DirectionalLights.First, inputs.DirectionalLights.Second) ?? _whiteSun,
             _settings.SkyBrightness,
             input.Traced is { } traced
                 ? new GpuTracedWorld { Acceleration = traced.Structure.Id, HitMaterials = traced.HitMaterials.Id }
@@ -858,9 +867,41 @@ public sealed class Renderer
         CancellationToken cancel
     )
     {
+        // The sun of what arrives and of the globals that stay, as the frame will pick it. Not the loading screen's,
+        // which is no global and leaves before the world arrives. Game thread, whose entities these are.
+        await _threads.Enter(EngineThread.Game);
+        List<Transform> transforms = [];
+        List<DirectionalLight> lights = [];
+        foreach (EcsChunk<Transform, DirectionalLight> chunk in _ecs.Query<Transform, DirectionalLight>())
+        {
+            for (int i = 0; i < chunk.Entities.Length; i++)
+            {
+                Entity entity = chunk.Entities[i];
+                if (_ecs.Has<Tags>(entity) && _ecs.Get<Tags>(entity).Has(Tag.Global))
+                {
+                    transforms.Add(chunk.First[i]);
+                    lights.Add(chunk.Second[i]);
+                }
+            }
+        }
+
+        foreach (ImmutableArray<IComponent> entity in entities)
+        {
+            foreach (DirectionalLight light in entity.OfType<DirectionalLight>())
+            {
+                transforms.Add(entity.OfType<Transform>().DefaultIfEmpty(new Transform()).First());
+                lights.Add(light);
+            }
+        }
+
+        (Vector3 Direction, Vector3 Illuminance)? sun = GetSun(
+            CollectionsMarshal.AsSpan(transforms),
+            CollectionsMarshal.AsSpan(lights)
+        );
+
         await _threads.Enter(EngineThread.Render);
         EndPreparing();
-        _cover.PickColor(entities);
+        _cover.PickColor(sun);
         Ecs.Components.Renderer[] renderers =
         [
             .. entities
@@ -984,22 +1025,27 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// Gets the directional light the frame is lit by.
+    /// Gets the directional light that the frame is lit by, from the lights at the same index of
+    /// <paramref name="transforms"/> and <paramref name="lights"/>.
     /// </summary>
     /// <remarks>
-    /// The sun while it is up, else the moon while it is up, else the first there is, else a white light from above.
+    /// The sun while it is up, else the moon while it is up, else the first there is. With no light, null: the frame
+    /// is lit by <see cref="_whiteSun"/>.
     /// </remarks>
     /// <returns>
     /// The unit direction towards the light, and its colour times its intensity, in lux, above the air.
     /// </returns>
-    private static (Vector3 Direction, Vector3 Illuminance) GetSun(EcsSnapshot<Transform, DirectionalLight> lights)
+    private static (Vector3 Direction, Vector3 Illuminance)? GetSun(
+        ReadOnlySpan<Transform> transforms,
+        ReadOnlySpan<DirectionalLight> lights
+    )
     {
-        (Vector3 Direction, Vector3 Illuminance) sun = (Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)), Vector3.One);
+        (Vector3 Direction, Vector3 Illuminance)? sun = null;
         int sunRank = -1;
-        for (int i = 0; i < lights.Count; i++)
+        for (int i = 0; i < lights.Length; i++)
         {
-            DirectionalLight light = lights.Second[i];
-            Vector3 towards = -Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, lights.First[i].Rotation));
+            DirectionalLight light = lights[i];
+            Vector3 towards = -Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, transforms[i].Rotation));
             bool isUp = towards.Y > 0;
             int rank = 0;
             if (isUp && light.Mode == DirectionalLightMode.Sun)
