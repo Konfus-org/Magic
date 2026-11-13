@@ -56,22 +56,16 @@ public struct ScriptContainer : IComponent, IEquatable<ScriptContainer>
     /// Adds <paramref name="script"/>, with <paramref name="values"/> for the gem of its language to set on it; false
     /// when it is none, there already, or there is no room for it.
     /// </summary>
-    public bool Add(Handle<Script> script, ScriptValues values = default) => Add(new ScriptSlot(script, values));
-
-    /// <summary>
-    /// Adds <paramref name="slot"/>, the script with its values and whether a save took its copy after it started;
-    /// false when its script is none, there already, or there is no room for it.
-    /// </summary>
-    public bool Add(ScriptSlot slot)
+    public bool Add(Handle<Script> script, ScriptValues values = default)
     {
         Span<ScriptSlot> held = this;
 
         // A free slot holds no script.
         int free = Slot(Handle<Script>.None);
-        if (slot.Script == Handle<Script>.None || Has(slot.Script) || free < 0)
+        if (script == Handle<Script>.None || Has(script) || free < 0)
             return false;
 
-        held[free] = slot;
+        held[free] = new ScriptSlot(script, values);
 
         return true;
     }
