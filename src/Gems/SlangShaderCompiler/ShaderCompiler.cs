@@ -1,12 +1,14 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO.Hashing;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using Magic.Assets;
+using Magic.Debugging;
 using Magic.Files;
 using Magic.Graphics;
 using Magic.Utils;
@@ -146,8 +148,14 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
             .ReadAsync<CompiledShader>(key, version, this, cancel)
             .ConfigureAwait(false);
         if (cached.Ok)
-            return cached;
+        {
+            Log.Verbose($"Shader read from the cache: {entryPath}: {entry.Name}.");
 
+            return cached;
+        }
+
+        Log.Verbose($"Shader compiling: {entryPath}: {entry.Name}.");
+        long started = Stopwatch.GetTimestamp();
         Result<CompiledShader> compiled = await RunAsync(
                 () => Compile(modules.Value, entryPath, entry, typeArguments, optimization),
                 cancel
@@ -156,6 +164,9 @@ public sealed partial class ShaderCompiler : IShaderCompiler, ICache<CompiledSha
         if (!compiled.Ok)
             return Result.Failure($"{entryPath}: {entry.Name} did not compile: {compiled.Error}");
 
+        Log.Verbose(
+            $"Shader compiled: {entryPath}: {entry.Name}, in {Stopwatch.GetElapsedTime(started).TotalMilliseconds:F0} ms."
+        );
         await _caches.WriteAsync(key, version, compiled.Value, this, cancel).ConfigureAwait(false);
 
         return compiled;

@@ -172,6 +172,8 @@ public static class Log
             }
         }
 
+        Info($"Log sink added: {GemRegistry.GetGemName(sink.GetType())}.");
+
         return new Subscription(() => Unregister(sink));
     }
 

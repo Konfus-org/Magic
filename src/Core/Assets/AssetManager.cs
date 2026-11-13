@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO.Hashing;
 using System.Linq;
@@ -649,7 +650,7 @@ public sealed class AssetManager : IDisposable
                 Database = Database with { Directories = directories, Index = index };
             }
 
-            Log.Verbose($"Indexed {index.ById.Count} assets under {directories.Length} folders.");
+            Log.Info($"Assets indexed: {directory}. {index.ById.Count} assets under {directories.Length} folders.");
 
             return;
         }
@@ -798,6 +799,7 @@ public sealed class AssetManager : IDisposable
     internal bool Reindex(ImmutableArray<string> directories, AssetIndex now, ImmutableHashSet<string> touched)
     {
         List<(TaskCompletionSource<Made> Waiter, Made Gone)> told = [];
+        List<string> unloaded = [];
         int reloading = 0;
         lock (_gate)
         {
@@ -825,6 +827,7 @@ public sealed class AssetManager : IDisposable
                 {
                     Made gone = Fail($"{before.ById[id].Path} is gone.");
                     told.AddRange(entry.Waiting.Select(waiter => (waiter, gone)));
+                    unloaded.Add(before.ById[id].Path);
                     loaded = loaded with { Entries = loaded.Entries.Remove(id) };
                     continue;
                 }
@@ -837,6 +840,7 @@ public sealed class AssetManager : IDisposable
                 // failed one is read again, so its asker hears when it loads.
                 if (entry.Stage == AssetStage.Loaded && entry.GetValue() is null && entry.Error.Length == 0)
                 {
+                    unloaded.Add(database.GetName(id));
                     loaded = loaded with { Entries = loaded.Entries.Remove(id) };
 
                     continue;
@@ -859,6 +863,11 @@ public sealed class AssetManager : IDisposable
         foreach ((TaskCompletionSource<Made> waiter, Made gone) in told)
         {
             waiter.TrySetResult(gone);
+        }
+
+        foreach (string asset in unloaded)
+        {
+            Log.Verbose($"Asset unloaded: {asset}.");
         }
 
         if (reloading > 0)
@@ -1408,6 +1417,8 @@ public sealed class AssetManager : IDisposable
             return;
         }
 
+        Log.Verbose($"Asset loading: {file.Path}.");
+        long started = Stopwatch.GetTimestamp();
         Made made;
         try
         {
@@ -1417,6 +1428,13 @@ public sealed class AssetManager : IDisposable
         {
             // A cancel as the run ends lands too, and is dropped there with the run's lifetime ended.
             made = Fail($"{file.Path} is not a {entry.Type.Name}: its importer threw: {ex}");
+        }
+
+        if (made.Value.Ok)
+        {
+            Log.Verbose(
+                $"Asset loaded: {file.Path}, a {entry.Type.Name}, in {Stopwatch.GetElapsedTime(started).TotalMilliseconds:F0} ms."
+            );
         }
 
         Land(id, made);
