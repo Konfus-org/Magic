@@ -33,13 +33,16 @@
         },
         {
             "name": "Sun",
+            "tags": [
+                "sun"
+            ],
             "components": {
                 "Transform": {
                     "rotation": {
-                        "x": 0.41554,
-                        "y": 0.2661,
-                        "z": -0.12854,
-                        "w": 0.86023
+                        "x": 0,
+                        "y": -0.13053,
+                        "z": 0,
+                        "w": 0.99144
                     }
                 },
                 "DirectionalLight": {
@@ -50,7 +53,8 @@
                         "b": 0.9
                     },
                     "intensity": 3
-                }
+                },
+                "ScriptContainer": [ { "id": 100421, "hour": 16, "hoursPerMinute": 1 } ]
             }
         }
     ]

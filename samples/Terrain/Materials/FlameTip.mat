@@ -1,0 +1,9 @@
+{
+    // The smaller tongues around the flame, where it cools towards orange: half the glow, and less of it in green.
+    "shader": { "id": 10001 },
+    "params": {
+        "color": { "r": 0, "g": 0, "b": 0, "a": 1 },
+        "roughness": { "x": 1 },
+        "emissive": { "x": 400, "y": 55, "z": 5 }
+    }
+}

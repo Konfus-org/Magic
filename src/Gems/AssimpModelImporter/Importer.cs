@@ -42,6 +42,11 @@ public sealed unsafe class Importer : IAssetImporter<Model>
         | aiProcess_FlipUVs
     );
 
+    /// <summary>
+    /// How many metres of a mesh without texture coordinates one tile of its material covers.
+    /// </summary>
+    private const float PlanarUvMetres = 4;
+
     internal Importer() { }
 
     public ImmutableArray<string> Extensions { get; } = [".fbx", ".glb", ".gltf", ".obj"];
@@ -132,8 +137,17 @@ public sealed unsafe class Importer : IAssetImporter<Model>
         bool hasUvs = mesh->mTextureCoords[0] != null;
         for (uint v = 0; v < mesh->mNumVertices; v++)
         {
+            Vector3 position = ToVector(mesh->mVertices[v]);
             Vector3 normal = ToVector(mesh->mNormals[v]);
-            Vector4 tangent = new(Vector3.UnitX, 1);
+
+            // A mesh that brings no texture coordinates gets ones laid over it from above, so that a material tiles
+            // over it: x and z give the uv, a tile to every PlanarUvMetres. The tangent runs along x, with the sign
+            // that puts the v axis of a normal map along z.
+            Vector2 uv = hasUvs
+                ? new Vector2(mesh->mTextureCoords[0][v].x, mesh->mTextureCoords[0][v].y)
+                : new Vector2(position.X, position.Z) / PlanarUvMetres;
+            Vector4 tangent = new(Vector3.UnitX, -1);
+
             if (hasTangents)
             {
                 Vector3 t = ToVector(mesh->mTangents[v]);
@@ -141,14 +155,13 @@ public sealed unsafe class Importer : IAssetImporter<Model>
                 tangent = new Vector4(t, Vector3.Dot(Vector3.Cross(normal, t), b) < 0 ? -1 : 1);
             }
 
-            aiVector3D uv = hasUvs ? mesh->mTextureCoords[0][v] : default;
             vertices.Add(
                 new Vertex
                 {
-                    Position = ToVector(mesh->mVertices[v]) - origin,
+                    Position = position - origin,
                     Normal = normal,
                     Tangent = tangent,
-                    Uv = new Vector2(uv.x, uv.y),
+                    Uv = uv,
                 }
             );
         }

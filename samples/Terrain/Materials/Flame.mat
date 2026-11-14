@@ -1,0 +1,10 @@
+{
+    // The tongues of flame over the hottest coals: a warm amber glow with no surface of its own, the brightest thing
+    // in the firebox.
+    "shader": { "id": 10001 },
+    "params": {
+        "color": { "r": 0, "g": 0, "b": 0, "a": 1 },
+        "roughness": { "x": 1 },
+        "emissive": { "x": 900, "y": 160, "z": 14 }
+    }
+}

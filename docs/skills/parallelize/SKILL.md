@@ -110,7 +110,8 @@ flowchart TD
      - When you finish, release the turn and end with `STATE: profiling-done` and the results.
    - If the slice does not fit in the hour, end with `STATE: too-big`, what is done and what is left.
    - Do not touch the worktree of another worker.
-   - End your last message with your follow-ups, your notes for the user, and this line:
+   - The coordinator reads only your last message. Put your whole answer in it, then your follow-ups, your notes for
+     the user, and this line:
      `SLICE: <branch>  STATE: <state>  CONTEXT: <percent>  NOTE: <what it did, its answer or its request>`
 5. **Read the state of each slice from the plan and from git, not from memory.** Copy each `SLICE:` line into the
    plan. A merged branch is deleted, so the plan keeps its line. After a restart or a compaction, make the picture

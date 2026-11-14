@@ -72,6 +72,10 @@ How a script runs:
 - The constructor gets the `Entity` for an `Entity` parameter, and a service for each other parameter. Only keep them
   in the constructor. Do the first work in `Start`.
 - The values of the prefab are set on the copy before `Start`, so `Start` reads them.
+- Values that change in the slot later, as the `set` command of the console writes them, are set on the copy in
+  the frame after, so a script is tuned while it runs. A set marked `started`, which a `get` prints after a save,
+  sets the saved fields on the copy as well, and does not start it over. A setter that throws goes to the log, and
+  the handle goes from the `ScriptContainer`.
 - The hooks of the behaviours run on the game thread, in the order that the copies started, after the hooks of the
   gems listed before this gem.
 - A behaviour far from each camera of the player updates less often: every frame within 64 m, then one frame in n at
@@ -93,7 +97,7 @@ What a save and a restart keep:
 - Each save writes the state of every copy that runs into its slot: its values, by the name a prefab gives them, and
   the other fields that it keeps for itself, by name. Left out are the fields that a copy gets again when it is made:
   its entity, a thing that its constructor is handed, a service that a gem gives, a delegate, a task and a
-  disposable. A member that JSON cannot hold goes to the log, and a copy from the save starts over without it.
+  disposable. A member that JSON cannot hold, or whose getter throws, goes to the log, and a copy from the save starts over without it.
 - A copy that a save made takes that state up and goes on from it: its slot is marked `started`, so the gem sets the
   saved properties and fields on it and calls `Resume` in place of `Start`. A spawner spawns once, and a light keeps
   the depth that it had.
@@ -128,6 +132,8 @@ Reads FBX, glTF and OBJ files into models. Provides `IAssetImporter<Model>`.
 - The importer puts all the nodes of a file into one model in the frame of the engine. This frame is left-handed, with
   +Y up and one metre for each unit. Triangles are clockwise when seen from outside.
 - If a file has no normals or tangents, the importer makes them.
+- If a mesh has no texture coordinates, the importer lays them over it from above, from its x and z, so a material
+  tiles over the mesh.
 - The model has one mesh for each material slot. The slots are numbered in the order that the file first uses its
   materials. The number of slots stops at the number that a renderer has.
 - The `origin` in the `.meta` file is the point that the importer moves to (0, 0, 0) of the model.

@@ -1,0 +1,12 @@
+{
+    // The fire's hottest coals: almost black lumps whose cracks glow orange-red. The glow map holds the cracks, so the
+    // crust between them stays dark and the lump does not read as one bright blob. The green of the glow stays far
+    // under its red, or the tonemapper washes the hot coals to cream.
+    "shader": { "id": 10001 },
+    "params": {
+        "color": { "r": 0.008, "g": 0.007, "b": 0.006, "a": 1 },
+        "roughness": { "x": 1 },
+        "emissive": { "x": 1400, "y": 120, "z": 8 },
+        "emissiveMap": { "texture": { "id": 300109 } }
+    }
+}

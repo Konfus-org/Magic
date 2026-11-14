@@ -14,9 +14,10 @@ namespace Magic.CommandLine;
 /// Reads and writes a value of an entity, named by a console path such as <c>player.transform.rotation.y</c>.
 /// </summary>
 /// <remarks>
-/// A path is <c>entity.component.member</c>, to any depth. The entity is an id, or the name of a tag, which names each
-/// entity with that tag. A component or member is its name in any case, or the initials of its capitals (<c>fov</c>
-/// for <c>FieldOfView</c>). The get command of the console reads one, and its set command writes one.
+/// A path is <c>entity.component.member</c>, to any depth, and <c>entity.component</c> is the whole component. The
+/// entity is an id, or the name of a tag, which names each entity with that tag. A component or member is its name in
+/// any case, or the initials of its capitals (<c>fov</c> for <c>FieldOfView</c>). The get command of the console
+/// reads one, and its set command writes one.
 /// </remarks>
 internal static class EntityPaths
 {
@@ -53,7 +54,8 @@ internal static class EntityPaths
     /// component.
     /// </summary>
     /// <remarks>
-    /// It returns how many it wrote, or why it wrote none.
+    /// A path that names a component and no member of it writes the whole component, as the JSON that
+    /// <see cref="Read"/> prints. It returns how many it wrote, or why it wrote none.
     /// </remarks>
     public static Result<int> Write(IEcs ecs, string path, ReadOnlySpan<string> values)
     {
@@ -62,14 +64,25 @@ internal static class EntityPaths
             return Result.Failure(found.Error);
 
         string[] members = path.Split('.')[2..];
-        if (members.Length == 0)
-            return Result.Failure($"{path} names a component; name one of its members to set.");
-
-        foreach ((Entity entity, IComponent component) in found.Value)
+        foreach ((Entity entity, IComponent held) in found.Value)
         {
-            Result written = WriteMembers(component, members, values);
-            if (!written.Ok)
-                return Result.Failure(written.Error);
+            IComponent component = held;
+
+            // A path that names no member names the whole component: the values give it as the JSON that get prints.
+            if (members.Length == 0)
+            {
+                Result<object> whole = ValueText.Parse(held.GetType(), values);
+                if (!whole.Ok)
+                    return Result.Failure($"{whole.Error} Put the component's JSON in single quotes.");
+
+                component = (IComponent)whole.Value;
+            }
+            else
+            {
+                Result written = WriteMembers(held, members, values);
+                if (!written.Ok)
+                    return Result.Failure(written.Error);
+            }
 
             ecs.Set(entity, [component]);
         }

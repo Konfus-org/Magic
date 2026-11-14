@@ -17,7 +17,7 @@ namespace Magic.CSharpScripting;
 /// <remarks>
 /// A field that is no data of the copy's own is left out, as a copy gets it again when it is made: its entity, a
 /// thing that its constructor is handed, a service, a delegate, a task or a disposable. A member that JSON cannot
-/// hold, or that the class no longer has, goes to the log one time. Game thread.
+/// hold, that the class no longer has, or whose getter throws, goes to the log one time. Game thread.
 /// </remarks>
 internal sealed class ScriptState(IServiceProvider services)
 {
@@ -47,7 +47,26 @@ internal sealed class ScriptState(IServiceProvider services)
         List<KeyValuePair<string, JsonElement>> state = [];
         foreach (SavedMember member in GetMembers(type).Saved)
         {
-            Add(state, type, member.Name, member.Type, member.Get(script));
+            object? value;
+            try
+            {
+                value = member.Get(script);
+            }
+            catch (TargetInvocationException exception)
+            {
+                // A getter of the script's own threw. The member is left out, so the save still holds the rest.
+                if (IsFirst(type, member.Name))
+                {
+                    Log.Warn(
+                        $"Script {type.Name}'s {member.Name} threw when the save read it, so it is left out: "
+                            + (exception.InnerException ?? exception).Message
+                    );
+                }
+
+                continue;
+            }
+
+            Add(state, type, member.Name, member.Type, value);
         }
 
         return state;
@@ -255,9 +274,14 @@ internal sealed class ScriptState(IServiceProvider services)
     /// </summary>
     private void LogOnce(Type type, string name, string message)
     {
-        if (_logged.Add($"{type.FullName}.{name}"))
+        if (IsFirst(type, name))
             Log.Error(message);
     }
+
+    /// <summary>
+    /// Whether the member <paramref name="name"/> of <paramref name="type"/> is told of for the first time.
+    /// </summary>
+    private bool IsFirst(Type type, string name) => _logged.Add($"{type.FullName}.{name}");
 
     /// <summary>
     /// A member that a save keeps: the name it is saved as, the type it holds, and how to read it out of a copy.

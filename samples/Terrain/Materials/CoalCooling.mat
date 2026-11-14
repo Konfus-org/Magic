@@ -1,0 +1,10 @@
+{
+    // The coals at the edge of the bed, cooling: the same cracked lumps with a quarter of the glow.
+    "shader": { "id": 10001 },
+    "params": {
+        "color": { "r": 0.008, "g": 0.007, "b": 0.006, "a": 1 },
+        "roughness": { "x": 1 },
+        "emissive": { "x": 380, "y": 30, "z": 2 },
+        "emissiveMap": { "texture": { "id": 300109 } }
+    }
+}

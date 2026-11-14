@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using Magic.Assets;
 using Magic.CommandLine.Commands;
 using Magic.Configuration;
@@ -140,16 +141,14 @@ internal sealed class Cli
     /// </remarks>
     public Result Execute(string command)
     {
-        if (string.IsNullOrWhiteSpace(command))
+        string[] words = SplitWords(command);
+        if (words.Length == 0)
             return Result.Success();
 
-        string firstWord = command.Split(' ', 2)[0];
-        if (command.StartsWith('-') || _cliCommands.Subcommands.Any(subcommand => subcommand.Name == firstWord))
-            return Invoke(_cliCommands.Parse(command));
+        if (!words[0].StartsWith('-') && !_cliCommands.Subcommands.Any(subcommand => subcommand.Name == words[0]))
+            words[0] = (words[0].Length == 1 ? "-" : "--") + words[0];
 
-        string dashes = command.Length == 1 ? "-" : "--";
-
-        return Invoke(_cliCommands.Parse(dashes + command));
+        return Invoke(_cliCommands.Parse(words));
     }
 
     /// <summary>
@@ -163,6 +162,54 @@ internal sealed class Cli
         Result ran = Execute(line);
         if (!ran.Ok)
             Log.Error($"Couldn't run '{line}': {ran.Error}");
+    }
+
+    /// <summary>
+    /// <paramref name="command"/> in its words: a space ends a word, and a pair of quotes holds one together and goes
+    /// with it, as a shell does.
+    /// </summary>
+    /// <remarks>
+    /// A word in single quotes keeps its double quotes, so a value in JSON comes through whole:
+    /// <c>set sun.scriptcontainer '[{"id":100421}]'</c>. A pair of quotes alone is an empty word, and a doubled quote
+    /// inside a quoted word is one quote of the word: <c>set player.name 'it''s'</c>.
+    /// </remarks>
+    private static string[] SplitWords(string command)
+    {
+        List<string> words = [];
+        StringBuilder? word = null;
+        char quote = default;
+        for (int i = 0; i < command.Length; i++)
+        {
+            char letter = command[i];
+            if (letter == quote && i + 1 < command.Length && command[i + 1] == quote)
+            {
+                // The second quote of the pair is the letter, so the word goes on past it.
+                (word ??= new()).Append(letter);
+                i++;
+            }
+            else if (letter == quote)
+                quote = default;
+            else if (quote == default && letter is '"' or '\'')
+            {
+                // The quote starts the word, so a pair that holds nothing is an empty word.
+                quote = letter;
+                word ??= new();
+            }
+            else if (quote == default && char.IsWhiteSpace(letter))
+            {
+                if (word is not null)
+                    words.Add(word.ToString());
+
+                word = null;
+            }
+            else
+                (word ??= new()).Append(letter);
+        }
+
+        if (word is not null)
+            words.Add(word.ToString());
+
+        return [.. words];
     }
 
     /// <summary>

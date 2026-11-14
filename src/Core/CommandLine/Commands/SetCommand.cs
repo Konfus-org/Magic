@@ -8,7 +8,8 @@ using Magic.Worlds;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>set</c>: sets a setting of a gem, by its key, or a value of an entity, named by a path, to a value.
+/// <c>set</c>: sets a setting of a gem, by its key, or a value of an entity, or a whole component of it, named by a
+/// path, to a value.
 /// </summary>
 /// <remarks>
 /// <see cref="ValueText"/> reads the value (<c>1 2 3</c> for a position), and <see cref="EntityPaths"/> reads the path.
@@ -20,16 +21,17 @@ internal static class SetCommand
         Argument<string> setting = new("setting")
         {
             Description =
-                "A setting's key, as Rendering.Resolution; or the path to an entity's value: the entity a tag or an id, each part its name or initials",
+                "A setting's key, as Rendering.Resolution; or the path to an entity's value or to a whole component: the entity a tag or an id, each part its name or initials",
         };
         Argument<string[]> value = new("value")
         {
-            Description = "The value in JSON, or one per field, as 1 2 3 for a position",
+            Description =
+                "The value in JSON, in single quotes so that it keeps its double quotes, or one per field, as 1 2 3 for a position",
             Arity = ArgumentArity.ZeroOrMore,
         };
         Command set = new(
             "set",
-            "Sets a setting, as Rendering.Resolution 2560 1440; or sets an entity's value, as entity.component.member and on to any depth, then the value"
+            "Sets a setting, as Rendering.Resolution 2560 1440; or sets an entity's value, as entity.component.member and on to any depth, then the value; or a whole component, as entity.component then its JSON in single quotes"
         )
         {
             setting,

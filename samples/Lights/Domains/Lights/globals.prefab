@@ -27,9 +27,6 @@
                 "PostProcessing": {
                     "effects": [
                         {
-                            "id": 16110046817102106845
-                        },
-                        {
                             "id": 6176367544898210812
                         },
                         {
@@ -79,7 +76,7 @@
             "components": {
                 "Weather": {
                     "fog": {
-                        "density": 0.02,
+                        "density": 0.002,
                         "anisotropy": 0.6
                     }
                 }

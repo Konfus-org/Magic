@@ -1,0 +1,10 @@
+{
+    // The ash the coals sit in: dark, with a dull red warmth under it, so the hearth floor does not show between them.
+    "shader": { "id": 10001 },
+    "params": {
+        "color": { "r": 0.008, "g": 0.0075, "b": 0.007, "a": 1 },
+        "roughness": { "x": 1 },
+        "emissive": { "x": 90, "y": 7, "z": 0.4 },
+        "emissiveMap": { "texture": { "id": 300109 } }
+    }
+}

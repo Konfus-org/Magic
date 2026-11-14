@@ -177,7 +177,7 @@ public record struct GpuVertex
 }
 
 /// <summary>
-/// A material slot as the GPU reads it from the material table, 64 bytes, the twin of <c>Scene/Materials.slang</c>'s.
+/// A material slot as the GPU reads it from the material table, 80 bytes, the twin of <c>Scene/Materials.slang</c>'s.
 /// </summary>
 /// <remarks>
 /// It holds the shader word, then the struct of the shader that draws the row, its params as the shader's reflection
@@ -186,7 +186,7 @@ public record struct GpuVertex
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 internal struct GpuMaterial
 {
-    public const int Bytes = 64;
+    public const int Bytes = 80;
 
     /// <summary>
     /// The bit of <see cref="Shader"/> set for a translucent shader's row, which draws over the lit picture.
