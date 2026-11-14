@@ -11,8 +11,8 @@ namespace Magic.Assets.Pipeline;
 /// <c>.meta</c> sets them, which the importer copies onto what it makes.
 /// </param>
 /// <param name="Version">
-/// A hash of the file and its <c>.meta</c>, which changes when either does: what a cache of work done on it is
-/// checked against.
+/// A hash of the file, its <c>.meta</c> and the importer's <see cref="IAssetImporter{T}.Version"/>, which changes when
+/// any does: what a cache of work done on it is checked against.
 /// </param>
 public readonly record struct AssetFile(
     ulong Id,

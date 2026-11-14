@@ -55,13 +55,11 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
     /// The wait of the world that arrived for the resolved picture to settle, which the frame that blends enough frames
     /// or upscales nothing completes. Render thread.
     /// </summary>
-    private TaskCompletionSource? _settling;
-
-    private readonly Threads _threads;
+    private readonly SettleWait _settling;
 
     internal Renderer(AssetManager assets, Threads threads)
     {
-        _threads = threads;
+        _settling = new SettleWait(threads);
         _shader = PassShaders.GetEntry(assets, "TaaUpscaling", "UpscalePicture");
         _upscaling = new Upscaling(Record);
     }
@@ -80,7 +78,7 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
 
         // A view maker that is out leaves the upscaling no view to resolve for good: the failure is already told.
         if (state != GpuState.Ready || graph.IsMakerOut<GpuView>())
-            _settling?.TrySetResult();
+            _settling.End();
 
         return state == GpuState.Ready ? _upscaling : null;
     }
@@ -92,13 +90,7 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
     /// Returns once the resolved picture of a view blended enough frames of the world that arrived, or at once while it
     /// upscales nothing.
     /// </summary>
-    public async Task OnDomainArrivedAsync(CancellationToken cancel)
-    {
-        await _threads.Enter(EngineThread.Render);
-        TaskCompletionSource settling = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        _settling = settling;
-        await settling.Task.WaitAsync(cancel).ConfigureAwait(false);
-    }
+    public Task OnDomainArrivedAsync(CancellationToken cancel) => _settling.WaitAsync(cancel);
 
     private static TextureDescription GetResolved(string name, int width, int height) =>
         new(
@@ -124,7 +116,7 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
         Result<GpuBuffer> constants = graph.Buffer(new("Upscale constants", Unsafe.SizeOf<UpscaleConstants>()));
         if (Result.FindFailure(first, second, sampler, constants) is { Ok: false } failed)
         {
-            _settling?.TrySetResult();
+            _settling.End();
             graph.Fail(RenderFailure.Resource, "Picture is not upscaled", failed.Error);
 
             return GpuTexture.None;
@@ -144,7 +136,7 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
         blended = hasHistory ? blended + 1 : 0;
         _resolved[graph.View] = (resolved, width, height, blended);
         if (blended >= SettleFrames)
-            _settling?.TrySetResult();
+            _settling.End();
 
         UpscaleConstants upscale = new()
         {

@@ -22,6 +22,8 @@ public sealed class Importer : IAssetImporter<Domain>
 
     public ImmutableArray<string> Extensions { get; } = [".domain"];
 
+    public int Version => 1;
+
     public Task<Result<Domain>> ImportAsync(AssetFile file, IProgress<LoadProgress>? progress, CancellationToken cancel)
     {
         ImmutableArray<Chunk>.Builder chunks = ImmutableArray.CreateBuilder<Chunk>();

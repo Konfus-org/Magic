@@ -150,14 +150,16 @@ internal sealed record AssetIndex
     }
 
     /// <summary>
-    /// A hash of a file's <paramref name="bytes"/> and its sidecar's <paramref name="settings"/>, which changes when
-    /// either does: the version of the asset they make.
+    /// A hash of a file's <paramref name="bytes"/>, its sidecar's <paramref name="settings"/> and the
+    /// <paramref name="importerVersion"/> of what reads it, which changes when any does: the version of the asset they
+    /// make.
     /// </summary>
-    public static ulong ComputeVersion(ReadOnlySpan<byte> bytes, JsonElement settings)
+    public static ulong ComputeVersion(ReadOnlySpan<byte> bytes, JsonElement settings, int importerVersion)
     {
         XxHash3 hash = new();
         hash.Append(bytes);
         hash.Append(Encoding.UTF8.GetBytes(settings.GetRawText()));
+        hash.Append(BitConverter.GetBytes(importerVersion));
 
         return hash.GetCurrentHashAsUInt64();
     }

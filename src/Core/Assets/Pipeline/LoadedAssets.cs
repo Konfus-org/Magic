@@ -55,15 +55,27 @@ internal delegate Task AssetPreprocessRun(ulong id, ulong version, object asset,
 internal delegate Result<object> AssetBuiltInReader(ReadOnlyMemory<byte> bytes, JsonElement settings);
 
 /// <summary>
-/// An asset type, as a <c>.meta</c>'s <c>"type"</c> names it: the type, and how its files are read.
+/// The version of the asset that a file's <paramref name="bytes"/> and <paramref name="settings"/> make with the
+/// importer of its type now.
 /// </summary>
-internal sealed record AssetType(Type Type, AssetImportRun Import, AssetBuiltInReader ReadBuiltIn);
+internal delegate ulong AssetVersionRun(ReadOnlySpan<byte> bytes, JsonElement settings);
+
+/// <summary>
+/// An asset type, as a <c>.meta</c>'s <c>"type"</c> names it: the type, how its files are read, and their version.
+/// </summary>
+internal sealed record AssetType(
+    Type Type,
+    AssetImportRun Import,
+    AssetBuiltInReader ReadBuiltIn,
+    AssetVersionRun ComputeVersion
+);
 
 /// <summary>
 /// What a load of an asset gave: the asset or why there is none, its version, and the ids of the handles it holds.
 /// </summary>
 /// <remarks>
-/// The version is a hash of the file and its <c>.meta</c>. The handles are there only when they were looked for.
+/// The version is a hash of the file, its <c>.meta</c> and its importer's version. The handles are there only when they
+/// were looked for.
 /// </remarks>
 internal readonly record struct Made(Result<object> Value, ulong Version, ImmutableArray<ulong> Handles = default);
 

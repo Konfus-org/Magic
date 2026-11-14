@@ -170,7 +170,7 @@ internal static class AssetCrawl
         Result<byte[]> unchanged = await assets.Files.ReadBytesAsync(file.File, cancel).ConfigureAwait(false);
         if (unchanged.Ok)
         {
-            ulong version = AssetIndex.ComputeVersion(unchanged.Value, file.Settings);
+            ulong version = type.ComputeVersion(unchanged.Value, file.Settings);
             Result<AssetDependencies> kept = await assets
                 .Caches.ReadAsync(id, version, AssetDependencyCache.Instance, cancel)
                 .ConfigureAwait(false);

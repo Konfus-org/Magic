@@ -11,12 +11,20 @@ namespace Magic.Assets.Pipeline;
 /// A gem gives one for its format as an exported part that implements it. The host gives it to
 /// <see cref="AssetManager"/> when the gem is made, and removes it when the gem ends. One importer reads a type. Core
 /// reads a type marked <see cref="AssetFormatAttribute"/> itself. When an importer is also an <see cref="ICache{T}"/>,
-/// Core caches what it imports by the asset's id and version, and does not call it again until the file or its
-/// <c>.meta</c> changes.
+/// Core caches what it imports by the asset's id and version, and does not call it again until the file, its
+/// <c>.meta</c> or the importer's <see cref="Version"/> changes.
 /// </remarks>
 public interface IAssetImporter<T>
     where T : IAsset<T>
 {
+    /// <summary>
+    /// Raised when what it makes of a file changes, so that what was cached of its assets is dirty.
+    /// </summary>
+    /// <remarks>
+    /// It is part of each asset's version, which the importer's own cache and each preprocessor's are checked against.
+    /// </remarks>
+    int Version { get; }
+
     /// <summary>
     /// The file extensions it reads, matched without case against the end of a file name, so <c>.png</c> also matches
     /// <c>.normal.png</c>.

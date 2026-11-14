@@ -54,7 +54,6 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
     /// How the light is traced, which <see cref="Render"/> reads each frame.
     /// </summary>
     private readonly GlobalIlluminationSettings _settings;
-    private readonly Threads _threads;
     private readonly Probes _probes;
     private readonly TracedDiffuse _diffuse;
     private readonly TracedReflections _reflections;
@@ -78,20 +77,20 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
     /// The wait of the world that arrived for the indirect light to settle, which the frame that settles the first
     /// view or traces nothing for good completes. Render thread.
     /// </summary>
-    private TaskCompletionSource? _settling;
+    private readonly SettleWait _settling;
 
     /// <summary>
     /// For each view, by its number: the size its history was last traced at, none while it holds nothing of the
-    /// world, the size its reflections were last traced at, none while they are off, and the frames traced since the
-    /// probes started afresh. Render thread.
+    /// world, the size its reflections were last traced at, none while they are off, and the frames its history blended
+    /// since the probes started afresh. Render thread.
     /// </summary>
-    private readonly List<((int Width, int Height)? Traced, (int Width, int Height)? Reflected, int Frames)> _views =
+    private readonly List<((int Width, int Height)? Traced, (int Width, int Height)? Reflected, int Blended)> _views =
     [];
 
     internal Renderer(GlobalIlluminationSettings settings, AssetManager assets, Threads threads, IGraphicsApi gpu)
     {
         _settings = settings;
-        _threads = threads;
+        _settling = new SettleWait(threads);
         _probes = new Probes(assets);
         _diffuse = new TracedDiffuse(assets);
         _reflections = new TracedReflections(assets);
@@ -141,7 +140,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         if (!_settings.IsIndirectLightOn)
         {
             _built.TrySetResult();
-            _settling?.TrySetResult();
+            _settling.End();
             _views[graph.View] = default;
 
             return null;
@@ -154,7 +153,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
             if (graph.IsMakerOut<GpuView>())
             {
                 _built.TrySetResult();
-                _settling?.TrySetResult();
+                _settling.End();
             }
 
             return null;
@@ -167,7 +166,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         {
             _built.TrySetResult();
             if (!graph.Features.HasRayQuery || graph.IsMakerOut<TracedWorld>())
-                _settling?.TrySetResult();
+                _settling.End();
 
             _views[graph.View] = default;
 
@@ -200,7 +199,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
 
         if (shaders == GpuState.Failed)
         {
-            _settling?.TrySetResult();
+            _settling.End();
             graph.Fail(
                 RenderFailure.Shader,
                 "Indirect light is not traced",
@@ -214,7 +213,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         // Where rays see no instance, the probes start afresh once they do.
         if (traced.Structure.IsNone)
         {
-            _settling?.TrySetResult();
+            _settling.End();
             _views[graph.View] = default;
 
             return null;
@@ -228,7 +227,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         if (!gpu.HasHistory && _views[graph.View].Traced == tracedSize)
             _views[graph.View] = default;
 
-        ((int Width, int Height)? lastTraced, (int Width, int Height)? lastReflected, int lastFrames) = _views[
+        ((int Width, int Height)? lastTraced, (int Width, int Height)? lastReflected, int lastBlended) = _views[
             graph.View
         ];
         bool hasHistory = lastTraced == tracedSize;
@@ -237,8 +236,9 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
             : [];
 
         // A new traced size starts the history afresh, but not the probes, which settle from where they are.
-        int frames = lastTraced is null ? 1 : lastFrames + 1;
-        bool isSettling = frames <= GetSettleFrames();
+        int blended = lastTraced is null ? 0 : lastBlended + 1;
+        int settleFrames = GetSettleFrames();
+        bool isSettling = blended < settleFrames;
         GIView view = new(
             graph,
             gpu,
@@ -266,7 +266,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         Result asked = Result.FindFailure(constants, probes, diffuse, reflections, depth, depthHistory, sampler);
         if (!asked.Ok)
         {
-            _settling?.TrySetResult();
+            _settling.End();
             graph.Fail(RenderFailure.Resource, "Indirect light is not traced", asked.Error);
 
             return null;
@@ -321,9 +321,9 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
             _reflections.Record(view, grid, gi);
 
         (int Width, int Height)? reflected = isReflectionsOn ? tracedSize : null;
-        _views[graph.View] = (tracedSize, reflected, frames);
-        if (graph.View == 0 && frames >= GetSettleFrames())
-            _settling?.TrySetResult();
+        _views[graph.View] = (tracedSize, reflected, blended);
+        if (graph.View == 0 && blended >= settleFrames)
+            _settling.End();
 
         return new IndirectLight(gi.Diffuse.Blend.Light, gi.Reflections.Blend.Light, grid.Probes, grid.Depth);
     }
@@ -336,13 +336,7 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
     /// or traces nothing for good: no view, no rays, indirect light off, a pass that failed, or no instance that rays
     /// see. It waits while the world as rays see it or the shaders are not built yet.
     /// </summary>
-    public async Task OnDomainArrivedAsync(CancellationToken cancel)
-    {
-        await _threads.Enter(EngineThread.Render);
-        TaskCompletionSource settling = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        _settling = settling;
-        await settling.Task.WaitAsync(cancel).ConfigureAwait(false);
-    }
+    public Task OnDomainArrivedAsync(CancellationToken cancel) => _settling.WaitAsync(cancel);
 
     /// <summary>
     /// The frames a view takes to settle after its probes start afresh: as many as its probes need to get their first

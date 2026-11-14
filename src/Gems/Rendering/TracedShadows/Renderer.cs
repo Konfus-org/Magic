@@ -79,13 +79,11 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
     /// The wait of the world that arrived for the shadows to settle, which the frame that blends enough frames or
     /// traces none completes. Render thread.
     /// </summary>
-    private TaskCompletionSource? _settling;
-
-    private readonly Threads _threads;
+    private readonly SettleWait _settling;
 
     internal Renderer(TracedShadowsSettings settings, AssetManager assets, Threads threads)
     {
-        _threads = threads;
+        _settling = new SettleWait(threads);
         _settings = settings;
         _traceShader = PassShaders.GetEntry(assets, "TraceShadows", "TraceShadows");
         _classifyShader = PassShaders.GetEntry(assets, "DenoiseShadows", "ClassifyShadows");
@@ -120,7 +118,7 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
         );
         if (state == GpuState.Failed)
         {
-            _settling?.TrySetResult();
+            _settling.End();
             graph.Fail(RenderFailure.Shader, "Shadows are not traced", "a shader of the shadows was not built.");
         }
 
@@ -179,7 +177,7 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
         );
         if (!asked.Ok)
         {
-            _settling?.TrySetResult();
+            _settling.End();
             graph.Fail(RenderFailure.Resource, "Shadows are not traced", asked.Error);
 
             return null;
@@ -196,7 +194,7 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
         blended = hasHistory ? blended + 1 : 0;
         _traced[graph.View] = (width, height, blended);
         if (blended >= SettleFrames)
-            _settling?.TrySetResult();
+            _settling.End();
 
         ShadowDenoiseConstants denoise = new()
         {
@@ -339,7 +337,7 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
             || graph.IsMakerOut<GpuView>()
             || graph.IsMakerOut<TracedWorld>()
         )
-            _settling?.TrySetResult();
+            _settling.End();
     }
 
     public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel) =>
@@ -349,13 +347,7 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
     /// Returns once the shadows of a view blended enough frames of the world that arrived, or at once while it traces
     /// none.
     /// </summary>
-    public async Task OnDomainArrivedAsync(CancellationToken cancel)
-    {
-        await _threads.Enter(EngineThread.Render);
-        TaskCompletionSource settling = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        _settling = settling;
-        await settling.Task.WaitAsync(cancel).ConfigureAwait(false);
-    }
+    public Task OnDomainArrivedAsync(CancellationToken cancel) => _settling.WaitAsync(cancel);
 }
 
 /// <summary>

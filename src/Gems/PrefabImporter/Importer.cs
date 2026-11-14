@@ -28,6 +28,8 @@ public sealed class Importer : IAssetImporter<Prefab>
 
     public ImmutableArray<string> Extensions { get; } = [".prefab"];
 
+    public int Version => 1;
+
     public async Task<Result<Prefab>> ImportAsync(
         AssetFile file,
         IProgress<LoadProgress>? progress,

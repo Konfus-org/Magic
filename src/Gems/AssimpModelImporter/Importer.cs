@@ -51,6 +51,8 @@ public sealed unsafe class Importer : IAssetImporter<Model>
 
     public ImmutableArray<string> Extensions { get; } = [".fbx", ".glb", ".gltf", ".obj"];
 
+    public int Version => 1;
+
     public Task<Result<Model>> ImportAsync(
         AssetFile file,
         IProgress<LoadProgress>? progress,

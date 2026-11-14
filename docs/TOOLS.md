@@ -106,8 +106,9 @@ From the root of the repository, run `Magic new gem Foo -o src/Gems/Foo`. Or, in
 3. Give the gem a name.
 4. Set its location to `src/Gems`.
 
-The template makes `src/Gems/Foo/Foo.csproj`, `EntryPoint.cs` and a part that logs that the gem runs, and adds the
-project to the `Gems` folder of the solution. The csproj of the gem states its `Description`, `Version` and `Authors`.
+The template makes `src/Gems/Foo/Foo.csproj` and `EntryPoint.cs`. It also makes the settings of the gem,
+`FooSettings.cs`, and a part that logs that the gem runs. It adds the project to the `Gems` folder of the solution. The
+csproj of the gem states its `Description`, `Version` and `Authors`.
 
 `Magic new <template> <name>` runs `dotnet new magic-<template>`. It passes on each option that Magic does not know,
 such as `-o`.
@@ -115,13 +116,25 @@ such as `-o`.
 ### Make a sample project
 
 1. From the root of the repository, run `Magic new project Foo -o samples/Foo`.
-2. Run `dotnet sln src/Magic.slnx add samples/Foo/Samples.Foo.csproj --solution-folder Samples`.
+2. Run `dotnet sln src/Magic.slnx add samples/Foo/Samples.Foo.csproj --solution-folder Samples/Foo`.
+3. In `src/Magic.slnx`, add `<File Path="../samples/Foo/Foo.magic" />` to the `/Samples/Foo/` folder.
 
-In Visual Studio, right-click the `Samples` solution folder and select Add > New Project > Magic Project. Set its
-location to the `samples` folder of the repository.
+Or, in Visual Studio:
+
+1. Right-click the `Samples` solution folder and select Add > New Solution Folder. Give it the name of the sample.
+2. Right-click the new folder and select Add > New Project > Magic Project.
+3. Set its location to the `samples` folder of the repository.
+4. Right-click the new folder and select Add > Existing Item. Select the `.magic` file of the sample.
 
 The template makes `samples/Foo/Foo.magic`, which lists no gems, and `Samples.Foo.csproj`. When you run the csproj, it
 builds Magic and opens the project ([Samples](../README.md#samples)).
+
+The `.magic` file can also name these assets, each as `{ "id": <asset id> }`:
+
+- `entryPoint`: the domain that the run opens first. If it is not set, the run opens the default domain.
+- `loadingScreen`: the domain that shows while a domain replaces the world. If it is not set, the engine's loading
+  screen shows.
+- `player`: the prefab that the run puts at the spawn of a domain. If it is not set, the run puts nothing there.
 
 ## Analyzers
 

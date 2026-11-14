@@ -310,8 +310,8 @@ public sealed class AssetManager : IDisposable
         : null;
 
     /// <summary>
-    /// Which make of <paramref name="asset"/> a load gets: a hash of its file and its <c>.meta</c>; 0 when no file has
-    /// it.
+    /// Which make of <paramref name="asset"/> a load gets: a hash of its file, its <c>.meta</c> and its importer's
+    /// version; 0 when no file has it.
     /// </summary>
     /// <remarks>
     /// Compare it with the version that an asset was loaded at to know whether to load it again.
@@ -327,7 +327,7 @@ public sealed class AssetManager : IDisposable
 
         Result<byte[]> bytes = Files.ReadBytes(file.File);
 
-        return bytes.Ok ? AssetIndex.ComputeVersion(bytes.Value, file.Settings) : 0;
+        return bytes.Ok ? ComputeVersion<T>(bytes.Value, file.Settings) : 0;
     }
 
     /// <summary>
@@ -522,8 +522,10 @@ public sealed class AssetManager : IDisposable
         if (!loaded.Ok)
             return Result.Failure(loaded.Error);
 
+        // Kept under the version the load made it at: before the type's importer is made, the version asked first lacks
+        // the importer's.
         TMade made = await Task.Run(() => preprocessor.Preprocess(loaded.Value), cancel).ConfigureAwait(false);
-        await Caches.WriteAsync(asset.Id, version, made, preprocessor, cancel).ConfigureAwait(false);
+        await Caches.WriteAsync(asset.Id, GetVersion(asset), made, preprocessor, cancel).ConfigureAwait(false);
 
         return Result.Success(made);
     }
@@ -673,7 +675,8 @@ public sealed class AssetManager : IDisposable
 
             AssetImportRun import = GetGeneric(nameof(RunImportAsync), type).CreateDelegate<AssetImportRun>(this);
             AssetBuiltInReader readBuiltIn = GetGeneric(nameof(ReadBuiltIn), type).CreateDelegate<AssetBuiltInReader>();
-            declared.Add(new AssetType(type, import, readBuiltIn));
+            AssetVersionRun version = GetGeneric(nameof(ComputeVersion), type).CreateDelegate<AssetVersionRun>(this);
+            declared.Add(new AssetType(type, import, readBuiltIn, version));
         }
 
         LoadedAssets added;
@@ -957,7 +960,7 @@ public sealed class AssetManager : IDisposable
         if (!bytes.Ok)
             return Fail($"{file.Path} could not be read: {bytes.Error}");
 
-        ulong version = AssetIndex.ComputeVersion(bytes.Value, file.Settings);
+        ulong version = AssetIndex.ComputeVersion(bytes.Value, file.Settings, reader?.Version ?? 0);
         Result<AssetMetadata> metadata = ReadSettings<T>(file.Settings);
         if (!metadata.Ok)
             return new Made(Result.Failure(notAsset + metadata.Error), version);
@@ -1228,6 +1231,18 @@ public sealed class AssetManager : IDisposable
                 );
             }
         }
+    }
+
+    /// <summary>
+    /// The version of the <typeparamref name="T"/> that a file's <paramref name="bytes"/> and
+    /// <paramref name="settings"/> make with the type's importer now.
+    /// </summary>
+    private ulong ComputeVersion<T>(ReadOnlySpan<byte> bytes, JsonElement settings)
+        where T : IAsset<T>
+    {
+        int importer = Loaded.Importers.GetValueOrDefault(typeof(T)) is IAssetImporter<T> reader ? reader.Version : 0;
+
+        return AssetIndex.ComputeVersion(bytes, settings, importer);
     }
 
     /// <summary>

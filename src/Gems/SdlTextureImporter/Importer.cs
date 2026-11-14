@@ -54,6 +54,10 @@ public sealed unsafe class Importer : IAssetImporter<Texture>, ICache<Texture>
     /// <summary>
     /// Raised when the bytes written change shape, or the levels are encoded otherwise.
     /// </summary>
+    /// <remarks>
+    /// It is the version of both the import and the cache, so a raise also makes dirty what preprocessors made of the
+    /// textures.
+    /// </remarks>
     public int Version => 3;
 
     public Task<Result<Texture>> ImportAsync(
