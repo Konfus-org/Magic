@@ -69,10 +69,13 @@ The screenshot shows the scene only. To photograph a failure:
   The capture shows what is drawn onto the window too, such as the banner of a failure and the debug UI. It copies
   the screen, so keep other windows off the window of Magic. It needs Windows.
 
-The camera of HelloWorld turns. To stop it and face the spawn direction, send these lines with `-Commands`:
+The camera of HelloWorld turns. To stop it and face the spawn direction, send these lines with `-Commands`. The
+whole component is written, so the line names the camera's own script beside the one that turns it. A value in JSON
+goes in single quotes, which is what keeps its double quotes, and each of those single quotes is doubled inside the
+single-quoted line of PowerShell:
 
 ```powershell
-tools/Scripts/Screenshot.ps1 -AllowErrors -Window -Commands 'set player.spin.degreesPerSec 0', 'set player.transform.rotation 0.2164 0 0 0.9763'
+tools/Scripts/Screenshot.ps1 -AllowErrors -Window -Commands 'set player.scriptcontainer ''[{"id":100411,"degreesPerSec":0},{"id":100412}]''', 'set player.transform.rotation 0.2164 0 0 0.9763'
 ```
 
 ## Profiling.ps1
