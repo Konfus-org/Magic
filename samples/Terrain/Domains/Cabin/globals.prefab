@@ -1,21 +1,21 @@
 {
     "entities": [
-        {"name": "Spawn", "tags": ["spawn"], "components": {"Transform": {"position": {"x": -2897.898, "y": 63.69, "z": -1816.817}, "rotation": {"x": 0, "y": -0.5373, "z": 0, "w": 0.84339}}}},
+        {"name": "Spawn", "tags": ["spawn"], "components": {"Transform": {"position": {"x": -3074.1, "y": 1151.45, "z": -217.2}, "rotation": {"x": 0, "y": -0.5373, "z": 0, "w": 0.84339}}}},
         {"name": "Sky", "components": {"Sky": {"material": {"id": 4569236087865836549}}}},
         // The sun rises and sets over the door wall, the cabin's -Z, so that from hour 15 to hour 17 it stands
         // over the open doorway and the window beside it, and shines into the room.
         {"name": "Sun", "tags": ["sun"], "components": {"Transform": {"rotation": {"x": 0, "y": 0.84339, "z": 0, "w": 0.5373}}, "DirectionalLight": {"mode": "sun", "color": {"r": 1, "g": 0.96, "b": 0.9}, "intensity": 120000}, "ScriptContainer": [{"id": 100421, "hour": 15, "hoursPerMinute": 1}]}},
         {"name": "Terrain", "components": {"Transform": {}, "Renderer": {"model": {"id": 300001}, "materials": [{"id": 300011}]}}},
-        {"name": "Cabin", "prefab": {"id": 300091}, "components": {"Transform": {"position": {"x": -2897.898, "y": 61.64, "z": -1816.817}, "rotation": {"x": 0, "y": -0.5373, "z": 0, "w": 0.84339}}}},
-        {"prefab": {"id": 300021}, "components": {"Transform": {"position": {"x": -2909.622, "y": 61.922, "z": -1844.679}, "rotation": {"x": 0, "y": 0.51473, "z": 0, "w": 0.85735}, "scale": {"x": 0.988, "y": 0.988, "z": 0.988}}}},
-        {"prefab": {"id": 300023}, "components": {"Transform": {"position": {"x": -2867.309, "y": 61.203, "z": -1827.058}, "rotation": {"x": 0, "y": 0.45341, "z": 0, "w": -0.8913}, "scale": {"x": 0.789, "y": 0.789, "z": 0.789}}}},
-        {"prefab": {"id": 300021}, "components": {"Transform": {"position": {"x": -2912.788, "y": 61.124, "z": -1786.693}, "rotation": {"x": 0, "y": 0.70546, "z": 0, "w": -0.70875}, "scale": {"x": 0.966, "y": 0.966, "z": 0.966}}}},
-        {"prefab": {"id": 300023}, "components": {"Transform": {"position": {"x": -2902.762, "y": 61.92, "z": -1850.805}, "rotation": {"x": 0, "y": 0.99983, "z": 0, "w": -0.01868}, "scale": {"x": 1.224, "y": 1.224, "z": 1.224}}}},
-        {"prefab": {"id": 300021}, "components": {"Transform": {"position": {"x": -2873.016, "y": 61.467, "z": -1840.706}, "rotation": {"x": 0, "y": 0.00692, "z": 0, "w": -0.99998}, "scale": {"x": 1.038, "y": 1.038, "z": 1.038}}}},
-        {"prefab": {"id": 300023}, "components": {"Transform": {"position": {"x": -2864.37, "y": 61.311, "z": -1835.037}, "rotation": {"x": 0, "y": 0.70374, "z": 0, "w": -0.71045}, "scale": {"x": 0.796, "y": 0.796, "z": 0.796}}}},
-        {"prefab": {"id": 300023}, "components": {"Transform": {"position": {"x": -2874.244, "y": 60.655, "z": -1787.022}, "rotation": {"x": 0, "y": 0.60342, "z": 0, "w": 0.79742}, "scale": {"x": 0.927, "y": 0.927, "z": 0.927}}}},
-        {"prefab": {"id": 300022}, "components": {"Transform": {"position": {"x": -2919.179, "y": 62.169, "z": -1852.685}, "rotation": {"x": 0, "y": 0.25053, "z": 0, "w": 0.96811}, "scale": {"x": 1.196, "y": 1.196, "z": 1.196}}}},
-        {"prefab": {"id": 300022}, "components": {"Transform": {"position": {"x": -2855.217, "y": 61.06, "z": -1822.662}, "rotation": {"x": 0, "y": 0.02277, "z": 0, "w": 0.99974}, "scale": {"x": 1.181, "y": 1.181, "z": 1.181}}}},
-        {"prefab": {"id": 300023}, "components": {"Transform": {"position": {"x": -2897.731, "y": 60.704, "z": -1773.019}, "rotation": {"x": 0, "y": 0.41479, "z": 0, "w": -0.90992}, "scale": {"x": 0.78, "y": 0.78, "z": 0.78}}}}
+        {"name": "Cabin", "prefab": {"id": 300091}, "components": {"Transform": {"position": {"x": -3074.1, "y": 1149.4, "z": -217.2}, "rotation": {"x": 0, "y": -0.5373, "z": 0, "w": 0.84339}}}},
+        {"prefab": {"id": 300021}, "components": {"Transform": {"position": {"x": -3085.824, "y": 1149.027, "z": -245.062}, "rotation": {"x": 0, "y": 0.51473, "z": 0, "w": 0.85735}, "scale": {"x": 0.988, "y": 0.988, "z": 0.988}}}},
+        {"prefab": {"id": 300023}, "components": {"Transform": {"position": {"x": -3043.511, "y": 1153.755, "z": -227.441}, "rotation": {"x": 0, "y": 0.45341, "z": 0, "w": -0.8913}, "scale": {"x": 0.789, "y": 0.789, "z": 0.789}}}},
+        {"prefab": {"id": 300021}, "components": {"Transform": {"position": {"x": -3088.99, "y": 1155.038, "z": -187.076}, "rotation": {"x": 0, "y": 0.70546, "z": 0, "w": -0.70875}, "scale": {"x": 0.966, "y": 0.966, "z": 0.966}}}},
+        {"prefab": {"id": 300023}, "components": {"Transform": {"position": {"x": -3078.964, "y": 1150.335, "z": -251.188}, "rotation": {"x": 0, "y": 0.99983, "z": 0, "w": -0.01868}, "scale": {"x": 1.224, "y": 1.224, "z": 1.224}}}},
+        {"prefab": {"id": 300021}, "components": {"Transform": {"position": {"x": -3049.218, "y": 1157.215, "z": -241.089}, "rotation": {"x": 0, "y": 0.00692, "z": 0, "w": -0.99998}, "scale": {"x": 1.038, "y": 1.038, "z": 1.038}}}},
+        {"prefab": {"id": 300023}, "components": {"Transform": {"position": {"x": -3040.572, "y": 1157.784, "z": -235.42}, "rotation": {"x": 0, "y": 0.70374, "z": 0, "w": -0.71045}, "scale": {"x": 0.796, "y": 0.796, "z": 0.796}}}},
+        {"prefab": {"id": 300023}, "components": {"Transform": {"position": {"x": -3050.446, "y": 1148.312, "z": -187.405}, "rotation": {"x": 0, "y": 0.60342, "z": 0, "w": 0.79742}, "scale": {"x": 0.927, "y": 0.927, "z": 0.927}}}},
+        {"prefab": {"id": 300022}, "components": {"Transform": {"position": {"x": -3095.381, "y": 1147.113, "z": -253.068}, "rotation": {"x": 0, "y": 0.25053, "z": 0, "w": 0.96811}, "scale": {"x": 1.196, "y": 1.196, "z": 1.196}}}},
+        {"prefab": {"id": 300022}, "components": {"Transform": {"position": {"x": -3031.419, "y": 1158.618, "z": -223.045}, "rotation": {"x": 0, "y": 0.02277, "z": 0, "w": 0.99974}, "scale": {"x": 1.181, "y": 1.181, "z": 1.181}}}},
+        {"prefab": {"id": 300023}, "components": {"Transform": {"position": {"x": -3073.933, "y": 1157.048, "z": -173.402}, "rotation": {"x": 0, "y": 0.41479, "z": 0, "w": -0.90992}, "scale": {"x": 0.78, "y": 0.78, "z": 0.78}}}}
     ]
 }

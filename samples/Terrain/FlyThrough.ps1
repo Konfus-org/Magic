@@ -64,11 +64,14 @@ $fourthWall = '{"x":0,"y":0.9763,"z":0,"w":-0.21644}'
 # The heading toward the door, pitched 30 degrees down, so the floor under the window fills the picture.
 $underWindow = '{"x":0.13907,"y":0.81465,"z":-0.21829,"w":0.51899}'
 
-$outside = '{"x":-2891.282,"y":63.19,"z":-1819.902}'
-$approach = '{"x":-2893.21,"y":63.49,"z":-1819.003}'
-$doorway = '{"x":-2895.138,"y":63.79,"z":-1818.104}'
-$inside = '{"x":-2896.518,"y":63.79,"z":-1817.461}'
-$middle = '{"x":-2897.898,"y":63.79,"z":-1816.817}'
+# The stops stand on the way in through the door, 7.3, 5.17, 3.05 and 1.52 m out from the room centre along the
+# cabin's local -Z. The two outside hold the eye 1.65 m over the ground there; from the doorway in, 1.65 m over the
+# floor, which lies 0.5 m over the cabin's base of 1149.4 m.
+$outside = '{"x":-3067.484,"y":1151.02,"z":-220.285}'
+$approach = '{"x":-3069.414,"y":1150.96,"z":-219.385}'
+$doorway = '{"x":-3071.34,"y":1151.55,"z":-218.487}'
+$inside = '{"x":-3072.72,"y":1151.55,"z":-217.844}'
+$middle = '{"x":-3074.1,"y":1151.55,"z":-217.2}'
 
 $way = @(
     @{ Name = 'outside the door'; Position = $outside; Rotation = $intoCabin },
