@@ -27,7 +27,8 @@ static const uint TraceGroupSize = 64u;
 // The rays all the probes trace in a frame, C#'s Probes.RayBudget: at least the most one probe traces.
 static const uint ProbeRayBudget = 131072u;
 
-// The most rays a probe traces in a frame, and the step its count of rays moves in, also the fewest it asks for.
+// The most rays a probe traces in a frame, C#'s Probes.MaxProbeRays, and the step its count of rays moves in, also the
+// fewest it asks for.
 static const uint MaxProbeRays = 256u;
 static const uint ProbeRayStep = 4u;
 

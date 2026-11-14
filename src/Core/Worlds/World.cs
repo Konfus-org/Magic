@@ -102,11 +102,11 @@ public sealed class World : IEcs, IDisposable
     /// <summary>
     /// What the load that runs loads, as the debug UI shows it each frame; null while none runs. Any thread.
     /// </summary>
-    private volatile string? _loading;
+    private volatile string? _loadingHeader;
 
     /// <summary>
-    /// What the load that runs does now, indented as the debug UI shows it under <see cref="_loading"/>; null until the
-    /// load's first step. Any thread.
+    /// What the load that runs does now, indented as the debug UI shows it under <see cref="_loadingHeader"/>; null
+    /// until the load's first step. Any thread.
     /// </summary>
     private volatile string? _loadingStep;
 
@@ -941,9 +941,9 @@ public sealed class World : IEcs, IDisposable
     /// <remarks>
     /// What is there leaves, the globals too when <paramref name="isClearingGlobals"/> is true, and the loading screen
     /// comes in its place. The gems clean up after what left and prepare what comes. When they are ready and no asset
-    /// is in load, the loading screen fades into the cover, or goes to it at once when the world was empty. Behind the full cover, the loading screen leaves, the gems clean up after it,
-    /// <paramref name="arrive"/> makes what comes, and the gems settle it. Then the cover fades into it.
-    /// <see cref="IsLoading"/> is true while it runs.
+    /// is in load, the loading screen fades into the cover, or goes to it at once when the world was empty. Behind the
+    /// full cover, the loading screen leaves, the gems clean up after it, <paramref name="arrive"/> makes what comes,
+    /// and the gems settle it. Then the cover fades into it. <see cref="IsLoading"/> is true while it runs.
     /// </remarks>
     private async Task ReplaceAsync(
         ImmutableArray<ImmutableArray<IComponent>> arriving,
@@ -1120,7 +1120,7 @@ public sealed class World : IEcs, IDisposable
     [Conditional("DEBUG")]
     private void DrawLoading()
     {
-        if (_loading is not { } loading)
+        if (_loadingHeader is not { } loading)
             return;
 
         _debugUI?.Text(loading);
@@ -1136,7 +1136,7 @@ public sealed class World : IEcs, IDisposable
     {
         Log.Info(loading);
         _loadingStep = null;
-        _loading = loading;
+        _loadingHeader = loading;
     }
 
     /// <summary>
@@ -1151,7 +1151,7 @@ public sealed class World : IEcs, IDisposable
 
     private void HideLoading()
     {
-        _loading = null;
+        _loadingHeader = null;
         _loadingStep = null;
     }
 

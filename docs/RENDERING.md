@@ -51,7 +51,8 @@ The renderer. It has four render steps:
 2. The view, one time for each view: it makes the targets and the frame buffer of the view, as its `GpuView`.
 3. The shading, one time for each view: it lights the GBuffer that a geometry gem drew, with the sun, the sky and the
    lights. Then it runs the `PictureEffects` of the frame and writes the picture into the target of the view.
-4. The failure banner: it draws the render failures of the frame over the top of the window.
+4. The failure banner: it fills the window with black under the views. Then it draws the cover of a load and the
+   render failures of the frame over the window.
 
 The gem also holds the types that the rendering gems share. List it in the `.magic` file after the GPU provider, the
 ECS, the model importer and the texture importer, with a gem that draws its geometry. The settings are in
@@ -63,11 +64,19 @@ ECS, the model importer and the texture importer, with a gem that draws its geom
   loads again when a frame draws it.
 - When a domain replaces the world, the loading screen stays until all that the new world draws is on the GPU or
   failed. This includes the passes of the gem.
-- During a load, the renderer draws one colour over the window at the world's cover opacity. The debug UI and the
-  failure banner show over it. The colour is black when the sun or the moon of the new world gives little light,
-  and an off-white when it gives much light.
+- Then the cover fades in over the loading screen. The cover is one colour over the window. The debug UI and the
+  failure banner show over it. An empty world gets the full cover at once.
+- Behind the full cover, the new world comes in the place of the loading screen, and its time stands still. Each gem
+  that blends its picture over frames starts its history again and settles: the shadows, the indirect light, the air
+  and the upscaling.
+- The cover fades out when each gem settled. A gem that does not settle in time does not stop the load. The world
+  then shows as it is, and the log has a warning.
+- The cover is black when the sun or the moon of the new world gives little light, and an off-white when it gives
+  much light.
 - While the cover is full, the post effects keep no history, so the exposure takes the value of each frame. When the
   cover fades, the exposure adapts from the settled picture.
+- Each frame, the renderer fills the window with black before the views draw. A part of the window that no view draws
+  shows black.
 
 ### Cameras
 

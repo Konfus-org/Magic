@@ -26,16 +26,11 @@ internal sealed class Probes(AssetManager assets)
     private const int MaxProbesUp = 16;
 
     /// <summary>
-    /// The rays all the probes trace in a frame, and the texels along a probe's irradiance tile: the twins of
-    /// <c>UpdateProbes.slang</c>'s.
+    /// The rays all the probes trace in a frame, the texels along a probe's irradiance tile, and the most rays a probe
+    /// traces in a frame, which it traces before it first blends its rays: the twins of <c>UpdateProbes.slang</c>'s.
     /// </summary>
     private const int RayBudget = 131072;
     private const int IrradianceTexels = 8;
-
-    /// <summary>
-    /// The rays a probe traces before it first blends its rays: the twin of <c>UpdateProbes.slang</c>'s
-    /// <c>MaxProbeRays</c>.
-    /// </summary>
     private const int MaxProbeRays = 256;
 
     /// <summary>

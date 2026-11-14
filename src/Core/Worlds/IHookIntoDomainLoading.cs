@@ -8,9 +8,9 @@ namespace Magic.Worlds;
 /// save replaces it.
 /// </summary>
 /// <remarks>
-/// The loading screen or the cover shows while the hooks run. The world waits for the hook of each gem before it continues, so
-/// nothing left over shows and nothing half ready shows. Each hook starts on the game thread. Implement only the hooks
-/// that the gem needs.
+/// The loading screen or the cover shows while the hooks run. The world waits for the hook of each gem before it
+/// continues, so nothing left over shows and nothing half ready shows. Each hook starts on the game thread. Implement
+/// only the hooks that the gem needs.
 /// </remarks>
 public interface IHookIntoDomainLoading
 {

@@ -29,8 +29,9 @@ public readonly record struct GlobalIlluminationInput(GpuView? View, TracedWorld
 public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, IHookIntoDomainLoading
 {
     /// <summary>
-    /// What a view takes while it settles, after its probes start afresh: the most diffuse rays, a history that keeps 0.8 a
-    /// frame, so 0.8^14 &lt; 5% of the start is left after 14 frames, and probes that take half of their rays' light.
+    /// What a view takes while it settles, after its probes start afresh: the most diffuse rays, a history that keeps
+    /// 0.8 a frame, so 0.8^14 &lt; 5% of the start is left after 14 frames, and probes that take half of their rays'
+    /// light.
     /// </summary>
     private const int SettleRayCount = 8; // PROTO
     private const float SettleHistory = 0.8f; // PROTO
@@ -74,8 +75,8 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
     private readonly TaskCompletionSource _built = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>
-    /// Ends once the first view settled after the world arrived, or once it traces nothing for good. Made by
-    /// <see cref="OnDomainArrivedAsync"/>, ended by <see cref="Render"/>. Render thread.
+    /// The wait of the world that arrived for the indirect light to settle, which the frame that settles the first
+    /// view or traces nothing for good completes. Render thread.
     /// </summary>
     private TaskCompletionSource? _settling;
 
@@ -344,8 +345,8 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
     }
 
     /// <summary>
-    /// The frames a view takes to settle after its probes start afresh: as many as its probes need to get their first rays
-    /// <see cref="SettleProbeSweeps"/> times, and at least as many as its history needs.
+    /// The frames a view takes to settle after its probes start afresh: as many as its probes need to get their first
+    /// rays <see cref="SettleProbeSweeps"/> times, and at least as many as its history needs.
     /// </summary>
     private int GetSettleFrames() =>
         Math.Max(

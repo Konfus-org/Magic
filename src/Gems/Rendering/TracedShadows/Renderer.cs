@@ -38,7 +38,7 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
     /// each frame's rays (<c>DenoiseShadows.slang</c>), so after 18 the first frames of a world weigh less than a
     /// tenth; the sun's count is full after 8.
     /// </summary>
-    private const int SettleFrames = 18;
+    private const int SettleFrames = 18; // PROTO
 
     private static readonly string[] _filterPassNames = ["Filter shadows 1", "Filter shadows 2"];
 

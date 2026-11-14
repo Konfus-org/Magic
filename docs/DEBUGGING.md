@@ -99,8 +99,8 @@ nothing. It needs a gem that provides `IDebugUI`.
 
 - In a Debug build, the counter shows from the start. In other builds, the counter line shows only while a debug
   window is open.
-- The counter line is the first line. In a Debug build, a load shows what it loads under the counter, and what it does
-  now under that, indented.
+- The counter line is the first line of the debug text. In a Debug build, a load adds two lines under it: what it
+  loads, and, indented, what it does now.
 - The gem collects the numbers at an interval that a setting gives, and only while the counter or the stats window
   shows.
 - The settings of the gem, with the key of each tool, are in `DebugToolsSettings`, in the `Debug` category.
