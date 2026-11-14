@@ -96,13 +96,11 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
     /// The wait of the world that arrived for the air to settle, which the frame that blends enough frames or fills no
     /// air completes. Render thread.
     /// </summary>
-    private TaskCompletionSource? _settling;
-
-    private readonly Threads _threads;
+    private readonly SettleWait _settling;
 
     internal Renderer(AssetManager assets, IEcs ecs, Threads threads)
     {
-        _threads = threads;
+        _settling = new SettleWait(threads);
         _ecs = ecs;
         _scatterShader = PassShaders.GetEntry(assets, "FillAir", "ScatterAir");
         _integrateShader = PassShaders.GetEntry(assets, "FillAir", "IntegrateAir");
@@ -129,7 +127,7 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
         )
         {
             _views.Clear();
-            _settling?.TrySetResult();
+            _settling.End();
 
             return null;
         }
@@ -144,7 +142,7 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
         Result<GpuSampler> sampler = graph.Sampler(new SamplerDescription { Wrap = TextureWrap.Clamp });
         if (Result.FindFailure(scattering, history, air, sampler) is { Ok: false } failed)
         {
-            _settling?.TrySetResult();
+            _settling.End();
             graph.Fail(RenderFailure.Resource, "Air is not filled", failed.Error);
 
             return null;
@@ -201,7 +199,7 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
         bool hasHistory = gpu.HasHistory && filled == size;
         blended = hasHistory ? blended + 1 : 0;
         if (blended >= SettleFrames)
-            _settling?.TrySetResult();
+            _settling.End();
 
         // The scattering pass's w is the weight of this frame's cell, the integrating pass's the air.
         uint last = hasHistory ? history.Value.Id : 0;
@@ -261,7 +259,7 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
 
         // A view maker that is out leaves the air no view to fill for good: the failure is already told.
         if (graph.IsMakerOut<GpuView>())
-            _settling?.TrySetResult();
+            _settling.End();
     }
 
     public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel) =>
@@ -271,13 +269,7 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
     /// Returns once the volume of a view blended enough frames of the world that arrived, or at once while it fills no
     /// air.
     /// </summary>
-    public async Task OnDomainArrivedAsync(CancellationToken cancel)
-    {
-        await _threads.Enter(EngineThread.Render);
-        TaskCompletionSource settling = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        _settling = settling;
-        await settling.Task.WaitAsync(cancel).ConfigureAwait(false);
-    }
+    public Task OnDomainArrivedAsync(CancellationToken cancel) => _settling.WaitAsync(cancel);
 
     /// <summary>
     /// Publishes the world's weather for the frame's air.

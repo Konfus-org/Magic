@@ -274,7 +274,9 @@ internal sealed class GpuResources(
                     meshes.ToImmutable()
                 )
             );
-            Log.Info($"{name}: {made.Vertices.Length} vertices, {made.Indices.Length / 3} triangles.");
+            Log.Verbose(
+                $"Model loaded on the GPU: {name}, {made.Vertices.Length} vertices, {made.Indices.Length / 3} triangles."
+            );
         }
 
         Result<GpuBuffer> vertices = _vertices.GetBuffer(graph);

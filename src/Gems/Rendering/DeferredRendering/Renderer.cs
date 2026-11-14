@@ -1069,6 +1069,26 @@ public sealed class Renderer
     }
 
     /// <summary>
+    /// Fills the window with black before the views draw into it, with no shader.
+    /// </summary>
+    /// <remarks>
+    /// A part of the window that no view draws this frame, or the whole window while the world's step draws nothing,
+    /// then shows black and not an older frame that the overlay draws over.
+    /// </remarks>
+    private static void ClearWindow(RenderGraph graph)
+    {
+        GpuTexture window = graph.WindowTarget;
+        if (window.IsNone)
+            return;
+
+        Result<GpuTexture> black = graph.Texture(
+            new("Black", 1, 1, GpuFormat.R8G8B8A8Unorm, TextureUsages.CopyDestination | TextureUsages.CopySource)
+        );
+        if (black.Ok && graph.Upload(black.Value, [0, 0, 0, 255]))
+            graph.Blit(black.Value, window, RenderStage.Prepare, TextureFilter.Nearest);
+    }
+
+    /// <summary>
     /// Lets the loading domain show when the world's or the view's step is out, fills the window with black under the
     /// views, and draws the cover and the frame's render failures over the window.
     /// </summary>
@@ -1084,7 +1104,7 @@ public sealed class Renderer
         if (!_world.IsLoading)
             _cover.MakeBlack();
 
-        Cover.ClearWindow(graph);
+        ClearWindow(graph);
         _cover.Record(graph, _world.CoverOpacity);
         _banner.Record(graph, frame);
     }
