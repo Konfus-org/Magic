@@ -328,8 +328,9 @@ public sealed class Renderer
 
         // The loading domain shows once the models and materials it waits for are on the GPU, or failed: a model drawn
         // as the failure cube, which is then waited for too; and once the shading's shaders are built, or failed, on
-        // the sky's type and on the open sky, as its frames take either. Its models are asked for here, as the pools
-        // only take them once they are made; an ask for one asked for already does nothing.
+        // the sky's type and on the open sky, as its frames take either; and once the cover's shaders are built, or
+        // failed, as the load fades to the cover next. Its models are asked for here, as the pools only take them once
+        // they are made; an ask for one asked for already does nothing.
         if (_preparing is { } preparing)
         {
             bool isPrepared = !graph.IsAnyLoading(
@@ -352,6 +353,7 @@ public sealed class Renderer
                 _lightViewShader,
                 _showShader
             );
+            isPrepared &= !_cover.IsLoading(graph);
             foreach (Handle<Model> model in preparing.Models)
             {
                 _resources.Get(model);

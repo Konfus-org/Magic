@@ -93,12 +93,24 @@ internal sealed class Cover(AssetManager assets)
     }
 
     /// <summary>
+    /// Gets whether a shader of the cover is still being built; a failed one counts as done.
+    /// </summary>
+    public bool IsLoading(RenderGraph graph) => graph.IsAnyLoading(_shaders.Vertex, _shaders.Pixel);
+
+    /// <summary>
     /// Records the cover over the window at <paramref name="opacity"/>, which the shader makes even to the eye.
     /// </summary>
+    /// <remarks>
+    /// It asks for its shaders each frame, at any opacity, so they are built before the first fade.
+    /// </remarks>
     public void Record(RenderGraph graph, float opacity)
     {
+        GpuState shaders = graph.GetState(_shaders.Vertex, _shaders.Pixel);
+        if (shaders == GpuState.Failed)
+            graph.Fail(RenderFailure.Shader, "The load is not covered", "a shader of the cover was not built.");
+
         GpuTexture target = graph.WindowTarget;
-        if (opacity <= 0 || target.IsNone || graph.GetState(_shaders.Vertex, _shaders.Pixel) != GpuState.Ready)
+        if (opacity <= 0 || target.IsNone || shaders != GpuState.Ready)
             return;
 
         Result<GpuBuffer> indices = graph.Buffer(new("Cover indices", 3 * sizeof(uint), BufferUsages.Index));
