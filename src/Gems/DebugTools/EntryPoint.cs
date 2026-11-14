@@ -22,4 +22,8 @@ public sealed class EntryPoint(DebugToolsSettings settings, Settings allSettings
     public void Dispose() => _debugWindows.Dispose();
 
     public void Update(in Frame frame) => _debugWindows.Update();
+
+    // The debug UI's gem takes the frame's lines in its own late update, which runs before this gem's, as this gem
+    // needs it.
+    public void LateUpdate(in Frame frame) => _debugWindows.ReportCounter();
 }

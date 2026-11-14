@@ -54,9 +54,6 @@ internal sealed class DebugWindows(DebugToolsSettings settings, Settings allSett
             _stats.Refresh(_metrics.Collect());
         }
 
-        if (settings.IsCounterShown)
-            ui.Text(_stats.CounterLine);
-
         bool isStatsOpen = settings.IsStatsOpen;
         _stats.Update(ref isStatsOpen);
         if (isStatsOpen != settings.IsStatsOpen)
@@ -68,5 +65,18 @@ internal sealed class DebugWindows(DebugToolsSettings settings, Settings allSett
         _settingsWindow.Update(ref isSettingsOpen);
         if (isSettingsOpen != wasSettingsOpen)
             settings.IsSettingsOpen = isSettingsOpen;
+    }
+
+    /// <summary>
+    /// Has the debug UI show the frame rate and memory line, while it shows, from the next frame.
+    /// </summary>
+    /// <remarks>
+    /// Call it after the debug UI took the frame's lines: the line is then the first reported for the next frame, so it
+    /// shows over every line that Core and the gems report in that frame.
+    /// </remarks>
+    internal void ReportCounter()
+    {
+        if (settings.IsCounterShown)
+            ui.Text(_stats.CounterLine);
     }
 }

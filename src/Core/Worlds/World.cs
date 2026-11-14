@@ -100,7 +100,13 @@ public sealed class World : IEcs, IDisposable
     private IDebugUI? _debugUI;
 
     /// <summary>
-    /// What the load that runs does now, as the debug UI shows it each frame; null while none runs. Any thread.
+    /// What the load that runs loads, as the debug UI shows it each frame; null while none runs. Any thread.
+    /// </summary>
+    private volatile string? _loading;
+
+    /// <summary>
+    /// What the load that runs does now, indented as the debug UI shows it under <see cref="_loading"/>; null until the
+    /// load's first step. Any thread.
     /// </summary>
     private volatile string? _loadingStep;
 
@@ -445,7 +451,7 @@ public sealed class World : IEcs, IDisposable
         if (_ecs is { } ecs)
             MaterialSet.SweepIfDue(ecs);
 
-        DrawLoadingStep();
+        DrawLoading();
 
         // Let a replace waiting for this frame go on.
         TaskCompletionSource starting = _frameStarting;
@@ -756,7 +762,7 @@ public sealed class World : IEcs, IDisposable
         }
         finally
         {
-            _loadingStep = null;
+            HideLoading();
             _turn.Release();
         }
     }
@@ -901,7 +907,8 @@ public sealed class World : IEcs, IDisposable
         if (!HasEcs)
             return Result.Failure("no gem the project lists provides the ECS.");
 
-        ShowLoadingStep($"Loading {GetName(domain)}...");
+        ShowLoading($"Loading {GetName(domain)}...");
+        ShowLoadingStep("Reading...");
         Result<DomainRead> read = await ReadDomainAsync(domain, progress, cancel).ConfigureAwait(false);
         if (!read.Ok)
             return Result.Failure(read.Error);
@@ -1042,7 +1049,7 @@ public sealed class World : IEcs, IDisposable
             await _threads.Enter(EngineThread.Game);
             GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
 
-            _loadingStep = null;
+            HideLoading();
             await FadeCoverAsync(1, 0, cancel).ConfigureAwait(false);
         }
         finally
@@ -1107,24 +1114,45 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
-    /// Has the debug UI show what the load that runs does now, in this frame. Debug builds only, as the lines logged
-    /// to show on screen.
+    /// Has the debug UI show what the load that runs loads, and under it what it does now, in this frame. Debug builds
+    /// only, as the lines logged to show on screen.
     /// </summary>
     [Conditional("DEBUG")]
-    private void DrawLoadingStep()
+    private void DrawLoading()
     {
+        if (_loading is not { } loading)
+            return;
+
+        _debugUI?.Text(loading);
         if (_loadingStep is { } step)
             _debugUI?.Text(step);
     }
 
     /// <summary>
-    /// Logs <paramref name="step"/>, what the load does from now, and has the debug UI show it each frame until the
-    /// next step or the end of the load.
+    /// Logs <paramref name="loading"/>, what the load that starts loads, and has the debug UI show it each frame until
+    /// the load ends.
+    /// </summary>
+    private void ShowLoading(string loading)
+    {
+        Log.Info(loading);
+        _loadingStep = null;
+        _loading = loading;
+    }
+
+    /// <summary>
+    /// Logs <paramref name="step"/>, what the load does from now, and has the debug UI show it under what loads each
+    /// frame until the next step or the end of the load.
     /// </summary>
     private void ShowLoadingStep(string step)
     {
         Log.Info(step);
-        _loadingStep = step;
+        _loadingStep = $"    {step}";
+    }
+
+    private void HideLoading()
+    {
+        _loading = null;
+        _loadingStep = null;
     }
 
     /// <summary>
@@ -1182,10 +1210,11 @@ public sealed class World : IEcs, IDisposable
         if (!HasEcs)
             return Result.Failure("no gem the project lists provides the ECS.");
 
+        ShowLoading($"Loading a save of {string.Join(", ", saved.Domains.Select(GetName))}...");
         ImmutableArray<DomainRead>.Builder reading = ImmutableArray.CreateBuilder<DomainRead>(saved.Domains.Length);
         foreach (Handle<Domain> domain in saved.Domains)
         {
-            ShowLoadingStep($"Loading {GetName(domain)}...");
+            ShowLoadingStep($"Reading {GetName(domain)}...");
             Result<DomainRead> read = await ReadDomainAsync(domain, progress, cancel).ConfigureAwait(false);
             if (!read.Ok)
                 return Result.Failure($"{GetName(domain)} does not open: {read.Error}");
