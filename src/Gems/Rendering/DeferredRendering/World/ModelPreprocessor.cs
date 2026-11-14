@@ -21,7 +21,7 @@ internal sealed class ModelPreprocessor : IAssetPreprocessor<Model, MeshDerived>
     /// <summary>
     /// Raised when the bytes written change shape, or what they hold is made otherwise.
     /// </summary>
-    public int Version => 17;
+    public int Version => 18;
 
     public MeshDerived Preprocess(Model asset)
     {

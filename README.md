@@ -38,7 +38,9 @@ line. A typed option can leave out its leading `--`.
 - `open <path>` and `headless false` restart the run.
 - `get <path>` and `set <path> <value>` read and change the values of an entity. The path starts with the tag or the
   id of the entity. Each next part is a name or its initials, as in `set player.camera.fov 100` or
-  `get player.transform`.
+  `get player.transform`. A path that ends at a component sets the whole component from JSON in single quotes, which
+  keep its double quotes, as in `set sun.scriptcontainer '[{"id":100421,"hour":12}]'`. A doubled quote inside a quoted
+  word is one quote of the word.
 - A setting of a gem has the path `Category.Member`, as in `set Rendering.Resolution 2560 1440`. `get` alone lists all
   the settings, and `get Rendering` lists one category.
 - `save settings` keeps the settings that are not at their defaults, for this user. Magic opens the project with them

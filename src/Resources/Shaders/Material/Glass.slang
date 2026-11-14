@@ -5,7 +5,6 @@
 module "Material/Glass";
 
 import Core.Heap;
-import Core.Math;
 import Surface.Surface;
 import Material.IMaterial;
 
@@ -28,14 +27,7 @@ public struct Glass : IMaterial
         if (colorMap.id != 0u)
             base *= colorMap.SampleGrad(colorMapSampler, inputs.uv, inputs.uvDdx, inputs.uvDdy);
 
-        float3 normal = inputs.normal;
-        if (normalMap.id != 0u)
-        {
-            float3 bent = normalMap.SampleGrad(normalMapSampler, inputs.uv, inputs.uvDdx, inputs.uvDdy).xyz * 2.0 - 1.0;
-            float3 bitangent = cross(inputs.normal, inputs.tangent) * inputs.tangentSign;
-            float3 shaded = inputs.tangent * bent.x + bitangent * bent.y + inputs.normal * bent.z;
-            normal = NormalizeSafe(shaded, inputs.normal);
-        }
+        float3 normal = inputs.SampleNormal(normalMap, normalMapSampler);
 
         SurfaceOutputs surface;
         surface.baseColor = base.rgb;

@@ -21,7 +21,7 @@ internal sealed class ClusterPreprocessor : IAssetPreprocessor<Model, ModelClust
     /// <summary>
     /// Raised when the bytes written change shape, or the hierarchy is built otherwise.
     /// </summary>
-    public int Version => 3;
+    public int Version => 4;
 
     public ModelClusters Preprocess(Model asset) => ClusterBuilder.Build(asset);
 
