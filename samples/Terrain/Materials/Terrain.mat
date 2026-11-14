@@ -1,16 +1,10 @@
 {
-    "shader": {
-        "id": 10001
-    },
+    "shader": { "id": 10001 },
     "params": {
-        "color": {
-            "r": 0.3,
-            "g": 0.32,
-            "b": 0.17,
-            "a": 1
-        },
-        "roughness": {
-            "x": 0.95
-        }
+        "color": { "r": 1, "g": 1, "b": 1, "a": 1 },
+        "roughness": { "x": 1 },
+        "colorMap": { "texture": { "id": 300121 } },
+        "normalMap": { "texture": { "id": 300122 } },
+        "ormMap": { "texture": { "id": 300123 } }
     }
 }

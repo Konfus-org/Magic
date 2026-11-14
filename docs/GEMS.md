@@ -130,6 +130,8 @@ Reads FBX, glTF and OBJ files into models. Provides `IAssetImporter<Model>`.
 - The importer puts all the nodes of a file into one model in the frame of the engine. This frame is left-handed, with
   +Y up and one metre for each unit. Triangles are clockwise when seen from outside.
 - If a file has no normals or tangents, the importer makes them.
+- If a mesh has no texture coordinates, the importer lays them over it from above: a metre of x or of z is
+  a unit of uv, so a material tiles over the mesh by the metre.
 - The model has one mesh for each material slot. The slots are numbered in the order that the file first uses its
   materials. The number of slots stops at the number that a renderer has.
 - The `origin` in the `.meta` file is the point that the importer moves to (0, 0, 0) of the model.

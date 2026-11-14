@@ -1,0 +1,8 @@
+{
+    "id": 300123,
+    "type": "Texture",
+    "usage": "mask",
+    "wrap": "repeat",
+    "filter": "linear",
+    "hasMipmaps": true
+}
