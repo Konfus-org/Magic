@@ -4,13 +4,13 @@ using Magic.Projects;
 namespace Magic.GemName;
 
 /// <summary>
-/// Logs that the gem runs, once every <paramref name="frames"/> frames.
+/// Logs that the gem runs, one time every <see cref="GemNameSettings.HeartbeatFrames"/> frames.
 /// </summary>
-internal sealed class Heartbeat(int frames)
+internal sealed class Heartbeat(GemNameSettings settings)
 {
     public void Beat(in Frame frame)
     {
-        if (frame.Index % frames == 0)
+        if (settings.HeartbeatFrames > 0 && frame.Index % settings.HeartbeatFrames == 0)
             Log.Info($"GemName is running, at frame {frame.Index}.");
     }
 }
