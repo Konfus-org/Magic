@@ -62,7 +62,10 @@ ECS, the model importer and the texture importer, with a gem that draws its geom
 
 - A model shows when it is on the GPU. A model that nothing drew for `Rendering.ModelKeepSec` leaves the GPU. It
   loads again when a frame draws it.
-- When a domain replaces the world, the loading screen stays until all that the new world draws is on the GPU or
+- When a domain replaces a world that shows, the cover fades in over that world. Behind the full cover, the loading
+  screen comes in its place. Then the cover fades out into the loading screen. Without a world that shows, the
+  loading screen shows at once.
+- The loading screen stays until all that the new world draws is on the GPU or
   failed. This includes the passes of the gem.
 - Then the cover fades in over the loading screen. The cover is one colour over the window. The debug UI and the
   failure banner show over it. An empty world gets the full cover at once.

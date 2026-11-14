@@ -152,7 +152,7 @@ public sealed class World : IEcs, IDisposable
     /// Whether a domain or a saved world replaces what is in the world.
     /// </summary>
     /// <remarks>
-    /// It is true from when the loading screen shows until the cover faded into what replaced the world.
+    /// It is true from when the load starts to fade the world out until the cover faded into what replaced it.
     /// </remarks>
     public bool IsLoading { get; private set; }
 
@@ -160,8 +160,9 @@ public sealed class World : IEcs, IDisposable
     /// How much a cover of one colour hides the window: 0 shows the window, 1 hides it.
     /// </summary>
     /// <remarks>
-    /// It is 0 outside a load. During a load, the loading screen fades into the cover, the world changes behind the
-    /// full cover, and the cover fades into the world when the gems settled. Read it on any thread.
+    /// It is 0 outside a load. During a load, the world that shows fades into the cover, the cover fades into the
+    /// loading screen, the loading screen fades into the cover, the world changes behind the full cover, and the cover
+    /// fades into the world when the gems settled. Read it on any thread.
     /// </remarks>
     public float CoverOpacity
     {
@@ -939,11 +940,12 @@ public sealed class World : IEcs, IDisposable
     /// Puts <paramref name="arriving"/> in place of the world, and shows nothing half ready or left from the old world.
     /// </summary>
     /// <remarks>
-    /// What is there leaves, the globals too when <paramref name="isClearingGlobals"/> is true, and the loading screen
-    /// comes in its place. The gems clean up after what left and prepare what comes. When they are ready and no asset
-    /// is in load, the loading screen fades into the cover, or goes to it at once when the world was empty. Behind the
-    /// full cover, the loading screen leaves, the gems clean up after it, <paramref name="arrive"/> makes what comes,
-    /// and the gems settle it. Then the cover fades into it. <see cref="IsLoading"/> is true while it runs.
+    /// The world that shows fades into the cover. Behind the full cover, what is there leaves, the globals too when
+    /// <paramref name="isClearingGlobals"/> is true, the loading screen comes in its place, the gems clean up after what
+    /// left, and the cover fades into the loading screen. An empty world, or a headless run, skips these fades. The
+    /// gems prepare what comes. When they are ready and no asset is in load, the loading screen fades into the cover,
+    /// or goes to it at once when it showed without a fade. Behind the full cover, the loading screen leaves, the gems
+    /// clean up after it, <paramref name="arrive"/> makes what comes, and the gems settle it. Then the cover fades into it. <see cref="IsLoading"/> is true while it runs.
     /// </remarks>
     private async Task ReplaceAsync(
         ImmutableArray<ImmutableArray<IComponent>> arriving,
@@ -970,6 +972,18 @@ public sealed class World : IEcs, IDisposable
                     Log.Warn($"No loading screen is shown: {read.Error}");
             }
 
+            // A world that shows fades into the cover, so that the loading screen takes its place hidden. An empty world
+            // shows nothing, and a headless run shows nothing, so the loading screen takes its place at once.
+            await _threads.Enter(EngineThread.Game);
+            bool wasShowing = false;
+            foreach (EcsChunk chunk in Query())
+            {
+                wasShowing |= !_app.IsHeadless && chunk.Entities.Length > 0;
+            }
+
+            if (wasShowing)
+                await FadeCoverAsync(0, 1, cancel).ConfigureAwait(false);
+
             // Everything in the world leaves but its globals, those too with isClearingGlobals. A global that stays
             // outlives the domain that owned it, so it is owned by none, as an entity made as the game runs.
             await _threads.Enter(EngineThread.Game);
@@ -987,8 +1001,6 @@ public sealed class World : IEcs, IDisposable
                 }
             }
 
-            // An empty world showed nothing, so the loading screen goes to the cover at once, without a fade.
-            bool wasShowing = leaving.Count > 0 || staying.Count > 0;
             DestroyEntities(leaving.ToImmutable());
             foreach (Entity entity in staying)
             {
@@ -1003,7 +1015,15 @@ public sealed class World : IEcs, IDisposable
             IsShowingLoadingScreen = true;
             await RunHooksAsync(hooks => hooks.OnDomainUnloadedAsync(cancel), "cleaning up").ConfigureAwait(false);
 
+            // The cover fades into the loading screen once a frame of it is drawn. Its time stood still behind the full
+            // cover and starts with this fade. Nothing waits for it to settle.
             await _threads.Enter(EngineThread.Game);
+            if (wasShowing)
+            {
+                await WaitUntilDrawnAsync(cancel).ConfigureAwait(false);
+                await FadeCoverAsync(1, 0, cancel).ConfigureAwait(false);
+            }
+
             ShowLoadingStep($"Preparing {arriving.Length} entities...");
             await RunHooksAsync(hooks => hooks.OnDomainLoadingAsync(arriving, cancel), "preparing")
                 .ConfigureAwait(false);
@@ -1032,14 +1052,7 @@ public sealed class World : IEcs, IDisposable
             // what the old world held is held by nothing now.
             FreeKeptScriptState();
 
-            // The next frame publishes what came, wherever this went on in the frame; it has shown once that one is
-            // drawn.
-            uint arrived = PublishedFrame + 1;
-            while (DrawnFrame < arrived)
-            {
-                await WaitForFrameAsync(cancel).ConfigureAwait(false);
-            }
-
+            await WaitUntilDrawnAsync(cancel).ConfigureAwait(false);
             ShowLoadingStep("Settling...");
             await SettleAsync(cancel).ConfigureAwait(false);
 
@@ -1182,6 +1195,19 @@ public sealed class World : IEcs, IDisposable
                     $"{GemRegistry.GetGemName(gem.GetType())} failed {doing} as the world changed, and it goes on without it: {ex}"
                 );
             }
+        }
+    }
+
+    /// <summary>
+    /// Waits until the world as it is now shows: the next frame publishes it, wherever this goes on in the frame, and it
+    /// shows once that frame is drawn. Goes on on the game thread.
+    /// </summary>
+    private async Task WaitUntilDrawnAsync(CancellationToken cancel)
+    {
+        uint published = PublishedFrame + 1;
+        while (DrawnFrame < published)
+        {
+            await WaitForFrameAsync(cancel).ConfigureAwait(false);
         }
     }
 
