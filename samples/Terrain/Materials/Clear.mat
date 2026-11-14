@@ -1,6 +1,5 @@
 // Glass at full clarity: it lets all the light behind it through, so what it draws keeps only a pane's sheen. The
-// cabin's door slot takes it, because the door is a submesh of the cabin's model and only a separate entity can
-// stand open.
+// cabin's door and window slots take it.
 {
     "shader": { "id": 10004 },
     "params": {

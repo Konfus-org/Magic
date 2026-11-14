@@ -20,10 +20,10 @@ namespace Magic.CSharpScripting;
 /// </summary>
 /// <remarks>
 /// Each <see cref="Update"/> starts the C# scripts that have no copy, when the world is not loading, and gives each
-/// copy the values of its slot that changed since it took them. Each hook ends the copies whose entity or handle went. A script in another language is left to the gem for that language.
-/// If a script's class is not found, cannot be made or started, or a hook throws, the error is logged and the handle is
-/// taken off the entity. A behaviour
-/// far from the player's cameras updates less often (<see cref="Pacing"/>), unless its entity is global. Game thread.
+/// copy the values of its slot that changed since it took them. Each hook ends the copies whose entity or handle went.
+/// A script in another language is left to the gem for that language. If a script's class is not found, cannot be
+/// made or started, or a hook throws, the error is logged and the handle is taken off the entity. A behaviour far from
+/// the player's cameras updates less often (<see cref="Pacing"/>), unless its entity is global. Game thread.
 /// </remarks>
 public sealed class Runner(World world, AssetManager assets, IServiceProvider services)
     : IHookIntoWorldSave,
@@ -162,7 +162,13 @@ public sealed class Runner(World world, AssetManager assets, IServiceProvider se
             if (_attached.TryGetValue((entity, slot.Script), out Copy? copy))
                 Tune(copy, slot, entity);
             else if (FindClass(slot.Script) is { } found)
-                StartCopy(found, entity, slot);
+            {
+                Result<IScript> started = found.Ok ? Start(found.Value, entity, slot) : Result.Failure(found.Error);
+                if (started.Ok)
+                    _attached.Add((entity, slot.Script), new Copy(started.Value, slot.Values));
+                else
+                    TakeOff(entity, slot.Script, $"is left off: {started.Error}");
+            }
         }
     }
 
@@ -201,19 +207,6 @@ public sealed class Runner(World world, AssetManager assets, IServiceProvider se
         }
 
         copy.Values = slot.Values;
-    }
-
-    /// <summary>
-    /// Starts a copy of the class of <paramref name="slot"/> on <paramref name="entity"/>, or takes the handle off
-    /// when it does not start.
-    /// </summary>
-    private void StartCopy(Result<Type> found, Entity entity, ScriptSlot slot)
-    {
-        Result<IScript> started = found.Ok ? Start(found.Value, entity, slot) : Result.Failure(found.Error);
-        if (started.Ok)
-            _attached.Add((entity, slot.Script), new Copy(started.Value, slot.Values));
-        else
-            TakeOff(entity, slot.Script, $"is left off: {started.Error}");
     }
 
     /// <summary>

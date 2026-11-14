@@ -23,12 +23,6 @@ namespace Magic.CommandLine;
 /// </remarks>
 internal sealed class Cli
 {
-    /// <summary>
-    /// The quotes that hold a word of a command together: double quotes, and single quotes, which keep the double
-    /// quotes of a value in JSON.
-    /// </summary>
-    private const string Quotes = @"""'";
-
     private readonly CommandQueue _queue;
 
     private readonly RootCommand _cliCommands;
@@ -195,7 +189,7 @@ internal sealed class Cli
             }
             else if (letter == quote)
                 quote = default;
-            else if (quote == default && Quotes.Contains(letter, StringComparison.Ordinal))
+            else if (quote == default && letter is '"' or '\'')
             {
                 // The quote starts the word, so a pair that holds nothing is an empty word.
                 quote = letter;

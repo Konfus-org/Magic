@@ -143,13 +143,10 @@ public sealed unsafe class Importer : IAssetImporter<Model>
             // A mesh that brings no texture coordinates gets ones laid over it from above, so that a material tiles
             // over it: x and z give the uv, a tile to every PlanarUvMetres. The tangent runs along x, with the sign
             // that puts the v axis of a normal map along z.
-            Vector2 uv = new(position.X / PlanarUvMetres, position.Z / PlanarUvMetres);
+            Vector2 uv = hasUvs
+                ? new Vector2(mesh->mTextureCoords[0][v].x, mesh->mTextureCoords[0][v].y)
+                : new Vector2(position.X, position.Z) / PlanarUvMetres;
             Vector4 tangent = new(Vector3.UnitX, -1);
-            if (hasUvs)
-            {
-                aiVector3D mapped = mesh->mTextureCoords[0][v];
-                uv = new Vector2(mapped.x, mapped.y);
-            }
 
             if (hasTangents)
             {
