@@ -73,7 +73,7 @@ internal static class EntityPaths
             {
                 Result<object> whole = ValueText.Parse(held.GetType(), values);
                 if (!whole.Ok)
-                    return Result.Failure(whole.Error);
+                    return Result.Failure($"{whole.Error} Put the component's JSON in single quotes.");
 
                 component = (IComponent)whole.Value;
             }

@@ -176,31 +176,43 @@ internal sealed class Cli
     /// </summary>
     /// <remarks>
     /// A word in single quotes keeps its double quotes, so a value in JSON comes through whole:
-    /// <c>set sun.scriptcontainer '[{"id":100421}]'</c>.
+    /// <c>set sun.scriptcontainer '[{"id":100421}]'</c>. A pair of quotes alone is an empty word, and a doubled quote
+    /// inside a quoted word is one quote of the word: <c>set player.name 'it''s'</c>.
     /// </remarks>
     private static string[] SplitWords(string command)
     {
         List<string> words = [];
-        StringBuilder word = new();
+        StringBuilder? word = null;
         char quote = default;
-        foreach (char letter in command)
+        for (int i = 0; i < command.Length; i++)
         {
-            if (letter == quote)
+            char letter = command[i];
+            if (letter == quote && i + 1 < command.Length && command[i + 1] == quote)
+            {
+                // The second quote of the pair is the letter, so the word goes on past it.
+                (word ??= new()).Append(letter);
+                i++;
+            }
+            else if (letter == quote)
                 quote = default;
             else if (quote == default && Quotes.Contains(letter, StringComparison.Ordinal))
+            {
+                // The quote starts the word, so a pair that holds nothing is an empty word.
                 quote = letter;
+                word ??= new();
+            }
             else if (quote == default && char.IsWhiteSpace(letter))
             {
-                if (word.Length > 0)
+                if (word is not null)
                     words.Add(word.ToString());
 
-                word.Clear();
+                word = null;
             }
             else
-                word.Append(letter);
+                (word ??= new()).Append(letter);
         }
 
-        if (word.Length > 0)
+        if (word is not null)
             words.Add(word.ToString());
 
         return [.. words];

@@ -25,12 +25,13 @@ internal static class SetCommand
         };
         Argument<string[]> value = new("value")
         {
-            Description = "The value in JSON, or one per field, as 1 2 3 for a position",
+            Description =
+                "The value in JSON, in single quotes so that it keeps its double quotes, or one per field, as 1 2 3 for a position",
             Arity = ArgumentArity.ZeroOrMore,
         };
         Command set = new(
             "set",
-            "Sets a setting, as Rendering.Resolution 2560 1440; or sets an entity's value, as entity.component.member and on to any depth, then the value; or a whole component, as entity.component then its JSON"
+            "Sets a setting, as Rendering.Resolution 2560 1440; or sets an entity's value, as entity.component.member and on to any depth, then the value; or a whole component, as entity.component then its JSON in single quotes"
         )
         {
             setting,
