@@ -59,7 +59,8 @@ flowchart TD
       approval.
    2. Make the worktree. Then claim the scope of the brief (Worktrees and claims).
    3. If the claim reports an overlap, stop and ask the user.
-   4. Build the slice.
+   4. Build the slice. Check a position, height or size that you work out from data against the running engine
+      (`get`, a probe or a screenshot) before a later step depends on it.
 6. If not, write a proposal that starts with the brief. Do not edit until the user approves, trims or splits it. The
    proposal gives:
    1. The method.
