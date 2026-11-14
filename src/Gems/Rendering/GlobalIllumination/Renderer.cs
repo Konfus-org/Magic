@@ -221,6 +221,12 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
 
         Result<GpuBuffer> constants = graph.Buffer(new("GI constants", Unsafe.SizeOf<GIConstants>()));
         (int Width, int Height) tracedSize = gpu.Scaled(_settings.IndirectScale);
+
+        // A view that lost its history at the same size draws another world: its probes and history start afresh
+        // at that world's first frame.
+        if (!gpu.HasHistory && _views[graph.View].Traced == tracedSize)
+            _views[graph.View] = default;
+
         ((int Width, int Height)? lastTraced, (int Width, int Height)? lastReflected, int lastFrames) = _views[
             graph.View
         ];
@@ -319,16 +325,6 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
             _settling?.TrySetResult();
 
         return new IndirectLight(gi.Diffuse.Blend.Light, gi.Reflections.Blend.Light, grid.Probes, grid.Depth);
-    }
-
-    /// <summary>
-    /// Forgets what each view traced of the world that left, so the probes and the history start afresh. Render thread,
-    /// between frames.
-    /// </summary>
-    public async Task OnDomainUnloadedAsync(CancellationToken cancel)
-    {
-        await _threads.Enter(EngineThread.Render);
-        _views.Clear();
     }
 
     public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel) =>
