@@ -51,7 +51,8 @@ The renderer. It has four render steps:
 2. The view, one time for each view: it makes the targets and the frame buffer of the view, as its `GpuView`.
 3. The shading, one time for each view: it lights the GBuffer that a geometry gem drew, with the sun, the sky and the
    lights. Then it runs the `PictureEffects` of the frame and writes the picture into the target of the view.
-4. The failure banner: it draws the render failures of the frame over the top of the window.
+4. The failure banner: it fills the window with black under the views. Then it draws the cover of a load and the
+   render failures of the frame over the window.
 
 The gem also holds the types that the rendering gems share. List it in the `.magic` file after the GPU provider, the
 ECS, the model importer and the texture importer, with a gem that draws its geometry. The settings are in
@@ -61,8 +62,25 @@ ECS, the model importer and the texture importer, with a gem that draws its geom
 
 - A model shows when it is on the GPU. A model that nothing drew for `Rendering.ModelKeepSec` leaves the GPU. It
   loads again when a frame draws it.
-- When a domain replaces the world, the loading screen stays until all that the new world draws is on the GPU or
+- When a domain replaces a world that shows, the cover fades in over that world. Behind the full cover, the loading
+  screen comes in its place. Then the cover fades out into the loading screen. Without a world that shows, the
+  loading screen shows at once.
+- The loading screen stays until all that the new world draws is on the GPU or
   failed. This includes the passes of the gem.
+- Then the cover fades in over the loading screen. The cover is one colour over the window. The debug UI and the
+  failure banner show over it. An empty world gets the full cover at once.
+- Behind the full cover, the new world comes in the place of the loading screen, and its time stands still. Each gem
+  that blends its picture over frames starts its history again and settles: the shadows, the indirect light, the air
+  and the upscaling.
+- The cover fades out when each gem settled. A gem that does not settle in time does not stop the load. The world
+  then shows as it is, and the log has a warning.
+- The cover over the new world is an off-white when the light that lights it is a sun or a light alone, above the
+  horizon, with an intensity above 0. A world with no directional light also gets an off-white cover. A moon, a light
+  below the horizon or a light of intensity 0 gives a black cover. The cover over the old world is black.
+- While the cover is full, the post effects keep no history, so the exposure takes the value of each frame. When the
+  cover fades, the exposure adapts from the settled picture.
+- Each frame, the renderer fills the window with black before the views draw. A part of the window that no view draws
+  shows black.
 
 ### Cameras
 
@@ -203,18 +221,17 @@ the reflections.
 ## WeatherFX
 
 Fills the air between the camera and the surfaces with the haze of the world. The sky, the sun and the local lights
-light the haze. On a GPU that traces rays, the light falls in shafts through gaps. The settings are in
-`WeatherFXSettings`.
+light the haze. On a GPU that traces rays, the light falls in shafts through gaps. The gem has no settings.
 
-To use it, list `WeatherFX` in the `.magic` file, and give the `Weather` of the world a `FogDensity` or a
-`CloudCover` above 0. With the AccelerationStructures gem, the haze has shadows. Without it, the sun lights all of the
-haze.
+To use it, list `WeatherFX` in the `.magic` file, and give the `Fog` of the world's `Weather` a `Density`, or its
+`Clouds` a `Cover`, above 0. With the AccelerationStructures gem, the haze has shadows. Without it, the sun lights all
+of the haze.
 
-- The `Weather` component sets the haze: its density at a height, how fast it thins above it, its colour and how
-  much it scatters towards the sun. A script can change it while the world runs.
-- The volume goes to `Rendering.VolumeDistance` from the camera. Past it, the haze has no shadows.
-- `CloudCover` fills the sky with clouds from `CloudHeight` up for 2 km. The `Wind` moves them. The clouds look
-  correct from the ground, not from inside them. Their shadow falls on the ground and in the haze.
+- The `Fog` of the `Weather` component sets the haze: its density at a height, how fast it thins above it, its
+  colour and how much it scatters towards the sun. A script can change it while the world runs.
+- The volume goes to the `VolumeDistance` of the `Fog` from the camera. Past it, the haze has no shadows.
+- The `Cover` of the `Clouds` fills the sky with clouds from their `Height` up for 2 km. The `Wind` moves them. The
+  clouds look correct from the ground, not from inside them. Their shadow falls on the ground and in the haze.
 - Clear air costs nothing.
 
 ## ProceduralSky

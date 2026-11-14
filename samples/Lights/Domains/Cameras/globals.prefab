@@ -72,8 +72,10 @@
             "name": "Weather",
             "components": {
                 "Weather": {
-                    "fogDensity": 0.02,
-                    "fogAnisotropy": 0.6
+                    "fog": {
+                        "density": 0.02,
+                        "anisotropy": 0.6
+                    }
                 }
             }
         },

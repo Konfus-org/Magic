@@ -6,6 +6,13 @@
                 "Transform": {},
                 "Camera": {}
             }
+        },
+        {
+            "name": "Darkness",
+            "components": {
+                "Transform": {},
+                "DirectionalLight": { "intensity": 0 }
+            }
         }
     ]
 }

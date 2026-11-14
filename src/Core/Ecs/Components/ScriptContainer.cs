@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Magic.Assets;
 
@@ -70,18 +71,22 @@ public struct ScriptContainer : IComponent, IEquatable<ScriptContainer>
     }
 
     /// <summary>
-    /// Puts <paramref name="values"/> in the slot of <paramref name="script"/> and marks the copy of it started, so a
-    /// save keeps the state of the copy and a copy made from that save takes it up instead of starting over; false
-    /// when the script is not there.
+    /// Puts <paramref name="state"/>, what a save keeps of the copy of <paramref name="script"/>, in its slot and
+    /// marks the copy started, so a copy made from that save takes the state up instead of starting over; false when
+    /// the script is not there.
     /// </summary>
-    public bool Keep(Handle<Script> script, ScriptValues values)
+    /// <remarks>
+    /// The set it makes of <paramref name="state"/> belongs to this slot, so a later save frees it once no slot holds
+    /// it.
+    /// </remarks>
+    public bool Keep(Handle<Script> script, ReadOnlySpan<KeyValuePair<string, JsonElement>> state)
     {
         Span<ScriptSlot> held = this;
         int slot = Slot(script);
         if (script == Handle<Script>.None || slot < 0)
             return false;
 
-        held[slot] = new ScriptSlot(script, values, Started: true);
+        held[slot] = new ScriptSlot(script, ScriptValues.OfSave(state), Started: true);
 
         return true;
     }

@@ -21,6 +21,7 @@ public sealed class EntryPoint(
     IGraphicsApi gpu,
     AssetManager assets,
     IEcs ecs,
+    Worlds.World world,
     Threads threads,
     EventCoordinator events,
     IDebugUI? debugUI = null,
@@ -34,7 +35,7 @@ public sealed class EntryPoint(
     /// </summary>
     public DeferredRenderingSettings Settings { get; } = settings;
 
-    public Renderer Renderer { get; } = new(settings, shaders, gpu, assets, ecs, threads, events);
+    public Renderer Renderer { get; } = new(settings, shaders, gpu, assets, ecs, world, threads, events);
 
     public void Dispose() => Renderer.Dispose();
 

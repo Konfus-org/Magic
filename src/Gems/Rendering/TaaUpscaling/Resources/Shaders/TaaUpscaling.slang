@@ -9,7 +9,7 @@
 // It works in the output's encoding for the screen, so the picture it resolves is the one the window shows. The pass
 // header's y names the history, last frame's resolved picture, or its z where there is none. Its z names the picture
 // this frame resolves, the size it is shown at, with each pixel's view depth in alpha for the next frame's test. Its w
-// names the linear clamp sampler the history is read through.
+// names the pass's UpscaleConstants.
 module "TaaUpscaling";
 
 import Core.Heap;
@@ -17,6 +17,14 @@ import Core.Pass;
 import Core.Frame;
 import Core.Math;
 import Post.TemporalAntiAliasing;
+
+// C#'s UpscaleConstants: the linear clamp sampler the history is read through, and how much of now each pixel takes at
+// least where the history is on the screen.
+public struct UpscaleConstants
+{
+    public uint sampler;
+    public float leastBlend;
+}
 
 // How fast a sample's weight falls with its distance from the pixel, in pixels: a Gaussian close to the
 // Blackman-Harris window over a pixel, from Karis.
@@ -102,9 +110,12 @@ void UpscalePicture(uint3 thread : SV_DispatchThreadID)
 
     // The history read between pixels, which blurs, so the more the pixel moved off whole pixels the more of now it
     // takes, by the weight of this frame's sample. All of now where its surface was off the screen.
-    SamplerRef sampler = { header.w };
+    UpscaleConstants upscale = LoadConstants<UpscaleConstants>(header.w);
+    SamplerRef sampler = { upscale.sampler };
     float3 before = clamp(history.SampleLevel(sampler, historyUv, 0.0).rgb, low, high);
     float2 moved = abs(velocity) * float2(size);
-    float blend = isOnScreen ? lerp(0.05, 0.8, frac(max(moved.x, moved.y)) * 0.5) * weight : 1.0;
+    float blend = isOnScreen
+        ? max(lerp(0.05, 0.8, frac(max(moved.x, moved.y)) * 0.5) * weight, upscale.leastBlend)
+        : 1.0;
     resolved.Store(thread.xy, float4(lerp(before, current, blend), viewDepth));
 }

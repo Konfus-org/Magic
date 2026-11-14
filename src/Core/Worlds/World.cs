@@ -52,6 +52,19 @@ internal readonly record struct DomainRead(Handle<Domain> Domain, Domain Asset, 
 /// </remarks>
 public sealed class World : IEcs, IDisposable
 {
+    /// <summary>
+    /// How long the cover takes to fade in or out.
+    /// </summary>
+    private const double CoverFadeSec = 0.4; // PROTO
+
+    /// <summary>
+    /// How long the cover waits at most for the gems to settle the world that arrived: until both this time passed and
+    /// this many frames were drawn, so a gem that never settles ends the wait, and a low frame rate alone doesn't.
+    /// </summary>
+    private const double SettleLimitSec = 5; // PROTO
+
+    private const uint SettleLimitFrames = 120; // PROTO
+
     private readonly AssetManager _assets;
 
     private readonly IFileSystem _files;
@@ -87,7 +100,13 @@ public sealed class World : IEcs, IDisposable
     private IDebugUI? _debugUI;
 
     /// <summary>
-    /// What the load that runs does now, as the debug UI shows it each frame; null while none runs. Any thread.
+    /// What the load that runs loads, as the debug UI shows it each frame; null while none runs. Any thread.
+    /// </summary>
+    private volatile string? _loadingHeader;
+
+    /// <summary>
+    /// What the load that runs does now, indented as the debug UI shows it under <see cref="_loadingHeader"/>; null
+    /// until the load's first step. Any thread.
     /// </summary>
     private volatile string? _loadingStep;
 
@@ -109,6 +128,12 @@ public sealed class World : IEcs, IDisposable
     /// </summary>
     private ImmutableArray<IHookIntoWorldSave> _saveHooks = [];
 
+    /// <summary>
+    /// The last save's write of the world it took, which runs on a worker and reads the sets of script values of that
+    /// world. Game thread.
+    /// </summary>
+    private Task _saving = Task.CompletedTask;
+
     internal World(AssetManager assets, IFileSystem files, EventCoordinator events, Threads threads, App app)
     {
         _assets = assets;
@@ -127,15 +152,30 @@ public sealed class World : IEcs, IDisposable
     /// Whether a domain or a saved world replaces what is in the world.
     /// </summary>
     /// <remarks>
-    /// It is true from when the loading screen shows until a frame drew what replaced the world.
+    /// It is true from when the load starts to fade the world out until the cover faded into what replaced it.
     /// </remarks>
     public bool IsLoading { get; private set; }
+
+    /// <summary>
+    /// How much a cover of one colour hides the window: 0 shows the window, 1 hides it.
+    /// </summary>
+    /// <remarks>
+    /// It is 0 outside a load. During a load, the world that shows fades into the cover, the cover fades into the
+    /// loading screen, the loading screen fades into the cover, the world changes behind the full cover, and the cover
+    /// fades into the world when the gems settled. Read it on any thread.
+    /// </remarks>
+    public float CoverOpacity
+    {
+        get => Volatile.Read(ref field);
+        private set => Volatile.Write(ref field, value);
+    }
 
     /// <summary>
     /// Whether the time of the world stands still, with no fixed steps, from the next frame.
     /// </summary>
     /// <remarks>
-    /// It is ignored during a load, because the gems can need steps to get ready.
+    /// It is ignored while the loading screen shows, because the gems can need steps to get ready. While the cover is
+    /// full, the time of the world stands still however it is set.
     /// </remarks>
     public bool IsPaused { get; set; }
 
@@ -143,7 +183,7 @@ public sealed class World : IEcs, IDisposable
     /// How fast the time of the world runs against real time, from the next frame.
     /// </summary>
     /// <remarks>
-    /// A value below 0 is 0. It is ignored during a load.
+    /// A value below 0 is 0. It is ignored while the loading screen shows or the cover is full.
     /// </remarks>
     public float TimeScale
     {
@@ -270,21 +310,22 @@ public sealed class World : IEcs, IDisposable
                 Result.Failure(IsLoading ? "the world is loading." : "no domain is open.")
             );
 
-        foreach (IHookIntoWorldSave hooks in _saveHooks)
-        {
-            hooks.OnWorldSaving();
-        }
+        RunSaveHooks();
+        FreeKeptScriptState();
 
         ImmutableArray<Handle<Domain>> open = Domains;
         ImmutableArray<DomainRead> domains = [.. open.Select(domain => _read[domain])];
         WorldState now = GetState();
 
-        return Task.Run(Result<byte[]> () =>
+        Task<Result<byte[]>> saving = Task.Run(Result<byte[]> () =>
         {
             Result<JsonNode?> changes = Diff(GetBaseState(domains), now);
 
             return changes.Ok ? ToBytes(new SaveFile(open, changes.Value)) : Result.Failure(changes.Error);
         });
+        _saving = saving;
+
+        return saving;
     }
 
     /// <summary>
@@ -411,7 +452,7 @@ public sealed class World : IEcs, IDisposable
         if (_ecs is { } ecs)
             MaterialSet.SweepIfDue(ecs);
 
-        DrawLoadingStep();
+        DrawLoading();
 
         // Let a replace waiting for this frame go on.
         TaskCompletionSource starting = _frameStarting;
@@ -722,7 +763,7 @@ public sealed class World : IEcs, IDisposable
         }
         finally
         {
-            _loadingStep = null;
+            HideLoading();
             _turn.Release();
         }
     }
@@ -808,6 +849,47 @@ public sealed class World : IEcs, IDisposable
         return new WorldState(placed, made.ToImmutable(), IsPaused, TimeScale);
     }
 
+    /// <summary>
+    /// Frees what the saves kept of the script copies that no entity of the world holds any more. Game thread.
+    /// </summary>
+    /// <remarks>
+    /// A save keeps the state of each copy that runs in the slot of its script, as a new set of values, so the sets of
+    /// the save before it, and of every copy whose entity or script went, are held by nothing. While a save still
+    /// writes, it reads the sets of the world it took, so this frees nothing and the next call frees them. Only the
+    /// game thread starts a save, so none starts while this runs.
+    /// </remarks>
+    private void FreeKeptScriptState()
+    {
+        if (!_saving.IsCompleted)
+            return;
+
+        HashSet<ScriptValues> held = [];
+        foreach (EcsChunk<ScriptContainer> chunk in Query<ScriptContainer>())
+        {
+            for (int i = 0; i < chunk.Entities.Length; i++)
+            {
+                foreach (ScriptSlot slot in chunk.First[i])
+                {
+                    held.Add(slot.Values);
+                }
+            }
+        }
+
+        ScriptValues.FreeUnheld(held);
+    }
+
+    /// <summary>
+    /// Has each gem write what it holds of the world's entities into their components, so what reads the components
+    /// next reads the state of now. Game thread.
+    /// </summary>
+    private void RunSaveHooks()
+    {
+        foreach (IHookIntoWorldSave hook in _saveHooks)
+        {
+            hook.OnWorldSaving();
+        }
+    }
+
     private string GetName(Handle<Domain> domain) => _assets.GetPath(domain) ?? "a domain";
 
     /// <summary>
@@ -826,7 +908,8 @@ public sealed class World : IEcs, IDisposable
         if (!HasEcs)
             return Result.Failure("no gem the project lists provides the ECS.");
 
-        ShowLoadingStep($"Loading {GetName(domain)}...");
+        ShowLoading($"Loading {GetName(domain)}...");
+        ShowLoadingStep("Reading...");
         Result<DomainRead> read = await ReadDomainAsync(domain, progress, cancel).ConfigureAwait(false);
         if (!read.Ok)
             return Result.Failure(read.Error);
@@ -857,10 +940,12 @@ public sealed class World : IEcs, IDisposable
     /// Puts <paramref name="arriving"/> in place of the world, and shows nothing half ready or left from the old world.
     /// </summary>
     /// <remarks>
-    /// What is there leaves, the globals too when <paramref name="isClearingGlobals"/> is true. The gems clean up after
-    /// it, and the loading screen shows while they prepare what comes. When they are ready and no asset is in load, the
-    /// loading screen leaves and the gems clean up after it. Then <paramref name="arrive"/> makes what comes, and the
-    /// replace ends after a frame drew it. <see cref="IsLoading"/> is true while it runs.
+    /// The world that shows fades into the cover. Behind the full cover, what is there leaves, the globals too when
+    /// <paramref name="isClearingGlobals"/> is true, the loading screen comes in its place, the gems clean up after what
+    /// left, and the cover fades into the loading screen. An empty world, or a headless run, skips these fades. The
+    /// gems prepare what comes. When they are ready and no asset is in load, the loading screen fades into the cover,
+    /// or goes to it at once when it showed without a fade. Behind the full cover, the loading screen leaves, the gems
+    /// clean up after it, <paramref name="arrive"/> makes what comes, and the gems settle it. Then the cover fades into it. <see cref="IsLoading"/> is true while it runs.
     /// </remarks>
     private async Task ReplaceAsync(
         ImmutableArray<ImmutableArray<IComponent>> arriving,
@@ -887,6 +972,18 @@ public sealed class World : IEcs, IDisposable
                     Log.Warn($"No loading screen is shown: {read.Error}");
             }
 
+            // A world that shows fades into the cover, so that the loading screen takes its place hidden. An empty world
+            // shows nothing, and a headless run shows nothing, so the loading screen takes its place at once.
+            await _threads.Enter(EngineThread.Game);
+            bool wasShowing = false;
+            foreach (EcsChunk chunk in Query())
+            {
+                wasShowing |= !_app.IsHeadless && chunk.Entities.Length > 0;
+            }
+
+            if (wasShowing)
+                await FadeCoverAsync(0, 1, cancel).ConfigureAwait(false);
+
             // Everything in the world leaves but its globals, those too with isClearingGlobals. A global that stays
             // outlives the domain that owned it, so it is owned by none, as an entity made as the game runs.
             await _threads.Enter(EngineThread.Game);
@@ -912,11 +1009,21 @@ public sealed class World : IEcs, IDisposable
 
             _read.Clear();
             Domains = [];
-            await RunHooksAsync(hooks => hooks.OnDomainUnloadedAsync(cancel), "cleaning up").ConfigureAwait(false);
 
-            await _threads.Enter(EngineThread.Game);
+            // In the same turn as the destroy, so no frame shows an empty world while the gems clean up.
             ImmutableArray<Entity> loading = CreateEntities(screen);
             IsShowingLoadingScreen = true;
+            await RunHooksAsync(hooks => hooks.OnDomainUnloadedAsync(cancel), "cleaning up").ConfigureAwait(false);
+
+            // The cover fades into the loading screen once a frame of it is drawn. Its time stood still behind the full
+            // cover and starts with this fade. Nothing waits for it to settle.
+            await _threads.Enter(EngineThread.Game);
+            if (wasShowing)
+            {
+                await WaitUntilDrawnAsync(cancel).ConfigureAwait(false);
+                await FadeCoverAsync(1, 0, cancel).ConfigureAwait(false);
+            }
+
             ShowLoadingStep($"Preparing {arriving.Length} entities...");
             await RunHooksAsync(hooks => hooks.OnDomainLoadingAsync(arriving, cancel), "preparing")
                 .ConfigureAwait(false);
@@ -928,6 +1035,11 @@ public sealed class World : IEcs, IDisposable
                 await WaitForFrameAsync(cancel).ConfigureAwait(false);
             }
 
+            if (wasShowing)
+                await FadeCoverAsync(0, 1, cancel).ConfigureAwait(false);
+            else
+                CoverOpacity = 1;
+
             await _threads.Enter(EngineThread.Game);
             DestroyEntities(loading);
             await RunHooksAsync(hooks => hooks.OnDomainUnloadedAsync(cancel), "cleaning up").ConfigureAwait(false);
@@ -936,46 +1048,124 @@ public sealed class World : IEcs, IDisposable
             arrive();
             IsShowingLoadingScreen = false;
 
-            // The next frame publishes what came, wherever this went on in the frame; it has shown once that one is
-            // drawn.
-            uint arrived = PublishedFrame + 1;
-            while (DrawnFrame < arrived)
-            {
-                await WaitForFrameAsync(cancel).ConfigureAwait(false);
-            }
+            // The world that came holds the sets of script state that its copies take up, so the sweep waits for it:
+            // what the old world held is held by nothing now.
+            FreeKeptScriptState();
+
+            await WaitUntilDrawnAsync(cancel).ConfigureAwait(false);
+            ShowLoadingStep("Settling...");
+            await SettleAsync(cancel).ConfigureAwait(false);
 
             // The low-latency GC Program asks for seldom collects gen 2, so what the load, the unloads and the gems'
             // first copies of the arrived world threw away would stay committed: one collection that compacts and
-            // decommits gives it back, once that world's first frame is drawn.
+            // decommits gives it back, behind the cover once that world's first frame is drawn.
             await _threads.Enter(EngineThread.Game);
             GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+
+            HideLoading();
+            await FadeCoverAsync(1, 0, cancel).ConfigureAwait(false);
         }
         finally
         {
             IsLoading = false;
             IsShowingLoadingScreen = false;
+            CoverOpacity = 0;
         }
     }
 
     /// <summary>
-    /// Has the debug UI show what the load that runs does now, in this frame. Debug builds only, as the lines logged
-    /// to show on screen.
+    /// Waits until the hook of each gem settled what arrived, for at most <see cref="SettleLimitSec"/> seconds and
+    /// <see cref="SettleLimitFrames"/> frames, whichever ends later.
+    /// </summary>
+    /// <remarks>
+    /// At the limit, the hooks are cancelled and the world shows as it is. Game thread.
+    /// </remarks>
+    private async Task SettleAsync(CancellationToken cancel)
+    {
+        using CancellationTokenSource limit = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        Task settled = RunHooksAsync(hooks => hooks.OnDomainArrivedAsync(limit.Token), "settling");
+        long start = Stopwatch.GetTimestamp();
+        uint lastFrame = DrawnFrame + SettleLimitFrames;
+        while (
+            !settled.IsCompleted
+            && (Stopwatch.GetElapsedTime(start).TotalSeconds < SettleLimitSec || DrawnFrame < lastFrame)
+        )
+        {
+            await Task.WhenAny(settled, _frameStarting.Task).WaitAsync(cancel).ConfigureAwait(false);
+            await _threads.Enter(EngineThread.Game);
+        }
+
+        await limit.CancelAsync().ConfigureAwait(false);
+        try
+        {
+            await settled.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
+        {
+            Log.Warn(
+                $"The gems did not settle in {SettleLimitSec} s and {SettleLimitFrames} frames, so the world shows as it is."
+            );
+        }
+    }
+
+    /// <summary>
+    /// Changes <see cref="CoverOpacity"/> from <paramref name="from"/> to <paramref name="to"/> frame by frame, over
+    /// <see cref="CoverFadeSec"/> seconds. Headless, nothing shows, so it changes at once.
+    /// </summary>
+    private async Task FadeCoverAsync(float from, float to, CancellationToken cancel)
+    {
+        long start = Stopwatch.GetTimestamp();
+        float done = 0;
+        while (!_app.IsHeadless && done < 1)
+        {
+            CoverOpacity = float.Lerp(from, to, done);
+            await WaitForFrameAsync(cancel).ConfigureAwait(false);
+            done = (float)(Stopwatch.GetElapsedTime(start).TotalSeconds / CoverFadeSec);
+        }
+
+        CoverOpacity = to;
+    }
+
+    /// <summary>
+    /// Has the debug UI show what the load that runs loads, and under it what it does now, in this frame. Debug builds
+    /// only, as the lines logged to show on screen.
     /// </summary>
     [Conditional("DEBUG")]
-    private void DrawLoadingStep()
+    private void DrawLoading()
     {
+        if (_loadingHeader is not { } loading)
+            return;
+
+        _debugUI?.Text(loading);
         if (_loadingStep is { } step)
             _debugUI?.Text(step);
     }
 
     /// <summary>
-    /// Logs <paramref name="step"/>, what the load does from now, and has the debug UI show it each frame until the
-    /// next step or the end of the load.
+    /// Logs <paramref name="loading"/>, what the load that starts loads, and has the debug UI show it each frame until
+    /// the load ends.
+    /// </summary>
+    private void ShowLoading(string loading)
+    {
+        Log.Info(loading);
+        _loadingStep = null;
+        _loadingHeader = loading;
+    }
+
+    /// <summary>
+    /// Logs <paramref name="step"/>, what the load does from now, and has the debug UI show it under what loads each
+    /// frame until the next step or the end of the load.
     /// </summary>
     private void ShowLoadingStep(string step)
     {
         Log.Info(step);
-        _loadingStep = step;
+        _loadingStep = $"    {step}";
+    }
+
+    private void HideLoading()
+    {
+        _loadingHeader = null;
+        _loadingStep = null;
     }
 
     /// <summary>
@@ -1009,6 +1199,19 @@ public sealed class World : IEcs, IDisposable
     }
 
     /// <summary>
+    /// Waits until the world as it is now shows: the next frame publishes it, wherever this goes on in the frame, and it
+    /// shows once that frame is drawn. Goes on on the game thread.
+    /// </summary>
+    private async Task WaitUntilDrawnAsync(CancellationToken cancel)
+    {
+        uint published = PublishedFrame + 1;
+        while (DrawnFrame < published)
+        {
+            await WaitForFrameAsync(cancel).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
     /// Waits for the next frame to start, and goes on there, on the game thread.
     /// </summary>
     private async Task WaitForFrameAsync(CancellationToken cancel)
@@ -1033,10 +1236,11 @@ public sealed class World : IEcs, IDisposable
         if (!HasEcs)
             return Result.Failure("no gem the project lists provides the ECS.");
 
+        ShowLoading($"Loading a save of {string.Join(", ", saved.Domains.Select(GetName))}...");
         ImmutableArray<DomainRead>.Builder reading = ImmutableArray.CreateBuilder<DomainRead>(saved.Domains.Length);
         foreach (Handle<Domain> domain in saved.Domains)
         {
-            ShowLoadingStep($"Loading {GetName(domain)}...");
+            ShowLoadingStep($"Reading {GetName(domain)}...");
             Result<DomainRead> read = await ReadDomainAsync(domain, progress, cancel).ConfigureAwait(false);
             if (!read.Ok)
                 return Result.Failure($"{GetName(domain)} does not open: {read.Error}");
@@ -1124,6 +1328,10 @@ public sealed class World : IEcs, IDisposable
 
             return;
         }
+
+        // What the gems hold of the entities goes into their components first, so the entities that come again take up
+        // the state of now and not that of the last save.
+        RunSaveHooks();
 
         // The domain's entities as they are, by their keys.
         ImmutableArray<Entity>.Builder leaving = ImmutableArray.CreateBuilder<Entity>();

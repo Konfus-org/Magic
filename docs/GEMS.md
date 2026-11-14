@@ -99,6 +99,8 @@ What a save and a restart keep:
   the depth that it had.
 - Write in `Resume` what the save does not hold and `Start` would have made: a subscription to an event, a delegate, a
   task, and the first work with a service that the copy kept. Without it, such a field is null after a restart.
+- A domain that opens again while the game runs keeps the state the same way: the copies of its entities take up what
+  they held and `Resume`.
 
 ### DomainImporter
 

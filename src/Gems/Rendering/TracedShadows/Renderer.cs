@@ -7,6 +7,7 @@ using Magic.DeferredRendering.View;
 using Magic.Ecs;
 using Magic.Graphics;
 using Magic.Projects;
+using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
 
@@ -31,6 +32,13 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
     /// The twin of <c>DenoiseShadows.slang</c>'s group size, a tile state each group.
     /// </summary>
     private const int DenoiseGroupSize = 8;
+
+    /// <summary>
+    /// The frames a view's history blends before its shadows are settled: the tile lights' slots take at least 0.12 of
+    /// each frame's rays (<c>DenoiseShadows.slang</c>), so after 18 the first frames of a world weigh less than a
+    /// tenth; the sun's count is full after 8.
+    /// </summary>
+    private const int SettleFrames = 18; // PROTO
 
     private static readonly string[] _filterPassNames = ["Filter shadows 1", "Filter shadows 2"];
 
@@ -62,12 +70,22 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
     private readonly ShaderEntry _upsampleShader;
 
     /// <summary>
-    /// The size the frame drawn last traced each view at, which the next blends with only at the same size.
+    /// The size the frame drawn last traced each view at, which the next blends with only at the same size, and the
+    /// frames its history blended.
     /// </summary>
-    private readonly List<(int Width, int Height)> _traced = [];
+    private readonly List<(int Width, int Height, int Blended)> _traced = [];
 
-    internal Renderer(TracedShadowsSettings settings, AssetManager assets)
+    /// <summary>
+    /// The wait of the world that arrived for the shadows to settle, which the frame that blends enough frames or
+    /// traces none completes. Render thread.
+    /// </summary>
+    private TaskCompletionSource? _settling;
+
+    private readonly Threads _threads;
+
+    internal Renderer(TracedShadowsSettings settings, AssetManager assets, Threads threads)
     {
+        _threads = threads;
         _settings = settings;
         _traceShader = PassShaders.GetEntry(assets, "TraceShadows", "TraceShadows");
         _classifyShader = PassShaders.GetEntry(assets, "DenoiseShadows", "ClassifyShadows");
@@ -101,7 +119,10 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
             _upsampleShader
         );
         if (state == GpuState.Failed)
+        {
+            _settling?.TrySetResult();
             graph.Fail(RenderFailure.Shader, "Shadows are not traced", "a shader of the shadows was not built.");
+        }
 
         if (state != GpuState.Ready)
             return null;
@@ -158,6 +179,7 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
         );
         if (!asked.Ok)
         {
+            _settling?.TrySetResult();
             graph.Fail(RenderFailure.Resource, "Shadows are not traced", asked.Error);
 
             return null;
@@ -169,8 +191,13 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
             _traced.Add(default);
         }
 
-        bool hasHistory = view.HasHistory && _traced[graph.View] == (width, height);
-        _traced[graph.View] = (width, height);
+        (int lastWidth, int lastHeight, int blended) = _traced[graph.View];
+        bool hasHistory = view.HasHistory && (lastWidth, lastHeight) == (width, height);
+        blended = hasHistory ? blended + 1 : 0;
+        _traced[graph.View] = (width, height, blended);
+        if (blended >= SettleFrames)
+            _settling?.TrySetResult();
+
         ShadowDenoiseConstants denoise = new()
         {
             TileStates = tileStates.Value.Id,
@@ -293,7 +320,7 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
 
     /// <summary>
     /// Asks for every shader of the shadows each frame while they are on and rays are traced, so each is built or
-    /// failed before a domain shows.
+    /// failed before a domain shows. Ends the wait for the shadows to settle while they cannot trace.
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph)
     {
@@ -303,10 +330,32 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
             || !graph.IsAnyLoading(_traceShader, _classifyShader, _filterShader, _lastFilterShader, _upsampleShader)
         )
             _built.TrySetResult();
+
+        // A maker that is out leaves the shadows without the view or the traced world for good: the failure is already
+        // told.
+        if (
+            !_settings.IsTracedShadowsOn
+            || !graph.Features.HasRayQuery
+            || graph.IsMakerOut<GpuView>()
+            || graph.IsMakerOut<TracedWorld>()
+        )
+            _settling?.TrySetResult();
     }
 
     public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel) =>
         _built.Task.WaitAsync(cancel);
+
+    /// <summary>
+    /// Returns once the shadows of a view blended enough frames of the world that arrived, or at once while it traces
+    /// none.
+    /// </summary>
+    public async Task OnDomainArrivedAsync(CancellationToken cancel)
+    {
+        await _threads.Enter(EngineThread.Render);
+        TaskCompletionSource settling = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _settling = settling;
+        await settling.Task.WaitAsync(cancel).ConfigureAwait(false);
+    }
 }
 
 /// <summary>

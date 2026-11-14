@@ -192,10 +192,6 @@ internal sealed class MaterialOverridesJsonConverter : JsonConverter<MaterialOve
 /// Reads and writes <see cref="ScriptContainer"/> as an array of scripts, each the handle of the script with its
 /// values beside it, with the free slots left out.
 /// </summary>
-/// <remarks>
-/// In a slot, <c>id</c> is the handle of the script and <c>started</c> says that a save took the copy of it after it
-/// started. Every other key is a value for the script: <c>{ "id": 3312, "height": 1 }</c>.
-/// </remarks>
 [SuppressMessage(
     "Performance",
     "CA1812:Avoid uninstantiated internal classes",
@@ -212,14 +208,38 @@ internal sealed class ScriptContainerJsonConverter : JsonConverter<ScriptContain
         while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
         {
             // The slot holds keys that no one type takes, so it is read key by key.
-            using JsonDocument slot = JsonDocument.ParseValue(ref reader);
-            Handle<Script> script = ReadHandle(slot.RootElement);
-            ScriptValues values = ReadValues(slot.RootElement);
-            if (!scripts.Add(script, values))
+            using JsonDocument document = JsonDocument.ParseValue(ref reader);
+            JsonElement slot = document.RootElement;
+            if (
+                slot.ValueKind != JsonValueKind.Object
+                || !slot.TryGetProperty("id", out JsonElement id)
+                || !id.TryGetUInt64(out ulong asset)
+            )
+            {
+                throw new JsonException(
+                    "A script of an entity is its handle and its values: { \"id\": 3312, \"x\": 1 }."
+                );
+            }
+
+            // The values are every key but the two that the slot itself takes.
+            List<KeyValuePair<string, JsonElement>> held = [];
+            foreach (JsonProperty value in slot.EnumerateObject())
+            {
+                if (!value.NameEquals("id") && !value.NameEquals("started"))
+                    held.Add(KeyValuePair.Create(value.Name, value.Value));
+            }
+
+            // A save took the copy of this script after it started, so its keys are the state of that copy, which Keep
+            // puts in the slot as a set of its own that the sweep frees once no slot holds it. The keys of a prefab are
+            // the values that the script starts with, one set that every file of equal values shares.
+            Handle<Script> script = new(asset);
+            bool isStarted =
+                slot.TryGetProperty("started", out JsonElement started) && started.ValueKind == JsonValueKind.True;
+            if (!scripts.Add(script, isStarted ? ScriptValues.None : ScriptValues.Of(CollectionsMarshal.AsSpan(held))))
                 throw new JsonException($"An entity has at most {ScriptContainer.Capacity} scripts, each one time.");
 
-            if (ReadStarted(slot.RootElement))
-                scripts.Keep(script, values);
+            if (isStarted)
+                scripts.Keep(script, CollectionsMarshal.AsSpan(held));
         }
 
         return scripts;
@@ -248,43 +268,5 @@ internal sealed class ScriptContainerJsonConverter : JsonConverter<ScriptContain
         }
 
         writer.WriteEndArray();
-    }
-
-    /// <summary>
-    /// The handle that the <c>id</c> of <paramref name="slot"/> names.
-    /// </summary>
-    private static Handle<Script> ReadHandle(JsonElement slot)
-    {
-        if (
-            slot.ValueKind != JsonValueKind.Object
-            || !slot.TryGetProperty("id", out JsonElement id)
-            || !id.TryGetUInt64(out ulong asset)
-        )
-        {
-            throw new JsonException("A script of an entity is its handle and its values: { \"id\": 3312, \"x\": 1 }.");
-        }
-
-        return new Handle<Script>(asset);
-    }
-
-    /// <summary>
-    /// Whether <paramref name="slot"/> says that a save took the copy of its script after it started.
-    /// </summary>
-    private static bool ReadStarted(JsonElement slot) =>
-        slot.TryGetProperty("started", out JsonElement started) && started.ValueKind == JsonValueKind.True;
-
-    /// <summary>
-    /// The values of <paramref name="slot"/>: every key of it but <c>id</c> and <c>started</c>.
-    /// </summary>
-    private static ScriptValues ReadValues(JsonElement slot)
-    {
-        List<KeyValuePair<string, JsonElement>> values = [];
-        foreach (JsonProperty value in slot.EnumerateObject())
-        {
-            if (!value.NameEquals("id") && !value.NameEquals("started"))
-                values.Add(KeyValuePair.Create(value.Name, value.Value));
-        }
-
-        return ScriptValues.Of(CollectionsMarshal.AsSpan(values));
     }
 }

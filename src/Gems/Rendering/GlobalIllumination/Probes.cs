@@ -26,11 +26,12 @@ internal sealed class Probes(AssetManager assets)
     private const int MaxProbesUp = 16;
 
     /// <summary>
-    /// The rays all the probes trace in a frame, and the texels along a probe's irradiance tile: the twins of
-    /// <c>UpdateProbes.slang</c>'s.
+    /// The rays all the probes trace in a frame, the texels along a probe's irradiance tile, and the most rays a probe
+    /// traces in a frame, which it traces before it first blends its rays: the twins of <c>UpdateProbes.slang</c>'s.
     /// </summary>
     private const int RayBudget = 131072;
     private const int IrradianceTexels = 8;
+    private const int MaxProbeRays = 256;
 
     /// <summary>
     /// The twins of the renderer's <c>Light/Probes.slang</c>'s.
@@ -70,6 +71,18 @@ internal sealed class Probes(AssetManager assets)
     public ImmutableArray<ShaderEntry> Shaders => [_askShader, _planShader, _listShader, _blendShader];
 
     /// <summary>
+    /// The frames that a grid of <paramref name="size"/> takes to give each of its probes its first rays, which are
+    /// the most a probe traces.
+    /// </summary>
+    public static int GetSweepFrames((int Across, int Up) size)
+    {
+        (int across, int up) = Clamp(size);
+        long rays = (long)across * up * across * MaxProbeRays;
+
+        return (int)((rays + RayBudget - 1) / RayBudget);
+    }
+
+    /// <summary>
     /// Asks for the buffers and depth texture of the grid of the graph's view at <paramref name="size"/>, and places
     /// the grid over <paramref name="box"/> with a margin.
     /// </summary>
@@ -84,7 +97,7 @@ internal sealed class Probes(AssetManager assets)
         (int Across, int Up) size
     )
     {
-        size = (Math.Clamp(size.Across, 2, MaxProbesAcross), Math.Clamp(size.Up, 2, MaxProbesUp));
+        size = Clamp(size);
 
         // What the view's grid keeps from frame to frame, by the view's number.
         while (_grids.Count <= graph.View)
@@ -189,4 +202,7 @@ internal sealed class Probes(AssetManager assets)
             .Writes(grid.Probes, update.Variance, grid.Depth)
             .Dispatch(probeCount);
     }
+
+    private static (int Across, int Up) Clamp((int Across, int Up) size) =>
+        (Math.Clamp(size.Across, 2, MaxProbesAcross), Math.Clamp(size.Up, 2, MaxProbesUp));
 }
