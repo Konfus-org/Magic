@@ -73,7 +73,9 @@ How a script runs:
   in the constructor. Do the first work in `Start`.
 - The values of the prefab are set on the copy before `Start`, so `Start` reads them.
 - Values that change in the slot later, as the `set` command of the console writes them, are set on the copy in
-  the frame after, so a script is tuned while it runs.
+  the frame after, so a script is tuned while it runs. A set marked `started`, which a `get` prints after a save,
+  sets the saved fields on the copy as well, and does not start it over. A setter that throws goes to the log, and
+  the handle goes from the `ScriptContainer`.
 - The hooks of the behaviours run on the game thread, in the order that the copies started, after the hooks of the
   gems listed before this gem.
 - A behaviour far from each camera of the player updates less often: every frame within 64 m, then one frame in n at

@@ -85,7 +85,11 @@ public sealed class Runner(World world, AssetManager assets, IServiceProvider se
                 continue;
 
             List<KeyValuePair<string, JsonElement>> state = _state.Read(copy.Script);
-            world.Mutate<ScriptContainer>(entity).Keep(script, CollectionsMarshal.AsSpan(state));
+            ref ScriptContainer container = ref world.Mutate<ScriptContainer>(entity);
+            container.Keep(script, CollectionsMarshal.AsSpan(state));
+
+            // The copy holds what the save just read out of it, so the set that the slot now has is no new values.
+            copy.Values = GetValues(in container, script);
         }
     }
 
@@ -114,6 +118,21 @@ public sealed class Runner(World world, AssetManager assets, IServiceProvider se
     /// </summary>
     private static Exception Unwrap(Exception ex) =>
         ex is TargetInvocationException { InnerException: { } inner } ? inner : ex;
+
+    /// <summary>
+    /// The values that the slot of <paramref name="script"/> holds in <paramref name="container"/>, or none when no
+    /// slot holds it.
+    /// </summary>
+    private static ScriptValues GetValues(in ScriptContainer container, Handle<Script> script)
+    {
+        foreach (ScriptSlot slot in container)
+        {
+            if (slot.Script == script)
+                return slot.Values;
+        }
+
+        return ScriptValues.None;
+    }
 
     /// <summary>
     /// Makes the copies match the slots of the entities: a copy of each C# script that an entity names and has none
@@ -148,22 +167,39 @@ public sealed class Runner(World world, AssetManager assets, IServiceProvider se
     }
 
     /// <summary>
-    /// Whether the copy of <paramref name="slot"/> runs on <paramref name="entity"/> with the values that the slot
-    /// holds now.
+    /// Whether the copy of <paramref name="slot"/> runs on <paramref name="entity"/> with the set of values that the
+    /// slot holds now.
     /// </summary>
-    /// <remarks>
-    /// The state that a save kept is no new values: the copy that came from the save took it up as it was made.
-    /// </remarks>
     private bool IsTakenUp(Entity entity, ScriptSlot slot) =>
-        _attached.TryGetValue((entity, slot.Script), out Copy? copy) && (slot.Started || slot.Values == copy.Values);
+        _attached.TryGetValue((entity, slot.Script), out Copy? copy) && slot.Values == copy.Values;
 
     /// <summary>
     /// Gives <paramref name="copy"/> the values that its slot holds now, so a console line or a file that changed
-    /// them reaches the script while it runs.
+    /// them reaches the script while it runs. A slot marked started holds the state of a copy, so the copy takes up
+    /// its fields as well as its values.
     /// </summary>
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Whatever a setter of the script throws, it is logged and the script ends. The others go on."
+    )]
     private void Tune(Copy copy, ScriptSlot slot, Entity entity)
     {
-        _state.SetValues(slot.Values, copy.Script, entity);
+        try
+        {
+            if (slot.Started)
+                _state.Restore(slot.Values, copy.Script, entity);
+            else
+                _state.SetValues(slot.Values, copy.Script, entity);
+        }
+        catch (Exception ex)
+        {
+            // The next hook finds the handle gone, ends the copy and takes it off the list.
+            TakeOff(entity, slot.Script, $"threw as it took up new values and ends: {Unwrap(ex)}");
+
+            return;
+        }
+
         copy.Values = slot.Values;
     }
 
