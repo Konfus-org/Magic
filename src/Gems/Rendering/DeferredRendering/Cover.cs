@@ -49,6 +49,26 @@ internal sealed class Cover(AssetManager assets)
     private Vector3 _color;
 
     /// <summary>
+    /// Fills the window with black before the views draw into it, with no shader.
+    /// </summary>
+    /// <remarks>
+    /// A part of the window that no view draws this frame, or the whole window while the world's step draws nothing,
+    /// then shows black and not an older frame that the overlay draws over.
+    /// </remarks>
+    public static void ClearWindow(RenderGraph graph)
+    {
+        GpuTexture window = graph.WindowTarget;
+        if (window.IsNone)
+            return;
+
+        Result<GpuTexture> black = graph.Texture(
+            new("Black", 1, 1, GpuFormat.R8G8B8A8Unorm, TextureUsages.CopyDestination | TextureUsages.CopySource)
+        );
+        if (black.Ok && graph.Upload(black.Value, [0, 0, 0, 255]))
+            graph.Blit(black.Value, window, RenderStage.Prepare, TextureFilter.Nearest);
+    }
+
+    /// <summary>
     /// Picks the colour of the cover from <paramref name="sun"/>, the light that the world is lit by: black when it
     /// is dark, off-white when it is bright, and a blend between.
     /// </summary>

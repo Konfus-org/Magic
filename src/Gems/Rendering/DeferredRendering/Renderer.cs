@@ -75,8 +75,8 @@ public readonly record struct ShadingInput(
 /// effects, a debug view where one is asked for, and the output into the view's target and any screenshot asked for.
 /// </para>
 /// <para>
-/// The banner's step draws the cover of a load over the window, then the frame's render failures over the top of
-/// it, even when no view was made.
+/// The banner's step fills the window with black under the views, draws the cover of a load over the window, then the
+/// frame's render failures over the top of it, even when no view was made.
 /// </para>
 /// <para>
 /// Where nothing made the world as rays see it, the shadows, the indirect light or the air, their rows of the view's
@@ -1065,8 +1065,8 @@ public sealed class Renderer
     }
 
     /// <summary>
-    /// Lets the loading domain show when the world's or the view's step is out, and draws the frame's render failures
-    /// over the window; nothing when none failed.
+    /// Lets the loading domain show when the world's or the view's step is out, fills the window with black under the
+    /// views, and draws the cover and the frame's render failures over the window.
     /// </summary>
     void IRender.Render(in Frame frame, RenderGraph graph)
     {
@@ -1075,6 +1075,7 @@ public sealed class Renderer
         if (graph.IsMakerOut<GpuWorld>() || graph.IsMakerOut<GpuView>())
             EndPreparing();
 
+        Cover.ClearWindow(graph);
         _cover.Record(graph, _world.CoverOpacity);
         _banner.Record(graph, frame);
     }
