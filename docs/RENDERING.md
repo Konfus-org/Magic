@@ -74,8 +74,9 @@ ECS, the model importer and the texture importer, with a gem that draws its geom
   and the upscaling.
 - The cover fades out when each gem settled. A gem that does not settle in time does not stop the load. The world
   then shows as it is, and the log has a warning.
-- The cover is black when the sun or the moon of the new world gives little light, and an off-white when it gives
-  much light.
+- The cover over the new world is an off-white when the light that lights it is a sun or a light alone, above the
+  horizon, with an intensity above 0. A world with no directional light also gets an off-white cover. A moon, a light
+  below the horizon or a light of intensity 0 gives a black cover. The cover over the old world is black.
 - While the cover is full, the post effects keep no history, so the exposure takes the value of each frame. When the
   cover fades, the exposure adapts from the settled picture.
 - Each frame, the renderer fills the window with black before the views draw. A part of the window that no view draws

@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Numerics;
 using Magic.Assets;
+using Magic.Ecs.Components;
 using Magic.Graphics;
 using Magic.Utils;
 
@@ -15,14 +16,6 @@ namespace Magic.DeferredRendering;
 /// </remarks>
 internal sealed class Cover(AssetManager assets)
 {
-    /// <summary>
-    /// The lux of the light under which the world is dark and the cover black, and over which it is bright and the
-    /// cover <see cref="_bright"/>; the colour blends between them by the log of the lux.
-    /// </summary>
-    private const float DarkLux = 10; // PROTO
-
-    private const float BrightLux = 10_000; // PROTO
-
     /// <summary>
     /// The stage of the cover: after <see cref="RenderStages.Post"/>, before <see cref="RenderStage.Overlay"/>.
     /// </summary>
@@ -43,8 +36,7 @@ internal sealed class Cover(AssetManager assets)
     };
 
     /// <summary>
-    /// The colour of the cover as the screen shows it, picked from the world that loads last. Black before the first
-    /// load.
+    /// The colour of the cover as the screen shows it, picked from the world that loads. Black until it is picked.
     /// </summary>
     private Vector3 _color;
 
@@ -69,28 +61,25 @@ internal sealed class Cover(AssetManager assets)
     }
 
     /// <summary>
-    /// Picks the colour of the cover from <paramref name="sun"/>, the light that the world is lit by: black when it
-    /// is dark, off-white when it is bright, and a blend between.
+    /// Picks the colour of the cover from <paramref name="sun"/>, the light that the world is lit by: off-white when
+    /// it is a sun or a light alone, above the horizon, that gives light, and black otherwise.
     /// </summary>
     /// <remarks>
-    /// A light below the horizon gives no light. With no light (null), the renderer's white sun lights the open
-    /// default sky, which shows bright, so the cover is off-white.
+    /// With no light (null), the renderer's white sun lights the open default sky, which shows bright, so the cover
+    /// is off-white.
     /// </remarks>
-    public void PickColor((Vector3 Direction, Vector3 Illuminance)? sun)
+    public void PickColor((Vector3 Direction, Vector3 Illuminance, DirectionalLightMode Mode)? sun)
     {
-        float lux = sun switch
-        {
-            null => BrightLux,
-            { Direction.Y: > 0 } up => Vector3.Dot(up.Illuminance, new Vector3(0.2126f, 0.7152f, 0.0722f)),
-            _ => 0,
-        };
-        float bright = Math.Clamp(
-            MathF.Log10(MathF.Max(lux, DarkLux) / DarkLux) / MathF.Log10(BrightLux / DarkLux),
-            0,
-            1
-        );
-        _color = _bright * bright;
+        bool isDay =
+            sun is not { } light
+            || (light.Direction.Y > 0 && light.Mode != DirectionalLightMode.Moon && light.Illuminance != Vector3.Zero);
+        _color = isDay ? _bright : Vector3.Zero;
     }
+
+    /// <summary>
+    /// Makes the cover black until the next <see cref="PickColor"/>.
+    /// </summary>
+    public void MakeBlack() => _color = Vector3.Zero;
 
     /// <summary>
     /// Gets whether a shader of the cover is still being built; a failed one counts as done.

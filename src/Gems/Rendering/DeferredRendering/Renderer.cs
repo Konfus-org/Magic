@@ -647,7 +647,9 @@ public sealed class Renderer
             camera,
             frame,
             isJittered ? FrameView.GetJitter(frame.Index) : Vector2.Zero,
-            GetSun(inputs.DirectionalLights.First, inputs.DirectionalLights.Second) ?? _whiteSun,
+            GetSun(inputs.DirectionalLights.First, inputs.DirectionalLights.Second) is { } sun
+                ? (sun.Direction, sun.Illuminance)
+                : _whiteSun,
             _settings.SkyBrightness,
             input.Traced is { } traced
                 ? new GpuTracedWorld { Acceleration = traced.Structure.Id, HitMaterials = traced.HitMaterials.Id }
@@ -896,7 +898,7 @@ public sealed class Renderer
             }
         }
 
-        (Vector3 Direction, Vector3 Illuminance)? sun = GetSun(
+        (Vector3 Direction, Vector3 Illuminance, DirectionalLightMode Mode)? sun = GetSun(
             CollectionsMarshal.AsSpan(transforms),
             CollectionsMarshal.AsSpan(lights)
         );
@@ -1035,14 +1037,14 @@ public sealed class Renderer
     /// is lit by <see cref="_whiteSun"/>.
     /// </remarks>
     /// <returns>
-    /// The unit direction towards the light, and its colour times its intensity, in lux, above the air.
+    /// The unit direction towards the light, its colour times its intensity, in lux, above the air, and its mode.
     /// </returns>
-    private static (Vector3 Direction, Vector3 Illuminance)? GetSun(
+    private static (Vector3 Direction, Vector3 Illuminance, DirectionalLightMode Mode)? GetSun(
         ReadOnlySpan<Transform> transforms,
         ReadOnlySpan<DirectionalLight> lights
     )
     {
-        (Vector3 Direction, Vector3 Illuminance)? sun = null;
+        (Vector3 Direction, Vector3 Illuminance, DirectionalLightMode Mode)? sun = null;
         int sunRank = -1;
         for (int i = 0; i < lights.Length; i++)
         {
@@ -1059,7 +1061,7 @@ public sealed class Renderer
                 continue;
 
             Vector3 illuminance = new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity;
-            sun = (towards, illuminance);
+            sun = (towards, illuminance, light.Mode);
             sunRank = rank;
         }
 
@@ -1076,6 +1078,11 @@ public sealed class Renderer
         // nothing pops in.
         if (graph.IsMakerOut<GpuWorld>() || graph.IsMakerOut<GpuView>())
             EndPreparing();
+
+        // PROTO: the first cover of a load, over the old world, is black. No hook tells the gem the loading screen
+        // that follows before that cover, and the engine's loading screen is black.
+        if (!_world.IsLoading)
+            _cover.MakeBlack();
 
         Cover.ClearWindow(graph);
         _cover.Record(graph, _world.CoverOpacity);
