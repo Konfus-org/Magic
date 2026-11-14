@@ -78,7 +78,8 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
         if (state != GpuState.Loading)
             _built.TrySetResult();
 
-        if (state != GpuState.Ready)
+        // A view maker that is out leaves the upscaling no view to resolve for good: the failure is already told.
+        if (state != GpuState.Ready || graph.IsMakerOut<GpuView>())
             _settling?.TrySetResult();
 
         return state == GpuState.Ready ? _upscaling : null;
@@ -123,6 +124,7 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
         Result<GpuBuffer> constants = graph.Buffer(new("Upscale constants", Unsafe.SizeOf<UpscaleConstants>()));
         if (Result.FindFailure(first, second, sampler, constants) is { Ok: false } failed)
         {
+            _settling?.TrySetResult();
             graph.Fail(RenderFailure.Resource, "Picture is not upscaled", failed.Error);
 
             return GpuTexture.None;

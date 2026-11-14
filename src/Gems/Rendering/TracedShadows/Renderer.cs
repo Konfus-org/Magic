@@ -119,7 +119,10 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
             _upsampleShader
         );
         if (state == GpuState.Failed)
+        {
+            _settling?.TrySetResult();
             graph.Fail(RenderFailure.Shader, "Shadows are not traced", "a shader of the shadows was not built.");
+        }
 
         if (state != GpuState.Ready)
             return null;
@@ -176,6 +179,7 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
         );
         if (!asked.Ok)
         {
+            _settling?.TrySetResult();
             graph.Fail(RenderFailure.Resource, "Shadows are not traced", asked.Error);
 
             return null;
@@ -316,7 +320,7 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
 
     /// <summary>
     /// Asks for every shader of the shadows each frame while they are on and rays are traced, so each is built or
-    /// failed before a domain shows.
+    /// failed before a domain shows. Ends the wait for the shadows to settle while they cannot trace.
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph)
     {
@@ -327,7 +331,14 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
         )
             _built.TrySetResult();
 
-        if (!_settings.IsTracedShadowsOn || !graph.Features.HasRayQuery)
+        // A maker that is out leaves the shadows without the view or the traced world for good: the failure is already
+        // told.
+        if (
+            !_settings.IsTracedShadowsOn
+            || !graph.Features.HasRayQuery
+            || graph.IsMakerOut<GpuView>()
+            || graph.IsMakerOut<TracedWorld>()
+        )
             _settling?.TrySetResult();
     }
 

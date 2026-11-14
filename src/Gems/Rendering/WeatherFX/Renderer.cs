@@ -144,6 +144,7 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
         Result<GpuSampler> sampler = graph.Sampler(new SamplerDescription { Wrap = TextureWrap.Clamp });
         if (Result.FindFailure(scattering, history, air, sampler) is { Ok: false } failed)
         {
+            _settling?.TrySetResult();
             graph.Fail(RenderFailure.Resource, "Air is not filled", failed.Error);
 
             return null;
@@ -251,12 +252,16 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
 
     /// <summary>
     /// Asks for every shader of the air and the clouds each frame, whatever the weather, so each is built or failed
-    /// before a domain shows.
+    /// before a domain shows. Ends the wait for the air to settle while it has no view to fill.
     /// </summary>
     public void Render(in Frame frame, RenderGraph graph)
     {
         if (!graph.IsAnyLoading(_scatterShader, _integrateShader, _cloudShader))
             _built.TrySetResult();
+
+        // A view maker that is out leaves the air no view to fill for good: the failure is already told.
+        if (graph.IsMakerOut<GpuView>())
+            _settling?.TrySetResult();
     }
 
     public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel) =>
