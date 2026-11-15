@@ -44,7 +44,7 @@ runs:
     # its driver, are the device the headless samples open.
     - name: Install the Vulkan runtime and a software Vulkan driver
       if: runner.os == 'Windows'
-      uses: jakoch/install-vulkan-sdk-action@v1.7.0
+      uses: jakoch/install-vulkan-sdk-action@v1.8.1
       with:
         install_runtime_only: true
         install_lavapipe: true
