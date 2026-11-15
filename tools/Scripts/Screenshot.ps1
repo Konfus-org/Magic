@@ -181,6 +181,8 @@ $input_ = Join-Path $work 'lines.txt'
 $results = Join-Path $work 'results.txt'
 $log = Join-Path $work 'log.txt'
 [System.IO.File]::WriteAllLines($input_, [string[]]$lines)
+# Only a few runs of Magic go at the same time, from all sessions: wait for a free slot, and hold it for the run.
+$slot = & (Join-Path $PSScriptRoot 'Profiling.ps1') -Slot
 try {
     $process = Start-Process -FilePath $magic -ArgumentList $arguments -NoNewWindow -PassThru `
         -RedirectStandardInput $input_ -RedirectStandardOutput $results -RedirectStandardError $log
@@ -215,6 +217,7 @@ try {
     $found = @(Get-Content $results -ErrorAction SilentlyContinue)
     $errors = @($text | Where-Object { $_ -match '\[Error\]' })
 } finally {
+    $slot.Dispose()
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 }
 

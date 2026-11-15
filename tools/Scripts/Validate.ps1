@@ -72,6 +72,8 @@ $screenshots = @()
 # -Seconds is killed.
 function Invoke-Headless {
     & (Join-Path $PSScriptRoot 'Profiling.ps1') -Wait
+    # The projects run together, as one run: hold one run slot for them all.
+    $slot = & (Join-Path $PSScriptRoot 'Profiling.ps1') -Slot
     $commands = Join-Path ([System.IO.Path]::GetTempPath()) ('Validate-' + [guid]::NewGuid() + '.txt')
     Set-Content -Path $commands -Value @('wait loaded', 'exit')
     $runs = foreach ($one in $Project) {
@@ -104,6 +106,7 @@ function Invoke-Headless {
         Remove-Item $run.Log -ErrorAction SilentlyContinue
     }
     Remove-Item $commands -ErrorAction SilentlyContinue
+    $slot.Dispose()
     $global:LASTEXITCODE = $code
 }
 
@@ -132,7 +135,17 @@ $steps = @(
             }
         }
     }
-    @{ Name = 'Test'; Run = { dotnet test --solution $solution --configuration $Configuration --no-build } }
+    @{
+        Name = 'Test'
+        Run = {
+            $slot = & (Join-Path $PSScriptRoot 'Profiling.ps1') -Slot
+            try {
+                dotnet test --solution $solution --configuration $Configuration --no-build
+            } finally {
+                $slot.Dispose()
+            }
+        }
+    }
     @{ Name = 'Headless'; Run = { Invoke-Headless } }
     @{ Name = 'Screenshot'; Run = { Invoke-Screenshot } }
 )

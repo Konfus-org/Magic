@@ -42,6 +42,9 @@ The scripts run under `pwsh` and Windows PowerShell ([Tools](docs/TOOLS.md)).
   it themselves. They name its window with the worktree's branch, the session's name, and end the run at a time limit.
   Do not start `Magic`, `Magic.exe` or `dotnet run` on the engine or a sample in another way. `Magic new` and
   `Magic --help` open nothing, so they are allowed.
+- **Run slots:** sessions build and code at the same time, but the scripts that run Magic or the tests wait for a
+  free run slot first, so only `MAGIC_RUN_SLOTS` runs (1 if not set) go at the same time, from all sessions. A
+  `dotnet test` of one test project takes no slot: do not run all the tests in another way.
 - **Profiling:** `tools/Scripts/Profiling.ps1 -Minutes <n>` takes a profiling turn for the branch, and `-Release` ends
   it. While another branch's turn runs, the scripts that run Magic or the tests wait for it to end. On Windows, their
   builds and formats run at once, at idle priority.
@@ -79,6 +82,7 @@ In Claude Code, the agent hooks in `.claude/settings.json` hold the workflow wit
 - An edit to a file in the main checkout is refused. Starting Claude Code with `MAGIC_ALLOW_MAIN_EDITS=1` allows it
   for that session; only the user sets it.
 - A command that starts Magic other than through the scripts in [Run Magic](#commands) is refused.
+- A `claude -p` worker run without `--model`, or on a Fable or Mythos model, is refused (the parallelize skill).
 - A `dotnet build` or test run is refused while another branch's profiling turn runs. Build with
   `tools/Scripts/Validate.ps1 -Only Build` instead, which on Windows runs at idle priority and does not wait.
 - An edit inside another session's claim is refused unless this worktree's own claim covers it too

@@ -57,8 +57,8 @@ flowchart TD
       of the root.
    2. Write the plan to `agent-swarm/<effort>.md` in `git rev-parse --git-common-dir`. Only you write it. Write it
       again each time something changes. It has:
-      - The goal in three lines, the decisions, the root, the worker limit, the permission flags and the models (step
-        4).
+      - The goal in three lines, the decisions, the root, the worker limit, the permission flags, and the line
+        "Models: each worker on `--model opus`, never Fable or Mythos" (step 4).
       - A table of the slices: branch, mode, check, scope, waits for, session ID, state.
       - The queue for the user and the profiling queue.
       - The notes for the user: hacks, known issues, trade-offs, decisions that you made, follow-ups that you did not
@@ -74,21 +74,19 @@ flowchart TD
 
    Start the spike with the most risk alone, unless the user says that the risk is known.
 
-   Select the model of each worker from your own model. Use the same `--effort` as your own. If you do not know your
-   effort, do not give `--effort`.
-
-   | Your model | Coders | QA |
-   | --- | --- | --- |
-   | Fable 5 (`fable`) | Opus 5.5 (`opus`) | `fable` |
-   | Opus 5.5 (`opus`) | Opus 5 (`claude-opus-5`) | `opus` |
-   | Opus 5 (`claude-opus-5`) | Opus 4.8 (`claude-opus-4-8`) | `claude-opus-5` |
-   | Any other | Your own model | Your own model |
+   **Models.** This is a hard rule. Each worker, of each role (coder, QA, fix, batch or any other), runs on
+   `--model opus`. Never give a worker a Fable or Mythos model, also when you run on one, and also for a hard task.
+   Give `--model opus` on each `claude -p`, also with `--resume`: without it, the run takes the default model. For a
+   background agent, set its model to `opus`. Write this rule in each plan and each handoff. An agent hook refuses a
+   `claude -p` without `--model`, or with a Fable or Mythos model. Use the same `--effort` as your own. If you do not
+   know your effort, do not give `--effort`.
 
    To start a worker, make a UUID for its session and write it in the plan. From the repository root, in bash, run
    this in the background:
-   `timeout -k 10 1h claude -p "<prompt>" --session-id <UUID> --model <model> --effort <effort> <permission flags> --output-format json < /dev/null`
+   `timeout -k 10 1h claude -p "<prompt>" --session-id <UUID> --model opus --effort <effort> <permission flags> --output-format json < /dev/null`
 
    To send a message to a worker, run the same command with `--resume <UUID> "<message>"` in place of `--session-id`.
+   Keep `--model opus`.
    When the worker stops, its result comes to you as a new turn. In a tool without headless sessions, use a background
    agent with the same limit.
 

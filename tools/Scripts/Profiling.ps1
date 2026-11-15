@@ -12,7 +12,11 @@ that. It fails when another worktree holds a turn that has not ended, or when th
 worktree holds a turn, and returns at once otherwise: the scripts that run Magic or the tests call it before each
 step. -Build runs a build or a format: on Windows at once, at idle priority, which every process it starts takes too,
 so that it uses only what the profiled run leaves idle; elsewhere after -Wait. A turn ends by itself at its time, so a
-holder that stops can't block the others. Runs from any current directory.
+holder that stops can't block the others. -Slot waits for a free run slot and returns it, open: the scripts that run
+Magic or the tests hold one while they run, so that the sessions can build at the same time but run only a few at a
+time (the environment variable MAGIC_RUN_SLOTS, 1 if not set). A slot is a file in the git folder that its holder keeps
+open; the holder disposes it when done, and the system frees it when the holder's process ends. Runs from any current
+directory.
 
 .PARAMETER Minutes
 Takes the turn for this many minutes, at most 20.
@@ -22,6 +26,9 @@ Ends this worktree's turn.
 
 .PARAMETER Wait
 Waits while another worktree holds a turn.
+
+.PARAMETER Slot
+Waits for a free run slot and returns it. Dispose it when the run ends.
 
 .PARAMETER Build
 The build or format to run without disturbing another worktree's turn. The script exits with its exit code.
@@ -38,6 +45,7 @@ param(
     [int] $Minutes,
     [switch] $Release,
     [switch] $Wait,
+    [switch] $Slot,
     [scriptblock] $Build
 )
 
@@ -130,6 +138,35 @@ function Get-OtherRuns {
     }
 
     return $runs
+}
+
+if ($Slot) {
+    $slots = Join-Path $common 'agent-runs'
+    New-Item -ItemType Directory -Force -Path $slots | Out-Null
+    $count = if ($env:MAGIC_RUN_SLOTS) { [int]$env:MAGIC_RUN_SLOTS } else { 1 }
+    $shown = $false
+    while ($true) {
+        for ($i = 1; $i -le $count; $i++) {
+            try {
+                $file = [System.IO.File]::Open((Join-Path $slots "slot-$i"), [System.IO.FileMode]::OpenOrCreate,
+                    [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+            } catch [System.IO.IOException] {
+                continue
+            }
+            # Who holds it, for a person who looks.
+            $file.SetLength(0)
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes("branch: $branch`nprocess: $PID`n")
+            $file.Write($bytes, 0, $bytes.Length)
+            $file.Flush()
+            Write-Output $file
+            exit 0
+        }
+        if (-not $shown) {
+            Write-Host "Waiting for a free run slot: $count run(s) of Magic or the tests from other sessions are going (MAGIC_RUN_SLOTS)."
+            $shown = $true
+        }
+        Start-Sleep -Seconds 5
+    }
 }
 
 if ($Wait) {
