@@ -1,15 +1,16 @@
 ---
 name: parallelize
-description: Runs a large effort as a swarm. Coders build slices at the same time into a root branch. Then QA, fixes, a cleanup and one review by the user follow. Use it on your own, without being asked, when the user gives a list of separate tasks, asks for something too big for a few slices (such as "make a game"), or the slice list of a kickoff has two or more slices that do not depend on each other.
+description: Runs a large effort as a swarm. Coders build slices at the same time, and the coordinator merges each one into one root branch. Then an optional QA pass and one finish of the root follow, with one merge into the main checkout's branch after the user's yes. Use it on your own, without being asked, when the user gives a list of separate tasks, asks for something too big for a few slices (such as "make a game"), or the slice list of a kickoff has two or more slices that do not depend on each other.
 ---
 
 # Parallelize
 
-The commands, paths and rules are in [PROJECT.md](../PROJECT.md).
+The commands, paths and rules are in [PROJECT.md](../PROJECT.md). The branches and merges rule is a hard rule: workers
+merge only into the root, and the root merges into the main checkout's branch one time, at the end (step 10).
 
-You are the coordinator. You plan the slices, give them to workers, keep the user informed and bring the work
-together. You do not build. After the user approves the plan, work like `/goal`: start workers until the goal is
-met. Do not ask the user if you must continue.
+You are the coordinator. You plan the slices, give them to workers, merge their branches into the root, keep the user
+informed and finish the root. You do not write code. After the user approves the plan, work like `/goal`: start
+workers until the goal is met. Do not ask the user if you must continue.
 
 - Do not give the user a button, a choice or a question that starts work. If the work helps the goal, start it. If
   not, put it in the notes of the plan (step 11).
@@ -19,19 +20,19 @@ This diagram shows the flow of a swarm, from the plan to the merge.
 
 ```mermaid
 flowchart TD
-    Plan --> Coders[Coders build slices] --> Trains[Merge trains into the root]
-    Trains --> QA --> Fixes[Fix slices] --> Cleanup --> Review[Review of the root] --> UserReview[The user's review] --> Merge
+    Plan --> Coders[Coders build slices] --> Root[Coordinator merges each into the root]
+    Root --> QA[QA, if the root is large] --> Fixes[Fix slices] --> Finish[Finish the root] --> Merge[One merge, after the user's yes]
 ```
 
 **In each turn, do these steps in this order:**
 
 - Read the state of each slice (step 5).
 - For each worker that stopped, do what its `SLICE:` line asks (step 6).
-- Give the next profiling turn, and start the next merge train (step 6).
+- Give the next profiling turn (step 6).
 - If nothing waits for the user, give the user the next item of the queue (step 7).
 - Start each slice that is ready (step 4).
 - If something changed, post an update (step 7).
-- If each slice merged or answered, go to step 9, 10 or 11.
+- If each slice merged into the root or answered, go to step 9, 10 or 11.
 - If workers still run, end the turn and wait for them.
 
 ## Steps
@@ -50,7 +51,7 @@ flowchart TD
 
    Keep each task of a list from the user as a task. Split a task only to fit the hour, and say so.
 3. **Write the swarm plan,** and get the user's yes.
-   1. Make the root branch, `<type>/<effort>`, from the merge target in its own worktree:
+   1. Make the root branch, `<type>/<effort>`, from the main checkout's branch in its own worktree:
       `git worktree add <worktree folder>/<type>/<effort> -b <type>/<effort>`. Claim the scope of each slice for it.
       Each slice branches from the root with `--track`, as `<type>/<effort>-<slice>`. Do not put a slice under the name
       of the root.
@@ -59,14 +60,15 @@ flowchart TD
       - The goal in three lines, the decisions, the root, the worker limit, the permission flags and the models (step
         4).
       - A table of the slices: branch, mode, check, scope, waits for, session ID, state.
-      - The queue for the user, the profiling queue and the merge queue.
+      - The queue for the user and the profiling queue.
       - The notes for the user: hacks, known issues, trade-offs, decisions that you made, follow-ups that you did not
         do.
    3. Show the plan. A yes approves each slice, each follow-up that helps the goal (step 8), and the close of each
-      worker. With the plan, give this line to paste. Make `<n>` eight times the number of slices, plus 20.
-      `/goal every slice of the swarm has merged or answered and the final report is given, as the chat shows, or stop after <n> turns`
+      worker. It does not approve the merge into the main checkout's branch (step 10). With the plan, give this line
+      to paste. Make `<n>` eight times the number of slices, plus 20.
+      `/goal every slice of the swarm has merged into the root or answered, the root is in the user's review, and the final report is given, as the chat shows, or stop after <n> turns`
 4. **Start each slice that is ready.** A slice is ready when these conditions are true:
-   - Each slice that it waits for merged or answered.
+   - Each slice that it waits for merged into the root or answered.
    - No slice that is not merged changes the same files or module.
    - Fewer workers run than the limit.
 
@@ -75,7 +77,7 @@ flowchart TD
    Select the model of each worker from your own model. Use the same `--effort` as your own. If you do not know your
    effort, do not give `--effort`.
 
-   | Your model | Coders and merge trains | QA and cleanup |
+   | Your model | Coders | QA |
    | --- | --- | --- |
    | Fable 5 (`fable`) | Opus 5.5 (`opus`) | `fable` |
    | Opus 5.5 (`opus`) | Opus 5 (`claude-opus-5`) | `opus` |
@@ -95,13 +97,13 @@ flowchart TD
    its check is a run that shows the fix, not the build alone. It tells the coder:
    - Make your worktree with `git worktree add --track -b <branch> <worktree folder>/<branch> <root>`. Claim your
      scope.
-   - Follow the slice skill from step 3, and each skill that the work needs, such as investigate, cleanup, profiling
-     and timeouts. Do not use the finish skill.
-   - Build, then run the one check that the brief names, headless or as a screenshot, with its time limit. Run the
-     stamp command. Do not run tests, full validations or reviews. Do not run the app in a window, except to profile
-     in a profiling turn.
-   - When the slice builds, commit on its branch and end with `STATE: done`. For a spike, release its claim, write its
-     summary and end with `STATE: answered`.
+   - Follow the slice skill from step 3 to step 6, and each skill that the work needs, such as investigate, cleanup,
+     profiling and timeouts. Do not use the finish skill. Do not merge your branch anywhere: the coordinator merges it.
+   - Build, then run the one check that the brief names, headless or as a screenshot, with its time limit. Do not run
+     tests, full validations, the stamp command or reviews. Do not run the app in a window, except to profile in a
+     profiling turn.
+   - Commit on your branch as often as it helps. When the slice builds and its check passes, end with `STATE: done`.
+     For a spike, release its claim, write its summary and end with `STATE: answered`.
    - Do not ask the user anything. When a skill tells you to ask the user or to stop, end with `STATE: blocked`. Add
      the proposal, and each question as a choice of two to four options, the recommended one first.
    - Before you profile or measure, end with `STATE: needs-profiling`, with what you will run and for how long.
@@ -120,20 +122,23 @@ flowchart TD
 
    | State | Do this |
    | --- | --- |
-   | `done` | Add it to the merge queue. |
-   | `merged` or `answered` | Do step 8. |
-   | `rejected`, from a train | Resume the coder with the reason. It rebases onto the root, fixes the build, commits and ends with `done`. |
-   | `requeued` | Add it to the merge queue again. |
+   | `done` | Merge it into the root (below). |
+   | `answered` | Do step 8. |
+   | `conflict` or `broken`, from your merge | Resume the coder with the reason: "Pull the root into your branch, fix the conflict or the build, commit, and end with `done`." |
    | `blocked` | Add its proposal and its questions to the queue for the user. If the block is a failure with a cause that is not proved, first start a spike that finds the cause. Give the user the choice of a fix only with that cause. |
    | `needs-profiling` | Add it to the profiling queue. |
    | `profiling-done` | End its turn. Resume it with "Continue your slice." |
    | `validated`, from QA | Resume it with "Continue." |
    | `qa-done` | Do step 9. |
 
-   - **A train, QA or cleanup worker at its time limit:** resume it one time with "Continue." If it gets to the limit
-     again, do this:
-     - For a train, reset its slices that did not merge to their first heads, and make them `requeued`.
-     - For QA or cleanup, put its state in the notes and continue.
+   **Merge a done slice into the root.** Merge one slice at a time, fixes first. In the worktree of the root:
+   1. Run `git merge --no-ff <slice>`. If there is a conflict, run `git merge --abort`, and make the slice `conflict`.
+   2. Run the build with the validate command (`-Only Build`). If it fails, run `git reset --keep ORIG_HEAD`, and make
+      the slice `broken`, with the error.
+   3. If it builds, release the slice's claim. Run `git worktree remove`, then `git branch -d`. Then do step 8.
+
+   - **A QA worker at its time limit:** resume it one time with "Continue." If it gets to the limit again, put its
+     state in the notes and continue.
    - **A coder that ended with `too-big`, or at its time limit:** kill the processes that it started
      ([timeouts skill](../timeouts/SKILL.md) step 5). If the profiling turn of another worker ran during its run,
      resume it one time. If not, split the slice into slices that each fit in one hour. Start the first on the same
@@ -144,39 +149,18 @@ flowchart TD
    **Profiling turns.** Only profiling waits for a turn. Give the turns one at a time, in the order of the queue.
    Resume the first coder with "Your profiling turn starts now." The turn ends when that coder stops. If it stopped
    without a release, run the command that releases a profiling turn, in its worktree.
-
-   **One ready slice.** If the merge queue has one slice that is on the root's tip and stamped at that state,
-   fast-forward the root to it yourself. Then release its claim and remove its worktree and branch. It needs no train.
-
-   **Merge trains.** Start a train worker with five slices or fewer when no train runs and one of these is true:
-   - The merge queue has two or more slices.
-   - The merge queue has one slice, and no coder builds.
-
-   The train counts against the worker limit. Its prompt gives the root and the slices. It says that the train owns their
-   worktrees until it stops, and tells it to:
-   1. Put the slices in order: fixes first, then features, then the others. Keep the order of the queue in each group.
-   2. Write down the head commit of each slice. Rebase the first slice onto the root, and each next slice onto the one
-      before. If a slice has a conflict, abort the rebase, reset the slice with `git reset --keep <head>`, and make it
-      `rejected`.
-   3. Run the build and stamp command in the worktree of the last slice. If the build fails, run it in the worktree of
-      each slice from the first, and stop at the first that fails. That slice is `rejected`, with the error. The
-      slices after it are `requeued`.
-   4. In the worktree of the root, run `git merge --ff-only <the last slice that built>`.
-   5. For each slice that merged, release its claim. Then run `git worktree remove` and `git branch -d`.
-   6. Reset each slice that did not merge to its first head with `git reset --keep <head>`.
-   7. End with one `SLICE:` line for each slice: `merged`, `rejected` with the reason, or `requeued`.
 7. **Keep the user informed.** Post one update when an item gets to the user, a slice merges or answers, or the plan
    changes. Always use this shape. Send a notification where the tool can.
 
    ```text
    Waiting on you: QA's issues (2 more in the queue)
    In flight (2): search (building), export (profiling)
-   Done (3/9): sign-in, settings page, file import
+   In the root (3/9): sign-in, settings page, file import
    Next: undo, once search merges
    ```
 
-   **The queue for the user** has the questions, the issues from QA, the cleanup plan and the final review, in the
-   order that they come.
+   **The queue for the user** has the questions, the issues from QA and the user's review of the root, in the order
+   that they come.
    - Give only the first item. Give the next item only when the user finished the first.
    - Ask with the multiple-choice prompt of the tool, with four questions or fewer in one prompt, as the worker wrote
      them.
@@ -192,31 +176,21 @@ flowchart TD
      follow-up that needs a decision that is hard to reverse.
    - If a ready slice is in the same area, you can resume the same coder with it. Do this only while the coder built
      fewer than three slices and its `CONTEXT` is less than half.
-9. **QA,** when each slice merged or answered:
-   1. Start a QA worker in the worktree of the root. Its prompt gives the root, the merge target and the brief of each
-      slice. It tells the worker to follow the [qa skill](../qa/SKILL.md). If it ends with `STATE: validated`, resume
-      it with "Continue."
+9. **QA,** when each slice merged or answered. Skip this step when the root has 300 changed lines or fewer against
+   the main checkout's branch.
+   1. Start a QA worker in the worktree of the root. Its prompt gives the root, the main checkout's branch and the
+      brief of each slice. It tells the worker to follow the [qa skill](../qa/SKILL.md). If it ends with
+      `STATE: validated`, resume it with "Continue."
    2. Put its issues in the queue for the user as multiple-select questions, the most severe first. Give the rank,
       the place and the suggested fix of each issue.
    3. Add each issue that the user selects as a fix slice (step 4). Put the others in the notes.
-   4. When the fixes merge, resume QA with "Check these fixes:" and their branches. Do this two times or fewer. Then
-      put the issues that are left in the notes.
-10. **Cleanup and the review,** when QA is done:
-    1. Start a cleanup worker as a slice from the root. It follows the [cleanup skill](../cleanup/SKILL.md) on
-       `git diff <merge target>...<root>`, and ends with `STATE: blocked` and its cleanup plan. Put the plan in the
-       queue. When the user approves, resume the worker. It builds, commits and ends with `STATE: done`, like a coder.
-    2. When the cleanup merges, tell a worker to rebase the root onto the merge target. If there is a conflict, it
-       resolves it, and you put the resolution in the queue. Then the worker:
-       - Runs the validate and stamp command in the worktree of the root, at the highest level of the slices.
-       - Examines the screenshots.
-       - Gets a review of the root in a fresh context ([review-slice skill](../review-slice/SKILL.md)). Its findings
-         are fix slices.
-    3. Put the user's review of the root in the queue. Run the user's review command from the worktree of the root, in
-       the background, with the limit from the timeouts skill. The comments become fix slices.
-    4. When fix slices from step 2 or 3 merge, do steps 2 and 3 again. Get a new review in a fresh context only when
-       the fixes added more than about 100 lines.
-    5. When the user approves, fast-forward the merge target to the root in its checkout. If the merge target moved,
-       do step 2 again first. Release the claim of the root, and remove its worktree and branch.
+   4. When the fixes merge, resume QA one time with "Check these fixes:" and their branches. Put the issues that are
+      left in the notes.
+10. **Finish the root,** when QA is done or skipped. Use the [finish skill](../finish/SKILL.md) on the root yourself,
+    in its worktree. It pulls the main checkout's branch, validates one time at the highest level of the slices, gets
+    one review in a fresh context, and starts the user's review in the background. Make each finding and each comment
+    a fix slice (step 4). When the user approves, the finish skill merges the root into the main checkout's branch one
+    time. Never merge the root before that yes.
 11. **The final report.** Close each worker that still runs. Run the
     [tidy-worktrees skill](../tidy-worktrees/SKILL.md). Then give the user:
     - Each slice, its commits and what it changed, one line each.

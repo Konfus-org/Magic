@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
 What an agent runs on completing a task: tools/Scripts/Format.ps1 on the change, the steps of tools/Scripts/Validate.ps1 that what the
-change can affect needs, then a stamp of the exact state it validated, which a git commit or git merge needs.
+change can affect needs, then a stamp of the exact state it validated, which a git merge in the main checkout needs.
 
 .DESCRIPTION
 -Change says what the change can affect, and so what must run to show it works (AGENTS.md, Finish). Docs is a change
@@ -17,22 +17,22 @@ would record it, so the stamp names content rather than a time. When every file 
 aside, is in the folder of a sample, only the samples that it touches run. A checkout whose files changed while it ran is not
 stamped. The stamps are kept in the repository's git folder, which every worktree shares, so a merge from the main
 checkout finds the stamp its branch's worktree wrote. A stamp keeps its level and its screenshots, and a state already
-stamped at the level asked for or a higher one is not validated again, so a run after a rebase that brought in
+stamped at the level asked for or a higher one is not validated again, so a run after a pull that brought in
 nothing ends at once. The script ends with the screenshots' paths, one of each domain: open each and look at it. It
 also points git at the repository's hooks (.githooks) when the clone has no hooks path, so every commit's subject gets
 its type.
 
-With -Hook it is a guard instead, for a tool hook that runs it before a command that commits or merges, with the
-hook's input as JSON on stdin. A git commit passes when the checkout's state has a stamp, and a
-git merge when the merged branch's last commit does, so an edit after the run, or a rebase onto new work, needs a new
-run. It exits 2 with the reason on stderr to refuse, which the agent is shown, and 0 to let the command run; any other
+With -Hook it is a guard instead, for a tool hook that runs it before a command that merges, with the hook's input
+as JSON on stdin. A git merge in the main checkout passes when the merged branch's last commit has a stamp, so an edit
+after the run, or a pull of new work, needs a new run. Commits, and merges in a worktree, such as a slice into its
+root branch, pass (AGENTS.md, Branches and Merges). It exits 2 with the reason on stderr to refuse, which the agent is shown, and 0 to let the command run; any other
 command, or one it cannot place in a checkout, passes. Runs under pwsh and Windows PowerShell, from any directory.
 
 .PARAMETER Change
 What the change can affect, which picks what runs: Docs, Code or Visual.
 
 .PARAMETER Hook
-Check the git commit or git merge the hook's input on stdin names, rather than validate.
+Check the git merge the hook's input on stdin names, rather than validate.
 
 .EXAMPLE
 tools/Scripts/AgentTaskComplete.ps1 -Change Code
@@ -139,7 +139,7 @@ if (-not $Hook) {
             $stamped = @($stamped | Select-Object -Skip 1)
         }
         if ($rank[$level] -ge $rank[$Change]) {
-            Write-Output "This state ($tree) was already validated as a $level change: git commit and git merge of it are allowed."
+            Write-Output "This state ($tree) was already validated as a $level change: a git merge of it is allowed."
             foreach ($path in $stamped) { Write-Output "  $path" }
             exit 0
         }
@@ -170,7 +170,7 @@ if (-not $Hook) {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $stamp) | Out-Null
     Set-Content -Path $stamp -Value (@($Change) + $screenshots) -Encoding utf8
     Write-Output ""
-    Write-Output "Stamped this state ($after) as a $Change change: git commit and git merge of it are allowed."
+    Write-Output "Stamped this state ($after) as a $Change change: a git merge of it is allowed."
     if ($screenshots.Count -gt 0) {
         Write-Output 'Open each screenshot and look at what it shows before reporting the task complete:'
         foreach ($path in $screenshots) { Write-Output "  $path" }
@@ -182,9 +182,8 @@ $hookInput = [Console]::In.ReadToEnd() | ConvertFrom-Json
 $command = [string]$hookInput.tool_input.command
 $here = [string]$hookInput.cwd
 
-# commit or merge as git's own command, not git commit-tree or git merge-base.
-if ($command -notmatch '\bgit\b(\s+-C\s+\S+)?\s+(commit|merge)(?![-\w])') { exit 0 }
-$isMerge = $Matches[2] -eq 'merge'
+# merge as git's own command, not git merge-base.
+if ($command -notmatch '\bgit\b(\s+-C\s+\S+)?\s+merge(?![-\w])') { exit 0 }
 
 # The folder the git command runs in: the one a git -C or a cd before it names, else where the command runs.
 $folder = $here
@@ -199,23 +198,19 @@ if (-not (Test-Path $folder)) { exit 0 }
 
 $top = & git -C $folder rev-parse --show-toplevel
 if ($LASTEXITCODE -ne 0 -or -not $top) { exit 0 }
+# Only the main checkout is checked: its git folder is the shared one.
+$gitDir = & git -C $top rev-parse --path-format=absolute --git-dir
+$common = & git -C $top rev-parse --path-format=absolute --git-common-dir
+if ($gitDir -ne $common) { exit 0 }
 
-if ($isMerge) {
-    # The branch merged: the first word after merge that is not an option. merge --abort or --continue names none.
-    $words = @(($command -split '\bmerge\b', 2)[1] -split '[\s;&|]+' | Where-Object { $_ -and -not $_.StartsWith('-') })
-    if ($words.Count -eq 0) { exit 0 }
-    $branch = $words[0].Trim('"', "'")
-    $tree = & git -C $top rev-parse --verify --quiet "$branch^{tree}"
-    if ($LASTEXITCODE -ne 0 -or -not $tree) { exit 0 }
-    $what = "$branch as its last commit has it"
-    $where = "the worktree of $branch"
-} else {
-    $tree = Get-CheckoutTree $top
-    $what = "$top as it is now"
-    $where = $top
-}
+# The branch merged: the first word after merge that is not an option. merge --abort or --continue names none.
+$words = @(($command -split '\bmerge\b', 2)[1] -split '[\s;&|]+' | Where-Object { $_ -and -not $_.StartsWith('-') })
+if ($words.Count -eq 0) { exit 0 }
+$branch = $words[0].Trim('"', "'")
+$tree = & git -C $top rev-parse --verify --quiet "$branch^{tree}"
+if ($LASTEXITCODE -ne 0 -or -not $tree) { exit 0 }
 
 if (Test-Path (Get-StampPath $top $tree)) { exit 0 }
 
-[Console]::Error.WriteLine("$what was never validated: run tools/Scripts/AgentTaskComplete.ps1 -Change with what the change can affect in $where, open any screenshot it prints and look at it, then try again (AGENTS.md, Finish). An edit after the run, or a rebase onto new work, needs a new run.")
+[Console]::Error.WriteLine("$branch as its last commit has it was never validated: run tools/Scripts/AgentTaskComplete.ps1 -Change with what the change can affect in the worktree of $branch, open any screenshot it prints and look at it, then try again (AGENTS.md, Branches and Merges). An edit after the run, or a pull of new work, needs a new run.")
 exit 2

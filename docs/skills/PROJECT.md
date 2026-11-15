@@ -17,6 +17,7 @@ To use the skills in another repository, copy this folder. Then change only this
 | When blocked | [When Blocked](../../AGENTS.md#when-blocked) |
 | Simplest first | [Simplest First](../../AGENTS.md#simplest-first) |
 | Documentation rules | [Documentation Rules](../../AGENTS.md#documentation-rules) |
+| Branches and merges | [Branches and Merges](../../AGENTS.md#branches-and-merges). A hard rule: no skill overrides it. |
 | Worktrees and claims | [Worktrees](../../AGENTS.md#worktrees) |
 | Commits | [Commits](../../AGENTS.md#commits) |
 | Code standards | [Code Standards](../CODE_STANDARDS.md), for `.cs` files |
@@ -38,15 +39,8 @@ To use the skills in another repository, copy this folder. Then change only this
 
 ## Validation levels
 
-From the lowest to the highest:
-
-| Level | For | Runs |
-| --- | --- | --- |
-| `Docs` | Markdown, comments, docstrings | The build |
-| `Code` | A change in behaviour that draws the same | The build, the tests, every sample headless |
-| `Visual` | A change that can change what is drawn | The build, the tests, a screenshot of every sample |
-
-The visual level is `Visual`. It prints the paths of the screenshots.
+The levels, from the lowest to the highest, are `Docs`, `Code` and `Visual`
+([Commands](../../AGENTS.md#commands)). The visual level is `Visual`. It prints the paths of the screenshots.
 
 ## Commands
 
@@ -54,6 +48,7 @@ The visual level is `Visual`. It prints the paths of the screenshots.
 | --- | --- |
 | Validate and stamp | `tools/Scripts/AgentTaskComplete.ps1 -Change <level>` |
 | Build and stamp only | `tools/Scripts/AgentTaskComplete.ps1 -Change Docs` |
+| The final merge | `git merge --no-ff <branch>`, in the main checkout |
 | Validate one step | `tools/Scripts/Validate.ps1 -Only Build`, `Test`, `Headless` or `Screenshot` |
 | Run the app | `tools/Scripts/Run.ps1 -Project <project> -Headless -Commands 'wait loaded', <commands>, 'exit'`. It exits `2` at the first error. Do not start the app in another way. |
 | Take a screenshot | `tools/Scripts/Screenshot.ps1 -Project <project> -Commands <commands>` |

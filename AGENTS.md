@@ -14,7 +14,7 @@ asked, when its trigger fits: read its `SKILL.md` and follow it. Claude Code als
 | [kickoff](docs/skills/kickoff/SKILL.md) | A request starts something too big for one slice |
 | [parallelize](docs/skills/parallelize/SKILL.md) | A list of separate tasks, or an effort too big for a few slices |
 | [slice](docs/skills/slice/SKILL.md) | Any change to code, docs or tools, and the next agreed slice |
-| [finish](docs/skills/finish/SKILL.md) | A slice's code is written, or the user's review comments are addressed |
+| [finish](docs/skills/finish/SKILL.md) | A single slice's code is written, an effort's last slice is in its root branch, or the user's review comments are addressed |
 | [review-slice](docs/skills/review-slice/SKILL.md) | Reviewing a validated slice from a context that didn't write it |
 | [tidy-worktrees](docs/skills/tidy-worktrees/SKILL.md) | The SessionStart note lists finished worktrees or stale claims |
 | [investigate](docs/skills/investigate/SKILL.md) | Something is broken, logs an error or draws wrong |
@@ -33,7 +33,7 @@ The scripts run under `pwsh` and Windows PowerShell ([Tools](docs/TOOLS.md)).
 
 - **Task complete:** `tools/Scripts/AgentTaskComplete.ps1 -Change <level>` formats, runs the steps of
   `tools/Scripts/Validate.ps1` the level needs and stamps the validated state. Run it when a task is done, and again
-  after any later edit or rebase. A state already stamped at that level returns at once.
+  after any later edit or pull. A state already stamped at that level returns at once.
 - **Validate:** `tools/Scripts/Validate.ps1` builds, runs the tests, runs every sample project headless, then
   screenshots each and prints the paths.
 - **Screenshot:** `tools/Scripts/Screenshot.ps1` runs a project until its world loads and prints the screenshot's
@@ -62,7 +62,8 @@ unsure:
 | `Code` | Anything that runs differently but draws the same, refactors and renames included | The build, the tests, every sample project headless |
 | `Visual` | Anything that can change what is drawn | The build, the tests, a screenshot of every sample project to look at |
 
-Commit or merge only once `tools/Scripts/AgentTaskComplete.ps1` has stamped that exact state.
+Merge into the main checkout's branch only once `tools/Scripts/AgentTaskComplete.ps1` has stamped that exact state.
+Commits, and merges into a root branch, need no stamp.
 
 To run one step on its own, use `tools/Scripts/Validate.ps1 -Only Build`, `Test`, `Headless` or `Screenshot`, with
 `-Project` for one sample ([Tools](docs/TOOLS.md#validateps1)).
@@ -83,10 +84,9 @@ In Claude Code, the agent hooks in `.claude/settings.json` hold the workflow wit
 - An edit inside another session's claim is refused unless this worktree's own claim covers it too
   ([Worktrees](#worktrees)).
 - The status line shows the slice's size against its limit of 300 lines, and how full the context is.
-- `git commit` and `git merge` are refused for a state `tools/Scripts/AgentTaskComplete.ps1` hasn't stamped, and for
-  a slice the `slice-reviewer` subagent hasn't reviewed. One review covers the slice until fixes add more than about
-  100 lines. A swarm's slice, which commits into its root, needs no review, and neither does a small slice: 50
-  changed lines or fewer, or a `Docs` change.
+- A `git merge` in the main checkout is refused for a branch that `tools/Scripts/AgentTaskComplete.ps1` hasn't
+  stamped, or that the `slice-reviewer` subagent hasn't reviewed. A small branch needs no review: 50 changed lines or
+  fewer, or a `Docs` change. Commits, and merges in a worktree, are not checked.
 - A plan opens in plannotator for the user's approval.
 - C# diagnostics reach you after every edit through the C# language server plugin.
 
@@ -118,17 +118,20 @@ Work moves one slice at a time, and the conversation holds the plan. A swarm dif
 
 - **A request is a slice, or gets split into slices.** A sweeping change becomes a list of slices you propose in the
   chat, and is never done as one task.
-- **One slice is one task:** one worktree, one review, one merge.
+- **One slice is one task:** one branch in one worktree. A slice of an effort merges into the effort's root branch,
+  never into the main checkout's branch ([Branches and Merges](#branches-and-merges)).
 - **Approved once.** The user's request, or their yes to a list of slices, is the approval (the slice skill).
 - **Iterate on the narrowest check.** While building, run one step of Validate, one test project or one sample.
-  Run `tools/Scripts/AgentTaskComplete.ps1` once, when the slice is done.
+  Run `tools/Scripts/AgentTaskComplete.ps1` once, on the branch that merges into the main checkout's branch: a single
+  slice, or the root branch of an effort at its end.
 - **Size:** reviewable in about 15 minutes, under about 300 changed lines, one area or one seam between two, and
   one runnable check that shows it works. A request that needs "and" more than once, or a design doc first, is too
   big: say so plainly and propose the split.
 - **Check for drift.** Before each slice, check it against the goal and decisions agreed in the conversation. Say so
   if it doesn't serve them.
-- **Go on through the approved list.** Once a slice merges, start the next slice of the list that the user approved.
-  When no approved slice is left, propose the next slice and wait. Never start a slice that the user did not approve.
+- **Go on through the approved list.** Once a slice merges into the root branch, start the next slice of the list
+  that the user approved. When no approved slice is left, finish the root branch (the finish skill). Never start a
+  slice that the user did not approve.
 - **Keep the context small.** Start the next slice in the same session while the context is less than half full.
   Otherwise give its brief to paste after `/clear`, and stop. When compacting, keep the slice list, the current
   slice, its worktree path, the files it changed and its `-Change` level.
@@ -182,9 +185,9 @@ subagent and keep only its answer.
 
 ### Finish
 
-A built slice is validated, reviewed in a fresh context unless it is small, summarized and shown to the user, and merges only on their
-approval (the finish skill). A swarm's slices go into its root branch, which
-gets QA, a cleanup and one review by the user before it merges (the parallelize skill).
+What merges into the main checkout's branch, a single slice or an effort's root branch, is validated one time,
+reviewed one time in a fresh context unless it is small, shown to the user, and merges only on their yes (the finish
+skill). A slice of an effort only builds, runs its check and merges into the root branch (the slice skill).
 
 ### When Blocked
 
@@ -231,7 +234,7 @@ Agents tend to over-build. Less is more: the best change often removes more code
 
 ### Structure
 
-- **Prefer removing code to adding it.** Match the surrounding style. No abstraction before a second real use.
+- **Match the surrounding style.**
 - **Project conventions first, then .NET's** (the Framework Design Guidelines).
 - **One responsibility each.** Split interfaces by what their user needs. Gems may depend on each other and reference one
   another; a gem throws when a dependency it needs isn't there.
@@ -259,24 +262,21 @@ meanings there.
 
 | Term | Meaning |
 | --- | --- |
-| slice | One task: one worktree, one review, one merge (the slice skill). |
+| slice | One task: one branch in one worktree (the slice skill). |
 | brief | The short statement of a slice: its goal, mode, scope, check and `-Change` level. |
 | main checkout | The first checkout of the repository. Agents do not edit in it. |
 | worktree | The git worktree that one branch is built in, under `Magic-worktrees/`. |
-| merge target | The branch that a slice merges into: the branch of the main checkout, or a root branch. |
+| merge target | The branch that a branch merges into: its root branch for a slice of an effort, otherwise the branch of the main checkout. |
 | claim | The record of the paths that a slice changes (`tools/Scripts/Claim.ps1`). |
 | stamp | The record that `tools/Scripts/AgentTaskComplete.ps1` validated an exact state. |
 | review | The check of a slice by a reviewer in a fresh context (the review-slice skill). |
 | the user's review | The check of a slice by the user, in plannotator or in the chat. |
 | swarm | Workers that build slices at the same time for one coordinator (the parallelize skill). |
 | coordinator | The session that plans a swarm, gives slices to its workers and merges the root branch. |
-| worker | A session that a coordinator starts: a coder that builds one slice, a merge train, QA or cleanup. |
-| swarm plan | The file that holds a swarm's slices and their states (the parallelize skill). |
-| worker limit | How many workers of a swarm run at the same time. |
+| worker | A session that a coordinator starts: a coder that builds one slice, or QA. |
 | profiling turn | A time in which one branch alone runs Magic and the tests, to profile or measure CPU, RAM or GPU use. Other branches build only at idle priority (`tools/Scripts/Profiling.ps1`). |
-| merge train | Done slices of a swarm that one worker builds and merges into the root together (the parallelize skill). |
 | QA | The check of a swarm's root for bugs by a worker that ranks them and fixes nothing (the qa skill). |
-| root branch | The branch that the slices of one feature merge into before it merges into the merge target. |
+| root branch | The one branch of an effort of more than one slice. Its slices merge into it, and it merges into the main checkout's branch one time, at the end. |
 | gem | A plugin: a part of the engine that a project adds or replaces. |
 | hook | A method that the engine calls on a gem each frame (Code Standards). |
 | agent hook | A check that Claude Code runs on its own (`.claude/settings.json`). |
@@ -284,23 +284,42 @@ meanings there.
 
 ## Git
 
+### Branches and Merges
+
+This is a hard rule. Each agent, skill and worker obeys it. No skill or plugin overrides it.
+
+- **One effort, one root branch.** An effort of more than one slice, such as a kickoff's slice list or a swarm, gets
+  one root branch from the main checkout's branch before its first slice. Each slice and each worker branches from the
+  root with `--track`, and merges back into the root. A request of one slice is its own branch and needs no root.
+- **Pull, do not merge.** A branch can pull the main checkout's branch into itself at any time. Nothing merges into
+  the main checkout's branch while the work goes on: not after a slice, a review or a fix, and not because a skill
+  says to finish a branch.
+- **One merge at the end.** When the work is complete and settled, the session that owns the branch (the coordinator,
+  or the session that ran the slices) does these steps (the finish skill):
+  1. Pulls the main checkout's branch into its branch, and resolves the conflicts.
+  2. Runs `tools/Scripts/AgentTaskComplete.ps1` at the highest level of its slices, and gets one review in a fresh
+     context.
+  3. Asks the user if it can merge, in the user's review or in the chat, and waits for a yes.
+  4. In the main checkout, runs `git merge --no-ff <branch>` one time. Then it removes the branch's worktree and
+     branch.
+- **Never push.**
+
 ### Worktrees
 
-Every task runs in its own worktree. Never edit or commit in the main checkout.
+Every task runs in its own worktree. Never edit or commit in the main checkout. The final merge is the one exception.
 
 - **Name:** `<type>/<feature>` in kebab-case, for example `fix/material-cache-leak`. Types: `feature`, `fix`,
   `refactor`, `docs`, `test`, `build`, `ci`. The worktree folder has the branch's name.
-- **Start:** start the session from the repository's root, never from a folder in it. Branch from the branch
-  checked out in the main checkout. That branch is the merge target. Title the session with the branch's name, as
-  `fix/material-cache-leak`. A worker in a swarm branches from the swarm's root branch instead, with `--track`, which
-  makes the root its merge target (the parallelize skill).
+- **Start:** start the session from the repository's root, never from a folder in it. Branch as
+  [Branches and Merges](#branches-and-merges) says. Title the session with the branch's name, as
+  `fix/material-cache-leak`.
 - **Claim:** right after making the worktree, claim the files and folders the slice will change:
   `tools/Scripts/Claim.ps1 -Slice <title> -Scope <paths>`. Include any file every slice touches that you need:
   `src/Magic.slnx`, `Directory.Packages.props`, `Directory.Build.props`, `Directory.Build.targets`, `AGENTS.md` and
   `docs/`. Claim again when the scope grows. If it reports overlap with another claim or worktree, stop and ask the
   user whether to wait for that work, narrow the slice, or go ahead. Never edit inside another session's claim
   without that yes. Release the claim with `-Release` once the slice merges, is answered or is dropped.
-- **Finish** and merge as the finish skill says, once the user approves.
+- **Finish** and merge as [Branches and Merges](#branches-and-merges) and the finish skill say.
 - **Abandoned work:** if the user drops the task, release its claim, leave the worktree and branch and say so.
 - **Start of a session:** when the SessionStart note lists finished worktrees or stale claims, remove what is
   finished and report the rest (the tidy-worktrees skill). Never remove a worktree or branch with work found nowhere
@@ -319,8 +338,8 @@ tidy-worktrees skill). A coordinator closes its own workers without a new approv
   and a commit of Markdown alone `docs`. Write the subject alone, never a scope or area prefix such as `fix(core): `
   or `Core, Gems:`. The `commit-msg` git hook refuses a commit whose subject lacks the type or has a scope, and the
   Commits check a push.
-- Commit only after the user approves the change in the user's review. A swarm's coder commits when its slice
-  builds (the parallelize skill).
+- Commit on your own branch as often as it helps. Only the merge into the main checkout's branch waits for the
+  user ([Branches and Merges](#branches-and-merges)).
 - Never push.
 - No co-author lines, and nothing in code, comments, commit messages or branch names that hints the work was
   generated.

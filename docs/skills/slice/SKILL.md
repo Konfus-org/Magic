@@ -17,7 +17,9 @@ flowchart TD
     Brief --> Clear{Clear, no hard decision?}
     Clear -- yes --> Build[Worktree, claim, build]
     Clear -- no --> Proposal[Proposal, then wait]
-    Build --> Finish[Finish skill]
+    Build --> One{Part of an effort?}
+    One -- no --> Finish[Finish skill]
+    One -- yes --> Root[Merge into the root, next slice]
 ```
 
 1. Take the slice that the user asks for, or the next slice of a list that the user approved. If the request is too
@@ -57,7 +59,9 @@ flowchart TD
 5. If the request is clear and needs no decision that is hard to reverse:
    1. Write the brief in the chat. Do not wait for approval. The request, or the user's yes to the slice list, is the
       approval.
-   2. Make the worktree. Then claim the scope of the brief (Worktrees and claims).
+   2. Make the worktree (Branches and merges). For a slice of an effort, branch from its root branch with
+      `--track`. Otherwise, branch from the main checkout's branch. Then claim the scope of the brief (Worktrees and
+      claims).
    3. If the claim reports an overlap, stop and ask the user.
    4. Build the slice. Check a position, height or size that you work out from data against the running engine
       (`get`, a probe or a screenshot) before a later step depends on it.
@@ -71,4 +75,9 @@ flowchart TD
       [ste-docs skill](../ste-docs/SKILL.md), section 7, says.
 
    In Claude Code, write the proposal in plan mode. In other tools, write it in the chat and wait.
-7. When the slice is built, use the [finish skill](../finish/SKILL.md).
+7. When the slice is built:
+   - For a single slice, use the [finish skill](../finish/SKILL.md).
+   - For a slice of an effort, run its "Works when" check and commit. In the root's worktree, run
+     `git merge --no-ff <slice>`. Release the claim, then remove the slice's worktree and branch. Start the next
+     approved slice. When the last one is in, use the [finish skill](../finish/SKILL.md) on the root branch. Do not
+     merge into the main checkout's branch before that.

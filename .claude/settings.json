@@ -51,9 +51,9 @@
             "type": "command",
             "if": "Bash(git *)",
             "shell": "bash",
-            "command": "input=$(cat); case \"$input\" in *commit*|*merge*) printf '%s' \"$input\" | powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/tools/Scripts/AgentTaskComplete.ps1\" -Hook || exit 2; printf '%s' \"$input\" | powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/ReviewGuard.ps1\" ;; esac",
+            "command": "input=$(cat); case \"$input\" in *merge*) printf '%s' \"$input\" | powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/tools/Scripts/AgentTaskComplete.ps1\" -Hook || exit 2; printf '%s' \"$input\" | powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/ReviewGuard.ps1\" ;; esac",
             "timeout": 120,
-            "statusMessage": "Checking the slice was validated and reviewed"
+            "statusMessage": "Checking the branch was validated and reviewed"
           }
         ]
       },

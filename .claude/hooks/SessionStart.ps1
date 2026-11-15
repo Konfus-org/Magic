@@ -36,7 +36,8 @@ try {
         }
     }
     $out.Add('- A clear request starts after a short brief (the slice skill); a new effort too big for one slice starts with the kickoff skill; a list of separate tasks, or a feature that splits into slices that can run side by side, runs as a swarm (the parallelize skill).')
-    $out.Add('- git commit needs AgentTaskComplete and one slice-reviewer review first; a slice of 50 lines or fewer, a Docs change and a swarm''s coder need no review.')
+    $out.Add('- Hard rule: an effort of more than one slice has one root branch; its slices merge into it, and it merges into the main checkout''s branch one time, at the end, after the user''s yes (AGENTS.md, Branches and Merges).')
+    $out.Add('- A git merge in the main checkout needs AgentTaskComplete and one slice-reviewer review first; a branch of 50 lines or fewer, or a Docs change, needs no review. Commits are free.')
 
     # Every slice in progress, from tools/Scripts/Claim.ps1, so this session works around them.
     $claims = @(Get-ChildItem -LiteralPath (Join-Path $checkout.Common 'agent-claims') -File -ErrorAction SilentlyContinue)

@@ -26,7 +26,8 @@ If the validate command formats a file, report it as an issue. Then restore the 
    - Work in a hot path, such as each frame, that allocates or does more than it needs.
    - Two slices that each work, but break when together.
    - A copy of a fixed bug that is not fixed, and docs that do not agree with the code.
-5. Report style only where it hides a bug. The cleanup worker does the rest.
+5. Report style only where it hides a bug. Also report code that the [cleanup skill](../cleanup/SKILL.md) (step 3)
+   removes or merges, at the `low` rank. You find it. You do not change it.
 6. Confirm each issue with a command that fails, a log line, a screenshot, or a code path that you can name. Mark an
    issue that you cannot confirm as `unconfirmed`.
 7. Rank each issue:

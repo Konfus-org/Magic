@@ -1,6 +1,6 @@
 ---
 name: review-slice
-description: Reviews the diff of a validated slice in a fresh context, against its request and the agent rules, and ends with a verdict. Use it one time for each slice, after validation and before the user's review, from a context that did not write the slice. It reads. It does not write code.
+description: Reviews the diff of a validated slice in a fresh context, against its request and the agent rules, and ends with a verdict. Use it one time for each branch that merges into the main checkout's branch (a single slice, or a root branch at its end), after validation and before the user's review, from a context that did not write it. It reads. It does not write code.
 ---
 
 # Review a slice
@@ -23,8 +23,8 @@ build, run scripts, commit or merge.
    - The agent rules for slices, modes, simplest first and how to implement.
    - The standards for each type of file that changed.
 
-   For the root branch of a swarm, review the whole: how its slices fit together, and what no slice owned. QA
-   checked the slices already. The slice size limit does not apply.
+   For a root branch, review the whole: how its slices fit together, and what no slice owned. The slice size limit
+   does not apply.
 4. Before you write a finding, ask: "Is there a more elegant solution?" Think of the version that an expert of this
    code would write. It often has a better data shape, or a different frame that removes special cases. It often
    removes more code than it adds. Compare the diff with that version.
@@ -39,12 +39,8 @@ build, run scripts, commit or merge.
      - More lines than the slice size limit.
    - **Rules:** a broken agent rule, for example a suppressed warning, a test that is weaker or deleted, or edited
      generated code.
-   - **Simpler:** the same result with clearly less code or a clearly more elegant design. For example:
-     - Code that exists and that the slice can delete or use again in place of new code.
-     - A flag, field, member, parameter, type or branch that the slice does not need.
-     - State that the code can compute.
-     - A name that simplest first does not allow.
-     - Brute force where a direct method fits.
+   - **Simpler:** the same result with clearly less code or a clearly more elegant design, as simplest first and
+     step 3 of the [cleanup skill](../cleanup/SKILL.md) describe it.
 
      Show the better version in a few lines. Report it only when it is smaller or clearly cleaner and does the same
      job. Do not report one reasonable method in place of another.

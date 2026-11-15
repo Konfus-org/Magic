@@ -50,8 +50,7 @@ more code than it adds. The rules are in [PROJECT.md](../PROJECT.md).
 4. **Do not add** a new abstraction, base type, option, setting or general system, or anything for a later need. If
    the simple version does not fit, stop and tell the user why.
 5. **Write the cleanup plan.** Get the user's yes before you edit. Use the proposal of the
-   [slice skill](../slice/SKILL.md) (step 6). In a swarm, end with `STATE: blocked`, with the plan in the message.
-   The plan has:
+   [slice skill](../slice/SKILL.md) (step 6). The plan has:
    - Each change in one line, with its reason.
    - Code before and after each important change, short enough to read quickly.
    - When the change moves types, layers or calls: a Mermaid diagram of the architecture before and after. Draw it
@@ -63,8 +62,7 @@ more code than it adds. The rules are in [PROJECT.md](../PROJECT.md).
 6. **Do the plan, and keep the behavior the same.**
    - Validate at the lowest level that covers the target. Use the visual level when the target can change what is
      drawn.
-   - Run the check from step 2 before and after the change. In a swarm, build only and do not run the check
-     (the parallelize skill).
+   - Run the check from step 2 before and after the change.
 7. **Report:**
    - The net change in lines, as measured.
    - What you removed, merged, made flat and renamed, one line each.

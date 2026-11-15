@@ -14,20 +14,8 @@ The rules, paths and commands are in [PROJECT.md](../PROJECT.md).
      `docs/SHADERS.md` for the shader library.
 
    Then read each file in the area, and how the rest of the code calls it.
-3. **Look for less code that does the same job:**
-   - Code that nothing calls.
-   - A type that only forwards calls, or a helper with one caller.
-   - A flag or a mode field.
-   - State that the code can compute.
-   - Two places that do the same thing.
-   - An abstraction with one use.
-   - A deep call chain or deep nesting.
-   - Brute force where a better data shape removes the special cases.
-
-   For each part, ask: "Is there a more elegant version?" The owner's taste comes first:
-   - One longer method in sections with short comments, not many small methods.
-   - The API shape that fits the call site.
-   - No flags, and no helpers with one caller.
+3. **Look for less code that does the same job:** the changes in step 3 of the [cleanup skill](../cleanup/SKILL.md),
+   judged by its list of what good code is. For each part, ask: "Is there a more elegant version?"
 4. **Check each finding against the code** before you write it: what calls it, and what can break.
 5. **Write the review** to `<reviews folder>/<Area>-<yyyy-MM-dd>.md`. Git does not track that folder. The review has
    these parts:
