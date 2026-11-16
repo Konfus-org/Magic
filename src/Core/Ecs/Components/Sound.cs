@@ -50,7 +50,7 @@ public enum SoundSpace : byte
 /// echo it. Everywhere alike is for music and ambience.
 /// </para>
 /// <para>
-/// A new one, <c>{ "audio": { "id": 800 } }</c> in a file, plays the sound once, at full volume, in the world. It is
+/// A new one, <c>{ "audio": { "id": 1234 } }</c> in a file, plays the sound once, at full volume, in the world. It is
 /// heard at full volume within a metre and not at all past 25 m. <c>"isLooping": true</c> plays it without end, and
 /// <c>"space": "everywhere"</c> plays it as music.
 /// </para>

@@ -41,8 +41,8 @@ run in the order of their list.
 
 - An effect before `Exposure` works in the light of the world. An effect after it works in exposed light. An effect
   after the tonemap works in the colours of the screen.
-- An effect that needs a target of its own declares levels. Each level can read the level before it. `Blur` and
-  `Bloom` show this.
+- An effect that needs a target of its own declares levels. Each level can read the level before it. `Bloom` shows
+  this.
 - An effect that reads the picture of the last frame declares a history. `Exposure` shows this.
 - An effect that blends frames declares jitter. `TemporalAntiAliasing` shows this.
 - An effect reads the frame and its lights itself.

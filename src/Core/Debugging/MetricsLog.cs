@@ -3,6 +3,7 @@ using System.Diagnostics.Metrics;
 using System.Globalization;
 using System.Linq;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Magic.Threading;
 
@@ -192,8 +193,20 @@ internal static class MetricsLog
         )
             where T : struct, INumberBase<T>
         {
-            string tagText = string.Join(' ', tags.ToArray().Select(tag => tag.Value));
-            string key = tagText.Length == 0 ? instrument.Name : $"{instrument.Name} {tagText}";
+            string key = instrument.Name;
+            if (!tags.IsEmpty)
+            {
+                DefaultInterpolatedStringHandler text = new(0, 0, CultureInfo.InvariantCulture, stackalloc char[256]);
+                text.AppendLiteral(key);
+                foreach (KeyValuePair<string, object?> tag in tags)
+                {
+                    text.AppendLiteral(" ");
+                    text.AppendFormatted(tag.Value);
+                }
+
+                key = text.ToStringAndClear();
+            }
+
             _measured.Writer.TryWrite(new Measured(instrument, key, double.CreateTruncating(value)));
         }
     }

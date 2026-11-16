@@ -6,8 +6,8 @@
     "entities": [
         // The model leaves the walls open to the sky: 20 cm between the top of the side logs and the roof's planks,
         // 2 cm between the side logs and the stone base, 15 cm under the first log of each end wall, and 1 cm where
-        // the end walls meet the roof. Trim boxes fill each one. Each sits inside the logs or the stone at its edges,
-        // so only its closing face shows.
+        // the end walls meet the roof, and 5 cm between the head of the end wall's window and the log over it. The
+        // log under that window also stands 5 cm over its sill. Trim boxes fill or cover each one. Each sits inside the logs or the stone at its edges, so only its closing face shows.
         {"name": "Cabin", "components": {"Transform": {}, "Renderer": {"model": {"id": 300051}, "materials": [{"id": 300061}, {"id": 300064}, {"id": 300063}, {"id": 300062}, {"id": 300074}, {"id": 300074}]}},
             "children": [
                 {"name": "Side trim", "components": {"Transform": {"position": {"x": 0, "y": 3.0, "z": 3.11}, "scale": {"x": 4.55, "y": 0.15, "z": 0.02}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300061}]}}},
@@ -18,6 +18,8 @@
                 {"name": "Side footing", "components": {"Transform": {"position": {"x": 0, "y": 0.424, "z": -3.015}, "scale": {"x": 4.55, "y": 0.024, "z": 0.155}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300064}]}}},
                 {"name": "End footing", "components": {"Transform": {"position": {"x": 3.98, "y": 0.5, "z": 0}, "scale": {"x": 0.14, "y": 0.1, "z": 3.0}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300064}]}}},
                 {"name": "End footing", "components": {"Transform": {"position": {"x": -3.98, "y": 0.5, "z": 0}, "scale": {"x": 0.14, "y": 0.1, "z": 3.0}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300064}]}}},
+                {"name": "End window head", "components": {"Transform": {"position": {"x": -4.0, "y": 2.545, "z": 0}, "scale": {"x": 0.155, "y": 0.095, "z": 0.67}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300062}]}}},
+                {"name": "End window sill", "components": {"Transform": {"position": {"x": -4.0, "y": 1.31, "z": 0}, "scale": {"x": 0.155, "y": 0.055, "z": 0.67}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300062}]}}},
                 {"name": "Doorstep", "components": {"Transform": {"position": {"x": 0, "y": 0.05, "z": -3.7}, "scale": {"x": 0.9, "y": 0.4, "z": 0.4}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300064}]}}}
             ]},
         // The cabin's own door and its window panes are submeshes, so they cannot swing or be left out. Both slots

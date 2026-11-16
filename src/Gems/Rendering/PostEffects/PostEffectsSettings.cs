@@ -17,7 +17,7 @@ public sealed class PostEffectsSettings : ISettings
     public float ExposureCompensation { get; set; }
 
     /// <summary>
-    /// The post effects left out of every frame, by their material's file name, as Bloom Vignette.
+    /// The post effects left out of every frame, by their material's file name, as Bloom Exposure.
     /// </summary>
     public ImmutableArray<string> DisabledEffects { get; set; } = [];
 }

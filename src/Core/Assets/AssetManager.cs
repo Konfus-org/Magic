@@ -216,8 +216,8 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// The default asset of type <typeparamref name="T"/>, from Magic's built-in <c>Resources/</c>; every asset type
-    /// has one.
+    /// The default asset of type <typeparamref name="T"/>, from Magic's built-in <c>Resources/</c>, when that type has
+    /// one.
     /// </summary>
     /// <remarks>
     /// It is the asset named Default, of any extension, in the folder named for the type: <c>Materials/Default.mat</c>,

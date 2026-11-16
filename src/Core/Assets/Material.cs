@@ -61,9 +61,9 @@ public sealed class Material : IAsset<Material>
 /// A scalar reads <see cref="X"/> (a bool is non-zero), a vector <see cref="X"/> to <see cref="W"/>, a colour
 /// <see cref="R"/> to <see cref="A"/>, a texture <see cref="Texture"/> or <see cref="RenderTexture"/>, and a curve
 /// <see cref="Curve"/>. In a file: <c>{ "x": 0.8 }</c>, <c>{ "r": 1, "g": 0.5, "b": 0, "a": 1 }</c>,
-/// <c>{ "texture": { "id": 36 } }</c>, <c>{ "curve": { "id": 3364 } }</c>. A part left out is 0 or none, and a curve
-/// left out is the default curve. It is a value that never changes: to change a param, set another in its place, and
-/// the dictionary counts the change. It converts from a number, a vector, a colour or a texture's handle, so
+/// <c>{ "texture": { "id": 1234 } }</c>, <c>{ "curve": { "id": 3364 } }</c>. A part left out is 0 or none. It is
+/// a value that never changes: to change a param, set another in its place, and the dictionary counts the change. It
+/// converts from a number, a vector, a colour or a texture's handle, so
 /// <c>material.Params["tint"] = new Color(1, 0, 0)</c> sets one.
 /// </remarks>
 [SuppressMessage(

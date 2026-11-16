@@ -191,41 +191,41 @@ Scattered GetScattered(
     return result;
 }
 
-// The multi-scattering table's entry for a height and a sun: what every direction scatters of the sun's light and
-// of itself, summed as a series.
-public float3 GetMultiScattering(TextureRef transmittanceLut, SamplerRef sampler, float2 uv)
+// How many directions over the sphere the multi-scattering table sums for each entry.
+public static const uint MultiScatteringDirections = 64u;
+
+// One direction's share of the multi-scattering table's entry for a height and a sun: what it scatters of the sun's
+// light, and how much of it would scatter again. The entry sums the shares of all the directions as a series.
+public void GetMultiScatteringShare(
+    TextureRef transmittanceLut,
+    SamplerRef sampler,
+    float2 uv,
+    uint i,
+    out float3 luminance,
+    out float3 multi
+)
 {
     float sunMu = uv.x * 2.0 - 1.0;
     float radius = GroundRadius + uv.y * (TopRadius - GroundRadius);
     float3 origin = float3(0.0, radius, 0.0);
     float3 sunDirection = float3(sqrt(saturate(1.0 - sunMu * sunMu)), sunMu, 0.0);
-    const uint directions = 64u;
-    float3 luminance = float3(0.0);
-    float3 multi = float3(0.0);
-    for (uint i = 0u; i < directions; i++)
+    // Directions spread over the sphere by a spiral.
+    float elevation = 1.0 - 2.0 * (float(i) + 0.5) / float(MultiScatteringDirections);
+    float ring = sqrt(saturate(1.0 - elevation * elevation));
+    float angle = float(i) * 2.399963;
+    float3 direction = float3(ring * cos(angle), elevation, ring * sin(angle));
+    Scattered scattered = GetScattered(transmittanceLut, transmittanceLut, sampler, origin, direction, sunDirection, 20u, false);
+    float mu = dot(origin / radius, direction);
+    if (IsGroundHit(radius, mu))
     {
-        // Directions spread over the sphere by a spiral.
-        float elevation = 1.0 - 2.0 * (float(i) + 0.5) / float(directions);
-        float ring = sqrt(saturate(1.0 - elevation * elevation));
-        float angle = float(i) * 2.399963;
-        float3 direction = float3(ring * cos(angle), elevation, ring * sin(angle));
-        Scattered scattered = GetScattered(transmittanceLut, transmittanceLut, sampler, origin, direction, sunDirection, 20u, false);
-        float mu = dot(origin / radius, direction);
-        if (IsGroundHit(radius, mu))
-        {
-            float3 ground = origin + direction * GetDistanceToSphere(radius, mu, GroundRadius);
-            float groundMu = dot(ground / GroundRadius, sunDirection);
-            float3 sunAtGround = SampleTransmittance(transmittanceLut, sampler, GroundRadius, groundMu);
-            scattered.luminance += scattered.transmittance * GroundAlbedo * InvPi * saturate(groundMu) * sunAtGround;
-        }
-
-        luminance += scattered.luminance;
-        multi += scattered.multiScatter;
+        float3 ground = origin + direction * GetDistanceToSphere(radius, mu, GroundRadius);
+        float groundMu = dot(ground / GroundRadius, sunDirection);
+        float3 sunAtGround = SampleTransmittance(transmittanceLut, sampler, GroundRadius, groundMu);
+        scattered.luminance += scattered.transmittance * GroundAlbedo * InvPi * saturate(groundMu) * sunAtGround;
     }
 
-    luminance /= float(directions);
-    multi /= float(directions);
-    return luminance / max(1.0 - multi, Epsilon);
+    luminance = scattered.luminance;
+    multi = scattered.multiScatter;
 }
 
 // The sky-view table's direction for its coordinates: azimuth across, and elevation down with the horizon in the

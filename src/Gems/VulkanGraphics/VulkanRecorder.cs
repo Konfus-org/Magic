@@ -1,3 +1,4 @@
+using System.Text;
 using Magic.Assets;
 using Magic.Debugging;
 using Magic.Graphics;
@@ -121,8 +122,11 @@ internal sealed unsafe class VulkanRecorder(
         if (!device.HasDebugUtils)
             return;
 
-        using NativeStrings label = new([name]);
-        VkDebugUtilsLabelEXT info = new() { pLabelName = label.Pointers[0] };
+        int bytes = Encoding.UTF8.GetByteCount(name);
+        byte* label = stackalloc byte[bytes + 1];
+        Encoding.UTF8.GetBytes(name, new Span<byte>(label, bytes));
+        label[bytes] = 0;
+        VkDebugUtilsLabelEXT info = new() { pLabelName = label };
         device.InstanceApi.vkCmdBeginDebugUtilsLabelEXT(cmd, &info);
     }
 

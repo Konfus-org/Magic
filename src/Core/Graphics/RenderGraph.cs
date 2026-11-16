@@ -293,7 +293,11 @@ public sealed class RenderGraph
     {
         OrderPasses();
 
-        return new(_ordered.DrainToImmutable());
+        // A copy, then Clear, so the builder keeps its capacity for the next frame; a drain would start it empty.
+        ImmutableArray<GpuPass> passes = _ordered.ToImmutable();
+        _ordered.Clear();
+
+        return new(passes);
     }
 
     /// <summary>
@@ -532,7 +536,9 @@ public sealed class RenderGraph
     internal void EndPass()
     {
         GpuPass pass = _pass ?? throw new InvalidOperationException("No pass has begun.");
-        _passes.Add(pass with { Uses = _uses.DrainToImmutable(), Commands = _commands.DrainToImmutable() });
+        _passes.Add(pass with { Uses = _uses.ToImmutable(), Commands = _commands.ToImmutable() });
+        _uses.Clear();
+        _commands.Clear();
         _pass = null;
     }
 

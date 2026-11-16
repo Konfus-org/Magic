@@ -55,8 +55,5 @@ public uint2 GetTexelAt(float2 uv, uint2 size) { return min(uint2(uv * float2(si
 // Whether texture coordinates are in [0, 1], on the picture.
 public bool IsOnScreen(float2 uv) { return all(saturate(uv) == uv); }
 
-// Texture coordinates in [0, 1] as clip-space xy in [-1, 1], y up.
-public float2 ToClip(float2 uv) { return float2(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0); }
-
 // Clip-space xy in [-1, 1], y up, as texture coordinates in [0, 1].
 public float2 ToUv(float2 clip) { return float2(clip.x * 0.5 + 0.5, 0.5 - clip.y * 0.5); }

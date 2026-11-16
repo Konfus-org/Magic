@@ -116,7 +116,7 @@ void ResolveOpaque<M : IMaterial>(FrameConstants frame, uint2 pixel)
         if (LoadMaterialShader(models.materials, GetMaterial(instance, slot)) != shader)
             return;
 
-        PixelTriangle shown = LoadPixelTriangle(frame, visible, ToClip(center));
+        PixelTriangle shown = LoadPixelTriangle(frame, visible, center);
         model = Interpolate(shown.v0.position, shown.v1.position, shown.v2.position, shown.bary.lambda);
         inputs = CreateSurfaceInputs(shown);
         lift = GetTriangleLift(shown, inputs.position);
@@ -166,7 +166,7 @@ void ResolveTranslucent<M : IMaterial>(FrameConstants frame, uint2 pixel)
         return;
 
     float2 center = GetTexelCenterUv(pixel, uint2(frame.width, frame.height));
-    PixelTriangle shown = LoadPixelTriangle(frame, visible, ToClip(center));
+    PixelTriangle shown = LoadPixelTriangle(frame, visible, center);
     M material = LoadMaterialParams<M>(models.materials, row);
     SurfaceOutputs surface = material.Evaluate(CreateSurfaceInputs(shown));
     uint failure = LoadFailureIndex(models.materials, row);

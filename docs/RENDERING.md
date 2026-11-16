@@ -271,4 +271,5 @@ renderer stretches the picture. List it in the `.magic` file with the renderer.
 
 - While it runs, the camera moves to a different point in each pixel each frame.
 - It upscales what the renderer shows, debug views included, with a window or without.
-- Use this gem or the `TemporalAntiAliasing` post effect, not both. With both, each frame blends over time two times.
+- Use this gem or a post effect with the `TemporalAntiAliasing` shader, not both. With both, each frame blends over
+  time two times.

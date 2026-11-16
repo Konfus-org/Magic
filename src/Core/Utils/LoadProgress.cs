@@ -1,7 +1,7 @@
 namespace Magic.Utils;
 
 /// <summary>
-/// How far one piece of long work is, as <c>Loading Materials/Checker.mat 0 of 1</c>.
+/// How far one piece of long work is, as <c>Loading Materials/Default.mat 0 of 1</c>.
 /// </summary>
 /// <remarks>
 /// Every async load reports it through its <see cref="IProgress{T}"/>, from any thread, never less than last time for

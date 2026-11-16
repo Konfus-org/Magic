@@ -306,11 +306,12 @@ internal sealed class Gems : IDisposable
     /// </summary>
     public void Pump()
     {
-        // While the loading screen shows, time runs as it is, so it moves however the world it replaces was paused.
-        // Behind the full cover, the loading screen and the world that arrives stand still until the cover starts to
-        // fade into them.
-        bool isPaused = _world.CoverOpacity >= 1 || (_world.IsPaused && !_world.IsShowingLoadingScreen);
-        float timeScale = _world.IsShowingLoadingScreen ? 1 : _world.TimeScale;
+        // While the loading screen shows, no domain is open, and time runs as it is, so it moves however the world it
+        // replaces was paused. Behind the full cover, the loading screen and the world that arrives stand still until
+        // the cover starts to fade into them.
+        bool isLoadingScreen = _world.IsLoading && _world.Domains.IsEmpty;
+        bool isPaused = _world.CoverOpacity >= 1 || (_world.IsPaused && !isLoadingScreen);
+        float timeScale = isLoadingScreen ? 1 : _world.TimeScale;
         Frame frame = CreateFrame(_clock, _frame, isPaused ? 0 : timeScale) with
         {
             IsPaused = isPaused,

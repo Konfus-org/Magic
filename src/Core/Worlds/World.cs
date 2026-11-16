@@ -146,6 +146,9 @@ public sealed class World : IEcs, IDisposable
     /// <summary>
     /// The domains open, in the order they came, without the loading screen.
     /// </summary>
+    /// <remarks>
+    /// While the loading screen shows, it is empty.
+    /// </remarks>
     public ImmutableArray<Handle<Domain>> Domains { get; private set; } = [];
 
     /// <summary>
@@ -190,14 +193,6 @@ public sealed class World : IEcs, IDisposable
         get;
         set => field = Math.Max(value, 0);
     } = 1;
-
-    /// <summary>
-    /// Whether the world holds the loading screen, until what replaces it comes.
-    /// </summary>
-    /// <remarks>
-    /// While it does, the pause and the time scale of the world wait.
-    /// </remarks>
-    internal bool IsShowingLoadingScreen { get; private set; }
 
     /// <summary>
     /// The last frame whose hooks before Render ran, so that what it made of the world is ready for the render thread.
@@ -1012,7 +1007,6 @@ public sealed class World : IEcs, IDisposable
 
             // In the same turn as the destroy, so no frame shows an empty world while the gems clean up.
             ImmutableArray<Entity> loading = CreateEntities(screen);
-            IsShowingLoadingScreen = true;
             await RunHooksAsync(hooks => hooks.OnDomainUnloadedAsync(cancel), "cleaning up").ConfigureAwait(false);
 
             // The cover fades into the loading screen once a frame of it is drawn. Its time stood still behind the full
@@ -1046,7 +1040,6 @@ public sealed class World : IEcs, IDisposable
 
             await _threads.Enter(EngineThread.Game);
             arrive();
-            IsShowingLoadingScreen = false;
 
             // The world that came holds the sets of script state that its copies take up, so the sweep waits for it:
             // what the old world held is held by nothing now.
@@ -1068,7 +1061,6 @@ public sealed class World : IEcs, IDisposable
         finally
         {
             IsLoading = false;
-            IsShowingLoadingScreen = false;
             CoverOpacity = 0;
         }
     }

@@ -58,37 +58,28 @@ public struct Barycentrics
     public float3 ddy;
 }
 
-// The barycentrics at pixelNdc, clip-space xy in [-1, 1] with y up, of the triangle whose vertices are clip0 to
-// clip2 after projection, for an output size pixels across and down.
-public Barycentrics GetBarycentrics(float4 clip0, float4 clip1, float4 clip2, float2 pixelNdc, float2 size)
+// The barycentrics of the point that a ray from the camera hits in the plane of the camera-relative triangle p0 to
+// p2, which are perspective-correct as they are the point's own. Each row of weigh, dotted with the ray, is in
+// proportion to a vertex's weight in the hit point, and the last row to their sum. Any length of the ray gives the same
+// weights, and no vertex's clip w is divided by, so a vertex near the camera's plane does not lose precision.
+float3 Weigh(float3x3 weigh, float3 ray)
 {
-    float3 invW = 1.0 / float3(clip0.w, clip1.w, clip2.w);
-    float2 ndc0 = clip0.xy * invW.x;
-    float2 ndc1 = clip1.xy * invW.y;
-    float2 ndc2 = clip2.xy * invW.z;
-    float invDet = 1.0 / determinant(float2x2(ndc2 - ndc1, ndc0 - ndc1));
-    float3 ddx = float3(ndc1.y - ndc2.y, ndc2.y - ndc0.y, ndc0.y - ndc1.y) * invDet * invW;
-    float3 ddy = float3(ndc2.x - ndc1.x, ndc0.x - ndc2.x, ndc1.x - ndc0.x) * invDet * invW;
-    float ddxSum = ddx.x + ddx.y + ddx.z;
-    float ddySum = ddy.x + ddy.y + ddy.z;
-    float2 delta = pixelNdc - ndc0;
-    float interpInvW = invW.x + delta.x * ddxSum + delta.y * ddySum;
-    float interpW = 1.0 / interpInvW;
+    float3 weights = mul(weigh, ray);
+    float2 yz = weights.xy / weights.z;
+    return float3(1.0 - yz.x - yz.y, yz);
+}
 
+// The barycentrics of the camera-relative triangle p0 to p2 along ray, a ray from the camera through a pixel, and
+// how they change to the rays through the pixel one across and one down.
+public Barycentrics GetBarycentrics(float3 p0, float3 p1, float3 p2, float3 ray, float3 across, float3 down)
+{
+    float3 e1 = p1 - p0;
+    float3 e2 = p2 - p0;
+    float3x3 weigh = float3x3(cross(e2, p0), cross(p0, e1), cross(e1, e2));
     Barycentrics result;
-    result.lambda.x = interpW * (invW.x + delta.x * ddx.x + delta.y * ddy.x);
-    result.lambda.y = interpW * (delta.x * ddx.y + delta.y * ddy.y);
-    result.lambda.z = interpW * (delta.x * ddx.z + delta.y * ddy.z);
-
-    // A pixel across is 2 / width of clip space, and a pixel down is -2 / height, as y points up.
-    ddx *= 2.0 / size.x;
-    ddy *= -2.0 / size.y;
-    ddxSum *= 2.0 / size.x;
-    ddySum *= -2.0 / size.y;
-    float interpWddx = 1.0 / (interpInvW + ddxSum);
-    float interpWddy = 1.0 / (interpInvW + ddySum);
-    result.ddx = interpWddx * (result.lambda * interpInvW + ddx) - result.lambda;
-    result.ddy = interpWddy * (result.lambda * interpInvW + ddy) - result.lambda;
+    result.lambda = Weigh(weigh, ray);
+    result.ddx = Weigh(weigh, across) - result.lambda;
+    result.ddy = Weigh(weigh, down) - result.lambda;
     return result;
 }
 
@@ -111,8 +102,8 @@ public struct PixelTriangle
     public Barycentrics bary;
 }
 
-// The visible triangle's vertices and the barycentrics of the pixel at pixelNdc, clip-space xy in [-1, 1] with y up.
-public PixelTriangle LoadPixelTriangle(FrameConstants frame, VisibleTriangle visible, float2 pixelNdc)
+// The visible triangle's vertices and the barycentrics of the pixel whose centre is at the texture coordinate uv.
+public PixelTriangle LoadPixelTriangle(FrameConstants frame, VisibleTriangle visible, float2 uv)
 {
     Models models = GetModels();
     ClusterConstants clusters = GetClusters();
@@ -128,12 +119,14 @@ public PixelTriangle LoadPixelTriangle(FrameConstants frame, VisibleTriangle vis
     result.p0 = ToCameraRelative(frame, ToWorld(result.instance.world, result.v0.position));
     result.p1 = ToCameraRelative(frame, ToWorld(result.instance.world, result.v1.position));
     result.p2 = ToCameraRelative(frame, ToWorld(result.instance.world, result.v2.position));
+    float2 texel = 1.0 / float2(frame.width, frame.height);
     result.bary = GetBarycentrics(
-        mul(float4(result.p0, 1.0), frame.viewProjection),
-        mul(float4(result.p1, 1.0), frame.viewProjection),
-        mul(float4(result.p2, 1.0), frame.viewProjection),
-        pixelNdc,
-        float2(frame.width, frame.height)
+        result.p0,
+        result.p1,
+        result.p2,
+        ReconstructRelative(frame, uv, 1.0),
+        ReconstructRelative(frame, uv + float2(texel.x, 0.0), 1.0),
+        ReconstructRelative(frame, uv + float2(0.0, texel.y), 1.0)
     );
     return result;
 }

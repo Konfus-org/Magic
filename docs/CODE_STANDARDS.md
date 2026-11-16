@@ -210,7 +210,7 @@ things:
 - A key that the file must have is `required { get; init; }`. One with a default is `{ get; set; }`, with the default
   as its initializer and nowhere else. What code sets, not the file, has no public setter.
 - Read and write all JSON with Core's one dialect. No options for each type.
-- Every asset type has a default asset, found by convention, never by a path in code or settings.
+- A default asset, when its type has one, is found by convention, never by a path in code or settings.
 - Refer to an asset by its typed handle, never a path, except in code that starts from a name.
 - A "nothing" value is a static `None` on its type. The fallback of an implementation lives once in that
   implementation, never on a Core type.

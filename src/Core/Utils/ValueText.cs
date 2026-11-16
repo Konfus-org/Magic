@@ -11,7 +11,7 @@ namespace Magic.Utils;
 /// </summary>
 /// <remarks>
 /// Text or a choice is one bare word. A value with several parts is one word per part, in their order (<c>1 2 3</c>
-/// for a position, <c>2560 1440</c> for a size). A list is one word per element (<c>Bloom Vignette</c>).
+/// for a position, <c>2560 1440</c> for a size). A list is one word per element (<c>Bloom Exposure</c>).
 /// </remarks>
 internal static class ValueText
 {
