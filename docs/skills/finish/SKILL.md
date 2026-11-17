@@ -34,6 +34,8 @@ flowchart TD
      skip it when the branch changes a public API, a file format or a dependency.
    - Fix each finding at its cause. If you do not fix a finding, give the evidence. Then do step 1 again.
    - Get a new review only when the fixes add more than about 100 lines.
+   - Run the reviewer in the foreground. A reviewer in the background records no review, and the merge is then
+     refused.
 4. Write the summary:
    - What changed and why. Give the reason for each hunk where it is not clear. Keep the fix and the cleanup apart.
      For a root branch, one line for each slice.

@@ -97,7 +97,8 @@ flowchart TD
      scope.
    - Follow the slice skill from step 3 to step 6, and each skill that the work needs, such as investigate, cleanup,
      profiling and timeouts. Do not use the finish skill. Do not merge your branch anywhere: the coordinator merges it.
-   - Build, then run the one check that the brief names, headless or as a screenshot, with its time limit. Do not run
+   - Build, then run the one check that the brief names, headless or as a screenshot, with its time limit. The run
+     and screenshot commands do not build: build again after each edit, before the run that checks it. Do not run
      tests, full validations, the stamp command or reviews. Do not run the app in a window, except to profile in a
      profiling turn.
    - Commit on your branch as often as it helps. When the slice builds and its check passes, end with `STATE: done`.
@@ -165,6 +166,9 @@ flowchart TD
    - Do not answer a design question for the user.
    - When the user answers, resume the worker.
    - Do not put a question in an update.
+   - When the check of a fix is the user's eye, such as the look of a picture, merge all such fixes into the root
+     first. Then show them one time: open the app in a window for the user with the run command, at the view that
+     shows the fixes.
 8. **When a slice merges or answers,** compare the plan with the result:
    - Add each follow-up that helps the goal as a slice. Put the other follow-ups and the notes of the worker in the
      plan.
