@@ -5,9 +5,10 @@ of day, and prints the screenshots' paths.
 
 .DESCRIPTION
 One run of samples/Terrain through tools/Scripts/Run.ps1, which opens the Cabin domain. The run holds the player
-still, then, for each hour of -Hours, holds the sun at that hour and sends the camera along the way: outside the
-door, a step nearer, the doorway, the middle of the room at four headings 90 degrees apart, the floor under the
-window, and back out through the door. The steps between the stops show what a move does to the picture.
+still, then, for each hour of -Hours, holds the sun at that hour and the moon opposite it, and sends the camera
+along the way: outside the door, a step nearer, the doorway, the middle of the room at four headings 90 degrees apart,
+the floor under the window, and back out through the door. The steps between the stops show what a move does to
+the picture.
 
 At each stop the run waits -Settle seconds for the exposure and the light to settle, takes a screenshot, and waits
 -Write seconds for it to be written. The output is the paths of the screenshots, in the order they were taken, so a
@@ -24,6 +25,10 @@ The times of day to fly the way at, from 0 to 24, where 12 is noon.
 
 .PARAMETER Settle
 How many seconds pass at each stop before its screenshot, for the exposure and the light to settle.
+
+.PARAMETER HourSettle
+How many seconds pass after the hour changes before the way starts, for the last hour's light to fade from the
+world and the exposure to follow.
 
 .PARAMETER Write
 How many seconds pass after each screenshot, for the frame to be read back and written.
@@ -44,6 +49,8 @@ param(
     [double[]] $Hours = @(12, 18.5, 1, 6.5),
     [ValidateRange(0, [int]::MaxValue)]
     [int] $Settle = 4,
+    [ValidateRange(0, [int]::MaxValue)]
+    [int] $HourSettle = 30,
     [ValidateRange(0, [int]::MaxValue)]
     [int] $Write = 4,
     [ValidateRange(1, [int]::MaxValue)]
@@ -90,12 +97,19 @@ $way = @(
 )
 
 # The world is loaded and settled, the spin is held at no turn so the camera keeps the heading each stop gives it, and
-# the camera's own script is kept, because the whole component is written. The sun's script keeps the copy that runs,
-# so writing the component only hands it the hour to hold.
+# the camera's own script is kept, because the whole component is written. The sun's and the moon's scripts keep the
+# copy that runs, so writing the component only hands each the hour to hold.
 $lines = @('wait loaded', 'wait drawn', 'wait 20s', "set player.scriptcontainer '[{""id"":100411,""degreesPerSec"":0},{""id"":100412}]'", 'wait 30')
 foreach ($hour in $Hours) {
     $text = $hour.ToString([cultureinfo]::InvariantCulture)
-    $lines += @("set sun.scriptcontainer '[{""id"":100421,""hour"":$text,""hoursPerMinute"":0}]'", "wait ${Settle}s")
+    $moon = (($hour + 12) % 24).ToString([cultureinfo]::InvariantCulture)
+    $lines += @(
+        "set sun.scriptcontainer '[{""id"":100421,""hour"":$text,""hoursPerMinute"":0}]'",
+        "set moon.scriptcontainer '[{""id"":100421,""hour"":$moon,""hoursPerMinute"":0}]'",
+        "set player.transform.position '$($way[0].Position)'",
+        "set player.transform.rotation '$($way[0].Rotation)'",
+        "wait ${HourSettle}s"
+    )
     foreach ($stop in $way) {
         $lines += @(
             "set player.transform.position '$($stop.Position)'",

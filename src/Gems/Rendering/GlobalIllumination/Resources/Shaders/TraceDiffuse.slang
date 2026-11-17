@@ -1,11 +1,14 @@
 // The light that reaches each surface indirectly, traced at a part of the picture's size: from one pixel of each traced
 // pixel's footprint, a few rays over its hemisphere as the diffuse lobe weighs it, each bringing back the light of the
-// surface it lands on, lit by one light at random and by the probes, or the probes' light at the pixel where it reaches
-// nothing within range, then filtered over its neighbours, and blended with the frames before where they saw the same
-// surface. Shading reads the result through Light/Indirect. Adapted from Wicked Engine's ray-traced diffuse. The pass
-// header's x is the frame's buffer, which holds the lights and the indirect light. Its y is the GI buffer.
+// surface it lands on, lit by the sun, the lights near it and the probes, or where it reaches nothing within range, the
+// sky's light if nothing stands beyond, else the probes' light at the pixel. The trace writes NVIDIA's NRD's inputs,
+// and NRD denoises the light; shading reads NRD's output through Light/Indirect. The share of the rays that reach the
+// sky, the sky the surface sees, is blended over frames beside the view depth. Adapted from Wicked Engine's ray-traced
+// diffuse.
+// The pass header's x is the frame's buffer, which holds the lights and the indirect light. Its y is the GI buffer.
 module "TraceDiffuse";
 
+import Core.Color;
 import Core.Heap;
 import Core.Frame;
 import Core.Math;
@@ -18,15 +21,17 @@ import Traced;
 import Sky.ISky;
 import Trace.HitSurface;
 import Scene.Models;
+import Nrd;
 
-// How far in traced pixels the filter reaches, and how many neighbours it reads there.
-static const float FilterSpread = 8.0;
-static const uint FilterSamples = 4u;
+// The view depth NRD takes for a pixel with nothing drawn: past its denoising range, so it leaves the pixel out.
+static const float NoSurfaceViewZ = 1e7;
 
-// How many of its neighbours' deviations a pixel's history is held within, and how much of the variance's history it
-// keeps.
-static const float HistorySpread = 0.9;
-static const float VarianceBlend = 0.6;
+// How many times brighter than the probes' light at the pixel NRD's input may be: brighter, a few rays that found a
+// small bright patch are a firefly that NRD spreads over frames. PROTO: the 12 is a guess.
+static const float FireflyRatio = 12.0;
+
+// The hit distance NRD takes for a ray that reaches nothing: the most a half float holds.
+static const float MissDistance = 65504.0;
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
@@ -42,9 +47,13 @@ void TraceDiffuse<S : ISky>(uint3 thread : SV_DispatchThreadID)
     StorageRef traced = { diffuse.traced, 0u };
     TextureRef depthTexture = { frame.depth };
     float depth = depthTexture.Load(pixel, 0u).x;
+    StorageRef radiance = { diffuse.radiance, 0u };
+    StorageRef viewZ = { diffuse.viewZ, 0u };
     if (depth == 0.0)
     {
         traced.Store(thread.xy, float4(0.0));
+        radiance.Store(thread.xy, float4(0.0));
+        viewZ.Store(thread.xy, float4(NoSurfaceViewZ));
         return;
     }
 
@@ -58,74 +67,86 @@ void TraceDiffuse<S : ISky>(uint3 thread : SV_DispatchThreadID)
     float3x3 basis = CreateBasis(normal);
     RaytracingAccelerationStructure scene = GetTracedAcceleration();
     float3 sum = float3(0.0);
+    float sky = 0.0;
+    float hitSum = 0.0;
+    uint hitCount = 0u;
     for (uint i = 0u; i < gi.diffuseRayCount; i++)
     {
         float3 direction = ToWorld(basis, SampleCosineHemisphere(GetRandom(thread.xy, frame.frameIndex, 1u + i).xy));
-        RayHit hit = GetClosestHit(scene, origin, direction, gi.diffuseRayRange, RAY_FLAG_CULL_BACK_FACING_TRIANGLES);
+        // A ray that lands on a back face is inside a mesh, as a ray from the seam between two logs is: it brings back
+        // no light. Skipped, it passed out through the wall and brought the sky in, a pale line along each seam.
+        RayHit hit = GetClosestHit(scene, origin, direction, gi.diffuseRayRange, RAY_FLAG_NONE);
+        if (hit.isHit && !hit.isFrontFace)
+            continue;
+
+        // Past the reach, the sky's light along the ray where nothing stands beyond, as the probes' rays bring back, so
+        // a ray out of a window brings the sky in, not the room's light.
         if (!hit.isHit)
         {
-            sum += beyond;
+            float3 start = origin + direction * gi.diffuseRayRange;
+            float3 open = hit.through * GetTransmittance(scene, start, direction, 1e30);
+            float3 skyLight = (gi.diffuseTermsOff & 2u) == 0u ? GetSkyRadiance<S>(lights, direction) : float3(0.0);
+            sum += any(open > 0.0) ? skyLight * open : beyond * hit.through;
+            sky += GetLuminance(open);
             continue;
         }
 
         HitSurface surface = LoadHitSurface(hit, origin, direction);
         float3 xi = GetRandom(thread.xy, frame.frameIndex, 1u + gi.diffuseRayCount + i);
-        sum += GetHitLight<S>(lights, grid, scene, surface, xi);
+        float3 hitLight = (gi.diffuseTermsOff & 1u) == 0u
+            ? GetHitLight<S>(lights, grid, scene, surface, xi)
+            : GetDirectLight<S>(lights, grid, scene, surface, xi) * surface.diffuse + surface.emissive;
+        sum += hitLight * hit.through;
+        hitSum += hit.distance;
+        hitCount++;
     }
 
-    traced.Store(thread.xy, float4(sum / float(gi.diffuseRayCount), 1.0));
+    // NRD's inputs: the light and its rays' mean hit distance, the motion to where the surface was last frame in the
+    // picture's UV, the normal from 0 to 1 with a roughness of 1, and the view depth.
+    float count = float(gi.diffuseRayCount);
+    traced.Store(thread.xy, float4(sum, sky) / count);
+    float3 mean = sum / count;
+    float limit = FireflyRatio * GetLuminance(beyond);
+    float brightness = GetLuminance(mean);
+    if (limit > 0.0 && brightness > limit)
+        mean *= limit / brightness;
+    // Capped, so no value past a half float's range, which is infinite, enters NRD's history.
+    radiance.Store(thread.xy, float4(min(mean * NrdRadianceScale, 250.0), hitCount > 0u ? hitSum / float(hitCount) : MissDistance));
+    TextureRef velocityTexture = { frame.velocity };
+    StorageRef motion = { diffuse.motion, 0u };
+    motion.Store(thread.xy, float4(velocityTexture.Load(pixel, 0u).xy, 0.0, 0.0));
+    StorageRef normalRoughness = { diffuse.normalRoughness, 0u };
+    normalRoughness.Store(thread.xy, NRD_FrontEnd_PackNormalAndRoughness(normal, 1.0, 0.0));
+    viewZ.Store(thread.xy, float4(ToViewDepth(depth, frame.near)));
 }
 
-// A thread a traced pixel: its light filtered over a few neighbours spread at random through the 8 by 8 traced pixels
-// around it, weighed by how near their depths are, as Traced's NeighbourLight averages them.
-[shader("compute")]
-[numthreads(8, 8, 1)]
-void FilterDiffuse(uint3 thread : SV_DispatchThreadID)
+// The share of a traced pixel's rays that reached the sky this frame, in the trace's alpha, averaged over the 3 by 3
+// traced pixels around it whose view depths are within a tenth of its own.
+float LoadSkyShare(FrameConstants frame, TextureRef traced, uint2 at, uint2 size, float viewDepth)
 {
-    FrameConstants frame = GetFrame();
-    GIConstants gi = GetGIConstants();
-    TracedDiffuseConstants diffuse = gi.diffuse;
-    uint2 size = gi.tracedSize;
-    if (any(thread.xy >= size))
-        return;
-
     TextureRef depthTexture = { frame.depth };
-    TextureRef traced = { diffuse.traced };
-    StorageRef filtered = { diffuse.filtered, 0u };
-    float depth = depthTexture.Load(GetPicturePixel(frame, thread.xy, size, float2(0.0)), 0u).x;
-    if (depth == 0.0)
+    float sum = 0.0;
+    float weightSum = 0.0;
+    for (uint i = 0u; i < 9u; i++)
     {
-        filtered.Store(thread.xy, float4(0.0));
-        return;
+        uint2 neighbour = uint2(clamp(int2(at) + int2(i % 3u, i / 3u) - 1, int2(0), int2(size) - 1));
+        float depth = depthTexture.Load(GetPicturePixel(frame, neighbour, size, float2(0.0)), 0u).x;
+        float gap = abs(viewDepth - ToViewDepth(depth, frame.near)) / viewDepth;
+        float weight = depth > 0.0 ? 1.0 - saturate(gap * 10.0) : 0.0;
+        sum += traced.Load(neighbour, 0u).a * weight;
+        weightSum += weight;
     }
 
-    float viewDepth = ToViewDepth(depth, frame.near);
-    float2 shift = GetRandom(thread.xy, frame.frameIndex, 0u).xy;
-    NeighbourLight neighbours = {};
-    for (uint i = 0u; i < FilterSamples; i++)
-    {
-        uint2 neighbour = GetNeighbour(thread.xy, i, FilterSamples, shift, FilterSpread);
-        if (any(neighbour >= size))
-            continue;
-
-        // No weight at a tenth of the depth apart, relative so a surface seen at a glancing angle keeps its neighbours.
-        float neighbourDepth = depthTexture.Load(GetPicturePixel(frame, neighbour, size, float2(0.0)), 0u).x;
-        float gap = abs(viewDepth - ToViewDepth(neighbourDepth, frame.near)) / viewDepth;
-        float weight = neighbourDepth > 0.0 ? 1.0 - saturate(gap * 10.0) : 0.0;
-        if (weight <= 0.0)
-            continue;
-
-        neighbours = AddNeighbour(neighbours, traced.Load(neighbour, 0u).rgb, weight);
-    }
-
-    filtered.Store(thread.xy, GetNeighbourAverage(neighbours, traced.Load(thread.xy, 0u).rgb));
+    return sum / max(weightSum, Epsilon);
 }
 
-// A thread a traced pixel: its filtered light blended with the history where the surface was last frame, as
-// Traced's BlendHistory blends it.
+// A thread a traced pixel: the share of the sky it sees blended with the history's where the texel there saw the same
+// surface, kept in y beside the view depth for the next frame's history, and the frames it has blended in z. A pixel
+// new to the view starts from its own share and blends by 1 over its frames, up to the history's blend, so it settles
+// in a few frames, not in 1 over 1 minus the blend.
 [shader("compute")]
 [numthreads(8, 8, 1)]
-void BlendDiffuse(uint3 thread : SV_DispatchThreadID)
+void BlendSkyShare(uint3 thread : SV_DispatchThreadID)
 {
     FrameConstants frame = GetFrame();
     GIConstants gi = GetGIConstants();
@@ -134,27 +155,32 @@ void BlendDiffuse(uint3 thread : SV_DispatchThreadID)
         return;
 
     uint2 pixel = GetPicturePixel(frame, thread.xy, size, float2(0.0));
-    TracedBlendConstants blend = gi.diffuse.blend;
     TextureRef depthTexture = { frame.depth };
-    TextureRef filtered = { gi.diffuse.filtered };
-    StorageRef light = { blend.light, 0u };
     float depth = depthTexture.Load(pixel, 0u).x;
-    float4 current = filtered.Load(thread.xy, 0u);
-
-    // The view depth kept for the next frame's history of both blends: 0 where nothing was drawn.
-    StorageRef viewDepth = { gi.depth, 0u };
-    viewDepth.Store(thread.xy, float4(depth > 0.0 ? ToViewDepth(depth, frame.near) : 0.0, 0.0, 0.0, 0.0));
-    if (blend.hasHistory == 0u || depth == 0.0)
+    StorageRef kept = { gi.depth, 0u };
+    if (depth == 0.0)
     {
-        light.Store(thread.xy, current);
+        kept.Store(thread.xy, float4(0.0));
         return;
     }
 
-    Neighbourhood neighbourhood = GetNeighbourhood(filtered, thread.xy, size);
-    TextureRef velocityTexture = { frame.velocity };
-    float3 velocity = velocityTexture.Load(pixel, 0u).xyz;
-    float2 uv = GetTexelCenterUv(thread.xy, size) + velocity.xy;
-    light.Store(
-        thread.xy,
-        BlendHistory(gi, blend, current, neighbourhood, velocity.z, uv, gi.diffuseHistory, HistorySpread, VarianceBlend));
+    float viewDepth = ToViewDepth(depth, frame.near);
+    TextureRef traced = { gi.diffuse.traced };
+    float sky = LoadSkyShare(frame, traced, thread.xy, size, viewDepth);
+    float frames = 1.0;
+    if (gi.diffuse.hasHistory != 0u)
+    {
+        TextureRef velocityTexture = { frame.velocity };
+        float3 velocity = velocityTexture.Load(pixel, 0u).xyz;
+        float2 uv = GetTexelCenterUv(thread.xy, size) + velocity.xy;
+        TextureRef depthHistory = { gi.depthHistory };
+        float3 history = depthHistory.Load(GetTexelAt(saturate(uv), size), 0u).xyz;
+        if (GetSameness(velocity.z, history.x) >= SameSurface && all(saturate(uv) == uv))
+        {
+            frames = min(history.z + 1.0, 1000.0);
+            sky = lerp(sky, history.y, min(gi.diffuseHistory, 1.0 - 1.0 / frames));
+        }
+    }
+
+    kept.Store(thread.xy, float4(viewDepth, sky, frames, 0.0));
 }

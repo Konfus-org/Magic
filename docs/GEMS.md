@@ -30,6 +30,7 @@ the item.
 - If more than one gem calls a library, put the library in a project of its own. The gems reference that project, and
   no `.magic` file lists it.
 - Make a callback an `[UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]` method.
+- For a C API declared in C++ headers, set the `Language` metadata of the item to `c++`.
 - To leave out a declaration, list it in the `Unbound` metadata of the item, with a comment that tells why.
 - To run the generator by hand, run `ClangSharpPInvokeGenerator @<library>.bindings.rsp`. The build writes this file
   in the intermediate folder of the project.

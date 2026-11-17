@@ -13,7 +13,7 @@ namespace Magic.DeferredRendering.View;
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public record struct FrameConstants
 {
-    public const int Bytes = 528;
+    public const int Bytes = 532;
 
     public Matrix4x4 View;
 
@@ -78,6 +78,8 @@ public record struct FrameConstants
     public uint GlassNormal;
 
     public uint GlassSurface;
+
+    public float MipBias;
 }
 
 /// <summary>
@@ -217,7 +219,15 @@ public record struct GpuIndirectLight
 
     public uint Reflections;
 
+    public uint SkyShare;
+
     public ProbeGridConstants Grid;
+
+    /// <summary>
+    /// The terms turned off to measure them, as GlobalIllumination's diffuse terms: 4, the shadow fill; 8, the probes'
+    /// light where the traced light does not cover the pixel (PROTO).
+    /// </summary>
+    public uint TermsOff;
 }
 
 /// <summary>
@@ -278,8 +288,8 @@ public record struct GpuAir
 }
 
 /// <summary>
-/// The probe grid: its size, its probes, their depth texture and its sampler, and where it lies in the world, the twin
-/// of <c>Light/Probes.slang</c> ProbeGridConstants.
+/// The probe grid: the size of a cascade and its cascades, its probes, their depth texture and its sampler, and the
+/// metres between the probes of the finest cascade, the twin of <c>Light/Probes.slang</c> ProbeGridConstants.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public record struct ProbeGridConstants
@@ -293,6 +303,11 @@ public record struct ProbeGridConstants
 
     public uint DimensionZ;
 
+    /// <summary>
+    /// The cascades: the same grid, each with cells twice as wide as the one before.
+    /// </summary>
+    public uint Cascades;
+
     public GpuBuffer Probes;
 
     public GpuTexture Depth;
@@ -300,9 +315,7 @@ public record struct ProbeGridConstants
     public GpuSampler DepthSampler;
 
     /// <summary>
-    /// Where the first probe rests in the world, and the metres between neighbouring probes.
+    /// The metres between neighbouring probes of the finest cascade.
     /// </summary>
-    public Vector3 Origin;
-
     public Vector3 CellSize;
 }

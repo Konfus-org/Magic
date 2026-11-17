@@ -1,7 +1,7 @@
 // The impostors the cull left, one indirect draw each of a quad fitted to what the instance's views show, its instance in
 // the draw's first instance. The vertices pick the atlas views the instance blends. A pixel traces them, writes the
-// impostor's id and the depth of what it sees, and shows the impostor's share of the handoff's dither, or all of it
-// when the first instance carries ImpostorWhole.
+// impostor's id and the depth of what it sees, none where its slot is empty, and shows the impostor's share of the
+// handoff's dither, or all of it when the first instance carries ImpostorWhole.
 module "DrawImpostors";
 
 import Core.Heap;
@@ -61,7 +61,7 @@ Targets DrawImpostorsPixel(Varyings input)
     GpuImpostor impostor = LoadImpostor(LoadClusterModel(instance.model).impostor);
     ImpostorBlend blend = { input.viewCells, input.viewWeights };
     ImpostorHit hit = TraceImpostor(instance, impostor, blend, GetModelRay(frame, instance, input.relative), 0.5);
-    if (!hit.isHit)
+    if (!hit.isHit || GetMaterial(instance, hit.slot) == EmptySlot)
         discard;
 
     float3 relative = ToCameraRelative(frame, ToWorld(instance.world, hit.position));

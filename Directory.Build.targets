@@ -46,7 +46,8 @@
        Library in it, and the shared libraries it Loads itself, which go beside it under their own names. How it is
        built: in Release with its CMakeOptions, one CMake argument each, installed unless
        CMakeTarget names the one target to build, after the libraries it DependsOn; or, for a library with no build of
-       its own, compiled from its Sources. What is bound of it: its Headers, read with what it Defines, every
+       its own, compiled from its Sources. What is bound of it: its Headers, read as its Language (c, or c++ for a C API
+       declared in C++ headers) with what it Defines, every
        declaration under its IncludePath bound under its C name, the functions and constants in a static class its
        Class names, but those Unbound names, which have no C# that is right on every platform; and the headers its
        build would generate from a template, which Shims makes as header=template. -->
@@ -65,6 +66,7 @@
       <Sources />
       <Namespace>$(RootNamespace)</Namespace>
       <Headers />
+      <Language>c</Language>
       <IncludePath />
       <Defines />
       <Class />
@@ -756,7 +758,7 @@ Success = !Log.HasLoggedErrors;
       File="%(_NativeGenerated.Response)"
       Overwrite="true"
       WriteOnlyWhenDifferent="true"
-      Lines="--language=c;--file=%(_NativeGenerated.RootHeader);@(_BindingsTraversed->'--traverse=%(FullPath)');@(_NativeInclude->'--include-directory=%(Checkout)%(IncludePath)');--include-directory=%(_NativeGenerated.ShimFolder);@(_BindingsDefine->'--define-macro=%(Identity)');@(_BindingsUnbound->'--exclude=%(Identity)');--namespace=%(_NativeGenerated.Namespace);--library-path=%(_NativeGenerated.Identity);--method-class-name=$([MSBuild]::ValueOrDefault('%(_NativeGenerated.Class)', '%(_NativeGenerated.Identity)'));--output=%(_NativeGenerated.Generated);--header-file=$(IntermediateOutputPath)bindings.header;--config=codegen=latest;--generate=macro-bindings;--generate=funcs-with-body=false;--generate=disable-runtime-marshalling;--generate=helper-types=$(_BindingsHelpers);--remap=_Bool=bool;--remap=char=byte;--remap=FILE=void;--with-callconv=*=Cdecl;--with-type=__AnonymousEnum_*=int;--no-resource-directory-detection;--additional=-Wno-implicit-function-declaration;@(_BindingsSystemArgument)"
+      Lines="--language=%(_NativeGenerated.Language);--file=%(_NativeGenerated.RootHeader);@(_BindingsTraversed->'--traverse=%(FullPath)');@(_NativeInclude->'--include-directory=%(Checkout)%(IncludePath)');--include-directory=%(_NativeGenerated.ShimFolder);@(_BindingsDefine->'--define-macro=%(Identity)');@(_BindingsUnbound->'--exclude=%(Identity)');--namespace=%(_NativeGenerated.Namespace);--library-path=%(_NativeGenerated.Identity);--method-class-name=$([MSBuild]::ValueOrDefault('%(_NativeGenerated.Class)', '%(_NativeGenerated.Identity)'));--output=%(_NativeGenerated.Generated);--header-file=$(IntermediateOutputPath)bindings.header;--config=codegen=latest;--generate=macro-bindings;--generate=funcs-with-body=false;--generate=disable-runtime-marshalling;--generate=helper-types=$(_BindingsHelpers);--remap=_Bool=bool;--remap=char=byte;--remap=FILE=void;--with-callconv=*=Cdecl;--with-type=__AnonymousEnum_*=int;--no-resource-directory-detection;--additional=-Wno-implicit-function-declaration;@(_BindingsSystemArgument)"
     />
   </Target>
 

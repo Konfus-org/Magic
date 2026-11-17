@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Magic.Assets;
+using Magic.Debugging;
 using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
 using Magic.Ecs;
@@ -23,15 +24,14 @@ public readonly record struct GlobalIlluminationInput(GpuView? View, TracedWorld
 /// <see cref="IndirectLight"/>.
 /// </summary>
 /// <remarks>
-/// It uses the probe grid, the traced diffuse light and the traced reflections, and writes into the view's frame
-/// buffer. Shading takes the indirect light. Each view has its own grid and history.
+/// It uses the probe grid and the traced diffuse light, and writes into the view's frame buffer. Shading takes the indirect light. Each view has its own grid and history.
 /// </remarks>
-public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, IHookIntoDomainLoading
+public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, IHookIntoDomainLoading, IDisposable
 {
     /// <summary>
-    /// What a view takes while it settles, after its probes start afresh: the most diffuse rays, a history that keeps
-    /// 0.8 a frame, so 0.8^14 &lt; 5% of the start is left after 14 frames, and probes that take half of their rays'
-    /// light.
+    /// What a view takes while it settles, after its probes start afresh: the most diffuse rays, a sky share that keeps
+    /// at most 0.8 of its history a frame, so 0.8^14 &lt; 5% of the start is left after 14 frames, and probes that take
+    /// half of their rays' light. NRD keeps the diffuse light's own history.
     /// </summary>
     private const int SettleRayCount = 8; // PROTO
     private const float SettleHistory = 0.8f; // PROTO
@@ -45,18 +45,17 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
     private const int SettleProbeSweeps = 2; // PROTO
 
     /// <summary>
-    /// The view depth's two textures: the even frames write the first and the odd the second, the other being the
-    /// history both blends read.
-    /// </summary>
-    private static readonly string[] _depthNames = ["Traced depth 0", "Traced depth 1"];
-
-    /// <summary>
     /// How the light is traced, which <see cref="Render"/> reads each frame.
     /// </summary>
     private readonly GlobalIlluminationSettings _settings;
     private readonly Probes _probes;
     private readonly TracedDiffuse _diffuse;
-    private readonly TracedReflections _reflections;
+    private readonly IGraphicsApi _gpu;
+
+    /// <summary>
+    /// For each view, by its number, the denoiser that keeps its history. Render thread.
+    /// </summary>
+    private readonly List<Denoiser> _denoisers = [];
     private readonly ImmutableArray<ShaderEntry> _shaders;
 
     /// <summary>
@@ -81,34 +80,34 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
 
     /// <summary>
     /// For each view, by its number: the size its history was last traced at, none while it holds nothing of the
-    /// world, the size its reflections were last traced at, none while they are off, and the frames its history blended
-    /// since the probes started afresh. Render thread.
+    /// world, and the frames its history blended since the probes started afresh. Render thread.
     /// </summary>
-    private readonly List<((int Width, int Height)? Traced, (int Width, int Height)? Reflected, int Blended)> _views =
-    [];
+    private readonly List<((int Width, int Height)? Traced, int Blended)> _views = [];
 
     internal Renderer(GlobalIlluminationSettings settings, AssetManager assets, Threads threads, IGraphicsApi gpu)
     {
         _settings = settings;
         _settling = new SettleWait(threads);
+        unsafe
+        {
+            Nrd.LibraryDesc* denoiser = Nrd.NRD.GetLibraryDesc();
+            Log.Info($"NRD {denoiser->versionMajor}.{denoiser->versionMinor}.{denoiser->versionBuild}.");
+        }
+
+        _gpu = gpu;
+
         _probes = new Probes(assets);
         _diffuse = new TracedDiffuse(assets);
-        _reflections = new TracedReflections(assets);
         _openSky = SkyTables.GetOpenSky(assets);
         _shaders =
         [
             .. _probes.Shaders,
             .. _diffuse.Shaders,
-            .. _reflections.Shaders,
             _probes.TraceShader with
             {
                 TypeArguments = _openSky,
             },
             _diffuse.TraceShader with
-            {
-                TypeArguments = _openSky,
-            },
-            _reflections.TraceShader with
             {
                 TypeArguments = _openSky,
             },
@@ -128,12 +127,11 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
     /// </returns>
     public IndirectLight? Render(in Frame frame, RenderGraph graph, in GlobalIlluminationInput input)
     {
-        bool isReflectionsOn = _settings.IsReflectionsOn;
-
         // What the view keeps from frame to frame, by its number.
         while (_views.Count <= graph.View)
         {
             _views.Add(default);
+            _denoisers.Add(new Denoiser(_gpu, _denoisers.Count > 0 ? _denoisers[0] : null));
         }
 
         // Off, no domain waits for the passes, and the probes start afresh once it is back on.
@@ -185,10 +183,6 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
             _diffuse.TraceShader with
             {
                 TypeArguments = skyType,
-            },
-            _reflections.TraceShader with
-            {
-                TypeArguments = skyType,
             }
         );
         if (skyShaders != GpuState.Ready && shaders != GpuState.Failed)
@@ -227,13 +221,8 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         if (!gpu.HasHistory && _views[graph.View].Traced == tracedSize)
             _views[graph.View] = default;
 
-        ((int Width, int Height)? lastTraced, (int Width, int Height)? lastReflected, int lastBlended) = _views[
-            graph.View
-        ];
+        ((int Width, int Height)? lastTraced, int lastBlended) = _views[graph.View];
         bool hasHistory = lastTraced == tracedSize;
-        ReadOnlySpan<GpuResource> sky = input.Sky is { HasTables: true } tables
-            ? [tables.Transmittance, tables.View]
-            : [];
 
         // A new traced size starts the history afresh, but not the probes, which settle from where they are.
         int blended = lastTraced is null ? 0 : lastBlended + 1;
@@ -244,26 +233,25 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
             gpu,
             constants.Value,
             tracedSize,
-            [.. sky, gpu.LightTable, gpu.Instances, gpu.Vertices, gpu.Indices, gpu.Meshes, traced.HitMaterials],
+            GIView.GetWorld(gpu, traced, input.Sky),
             SkyTables.GetSkyType(input.Sky, _openSky)
         );
         Result<(ProbeGridConstants Grid, ProbeUpdateConstants Update)> probes = _probes.Prepare(
             graph,
             lastTraced is not null,
-            traced.Box,
-            (_settings.ProbesAcross, _settings.ProbesUp)
+            (_settings.ProbesAcross, _settings.ProbesUp),
+            _settings.ProbeSpacing
         );
-        Result<TracedDiffuseConstants> diffuse = TracedDiffuse.Prepare(view, frame.Index, hasHistory);
-        Result<TracedReflectionConstants> reflections = isReflectionsOn
-            ? TracedReflections.Prepare(view, frame.Index, hasHistory && lastReflected == tracedSize)
-            : Result.Success(default(TracedReflectionConstants));
+        Result<DenoiserTextures> nrd = Denoiser.Prepare(view);
+        Result<TracedDiffuseConstants> diffuse = nrd.Ok
+            ? TracedDiffuse.Prepare(view, nrd.Value, hasHistory)
+            : Result.Failure(nrd.Error);
         int written = (int)(frame.Index % 2);
-        Result<GpuTexture> depth = graph.Texture(view.GetTraced(_depthNames[written], GpuFormat.R32Sfloat));
-        Result<GpuTexture> depthHistory = graph.Texture(view.GetTraced(_depthNames[1 - written], GpuFormat.R32Sfloat));
-        Result<GpuSampler> sampler = graph.Sampler(
-            new SamplerDescription { Wrap = TextureWrap.Clamp, MipFilter = TextureFilter.Nearest }
+        Result<GpuTexture> depth = graph.Texture(view.GetTraced(GIView.DepthNames[written], GIView.DepthFormat));
+        Result<GpuTexture> depthHistory = graph.Texture(
+            view.GetTraced(GIView.DepthNames[1 - written], GIView.DepthFormat)
         );
-        Result asked = Result.FindFailure(constants, probes, diffuse, reflections, depth, depthHistory, sampler);
+        Result asked = Result.FindFailure(constants, probes, diffuse, depth, depthHistory);
         if (!asked.Ok)
         {
             _settling.End();
@@ -275,23 +263,15 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         GIConstants gi = new()
         {
             Diffuse = diffuse.Value,
-            Reflections = reflections.Value,
             Probes = probes.Value.Update,
             Depth = depth.Value,
             DepthHistory = depthHistory.Value,
-            Sampler = sampler.Value,
             TracedWidth = (uint)tracedSize.Width,
             TracedHeight = (uint)tracedSize.Height,
             DiffuseRayCount = (uint)Math.Clamp(isSettling ? SettleRayCount : _settings.IndirectRayCount, 1, 8),
             DiffuseRayRange = Math.Max(_settings.IndirectRayRange, 0),
-            ReflectionRayRange = Math.Max(_settings.ReflectionRayRange, 0),
             DiffuseHistory = Math.Clamp(
                 isSettling ? Math.Min(SettleHistory, _settings.IndirectHistory) : _settings.IndirectHistory,
-                0,
-                1
-            ),
-            ReflectionHistory = Math.Clamp(
-                isSettling ? Math.Min(SettleHistory, _settings.ReflectionHistory) : _settings.ReflectionHistory,
                 0,
                 1
             ),
@@ -300,6 +280,11 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
                 0,
                 1
             ),
+            DiffuseTermsOff =
+                (_settings.IsHitProbeLightOn ? 0u : 1u)
+                | (_settings.IsDiffuseSkyOn ? 0u : 2u)
+                | (_settings.IsShadowFillOn ? 0u : 4u)
+                | (_settings.IsPixelProbeLightOn ? 0u : 8u),
         };
         // Not staged: nothing is recorded, and the frame's row stays the view's default, which the shaders read as none.
         if (!graph.Upload(view.Constants, [gi]))
@@ -308,24 +293,33 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
         ProbeGridConstants grid = probes.Value.Grid;
         GpuIndirectLight row = new()
         {
-            Diffuse = gi.Diffuse.Blend.Light.Id,
-            Reflections = gi.Reflections.Blend.Light.Id,
+            Diffuse = nrd.Value.Output.Id,
+            SkyShare = gi.Depth.Id,
             Grid = grid,
+            TermsOff = gi.DiffuseTermsOff,
         };
         if (!graph.Upload(gpu.Frame, [row], GpuIndirectLight.Offset))
             return null;
 
         _probes.Record(view, grid, gi.Probes);
-        _diffuse.Record(view, grid, gi);
-        if (isReflectionsOn)
-            _reflections.Record(view, grid, gi);
+        _diffuse.RecordTrace(view, grid, gi);
+        Result denoised = _denoisers[graph.View]
+            .Record(view, nrd.Value, frame.Index, (float)frame.AppDeltaSec, !hasHistory);
+        if (!denoised.Ok)
+            graph.Fail(RenderFailure.Resource, "Indirect light is not denoised", denoised.Error);
 
-        (int Width, int Height)? reflected = isReflectionsOn ? tracedSize : null;
-        _views[graph.View] = (tracedSize, reflected, blended);
+        _diffuse.RecordSkyShare(view, gi);
+        _views[graph.View] = (tracedSize, blended);
         if (graph.View == 0 && blended >= settleFrames)
             _settling.End();
 
-        return new IndirectLight(gi.Diffuse.Blend.Light, gi.Reflections.Blend.Light, grid.Probes, grid.Depth);
+        return new IndirectLight(nrd.Value.Output, gi.Depth, grid.Probes, grid.Depth);
+    }
+
+    public void Dispose()
+    {
+        foreach (Denoiser denoiser in _denoisers)
+            denoiser.Dispose();
     }
 
     public Task OnDomainLoadingAsync(ImmutableArray<ImmutableArray<IComponent>> entities, CancellationToken cancel) =>

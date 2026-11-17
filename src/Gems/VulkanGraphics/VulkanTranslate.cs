@@ -53,12 +53,26 @@ internal static class VulkanTranslate
     /// </summary>
     public static GpuFormat ToGpu(this VkFormat format) => _windowFormats.GetValueOrDefault(format, GpuFormat.Unknown);
 
+    public static VkDescriptorType ToVulkan(this GpuBindingKind kind) =>
+        kind switch
+        {
+            GpuBindingKind.Sampler => VkDescriptorType.Sampler,
+            GpuBindingKind.Constants => VkDescriptorType.UniformBuffer,
+            GpuBindingKind.Texture => VkDescriptorType.SampledImage,
+            GpuBindingKind.StorageTexture => VkDescriptorType.StorageImage,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+        };
+
     public static VkBufferUsageFlags ToVulkan(this BufferUsages usage, bool hasAcceleration)
     {
         // Every buffer may be copied either way, so uploads and readbacks need nothing of their own.
         VkBufferUsageFlags flags = VkBufferUsageFlags.TransferSrc | VkBufferUsageFlags.TransferDst;
         if (usage.HasFlag(BufferUsages.Storage))
             flags |= VkBufferUsageFlags.StorageBuffer | VkBufferUsageFlags.ShaderDeviceAddress;
+
+        // A staging ring also holds a bound shader's constants.
+        if (usage.HasFlag(BufferUsages.Upload))
+            flags |= VkBufferUsageFlags.UniformBuffer;
 
         // A storage buffer may hold the triangles or the instances an acceleration structure is built from.
         if (usage.HasFlag(BufferUsages.Storage) && hasAcceleration)

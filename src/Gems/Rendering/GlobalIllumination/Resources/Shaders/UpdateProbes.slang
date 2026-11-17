@@ -1,8 +1,8 @@
 // The probe grid's light brought up to date each frame (Majercik et al., "Dynamic Diffuse Global Illumination with
 // Ray-Traced Irradiance Fields", 2019): each probe asks for rays as its light still changes, and the probes are given
 // them in turn while they fit in a budget for all of them. Each ray is traced into the world and lit where it lands by
-// one light picked at random and by the probes themselves, and each probe given rays blends them into its light's
-// harmonics and its map of distances, moving away from a surface it is near. The pass header's x is the frame's
+// the sun, the lights near it and the probes themselves, and each probe given rays blends them into its maps of light
+// and of distances, moving away from a surface it is near. The pass header's x is the frame's
 // buffer, which holds the lights and IndirectLight, which holds the grid. Its y is the GI buffer, which holds the
 // update's own buffers.
 module "UpdateProbes";
@@ -32,9 +32,6 @@ static const uint ProbeRayBudget = 131072u;
 static const uint MaxProbeRays = 256u;
 static const uint ProbeRayStep = 4u;
 
-// The directions a probe blends its light in, a side of its octahedral map, C#'s Probes.IrradianceTexels.
-static const uint IrradianceTexels = 8u;
-
 // How far a probe moves from a surface it is near, as a part of its depth's reach.
 static const float KeepDistance = 0.1;
 
@@ -43,19 +40,12 @@ static const float KeepDistance = 0.1;
 uint GetProbeRayCountOffset(uint probe) { return 4u + probe * 8u; }
 uint GetProbeRayStartOffset(uint probe) { return 8u + probe * 8u; }
 
-// The harmonics of a value seen along a unit direction.
-ProbeSh ProjectOntoSh(float3 direction, float3 value)
-{
-    ProbeSh sh;
-    sh.c[0] = ShBasis0 * value;
-    sh.c[1] = ShBasis1 * direction.y * value;
-    sh.c[2] = ShBasis1 * direction.z * value;
-    sh.c[3] = ShBasis1 * direction.x * value;
-    return sh;
-}
-
 static const uint IrradianceTexelCount = IrradianceTexels * IrradianceTexels;
 static const uint DepthTexelCount = DepthTexels * DepthTexels;
+
+// How many times brighter or darker than its short mean a probe's mean may be before it takes the short mean at once.
+// PROTO: the 4 is a guess.
+static const float ChangeRatio = 4.0;
 
 // How fast a probe's distances and its place follow its rays; the gem's constants say how fast its light does.
 static const float DepthBlend = 0.02;
@@ -127,10 +117,11 @@ ProbeVariance DecodeProbeVariance(uint4 packed)
 
 // The data moved on by a new value: a mean that catches up as fast as the short mean strays from it beyond the noise,
 // with fireflies clipped first (Barré-Brisebois, "A Multi-Scale Mean Estimator", in the SIGGRAPH 2021 course "Global
-// Illumination Based on Surfels").
+// Illumination Based on Surfels"). The deviation's floor is far under any light a probe keeps, so the mean follows a
+// change the same at any brightness, and light with no source left decays to none.
 ProbeVariance EstimateMean(ProbeVariance data, float3 value, float shortBlend)
 {
-    float3 deviation = sqrt(max(1e-5, data.variance));
+    float3 deviation = max(sqrt(data.variance), Epsilon);
     value -= max(0.0, value - (0.1 + data.shortMean + deviation * 8.0));
 
     float3 delta = value - data.shortMean;
@@ -139,12 +130,24 @@ ProbeVariance EstimateMean(ProbeVariance data, float3 value, float shortBlend)
 
     // A longer window than the short mean's, so the variance doesn't shrink with it.
     data.variance = lerp(data.variance, delta * delta2, shortBlend * 0.5);
-    deviation = sqrt(max(1e-5, data.variance));
-
     float3 luma = float3(0.299, 0.587, 0.114);
-    float relativeDiff = dot(luma, abs(data.mean - data.shortMean) / max(1e-5, deviation));
+
+    // A change past ChangeRatio either way, as when the sun sets at once or a light goes out, is no noise: the mean
+    // takes the short mean, and the variance the change made is dropped, which would hold the mean for hundreds of
+    // frames.
+    float meanBrightness = dot(luma, data.mean);
+    float shortBrightness = dot(luma, data.shortMean);
+    if (max(meanBrightness, shortBrightness) > ChangeRatio * min(meanBrightness, shortBrightness) + Epsilon)
+    {
+        data.mean = data.shortMean;
+        data.variance = min(data.variance, Pow2(data.shortMean));
+        return data;
+    }
+
+    deviation = max(sqrt(data.variance), Epsilon);
+    float relativeDiff = dot(luma, abs(data.mean - data.shortMean) / deviation);
     data.inconsistency = lerp(data.inconsistency, relativeDiff, 0.08);
-    float slowing = clamp(dot(luma, 0.5 * data.shortMean / max(1e-5, deviation)), 1.0 / 32.0, 1.0);
+    float slowing = clamp(dot(luma, 0.5 * data.shortMean / deviation), 1.0 / 32.0, 1.0);
     float catchUp = clamp(smoothstep(0.0, 1.0, relativeDiff * max(0.02, data.inconsistency - 0.2)), 1.0 / 256.0, 1.0);
     catchUp *= data.varianceSlowing;
     data.varianceSlowing = lerp(data.varianceSlowing, slowing, 0.1);
@@ -154,8 +157,9 @@ ProbeVariance EstimateMean(ProbeVariance data, float3 value, float shortBlend)
 
 groupshared uint groupInconsistency;
 
-// A group a probe: as many rays as its light still changes, up to the most, a tenth of that out of view and all of them
-// before it first blends its rays, kept as its count.
+// A group a probe: as many rays as its light still changes, up to the most, half that for each cascade out, a tenth of
+// that out of view and all of them before it first blends its rays, kept as its count. A probe whose slot the moved grid
+// gave a new world cell starts afresh.
 [shader("compute")]
 [numthreads(32, 1, 1)]
 void AskProbeRays(uint3 group : SV_GroupID, uint index : SV_GroupIndex)
@@ -181,10 +185,21 @@ void AskProbeRays(uint3 group : SV_GroupID, uint index : SV_GroupIndex)
     if (index != 0u)
         return;
 
-    uint rayCount = uint(saturate(asfloat(groupInconsistency)) * float(MaxProbeRays));
-    GpuProbe loaded = LoadProbe(grid, probe);
-    float3 position = ToCameraRelative(frame, GetProbePosition(grid, GetProbeCoord(grid, probe), loaded));
-    if (!IsSphereInFrustum(frame, position, Max3(grid.cellSize) * 2.0))
+    ArrayRef<GpuProbe> probes = { grid.probes };
+    GpuProbe loaded = probes[probe];
+    uint3 slot = GetProbeCoord(grid, probe);
+    uint k = GetSlotCascade(grid, slot);
+    ProbeGridConstants cascade = GetCascade(grid, k);
+    uint rayCount = uint(saturate(asfloat(groupInconsistency)) * float(MaxProbeRays)) >> k;
+    int3 cell = GetProbeCell(grid, slot, GetFirstProbeCell(cascade, frame.cameraPosition.xyz));
+    if (any(cell != GetProbeCell(grid, slot, GetFirstProbeCell(cascade, frame.previousCameraPosition.xyz))))
+    {
+        loaded.offset = float4(0.0);
+        probes[probe] = loaded;
+    }
+
+    float3 position = ToCameraRelative(frame, GetProbePosition(cascade, cell, loaded));
+    if (!IsSphereInFrustum(frame, position, Max3(cascade.cellSize) * 2.0))
         rayCount /= 10u;
 
     rayCount = clamp((rayCount + ProbeRayStep - 1u) / ProbeRayStep * ProbeRayStep, ProbeRayStep, MaxProbeRays);
@@ -213,7 +228,7 @@ void PlanProbeRays(uint index : SV_GroupIndex)
     ProbeUpdateConstants update = GetGIConstants().probes;
     BufferRef counts = { update.rayCounts };
     BufferRef arguments = { update.rayArguments };
-    uint probeCount = grid.dimensions.x * grid.dimensions.y * grid.dimensions.z;
+    uint probeCount = grid.dimensions.x * grid.dimensions.y * grid.dimensions.z * grid.cascades;
     uint cursor = arguments.Load<uint>(12u) % probeCount;
     uint perThread = (probeCount + PlanGroupSize - 1u) / PlanGroupSize;
     uint first = min(index * perThread, probeCount);
@@ -332,7 +347,10 @@ void TraceProbes<S : ISky>(uint3 thread : SV_DispatchThreadID)
     uint entry = list[thread.x];
     uint probe = entry & 0xFFFFFu;
     uint rayIndex = entry >> 20u;
-    float3 origin = GetProbePosition(grid, GetProbeCoord(grid, probe), LoadProbe(grid, probe));
+    uint3 slot = GetProbeCoord(grid, probe);
+    ProbeGridConstants cascade = GetCascade(grid, GetSlotCascade(grid, slot));
+    int3 cell = GetProbeCell(grid, slot, GetFirstProbeCell(cascade, frame.cameraPosition.xyz));
+    float3 origin = GetProbePosition(cascade, cell, LoadProbe(grid, probe));
     uint rayCount = counts.Load<uint>(GetProbeRayCountOffset(probe));
     float3 direction = normalize(mul(GetFibonacciDirection(rayIndex, rayCount), GetRandomRotation(frame.frameIndex)));
 
@@ -343,7 +361,7 @@ void TraceProbes<S : ISky>(uint3 thread : SV_DispatchThreadID)
     if (!hit.isHit)
     {
         ray.depth = -1.0;
-        ray.radiance = GetSkyRadiance<S>(lights, direction);
+        ray.radiance = GetSkyRadiance<S>(lights, direction) * hit.through;
     }
     else
     {
@@ -352,10 +370,10 @@ void TraceProbes<S : ISky>(uint3 thread : SV_DispatchThreadID)
         // A ray that reached a back is cut short, so a probe sees the inside closer than it is and doesn't leak it.
         ray.depth = surface.isBackface ? hit.distance * 0.9 : hit.distance;
         float3 xi = GetRandom(uint2(thread.x, 0u), frame.frameIndex, 1u);
-        float3 light = GetDirectLight<S>(lights, world, surface, xi);
+        float3 light = GetDirectLight<S>(lights, grid, world, surface, xi);
         light += 0.95 * GetProbeIrradiance(grid, surface.position, surface.normal);
 
-        ray.radiance = light * surface.diffuse + surface.emissive;
+        ray.radiance = (light * surface.diffuse + surface.emissive) * hit.through;
     }
 
     ArrayRef<uint4> rays = { update.rays };
@@ -391,7 +409,7 @@ static const uint DepthBorderTexels = 4u * DepthTexels + 4u;
 
 // A group a probe, a thread a ray and a direction of its 16 by 16 map of distances, the first 64 threads also one of
 // its 8 by 8 map of light. The light: the probe's rays weighted by how near each is to the direction, followed by the
-// mean estimator, then the map projected into the probe's harmonics. The distances: the mean and squared mean of its
+// mean estimator, then kept in the probe. The distances: the mean and squared mean of its
 // rays' distances, sharply weighted towards the direction, blended slowly into the map, its border copied around it,
 // and the probe moved away from what its rays found nearer than it should keep. A probe traces at most a ray a thread.
 [shader("compute")]
@@ -408,6 +426,8 @@ void BlendProbes(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID, uint 
         return;
 
     uint start = counts.Load<uint>(GetProbeRayStartOffset(probe));
+    uint3 slot = GetProbeCoord(grid, probe);
+    uint k = GetSlotCascade(grid, slot);
     bool hasBlended = HasBlended(LoadProbe(grid, probe));
     if (index < rayCount)
     {
@@ -456,7 +476,7 @@ void BlendProbes(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID, uint 
     }
 
     // The distances of every thread's direction, and the push away from what is too near.
-    float maxDistance = update.maxDistance;
+    float maxDistance = update.maxDistance * float(1u << k);
     float keep = maxDistance * KeepDistance;
     float3 texelDirection = DecodeUnitVectorUnorm((float2(local.xy) + 0.5) / float(DepthTexels));
     float2 moments = float2(0.0);
@@ -480,7 +500,7 @@ void BlendProbes(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID, uint 
     if (totalWeight > WeightEpsilon)
         moments /= totalWeight;
 
-    uint2 corner = GetProbeDepthTexel(grid, GetProbeCoord(grid, probe)) - 1u;
+    uint2 corner = GetProbeDepthTexel(grid, slot) - 1u;
     StorageRef depthTarget = { grid.depth, 0u };
     if (hasBlended)
         moments = lerp(depthTarget.Load(corner + 1u + local.xy).xy, moments, DepthBlend);
@@ -498,27 +518,14 @@ void BlendProbes(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID, uint 
     if (index != 0u)
         return;
 
-    // Each texel's light over the sphere into harmonics: the sum of the texels, each covering 4 pi over their count.
-    ProbeSh sh = {};
-    for (uint i = 0u; i < IrradianceTexelCount; i++)
-    {
-        uint2 at = uint2(i % IrradianceTexels, i / IrradianceTexels);
-        float3 direction = DecodeUnitVectorUnorm((float2(at) + 0.5) / float(IrradianceTexels));
-        ProbeSh texelSh = ProjectOntoSh(direction, groupMeans[i]);
-        for (uint band = 0u; band < 4u; band++)
-        {
-            sh.c[band] += texelSh.c[band] * (4.0 * Pi / float(IrradianceTexelCount));
-        }
-    }
-
     ArrayRef<GpuProbe> probes = { grid.probes };
     GpuProbe updated = probes[probe];
-    for (uint band = 0u; band < 4u; band++)
+    for (uint i = 0u; i < IrradianceTexelCount; i++)
     {
-        updated.radiance[band] = float4(sh.c[band], 0.0);
+        updated.irradiance[i / 4u][i % 4u] = PackR11G11B10(groupMeans[i]);
     }
 
-    float3 limit = grid.cellSize * 0.5;
+    float3 limit = GetCascade(grid, k).cellSize * 0.5;
     float3 offset = hasBlended ? updated.offset.xyz * limit : float3(0.0);
     updated.offset = float4(clamp(lerp(offset, push, OffsetBlend), -limit, limit) / limit, 1.0);
     probes[probe] = updated;

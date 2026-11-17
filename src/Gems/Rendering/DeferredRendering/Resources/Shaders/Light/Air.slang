@@ -74,12 +74,28 @@ public float GetHazeDensity(Air air, float height)
     return air.density * exp(-0.693147 / max(air.halfHeight, 0.01) * (height - air.height));
 }
 
+// How far under the horizon, as the sine of the angle, the sun's twilight lights the sky: 8 degrees, where it is about
+// as bright as a full moon.
+static const float TwilightDepth = 0.139;
+
+// The sun's light on the air and the clouds: none under the horizon, where the Earth hides it.
+public float3 GetAirSunIlluminance(Lights lights)
+{
+    return lights.sunDirection.y > 0.0 ? lights.sunIlluminance.rgb : float3(0.0);
+}
+
+// The sky's light on the air and the clouds: the open sky's, fading out as the sun's twilight ends.
+public float3 GetAirSkyRadiance(Lights lights)
+{
+    return GetOpenSkyRadiance(lights) * saturate(1.0 + lights.sunDirection.y / TwilightDepth);
+}
+
 // The light the air scatters towards the camera from a unit direction, per part of it scattered: its colour times the
 // sky's light, evenly, and the sun's by the angle to it, each as much of it as gets through, by colour.
 public float3 GetAirRadiance(Air air, Lights lights, float3 direction, float3 skyThrough, float3 sunThrough)
 {
     float phase = GetAirPhase(air.anisotropy, dot(direction, lights.sunDirection.xyz));
-    return air.color * (skyThrough * GetOpenSkyRadiance(lights) + sunThrough * lights.sunIlluminance.rgb * phase);
+    return air.color * (skyThrough * GetAirSkyRadiance(lights) + sunThrough * GetAirSunIlluminance(lights) * phase);
 }
 
 // Under this much change of the haze's exponent along a ray, the haze is taken as level, where the closed form divides

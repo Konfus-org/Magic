@@ -13,6 +13,7 @@ import Core.Pass;
 import Core.Frame;
 import Core.Math;
 import Core.Color;
+import Core.Random;
 import Light.Indirect;
 
 // C#'s DebugView.
@@ -90,7 +91,7 @@ float3 GetLightView(FrameConstants frame, DebugView view, uint2 pixel)
         return float3(0.0);
 
     float3 relative = ReconstructPixel(frame, pixel, depth);
-    return SampleIndirectDiffuse(frame, indirect.diffuse, pixel, relative, LoadNormal(frame.gbufferNormal, pixel));
+    return SampleIndirectDiffuse(frame, indirect.diffuse, pixel, relative, LoadNormal(frame.gbufferNormal, pixel)).rgb;
 }
 
 [shader("compute")]
@@ -127,6 +128,12 @@ void ShowSurface(uint3 thread : SV_DispatchThreadID)
     float3 color = isPicture
         ? pow(saturate(ToSrgb(light)), 1.0 / gamma)
         : GetSurfaceView(frame, view, depthViewFar, thread.xy);
+
+    // Triangular noise of up to one 8-bit step, new each frame, so a smooth gradient has no bands where the output
+    // rounds it to 8 bits (Lipshitz, Wannamaker and Vanderkooy, "Quantization and Dither: A Theoretical Survey",
+    // 1992). The same noise in each channel keeps it grey.
+    float2 random = GetRandom(thread.xy, frame.frameIndex, 0u).xy;
+    color += (random.x + random.y - 1.0) / 255.0;
     StorageRef output = { frame.output, 0u };
     output.Store(thread.xy, float4(color, 1.0));
 }

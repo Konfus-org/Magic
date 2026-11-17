@@ -94,7 +94,7 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
         _heap = new VulkanHeap(_device.Api, _device.Features.HasRayQuery);
         _resources = new VulkanResources(_device, _heap);
         _frames = new VulkanFrames(_device, _resources, _meter);
-        _shaders = new VulkanShaders(compiler, _resources, threads);
+        _shaders = new VulkanShaders(compiler, _resources, _frames, threads);
         _recorder = new VulkanRecorder(_device, _resources, _heap, _shaders);
         if (drawn is not null && _device.Surface.IsNotNull)
             _swapchain = new VulkanSwapchain(_device, _resources, drawn);
@@ -428,6 +428,7 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
         DestroyUnasked(_namedBottomLevels, static (api, acceleration) => api.Destroy(acceleration));
         DestroyUnasked(_namedTopLevels, static (api, acceleration) => api.Destroy(acceleration));
         DestroyUnasked(_samplers, static (api, sampler) => api.Destroy(sampler));
+        _shaders.DestroyUnasked();
     }
 
     private void DestroyUnasked<TKey, TDescription, T>(

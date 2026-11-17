@@ -28,6 +28,7 @@
     <Project Path="Gems/Rendering/PostEffects/PostEffects.csproj" />
     <Project Path="Gems/Rendering/ProceduralSky/ProceduralSky.csproj" />
     <Project Path="Gems/Rendering/TaaUpscaling/TaaUpscaling.csproj" />
+    <Project Path="Gems/Rendering/TracedReflections/TracedReflections.csproj" />
     <Project Path="Gems/Rendering/TracedShadows/TracedShadows.csproj" />
     <Project Path="Gems/Rendering/WeatherFX/WeatherFX.csproj" />
   </Folder>

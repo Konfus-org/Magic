@@ -9,7 +9,7 @@ import Core.Math;
 import Core.Pack;
 
 // The frame's bytes, C#'s FrameConstants.Bytes: where the rows after it in its buffer start.
-public static const uint FrameBytes = 528u;
+public static const uint FrameBytes = 532u;
 
 public struct FrameConstants
 {
@@ -67,6 +67,10 @@ public struct FrameConstants
     public uint glassBase;
     public uint glassNormal;
     public uint glassSurface;
+    // The mip level the textures are read at, added to the one the picture's pixels give: log2 of the picture's width
+    // over the width it is shown at while a gem upscales it, so textures keep the detail of the shown size, and 0
+    // otherwise.
+    public float mipBias;
 }
 
 public FrameConstants GetFrame() { return LoadConstants<FrameConstants>(); }

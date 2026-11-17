@@ -24,18 +24,31 @@ import DenoiseShadows;
 // The sun's bits of the group's two tiles, the upper and the lower 8 by 4 pixels.
 groupshared uint groupSunTiles[2];
 
-// A pixel's words, all lit for the sky and where there is nothing to hit, and the sun's tint, white unless its ray
-// went through glass.
+// A pixel's words, all lit for the sky and where there is nothing to hit, the sun's tint, white unless its ray went
+// through glass, and how far towards the sun the nearest thing in its way is, 0 with nothing in it.
 struct PixelShadows
 {
     uint4 words;
     float3 sunTint;
+    float sunOccluder;
 };
 
-PixelShadows Trace(FrameConstants frame, Lights lights, uint2 pixel)
+// How far off its surface a shadow ray starts. The outer sides of triangles nearer than the pixel's ray offset are
+// passed, so the surface does not shadow itself and a thin caster close to it still does.
+static const float ShadowRayStart = 0.01;
+
+// A point of the unit square for a pixel's slot and sample: blue noise, so neighbours' points differ as much as they
+// can, moved along R2 each frame, so the blend with last frame's averages more of the light than random points.
+float2 GetLightSample(ShadowDenoiseConstants denoise, uint2 pixel, uint frameIndex, uint slot, uint sample)
+{
+    return GetBlueNoise(denoise.blueNoise, pixel, frameIndex * 2u + sample, slot);
+}
+
+// Rays is how many the sun gets: 2 where last frame filtered the pixel's group, its shadow's edge, else 1.
+PixelShadows Trace(FrameConstants frame, ShadowDenoiseConstants denoise, Lights lights, uint2 pixel, uint rays)
 {
     TracedWorld traced = GetTracedWorld();
-    PixelShadows shadows = { uint4(0u), float3(1.0) };
+    PixelShadows shadows = { uint4(0u), float3(1.0), 0.0 };
     TextureRef depthTexture = { frame.depth };
     float depth = depthTexture.Load(pixel, 0u).x;
     if (depth == 0.0 || traced.acceleration == 0u)
@@ -51,18 +64,25 @@ PixelShadows Trace(FrameConstants frame, Lights lights, uint2 pixel)
     float3 normal = LoadNormal(frame.gbufferNormal, pixel);
     float lift = DecodeLift(frame, relative, surfaceTexture.Load(pixel, 0u).w);
     float3 world = relative + normal * lift + frame.cameraPosition.xyz;
-    float3 origin = world + normal * GetRayOffset(frame, relative);
+    float3 origin = world + normal * ShadowRayStart;
+    float frontReach = GetRayOffset(frame, relative);
     RaytracingAccelerationStructure scene = GetTracedAcceleration();
 
-    // The sun, through a random point of its disc, lit as often as its light gets through, its colour over its
-    // brightness the tint.
+    // The sun, through a point of its disc for each ray, the mean of how much of its light gets through, its colour
+    // over its brightness the tint.
     float3 toSun = lights.sunDirection.xyz;
-    float3 xi = GetRandom(pixel, frame.frameIndex, 0u);
-    float3 sunRay = SampleSunDirection(toSun, xi.xy);
-    float3 sunThrough = dot(normal, toSun) > 0.0 ? GetTransmittance(scene, origin, sunRay, 1e6) : float3(0.0);
+    float3 sunThrough = float3(0.0);
+    for (uint i = 0u; i < rays && dot(normal, toSun) > 0.0; i++)
+    {
+        float3 sunRay = SampleSunDirection(toSun, GetLightSample(denoise, pixel, frame.frameIndex, 0u, i));
+        float occluder;
+        sunThrough += GetTransmittance(scene, origin, sunRay, 1e6, frontReach, occluder) / float(rays);
+        if (occluder > 0.0)
+            shadows.sunOccluder = shadows.sunOccluder > 0.0 ? min(shadows.sunOccluder, occluder) : occluder;
+    }
+
     float sunBrightness = GetLuminance(sunThrough);
-    if (sunBrightness > xi.z)
-        shadows.words = EncodeShadow(shadows.words, 0u, 1.0);
+    shadows.words = EncodeShadow(shadows.words, 0u, sunBrightness);
 
     if (sunBrightness > 0.0)
         shadows.sunTint = sunThrough / sunBrightness;
@@ -80,11 +100,11 @@ PixelShadows Trace(FrameConstants frame, Lights lights, uint2 pixel)
             uint bit = firstbitlow(bits);
             bits &= bits - 1u;
             GpuLight light = LoadLight(lights.table, bucket * 32u + bit);
-            float3 target = SampleLightPoint(light, world, GetRandom(pixel, frame.frameIndex, slot).xy);
+            float3 target = SampleLightPoint(light, world, GetLightSample(denoise, pixel, frame.frameIndex, slot, 0u));
             LightRay ray = CreateLightRay(origin, target);
             if (dot(normal, ray.direction) > 0.0)
             {
-                float through = GetLuminance(GetTransmittance(scene, origin, ray.direction, ray.distance));
+                float through = GetLuminance(GetTransmittance(scene, origin, ray.direction, ray.distance, frontReach));
                 shadows.words = EncodeShadow(shadows.words, slot, through);
             }
 
@@ -110,15 +130,22 @@ void TraceShadows(uint3 thread : SV_DispatchThreadID, uint3 local : SV_GroupThre
     bool isInside = all(thread.xy < size);
     if (isInside)
     {
-        PixelShadows shadows = Trace(frame, lights, GetPicturePixel(frame, thread.xy, size, float2(0.0)));
+        // Last frame's state of the pixel's group, which ClassifyShadows has not written yet this frame.
+        ArrayRef<uint> tileStates = { denoise.tileStates };
+        bool isEdge = denoise.hasHistory != 0u && tileStates[GetTileStateIndex(thread.xy / 8u, size.x)] == 0u;
+        uint2 picturePixel = GetPicturePixel(frame, thread.xy, size, float2(0.0));
+        PixelShadows shadows = Trace(frame, denoise, lights, picturePixel, isEdge ? 2u : 1u);
         StoreShadowMask(denoise.mask, thread.xy, size.x, shadows.words);
+        StorageRef occluders = { denoise.sunOccluder, 0u };
+        occluders.Store(thread.xy, float4(shadows.sunOccluder, 0.0, 0.0, 0.0));
         if (denoise.sunTint != 0u)
         {
             StorageRef tints = { denoise.sunTint, 0u };
             tints.Store(thread.xy, float4(shadows.sunTint, 1.0));
         }
 
-        if (GetShadow(shadows.words, 0u) > 0.5)
+        // The sun's bit lit as often as its light gets through.
+        if (GetShadow(shadows.words, 0u) > GetRandom(thread.xy, frame.frameIndex, 0u).x)
             InterlockedOr(groupSunTiles[local.y / SunTileSize.y], GetSunTileBit(thread.xy));
     }
 

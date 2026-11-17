@@ -28,6 +28,11 @@ internal sealed class FrameView
     private (Matrix4x4 ViewProjection, Vector4 CameraPosition, int Width, int Height)? _previous;
 
     /// <summary>
+    /// The rows the last <see cref="Upload"/> wrote.
+    /// </summary>
+    public FrameConstants Constants { get; private set; }
+
+    /// <summary>
     /// Gets the jitter of frame <paramref name="frameIndex"/>, in pixels from the pixel's middle.
     /// </summary>
     /// <remarks>
@@ -51,7 +56,8 @@ internal sealed class FrameView
     /// Uploads the frame's rows into its buffer.
     /// </summary>
     /// <remarks>
-    /// The rows are the view's constants, with the camera shifted by <paramref name="jitter"/>; the models, the
+    /// The rows are the view's constants, with the camera shifted by <paramref name="jitter"/> and textures read at
+    /// <paramref name="mipBias"/>; the models, the
     /// instance and material tables of <paramref name="world"/>; the lights: the sun, the open sky at
     /// <paramref name="skyBrightness"/>, the sampler of the sky's tables, and the light table's lights and its tiles;
     /// the world as rays see it, <paramref name="traced"/>; and, at 0, the rows the gems after the view write.
@@ -63,6 +69,7 @@ internal sealed class FrameView
         (Transform Transform, Camera Camera) camera,
         in Frame frame,
         Vector2 jitter,
+        float mipBias,
         (Vector3 Direction, Vector3 Illuminance) sun,
         float skyBrightness,
         GpuTracedWorld traced
@@ -109,6 +116,7 @@ internal sealed class FrameView
             PixelsPerRadian = height / (2 * MathF.Tan(camera.Camera.FieldOfView * MathF.PI / 360)),
             FrameIndex = frame.Index,
             Jitter = jitter,
+            MipBias = mipBias,
         };
         GpuLights frameLights = new()
         {
@@ -143,6 +151,7 @@ internal sealed class FrameView
                 ? (last.ViewProjection, last.CameraPosition)
                 : (unjittered, constants.CameraPosition);
         _previous = (unjittered, constants.CameraPosition, width, height);
+        Constants = constants;
         bool isSent = graph.Upload(view.Frame, [constants]);
         isSent &= graph.Upload(view.Frame, [world.ModelsRow], GpuModels.Offset);
         isSent &= graph.Upload(view.Frame, [frameLights], GpuLights.Offset);

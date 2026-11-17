@@ -246,6 +246,31 @@ public sealed class RenderGraph
     }
 
     /// <summary>
+    /// Begins a compute pass that runs <paramref name="shader"/> with its bindings, which it reads and writes as their
+    /// kinds say. A dispatch ends it.
+    /// </summary>
+    public ComputePass Compute(string name, in BoundShader shader, RenderStage stage)
+    {
+        Begin(
+            new()
+            {
+                Name = name,
+                Stage = stage,
+                BoundShader = shader,
+            }
+        );
+        foreach (GpuBinding binding in shader.Bindings)
+        {
+            if (binding.Kind == GpuBindingKind.Texture)
+                Use(new GpuTexture(binding.Id), GpuAccess.ShaderRead);
+            else if (binding.Kind == GpuBindingKind.StorageTexture)
+                Use(new GpuTexture(binding.Id), GpuAccess.ShaderWrite);
+        }
+
+        return new ComputePass(this);
+    }
+
+    /// <summary>
     /// Begins a draw pass with <paramref name="shaders"/> into <paramref name="targets"/>. A draw ends it.
     /// </summary>
     /// <remarks>

@@ -6,6 +6,10 @@ import Core.Heap;
 
 public static const uint MaterialSlots = 8u;
 
+// The material row of a slot that a renderer with other materials leaves empty: its meshes draw nothing and rays pass
+// them.
+public static const uint EmptySlot = 0xFFFFFFFFu;
+
 public struct GpuInstance
 {
     // The model's frame to the world, row-major, for row vectors, the world to the model's frame, and the model's

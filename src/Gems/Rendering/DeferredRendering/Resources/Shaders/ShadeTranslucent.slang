@@ -1,10 +1,11 @@
-// The nearest translucent surface of each pixel shaded over the lit picture: what is behind it, as shading left it,
-// through the pane's colour, and through any other pane between, which a ray finds on a GPU that traces rays, what it
-// reflects of the light around it, more of it at a grazing angle (Schlick's Fresnel), and the sun on it, its
-// highlight and what its body scatters. Then the air in front of it, or in front of the opaque surface where no pane
-// is. Each pane's surface is what the resolve left in the frame's glass targets, as its material decided it, and where
-// it is the glass depth. The entry is specialised to the sky. The pass header's x is the frame's buffer, which holds
-// the lights, the probe grid's constants, whose probes are 0 where there are none, and the air.
+// The nearest translucent surface of each pixel shaded over the lit picture: what is behind it, as shading left it and
+// seen through the air between them, through the pane's colour and through any other pane between, which a ray finds
+// on a GPU that traces rays, what it mirrors, more of it at a grazing angle (Schlick's Fresnel), which one ray traces on
+// such a GPU and which is the sky elsewhere, and the sun's highlight on it. Then the air in front of it, or in front of
+// the opaque surface where no pane is. Each pane's surface is what the resolve left in the frame's glass targets, as
+// its material decided it, and where it is the glass depth. The entry is specialised to the sky. The pass header's x
+// is the frame's buffer, which holds the lights, the probe grid's constants, whose probes are 0 where there are none,
+// and the air.
 module "ShadeTranslucent";
 
 import Core.Heap;
@@ -23,14 +24,29 @@ import Scene.Models;
 // How much of the light a pane reflects straight on: an index of refraction of 1.5.
 static const float PaneReflectance = 0.04;
 
-// The light reaching a point from a direction: the probes' where there are any, else the sky's.
-float3 GetSurroundings<S : ISky>(Lights lights, float3 world, float3 direction)
-{
-    ProbeGridConstants grid = GetProbeGrid();
-    if (grid.probes != 0u)
-        return GetProbeIrradiance(grid, world, direction);
+// How far a pane's mirror ray reaches, in metres.
+static const float MirrorRange = 10000.0;
 
-    return GetSkyRadiance<S>(lights, direction);
+// The light a smooth pane mirrors from origin along a direction: the sky's where the ray lands on nothing, else what
+// the surface it lands on sends back, lit by the sun and the probes' light, as the reflections gem shades its hits but
+// without the local lights, which only the probes bring. Each passes any glass between.
+float3 GetMirrored<S : ISky>(Lights lights, float3 origin, float3 direction)
+{
+    RaytracingAccelerationStructure scene = GetTracedAcceleration();
+    RayHit hit = GetClosestHit(scene, origin, direction, MirrorRange, RAY_FLAG_CULL_BACK_FACING_TRIANGLES);
+    if (!hit.isHit)
+        return GetSkyRadiance<S>(lights, direction) * hit.through;
+
+    HitSurface landed = LoadHitSurface(hit, origin, direction);
+    float3 toSun = lights.sunDirection.xyz;
+    float sunCosine = dot(landed.normal, toSun);
+    float3 sun = sunCosine > 0.0
+        ? GetSunIlluminance<S>(lights) * sunCosine * InvPi
+            * GetTransmittance(scene, landed.position + landed.normal * 0.01, toSun, 1e6)
+        : float3(0.0);
+    ProbeGridConstants grid = GetProbeGrid();
+    float3 surroundings = grid.probes != 0u ? GetProbeIrradiance(grid, landed.position, landed.normal) : float3(0.0);
+    return ((sun + surroundings) * landed.diffuse + landed.emissive) * hit.through;
 }
 
 [shader("compute")]
@@ -77,23 +93,32 @@ void ShadeTranslucent<S : ISky>(uint3 thread : SV_DispatchThreadID)
     float3 through = base.rgb * (1.0 - base.a);
     float3 toSun = lights.sunDirection.xyz;
     float3 sunIlluminance = GetSunIlluminance<S>(lights);
+    TextureRef depth = { frame.depth };
+    float3 opaque = ReconstructPixel(frame, thread.xy, max(depth.Load(thread.xy, 0u).x, FarDepth));
     if (traced.acceleration != 0u)
     {
         RaytracingAccelerationStructure scene = GetTracedAcceleration();
-        TextureRef depth = { frame.depth };
-        float3 opaque = ReconstructPixel(frame, thread.xy, max(depth.Load(thread.xy, 0u).x, FarDepth));
         float offset = GetRayOffset(frame, position);
-        float behind = length(opaque - position) * 0.999;
+        // The ray ends a ray offset short of the opaque surface, where the traced surface may stand nearer than the
+        // drawn one.
+        float behind = max(length(opaque - position) - offset - GetRayOffset(frame, opaque), 0.0);
         through *= GetTransmittance(scene, world - view * offset, -view, behind);
         float3 sunSide = dot(normal, toSun) > 0.0 ? normal : -normal;
         sunIlluminance *= GetTransmittance(scene, world + sunSide * offset, toSun, 1e6);
     }
 
-    Brdf body = CreateBrdf(base.rgb * base.a, 0.0, surface.x, 0.5);
-    float3 color = picture.Load(thread.xy).rgb * through * (1.0 - fresnel)
-        + fresnel * GetSurroundings<S>(lights, world, reflect(-view, normal))
-        + body.diffuse * GetSurroundings<S>(lights, world, normal)
+    float3 mirror = reflect(-view, normal);
+    float3 reflected = traced.acceleration != 0u
+        ? GetMirrored<S>(lights, world + normal * GetRayOffset(frame, position), mirror)
+        : GetSkyRadiance<S>(lights, mirror);
+    // What does not get through the pane its body absorbs: clear glass scatters none of it.
+    Brdf body = CreateBrdf(float3(0.0), 0.0, surface.x, 0.5);
+    float3 pane = fresnel * reflected
         + Evaluate(body, normal, view, toSun) * sunIlluminance
         + surface.yzw;
-    picture.Store(thread.xy, float4(ApplyAir(color, position), 1.0));
+    // What is behind reaches the pane through the air between them, and the camera through the air in front of the
+    // pane, whose own light, ApplyAir of nothing at the pane, the pane does not dim.
+    float3 seenBehind = ApplyAir(picture.Load(thread.xy).rgb, opaque) - ApplyAir(float3(0.0), position);
+    float3 color = ApplyAir(pane, position) + seenBehind * through * (1.0 - fresnel);
+    picture.Store(thread.xy, float4(color, 1.0));
 }

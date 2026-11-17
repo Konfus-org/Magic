@@ -12,85 +12,75 @@ namespace Magic.GlobalIllumination;
 /// </summary>
 /// <remarks>
 /// A few rays go from a pixel of each traced pixel's footprint. The lights and the probes light them where they land, and
-/// the probes' light is used where they reach nothing within range. The light is filtered over neighbours and blended
-/// over frames into the light that shading reads.
+/// the probes' light is used where they reach nothing within range. The trace writes NRD's inputs, which the
+/// <see cref="Denoiser"/> turns into the light that shading reads.
 /// </remarks>
 internal sealed class TracedDiffuse(AssetManager assets)
 {
-    private static readonly string[] _blendNames = ["Diffuse light 0", "Diffuse light 1"];
-
-    private readonly ShaderEntry _filterShader = PassShaders.GetEntry(assets, "TraceDiffuse", "FilterDiffuse");
-    private readonly ShaderEntry _blendShader = PassShaders.GetEntry(assets, "TraceDiffuse", "BlendDiffuse");
+    private readonly ShaderEntry _skyShareShader = PassShaders.GetEntry(assets, "TraceDiffuse", "BlendSkyShare");
 
     /// <summary>
     /// The trace's entry, generic over the sky, which the renderer specialises on the frame's sky.
     /// </summary>
     public ShaderEntry TraceShader { get; } = PassShaders.GetEntry(assets, "TraceDiffuse", "TraceDiffuse");
 
-    public ImmutableArray<ShaderEntry> Shaders => [_filterShader, _blendShader];
+    public ImmutableArray<ShaderEntry> Shaders => [_skyShareShader];
 
     /// <summary>
-    /// Asks for the textures at the traced size, the blend's history holding the view as
-    /// <paramref name="hasHistory"/> says.
+    /// Asks for the trace's texture at the traced size, beside NRD's inputs.
     /// </summary>
-    /// <remarks>
-    /// The blended light is the indirect diffuse light that shading reads.
-    /// </remarks>
-    public static Result<TracedDiffuseConstants> Prepare(in GIView view, uint frameIndex, bool hasHistory)
+    public static Result<TracedDiffuseConstants> Prepare(in GIView view, in DenoiserTextures nrd, bool hasHistory)
     {
-        RenderGraph graph = view.Graph;
-        Result<GpuTexture> traced = graph.Texture(view.GetTraced("Traced diffuse", GpuFormat.R16G16B16A16Sfloat));
-        Result<GpuTexture> filtered = graph.Texture(view.GetTraced("Filtered diffuse", GpuFormat.R16G16B16A16Sfloat));
-        Result<TracedBlendConstants> blend = TracedBlend.Prepare(view, _blendNames, frameIndex, hasHistory);
-        if (Result.FindFailure(traced, filtered, blend) is { Ok: false } failed)
-            return Result.Failure(failed.Error);
+        Result<GpuTexture> traced = view.Graph.Texture(view.GetTraced("Traced diffuse", GpuFormat.R16G16B16A16Sfloat));
+        if (!traced.Ok)
+            return Result.Failure(traced.Error);
 
         return Result.Success(
             new TracedDiffuseConstants
             {
                 Traced = traced.Value,
-                Filtered = filtered.Value,
-                Blend = blend.Value,
+                Radiance = nrd.Radiance,
+                Motion = nrd.Motion,
+                NormalRoughness = nrd.NormalRoughness,
+                ViewZ = nrd.ViewZ,
+                HasHistory = hasHistory ? 1u : 0u,
             }
         );
     }
 
-    /// <summary>
-    /// Traces rays from the view's surfaces through the world, then filters them and blends them with the history.
-    /// </summary>
-    /// <remarks>
-    /// The lights, the sky and the probes light the rays. The blend also keeps the view depth for the next frame.
-    /// </remarks>
-    public void Record(in GIView view, in ProbeGridConstants grid, in GIConstants gi)
+    public void RecordTrace(in GIView view, in ProbeGridConstants grid, in GIConstants gi)
     {
-        RenderGraph graph = view.Graph;
         TracedDiffuseConstants diffuse = gi.Diffuse;
         (int width, int height) = view.TracedSize;
-        GpuConstants header = view.Header;
-        graph
-            .Compute("Trace diffuse", TraceShader with { TypeArguments = view.SkyType }, header, RenderStages.Light)
+        view.Graph.Compute(
+                "Trace diffuse",
+                TraceShader with
+                {
+                    TypeArguments = view.SkyType,
+                },
+                view.Header,
+                RenderStages.Light
+            )
             .Reads(view.World.AsSpan())
-            .Reads(view.Gpu.Frame, view.Constants, view.Gpu.Depth, view.Gpu.GBufferNormal)
+            .Reads(view.Gpu.Frame, view.Constants, view.Gpu.Depth, view.Gpu.GBufferNormal, view.Gpu.Velocity)
             .Reads(grid.Probes, grid.Depth)
-            .Writes(diffuse.Traced)
+            .Writes(diffuse.Traced, diffuse.Radiance, diffuse.Motion, diffuse.NormalRoughness, diffuse.ViewZ)
             .DispatchOver(width, height);
-        graph
-            .Compute("Filter diffuse", _filterShader, header, RenderStages.Light)
-            .Reads(view.Gpu.Frame, view.Constants, view.Gpu.Depth, diffuse.Traced)
-            .Writes(diffuse.Filtered)
-            .DispatchOver(width, height);
-        graph
-            .Compute("Blend diffuse", _blendShader, header, RenderStages.Light)
+    }
+
+    public void RecordSkyShare(in GIView view, in GIConstants gi)
+    {
+        (int width, int height) = view.TracedSize;
+        view.Graph.Compute("Blend sky share", _skyShareShader, view.Header, RenderStages.Light)
             .Reads(
                 view.Gpu.Frame,
                 view.Constants,
                 view.Gpu.Depth,
                 view.Gpu.Velocity,
-                diffuse.Filtered,
-                diffuse.Blend.LightHistory,
+                gi.Diffuse.Traced,
                 gi.DepthHistory
             )
-            .Writes(diffuse.Blend.Light, gi.Depth)
+            .Writes(gi.Depth)
             .DispatchOver(width, height);
     }
 }

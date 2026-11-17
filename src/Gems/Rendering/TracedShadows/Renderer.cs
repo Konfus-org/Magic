@@ -34,18 +34,37 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
     private const int DenoiseGroupSize = 8;
 
     /// <summary>
+    /// The twins of <c>Scene/Lights.slang</c>'s tile size and words a tile.
+    /// </summary>
+    private const int LightTileSize = 32;
+
+    private const int LightBuckets = 32;
+
+    /// <summary>
     /// The frames a view's history blends before its shadows are settled: the tile lights' slots take at least 0.12 of
     /// each frame's rays (<c>DenoiseShadows.slang</c>), so after 18 the first frames of a world weigh less than a
     /// tenth; the sun's count is full after 8.
     /// </summary>
     private const int SettleFrames = 18; // PROTO
 
+    /// <summary>
+    /// The side of the blue-noise tile, the twin of <c>Core/Random.slang</c>'s <c>BlueNoiseSize</c>.
+    /// </summary>
+    private const int BlueNoiseSize = 64;
+
+    /// <summary>
+    /// The blue noise that the rays pick their points on the lights with, made once.
+    /// </summary>
+    private static readonly float[] _blueNoise = MakeBlueNoise(); // PROTO
+
     private static readonly string[] _filterPassNames = ["Filter shadows 1", "Filter shadows 2"];
 
     /// <summary>
-    /// The two masks and the two moments, the even frames writing the first of each and the odd the second.
+    /// The two filtered masks, blends and moments, the even frames writing the first of each and the odd the second.
     /// </summary>
-    private static readonly string[] _maskNames = ["Traced shadow mask 1", "Traced shadow mask 2"];
+    private static readonly string[] _maskNames = ["Filtered shadow mask 1", "Filtered shadow mask 2"];
+
+    private static readonly string[] _blendNames = ["Sun shadow blend 1", "Sun shadow blend 2"];
 
     private static readonly string[] _momentNames = ["Sun shadow moments 1", "Sun shadow moments 2"];
 
@@ -66,6 +85,10 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
     private readonly ShaderEntry _filterShader;
 
     private readonly ShaderEntry _lastFilterShader;
+
+    private readonly ShaderEntry _tileFilterShader;
+
+    private readonly ShaderEntry _keepTilesShader;
 
     private readonly ShaderEntry _upsampleShader;
 
@@ -89,6 +112,8 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
         _classifyShader = PassShaders.GetEntry(assets, "DenoiseShadows", "ClassifyShadows");
         _filterShader = PassShaders.GetEntry(assets, "DenoiseShadows", "FilterShadows");
         _lastFilterShader = PassShaders.GetEntry(assets, "DenoiseShadows", "FilterLastAndBlendShadows");
+        _tileFilterShader = PassShaders.GetEntry(assets, "DenoiseShadows", "FilterTileShadows");
+        _keepTilesShader = PassShaders.GetEntry(assets, "DenoiseShadows", "KeepLightTiles");
         _upsampleShader = PassShaders.GetEntry(assets, "DenoiseShadows", "UpsampleShadows");
     }
 
@@ -114,6 +139,8 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
             _classifyShader,
             _filterShader,
             _lastFilterShader,
+            _tileFilterShader,
+            _keepTilesShader,
             _upsampleShader
         );
         if (state == GpuState.Failed)
@@ -125,8 +152,10 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
         if (state != GpuState.Ready)
             return null;
 
-        // The masks and the denoiser's targets at the traced size, this frame's and last frame's mask and moments by
-        // the frame's index, and the mask and tint shading reads at the view's size.
+        // The masks and the denoiser's targets at the traced size, this frame's and last frame's filtered mask and
+        // moments by the frame's index, a copy of the view's tiles of lights for the next frame, and the mask and tint
+        // shading reads at the view's size. Without local lights, the tile lights' slots have nothing to filter, so the
+        // traced mask is the filtered one.
         GpuView view = input.View;
         (int width, int height) = view.Scaled(_settings.ShadowScale);
         long tiles = (long)((width + SunTileWidth - 1) / SunTileWidth) * ((height + SunTileHeight - 1) / SunTileHeight);
@@ -134,28 +163,38 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
         long groups =
             (long)((width + DenoiseGroupSize - 1) / DenoiseGroupSize)
             * ((height + DenoiseGroupSize - 1) / DenoiseGroupSize);
+        long lightTileWords =
+            (long)((view.Width + LightTileSize - 1) / LightTileSize)
+            * ((view.Height + LightTileSize - 1) / LightTileSize)
+            * LightBuckets;
         int written = (int)(frame.Index % 2);
         Result<GpuBuffer> constants = graph.Buffer(
             new("Shadow denoiser constants", Unsafe.SizeOf<ShadowDenoiseConstants>())
         );
         Result<GpuBuffer> tileStates = graph.Buffer(new("Shadow tile states", groups * sizeof(uint)));
+        Result<GpuBuffer> blueNoise = graph.Buffer(new("Blue noise", _blueNoise.Length * sizeof(float)));
         Result<GpuBuffer> sunTiles = graph.Buffer(new("Sun shadow tiles", tiles * sizeof(uint)));
-        Result<GpuBuffer> tracedMask = graph.Buffer(new(_maskNames[written], maskBytes));
+        Result<GpuBuffer> tracedMask = graph.Buffer(new("Traced shadow mask", maskBytes));
+        bool hasTileLights = view.LightCount > 0;
+        Result<GpuBuffer> filteredMask = hasTileLights ? graph.Buffer(new(_maskNames[written], maskBytes)) : tracedMask;
         Result<GpuBuffer> previousMask = graph.Buffer(new(_maskNames[1 - written], maskBytes));
+        Result<GpuBuffer> lastLightTiles = graph.Buffer(new("Last light tiles", lightTileWords * sizeof(uint)));
         // Without glass, which the view has targets for only while a material draws translucent, the sun's light stays
         // white, so no tint is asked for and the graph frees the last one's.
         bool hasGlass = !view.GlassDepth.IsNone;
         Result<GpuTexture> tracedTint = hasGlass
             ? GetTracedTexture("Traced sun tint", GpuFormat.R16G16B16A16Sfloat)
             : Result.Success(GpuTexture.None);
-        Result<GpuTexture> sunBlend = GetTracedTexture("Sun shadow blend", GpuFormat.R16G16Sfloat);
-        Result<GpuTexture> sunHistory = GetTracedTexture("Sun shadow history", GpuFormat.R16G16Sfloat);
+        Result<GpuTexture> sunOccluder = GetTracedTexture("Sun occluder distance", GpuFormat.R32Sfloat);
+        Result<GpuTexture> sunBlend = GetTracedTexture(_blendNames[written], GpuFormat.R16G16Sfloat);
+        Result<GpuTexture> sunHistory = GetTracedTexture(_blendNames[1 - written], GpuFormat.R16G16Sfloat);
+        Result<GpuTexture> sunFiltered = GetTracedTexture("Sun shadow filtered", GpuFormat.R16G16Sfloat);
         Result<GpuTexture> moments = GetTracedTexture(_momentNames[written], GpuFormat.R16G16Sfloat);
         Result<GpuTexture> previousMoments = GetTracedTexture(_momentNames[1 - written], GpuFormat.R16G16Sfloat);
-        // Traced at the picture's size, the traced mask and tint are what shading reads.
+        // Traced at the picture's size, the filtered mask and the traced tint are what shading reads.
         bool isPictureSize = (width, height) == (view.Width, view.Height);
         Result<GpuBuffer> mask = isPictureSize
-            ? tracedMask
+            ? filteredMask
             : graph.Buffer(new("Shadow mask", (long)view.Width * view.Height * BytesPerPixel));
         Result<GpuTexture> sunTint =
             isPictureSize || !hasGlass
@@ -164,12 +203,17 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
         Result asked = Result.FindFailure(
             constants,
             tileStates,
+            blueNoise,
             sunTiles,
             tracedMask,
+            filteredMask,
             previousMask,
+            lastLightTiles,
             tracedTint,
+            sunOccluder,
             sunBlend,
             sunHistory,
+            sunFiltered,
             moments,
             previousMoments,
             mask,
@@ -200,20 +244,29 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
         {
             TileStates = tileStates.Value.Id,
             SunTiles = sunTiles.Value.Id,
+            SunOccluder = sunOccluder.Value.Id,
             SunBlend = sunBlend.Value.Id,
             SunHistory = sunHistory.Value.Id,
+            SunFiltered = sunFiltered.Value.Id,
             Moments = moments.Value.Id,
             PreviousMoments = previousMoments.Value.Id,
             Mask = tracedMask.Value.Id,
+            FilteredMask = filteredMask.Value.Id,
             PreviousMask = previousMask.Value.Id,
+            LastLightTiles = lastLightTiles.Value.Id,
             SunTint = tracedTint.Value.Id,
             HasHistory = hasHistory ? 1u : 0u,
             Width = (uint)width,
             Height = (uint)height,
+            BlueNoise = blueNoise.Value.Id,
         };
         // Not staged: nothing is recorded, and the frame's row stays the view's default, which the shaders read as none.
         GpuShadows row = new() { Mask = mask.Value.Id, SunTint = sunTint.Value.Id };
-        if (!graph.Upload(constants.Value, [denoise]) || !graph.Upload(view.Frame, [row], GpuShadows.Offset))
+        if (
+            !graph.Upload(constants.Value, [denoise])
+            || !graph.Upload(view.Frame, [row], GpuShadows.Offset)
+            || !graph.Upload(blueNoise.Value, _blueNoise)
+        )
             return null;
 
         // Trace each traced pixel's shadows from the view's surfaces.
@@ -230,9 +283,11 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
                 view.GBufferNormal,
                 view.GBufferSurface,
                 view.Meshes,
-                input.Traced.HitMaterials
+                input.Traced.HitMaterials,
+                tileStates.Value,
+                blueNoise.Value
             )
-            .Writes(tracedMask.Value, sunTiles.Value, tracedTint.Value)
+            .Writes(tracedMask.Value, sunTiles.Value, sunOccluder.Value, tracedTint.Value)
             .DispatchOver(width, height);
 
         // Denoise: classify the sun's tiles, filter once or twice, as the settings say, then once more as the mask blends
@@ -246,28 +301,37 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
                 view.Depth,
                 view.GBufferNormal,
                 view.Velocity,
+                tracedMask.Value,
                 sunHistory.Value,
                 previousMoments.Value
             )
             .Writes(tileStates.Value, sunBlend.Value, moments.Value)
             .DispatchOver(width, height);
 
-        // Each pass reads the last one's output; the first pass's is what the next frame blends with.
+        // Each pass reads the last one's output. The second writes over last frame's blend, which is read by then.
         int passes = Math.Clamp(_settings.ShadowFilterPasses, 1, _filterPassNames.Length);
-        GpuTexture filtered = passes == 1 ? sunHistory.Value : sunBlend.Value;
+        GpuTexture filtered = passes == 1 ? sunFiltered.Value : sunHistory.Value;
         for (int pass = 0; pass < passes; pass++)
         {
             (GpuTexture source, GpuTexture output) =
-                pass == 0 ? (sunBlend.Value, sunHistory.Value) : (sunHistory.Value, sunBlend.Value);
+                pass == 0 ? (sunBlend.Value, sunFiltered.Value) : (sunFiltered.Value, sunHistory.Value);
             graph
                 .Compute(_filterPassNames[pass], _filterShader, header with { W = (uint)pass }, RenderStages.Light)
-                .Reads(view.Frame, constants.Value, tileStates.Value, view.Depth, view.GBufferNormal, source)
+                .Reads(
+                    view.Frame,
+                    constants.Value,
+                    tileStates.Value,
+                    view.Depth,
+                    view.GBufferNormal,
+                    sunOccluder.Value,
+                    source
+                )
                 .Writes(output)
                 .DispatchOver(width, height);
         }
 
         // The sun's slot filtered a last time from the last pass's into the mask the rays wrote, and the tile lights'
-        // slots blended with last frame's.
+        // slots blended with last frame's slots of the same lights.
         graph
             .Compute(
                 "Filter last and blend shadows",
@@ -285,12 +349,33 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
                 view.Depth,
                 view.GBufferNormal,
                 view.Velocity,
+                view.LightTiles,
+                sunOccluder.Value,
                 filtered,
                 previousMask.Value,
-                previousMoments.Value
+                previousMoments.Value,
+                lastLightTiles.Value
             )
             .Writes(tracedMask.Value)
             .DispatchOver(width, height);
+
+        // The tile lights' slots filtered over their tiles into the mask the next frame blends with, and the view's
+        // tiles of lights kept for it. A frame that follows one without lights finds none in them, so it never reads the
+        // filtered mask that frame did not write.
+        if (hasTileLights)
+        {
+            graph
+                .Compute("Filter tile shadows", _tileFilterShader, header, RenderStages.Light)
+                .Reads(view.Frame, constants.Value, view.LightTiles, view.Depth, view.GBufferNormal, tracedMask.Value)
+                .Writes(filteredMask.Value)
+                .DispatchOver(width, height);
+        }
+
+        graph
+            .Compute("Keep light tiles", _keepTilesShader, header, RenderStages.Light)
+            .Reads(view.Frame, constants.Value, view.LightTiles)
+            .Writes(lastLightTiles.Value)
+            .DispatchOver((int)lightTileWords, 1);
 
         // The mask and the sun's tint at the picture's size, each pixel read from the traced pixels on its surface.
         if (!isPictureSize)
@@ -303,7 +388,7 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
                     view.Depth,
                     view.GBufferNormal,
                     view.GBufferSurface,
-                    tracedMask.Value,
+                    filteredMask.Value,
                     tracedTint.Value
                 )
                 .Writes(mask.Value, sunTint.Value)
@@ -325,7 +410,15 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
         if (
             !_settings.IsTracedShadowsOn
             || !graph.Features.HasRayQuery
-            || !graph.IsAnyLoading(_traceShader, _classifyShader, _filterShader, _lastFilterShader, _upsampleShader)
+            || !graph.IsAnyLoading(
+                _traceShader,
+                _classifyShader,
+                _filterShader,
+                _lastFilterShader,
+                _tileFilterShader,
+                _keepTilesShader,
+                _upsampleShader
+            )
         )
             _built.TrySetResult();
 
@@ -348,6 +441,106 @@ public sealed class Renderer : IRender<TracedInput, ShadowMask>, IRender, IHookI
     /// none.
     /// </summary>
     public Task OnDomainArrivedAsync(CancellationToken cancel) => _settling.WaitAsync(cancel);
+
+    /// <summary>
+    /// A tile of blue noise, by void and cluster (Ulichney, 1993): each pixel's rank among the tile's, from 0 to 1. A
+    /// tenth of the pixels is first spread evenly, by moving the most crowded to the emptiest place until none moves;
+    /// those are ranked by taking the most crowded away, the rest by filling the emptiest place in turn.
+    /// </summary>
+    private static float[] MakeBlueNoise()
+    {
+        const int Pixels = BlueNoiseSize * BlueNoiseSize;
+        const float Sigma = 1.5f;
+
+        // How much a set pixel crowds each other, by their distance across the wrapping tile.
+        float[] kernel = new float[Pixels];
+        for (int i = 0; i < Pixels; i++)
+        {
+            int x = Math.Min(i % BlueNoiseSize, BlueNoiseSize - (i % BlueNoiseSize));
+            int y = Math.Min(i / BlueNoiseSize, BlueNoiseSize - (i / BlueNoiseSize));
+            kernel[i] = MathF.Exp(-((x * x) + (y * y)) / (2 * Sigma * Sigma));
+        }
+
+        bool[] isSet = new bool[Pixels];
+        float[] crowding = new float[Pixels];
+        uint seed = 7;
+        int count = 0;
+        while (count < Pixels / 10)
+        {
+            seed = unchecked((seed * 1664525) + 1013904223);
+            int at = (int)((seed >> 8) % Pixels);
+            if (isSet[at])
+                continue;
+
+            Set(at, true);
+            count++;
+        }
+
+        // Until the emptiest place is the one the most crowded pixel just left.
+        int left;
+        int filled;
+        do
+        {
+            left = Find(true);
+            Set(left, false);
+            filled = Find(false);
+            Set(filled, true);
+        } while (filled != left);
+
+        float[] ranks = new float[Pixels];
+        bool[] start = (bool[])isSet.Clone();
+        float[] startCrowding = (float[])crowding.Clone();
+        for (int rank = count - 1; rank >= 0; rank--)
+        {
+            int crowded = Find(true);
+            Set(crowded, false);
+            ranks[crowded] = rank;
+        }
+
+        isSet = start;
+        crowding = startCrowding;
+        for (int rank = count; rank < Pixels; rank++)
+        {
+            int empty = Find(false);
+            Set(empty, true);
+            ranks[empty] = rank;
+        }
+
+        for (int i = 0; i < Pixels; i++)
+        {
+            ranks[i] = (ranks[i] + 0.5f) / Pixels;
+        }
+
+        return ranks;
+
+        // The most crowded set pixel, or the least crowded empty one.
+        int Find(bool set)
+        {
+            int found = -1;
+            for (int i = 0; i < Pixels; i++)
+            {
+                bool isBetter = found < 0 || (set ? crowding[i] > crowding[found] : crowding[i] < crowding[found]);
+                if (isSet[i] == set && isBetter)
+                    found = i;
+            }
+
+            return found;
+        }
+
+        void Set(int at, bool value)
+        {
+            isSet[at] = value;
+            float sign = value ? 1 : -1;
+            int ax = at % BlueNoiseSize;
+            int ay = at / BlueNoiseSize;
+            for (int i = 0; i < Pixels; i++)
+            {
+                int dx = ((i % BlueNoiseSize) - ax + BlueNoiseSize) % BlueNoiseSize;
+                int dy = ((i / BlueNoiseSize) - ay + BlueNoiseSize) % BlueNoiseSize;
+                crowding[i] += sign * kernel[(dy * BlueNoiseSize) + dx];
+            }
+        }
+    }
 }
 
 /// <summary>
@@ -360,20 +553,29 @@ internal record struct ShadowDenoiseConstants
 
     public uint SunTiles;
 
+    public uint SunOccluder;
+
     public uint SunBlend;
 
     public uint SunHistory;
+
+    public uint SunFiltered;
 
     public uint Moments;
 
     public uint PreviousMoments;
 
     /// <summary>
-    /// The traced mask, the rays' and then the denoised, last frame's, and the sun's tint as traced.
+    /// The traced mask, the rays' and then the blended, the filtered mask, this frame's and last frame's, last frame's
+    /// tiles of lights, and the sun's tint as traced.
     /// </summary>
     public uint Mask;
 
+    public uint FilteredMask;
+
     public uint PreviousMask;
+
+    public uint LastLightTiles;
 
     public uint SunTint;
 
@@ -388,4 +590,6 @@ internal record struct ShadowDenoiseConstants
     public uint Width;
 
     public uint Height;
+
+    public uint BlueNoise;
 }

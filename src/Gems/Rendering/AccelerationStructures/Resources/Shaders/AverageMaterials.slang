@@ -41,7 +41,9 @@ void AverageMaterials<M : IMaterial>(uint3 thread : SV_DispatchThreadID)
     hit.diffuse = surface.baseColor * (1.0 - surface.metalness);
     hit.transmission = PackUnorm4x8(float4(surface.baseColor * (1.0 - surface.alpha), 0.0));
     hit.emissive = surface.emissive;
-    hit.padding1 = 0u;
+    // PROTO: the specular colour at normal incidence, F0, in 8 bits each, in the row's free word, which reflections
+    // read for a metal hit. The row names it padding1 until the renderer's Trace/HitSurface names it.
+    hit.padding1 = PackUnorm4x8(float4(lerp(float3(0.04), surface.baseColor, surface.metalness), 0.0));
     ArrayRef<GpuHitMaterial> table = { header.y };
     table[row] = hit;
 }

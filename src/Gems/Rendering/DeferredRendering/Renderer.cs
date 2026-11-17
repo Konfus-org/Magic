@@ -11,6 +11,7 @@ using Magic.DeferredRendering.World;
 using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Events;
+using Magic.Files;
 using Magic.Graphics;
 using Magic.Projects;
 using Magic.Threading;
@@ -37,8 +38,8 @@ public readonly record struct ViewInput(
 /// </summary>
 /// <remarks>
 /// Where a gem makes them, it also takes the world as rays see it, the sky's tables, each pixel's shadows, the light
-/// that reaches the surfaces indirectly, the air between the camera and them, the picture's effects and the output's
-/// upscaling.
+/// that reaches the surfaces indirectly, the reflections, the air between the camera and them, the picture's effects
+/// and the output's upscaling.
 /// </remarks>
 public readonly record struct ShadingInput(
     GpuWorld World,
@@ -48,6 +49,7 @@ public readonly record struct ShadingInput(
     SkyTables? Sky,
     ShadowMask? Shadows,
     IndirectLight? Light,
+    Reflections? Reflections,
     Air? Air,
     PictureEffects? Effects,
     Upscaling? Upscaling
@@ -104,6 +106,12 @@ public sealed class Renderer
     /// Set in the output pass's view when no effects finished the picture, the twin of <c>ShowSurface.slang</c>'s.
     /// </summary>
     private const uint NoEffects = 0x80000000u;
+
+    /// <summary>
+    /// The height, as the sine of the angle, down to which a sun under the horizon still lights the world's sky: 8
+    /// degrees under it, where its twilight is about as bright as a full moon.
+    /// </summary>
+    private const float TwilightEnd = -0.139f;
 
     /// <summary>
     /// The light of a world with no directional light: white, of 1 lux, from above.
@@ -175,6 +183,8 @@ public sealed class Renderer
 
     private readonly EventCoordinator _events;
 
+    private readonly IFileSystem _files;
+
     /// <summary>
     /// The screenshots asked for on the game thread. The world's step looks at the first, and the shading's step of
     /// the last view takes it, on the render thread.
@@ -229,7 +239,8 @@ public sealed class Renderer
         IEcs ecs,
         Worlds.World world,
         Threads threads,
-        EventCoordinator events
+        EventCoordinator events,
+        IFileSystem files
     )
     {
         _settings = settings;
@@ -255,6 +266,7 @@ public sealed class Renderer
 
         _gpu = gpu;
         _events = events;
+        _files = files;
         _shadeShader = PassShaders.GetEntry(assets, "ShadeSurfaces", "ShadeSurfaces");
         _translucentShader = PassShaders.GetEntry(assets, "ShadeTranslucent", "ShadeTranslucent");
         _lightViewShader = PassShaders.GetEntry(assets, "ShowSurface", "ShowLight");
@@ -409,7 +421,7 @@ public sealed class Renderer
         // channel, which each view of the window is copied into. The request stays until the shading's step of the
         // last view reads the picture back, so a frame that cannot draw loses none.
         Screenshot? screenshot = null;
-        if (_screenshots.Reader.TryPeek(out ScreenshotRequested saved))
+        if (_screenshots.Reader.TryPeek(out ScreenshotRequested saved) && !IsHdr(saved.Path))
         {
             Result<GpuBuffer> readback = graph.Buffer(
                 new("Output readback", (long)picture.Width * picture.Height * 4, BufferUsages.Readback)
@@ -559,6 +571,7 @@ public sealed class Renderer
                     | TextureUsages.ColorTarget
                     | TextureUsages.Sampled
                     | TextureUsages.CopyDestination
+                    | TextureUsages.CopySource
             )
         );
         Result<GpuTexture> output = graph.Texture(
@@ -634,6 +647,7 @@ public sealed class Renderer
             HeapTextures = world.HeapTextures,
             LightTable = world.Lights.Table,
             LightTiles = tiles.Value,
+            LightCount = world.Lights.Count,
             PreparedDomains = world.PreparedDomains,
         };
 
@@ -647,6 +661,7 @@ public sealed class Renderer
             camera,
             frame,
             isJittered ? FrameView.GetJitter(frame.Index) : Vector2.Zero,
+            input.Upscaling is null ? 0 : MathF.Log2((float)view.Width / view.ShownWidth),
             GetSun(inputs.DirectionalLights.First, inputs.DirectionalLights.Second) is { } sun
                 ? (sun.Direction, sun.Illuminance)
                 : _whiteSun,
@@ -661,6 +676,8 @@ public sealed class Renderer
 
             return null;
         }
+
+        view = view with { Constants = frameView.Constants };
 
         // Each tile's lights.
         _lightTiles.Record(graph, view);
@@ -697,7 +714,14 @@ public sealed class Renderer
         TextureFilter upscaleFilter = _settings.UpscaleFilter;
 
         ReadOnlySpan<GpuResource> indirect = input.Light is { } light
-            ? [light.Diffuse, light.Reflections, light.Probes, light.ProbeDepth]
+            ?
+            [
+                light.Diffuse,
+                light.SkyShare,
+                light.Probes,
+                light.ProbeDepth,
+                input.Reflections?.Light ?? GpuTexture.None,
+            ]
             : [];
         ReadOnlySpan<GpuResource> tables = input.Sky is { HasTables: true } made ? [made.Transmittance, made.View] : [];
 
@@ -765,6 +789,28 @@ public sealed class Renderer
                 .Reads(indirect)
                 .Writes(gpu.Hdr)
                 .DispatchOver(gpu.Width, gpu.Height);
+        }
+
+        // An HDR screenshot: the lit light of the last view of the window before the effects expose it, read back as
+        // it is, at the view's size.
+        if (
+            _screenshots.Reader.TryPeek(out ScreenshotRequested asked)
+            && IsHdr(asked.Path)
+            && gpu.Target == graph.WindowTarget
+            && graph.View == input.Views.Count - 1
+        )
+        {
+            _screenshots.Reader.TryRead(out _);
+            Result<GpuBuffer> readback = graph.Buffer(
+                new("HDR readback", (long)gpu.Width * gpu.Height * 8, BufferUsages.Readback)
+            );
+            if (readback.Ok)
+            {
+                graph.ReadBack(gpu.Hdr, readback.Value, RenderStages.Shade);
+                SaveHdrAsync(readback.Value, asked.Path, gpu.Width, gpu.Height).FireAndForget();
+            }
+            else
+                Log.Error($"The HDR screenshot was not taken: {readback.Error}");
         }
 
         // Behind the full cover, the effects start their history anew each frame, so the exposure takes each frame's
@@ -1033,7 +1079,7 @@ public sealed class Renderer
     /// <paramref name="transforms"/> and <paramref name="lights"/>.
     /// </summary>
     /// <remarks>
-    /// The sun while it is up, else the moon while it is up, else the first there is. With no light, null: the frame
+    /// The sun while it is up or its twilight lights the sky, else the moon while it is up, else the first there is. With no light, null: the frame
     /// is lit by <see cref="_whiteSun"/>.
     /// </remarks>
     /// <returns>
@@ -1052,7 +1098,7 @@ public sealed class Renderer
             Vector3 towards = -Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, transforms[i].Rotation));
             bool isUp = towards.Y > 0;
             int rank = 0;
-            if (isUp && light.Mode == DirectionalLightMode.Sun)
+            if (towards.Y > TwilightEnd && light.Mode == DirectionalLightMode.Sun)
                 rank = 2;
             else if (isUp && light.Mode == DirectionalLightMode.Moon)
                 rank = 1;
@@ -1067,6 +1113,8 @@ public sealed class Renderer
 
         return sun;
     }
+
+    private static bool IsHdr(string path) => path.EndsWith(".pfm", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Fills the window with black before the views draw into it, with no shader.
@@ -1177,6 +1225,50 @@ public sealed class Renderer
             Terminal.Write(path);
         else
             Log.Error($"The screenshot could not be written: {written.Error}");
+    }
+
+    /// <summary>
+    /// Writes the half floats read back to <paramref name="path"/> as a PFM of linear colour once the GPU is done with
+    /// them: its header, then each row's red, green and blue as 32-bit floats, from the bottom row up.
+    /// </summary>
+    private async Task SaveHdrAsync(GpuBuffer readback, string path, int width, int height)
+    {
+        Result<ReadOnlyMemory<byte>> pixels = await _gpu.ReadBackAsync(
+                readback,
+                0,
+                width * height * 8,
+                CancellationToken.None
+            )
+            .ConfigureAwait(false);
+        if (!pixels.Ok)
+        {
+            Log.Error($"The HDR screenshot could not be read back: {pixels.Error}");
+
+            return;
+        }
+
+        byte[] header = System.Text.Encoding.ASCII.GetBytes($"PF\n{width} {height}\n-1.0\n");
+        byte[] file = new byte[header.Length + (width * height * 12)];
+        header.CopyTo(file, 0);
+        ReadOnlySpan<Half> halves = MemoryMarshal.Cast<byte, Half>(pixels.Value.Span);
+        Span<float> floats = MemoryMarshal.Cast<byte, float>(file.AsSpan(header.Length));
+        for (int y = 0; y < height; y++)
+        {
+            int row = (height - 1 - y) * width;
+            for (int x = 0; x < width; x++)
+            {
+                for (int c = 0; c < 3; c++)
+                {
+                    floats[((row + x) * 3) + c] = (float)halves[(((y * width) + x) * 4) + c];
+                }
+            }
+        }
+
+        Result written = await _files.WriteAsync(path, file, CancellationToken.None).ConfigureAwait(false);
+        if (written.Ok)
+            Terminal.Write(path);
+        else
+            Log.Error($"The HDR screenshot could not be written: {written.Error}");
     }
 
     /// <summary>

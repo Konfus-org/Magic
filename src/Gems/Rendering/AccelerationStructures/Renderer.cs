@@ -5,6 +5,7 @@ using Magic.Debugging;
 using Magic.DeferredRendering;
 using Magic.DeferredRendering.View;
 using Magic.DeferredRendering.World;
+using Magic.Ecs.Components;
 using Magic.Graphics;
 using Magic.Projects;
 using Magic.Utils;
@@ -24,6 +25,10 @@ public readonly record struct AccelerationStructuresInput(GpuWorld World, GpuIns
 /// <para>
 /// Each model's triangles' structure has a geometry for each of its meshes in the mesh table. It is built once as the
 /// model arrives and let go as it leaves.
+/// </para>
+/// <para>
+/// An instance whose renderer leaves slots empty traces through a structure of its model with no triangles in the
+/// meshes of those slots, kept while an instance draws with it.
 /// </para>
 /// <para>
 /// The top-level acceleration structure, what a ray query traces through, has an instance row for every instance whose
@@ -64,6 +69,11 @@ public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
     /// </remarks>
     private readonly List<(ModelPlace Place, BottomLevelDescription? Description, GpuAcceleration Structure)> _models =
     [];
+
+    /// <summary>
+    /// Each structure of a model with empty slots that an instance draws with.
+    /// </summary>
+    private List<EmptySlotsStructure> _withEmptySlots = [];
 
     /// <summary>
     /// The instance table's version the last build was of, how many instances rays see in it, and the box over them.
@@ -161,6 +171,71 @@ public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
             _models[index] = row;
         }
 
+        // A structure for each model and empty slots that an instance draws with, made again when the instances or
+        // the models changed; one of an instance whose every mesh is empty is not made, so rays pass it all.
+        if (isChanged)
+        {
+            List<EmptySlotsStructure> kept = [];
+            foreach (GpuInstance instance in drawn.Rows.Span)
+            {
+                (ModelPlace place, BottomLevelDescription? description, _) = _models[(int)instance.Model];
+                uint empty = GetEmptySlots(instance, place);
+                if (
+                    description is not { } whole
+                    || empty == 0
+                    || place.Meshes.All(mesh => IsEmpty(empty, mesh.Mesh))
+                    || kept.Exists(held => held.Model == instance.Model && held.EmptySlots == empty)
+                )
+                    continue;
+
+                int index = _withEmptySlots.FindIndex(held =>
+                    held.Model == instance.Model && held.EmptySlots == empty && held.Place == place
+                );
+                kept.Add(
+                    index >= 0
+                        ? _withEmptySlots[index]
+                        : new EmptySlotsStructure(
+                            instance.Model,
+                            empty,
+                            place,
+                            whole with
+                            {
+                                Geometries =
+                                [
+                                    .. whole.Geometries.Select(
+                                        (geometry, mesh) =>
+                                            IsEmpty(empty, place.Meshes[mesh].Mesh)
+                                                ? geometry with
+                                                {
+                                                    TriangleCount = 0,
+                                                }
+                                                : geometry
+                                    ),
+                                ],
+                                Name = $"{whole.Name} without slots {empty:b}",
+                            },
+                            GpuAcceleration.None
+                        )
+                );
+            }
+
+            _withEmptySlots = kept;
+        }
+
+        for (int index = 0; index < _withEmptySlots.Count; index++)
+        {
+            EmptySlotsStructure held = _withEmptySlots[index];
+            Result<GpuAcceleration> structure = graph.Acceleration(held.Description);
+            if (!structure.Ok || structure.Value == held.Structure)
+                continue;
+
+            if (held.Structure.IsNone)
+                graph.BuildAcceleration(structure.Value);
+
+            _withEmptySlots[index] = held with { Structure = structure.Value };
+            isChanged = true;
+        }
+
         // The structure over the world's instances and its instances asked for every frame, so the structure built last
         // stays, and the hit materials table with a row for each of the material table's.
         Result<GpuBuffer> hitMaterials = graph.Buffer(
@@ -196,7 +271,7 @@ public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
             (Vector3 Min, Vector3 Max) box = (new Vector3(float.MaxValue), new Vector3(float.MinValue));
             foreach (GpuInstance instance in rows)
             {
-                (ModelPlace place, _, GpuAcceleration structure) = _models[(int)instance.Model];
+                (ModelPlace place, GpuAcceleration structure) = GetStructure(instance);
                 if (structure.IsNone)
                     continue;
 
@@ -219,7 +294,7 @@ public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
                 int next = 0;
                 for (int i = 0; i < rows.Length; i++)
                 {
-                    (ModelPlace place, _, GpuAcceleration structure) = _models[(int)rows[i].Model];
+                    (ModelPlace place, GpuAcceleration structure) = GetStructure(rows[i]);
                     if (structure.IsNone)
                         continue;
 
@@ -269,6 +344,28 @@ public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
     }
 
     /// <summary>
+    /// Gets the slots, a bit each, that the instance leaves empty and a mesh of its model is in.
+    /// </summary>
+    private static uint GetEmptySlots(GpuInstance instance, ModelPlace place)
+    {
+        uint empty = 0;
+        foreach ((GpuMesh mesh, _) in place.Meshes)
+        {
+            if (instance.Materials[GetSlot(mesh)] == GpuMaterialRows.EmptySlot)
+                empty |= 1u << GetSlot(mesh);
+        }
+
+        return empty;
+    }
+
+    /// <summary>
+    /// Gets the mesh's slot as the instance table reads it: the last for one past it.
+    /// </summary>
+    private static int GetSlot(GpuMesh mesh) => (int)Math.Min(mesh.MaterialSlot, MaterialSlots.Capacity - 1);
+
+    private static bool IsEmpty(uint emptySlots, GpuMesh mesh) => (emptySlots & (1u << GetSlot(mesh))) != 0;
+
+    /// <summary>
     /// Gets the box in the world around a box in a model's frame placed by <paramref name="world"/>.
     /// </summary>
     /// <remarks>
@@ -287,4 +384,35 @@ public sealed class Renderer : IRender<AccelerationStructuresInput, TracedWorld>
 
         return (center - reach, center + reach);
     }
+
+    /// <summary>
+    /// Gets the instance's model's place, and the structure rays trace it through: its model's, or the one of its model
+    /// with its empty slots; none while that is not made, or when every mesh is empty.
+    /// </summary>
+    private (ModelPlace Place, GpuAcceleration Structure) GetStructure(GpuInstance instance)
+    {
+        (ModelPlace place, _, GpuAcceleration structure) = _models[(int)instance.Model];
+        uint empty = GetEmptySlots(instance, place);
+        if (empty == 0)
+            return (place, structure);
+
+        int index = _withEmptySlots.FindIndex(held => held.Model == instance.Model && held.EmptySlots == empty);
+
+        return (place, index >= 0 ? _withEmptySlots[index].Structure : GpuAcceleration.None);
+    }
+
+    /// <summary>
+    /// A structure of a model with empty slots, a bit each: its model's geometries, those in an empty slot with no
+    /// triangles, so rays pass them and each geometry keeps its index.
+    /// </summary>
+    /// <remarks>
+    /// It holds the place it is made for, what it is made to, and the structure, none until it is made.
+    /// </remarks>
+    private readonly record struct EmptySlotsStructure(
+        uint Model,
+        uint EmptySlots,
+        ModelPlace Place,
+        BottomLevelDescription Description,
+        GpuAcceleration Structure
+    );
 }

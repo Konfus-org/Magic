@@ -9,8 +9,9 @@ import Core.Frame;
 import Scene.Models;
 import Sky.ISky;
 
-// The sun's angular radius as it looks from the Earth: how wide a disc its shadow rays aim through.
-public static const float SunAngularRadius = 0.00465;
+// The angular radius of the disc the sun's shadow rays aim through, 1 degree: about four times the sun's as it looks
+// from the Earth, for softer shadows.
+public static const float SunAngularRadius = 0.01745;
 
 // Where the lights are in the frame's buffer, right after the world as rays see it, and their bytes: C#'s GpuLights.
 public static const uint LightsOffset = TracedWorldOffset + TracedWorldBytes;

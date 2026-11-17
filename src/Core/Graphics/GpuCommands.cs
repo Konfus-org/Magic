@@ -54,7 +54,7 @@ public readonly record struct GpuPass
     /// </summary>
     public GpuPassKind Kind =>
         DrawShaders is not null ? GpuPassKind.Draw
-        : Shader is not null ? GpuPassKind.Compute
+        : Shader is not null || BoundShader is not null ? GpuPassKind.Compute
         : GpuPassKind.Transfer;
 
     public RenderStage Stage { get; init; }
@@ -72,6 +72,11 @@ public readonly record struct GpuPass
     /// The compute shader bound before the commands. The frame leaves the pass out while the shader is not built.
     /// </summary>
     public ShaderEntry? Shader { get; init; }
+
+    /// <summary>
+    /// The built compute shader bound, with its resources, before the commands, in place of <see cref="Shader"/>.
+    /// </summary>
+    public BoundShader? BoundShader { get; init; }
 
     /// <summary>
     /// The shaders of a draw pass, bound before the commands.

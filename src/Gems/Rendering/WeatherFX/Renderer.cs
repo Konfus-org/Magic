@@ -217,7 +217,7 @@ public sealed class Renderer : IRender<WeatherFXInput, Air>, IRender, IHookIntoD
         graph
             .Compute("Scatter air", _scatterShader, scatterHeader, RenderStages.Light)
             .Reads(traced)
-            .Reads(gpu.Frame, gpu.LightTable, history.Value)
+            .Reads(gpu.Frame, gpu.LightTable, gpu.Depth, history.Value)
             .Writes(scattering.Value)
             .DispatchOver(size.Width, size.Height, Slices / GroupSlices);
         graph

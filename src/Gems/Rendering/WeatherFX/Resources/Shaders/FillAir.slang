@@ -31,6 +31,9 @@ static const uint GroupSlices = 4u;
 // How many of the group's local lights a cell weighs to pick the one it traces.
 static const uint Candidates = 8u;
 
+// The metres in front of the surface a column sees that its cells stay, so that their rays start on the camera's side.
+static const float SurfaceGap = 0.1;
+
 // The local lights whose reach touches the group's cells, by their index in the light table.
 groupshared uint groupLightCount;
 groupshared uint groupLights[MaxLights];
@@ -86,10 +89,17 @@ void ScatterAir(uint3 thread : SV_DispatchThreadID, uint3 group : SV_GroupID, ui
 
     float2 uv = GetTexelCenterUv(thread.xy, size.xy);
     float3 direction = NormalizeSafe(ReconstructRelative(frame, uv, 1.0), float3(0.0, 0.0, -1.0));
+
+    // The cells stay in front of the surface the column sees: past it is air the camera does not see, such as the
+    // sunlit air behind a wall, which the slice that holds the wall would otherwise blend into what is drawn on it.
+    TextureRef depthTexture = { frame.depth };
+    uint2 pixel = min(uint2(uv * float2(frame.width, frame.height)), uint2(frame.width, frame.height) - 1u);
+    float surfaceDepth = depthTexture.Load(pixel, 0u).x;
+    float seen = surfaceDepth > 0.0 ? length(ReconstructRelative(frame, uv, surfaceDepth)) - SurfaceGap : 1e30;
     for (uint slice = firstSlice; slice < endSlice; slice++)
     {
         float3 random = GetRandom(thread.xy, frame.frameIndex, slice);
-        float distance = ToAirDistance((float(slice) + random.x) / float(size.z), air.distance);
+        float distance = max(min(ToAirDistance((float(slice) + random.x) / float(size.z), air.distance), seen), 0.0);
         float3 world = frame.cameraPosition.xyz + direction * distance;
 
         // The sun's light reaches the cell through what stands in its way, where rays see the world, and the sky's

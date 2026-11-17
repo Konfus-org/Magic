@@ -78,6 +78,14 @@ single-quoted line of PowerShell:
 tools/Scripts/Screenshot.ps1 -AllowErrors -Window -Commands 'set player.scriptcontainer ''[{"id":100411,"degreesPerSec":0},{"id":100412}]''', 'set player.transform.rotation 0.2164 0 0 0.9763'
 ```
 
+## CompareReference.ps1
+
+Measures Magic's light against a Blender Cycles render of the same view, at each of the view's hours. It runs Magic
+through `Screenshot.ps1`, Cycles through `tools/Reference/BuildScene.py` and the comparison through
+`tools/Reference/Compare.py`, then prints the paths of the pictures and the table of the view's points
+([Reference views](DEBUGGING.md#reference-views)). It needs Blender; give its path with `-Blender` when it is not the
+default one.
+
 ## Profiling.ps1
 
 Takes, waits for or releases a profiling turn. In a profiling turn, only one worktree runs Magic and the tests, so

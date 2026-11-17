@@ -76,3 +76,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+The gem loads NVIDIA's Real-time Denoisers (NRD, https://github.com/NVIDIA-RTX/NRD), built from its source, under the
+NVIDIA RTX SDKs License (LICENSE.txt in NRD's repository). This software contains source code provided by NVIDIA
+Corporation.

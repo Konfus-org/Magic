@@ -2,7 +2,8 @@
 
 The rendering gems draw the world into the window. The renderer, `DeferredRendering`, keeps the world on the GPU and
 lights it. The other gems add parts of the picture: the geometry, the world as rays see it, shadows, indirect light,
-the sky, the air, the upscaling and the post effects. A project lists the gems that it wants in its `.magic` file.
+reflections, the sky, the air, the upscaling and the post effects. A project lists the gems that it wants in its
+`.magic` file.
 
 Each gem has a `Renderer` part with one or more render steps. Core runs a step after the steps that make its inputs.
 A step that takes `RenderViews`, or the output of such a step, runs one time for each view of the frame. This diagram
@@ -21,12 +22,16 @@ flowchart LR
     View -- GpuView --> Sky[ProceduralSky]
     Sky -- SkyTables --> GI
     Sky -- SkyTables --> Shading
+    Sky -- SkyTables --> Refl
     Pools -- ClusterPools --> Clusters
     Accel -- TracedWorld --> Shadows[TracedShadows]
     Accel -- TracedWorld --> GI[GlobalIllumination]
     Accel -- TracedWorld --> Vol[WeatherFX]
     Shadows -- ShadowMask --> Shading[DeferredRendering shading]
     GI -- IndirectLight --> Shading
+    Accel -- TracedWorld --> Refl[TracedReflections]
+    GI -- IndirectLight --> Refl
+    Refl -- Reflections --> Shading
     Vol -- Air --> Shading
     Post -- PictureEffects --> Shading
     Clusters -. GBuffer .-> Shading
@@ -62,6 +67,9 @@ ECS, the model importer and the texture importer, with a gem that draws its geom
 
 - A model shows when it is on the GPU. A model that nothing drew for `Rendering.ModelKeepSec` leaves the GPU. It
   loads again when a frame draws it.
+- A renderer with no materials draws each mesh of its model with the default material. When a renderer has a
+  material in one or more slots, a mesh whose slot is empty does not draw, casts no shadow, and rays go through it.
+  To open a door or a window, leave the slot of that part empty.
 - When a domain replaces a world that shows, the cover fades in over that world. Behind the full cover, the loading
   screen comes in its place. Then the cover fades out into the loading screen. Without a world that shows, the
   loading screen shows at once.
@@ -70,8 +78,8 @@ ECS, the model importer and the texture importer, with a gem that draws its geom
 - Then the cover fades in over the loading screen. The cover is one colour over the window. The debug UI and the
   failure banner show over it. An empty world gets the full cover at once.
 - Behind the full cover, the new world comes in the place of the loading screen, and its time stands still. Each gem
-  that blends its picture over frames starts its history again and settles: the shadows, the indirect light, the air
-  and the upscaling.
+  that blends its picture over frames starts its history again and settles: the shadows, the indirect light, the
+  reflections, the air and the upscaling.
 - The cover fades out when each gem settled. A gem that does not settle in time does not stop the load. The world
   then shows as it is, and the log has a warning.
 - The cover over the new world is an off-white when the light that lights it is a sun or a light alone, above the
@@ -112,8 +120,11 @@ ECS, the model importer and the texture importer, with a gem that draws its geom
 - Lights use physical units: lux for the sun, candela for point, spot and rect lights. A frame draws the first 1024
   lights.
 - Where a gem made a shadow mask, the mask shadows the surfaces. Else nothing is shadowed.
-- Where a gem made indirect light, the surfaces take it. Else the sky lights them. A surface with a roughness of 0.6
-  or less shows the reflections.
+- Where a gem made indirect light, the surfaces take it. Else the sky lights them. A surface with a roughness under 0.3
+  shows the reflections.
+- The indirect light gem traces the diffuse light and denoises it with NVIDIA's NRD (RELAX_DIFFUSE).
+- A shadowed surface keeps a small part of the light that its lights give it unshadowed, so a shadow is not black.
+  With indirect light, the sun gives this part only where the surface sees enough of the sky.
 - Where a gem filled the air, the picture shows the air in front of each surface.
 
 ### Glass
@@ -139,6 +150,9 @@ failures flash on the mesh of their entity ([Debugging](DEBUGGING.md)).
 `Debug.RenderView` shows one part of the GBuffer, or the indirect light, alone. `Final` shows the finished frame. The
 names are in `DebugView`. With a gem that gives the debug UI, F2 opens the Rendering window. F5 and F6 step through
 the views.
+
+To measure the light against a path tracer, use the reference views ([Debugging](DEBUGGING.md#reference-views)).
+`screenshot --hdr` saves the frame's lit light before the exposure, in nits, as a PFM.
 
 ### Change the renderer
 
@@ -204,19 +218,36 @@ AccelerationStructures gem. The settings are in `TracedShadowsSettings`. `Render
 
 ## GlobalIllumination
 
-Lights the surfaces with the light that bounces: a probe grid, the diffuse light near each surface and the
-reflections of smooth surfaces. List it in the `.magic` file with the AccelerationStructures gem. The settings are in
-`GlobalIlluminationSettings`. `Rendering.IsIndirectLightOn` turns it off, and `Rendering.IsReflectionsOn` turns off
-the reflections.
+Lights the surfaces with the light that bounces: a probe grid and the diffuse light near each surface. List it in the
+`.magic` file with the AccelerationStructures gem. The settings are in `GlobalIlluminationSettings`.
+`Rendering.IsIndirectLightOn` turns it off.
 
-- A grid of probes covers the world that rays see. The grid follows the world slowly.
+- Three grids of probes are centred on the camera and move with it a cell at a time. The probes of the first grid are
+  `ProbeSpacing` metres apart, and each next grid has cells twice as wide, so it reaches twice as far. A point gets the
+  light of the finest grid that holds it, blended into the next grid near the edge. A probe keeps its light while it
+  stays in its grid. Past the edge of the last grid, a point gets the light of the probes at the edge.
 - Each frame, rays from each surface find the light that bounces into it. A closed room gets none of the light of the
   sky, and a lit wall tints what is near it.
-- A ray reads the material that it hits as the average over its texture, with no specular. A metal reflects black.
-- A surface with a roughness of 0.6 or less reflects what its rays find. A mirror is sharp and a rough surface is
-  blurred.
+- A ray reads the material that it hits as the average over its texture, with no specular. A metal bounces no light.
+- Each frame, the lights are put into the cells that they reach of a grid over the first probe grid. Its cells are
+  half as wide as the probe grid's. Where a ray hits, it looks only at the lights of the cell there. The cells at the edge of the grid reach on past it.
 - The gem traces at `Rendering.IndirectScale` of the picture size.
-- The `IndirectDiffuse` and `Reflections` debug views show what the gem traced.
+- The `IndirectDiffuse` debug view shows what the gem traced.
+
+## TracedReflections
+
+Traces what smooth surfaces reflect. List it in the `.magic` file with the GlobalIllumination gem, which it needs. The
+settings are in `TracedReflectionsSettings`. `Rendering.IsReflectionsOn` turns it off. Without the gem, a surface
+reflects the sky, or its diffuse light where the diffuse light is traced.
+
+- A surface with a roughness under 0.3 reflects what its rays find. A mirror is sharp and a rougher surface is
+  blurred. A surface at 0.3 or more reflects its diffuse light, and its reflection does not get stronger when it is
+  seen edge-on.
+- A ray that lands on a surface reads its material as the indirect light's rays do, and the probes light it. Its
+  specular reflects the probes' light as a rough mirror, so a metal shows the colour of what is around it.
+- One bright ray does not flash: each ray's light is held near the brightness of the rays around it.
+- The gem traces at `Rendering.IndirectScale` of the picture size, as the indirect light does.
+- The `Reflections` debug view shows what the gem traced.
 
 ## WeatherFX
 
@@ -271,5 +302,6 @@ renderer stretches the picture. List it in the `.magic` file with the renderer.
 
 - While it runs, the camera moves to a different point in each pixel each frame.
 - It upscales what the renderer shows, debug views included, with a window or without.
+- `Rendering.Sharpness` sharpens the upscaled picture, from 0, which turns it off, to 1.
 - Use this gem or a post effect with the `TemporalAntiAliasing` shader, not both. With both, each frame blends over
   time two times.

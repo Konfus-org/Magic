@@ -1,8 +1,9 @@
 namespace Magic.Graphics;
 
 /// <summary>
-/// A compute pass that <see cref="RenderGraph.Compute"/> begins: declare what it reads and writes, then end it with a
-/// dispatch.
+/// A compute pass that <see cref="RenderGraph.Compute(string, in ShaderEntry, in GpuConstants, RenderStage)"/> or
+/// <see cref="RenderGraph.Compute(string, in BoundShader, RenderStage)"/> begins: declare what it reads and writes,
+/// then end it with a dispatch.
 /// </summary>
 /// <remarks>
 /// The GPU provider puts in the barriers from these declarations. It ignores an access of <c>None</c>.

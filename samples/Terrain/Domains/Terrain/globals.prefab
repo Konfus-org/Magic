@@ -52,7 +52,7 @@
                         "g": 0.96,
                         "b": 0.9
                     },
-                    "intensity": 3
+                    "intensity": 120000
                 },
                 "ScriptContainer": [ { "id": 100421, "hour": 16, "hoursPerMinute": 1 } ]
             }

@@ -18,6 +18,24 @@ static const float LeastLog = -10.0;
 static const float MostLog = 20.0;
 static const float BlackLuminance = 0.001;
 
+// The log2 luminance, in cd/m², that the adapted luminance stays between. The dimmest is grass under a full moon's
+// 0.3 lux (0.2 × 0.3 / π ≈ 1/64 cd/m²): a frame darker than that is not lifted more and reads dark. The brightest is
+// sunlit snow (0.9 × 100 000 / π ≈ 30 000 cd/m²).
+static const float DimmestLog = -6.0;
+static const float BrightestLog = 15.0;
+
+// PROTO: the stops a bright scene is keyed above the key, as the eye sees daylight as bright and a room as dim
+// (Krawczyk et al., "Lightness Perception in Tone Reproduction for High Dynamic Range Images", 2005): none up to a lit
+// room's log2 luminance, all of them from a sunlit field's (0.3 × 100 000 / π ≈ 10 000 cd/m²), a ramp between.
+static const float DaylightStops = 1.5;
+static const float RoomLog = 7.0;
+static const float DaylightLog = 13.0;
+
+// PROTO: the stops a dim scene is keyed under the key, as the eye sees twilight and moonlight as dark: none from a pale
+// surface in deep twilight's 10 lux (0.3 × 10 / π ≈ 1 cd/m²) up, all of them at the dimmest, a ramp between.
+static const float NightStops = 2.0;
+static const float TwilightLog = 0.0;
+
 public struct Exposure : IPixelEffect
 {
     public static const uint Levels = 16;
@@ -40,7 +58,7 @@ public struct Exposure : IPixelEffect
         // round a frame's small step away, so it is kept as one and what that one rounded off. The one is rounded to
         // a 64th, which a half holds exactly under 32. The compiler folds a half round trip away, which leaves nothing
         // rounded off.
-        float frameLog = average.y > 0.0 ? average.x / average.y : LeastLog;
+        float frameLog = clamp(average.y > 0.0 ? average.x / average.y : LeastLog, DimmestLog, BrightestLog);
         float4 last = inputs.history.Load(uint2(0u), inputs.level);
         float adapted = inputs.hasHistory
             ? lerp(last.z + last.w, frameLog, 1.0 - exp(-GetFrame().deltaSec * AdaptionRate))
@@ -53,7 +71,10 @@ public struct Exposure : IPixelEffect
     {
         uint last = min(firstbithigh(max(inputs.size.x, inputs.size.y)), Levels - 1u);
         float4 metered = inputs.target.Load(uint2(0u), last);
-        return color * Key * exp2(compensation - metered.z - metered.w);
+        float adapted = metered.z + metered.w;
+        float daylight = DaylightStops * saturate((adapted - RoomLog) / (DaylightLog - RoomLog));
+        float night = NightStops * saturate((TwilightLog - adapted) / (TwilightLog - DimmestLog));
+        return color * Key * exp2(compensation + daylight - night - adapted);
     }
 }
 

@@ -7,8 +7,9 @@
         // The model leaves the walls open to the sky: 20 cm between the top of the side logs and the roof's planks,
         // 2 cm between the side logs and the stone base, 15 cm under the first log of each end wall, and 1 cm where
         // the end walls meet the roof, and 5 cm between the head of the end wall's window and the log over it. The
-        // log under that window also stands 5 cm over its sill. Trim boxes fill or cover each one. Each sits inside the logs or the stone at its edges, so only its closing face shows.
-        {"name": "Cabin", "components": {"Transform": {}, "Renderer": {"model": {"id": 300051}, "materials": [{"id": 300061}, {"id": 300064}, {"id": 300063}, {"id": 300062}, {"id": 300074}, {"id": 300074}]}},
+        // log under that window also stands 5 cm over its sill. Trim boxes fill or cover each one. Each sits inside
+        // the logs or the stone at its edges, so only its closing face shows.
+        {"name": "Cabin", "components": {"Transform": {}, "Renderer": {"model": {"id": 300051}, "materials": [{"id": 300061}, {"id": 300064}, {"id": 300063}, {"id": 300062}]}},
             "children": [
                 {"name": "Side trim", "components": {"Transform": {"position": {"x": 0, "y": 3.0, "z": 3.11}, "scale": {"x": 4.55, "y": 0.15, "z": 0.02}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300061}]}}},
                 {"name": "Side trim", "components": {"Transform": {"position": {"x": 0, "y": 3.0, "z": -3.11}, "scale": {"x": 4.55, "y": 0.15, "z": 0.02}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300061}]}}},
@@ -22,12 +23,11 @@
                 {"name": "End window sill", "components": {"Transform": {"position": {"x": -4.0, "y": 1.31, "z": 0}, "scale": {"x": 0.155, "y": 0.055, "z": 0.67}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300062}]}}},
                 {"name": "Doorstep", "components": {"Transform": {"position": {"x": 0, "y": 0.05, "z": -3.7}, "scale": {"x": 0.9, "y": 0.4, "z": 0.4}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300064}]}}}
             ]},
-        // The cabin's own door and its window panes are submeshes, so they cannot swing or be left out. Both slots
-        // take the clear material, which lets the doorway and all four windows through. This box, the door's size,
-        // stands open a quarter turn on the jamb at -X.
+        // The cabin's own door and its window panes are its last two submeshes. The renderer gives them no material,
+        // so they draw nothing and the doorway and all four windows stand open. This box, the door's size, stands
+        // open a quarter turn on the jamb at -X.
         {"name": "Door", "components": {"Transform": {"position": {"x": -0.49, "y": 1.45, "z": -3.81}, "rotation": {"x": 0, "y": 0.70711, "z": 0, "w": 0.70711}, "scale": {"x": 0.49, "y": 0.99, "z": 0.025}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300065}]}}},
-        // One window of the door wall keeps its glass: this box fills the opening, set 5 cm into the reveal so that it
-        // does not touch the clear pane.
+        // One window of the door wall keeps its glass: this box fills the opening, set 5 cm into the reveal.
         {"name": "Window pane", "components": {"Transform": {"position": {"x": 2.5, "y": 1.875, "z": -2.95}, "scale": {"x": 0.61, "y": 0.585, "z": 0.012}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 9074876982782962638}]}}},
         {"name": "Bench", "components": {"Transform": {"position": {"x": 1.55, "y": 0.45, "z": 0.2}, "rotation": {"x": 0, "y": 0.70711, "z": 0, "w": -0.70711}}, "Renderer": {"model": {"id": 300052}, "materials": [{"id": 300066}]}}},
         {"name": "Rocking chair", "components": {"Transform": {"position": {"x": 1.3, "y": 0.45, "z": -1.6}, "rotation": {"x": 0, "y": 0.5373, "z": 0, "w": 0.84339}}, "Renderer": {"model": {"id": 300053}, "materials": [{"id": 300067}]}}},
@@ -35,7 +35,7 @@
         // puts its open side in the wall and leaves its back board standing on the room's side of the logs.
         {"name": "Shelf", "components": {"Transform": {"position": {"x": -2.9, "y": 0.45, "z": 2.84}}, "Renderer": {"model": {"id": 300054}, "materials": [{"id": 300068}]}}},
         {"name": "Lantern", "components": {"Transform": {"position": {"x": 1.55, "y": 1, "z": 0.6}, "rotation": {"x": 0, "y": 1, "z": 0, "w": 0}, "scale": {"x": 1.6, "y": 1.6, "z": 1.6}}, "Renderer": {"model": {"id": 300055}, "materials": [{"id": 300069}, {"id": 300070}], "isShadowless": true}}},
-        {"name": "Lantern light", "components": {"Transform": {"position": {"x": 1.55, "y": 1.17, "z": 0.6}}, "PointLight": {"color": {"r": 1, "g": 0.72, "b": 0.42}, "intensity": 20, "range": 9}, "ScriptContainer": [{"id": 100330, "depth": 0.1}]}},
+        {"name": "Lantern light", "components": {"Transform": {"position": {"x": 1.55, "y": 1.17, "z": 0.6}}, "PointLight": {"color": {"r": 1, "g": 0.72, "b": 0.42}, "intensity": 120, "range": 9}, "ScriptContainer": [{"id": 100330, "depth": 0.1}]}},
         {"name": "Ash", "components": {"Transform": {"position": {"x": 3.45, "y": 0.525, "z": 0}, "scale": {"x": 0.16, "y": 0.03, "z": 0.27}}, "Renderer": {"model": {"id": 517}, "materials": [{"id": 300073}]}}},
         {"name": "Coal", "components": {"Transform": {"position": {"x": 3.45, "y": 0.545, "z": 0.0}, "rotation": {"x": 0, "y": 0.30071, "z": 0, "w": 0.95372}, "scale": {"x": 0.095, "y": 0.055, "z": 0.085}}, "Renderer": {"model": {"id": 517}, "materials": [{"id": 300071}]}}},
         {"name": "Coal", "components": {"Transform": {"position": {"x": 3.39, "y": 0.542, "z": 0.17}, "rotation": {"x": 0, "y": 0.81915, "z": 0, "w": 0.57358}, "scale": {"x": 0.075, "y": 0.048, "z": 0.068}}, "Renderer": {"model": {"id": 517}, "materials": [{"id": 300071}]}}},
@@ -55,6 +55,6 @@
         {"name": "Flame", "components": {"Transform": {"position": {"x": 3.5, "y": 0.7, "z": -0.06}, "rotation": {"x": -0.061, "y": 0, "z": 0, "w": 0.9981}, "scale": {"x": 0.065, "y": 0.32, "z": 0.065}}, "Renderer": {"model": {"id": 513}, "materials": [{"id": 300076}], "isShadowless": true}}},
         {"name": "Flame", "components": {"Transform": {"position": {"x": 3.46, "y": 0.665, "z": 0.24}, "scale": {"x": 0.055, "y": 0.25, "z": 0.055}}, "Renderer": {"model": {"id": 513}, "materials": [{"id": 300076}], "isShadowless": true}}},
         {"name": "Flame", "components": {"Transform": {"position": {"x": 3.44, "y": 0.66, "z": -0.22}, "rotation": {"x": 0, "y": 0, "z": 0.0436, "w": 0.999}, "scale": {"x": 0.05, "y": 0.23, "z": 0.05}}, "Renderer": {"model": {"id": 513}, "materials": [{"id": 300076}], "isShadowless": true}}},
-        {"name": "Fire", "tags": ["fire"], "components": {"Transform": {"position": {"x": 3.0, "y": 0.7, "z": 0}}, "PointLight": {"color": {"r": 1, "g": 0.36, "b": 0.09}, "intensity": 45, "range": 12, "radius": 0.15}, "ScriptContainer": [{"id": 100330, "depth": 0.4}]}}
+        {"name": "Fire", "tags": ["fire"], "components": {"Transform": {"position": {"x": 3.0, "y": 0.7, "z": 0}}, "PointLight": {"color": {"r": 1, "g": 0.6, "b": 0.3}, "intensity": 300, "range": 12, "radius": 0.15}, "ScriptContainer": [{"id": 100330, "depth": 0.4}]}}
     ]
 }

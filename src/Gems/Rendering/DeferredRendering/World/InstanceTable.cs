@@ -331,7 +331,8 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
             ResidentModel? resident = renderer.Model == Handle<Model>.None ? null : resources.Get(renderer.Model);
 
             // A resident model's row: where it is, its bounds in the world and the material rows of its slots, every
-            // slot the default with the model's failure when the model failed.
+            // slot the default with the model's failure when the model failed. A renderer with no material draws every
+            // slot with the default; one with any leaves its empty slots empty.
             GpuInstance row = default;
             if (resident is { } model)
             {
@@ -358,9 +359,12 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
                 for (int slot = 0; slot < MaterialSet.Capacity; slot++)
                 {
                     MaterialInstance held = slot < slots.Length ? slots[slot] : default;
-                    row.Materials[slot] = GetMaterialRow(
-                        model.IsFailure ? (_materialSlots[0].Slot, renderer.Model.Id) : (held, 0)
-                    );
+                    if (model.IsFailure)
+                        row.Materials[slot] = GetMaterialRow((_materialSlots[0].Slot, renderer.Model.Id));
+                    else if (!slots.IsEmpty && held.Handle == Handle<Material>.None)
+                        row.Materials[slot] = GpuMaterialRows.EmptySlot;
+                    else
+                        row.Materials[slot] = GetMaterialRow((held, 0));
                 }
             }
 
@@ -428,8 +432,8 @@ internal sealed class InstanceTable(AssetManager assets, GpuResources resources)
     }
 
     /// <summary>
-    /// Gets the material row of the slot, drawn for the failed model <paramref name="drawn"/>.FailedModel when not 0; 0
-    /// for an empty slot.
+    /// Gets the material row of the slot, drawn for the failed model <paramref name="drawn"/>.FailedModel when not 0; 0,
+    /// the default, for an empty slot.
     /// </summary>
     /// <remarks>
     /// A value first seen takes the next row, which every slot holding it shares. A slot whose params change takes

@@ -318,6 +318,11 @@ public struct Atmosphere : ISky
         TextureRef transmittance = { inputs.transmittanceLut };
         SamplerRef sampler = { inputs.sampler };
         float r = GroundRadius + max(inputs.altitude * 0.001, 0.001);
+
+        // A sun under the horizon is behind the Earth: the table's edge would give the horizon's red light instead.
+        if (IsGroundHit(r, inputs.sunDirection.y))
+            return float3(0.0);
+
         return inputs.sunIlluminance * SampleTransmittance(transmittance, sampler, r, inputs.sunDirection.y);
     }
 

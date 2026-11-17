@@ -63,6 +63,12 @@ public record struct GpuInstance
 [InlineArray(MaterialSlots.Capacity)]
 public struct GpuMaterialRows : IEquatable<GpuMaterialRows>
 {
+    /// <summary>
+    /// The row of a slot that holds no material in a renderer that holds others: its meshes draw nothing and rays pass
+    /// them.
+    /// </summary>
+    public const uint EmptySlot = uint.MaxValue;
+
     private uint _first;
 
     public static bool operator ==(GpuMaterialRows left, GpuMaterialRows right) => left.Equals(right);

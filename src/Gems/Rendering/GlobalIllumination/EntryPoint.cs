@@ -13,7 +13,7 @@ public sealed class EntryPoint(
     AssetManager assets,
     Threads threads,
     IGraphicsApi gpu
-) : IGem
+) : IGem, IDisposable
 {
     /// <summary>
     /// How the light is traced, which the renderer reads each frame. Game thread.
@@ -21,4 +21,6 @@ public sealed class EntryPoint(
     public GlobalIlluminationSettings Settings { get; } = settings;
 
     public Renderer Renderer { get; } = new(settings, assets, threads, gpu);
+
+    public void Dispose() => Renderer.Dispose();
 }

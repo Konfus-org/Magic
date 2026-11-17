@@ -111,6 +111,13 @@ internal sealed class VulkanPipeline
     public required VkPipeline Pipeline { get; init; }
 
     public required VkPipelineBindPoint BindPoint { get; init; }
+
+    /// <summary>
+    /// A bound shader's own layout and its sets' layouts; none for every other pipeline, which binds the heap's layout.
+    /// </summary>
+    public VkPipelineLayout Layout { get; init; }
+
+    public VkDescriptorSetLayout[] SetLayouts { get; init; } = [];
 }
 
 /// <summary>
@@ -223,7 +230,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
 
         foreach (VulkanPipeline pipeline in Pipelines.Items)
         {
-            device.Api.vkDestroyPipeline(pipeline.Pipeline);
+            Free(pipeline);
         }
     }
 
@@ -455,6 +462,86 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
         return AddPipeline(pipeline, VkPipelineBindPoint.Compute);
     }
 
+    /// <summary>
+    /// Builds a bound shader's pipeline with a layout of its own: a set for each set its bindings name, up to the
+    /// highest.
+    /// </summary>
+    public Result<GpuPipeline> CreatePipeline(in BoundShader shader)
+    {
+        Result<VkShaderModule> module = CreateModule(shader.Spirv);
+        if (!module.Ok)
+            return Result.Failure(module.Error);
+
+        uint sets = shader.Bindings.Max(binding => binding.Set) + 1;
+        VkDescriptorSetLayout[] setLayouts = new VkDescriptorSetLayout[sets];
+        for (uint set = 0; set < sets; set++)
+        {
+            VkDescriptorSetLayoutBinding[] bindings =
+            [
+                .. shader
+                    .Bindings.Where(binding => binding.Set == set)
+                    .Select(binding => new VkDescriptorSetLayoutBinding
+                    {
+                        binding = binding.Slot,
+                        descriptorType = binding.Kind.ToVulkan(),
+                        descriptorCount = 1,
+                        stageFlags = VkShaderStageFlags.Compute,
+                    }),
+            ];
+            fixed (VkDescriptorSetLayoutBinding* bindingsPointer = bindings)
+            {
+                VkDescriptorSetLayoutCreateInfo layoutInfo = new()
+                {
+                    bindingCount = (uint)bindings.Length,
+                    pBindings = bindingsPointer,
+                };
+                device
+                    .Api.vkCreateDescriptorSetLayout(&layoutInfo, out setLayouts[set])
+                    .ThrowIfFailed("a bound shader's set layout");
+            }
+        }
+
+        VkPipelineLayout layout;
+        fixed (VkDescriptorSetLayout* setLayoutsPointer = setLayouts)
+        {
+            VkPipelineLayoutCreateInfo layoutInfo = new() { setLayoutCount = sets, pSetLayouts = setLayoutsPointer };
+            device.Api.vkCreatePipelineLayout(&layoutInfo, out layout).ThrowIfFailed("a bound shader's layout");
+        }
+
+        using NativeStrings entry = new([shader.EntryPoint]);
+        VkComputePipelineCreateInfo createInfo = new()
+        {
+            stage = new VkPipelineShaderStageCreateInfo
+            {
+                stage = VkShaderStageFlags.Compute,
+                module = module.Value,
+                pName = entry.Pointers[0],
+            },
+            layout = layout,
+        };
+        VkPipeline pipeline;
+        VkResult result = device.Api.vkCreateComputePipelines(VkPipelineCache.Null, 1, &createInfo, &pipeline);
+        device.Api.vkDestroyShaderModule(module.Value);
+        VulkanPipeline made = new()
+        {
+            Pipeline = pipeline,
+            BindPoint = VkPipelineBindPoint.Compute,
+            Layout = layout,
+            SetLayouts = setLayouts,
+        };
+        if (result == VkResult.Success && Pipelines.TryAdd(made, out uint id))
+            return Result.Success(new GpuPipeline(id));
+
+        device.Api.vkDestroyPipeline(pipeline);
+        device.Api.vkDestroyPipelineLayout(layout);
+        foreach (VkDescriptorSetLayout setLayout in setLayouts)
+        {
+            device.Api.vkDestroyDescriptorSetLayout(setLayout);
+        }
+
+        return Result.Failure($"Vulkan could not build the bound pipeline {shader.EntryPoint}: {result}.");
+    }
+
     public Result<GpuPipeline> CreatePipeline(in GraphicsPipelineDescription description)
     {
         Result<VkShaderModule> vertex = CreateModule(description.VertexSpirv);
@@ -575,7 +662,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
                 Samplers.Release(trash.Id);
                 break;
             case VulkanPipeline pipeline:
-                device.Api.vkDestroyPipeline(pipeline.Pipeline);
+                Free(pipeline);
                 Pipelines.Release(trash.Id);
                 break;
             case VulkanAcceleration acceleration:
@@ -859,6 +946,22 @@ internal sealed unsafe class VulkanResources(VulkanDevice device, VulkanHeap hea
         Name(VkObjectType.AccelerationStructureKHR, handle.Handle, name);
 
         return Result.Success(new GpuAcceleration(id, acceleration.Address));
+    }
+
+    /// <summary>
+    /// Destroys the pipeline, and a bound shader's own layout and its sets' layouts. The heap's layout is not its own.
+    /// </summary>
+    private void Free(VulkanPipeline pipeline)
+    {
+        device.Api.vkDestroyPipeline(pipeline.Pipeline);
+        if (pipeline.SetLayouts.Length == 0)
+            return;
+
+        device.Api.vkDestroyPipelineLayout(pipeline.Layout);
+        foreach (VkDescriptorSetLayout layout in pipeline.SetLayouts)
+        {
+            device.Api.vkDestroyDescriptorSetLayout(layout);
+        }
     }
 
     private void Free(VulkanAcceleration acceleration)

@@ -38,10 +38,11 @@ internal sealed unsafe class VulkanRecorder(
 
             // A pass whose shaders are not built yet is left out, and what it writes keeps what it held.
             VulkanShader? shader = pass.Shader is { } entry ? shaders.Get(entry) : null;
-            GpuPipeline pipeline = pass.DrawShaders is { } drawn
-                ? shaders.Get(drawn, pass.Targets)
+            GpuPipeline pipeline =
+                pass.DrawShaders is { } drawn ? shaders.Get(drawn, pass.Targets)
+                : pass.BoundShader is { } bound ? shaders.Get(bound)
                 : shader?.Pipeline ?? GpuPipeline.None;
-            if ((pass.Shader is not null || pass.DrawShaders is not null) && pipeline.IsNone)
+            if (pass.Kind != GpuPassKind.Transfer && pipeline.IsNone)
                 continue;
 
             BeginGroup(cmd, pass.Name);
@@ -49,12 +50,19 @@ internal sealed unsafe class VulkanRecorder(
             frame.WriteTimestamp(pass.Name, passIndex);
             bool isDrawing = pass.Kind == GpuPassKind.Draw && BeginRendering(cmd, pass);
             (uint X, uint Y, uint Z) groupSize = shader?.GroupSize ?? (1, 1, 1);
-            if (resources.Pipelines[pipeline.Id] is { } bound)
-                api.vkCmdBindPipeline(cmd, bound.BindPoint, bound.Pipeline);
+            VulkanPipeline? made = resources.Pipelines[pipeline.Id];
+            if (made is not null)
+                api.vkCmdBindPipeline(cmd, made.BindPoint, made.Pipeline);
 
-            foreach (GpuCommand command in pass.Commands)
+            if (pass.BoundShader is not { } boundShader)
+                RunAll(frame, pass, groupSize);
+            else
             {
-                Run(frame, command, groupSize);
+                if (made is not null && Bind(frame, boundShader, made))
+                    RunAll(frame, pass, groupSize);
+
+                // The heap's set again, which the bound shader's sets replaced.
+                api.vkCmdBindDescriptorSets(cmd, VkPipelineBindPoint.Compute, heap.PipelineLayout, 0, heap.Set);
             }
 
             if (isDrawing)
@@ -339,6 +347,104 @@ internal sealed unsafe class VulkanRecorder(
     /// </remarks>
     private void SetViewport(VkCommandBuffer cmd, uint x, uint y, uint width, uint height) =>
         device.Api.vkCmdSetViewport(cmd, x, y + height, width, -(float)height, 0, 1);
+
+    private void RunAll(VulkanFrames.Frame frame, in GpuPass pass, (uint X, uint Y, uint Z) groupSize)
+    {
+        foreach (GpuCommand command in pass.Commands)
+        {
+            Run(frame, command, groupSize);
+        }
+    }
+
+    /// <summary>
+    /// Writes a bound shader's resources into new sets of the frame's pool and binds them; false, and nothing bound,
+    /// when a resource or the pool's room is missing.
+    /// </summary>
+    private bool Bind(VulkanFrames.Frame frame, in BoundShader shader, VulkanPipeline pipeline)
+    {
+        VkDeviceApi api = device.Api;
+        int sets = pipeline.SetLayouts.Length;
+        VkDescriptorSet* allocated = stackalloc VkDescriptorSet[sets];
+        fixed (VkDescriptorSetLayout* layouts = pipeline.SetLayouts)
+        {
+            VkDescriptorSetAllocateInfo allocateInfo = new()
+            {
+                descriptorPool = frame.Descriptors,
+                descriptorSetCount = (uint)sets,
+                pSetLayouts = layouts,
+            };
+            VkResult result = api.vkAllocateDescriptorSets(&allocateInfo, allocated);
+            if (result != VkResult.Success)
+            {
+                Log.Error($"The frame has no room for the sets of {shader.EntryPoint}: {result}.");
+
+                return false;
+            }
+        }
+
+        int count = shader.Bindings.Length;
+        VkWriteDescriptorSet* writes = stackalloc VkWriteDescriptorSet[count];
+        VkDescriptorImageInfo* images = stackalloc VkDescriptorImageInfo[count];
+        VkDescriptorBufferInfo* buffers = stackalloc VkDescriptorBufferInfo[count];
+        for (int i = 0; i < count; i++)
+        {
+            GpuBinding binding = shader.Bindings[i];
+            writes[i] = new VkWriteDescriptorSet
+            {
+                dstSet = allocated[binding.Set],
+                dstBinding = binding.Slot,
+                descriptorCount = 1,
+                descriptorType = binding.Kind.ToVulkan(),
+                pImageInfo = &images[i],
+                pBufferInfo = &buffers[i],
+            };
+            VulkanTexture? texture = binding.Kind is GpuBindingKind.Texture or GpuBindingKind.StorageTexture
+                ? resources.Textures[binding.Id]
+                : null;
+            if (binding.Kind == GpuBindingKind.Sampler && resources.Samplers[binding.Id] is { } sampler)
+            {
+                images[i] = new VkDescriptorImageInfo { sampler = sampler };
+            }
+            else if (binding.Kind == GpuBindingKind.Constants && resources.Buffers[binding.Id] is { } buffer)
+            {
+                buffers[i] = new VkDescriptorBufferInfo
+                {
+                    buffer = buffer.Buffer,
+                    offset = binding.Offset,
+                    range = binding.Size,
+                };
+            }
+            else if (texture is not null)
+            {
+                bool isRead = binding.Kind == GpuBindingKind.Texture;
+                images[i] = new VkDescriptorImageInfo
+                {
+                    imageView = texture.View,
+                    imageLayout = isRead ? VkImageLayout.ShaderReadOnlyOptimal : VkImageLayout.General,
+                };
+            }
+            else
+            {
+                Log.Error($"{shader.EntryPoint} is left out: its {binding.Kind} {binding.Id} is not in the heap.");
+
+                return false;
+            }
+        }
+
+        api.vkUpdateDescriptorSets((uint)count, writes, 0, null);
+        api.vkCmdBindDescriptorSets(
+            frame.CommandBuffer,
+            VkPipelineBindPoint.Compute,
+            pipeline.Layout,
+            0,
+            (uint)sets,
+            allocated,
+            0,
+            null
+        );
+
+        return true;
+    }
 
     /// <summary>
     /// Records <paramref name="command"/>, a dispatch of threads in groups of <paramref name="groupSize"/>: the group

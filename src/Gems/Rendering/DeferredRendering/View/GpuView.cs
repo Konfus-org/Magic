@@ -68,6 +68,11 @@ public readonly record struct GpuView
 
     public required GpuTexture Velocity { get; init; }
 
+    /// <summary>
+    /// The rows of the view that its frame buffer starts with: its camera, projection and jitter, for the CPU.
+    /// </summary>
+    public FrameConstants Constants { get; init; }
+
     //TODO(Konfus): Glass should not be a deferred rendering concept, transparency yes, glass no. Perhaps these just need a rename, or perhaps they need a rethink?
     /// <summary>
     /// The nearest glass's depth and surface, in front of the opaque surfaces; none while no material draws
@@ -139,6 +144,11 @@ public readonly record struct GpuView
     public required GpuBuffer LightTable { get; init; }
 
     public required GpuBuffer LightTiles { get; init; }
+
+    /// <summary>
+    /// How many rows of the light table hold a local light.
+    /// </summary>
+    public required int LightCount { get; init; }
 
     /// <summary>
     /// How many domains that loaded have had what they draw put on the GPU.

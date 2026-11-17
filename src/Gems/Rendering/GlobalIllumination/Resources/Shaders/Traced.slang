@@ -1,7 +1,7 @@
 // What the gem's passes share: the GI buffer. The light a ray brings back from what it lands on, and for the light
 // traced at a part of the picture's size, the diffuse and the reflections alike, which pixel of each traced pixel's
 // footprint traces this frame, how a pass averages its neighbours' light, and its history found where the surface was
-// last frame. C#'s GIConstants is the GI buffer, the pass header's y.
+// last frame. C#'s GIConstants is the GI buffer, the pass header's y. The reflections' gem imports it too.
 module "Traced";
 
 import Core.Heap;
@@ -29,29 +29,20 @@ public struct TracedBlendConstants
 
 public struct TracedDiffuseConstants
 {
-    // The rays' light at each traced pixel.
+    // The rays' light at each traced pixel, with the share of them that reach the sky in alpha.
     public uint traced;
-    // The rays' light filtered over the neighbours, with its brightness's variance in alpha.
-    public uint filtered;
-    public TracedBlendConstants blend;
-}
-
-public struct TracedReflectionConstants
-{
-    // The rays' light at each traced pixel, with how far each went in alpha, and its direction with the density it was
-    // drawn at.
-    public uint traced;
-    public uint rays;
-    // The rays' light resolved over the neighbours, with its brightness's variance in alpha, and the farthest of their
-    // rays that count.
-    public uint resolved;
-    public uint distance;
-    public TracedBlendConstants blend;
+    // NRD's inputs: the light and hit distance, the motion, the normal and roughness, and the view depth.
+    public uint radiance;
+    public uint motion;
+    public uint normalRoughness;
+    public uint viewZ;
+    // 1 where the sky share's history holds last frame's.
+    public uint hasHistory;
 }
 
 // What the probe update reads beyond the grid: the frame's rays, the list of which probe traces each, the trace's
 // arguments, each probe's count of rays and where they start, and each probe texel's variance, and how far a probe's
-// depth reaches, one and a half cells.
+// depth reaches, one and a half cells of the finest cascade.
 public struct ProbeUpdateConstants
 {
     public uint rays;
@@ -65,68 +56,139 @@ public struct ProbeUpdateConstants
 public struct GIConstants
 {
     public TracedDiffuseConstants diffuse;
-    public TracedReflectionConstants reflections;
     public ProbeUpdateConstants probes;
-    // The view depth of each traced pixel, which the diffuse blend writes, and last frame's, which both blends read.
+    // The view depth of each traced pixel in x, the share of the sky it sees in y and the frames that share blended in
+    // z, which the sky share's blend writes, and last frame's, which it reads.
     public uint depth;
     public uint depthHistory;
-    // Linear, clamped to the edges: what the history is read with.
-    public uint sampler;
     // The traced textures' size.
     public uint2 tracedSize;
-    // The diffuse light's rays a traced pixel and how far they reach, the reflections' reach, how much of its history
-    // each keeps a frame, and how much of its rays' light a probe takes.
+    // The diffuse light's rays a traced pixel and how far they reach, the most of its history the sky share keeps a
+    // frame, and how much of its rays' light a probe takes.
     public uint diffuseRayCount;
     public float diffuseRayRange;
-    public float reflectionRayRange;
     public float diffuseHistory;
-    public float reflectionHistory;
     public float probeBlend;
+    // The diffuse rays' terms turned off to measure them: 1, the probes' light at a hit; 2, the sky. PROTO.
+    public uint diffuseTermsOff;
 }
 
 public GIConstants GetGIConstants() { return LoadConstants<GIConstants>(GetPassHeader().y); }
 
-// The light that reaches a surface from one light picked at random by xi.x, the sun among them, aimed at a point of it
-// by xi.yz, over pi and times how many there are to pick from: what a white diffuse surface reflects of them all, on
-// average.
+// The light grid: for each cell, a bit per light whose reach touches the cell, in words as a screen tile keeps them.
+// It covers the finest probe cascade, its cells LightCellsPerProbe to a probe cell along each axis, so a cell holds
+// fewer lights that do not reach its points. The cells at the grid's sides reach on without end, so every point has a
+// cell that holds each light that reaches it. PROTO: the grid's words follow the probes in the probe table, so the
+// reflections find it through the probe grid that they already read.
+
+public static const uint LightCellsPerProbe = 2u;
+
+// The light grid's cells along each axis.
+public uint3 GetLightGridSize(ProbeGridConstants grid)
+{
+    return grid.dimensions * LightCellsPerProbe;
+}
+
+// The metres along each side of a light grid cell.
+public float3 GetLightCellSize(ProbeGridConstants grid)
+{
+    return grid.cellSize / float(LightCellsPerProbe);
+}
+
+// The world cell of the light grid's first cell.
+public int3 GetFirstLightCell(ProbeGridConstants grid)
+{
+    return GetFirstProbeCell(grid, GetFrame().cameraPosition.xyz) * int(LightCellsPerProbe);
+}
+
+// The cell of the light grid that holds a point.
+public int3 GetLightCell(ProbeGridConstants grid, float3 position)
+{
+    int3 cell = int3(floor(position / GetLightCellSize(grid))) - GetFirstLightCell(grid);
+    return clamp(cell, int3(0), int3(GetLightGridSize(grid)) - 1);
+}
+
+// The first of a cell's words in the probe table.
+public uint GetLightCellOffset(ProbeGridConstants grid, int3 cell)
+{
+    uint3 size = grid.dimensions;
+    uint probeWords = size.x * size.y * size.z * grid.cascades * (sizeof(GpuProbe) / 4u);
+    uint3 cells = GetLightGridSize(grid);
+    return probeWords + (cell.x + (cell.y + cell.z * cells.y) * cells.x) * LightBuckets;
+}
+
+// The light that reaches a surface from the sun, aimed at a point of its disc by xi.yz, and from one light whose reach
+// holds it, picked by xi.x as likely as its unshadowed light there is bright, shadowed by a ray aimed at a point of it
+// by xi.yz and divided by how likely the pick was, is: over pi, what a white diffuse surface reflects of them. The
+// light grid's cell gives the lights to look at.
 public float3 GetDirectLight<S : ISky>(
     Lights lights,
+    ProbeGridConstants grid,
     RaytracingAccelerationStructure world,
     HitSurface surface,
     float3 xi
 )
 {
-    uint lightCount = min(lights.count, MaxLights);
-    uint picked = min(uint(xi.x * float(lightCount + 1u)), lightCount);
     float3 origin = surface.position + surface.normal * 0.01;
-    float3 direction;
-    float3 irradiance;
-    float distance;
-    if (picked == lightCount)
+    float3 light = float3(0.0);
+    float3 sunIlluminance = GetSunIlluminance<S>(lights);
+    float3 toSun = SampleSunDirection(lights.sunDirection.xyz, xi.yz);
+    float sunCosine = dot(surface.normal, toSun);
+    if (sunCosine > 0.0 && any(sunIlluminance > 0.0))
+        light = sunIlluminance * GetTransmittance(world, origin, toSun, 1e6) * sunCosine;
+
+    uint lightCount = min(lights.count, MaxLights);
+    if (lightCount == 0u)
+        return light * InvPi;
+
+    // A reservoir of one: each light replaces the pick as likely as its share of the brightness seen so far.
+    uint seed = uint(xi.x * 16777216.0);
+    uint picked = 0u;
+    float targetSum = 0.0;
+    float3 pickedLight = float3(0.0);
+    float pickedTarget = 0.0;
+    ArrayRef<uint> cells = { grid.probes };
+    uint offset = GetLightCellOffset(grid, GetLightCell(grid, surface.position));
+    uint buckets = (lightCount + 31u) / 32u;
+    for (uint bucket = 0u; bucket < buckets; bucket++)
     {
-        direction = SampleSunDirection(lights.sunDirection.xyz, xi.yz);
-        irradiance = GetSunIlluminance<S>(lights);
-        distance = 1e6;
-    }
-    else
-    {
-        GpuLight light = LoadLight(lights.table, picked);
-        LightRay ray = CreateLightRay(origin, SampleLightPoint(light, surface.position, xi.yz));
-        direction = ray.direction;
-        distance = ray.distance;
-        irradiance = SampleLight(light, surface.position, surface.normal).irradiance;
+        uint bits = cells[offset + bucket];
+        while (bits != 0u)
+        {
+            uint candidate = bucket * 32u + firstbitlow(bits);
+            bits &= bits - 1u;
+            GpuLight each = LoadLight(lights.table, candidate);
+            if (length(surface.position - each.position) > GetLightReach(each))
+                continue;
+
+            LightSample sample = SampleLight(each, surface.position, surface.normal);
+            float3 received = sample.irradiance * saturate(dot(surface.normal, sample.direction));
+            float target = GetLuminance(received);
+            if (target <= 0.0)
+                continue;
+
+            targetSum += target;
+            seed = GetHash(seed);
+            if (ToUnitFloat(seed) * targetSum < target)
+            {
+                picked = candidate;
+                pickedLight = received;
+                pickedTarget = target;
+            }
+        }
     }
 
-    float cosine = dot(surface.normal, direction);
-    if (cosine <= 0.0)
-        return float3(0.0);
+    if (targetSum <= 0.0)
+        return light * InvPi;
 
-    float3 through = GetTransmittance(world, origin, direction, distance);
-    return float(lightCount + 1u) * irradiance * through * cosine * InvPi;
+    LightRay ray = CreateLightRay(origin, SampleLightPoint(LoadLight(lights.table, picked), surface.position, xi.yz));
+    // Picked as likely as pickedTarget / targetSum.
+    light += pickedLight * (targetSum / pickedTarget) * GetTransmittance(world, origin, ray.direction, ray.distance);
+    return light * InvPi;
 }
 
-// The light a surface a ray landed on sends back along it: what it reflects of one light picked at random by xi and of
-// the probes' light around it, and what it gives off.
+// The light a surface a ray landed on sends back along it: what it reflects of the lights, as GetDirectLight picks
+// them by xi, and of the probes' light around it, and what it gives off.
 public float3 GetHitLight<S : ISky>(
     Lights lights,
     ProbeGridConstants grid,
@@ -135,7 +197,7 @@ public float3 GetHitLight<S : ISky>(
     float3 xi
 )
 {
-    float3 light = GetDirectLight<S>(lights, world, surface, xi)
+    float3 light = GetDirectLight<S>(lights, grid, world, surface, xi)
         + GetProbeIrradiance(grid, surface.position, surface.normal);
     return light * surface.diffuse + surface.emissive;
 }
@@ -158,19 +220,28 @@ public uint2 GetNeighbour(uint2 traced, uint i, uint count, float2 shift, float 
 
 // The weighed light of a pass's neighbours, in a curve that keeps a bright neighbour from outweighing the rest, and its
 // brightness's mean and squared differences taken as it goes (West, "Updating Mean and Variance Estimates: An Improved
-// Method", 1979).
+// Method", 1979). The curve halves a light as bright as level, which the pass takes from what the view does not
+// change, so it bends the same at noon and at night and wherever the camera looks.
 public struct NeighbourLight
 {
     public float3 sum;
     public float weightSum;
     public float mean;
     public float squares;
+    public float level;
+}
+
+public NeighbourLight CreateNeighbourLight(float level)
+{
+    NeighbourLight neighbours = {};
+    neighbours.level = max(level, Epsilon);
+    return neighbours;
 }
 
 // The neighbours' light with one more, of a weight over 0.
 public NeighbourLight AddNeighbour(NeighbourLight neighbours, float3 light, float weight)
 {
-    float3 color = light / (1.0 + GetLuminance(light));
+    float3 color = light / (neighbours.level + GetLuminance(light));
     neighbours.sum += color * weight;
     neighbours.weightSum += weight;
     float luminance = GetLuminance(color);
@@ -180,15 +251,18 @@ public NeighbourLight AddNeighbour(NeighbourLight neighbours, float3 light, floa
     return neighbours;
 }
 
-// The neighbours' light averaged and brought back out of the curve, with its brightness's variance in alpha. Where none
-// weighed anything, the pixel's own light with none.
+// The neighbours' light averaged and brought back out of the curve, with its brightness's variance in the curve in
+// alpha. Where none weighed anything, the pixel's own light with none.
 public float4 GetNeighbourAverage(NeighbourLight neighbours, float3 own)
 {
     float4 result = float4(own, 0.0);
     if (neighbours.weightSum > 0.0)
     {
         float3 average = neighbours.sum / neighbours.weightSum;
-        result = float4(average / max(1.0 - GetLuminance(average), Epsilon), neighbours.squares / neighbours.weightSum);
+        result = float4(
+            average * neighbours.level / max(1.0 - GetLuminance(average), 0.001),
+            neighbours.squares / neighbours.weightSum
+        );
     }
 
     return float4(max(result.rgb, 1e-5), result.a);
@@ -219,11 +293,16 @@ public Neighbourhood GetNeighbourhood(TextureRef light, uint2 traced, uint2 size
     return neighbourhood;
 }
 
+// How many times brighter or darker than its neighbours' mean a history may stay: within it, the noise of a few rays,
+// most of them dark, is kept; past it, as when a light goes out, the history drops to it at once and does not fade
+// over hundreds of frames. PROTO: the 8 is a guess.
+static const float HistoryRatio = 8.0;
+
 // How alike the history's depth must be to the surface's to be the same surface.
-public static const float SameSurface = 0.9;
+public static const float SameSurface = 0.98;
 
 // How alike a history texel's view depth is to the surface's last frame: 1 the same, falling as they part.
-float GetSameness(float previousDepth, float historyDepth)
+public float GetSameness(float previousDepth, float historyDepth)
 {
     return exp(-abs(historyDepth - previousDepth) / max(previousDepth, Epsilon));
 }
@@ -233,14 +312,18 @@ float LoadHistoryDepth(TextureRef depthHistory, float2 uv, uint2 size)
     return depthHistory.Load(GetTexelAt(saturate(uv), size), 0u).x;
 }
 
-// A traced effect's light blended with its history, read at texture coordinates where the surface last frame at a view
-// depth was. Where the texel there saw another surface, the nearest of its neighbours that saw this one is read, and
-// failing that the four around it blended by hand. The history is held within spread deviations of the neighbours'
-// mean, so light that changed doesn't trail, keeping blend of it, and the variance keeping varianceBlend of its own.
+// A traced effect's light blended with its history, read with a sampler at texture coordinates where the surface last
+// frame at a view depth was, in traced textures of a size whose depth history holds last frame's view depths. Where
+// the texel there saw another surface, the nearest of its neighbours that saw this one is read, and failing that the
+// four around it blended by hand. The history is held within spread deviations of the neighbours' mean, and within
+// HistoryRatio of its brightness, so light that changed doesn't trail, keeping blend of it, and the variance keeping
+// varianceBlend of its own.
 // Where the history saw another surface or lies off the screen, the light alone at the most variance, so the picture
 // blurs what is new.
 public float4 BlendHistory(
-    GIConstants gi,
+    uint depthHistoryTexture,
+    uint historySampler,
+    uint2 size,
     TracedBlendConstants effect,
     float4 current,
     Neighbourhood neighbourhood,
@@ -252,9 +335,8 @@ public float4 BlendHistory(
 )
 {
     TextureRef light = { effect.lightHistory };
-    TextureRef depthHistory = { gi.depthHistory };
-    SamplerRef sampler = { gi.sampler };
-    uint2 size = gi.tracedSize;
+    TextureRef depthHistory = { depthHistoryTexture };
+    SamplerRef sampler = { historySampler };
 
     // Written so a depth the history never held, NaN, counts as another surface.
     float sameness = GetSameness(previousDepth, LoadHistoryDepth(depthHistory, uv, size));
@@ -301,5 +383,9 @@ public float4 BlendHistory(
 
     float3 range = spread * neighbourhood.deviation;
     float3 held = clamp(previous.rgb, neighbourhood.mean - range, neighbourhood.mean + range);
+    float heldBrightness = GetLuminance(held);
+    float meanBrightness = GetLuminance(neighbourhood.mean);
+    if (heldBrightness > 0.0)
+        held *= clamp(heldBrightness, meanBrightness / HistoryRatio, meanBrightness * HistoryRatio) / heldBrightness;
     return float4(lerp(current.rgb, held, blend), max(lerp(current.a, previous.a, varianceBlend), 0.0));
 }

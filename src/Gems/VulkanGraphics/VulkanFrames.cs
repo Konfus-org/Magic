@@ -123,6 +123,7 @@ internal sealed unsafe class VulkanFrames : IDisposable
 
         _device.Api.vkResetFences(frame.Fence);
         _device.Api.vkResetCommandPool(frame.Pool, VkCommandPoolResetFlags.None);
+        _device.Api.vkResetDescriptorPool(frame.Descriptors, VkDescriptorPoolResetFlags.None);
         frame.Serial = ++_serial;
         frame.StagingOffset = 0;
         VkCommandBufferBeginInfo beginInfo = new() { flags = VkCommandBufferUsageFlags.OneTimeSubmit };
@@ -320,6 +321,27 @@ internal sealed unsafe class VulkanFrames : IDisposable
                 CompactedSizes = sizes;
             }
 
+            Span<VkDescriptorPoolSize> poolSizes =
+            [
+                new(VkDescriptorType.Sampler, 256),
+                new(VkDescriptorType.UniformBuffer, 128),
+                new(VkDescriptorType.SampledImage, 1024),
+                new(VkDescriptorType.StorageImage, 512),
+            ];
+            fixed (VkDescriptorPoolSize* sizesPointer = poolSizes)
+            {
+                VkDescriptorPoolCreateInfo poolInfo = new()
+                {
+                    maxSets = 256,
+                    poolSizeCount = (uint)poolSizes.Length,
+                    pPoolSizes = sizesPointer,
+                };
+                device
+                    .Api.vkCreateDescriptorPool(&poolInfo, out VkDescriptorPool descriptors)
+                    .ThrowIfFailed("a frame's descriptor pool");
+                Descriptors = descriptors;
+            }
+
             Result staged = Restage(StagingBytes);
             if (Staging is null)
                 throw new InvalidOperationException($"Frame {index} has no staging ring: {staged.Error}");
@@ -332,6 +354,11 @@ internal sealed unsafe class VulkanFrames : IDisposable
         public VkCommandBuffer CommandBuffer { get; }
 
         public VkFence Fence { get; }
+
+        /// <summary>
+        /// The sets of the frame's bound shaders, emptied as the frame begins again.
+        /// </summary>
+        public VkDescriptorPool Descriptors { get; }
 
         /// <summary>
         /// Signalled when the window's image is the frame's to draw into.
@@ -374,6 +401,7 @@ internal sealed unsafe class VulkanFrames : IDisposable
 
         public void Dispose()
         {
+            _device.Api.vkDestroyDescriptorPool(Descriptors);
             _device.Api.vkDestroyQueryPool(Queries);
             _device.Api.vkDestroyQueryPool(CompactedSizes);
             _device.Api.vkDestroySemaphore(Acquired);

@@ -20,8 +20,9 @@ namespace Magic.TaaUpscaling;
 /// Each frame it makes the <see cref="Upscaling"/>, so the camera jitters, and the renderer has it record one pass once
 /// the view's output is drawn. The pass builds each shown pixel from the output's jittered texels around it and blends
 /// it with last frame's resolved picture where its surface was. It keeps two resolved pictures and swaps them every
-/// frame, with no history on the first frame at a size or of a world; the newer is what the window shows. It makes
-/// nothing while its shader builds or after it failed.
+/// frame, with no history on the first frame at a size or of a world. A second pass sharpens the newer into the
+/// picture the window shows, by the settings' sharpness, 0 copying it, and dithers it. It makes nothing while its
+/// shaders build or after one failed.
 /// </remarks>
 public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
 {
@@ -40,6 +41,10 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
 
     private readonly ShaderEntry _shader;
 
+    private readonly ShaderEntry _sharpenShader;
+
+    private readonly TaaUpscalingSettings _settings;
+
     /// <summary>
     /// The one upscaling every frame makes, so a frame makes no delegate.
     /// </summary>
@@ -57,19 +62,24 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
     /// </summary>
     private readonly SettleWait _settling;
 
-    internal Renderer(AssetManager assets, Threads threads)
+    internal Renderer(TaaUpscalingSettings settings, AssetManager assets, Threads threads)
     {
+        _settings = settings;
         _settling = new SettleWait(threads);
         _shader = PassShaders.GetEntry(assets, "TaaUpscaling", "UpscalePicture");
+        _sharpenShader = PassShaders.GetEntry(assets, "TaaUpscaling", "SharpenPicture");
         _upscaling = new Upscaling(Record);
     }
 
     /// <summary>
-    /// Makes the frame's upscaling; none while the shader builds or after it failed.
+    /// Makes the frame's upscaling; none while a shader builds or after one failed.
     /// </summary>
     public Upscaling? Render(in Frame frame, RenderGraph graph)
     {
         GpuState state = graph.GetState(_shader);
+        if (state == GpuState.Ready)
+            state = graph.GetState(_sharpenShader);
+
         if (state == GpuState.Failed)
             graph.Fail(RenderFailure.Shader, "Picture is not upscaled", "the upscaling's shader was not built.");
 
@@ -159,7 +169,42 @@ public sealed class Renderer : IRenderInto<Upscaling>, IHookIntoDomainLoading
             .Writes(resolved)
             .DispatchOver(width, height);
 
-        return resolved;
+        return Sharpen(graph, view, resolved, width, height);
+    }
+
+    /// <summary>
+    /// Records the pass that sharpens and dithers the resolved picture into the one the window shows. It stays out of
+    /// the history, so the sharpening and the dither never add up over frames.
+    /// </summary>
+    /// <returns>The sharpened picture; the resolved one when the picture was not made.</returns>
+    private GpuTexture Sharpen(RenderGraph graph, GpuView view, GpuTexture resolved, int width, int height)
+    {
+        float sharpness = Math.Clamp(_settings.Sharpness, 0f, 1f);
+        Result<GpuTexture> sharpened = graph.Texture(GetResolved("Sharpened picture", width, height));
+        if (!sharpened.Ok)
+        {
+            graph.Fail(RenderFailure.Resource, "Picture is not sharpened", sharpened.Error);
+
+            return resolved;
+        }
+
+        graph
+            .Compute(
+                "Sharpen picture",
+                _sharpenShader,
+                new GpuConstants(
+                    view.Frame.Id,
+                    resolved.Id,
+                    sharpened.Value.Id,
+                    BitConverter.SingleToUInt32Bits(sharpness)
+                ),
+                RenderStages.Post
+            )
+            .Reads(view.Frame, resolved)
+            .Writes(sharpened.Value)
+            .DispatchOver(width, height);
+
+        return sharpened.Value;
     }
 }
 

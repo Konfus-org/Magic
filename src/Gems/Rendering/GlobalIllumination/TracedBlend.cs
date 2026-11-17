@@ -10,7 +10,7 @@ namespace Magic.GlobalIllumination;
 /// It holds this frame's light, with its variance in alpha, and last frame's, which this frame's blends with while it
 /// holds the view. It keeps two and swaps them every frame.
 /// </remarks>
-internal static class TracedBlend
+public static class TracedBlend
 {
     /// <summary>
     /// Asks for the textures under <paramref name="names"/>: the even frames write the first and the odd the second.

@@ -107,6 +107,11 @@ void ResolveOpaque<M : IMaterial>(FrameConstants frame, uint2 pixel)
         inputs.uv = uv.uv;
         inputs.uvDdx = uv.perTexelX * (footprint / atlasTexel);
         inputs.uvDdy = uv.perTexelY * (footprint / atlasTexel);
+
+        // Half the model's radius on screen where it turns into its impostor, so a ray from the impostor's surface
+        // starts outside the leaves of the model that rays see in its place, rather than among them, where it would
+        // shadow itself in squares that flicker.
+        lift = 8.0 * footprint; // PROTO
     }
     else
     {

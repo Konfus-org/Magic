@@ -126,6 +126,53 @@ second. A gauge shows its last value.
 - A setting marked `(restarts)` applies when you click its button. This restarts the run.
 - **Save** keeps the settings for this user and project.
 
+## Reference views
+
+A reference view is a fixed camera in a sample project, with hours and named points, where Magic's light is measured
+against a render of the same scene in Blender Cycles. The views are in `tools/Scripts/ReferenceViews.json`.
+`tools/Reference/BuildScene.py` builds the Cycles scene from the files Magic loads: the domain's prefabs, their models,
+materials and textures, the lights, the sky and the sun at the hour, and the camera.
+
+To compare Magic's light with the reference:
+
+1. Install Blender 5.3 or later. The tool looks for it at the Steam path in `CompareReference.ps1`; give another path
+   with `-Blender`.
+2. Run `tools/Scripts/CompareReference.ps1 -View cabin-wall -Hour 12`. Without `-View`, it runs every view. Without
+   `-Hour`, it runs each of the view's hours. `-Samples` sets Cycles' samples a pixel. One view at one hour takes 3 to
+   6 minutes.
+3. Read the paths it prints: Magic's picture, the Cycles EXR, the ratio map and the split picture, all in
+   `Screenshots/Reference/<view>-<hour>` beside Magic. The split picture has Magic's light on the left and the
+   reference on the right, at one exposure taken from Magic's light. Show it to a person who judges the look.
+4. Read the table: each point's name, its place as a part of the picture's width and height, Magic's light over the
+   reference's, and the colour of each as red over green and blue over green.
+
+How to read the ratio map:
+
+- It compares the light before the exposure, in nits, so the exposure does not change it.
+- Grey is the same light. Red is brighter than the reference, blue is darker. Full red is 8 times or more, full blue
+  an eighth or less.
+- A thin line along an edge is the jitter of Magic's picture, not a fault.
+
+The Cycles scene leaves out these, so a difference there can come from the tool:
+
+- A light's range: Cycles' lights reach to any distance.
+- The flicker of the fire and the lantern: Cycles uses their set intensity.
+- The sun's colour: the sun's light comes from Blender's sky, which colours it by its own air.
+- The leaves' alpha: Cycles draws the leaves as solid.
+- The planar texture coordinates that Magic gives a mesh without them.
+
+The tool sets the sun and the moon to their rotation at the hour, and removes their DayCycle for the run: a DayCycle
+set anew starts from the rotation its light has at that time.
+
+To add a view, add an entry to `ReferenceViews.json`: the project, the hours of a sun with a DayCycle, the camera's
+position, and its yaw and pitch in degrees. At a yaw of 0, the camera looks along +Z. The vertical field of view is
+always 60 degrees.
+
+To add a point, add its name and its world position. The tool projects it through the view's camera on each run, so
+the point stays on the same surface at any resolution. A point can also be a place in the picture, an `x` and a `y`
+from 0 to 1, across and down. To find the world position of a pixel, take a screenshot with the `Depth` debug view and
+`Debug.DepthViewFar` set, and undo the depth's log scale.
+
 ## Measuring
 
 Core and each gem publish their measurements on their own `System.Diagnostics.Metrics` meter.

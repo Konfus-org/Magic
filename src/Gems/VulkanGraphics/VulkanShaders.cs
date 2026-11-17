@@ -1,4 +1,7 @@
 using System.Collections.Immutable;
+using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Magic.Debugging;
 using Magic.Graphics;
 using Magic.Threading;
@@ -28,18 +31,35 @@ internal sealed class VulkanShader
 /// </summary>
 /// <remarks>
 /// Each shader compiles for Vulkan on its first ask, and a compute shader is then built into its pipeline. Each draw
-/// pipeline is built on its first draw, with its shaders and its target formats. Call it only on the render thread.
-/// The compiles run on a worker.
+/// pipeline is built on its first draw, with its shaders and its target formats. A draw or bound shader's pipeline
+/// that no pass asks for in <see cref="UnusedFrames"/> frames is destroyed. Call it only on the render thread. The
+/// compiles run on a worker.
 /// </remarks>
-internal sealed class VulkanShaders(IShaderCompiler compiler, VulkanResources resources, Threads threads) : IDisposable
+internal sealed class VulkanShaders(
+    IShaderCompiler compiler,
+    VulkanResources resources,
+    VulkanFrames frames,
+    Threads threads
+) : IDisposable
 {
+    /// <summary>
+    /// How many frames in a row a draw or bound shader's pipeline may go unasked for before it is destroyed: about ten
+    /// seconds at 60 frames a second, so a pass that pauses does not build its pipeline again.
+    /// </summary>
+    private const int UnusedFrames = 600;
+
     private readonly Dictionary<ShaderEntry, VulkanShader> _shaders = [];
 
     /// <summary>
     /// The draw pipelines, by their shaders and the formats of the targets they draw into, a colour target's a byte
     /// each; none for one that did not build.
     /// </summary>
-    private readonly Dictionary<(DrawShaders Shaders, ulong Colors, GpuFormat Depth), GpuPipeline> _drawPipelines = [];
+    private readonly Dictionary<(DrawShaders Shaders, ulong Colors, GpuFormat Depth), Asked> _drawPipelines = [];
+
+    /// <summary>
+    /// The bound shaders' pipelines, by their SPIR-V; none for one that failed.
+    /// </summary>
+    private readonly Dictionary<ReadOnlyMemory<byte>, Asked> _boundPipelines = [];
 
     /// <summary>
     /// Ends the compiles still running when the provider goes, so nothing is built for a device that is gone.
@@ -61,6 +81,24 @@ internal sealed class VulkanShaders(IShaderCompiler compiler, VulkanResources re
         GetOrStart(entry) is { State: GpuState.Ready } shader ? shader : null;
 
     /// <summary>
+    /// Gets the pipeline of <paramref name="shader"/>, built on the first ask; none after a failed build.
+    /// </summary>
+    public GpuPipeline Get(in BoundShader shader)
+    {
+        if (TryAsk(_boundPipelines, shader.Spirv) is { } kept)
+            return kept;
+
+        Result<GpuPipeline> made = resources.CreatePipeline(shader);
+        if (!made.Ok)
+            Log.Error($"The passes that run {shader.EntryPoint} are left out: {made.Error}");
+
+        GpuPipeline pipeline = made.Ok ? made.Value : GpuPipeline.None;
+        _boundPipelines[shader.Spirv] = new Asked(pipeline, frames.Current.Serial);
+
+        return pipeline;
+    }
+
+    /// <summary>
     /// Gets the pipeline that <paramref name="shaders"/> draw into <paramref name="targets"/> with, and builds it on
     /// the first ask after both shaders are compiled.
     /// </summary>
@@ -79,7 +117,7 @@ internal sealed class VulkanShaders(IShaderCompiler compiler, VulkanResources re
         }
 
         GpuFormat depth = targets.Depth is { } target ? GetFormat(target) : GpuFormat.Unknown;
-        if (_drawPipelines.TryGetValue((shaders, colors, depth), out GpuPipeline built))
+        if (TryAsk(_drawPipelines, (shaders, colors, depth)) is { } built)
             return built;
 
         ImmutableArray<GpuFormat>.Builder formats = ImmutableArray.CreateBuilder<GpuFormat>(targets.Colors.Length);
@@ -111,9 +149,59 @@ internal sealed class VulkanShaders(IShaderCompiler compiler, VulkanResources re
         }
 
         GpuPipeline pipeline = made.Ok ? made.Value : GpuPipeline.None;
-        _drawPipelines[(shaders, colors, depth)] = pipeline;
+        _drawPipelines[(shaders, colors, depth)] = new Asked(pipeline, frames.Current.Serial);
 
         return pipeline;
+    }
+
+    /// <summary>
+    /// Destroys each draw and bound shader's pipeline that no pass asked for in the last <see cref="UnusedFrames"/>
+    /// frames, after the frames in flight are done with it.
+    /// </summary>
+    public void DestroyUnasked()
+    {
+        int destroyed = DestroyUnasked(_drawPipelines) + DestroyUnasked(_boundPipelines);
+        if (destroyed > 0)
+        {
+            int live = resources.Pipelines.Items.Count();
+            Log.Info($"Destroyed {destroyed} pipelines unasked for {UnusedFrames} frames; {live} live.");
+        }
+    }
+
+    private int DestroyUnasked<TKey>(Dictionary<TKey, Asked> pipelines)
+        where TKey : notnull
+    {
+        int destroyed = 0;
+        ulong frame = frames.Current.Serial;
+        foreach ((TKey key, Asked entry) in pipelines)
+        {
+            if (frame - entry.Frame < UnusedFrames)
+                continue;
+
+            pipelines.Remove(key);
+            if (resources.Pipelines.Remove(entry.Pipeline.Id) is not { } removed)
+                continue;
+
+            frames.Current.Trash.Add(new(entry.Pipeline.Id, removed));
+            destroyed++;
+        }
+
+        return destroyed;
+    }
+
+    /// <summary>
+    /// Gets the pipeline kept under <paramref name="key"/> and marks it as asked for in this frame; null when none is.
+    /// </summary>
+    private GpuPipeline? TryAsk<TKey>(Dictionary<TKey, Asked> pipelines, TKey key)
+        where TKey : notnull
+    {
+        ref Asked kept = ref CollectionsMarshal.GetValueRefOrNullRef(pipelines, key);
+        if (Unsafe.IsNullRef(ref kept))
+            return null;
+
+        kept.Frame = frames.Current.Serial;
+
+        return kept.Pipeline;
     }
 
     private GpuFormat GetFormat(in GpuTarget target) =>
@@ -192,4 +280,9 @@ internal sealed class VulkanShaders(IShaderCompiler compiler, VulkanResources re
 
         return Result.Success();
     }
+
+    /// <summary>
+    /// A pipeline, and the frame that last asked for it.
+    /// </summary>
+    private record struct Asked(GpuPipeline Pipeline, ulong Frame);
 }

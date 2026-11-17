@@ -2,6 +2,8 @@
 // the same from one run to the next and from one GPU to another.
 module "Core/Random";
 
+import Core.Heap;
+
 // A well-mixed word from one (O'Neill's PCG, the 32-bit output permutation).
 public uint GetHash(uint seed)
 {
@@ -33,4 +35,19 @@ public float3 GetRandom(uint2 pixel, uint frame, uint sample)
 {
     uint3 hash = GetHash(uint3(pixel, frame * 65536u + sample));
     return float3(ToUnitFloat(hash.x), ToUnitFloat(hash.y), ToUnitFloat(hash.z));
+}
+
+// The side of the blue-noise tile in pixels, the twin of C#'s BlueNoise.Size.
+public static const uint BlueNoiseSize = 64u;
+
+// Two numbers in [0, 1) for a pixel, a frame and a sample index, from a buffer of blue noise, a float a pixel of its
+// tile row by row: the tile read at the pixel and half a tile across, shifted by the sample, so neighbours differ as
+// much as they can, and each moved by the frame along the R2 sequence, so a pixel's frames in a row spread evenly.
+public float2 GetBlueNoise(uint noise, uint2 pixel, uint frame, uint sample)
+{
+    ArrayRef<float> values = { noise };
+    uint2 first = (pixel + sample * uint2(17u, 41u)) % BlueNoiseSize;
+    uint2 second = (first + BlueNoiseSize / 2u) % BlueNoiseSize;
+    float2 tile = float2(values[first.y * BlueNoiseSize + first.x], values[second.y * BlueNoiseSize + second.x]);
+    return frac(tile + float(frame % 4096u) * float2(0.7548776662, 0.5698402910));
 }

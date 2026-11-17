@@ -260,12 +260,15 @@ uint GetDemandBin(FrameConstants frame, GpuInstance instance)
     return min(uint(log2(max(distance, 1.0)) * 4.0), DemandBins - 1u);
 }
 
-// The tests on one cluster: the frustum, the cut, the cone and the depth pyramid, last frame's on the first pass and
-// this frame's on the retest. The retest list holds entries only when there was a pyramid to test against.
+// The tests on one cluster: its slot, the frustum, the cut, the cone and the depth pyramid, last frame's on the first
+// pass and this frame's on the retest. The retest list holds entries only when there was a pyramid to test against.
 ClusterOutcome GetClusterOutcome(FrameConstants frame, GpuInstance instance, uint clusterIndex)
 {
     ClusterConstants clusters = GetClusters();
     GpuCluster cluster = LoadCluster(clusters.clusters, clusterIndex);
+    if (GetMaterial(instance, cluster.materialSlot) == EmptySlot)
+        return ClusterOutcome.Culled;
+
     float scale = GetMaxScale(instance.world);
     float3 center = ToCameraRelative(frame, ToWorld(instance.world, cluster.center));
     float radius = cluster.radius * scale;

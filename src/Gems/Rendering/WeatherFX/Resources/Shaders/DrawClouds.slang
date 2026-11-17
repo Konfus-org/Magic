@@ -98,8 +98,8 @@ void DrawClouds(uint3 thread : SV_DispatchThreadID)
         float3 toSun = lights.sunDirection.xyz;
         float cosine = dot(direction, toSun);
         float phase = lerp(GetAirPhase(0.8, cosine), GetAirPhase(-0.3, cosine), 0.3);
-        float3 sun = lights.sunIlluminance.rgb * phase;
-        float3 sky = GetOpenSkyRadiance(lights);
+        float3 sun = GetAirSunIlluminance(lights) * phase;
+        float3 sky = GetAirSkyRadiance(lights);
         float3 lit = float3(0.0);
         float through = 1.0;
         for (uint i = 0u; i < Steps && through > 0.01; i++)

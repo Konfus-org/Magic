@@ -2,10 +2,13 @@
     "entities": [
         {"name": "Spawn", "tags": ["spawn"], "components": {"Transform": {"position": {"x": -3074.1, "y": 1151.45, "z": -217.2}, "rotation": {"x": 0, "y": -0.5373, "z": 0, "w": 0.84339}}}},
         {"name": "Sky", "components": {"Sky": {"material": {"id": 4569236087865836549}}}},
-        // The sun rises and sets 30 degrees to the hearth side of the door wall's normal, the cabin's -Z, so that
-        // from hour 15 to hour 17 it shines into the room through the doorway and the door wall's windows, and the open
-        // door panel, which stands out from that wall, throws a broad shadow on the wall and the doorstep.
-        {"name": "Sun", "tags": ["sun"], "components": {"Transform": {"rotation": {"x": 0, "y": 0.67559, "z": 0, "w": 0.73728}}, "DirectionalLight": {"mode": "sun", "color": {"r": 1, "g": 0.96, "b": 0.9}, "intensity": 120000}, "ScriptContainer": [{"id": 100421, "hour": 15, "hoursPerMinute": 1}]}},
+        // The sun faces west along the door wall, so at noon it stands south, on the door wall's normal, the cabin's -Z:
+        // through the middle of the day it shines into the room through the doorway and the door wall's window, and the
+        // open door panel, which stands out from that wall, throws a shadow on the wall and the doorstep.
+        {"name": "Sun", "tags": ["sun"], "components": {"Transform": {"rotation": {"x": 0, "y": 0.9763, "z": 0, "w": -0.21644}}, "DirectionalLight": {"mode": "sun", "color": {"r": 1, "g": 0.96, "b": 0.9}, "intensity": 120000}, "ScriptContainer": [{"id": 100421, "hour": 15, "hoursPerMinute": 1}]}},
+        // The full moon goes the sun's path 12 hours behind it, so it stands opposite the sun and is up while the sun is
+        // down. Its hour and its speed keep it there: a change to the sun's needs the same change here.
+        {"name": "Moon", "tags": ["moon"], "components": {"Transform": {"rotation": {"x": 0, "y": 0.9763, "z": 0, "w": -0.21644}}, "DirectionalLight": {"mode": "moon", "color": {"r": 0.75, "g": 0.85, "b": 1}, "intensity": 0.3}, "ScriptContainer": [{"id": 100421, "hour": 3, "hoursPerMinute": 1}]}},
         {"name": "Terrain", "components": {"Transform": {}, "Renderer": {"model": {"id": 300001}, "materials": [{"id": 300011}]}}},
         {"name": "Cabin", "prefab": {"id": 300091}, "components": {"Transform": {"position": {"x": -3074.1, "y": 1149.4, "z": -217.2}, "rotation": {"x": 0, "y": -0.5373, "z": 0, "w": 0.84339}}}},
         {"prefab": {"id": 300021}, "components": {"Transform": {"position": {"x": -3085.824, "y": 1149.027, "z": -245.062}, "rotation": {"x": 0, "y": 0.51473, "z": 0, "w": 0.85735}, "scale": {"x": 0.988, "y": 0.988, "z": 0.988}}}},

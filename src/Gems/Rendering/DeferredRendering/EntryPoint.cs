@@ -2,6 +2,7 @@ using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Events;
+using Magic.Files;
 using Magic.Graphics;
 using Magic.Input;
 using Magic.Projects;
@@ -24,6 +25,7 @@ public sealed class EntryPoint(
     Worlds.World world,
     Threads threads,
     EventCoordinator events,
+    IFileSystem files,
     IDebugUI? debugUI = null,
     IInput? input = null
 ) : IGem, IDisposable
@@ -35,7 +37,7 @@ public sealed class EntryPoint(
     /// </summary>
     public DeferredRenderingSettings Settings { get; } = settings;
 
-    public Renderer Renderer { get; } = new(settings, shaders, gpu, assets, ecs, world, threads, events);
+    public Renderer Renderer { get; } = new(settings, shaders, gpu, assets, ecs, world, threads, events, files);
 
     public void Dispose() => Renderer.Dispose();
 

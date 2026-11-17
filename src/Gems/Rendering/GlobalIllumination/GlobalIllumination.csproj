@@ -2,12 +2,58 @@
   <!-- A gem: Magic loads it from Gems/GlobalIllumination/GlobalIllumination.dll when a project lists GlobalIllumination. -->
   <PropertyGroup>
     <!-- Shown beside the gem as Magic starts it. -->
-    <Description>Lights the view's surfaces indirectly on a GPU that traces rays: a probe grid, traced diffuse light and traced reflections.</Description>
+    <Description>Lights the view's surfaces indirectly on a GPU that traces rays: a probe grid and traced diffuse light.</Description>
     <Version>1.0.0</Version>
     <Authors>Konfus</Authors>
     <!-- Copies the gem's own NuGet dependencies next to it, where its load context finds them. -->
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <!-- NRD's API is a C API over pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+  <!-- NVIDIA's denoiser, NRD: a C API declared in C++ headers, with its compute shaders built into it as SPIR-V and
+       nothing for DirectX. Its quad intrinsics are off, as they need a Vulkan extension the device does not ask for. Its
+       normal encoding is R10G10B10A2 and its roughness linear, as the trace packs them with its shader front end. It
+       puts its library beside its source unless told where, so it is told its build folder. Its API is bound in a
+       namespace of its own, as names such as Result and Format are Magic's too. -->
+  <ItemGroup>
+    <NativeLibrary
+      Include="NRD"
+      Repository="https://github.com/NVIDIA-RTX/NRD"
+      Tag="v4.18.0"
+      CMakeOptions="-DNRD_EMBEDS_DXIL_SHADERS=OFF;-DNRD_EMBEDS_DXBC_SHADERS=OFF;-DNRD_SUPPORTS_QUAD_INTRINSICS=OFF;
+                    -DNRD_NORMAL_ENCODING=2;-DNRD_ROUGHNESS_ENCODING=1;
+                    -DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$(MagicNativeLibs)NRD/build/bin;-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=$(MagicNativeLibs)NRD/build/bin"
+      CMakeTarget="NRD"
+      Headers="Include/NRD.h"
+      IncludePath="Include"
+      Language="c++"
+      Namespace="Magic.GlobalIllumination.Nrd"
+      Class="NRD"
+    />
+  </ItemGroup>
+  <!-- NRD's shader front end, NRD.hlsli with its NRDConfig.hlsli put in place of its include, written beside the
+       gem's shaders as the module Nrd, which a shader imports to pack NRD's inputs as NRD reads them. Its largest
+       float, 3.40282347e+38, rounds past a float's largest, which Slang warns of and so fails; 3.4028234e+38 is the
+       same float. -->
+  <Target Name="WriteNrdShaderModule" AfterTargets="PrepareNativeLibraries" Condition="'$(DesignTimeBuild)' != 'true'">
+    <PropertyGroup>
+      <_NrdShaders>$(MagicNativeLibs)NRD/source/Shaders/</_NrdShaders>
+      <_NrdConfig>$([System.IO.File]::ReadAllText('$(_NrdShaders)NRDConfig.hlsli'))</_NrdConfig>
+      <_NrdModule>$([System.IO.File]::ReadAllText('$(_NrdShaders)NRD.hlsli').Replace('#include "NRDConfig.hlsli"', '$(_NrdConfig)').Replace('3.40282347e+38', '3.4028234e+38'))</_NrdModule>
+    </PropertyGroup>
+    <WriteLinesToFile
+      File="$(MagicResources)/Shaders/Nrd.slang"
+      Lines="// Written by the build from NRD's NRD.hlsli and NRDConfig.hlsli. Do not edit.;$([MSBuild]::Escape('$(_NrdModule)'))"
+      Overwrite="true"
+      WriteOnlyWhenDifferent="true"
+    />
+    <WriteLinesToFile
+      File="$(MagicResources)/Shaders/Nrd.slang.meta"
+      Lines="{;    &quot;id&quot;: 1700000000000943,;    &quot;type&quot;: &quot;Shader&quot;;}"
+      Overwrite="true"
+      WriteOnlyWhenDifferent="true"
+    />
+  </Target>
   <ItemGroup>
     <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its interfaces, and
          the renderer a project lists beside it, whose view it lights. -->
