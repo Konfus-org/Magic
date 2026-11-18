@@ -16,6 +16,13 @@ public interface IFileSystem
 
     bool FileExists(string path);
     bool DirectoryExists(string path);
+
+    /// <summary>When the file at <paramref name="path"/> was last written, in UTC.</summary>
+    Result<DateTime> GetLastWriteTime(string path);
+
+    /// <summary>Sets when the file at <paramref name="path"/> was last written to now, and leaves what it holds.</summary>
+    Result Touch(string path);
+
     Result CreateDirectory(string path);
     Result<string[]> EnumerateFiles(string path, string searchPattern, bool recursive);
     Result<string[]> EnumerateDirectories(string path);

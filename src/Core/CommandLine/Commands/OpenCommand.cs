@@ -51,6 +51,13 @@ internal static class OpenCommand
                 return;
             }
 
+            // The user's folder of a project has the project's name, and the user's caches are in the one named Cache.
+            if (read.Value.Name.Equals("Cache", StringComparison.OrdinalIgnoreCase))
+            {
+                Log.Error($"The project {path} did not open: a project cannot have the name {read.Value.Name}.");
+                return;
+            }
+
             app.Project = read.Value with { Path = path };
         }
 

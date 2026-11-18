@@ -164,6 +164,7 @@ internal static class Program
         Log.Info($"Running {project.Name} in {(app.IsHeadless ? "headless" : "GUI")} mode.");
 
         app.StartRun();
+        Task.Run(caches.Sweep).FireAndForget();
 
         // The code of the run, which outlives the gems and the project's code that use it.
         using Assemblies assemblies = new(files);

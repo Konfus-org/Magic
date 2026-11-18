@@ -39,6 +39,11 @@ public sealed class Caches
     /// </summary>
     private const int HeaderSize = sizeof(ulong) + sizeof(int);
 
+    /// <summary>
+    /// How long an entry that no run reads or writes is kept on this machine.
+    /// </summary>
+    private static readonly TimeSpan _keptUnused = TimeSpan.FromDays(30);
+
     private readonly IFileSystem _files;
 
     private readonly App _app;
@@ -54,13 +59,13 @@ public sealed class Caches
     /// This user's cache folder for the project, a folder per type under it: read after the project's, and the one
     /// written.
     /// </summary>
-    private string UserCacheFolder =>
-        _files.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Magic",
-            "Cache",
-            Project.Name
-        );
+    private string UserCacheFolder => _files.Combine(UserCacheRoot, Project.Name);
+
+    /// <summary>
+    /// This user's cache folders of every project, one per project.
+    /// </summary>
+    private string UserCacheRoot =>
+        _files.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Magic", "Cache");
 
     /// <summary>
     /// The project this run's caches are for, as it was when first asked: another opened as the run ends is the next
@@ -84,9 +89,64 @@ public sealed class Caches
         Result<T> fromProject = await ReadEntryAsync(GetEntryFile<T>(projectCache, key), version, cache, cancel)
             .ConfigureAwait(false);
 
-        return fromProject.Ok
-            ? fromProject
-            : await ReadEntryAsync(GetEntryFile<T>(UserCacheFolder, key), version, cache, cancel).ConfigureAwait(false);
+        if (fromProject.Ok)
+            return fromProject;
+
+        // A hit marks the entry as used, so the sweep keeps it. When the mark fails, the entry is only made again
+        // sooner.
+        string file = GetEntryFile<T>(UserCacheFolder, key);
+        Result<T> fromUser = await ReadEntryAsync(file, version, cache, cancel).ConfigureAwait(false);
+        if (fromUser.Ok)
+            _ = _files.Touch(file);
+
+        return fromUser;
+    }
+
+    /// <summary>
+    /// Deletes each entry in this user's cache folders that no run read or wrote for 30 days, for every project, then
+    /// each folder that holds no entry.
+    /// </summary>
+    /// <remarks>
+    /// A project that is gone, a type that nothing caches now and an asset that is deleted free their space this way.
+    /// The cache folder a project brings with it is never swept. An entry that another run reads as it goes is only
+    /// made again. Any thread.
+    /// </remarks>
+    public void Sweep()
+    {
+        if (!_files.DirectoryExists(UserCacheRoot))
+            return;
+
+        Result<string[]> entries = _files.EnumerateFiles(UserCacheRoot, "*", recursive: true);
+        if (!entries.Ok)
+        {
+            Log.Warn($"{UserCacheRoot} could not be swept: {entries.Error}");
+            return;
+        }
+
+        DateTime usedSince = DateTime.UtcNow - _keptUnused;
+        foreach (string entry in entries.Value)
+        {
+            if (_files.GetLastWriteTime(entry) is { Ok: true, Value: { } written } && written < usedSince)
+                _ = _files.Delete(entry);
+        }
+
+        // Each type folder, then its project's, that holds nothing now: the disk refuses to delete a folder that holds
+        // something, such as an entry that a run writes as the sweep goes.
+        if (_files.EnumerateDirectories(UserCacheRoot) is not { Ok: true, Value: { } projects })
+            return;
+
+        foreach (string project in projects)
+        {
+            if (_files.EnumerateDirectories(project) is { Ok: true, Value: { } types })
+            {
+                foreach (string type in types)
+                {
+                    _ = _files.Delete(type);
+                }
+            }
+
+            _ = _files.Delete(project);
+        }
     }
 
     /// <summary>

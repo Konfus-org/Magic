@@ -22,6 +22,16 @@ internal sealed class FileSystem : IFileSystem
 
     public bool DirectoryExists(string path) => Directory.Exists(path);
 
+    // System.IO gives 1601 for a missing file, not an error.
+    public Result<DateTime> GetLastWriteTime(string path) =>
+        Run(() =>
+            File.Exists(path)
+                ? File.GetLastWriteTimeUtc(path)
+                : throw new FileNotFoundException($"{path} does not exist.", path)
+        );
+
+    public Result Touch(string path) => Run(() => File.SetLastWriteTimeUtc(path, DateTime.UtcNow));
+
     public Result CreateDirectory(string path) =>
         Run(() =>
         {
