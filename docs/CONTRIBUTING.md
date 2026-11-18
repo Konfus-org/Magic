@@ -15,7 +15,7 @@ Follow the [Code of Conduct](CODE_OF_CONDUCT.md) in every space of the project.
 9. Open a pull request from your fork into `dev`.
 
 Code follows the [Code Standards](CODE_STANDARDS.md). Tests follow [Tests](TESTS.md). Docs follow the
-[Documentation Rules](../AGENTS.md#documentation-rules).
+[Documentation Rules](skills/PROJECT.md#documentation-rules).
 
 ## Pull requests
 

@@ -1,6 +1,6 @@
 ---
 name: retro
-description: Turns what went wrong in the workflow into a few small edits to the agent rules or a skill. Use it on your own, without being asked, when a swarm finishes, a slice needed more than two rounds of review, the same fix failed twice, or the user corrects how you work. Also use it when the user asks for a retro.
+description: Turns what went wrong in the workflow into a few small edits to AGENTS.md, PROJECT.md or a skill. Use it on your own, without being asked, when a swarm finishes, a slice needed more than two rounds of review, the same fix failed twice, or the user corrects how you work. Also use it when the user asks for a retro.
 ---
 
 # Retro
@@ -9,7 +9,7 @@ description: Turns what went wrong in the workflow into a few small edits to the
    - What the user asked for, and what you built.
    - Where the turns went.
    - What the user corrected.
-   - What the reviewer found more than one time.
+   - What QA found more than one time.
 2. **Find the cause in the docs.** Find the rule that let it happen. The rule is missing, not clear, hidden, or costs
    more than it saves. Delete or sharpen a rule before you add one.
 3. **Propose three edits or fewer.** For each edit, give the file, the lines before and after, and what the edit

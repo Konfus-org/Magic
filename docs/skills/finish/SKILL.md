@@ -1,6 +1,6 @@
 ---
 name: finish
-description: Reviews, validates, shows and merges a branch into the main checkout's branch, one time. The branch is a single slice, or the root branch of an effort when its last slice is in. Use it on your own, without being asked, as soon as the code of a single slice is written, when the last slice of an effort merges into its root, and again after you address the comments of the user's review. A slice of an effort does not use it.
+description: Cleans up, gets QA for, validates, shows and merges a branch into the main checkout's branch, one time. The branch is a single slice, or the root branch of an effort when its last slice is in. Use it on your own, without being asked, as soon as the code of a single slice is written, when the last slice of an effort merges into its root, and again after you address the comments of the user's review. A slice of an effort does not use it.
 ---
 
 # Finish
@@ -8,15 +8,16 @@ description: Reviews, validates, shows and merges a branch into the main checkou
 The commands and rules are in [PROJECT.md](../PROJECT.md). The branches and merges rule is a hard rule: this skill
 merges into the main checkout's branch only at step 8, one time, after the user's yes.
 
-The validate and stamp command is the slow step. Run it one time, after the review, when the code no longer changes.
+The validate and stamp command is the slow step. Run it one time, after QA, when the code no longer changes.
 Run it again only after an edit or a pull. Do not run other checks between the steps.
 
 This diagram shows the flow from the pull to the merge.
 
 ```mermaid
 flowchart TD
-    Pull[Pull the main checkout's branch] --> Review[Review in a fresh context] --> Validate[Validate one time]
-    Validate --> Summary --> UserReview[The user's review]
+    Pull[Pull the main checkout's branch] --> Clean[Cleanup branch pass] --> QA[QA in a fresh context]
+    QA -- REJECT, critical or high --> Fix[Fix at the cause] --> QA
+    QA -- PASS --> Validate[Validate one time] --> Summary --> UserReview[The user's review]
     UserReview -- comments --> Validate
     UserReview -- yes --> Merge[One merge] --> Next[Propose the next work]
 ```
@@ -25,15 +26,18 @@ flowchart TD
    Apply both changes (Branches and merges): each side's change holds in the result, deletions included. Build, then
    run the checks of each area that the two sides both changed. If the two changes cannot both stand, stop and ask
    the user.
-2. Get one review in a fresh context. Give the reviewer the worktree, the main checkout's branch and the slice, or the
-   briefs of the slices of a root branch. Use the reviewer in PROJECT.md. If there is none, use a new session or
-   subagent that follows the [review-slice skill](../review-slice/SKILL.md).
-   - Skip this step for a small branch: 50 changed lines or fewer, or a change at the lowest validation level. Do not
-     skip it when the branch changes a public API, a file format or a dependency.
-   - Fix each finding at its cause, and commit. If you do not fix a finding, give the evidence.
-   - Get a new review only when the fixes add more than about 100 lines.
-   - Run the reviewer in the foreground. A reviewer in the background records no review, and the merge is then
-     refused.
+2. Clean up, then get QA. Do both for each branch, also a small one or a change of docs alone. An agent hook refuses
+   the merge without a QA `PASS`.
+   1. Do the branch pass of the [cleanup skill](../cleanup/SKILL.md), and commit.
+   2. Get QA in a fresh context. Give it the worktree, the main checkout's branch and the slice, or the briefs of the
+      slices of a root branch. Use the QA in PROJECT.md. If there is none, use a new session or subagent that follows
+      the [qa skill](../qa/SKILL.md). Run it in the foreground: QA in the background records no verdict.
+   3. Fix each `REJECT:` line and each `critical` and `high` issue at its cause, and commit. Then get QA again, until
+      it gives `VERDICT: PASS`.
+   4. Fix the `medium` and `low` issues that are in the branch's scope. Give the others to the user in the summary,
+      with the evidence for each one that you do not fix. These fixes need no new QA, unless they add more than about
+      100 lines.
+   - In a swarm, the coordinator does not write code: it makes the cleanup branch pass and each fix a fix slice.
 3. Run the validate and stamp command at the level of the branch: for a root branch, the highest level of its slices.
    If a test fails, fix the cause. Do not make the test weaker, skip it or delete it.
 4. For a change at the visual level, open each screenshot that the command printed and examine it. If the change shows
@@ -56,7 +60,7 @@ flowchart TD
    user what to do.
 8. Approval in the user's review, or a yes in the chat, means merge. Do not ask again. If the yes is in the chat, stop
    the user's review. Then:
-   1. If the main checkout's branch moved, do step 1 and step 3 again. Do not get a new review. After a pull with no
+   1. If the main checkout's branch moved, do step 1 and step 3 again. Do not get QA again. After a pull with no
       conflict, the stamp command runs only the build.
    2. In the main checkout, run the final merge command one time. It makes one commit of the branch. Write a subject
       for all the work of the branch, and put its decisions in the body. Do not push.

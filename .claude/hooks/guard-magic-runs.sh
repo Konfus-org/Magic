@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # PreToolUse on shell commands: refuses a command that starts Magic other than through tools/Scripts/Run.ps1 or the
-# scripts that run it themselves, which name its window for the session (AGENTS.md, Commands). Magic's own commands
+# scripts that run it themselves, which name its window for the session (docs/skills/PROJECT.md, Commands). Magic's own commands
 # that open nothing, such as new and --help, pass. During another branch's profiling turn it also refuses a build or a
 # test run (tools/Scripts/Profiling.ps1). Pure text and file checks, because it runs before every shell command.
 input=$(cat)
@@ -97,7 +97,7 @@ for part in "${parts[@]}"; do
         [ -n "$turn" ] && deny "The profiling turn of $turn is running, and a build or a test run would disturb it. Build with tools/Scripts/Validate.ps1 -Only Build, which runs at idle priority and does not wait, or wait until the turn ends (tools/Scripts/Profiling.ps1 -Wait)."
     fi
     starts_magic "$part" || continue
-    reason="Start Magic only with tools/Scripts/Run.ps1, or Screenshot.ps1 and Validate.ps1, which name its window for this session (AGENTS.md, Commands). For example: tools/Scripts/Run.ps1 -Project samples/MountainCabin/MountainCabin.magic, or tools/Scripts/Run.ps1 -Headless -Commands 'wait loaded', 'exit'."
+    reason="Start Magic only with tools/Scripts/Run.ps1, or Screenshot.ps1 and Validate.ps1, which name its window for this session (docs/skills/PROJECT.md, Commands). For example: tools/Scripts/Run.ps1 -Project samples/MountainCabin/MountainCabin.magic, or tools/Scripts/Run.ps1 -Headless -Commands 'wait loaded', 'exit'."
     deny "$reason"
 done
 exit 0

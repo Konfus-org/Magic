@@ -1,6 +1,6 @@
 #!/bin/sh
 # Starts the commit's subject with type: , the type from the branch's name, which the staged files override or fill in
-# (AGENTS.md, Commits). A subject that already starts with one, or marks a fixup, is left as it is. Git runs it once
+# (docs/skills/PROJECT.md, Commits). A subject that already starts with one, or marks a fixup, is left as it is. Git runs it once
 # core.hooksPath names this folder. It never refuses a commit; commit-msg refuses one whose subject still lacks the
 # prefix.
 message=$1

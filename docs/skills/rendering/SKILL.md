@@ -48,7 +48,7 @@ Rules can pull two ways. When they do, the rule higher in this list wins.
    still fails a limit is not done ([The one command](#4-the-one-command)).
 5. **The look of the picture is the user's decision.** The user picks a strength, a radius, a tonemap, an exposure,
    a grade, a pass limit and a new dependency ([Decisions that are the user's](#10-decisions-that-are-the-users)).
-6. **Where this skill is stricter than [AGENTS.md](../../../AGENTS.md) or another skill, follow this skill, and say
+6. **Where this skill is stricter than [PROJECT.md](../PROJECT.md) or another skill, follow this skill, and say
    which rule is stricter.** This skill permits nothing that they forbid. It is stricter in three places: a leak is
    an automatic fail, a fix needs a run that proved its cause, and you never call a picture right before the user
    saw it.

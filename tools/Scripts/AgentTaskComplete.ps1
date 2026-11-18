@@ -4,7 +4,7 @@ What an agent runs on completing a task: tools/Scripts/Format.ps1 on the change,
 change can affect needs, then a stamp of the exact state it validated, which a git merge in the main checkout needs.
 
 .DESCRIPTION
--Change says what the change can affect, and so what must run to show it works (AGENTS.md, Finish). Docs is a change
+-Change says what the change can affect, and so what must run to show it works (docs/skills/PROJECT.md, Validation). Docs is a change
 to nothing Magic builds or loads, such as Markdown, comments, docstrings and the tool files in tools/Scripts, .claude
 and .githooks: nothing runs, no format among it, and the state is stamped at once. A change with another file is
 refused as Docs, unless every line it changes in a .cs or .slang file is a // comment. Code is any change to what runs, a refactor among them, as a rename can break a lookup by
@@ -27,7 +27,7 @@ its type.
 With -Hook it is a guard instead, for a tool hook that runs it before a command that merges, with the hook's input
 as JSON on stdin. A git merge in the main checkout passes when the merged branch's last commit has a stamp, so an edit
 after the run, or a pull of new work, needs a new run. Commits, and merges in a worktree, such as a slice into its
-root branch, pass (AGENTS.md, Branches and Merges). It exits 2 with the reason on stderr to refuse, which the agent is shown, and 0 to let the command run; any other
+root branch, pass (docs/skills/PROJECT.md, Branches and Merges). It exits 2 with the reason on stderr to refuse, which the agent is shown, and 0 to let the command run; any other
 command, or one it cannot place in a checkout, passes. Runs under pwsh and Windows PowerShell, from any directory.
 
 .PARAMETER Change
@@ -289,5 +289,5 @@ if ($LASTEXITCODE -ne 0 -or -not $tree) { exit 0 }
 
 if (Test-Path (Get-StampPath $top $tree)) { exit 0 }
 
-[Console]::Error.WriteLine("$branch as its last commit has it was never validated: run tools/Scripts/AgentTaskComplete.ps1 -Change with what the change can affect in the worktree of $branch, open any screenshot it prints and look at it, then try again (AGENTS.md, Branches and Merges). An edit after the run, or a pull of new work, needs a new run.")
+[Console]::Error.WriteLine("$branch as its last commit has it was never validated: run tools/Scripts/AgentTaskComplete.ps1 -Change with what the change can affect in the worktree of $branch, open any screenshot it prints and look at it, then try again (docs/skills/PROJECT.md, Branches and Merges). An edit after the run, or a pull of new work, needs a new run.")
 exit 2

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PreToolUse on file edits: refuses an edit to a file in Magic's main checkout (AGENTS.md, Worktrees). File reads
+# PreToolUse on file edits: refuses an edit to a file in Magic's main checkout (docs/skills/PROJECT.md, Worktrees). File reads
 # only, no git and no PowerShell, because it runs before every edit. MAGIC_ALLOW_MAIN_EDITS=1 turns the check off for a
 # session.
 input=$(cat)
@@ -41,6 +41,6 @@ if [ -d "$root/.git" ]; then
         project_root=${gitdir%%/.git/*}
     fi
     [ "${root,,}" = "${project_root,,}" ] || exit 0
-    deny "$path is in the main checkout, where agents never edit (AGENTS.md, Worktrees). Make the task's worktree first, for example: git worktree add ../Magic-worktrees/<type>/<feature> -b <type>/<feature>, then edit the file there. The user can allow main-checkout edits for a session by starting Claude Code with MAGIC_ALLOW_MAIN_EDITS=1."
+    deny "$path is in the main checkout, where agents never edit (docs/skills/PROJECT.md, Worktrees). Make the task's worktree first, for example: git worktree add ../Magic-worktrees/<type>/<feature> -b <type>/<feature>, then edit the file there. The user can allow main-checkout edits for a session by starting Claude Code with MAGIC_ALLOW_MAIN_EDITS=1."
 fi
 exit 0

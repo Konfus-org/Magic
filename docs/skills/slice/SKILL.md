@@ -50,7 +50,7 @@ flowchart TD
    Out of scope: <the next step that you will not do, by name>
 
    Works when: <one check: a command, a sample and what it shows, or a test name. For docs or comments alone: none>
-   /goal (only when it fits): /goal <end state> - shown by the validate and stamp command at <level> and the review
+   /goal (only when it fits): /goal <end state> - shown by the validate and stamp command at <level> and QA
    in a fresh context returning VERDICT: PASS - <what must not change> - or stop after <n> turns
    ```
 
@@ -58,18 +58,20 @@ flowchart TD
    when the slice needs decisions from the user. Give the reason in one sentence. Only the user can type the line.
 5. If the change is Small, or the slice is in a plan or a list that the user agreed to, write the brief in the chat.
    Do not wait.
-6. If not, agree on a plan with the user before the first edit:
-   1. Write the brief and the plan in one message. The plan is the path that you will take, and the alternatives if
-      there are any.
-   2. Ask only the questions whose answer changes the path, four or fewer.
-   3. Do not edit until the user agrees to the plan.
+6. If not, agree on a plan with the user before the first edit. In Claude Code, do this in plan mode:
+   1. Enter plan mode.
+   2. Ask all the questions whose answer changes the path together, four or fewer, with the multiple-choice prompt
+      of the tool.
+   3. Write the brief and the plan in the plan file. The plan is the path that you will take, and the alternatives
+      if there are any.
+   4. Exit plan mode for the user's yes. Do not edit until the user agrees to the plan.
 
    The user's yes is the approval to build all that the plan covers, up to the user's review. Do not propose, plan
    or ask again for a slice or a step that the plan covers. Ask again only when the work leaves the plan: a decision
    that is hard to reverse, or scope that the plan did not name. The yes does not cover the merge into the main
    checkout's branch. That merge waits for the user's review and a separate yes.
 
-   For a sweeping change, the plan is a proposal. In Claude Code, write it in plan mode. It gives:
+   For a sweeping change, the plan is a proposal. It gives:
    1. The method.
    2. The smallest version that can work, the alternatives, and why the selected one is the simplest.
    3. For a new thing, the libraries and tools that exist and that you examined.
@@ -85,5 +87,5 @@ flowchart TD
 8. When the slice is built:
    - For a single slice, use the [finish skill](../finish/SKILL.md).
    - For a slice of an effort, run its "Works when" check and commit on the root branch. Start the next approved
-     slice in the same worktree. When the last one is in, use the [finish skill](../finish/SKILL.md) on the root branch. Do not
-     merge into the main checkout's branch before that.
+     slice in the same worktree. When the last one is in, use the [finish skill](../finish/SKILL.md) on the root
+     branch. Do not merge into the main checkout's branch before that.

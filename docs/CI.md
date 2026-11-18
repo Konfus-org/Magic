@@ -9,7 +9,7 @@ start them by hand from the Actions tab. The workflows are in `.github/workflows
 | --- | --- |
 | Build | Runs the Build and Headless steps of `tools/Scripts/Validate.ps1` in `Release`, on Windows, Linux and macOS ([Tools](TOOLS.md#validateps1)) |
 | Test | Runs the Test step on Linux |
-| Commits | Makes sure that the subject of each commit starts with `type: ` ([Commits](../AGENTS.md#commits)) |
+| Commits | Makes sure that the subject of each commit starts with `type: ` ([Commits](skills/PROJECT.md#commits)) |
 | Docs | Makes sure that each link in the Markdown files resolves |
 | CodeQL | Runs the CodeQL analysis of GitHub on the C# code |
 

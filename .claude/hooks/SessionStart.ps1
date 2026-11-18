@@ -12,7 +12,7 @@ try {
     if ($checkout.IsWorktree) {
         $out.Add("- Worktree: $($checkout.Top). Merge target: $($checkout.Target).")
     } else {
-        $out.Add("- Main checkout, on $($checkout.Target). Edits here are refused: make a worktree before the first edit (AGENTS.md, Worktrees).")
+        $out.Add("- Main checkout, on $($checkout.Target). Edits here are refused: make a worktree before the first edit (docs/skills/PROJECT.md, Worktrees).")
     }
     # Ask for a tidy only when there is something to tidy: a worktree whose folder is gone, or one whose branch merged
     # into the merge target and that has no change that is not committed.
@@ -29,8 +29,8 @@ try {
         }
     }
     $out.Add('- A request starts when the user agrees to its brief and plan; a small change, or a slice of an agreed plan, starts after its brief (the slice skill). A new effort too big for one slice starts with the kickoff skill. A swarm runs only when the user asks for one, or at four or more slices that do not depend on each other (the parallelize skill).')
-    $out.Add('- Hard rule: an effort of more than one slice has one root branch; its slices go into it, and it merges into the main checkout''s branch one time, at the end, after the user''s yes (AGENTS.md, Branches and Merges).')
-    $out.Add('- A git merge in the main checkout needs AgentTaskComplete and one slice-reviewer review first; a branch of 50 lines or fewer, or a Docs change, needs no review. Commits are free.')
+    $out.Add('- Hard rule: an effort of more than one slice has one root branch; its slices go into it, and it merges into the main checkout''s branch one time, at the end, after the user''s yes (docs/skills/PROJECT.md, Branches and Merges).')
+    $out.Add('- A git merge in the main checkout needs AgentTaskComplete and a QA PASS from the qa subagent first, for each branch, after the cleanup branch pass. Commits are free.')
 
     if ($finished -gt 0) {
         $out.Insert(2, "- Tidy first: $finished finished worktree(s) (the tidy-worktrees skill).")

@@ -1,4 +1,4 @@
-# Every commit's subject starts with type: and has no scope (AGENTS.md, Commits). The repository's hook writes it where
+# Every commit's subject starts with type: and has no scope (docs/skills/PROJECT.md, Commits). The repository's hook writes it where
 # the commit is made; this checks what reached GitHub, every subject of a push or pull request, and names each one
 # without it.
 name: Commits

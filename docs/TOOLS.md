@@ -85,7 +85,7 @@ before you report it as a failure.
 
 ## AgentTaskComplete.ps1
 
-Runs `Format.ps1`, then the steps of `Validate.ps1` that the `-Change` level needs ([Commands](../AGENTS.md#commands)).
+Runs `Format.ps1`, then the steps of `Validate.ps1` that the `-Change` level needs ([Validation](skills/PROJECT.md#validation)).
 If the change touches only files in sample folders, Markdown aside, only those samples run.
 
 At the `Docs` level the script runs nothing and only stamps. It accepts Markdown, the files in
@@ -267,7 +267,7 @@ To add a rule:
 ## Git hooks
 
 Git runs the hooks in `.githooks/` when `core.hooksPath` names that folder. Run `git config core.hooksPath .githooks`
-once for each clone. `AgentTaskComplete.ps1` also sets it ([Commits](../AGENTS.md#commits)).
+once for each clone. `AgentTaskComplete.ps1` also sets it ([Commits](skills/PROJECT.md#commits)).
 
 - `prepare-commit-msg` starts the subject of a commit with `type: `, such as `feat: `. The type comes from the name of
   the branch. If all the staged files are Markdown, CI, build or test files, the type comes from them.

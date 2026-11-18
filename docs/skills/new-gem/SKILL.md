@@ -8,7 +8,7 @@ description: Adds a gem to Magic, from the template to a sample that runs it. Us
 1. **Make sure that it must be a gem.** A gem is a part that a project adds or replaces
    ([Code Standards](../../CODE_STANDARDS.md#gems-hooks-and-services)).
    - First, look for a gem or a Core service that does the job, or can do it after a small change.
-   - A new gem is a decision. Get the user's yes ([AGENTS.md](../../../AGENTS.md#decisions)).
+   - A new gem is a decision. Get the user's yes ([PROJECT.md](../PROJECT.md#decisions)).
    - Name the gem for its role.
 2. **Make the gem from the template.** From the repository root, run `Magic new gem <Name> -o src/Gems/<Name>`
    ([Templates](../../TOOLS.md#templates)). Only its csproj gives its `Description`, `Version` and `Authors`.
@@ -21,7 +21,7 @@ description: Adds a gem to Magic, from the template to a sample that runs it. Us
    Each part is a class with the name of the Core interface that it implements, such as `Importer` or `Renderer`. A
    C# binding to a C library follows the [native libraries](../../GEMS.md#native-libraries) rules.
 4. **Write its section** in [Gems](../../GEMS.md). Do not write a README. Say what a user of the gem must know, and
-   the services and assets that it uses, by role ([AGENTS.md](../../../AGENTS.md#documentation-rules)).
+   the services and assets that it uses, by role ([PROJECT.md](../PROJECT.md#documentation-rules)).
 5. **Run it.** Add it to the `.magic` file of a sample that shows it. Or make a sample for it:
    `Magic new project <Name> -o samples/<Name>`. Then validation runs it. A gem that draws is a `Visual` change. Any
    other gem is a `Code` change.

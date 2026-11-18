@@ -61,54 +61,19 @@ function Test-ThisRepository($checkout) {
     return (ConvertTo-Key $project) -eq (ConvertTo-Key $checkout.Common)
 }
 
-# The lines that a git diff --numstat adds and removes, binary files aside.
-function Measure-ChangedLines([string] $top, [string[]] $arguments) {
-    $lines = 0
-    foreach ($row in @(Invoke-Git $top $arguments)) {
-        $parts = ([string]$row) -split "`t"
-        if ($parts.Count -ge 2 -and $parts[0] -match '^\d+$' -and $parts[1] -match '^\d+$') {
-            $lines += [int]$parts[0] + [int]$parts[1]
-        }
-    }
-    return $lines
-}
-
-# The checkout's state as tools/Scripts/AgentTaskComplete.ps1 stamps it: the git tree of every file, tracked or new,
-# built in an index of its own. Also the lines changed against the merge base with the merge target.
-function Get-SliceState($checkout) {
-    $top = $checkout.Top
-    $index = Join-Path ([System.IO.Path]::GetTempPath()) ('MagicHook-' + [guid]::NewGuid() + '.index')
-    $own = Invoke-Git $top @('rev-parse', '--path-format=absolute', '--git-path', 'index')
-    if ($own -and (Test-Path -LiteralPath ([string]$own))) { Copy-Item -LiteralPath ([string]$own) $index }
-    $env:GIT_INDEX_FILE = $index
-    try {
-        $null = Invoke-Git $top @('add', '--all')
-        $tree = [string](Invoke-Git $top @('write-tree'))
-        $base = $null
-        $baseTree = $null
-        $lines = 0
-        if ($checkout.Target) { $base = Invoke-Git $top @('merge-base', 'HEAD', $checkout.Target) }
-        if ($base) {
-            $baseTree = [string](Invoke-Git $top @('rev-parse', "$base^{tree}"))
-            $lines = Measure-ChangedLines $top @('diff', '--cached', '--numstat', [string]$base)
-        }
-        return [pscustomobject]@{ Tree = $tree; BaseTree = $baseTree; Lines = $lines }
-    } finally {
-        Remove-Item env:GIT_INDEX_FILE -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $index -ErrorAction SilentlyContinue
-    }
-}
-
-function Get-ValidationStamp($checkout, [string] $tree) {
-    return Join-Path (Join-Path $checkout.Common 'agent-task-complete') $tree
-}
-
 # A branch's name as one file name, for the stamps kept per branch.
 function ConvertTo-BranchFileName([string] $branch) { return $branch -replace '[\\/:]', '__' }
 
-# A slice is reviewed once per branch. The stamp's first line is the slice's changed lines when it was reviewed.
+# The last QA verdict of a branch. The stamp's first line is the commit that QA checked, the rest the QA report.
 function Get-ReviewStamp($checkout, [string] $branch) {
     return Join-Path (Join-Path $checkout.Common 'agent-review') (ConvertTo-BranchFileName $branch)
+}
+
+# The verdict of a QA report: the word on its last line that starts with VERDICT:, or nothing.
+function Get-Verdict([string] $report) {
+    $found = [regex]::Matches($report, '(?m)^\s*VERDICT:\s*(PASS|FINDINGS)\b')
+    if ($found.Count -eq 0) { return $null }
+    return $found[$found.Count - 1].Groups[1].Value
 }
 
 # Whether the work of a branch, in its worktree $top, is in its merge target: a merge of the branch into the target

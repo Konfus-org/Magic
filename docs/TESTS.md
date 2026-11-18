@@ -21,7 +21,7 @@ Each tested project has one xunit test project in `tests/`:
 - The tests must pass on all supported operating systems. Make paths with `IFileSystem.Combine`. Do not write Windows
   paths, for example `C:\` or `\\`.
 
-> **Note:** An agent writes a new test only when the user asks for one ([Structure](../AGENTS.md#structure)).
+> **Note:** An agent writes a new test only when the user asks for one ([Structure](skills/PROJECT.md#structure)).
 
 ## What a test covers
 
