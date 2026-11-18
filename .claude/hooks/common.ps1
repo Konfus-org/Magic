@@ -122,5 +122,42 @@ function Read-Claim([string] $path) {
     return [pscustomobject]$claim
 }
 
-# Whether a claim's worktree still exists. One whose worktree is gone is stale, and the tidy-worktrees skill removes it.
-function Test-ClaimLive($claim) { return [bool]$claim.worktree -and (Test-Path -LiteralPath $claim.worktree) }
+# Whether the work of a branch, in its worktree $top, is in its merge target: the target holds the branch's last
+# commit and has moved on since, and the worktree has no change that is not committed. A branch with no commit of its
+# own, as its reflog shows, is a slice that just started, so it does not count.
+function Test-BranchMerged([string] $top, [string] $branch, [string] $target) {
+    if (-not $target -or $branch -eq $target) { return $false }
+    $merged = @(Invoke-Git $top @('branch', '--merged', $target, '--format=%(refname:short)'))
+    return $merged -contains $branch -and -not (Invoke-Git $top @('status', '--porcelain')) -and
+        [string](Invoke-Git $top @('rev-parse', $branch)) -ne [string](Invoke-Git $top @('rev-parse', $target)) -and
+        @(Invoke-Git $top @('reflog', 'show', '--format=%gs', "refs/heads/$branch")).Count -gt 1
+}
+
+# How long a claim blocks other sessions after the last sign of work in its worktree.
+$ClaimIdleDays = 3
+
+# Whether a worktree is idle: no commit, checkout or merge in it, as its HEAD log shows, and no write of its claim,
+# for $ClaimIdleDays days. The edit hook makes the same test on the same two files.
+function Test-WorktreeIdle([string] $top, [string] $claimPath) {
+    $log = Join-Path ([string](Invoke-Git $top @('rev-parse', '--path-format=absolute', '--git-dir'))) 'logs/HEAD'
+    $last = @($claimPath, $log) | Where-Object { Test-Path -LiteralPath $_ } |
+        ForEach-Object { (Get-Item -LiteralPath $_).LastWriteTimeUtc } | Sort-Object | Select-Object -Last 1
+    return $null -ne $last -and ([DateTime]::UtcNow - $last).TotalDays -ge $ClaimIdleDays
+}
+
+# The claims whose work is still open, each with its state: 'idle' for one that no longer blocks, otherwise 'live'.
+# Deletes each claim whose work is done: its worktree or its branch is gone, or its branch merged into its merge target.
+function Get-OpenClaims([string] $common) {
+    foreach ($file in @(Get-ChildItem -LiteralPath (Join-Path $common 'agent-claims') -File -ErrorAction SilentlyContinue)) {
+        $claim = Read-Claim $file.FullName
+        $checkout = if ($claim.worktree -and (Test-Path -LiteralPath $claim.worktree)) { Get-Checkout $claim.worktree }
+        if (-not $checkout -or
+            -not (Invoke-Git $checkout.Top @('rev-parse', '--verify', '--quiet', "refs/heads/$($claim.branch)")) -or
+            (Test-BranchMerged $checkout.Top $claim.branch $checkout.Target)) {
+            Remove-Item -LiteralPath $file.FullName -ErrorAction SilentlyContinue
+            continue
+        }
+        $state = if (Test-WorktreeIdle $checkout.Top $file.FullName) { 'idle' } else { 'live' }
+        $claim | Add-Member -NotePropertyName state -NotePropertyValue $state -PassThru
+    }
+}

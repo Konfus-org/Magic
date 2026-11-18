@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # PreToolUse on file edits: refuses an edit to a file in Magic's main checkout, and one inside another session's claim
-# that this worktree's own claim doesn't cover (AGENTS.md, Worktrees). Pure file reads, no git and no PowerShell,
+# that this worktree's own claim doesn't cover (AGENTS.md, Worktrees). File reads only, no git and no PowerShell,
 # because it runs before every edit. MAGIC_ALLOW_MAIN_EDITS=1 turns the main-checkout check off for a session.
 input=$(cat)
 path=$(printf '%s' "$input" | sed -n 's/.*"\(file_path\|notebook_path\)"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\2/p')
@@ -81,13 +81,22 @@ covers() {
     return $hit
 }
 
-# The worktree's own claim lets the edit through, even where another claim overlaps it with the user's yes.
+# Whether a file changed in the last 3 days.
+recent() {
+    [ -f "$1" ] && [ $(( $(date +%s) - $(stat -c %Y "$1") )) -lt 259200 ]
+}
+
+# The worktree's own claim lets the edit through, even where another claim overlaps it with the user's yes. A claim
+# whose worktree is gone no longer blocks, nor does an idle one: no write of the claim, and no commit, checkout or
+# merge in its worktree, as its HEAD log shows, for 3 days (common.ps1, Test-WorktreeIdle).
 own="$claims/${branch//[\/\\:]/__}"
 [ -f "$own" ] && covers "$own" && exit 0
 for claim in "$claims"/*; do
     [ -f "$claim" ] && [ "$claim" != "$own" ] || continue
     covers "$claim" || continue
     [ -d "$claim_worktree" ] || continue
+    their_gitdir=$(sed -n 's/^gitdir: *//p' "$claim_worktree/.git" 2>/dev/null)
+    recent "$claim" || recent "${their_gitdir//\\//}/logs/HEAD" || continue
     deny "$file is in the claim of $claim_branch ($claim_slice), another session's slice (AGENTS.md, Worktrees). Ask the user whether to wait for that work, narrow this slice, or go ahead. With their yes, add the path to this slice's claim with tools/Scripts/Claim.ps1 and edit again."
 done
 exit 0

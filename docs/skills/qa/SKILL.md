@@ -42,6 +42,3 @@ If the validate command formats a file, report it as an issue. Then restore the 
 8. Write one line for each issue, the most severe first:
    `ISSUE: <rank> | <slice> | <file:line> | <what goes wrong> | <how to see it> | <the fix you suggest>`
 9. End with `SLICE: <branch>  STATE: qa-done  CONTEXT: <percent>  NOTE: <the number of issues of each rank>`.
-
-When the coordinator resumes you with "Check these fixes:", check only those fixes and the code that they change.
-Report in the same way.

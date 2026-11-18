@@ -14,43 +14,35 @@ try {
     } else {
         $out.Add("- Main checkout, on $($checkout.Target). Edits here are refused: make a worktree before the first edit (AGENTS.md, Worktrees).")
     }
-    # Ask for a tidy only when there is something to tidy: a stale claim, a worktree whose folder is gone, or one whose
-    # branch merged into the merge target, which has moved on since. A branch with no commit of its own, as its reflog
-    # shows, is a slice that just started, so it does not count.
+    # Ask for a tidy only when there is something to tidy: a worktree whose folder is gone, or one whose branch merged
+    # into the merge target and that has no change that is not committed.
     $finished = 0
     if ($checkout.Target) {
-        $merged = @(Invoke-Git $checkout.Top @('branch', '--merged', $checkout.Target, '--format=%(refname:short)'))
-        $targetHead = [string](Invoke-Git $checkout.Top @('rev-parse', $checkout.Target))
         $path = $null
         foreach ($line in @(Invoke-Git $checkout.Top @('worktree', 'list', '--porcelain'))) {
             if ($line -like 'worktree *') { $path = $line.Substring(9) }
             if ($line -match '^branch refs/heads/(.+)$' -and $Matches[1] -ne $checkout.Target -and
                 (ConvertTo-Key $path) -ne (ConvertTo-Key $checkout.Top)) {
-                $branch = $Matches[1]
                 $gone = -not (Test-Path -LiteralPath $path)
-                $done = $merged -contains $branch -and
-                    [string](Invoke-Git $checkout.Top @('rev-parse', $branch)) -ne $targetHead -and
-                    @(Invoke-Git $checkout.Top @('reflog', 'show', '--format=%gs', "refs/heads/$branch")).Count -gt 1
-                if ($gone -or $done) { $finished++ }
+                if ($gone -or (Test-BranchMerged $path $Matches[1] $checkout.Target)) { $finished++ }
             }
         }
     }
-    $out.Add('- A clear request starts after a short brief (the slice skill); a new effort too big for one slice starts with the kickoff skill; a list of separate tasks, or a feature that splits into slices that can run side by side, runs as a swarm (the parallelize skill).')
-    $out.Add('- Hard rule: an effort of more than one slice has one root branch; its slices merge into it, and it merges into the main checkout''s branch one time, at the end, after the user''s yes (AGENTS.md, Branches and Merges).')
+    $out.Add('- A request starts when the user agrees to its brief and plan; a small change, or a slice of an agreed plan, starts after its brief (the slice skill). A new effort too big for one slice starts with the kickoff skill. A swarm runs only when the user asks for one, or at four or more slices that do not depend on each other (the parallelize skill).')
+    $out.Add('- Hard rule: an effort of more than one slice has one root branch; its slices go into it, and it merges into the main checkout''s branch one time, at the end, after the user''s yes (AGENTS.md, Branches and Merges).')
     $out.Add('- A git merge in the main checkout needs AgentTaskComplete and one slice-reviewer review first; a branch of 50 lines or fewer, or a Docs change, needs no review. Commits are free.')
 
-    # Every slice in progress, from tools/Scripts/Claim.ps1, so this session works around them.
-    $claims = @(Get-ChildItem -LiteralPath (Join-Path $checkout.Common 'agent-claims') -File -ErrorAction SilentlyContinue)
-    $staleCount = @($claims | Where-Object { -not (Test-ClaimLive (Read-Claim $_.FullName)) }).Count
-    if ($finished -gt 0 -or $staleCount -gt 0) {
-        $out.Insert(2, "- Tidy first: $finished finished worktree(s) and $staleCount stale claim(s) (the tidy-worktrees skill).")
+    if ($finished -gt 0) {
+        $out.Insert(2, "- Tidy first: $finished finished worktree(s) (the tidy-worktrees skill).")
     }
+    # Every slice in progress, from tools/Scripts/Claim.ps1, so this session works around them. A claim whose work is
+    # done is deleted here.
+    $claims = @(Get-OpenClaims $checkout.Common)
     if ($claims.Count -gt 0) {
         $out.Add('- Slices in progress and the paths each claims; never edit inside one without the user''s yes (AGENTS.md, Worktrees):')
-        foreach ($file in $claims) {
-            $claim = Read-Claim $file.FullName
-            $stale = if (Test-ClaimLive $claim) { '' } else { ' [stale: its worktree is gone]' }
-            $out.Add("  - $($claim.branch): $($claim.slice) ($($claim.scope -join ', '))$stale")
+        foreach ($claim in $claims) {
+            $idle = if ($claim.state -eq 'idle') { " [idle for $ClaimIdleDays days: it no longer blocks]" } else { '' }
+            $out.Add("  - $($claim.branch): $($claim.slice) ($($claim.scope -join ', '))$idle")
         }
     }
     [Console]::Out.Write(($out -join "`n"))

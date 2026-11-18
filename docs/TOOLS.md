@@ -11,6 +11,38 @@ The help comment of a script lists its parameters: `Get-Help ./tools/Scripts/Val
 
 When you write a script, do not use `&&`, `?:` or `??`. Windows PowerShell 5.1 does not have them.
 
+## Traps
+
+Shells:
+
+- If `pwsh` is not installed, run the scripts with `powershell`.
+- Do not run `wsl` or a bare `bash` from PowerShell. It starts the WSL virtual machine.
+- `powershell -File <script> -Commands 'a', 'b'` joins the list into one string. Use
+  `powershell -Command "& <script> -Commands 'a', 'b'"`.
+- In Windows PowerShell 5.1, `$PSScriptRoot` is empty in a default value of `param`. Set such a default after the
+  `param` block.
+- Git Bash changes a switch such as `-bl:/c/...` into a wrong path. Give MSBuild path switches from PowerShell.
+
+Git:
+
+- Run `git commit` and `git merge` in a command of their own. The agent hooks read the folder of the first `git -C`
+  or `cd` in the command. Do not send the output of a merge through `tail`, which hides its failure.
+- Do not run `git add -N .` to get a diff. It stages the deletion of tracked files.
+- All the worktrees share one stash list. Do not run a bare `git stash pop`.
+- After a build, `git worktree remove` can fail with "Permission denied". It still removes the worktree from git. An
+  idle build server holds the empty folder: run `dotnet build-server shutdown`, then delete the folder.
+- The root `.gitignore` ignores each folder with the name `Logs`, `Cache` or `Screenshots`, at any depth.
+
+Builds and runs:
+
+- Build a new worktree one time before the first run of `Format.ps1` or `AgentTaskComplete.ps1`. Before the build,
+  the generated bindings do not exist, and the format removes the `using` lines for them.
+- `Run.ps1` and `Screenshot.ps1` do not build. Build after each edit, before the run that checks it.
+- The build does not compile `.slang` files. Run Magic to check a shader edit: `Validate.ps1 -Only Headless`.
+- A Magic that the user started in a terminal holds `Magic.exe`, and the build then fails at its copy step. Ask the
+  user to close it.
+- The camera of the samples turns. Two screenshots at different times show different views.
+
 ## Format.ps1
 
 Formats the `.cs`, `.csproj`, `.props` and `.targets` files that are different from the last commit, and new files.
@@ -45,8 +77,13 @@ Runs the checks that a change must pass. It runs these steps in order, and stops
 Runs `Format.ps1`, then the steps of `Validate.ps1` that the `-Change` level needs ([Commands](../AGENTS.md#commands)).
 If the change touches only files in sample folders, Markdown aside, only those samples run.
 
+At the `Docs` level the script runs nothing and only stamps. It accepts Markdown, the files in
+`tools/Scripts/`, `.claude/` and `.githooks/`, and a `.cs` or `.slang` file in which each changed line is a `//`
+comment. It refuses a change that has another file.
+
 If the steps pass, the script stamps the exact files of the checkout with the level. If the state already has a stamp
-at that level or higher, the script stops at once.
+at that level or higher, the script stops at once. After a pull that git merged with no conflict, of a stamped state
+into a stamped state, the script runs only the build.
 
 ## Run.ps1
 
@@ -97,6 +134,12 @@ wait.
 
 Claims the files and folders that a slice will change. All the worktrees see the claim. An agent hook refuses an edit
 inside the claim of another session ([Worktrees](../AGENTS.md#worktrees)).
+
+- A new claim replaces the old claim of the branch.
+- `-Release` removes the claim of the branch. `-Release -Branch <branch>` removes the claim of another branch.
+- Each run deletes the claims whose branch merged, or whose worktree or branch is gone.
+- A claim is idle after 3 days with no commit in its worktree and no new claim. An idle claim does not block edits
+  and is not an overlap.
 
 ## Templates
 

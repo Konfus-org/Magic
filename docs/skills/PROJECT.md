@@ -47,7 +47,7 @@ The levels, from the lowest to the highest, are `Docs`, `Code` and `Visual`
 | Role | Command |
 | --- | --- |
 | Validate and stamp | `tools/Scripts/AgentTaskComplete.ps1 -Change <level>` |
-| Build and stamp only | `tools/Scripts/AgentTaskComplete.ps1 -Change Docs` |
+| Stamp only, for docs and comments | `tools/Scripts/AgentTaskComplete.ps1 -Change Docs` |
 | The final merge | `git merge --no-ff <branch>`, in the main checkout |
 | Validate one step | `tools/Scripts/Validate.ps1 -Only Build`, `Test`, `Headless` or `Screenshot` |
 | Run the app | `tools/Scripts/Run.ps1 -Project <project> -Headless -Commands 'wait loaded', <commands>, 'exit'`. It exits `2` at the first error. Do not start the app in another way. |
@@ -55,7 +55,7 @@ The levels, from the lowest to the highest, are `Docs`, `Code` and `Visual`
 | Run one test project | `dotnet test --project tests/<Gem>.Tests/<Gem>.Tests.csproj` |
 | Read a value while the app runs | The console command `get <setting>` |
 | Claim | `tools/Scripts/Claim.ps1 -Slice <title> -Scope <paths>` |
-| Release a claim | `tools/Scripts/Claim.ps1 -Release` |
+| Release a claim | `tools/Scripts/Claim.ps1 -Release`, with `-Branch <branch>` for the claim of another branch |
 | Take a profiling turn | `tools/Scripts/Profiling.ps1 -Minutes <n>`, at most 20 |
 | Release a profiling turn | `tools/Scripts/Profiling.ps1 -Release` |
 | The user's review | `plannotator review --base <merge target>`. `plannotator sessions --json` lists the URL and the worktree of each open review. |

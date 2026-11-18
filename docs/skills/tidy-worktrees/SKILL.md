@@ -1,12 +1,13 @@
 ---
 name: tidy-worktrees
-description: Removes finished worktrees, branches and sessions, and reports the rest. Use it on your own, without being asked, when a session starts and finished worktrees or stale claims exist, and after you delete a session.
+description: Removes finished worktrees, branches and sessions, and reports the rest. Use it on your own, without being asked, when a session starts and finished worktrees exist, and after you delete a session.
 ---
 
 # Tidy worktrees
 
 1. Run `git worktree list` and `git branch --no-merged <merge target>`. Look at the sessions of the repository.
-2. If the project has claims ([PROJECT.md](../PROJECT.md)), delete each claim whose worktree is gone.
+2. If the project has claims ([PROJECT.md](../PROJECT.md)), release each claim whose session is gone and whose work
+   is dropped or answered. The claim command deletes the claim of a merged branch or a removed worktree itself.
 3. Remove each worktree and branch for which these two conditions are true:
    - Its session is gone.
    - All its commits are merged into the merge target or into a remote branch.

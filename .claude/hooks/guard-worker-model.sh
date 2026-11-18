@@ -12,12 +12,12 @@ command=${command,,}
 [[ $command =~ [[:space:]](-p|--print)([[:space:]]|$) ]] || exit 0
 
 if ! [[ $command =~ --model[[:space:]=]+[\"\']?([a-z0-9._-]+) ]]; then
-    echo "A worker run needs --model opus: without it, it takes the default model (the parallelize skill, Models)." >&2
+    echo "A worker run needs --model sonnet or opus: without it, it takes the default model (the parallelize skill, Models)." >&2
     exit 2
 fi
 model=${BASH_REMATCH[1]}
 if [[ $model == *fable* || $model == *mythos* ]]; then
-    echo "A worker never runs on $model: use --model opus (the parallelize skill, Models)." >&2
+    echo "A worker never runs on $model: use --model sonnet or opus (the parallelize skill, Models)." >&2
     exit 2
 fi
 exit 0

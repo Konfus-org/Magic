@@ -1,6 +1,6 @@
 ---
 name: parallelize
-description: Runs a large effort as a swarm. Coders build slices at the same time, and the coordinator merges each one into one root branch. Then an optional QA pass and one finish of the root follow, with one merge into the main checkout's branch after the user's yes. Use it on your own, without being asked, when the user gives a list of separate tasks, asks for something too big for a few slices (such as "make a game"), or the slice list of a kickoff has two or more slices that do not depend on each other.
+description: Runs a large effort as a swarm. Coders build slices at the same time, and the coordinator merges each one into one root branch. Then an optional QA pass and one finish of the root follow, with one merge into the main checkout's branch after the user's yes. Use it when the user asks for a swarm or for work in parallel. Use it on your own only when a list has four or more slices that do not depend on each other. Smaller efforts run one slice after the other (the slice skill).
 ---
 
 # Parallelize
@@ -13,7 +13,7 @@ informed and finish the root. You do not write code. After the user approves the
 workers until the goal is met. Do not ask the user if you must continue.
 
 - Do not give the user a button, a choice or a question that starts work. If the work helps the goal, start it. If
-  not, put it in the notes of the plan (step 11).
+  not, put it in the notes for the user (step 3).
 - Only you ask the user, and only one item at a time (step 7).
 
 This diagram shows the flow of a swarm, from the plan to the merge.
@@ -21,7 +21,7 @@ This diagram shows the flow of a swarm, from the plan to the merge.
 ```mermaid
 flowchart TD
     Plan --> Coders[Coders build slices] --> Root[Coordinator merges each into the root]
-    Root --> QA[QA, if the root is large] --> Fixes[Fix slices] --> Finish[Finish the root] --> Merge[One merge, after the user's yes]
+    Root --> QA[QA, for a large engine change] --> Fixes[Fix slices] --> Finish[Finish the root] --> Merge[One merge, after the user's yes]
 ```
 
 **In each turn, do these steps in this order:**
@@ -55,14 +55,16 @@ flowchart TD
       `git worktree add <worktree folder>/<type>/<effort> -b <type>/<effort>`. Claim the scope of each slice for it.
       Each slice branches from the root with `--track`, as `<type>/<effort>-<slice>`. Do not put a slice under the name
       of the root.
-   2. Write the plan to `agent-swarm/<effort>.md` in `git rev-parse --git-common-dir`. Only you write it. Write it
-      again each time something changes. It has:
+   2. Write the plan to `agent-swarm/<effort>.md` in `git rev-parse --git-common-dir`. Only you write it. Keep it
+      short, because you read it in each turn. When something changes, change only that line. It has:
       - The goal in three lines, the decisions, the root, the worker limit, the permission flags, and the line
-        "Models: each worker on `--model opus`, never Fable or Mythos" (step 4).
-      - A table of the slices: branch, mode, check, scope, waits for, session ID, state.
+        "Models: coders on `--model sonnet`, hard slices and QA on `--model opus`, never Fable or Mythos" (step 4).
+      - A table of the slices: branch, mode, model, check, scope, waits for, session ID, state.
       - The queue for the user and the profiling queue.
-      - The notes for the user: hacks, known issues, trade-offs, decisions that you made, follow-ups that you did not
-        do.
+
+      Write the notes for the user to `agent-swarm/<effort>-notes.md`: hacks, known issues, trade-offs, decisions that
+      you made, follow-ups that you did not do. Add each note at the end. Read this file only for the final report
+      (step 11).
    3. Show the plan. A yes approves each slice, each follow-up that helps the goal (step 8), and the close of each
       worker. It does not approve the merge into the main checkout's branch (step 10). With the plan, give this line
       to paste. Make `<n>` eight times the number of slices, plus 20.
@@ -74,35 +76,48 @@ flowchart TD
 
    Start the spike with the most risk alone, unless the user says that the risk is known.
 
-   **Models.** This is a hard rule. Each worker, of each role (coder, QA, fix, batch or any other), runs on
-   `--model opus`. Never give a worker a Fable or Mythos model, also when you run on one, and also for a hard task.
-   Give `--model opus` on each `claude -p`, also with `--resume`: without it, the run takes the default model. For a
-   background agent, set its model to `opus`. Write this rule in each plan and each handoff. An agent hook refuses a
-   `claude -p` without `--model`, or with a Fable or Mythos model. Use the same `--effort` as your own. If you do not
-   know your effort, do not give `--effort`.
+   **Models.** This is a hard rule. Coders write the code fast, and the final pass makes it good.
+
+   | Worker | Model and effort |
+   | --- | --- |
+   | A coder or a fix | `--model sonnet --effort medium` |
+   | A coder of a slice that the plan marks hard, such as shader or renderer work | `--model opus --effort medium` |
+   | QA | `--model opus --effort high` |
+
+   - Mark a slice hard in the plan before you start it. If a coder on `sonnet` fails a slice two times, mark the
+     slice hard.
+   - Never give a worker a Fable or Mythos model, also when you run on one, and also for a hard task.
+   - Give `--model` on each `claude -p`, also with `--resume`: without it, the run takes the default model. For a
+     background agent, set its model in the same way.
+   - Write this rule in each plan and each handoff. An agent hook refuses a `claude -p` without `--model`, or with a
+     Fable or Mythos model.
 
    To start a worker, make a UUID for its session and write it in the plan. From the repository root, in bash, run
    this in the background:
-   `timeout -k 10 1h claude -p "<prompt>" --session-id <UUID> --model opus --effort <effort> <permission flags> --output-format json < /dev/null`
+   `timeout -k 10 1h claude -p "<prompt>" --session-id <UUID> --model <model> --effort <effort> <permission flags> --output-format json < /dev/null`
 
    To send a message to a worker, run the same command with `--resume <UUID> "<message>"` in place of `--session-id`.
-   Keep `--model opus`.
+   Keep the same `--model`.
    When the worker stops, its result comes to you as a new turn. In a tool without headless sessions, use a background
    agent with the same limit.
 
    The prompt of a coder gives the brief of the slice, in the format of the slice skill. It also gives its branch, the
-   root, the decisions, and the other slices that run, with their scopes. When the change affects how a run behaves,
-   its check is a run that shows the fix, not the build alone. It tells the coder:
+   root, the decisions, and the other slices that run, with their scopes. Each brief names one check, the cheapest command
+   that shows that the slice works. Only an engine change gets a run of Magic. For a script or an external tool, the
+   check is the tool on a small input. A slice of docs or comments alone has no check. The prompt tells the coder:
    - Make your worktree with `git worktree add --track -b <branch> <worktree folder>/<branch> <root>`. Claim your
      scope.
-   - Follow the slice skill from step 3 to step 6, and each skill that the work needs, such as investigate, cleanup,
+   - Follow the slice skill from step 3 to step 7, and each skill that the work needs, such as investigate, cleanup,
      profiling and timeouts. Do not use the finish skill. Do not merge your branch anywhere: the coordinator merges it.
-   - Build, then run the one check that the brief names, headless or as a screenshot, with its time limit. The run
+   - Build, then run the one check that the brief names, with its time limit. For a slice of docs or comments
+     alone, do not build and run nothing. The run
      and screenshot commands do not build: build again after each edit, before the run that checks it. Do not run
      tests, full validations, the stamp command or reviews. Do not run the app in a window, except to profile in a
      profiling turn.
    - Commit on your branch as often as it helps. When the slice builds and its check passes, end with `STATE: done`.
-     For a spike, release its claim, write its summary and end with `STATE: answered`.
+     For a spike, write its summary and end with `STATE: answered`.
+   - Release your claim as your last step before `STATE: done`, `STATE: answered` and `STATE: too-big`. Keep it for
+     a state after which you continue the slice.
    - Do not ask the user anything. When a skill tells you to ask the user or to stop, end with `STATE: blocked`. Add
      the proposal, and each question as a choice of two to four options, the recommended one first.
    - Before you profile or measure, end with `STATE: needs-profiling`, with what you will run and for how long.
@@ -132,9 +147,10 @@ flowchart TD
 
    **Merge a done slice into the root.** Merge one slice at a time, fixes first. In the worktree of the root:
    1. Run `git merge --no-ff <slice>`. If there is a conflict, run `git merge --abort`, and make the slice `conflict`.
-   2. Run the build with the validate command (`-Only Build`). If it fails, run `git reset --keep ORIG_HEAD`, and make
+   2. Run the build with the validate command (`-Only Build`). Skip it for a slice of docs or comments alone. If it
+      fails, run `git reset --keep ORIG_HEAD`, and make
       the slice `broken`, with the error.
-   3. If it builds, release the slice's claim. Run `git worktree remove`, then `git branch -d`. Then do step 8.
+   3. If it builds, release the slice's claim with `-Branch <slice>`, if the coder left it. Run `git worktree remove`, then `git branch -d`. Then do step 8.
 
    - **A QA worker at its time limit:** resume it one time with "Continue." If it gets to the limit again, put its
      state in the notes and continue.
@@ -171,7 +187,7 @@ flowchart TD
      shows the fixes.
 8. **When a slice merges or answers,** compare the plan with the result:
    - Add each follow-up that helps the goal as a slice. Put the other follow-ups and the notes of the worker in the
-     plan.
+     notes file.
    - Do not add more slices than two times the number that the user approved.
    - You can put slices in a new order or split them without a question.
    - Add a question to the queue before you drop a slice or change a decision. Do the same before you take a
@@ -179,18 +195,17 @@ flowchart TD
    - If a ready slice is in the same area, you can resume the same coder with it. Do this only while the coder built
      fewer than three slices and its `CONTEXT` is less than half.
 9. **QA,** when each slice merged or answered. Skip this step when the root has 300 changed lines or fewer against
-   the main checkout's branch.
+   the main checkout's branch, or has no engine change. The coordinator adds no check, test run or validation that
+   this skill does not name.
    1. Start a QA worker in the worktree of the root. Its prompt gives the root, the main checkout's branch and the
       brief of each slice. It tells the worker to follow the [qa skill](../qa/SKILL.md). If it ends with
       `STATE: validated`, resume it with "Continue."
    2. Put its issues in the queue for the user as multiple-select questions, the most severe first. Give the rank,
       the place and the suggested fix of each issue.
    3. Add each issue that the user selects as a fix slice (step 4). Put the others in the notes.
-   4. When the fixes merge, resume QA one time with "Check these fixes:" and their branches. Put the issues that are
-      left in the notes.
 10. **Finish the root,** when QA is done or skipped. Use the [finish skill](../finish/SKILL.md) on the root yourself,
-    in its worktree. It pulls the main checkout's branch, validates one time at the highest level of the slices, gets
-    one review in a fresh context, and starts the user's review in the background. Make each finding and each comment
+    in its worktree. It pulls the main checkout's branch, gets one review in a fresh context, validates one time at the
+    highest level of the slices, and starts the user's review in the background. Make each finding and each comment
     a fix slice (step 4). When the user approves, the finish skill merges the root into the main checkout's branch one
     time. Never merge the root before that yes.
 11. **The final report.** Close each worker that still runs. Run the
@@ -202,4 +217,5 @@ flowchart TD
     - The follow-ups that you did not do, with the reason for each.
     - All else that the user must know, such as a decision that you made for the user.
 
-    Do not offer to start any of these. Then delete the plan.
+    Do not offer to start any of these. Then delete the plan and the notes file. Look in the claims folder, and
+    release each claim that is left of the root and of its workers.

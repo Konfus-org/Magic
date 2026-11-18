@@ -1,6 +1,6 @@
 ---
 name: parallelize
-description: Runs a large effort as a swarm. Coders build slices at the same time into a root branch. Then QA, fixes, a cleanup and one review by the user follow. Use it on your own, without being asked, when the user gives a list of separate tasks, asks for something too big for a few slices (such as "make a game"), or the slice list of a kickoff has two or more slices that do not depend on each other.
+description: Runs a large effort as a swarm. Coders build slices at the same time, and the coordinator merges each one into one root branch. Then an optional QA pass and one finish of the root follow, with one merge into the main checkout's branch after the user's yes. Use it when the user asks for a swarm or for work in parallel. Use it on your own only when a list has four or more slices that do not depend on each other. Smaller efforts run one slice after the other (the slice skill).
 ---
 
 Read and follow [docs/skills/parallelize/SKILL.md](../../../docs/skills/parallelize/SKILL.md).

@@ -1,6 +1,6 @@
 ---
 name: ste-docs
-description: Writes docs, summaries, replies and code comments in ASD-STE100 Simplified Technical English, with diagrams where they help. Use it on your own, without being asked, each time you write a reply to the user, or write or rewrite a README, guide, design note, skill, plan, XML doc comment, inline comment, or a summary of work or changes.
+description: Writes docs, summaries, replies and code comments in ASD-STE100 Simplified Technical English, with diagrams where they help. Use it on your own, without being asked, each time you write or rewrite a README, guide, design note, skill, XML doc comment or inline comment. Do not load it for a reply, a summary or a plan in the chat: the Writing rules of the agent rules are enough for those.
 ---
 
 # STE docs
@@ -8,13 +8,13 @@ description: Writes docs, summaries, replies and code comments in ASD-STE100 Sim
 Write documentation, summaries, replies and comments in ASD-STE100 Simplified Technical English (STE). The goal: short text
 that a reader who is not a native speaker understands on the first read.
 
-Use this skill each time you write text for a reader, also when the user does not ask for it:
+Use this skill each time you write these, also when the user does not ask for it:
 
 - Docs: README, guide, design note, changelog, API doc, skill, plan.
 - Code comments: XML doc comments (`/// <summary>`) and inline comments (`//`).
-- Summaries: summaries of work, changes, code reviews, files or discussions.
-- Replies to the user: answers, plans, status updates and questions.
-- Rewrites and reviews of docs, comments or summaries.
+- Rewrites and reviews of docs or comments.
+
+Sections 5 and 6 give the rules for summaries and replies. You do not need to read this skill again for each one.
 
 Do not apply it to code, identifiers, quoted text or quoted error messages.
 

@@ -21,10 +21,10 @@ description: Interviews the user and splits a new effort into slices. Use it on 
    - Write each slice as `Verb + result (prototype; check: <command or sample>)`, with its mode and its check.
    - Give about the first five slices in full. Write the later work in one line.
    - Push back on a slice that polishes before it proves something.
-5. If two or more slices do not depend on each other, use the [parallelize skill](../parallelize/SKILL.md).
-   Otherwise, tell the user these two things, and wait for the yes:
+5. If the user asks for a swarm, or four or more slices do not depend on each other, use the
+   [parallelize skill](../parallelize/SKILL.md). Otherwise, tell the user these two things, and wait for the yes:
    - A yes to the list lets each slice start without a new approval.
-   - The slices merge into one root branch. The root merges into the main checkout's branch one time, at the end,
+   - The slices are commits on one root branch. The root merges into the main checkout's branch one time, at the end,
      after the user's yes (Branches and merges, in [PROJECT.md](../PROJECT.md)).
 6. After the yes, make the root branch `<type>/<effort>` from the main checkout's branch in its own worktree. Then
    start the first slice with the [slice skill](../slice/SKILL.md).
