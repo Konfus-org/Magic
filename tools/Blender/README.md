@@ -6,8 +6,10 @@ it.
 
 ## Install
 
+Run this from the repository's root, with the path of your `blender.exe`. The folder must exist.
+
 ```powershell
-blender --command extension build --source-dir tools/Blender/magic_domain --output-dir <folder>
+& 'C:/Program Files (x86)/Steam/steamapps/common/Blender/blender.exe' --command extension build --source-dir tools/Blender/magic_domain --output-dir <folder>
 ```
 
 Then Edit > Preferences > Get Extensions > Install from Disk with that zip.

@@ -14,4 +14,4 @@ license = [
 ]
 
 [permissions]
-files = "Read a project, its prefabs, its models and its textures, and write its prefabs back"
+files = "Read a project and its assets, and write its prefabs back"
