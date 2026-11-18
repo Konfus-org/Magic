@@ -74,10 +74,9 @@ of objects costs seconds and hundreds of megabytes to write. Ctrl+Z after an imp
 stood before the import, which takes the domain away. Esc stops the import and takes away the objects that it built,
 and nothing that stood in the scene before it. After a clear, the clear is done: the scene is empty.
 
-The import builds the domain in parts, so Blender answers while the scene fills in. A progress bar in the status
-bar holds the part that is done and what is built now. Blender shows the progress of its own long jobs in the same
-place. The domain is built out of the view layer and comes into the view in one step at the end, so Blender draws it
-one time. The import in a window takes the time of the plain call.
+While the import runs, Blender takes no input but Esc. A progress bar in the middle of each 3D viewport holds the
+part that is done and what is built now. The domain is built out of the view layer and comes into the view in one
+step at the end, so Blender draws it one time. The import in a window takes the time of the plain call.
 
 The models come first, each as a part of its own under its name, then the entities that draw them. A model is read
 from its file one time on a machine: the first read builds its mesh and keeps it as a `.blend` of its own under the

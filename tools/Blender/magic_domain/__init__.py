@@ -35,11 +35,15 @@
 #   in the 40 steps that the table's own entries are made in (Atmosphere.slang, GetAirTransmittance).
 import math
 import os
+import sys
 import time
 
+import blf
 import bpy
+import gpu
 from bpy.props import EnumProperty, FloatProperty, StringProperty
 from bpy_extras.io_utils import ImportHelper
+from gpu_extras.batch import batch_for_shader
 from mathutils import Vector
 
 from .cache import folder as cache_folder
@@ -63,12 +67,19 @@ OBJECTS = [
     ('CLEAR', 'Clear Scene', 'Take the objects of the scene away, and the data that only they used'),
 ]
 
-# Seconds between the ticks of an import, and the seconds of each tick that it builds in. Blender draws the status
-# bar and answers between two slices, so the bar moves about four times a second and Esc stops the import within a
-# quarter of a second. The import builds the domain out of the view layer, so a tick draws the bar alone and the
-# window import takes the time of the plain call.
+# Seconds between the ticks of an import, and the seconds of each tick that it builds in. Blender draws the progress
+# bar between two slices, so the bar moves about four times a second and Esc stops the import within a quarter of a
+# second. The import builds the domain out of the view layer, so a tick draws the bar alone and the window import
+# takes the time of the plain call.
 TICK = 0.05
 SLICE = 0.2
+
+# The progress bar of an import: its width and height in pixels at a UI scale of 1, the colour that dims the 3D
+# viewport behind it, the colour of the bar's track and of the part that is done.
+BAR_SIZE = (480, 20)
+SHADE = (0.0, 0.0, 0.0, 0.5)
+TRACK = (0.16, 0.16, 0.16, 1.0)
+FILL = (0.28, 0.45, 0.8, 1.0)
 
 # The choice that stands for no component, which the add button shows when the entity holds every type that Magic
 # knows.
@@ -157,11 +168,29 @@ def far_warning(context, objects):
              'The viewport shows nothing of the domain that lies farther away than that.'), value)
 
 
-def redraw_status(context):
-    """Asks Blender to draw the status bar again, so that the bar of an import moves. Setting the status text is what
-    tags it, since the status bar is no area of a screen: measured over 60 ticks, this draws the bar 59 times and a
-    tag of the areas draws it none."""
-    context.workspace.status_text_set(None)
+def redraw_views(context):
+    """Asks Blender to draw each 3D viewport of the window again, so that the progress bar of an import moves."""
+    for area in context.window.screen.areas:
+        if area.type == 'VIEW_3D':
+            area.tag_redraw()
+
+
+def fill(x, y, width, height, color):
+    """Draws one rectangle of one colour in the pixels of the region that Blender draws now."""
+    shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+    batch = batch_for_shader(shader, 'TRIS', {'pos': [(x, y), (x + width, y), (x + width, y + height), (x, y + height)]},
+                             indices=[(0, 1, 2), (0, 2, 3)])
+    shader.uniform_float('color', color)
+    batch.draw(shader)
+
+
+def centered_text(text, y, size):
+    """Draws one line of white text in the middle of the width of the region that Blender draws now."""
+    blf.size(0, size)
+    blf.color(0, 1.0, 1.0, 1.0, 1.0)
+    width, _ = blf.dimensions(0, text)
+    blf.position(0, (bpy.context.region.width - width) / 2, y, 0)
+    blf.draw(0, text)
 
 
 def clear_scene(scene):
@@ -253,23 +282,31 @@ class MAGIC_OT_import_domain(bpy.types.Operator, ImportHelper):
             self.build.run(math.inf)
             self.say_what_it_built(context)
             return {'FINISHED'}
-        bpy.types.STATUSBAR_HT_header.append(self.draw_bar)
+        self.bar = bpy.types.SpaceView3D.draw_handler_add(self.draw_bar, (), 'WINDOW', 'POST_PIXEL')
+        context.window.cursor_modal_set('WAIT')
         self.timer = context.window_manager.event_timer_add(TICK, window=context.window)
         context.window_manager.modal_handler_add(self)
         return {'RUNNING_MODAL'}
 
-    def draw_bar(self, header, context):
-        """The progress of the import in the status bar, where Blender draws the progress of its own long jobs. It is
-        Blender's own bar: the part of the work that is done, what is built now, and the key that stops it."""
-        layout = header.layout
-        layout.separator_spacer()
-        layout.progress(factor=self.build.factor, text=f'Magic: {self.build.text}', type='BAR')
-        layout.label(text='Esc to stop')
-        layout.separator_spacer()
+    def draw_bar(self):
+        """The progress of the import over the middle of each 3D viewport, which it dims: what is built now, the part
+        of the work that is done, and the key that stops it."""
+        region = bpy.context.region
+        scale = bpy.context.preferences.system.ui_scale
+        width, height = min(BAR_SIZE[0] * scale, region.width - 40 * scale), BAR_SIZE[1] * scale
+        x, y = (region.width - width) / 2, (region.height - height) / 2
+        gpu.state.blend_set('ALPHA')
+        fill(0, 0, region.width, region.height, SHADE)
+        fill(x, y, width, height, TRACK)
+        fill(x, y, width * self.build.factor, height, FILL)
+        gpu.state.blend_set('NONE')
+        centered_text(f'Magic: {self.build.text}', y + height + 12 * scale, 16 * scale)
+        centered_text('Esc to stop', y - 24 * scale, 12 * scale)
 
     def modal(self, context, event):
-        """One tick of the import: it builds for part of the tick and gives the rest to Blender, so that a person
-        turns the view while the domain fills in. Esc stops it and takes away what is built."""
+        """One tick of the import: it builds for part of the tick and gives the rest to Blender, which draws the
+        progress bar. It takes every other event, so that nothing changes the scene while the domain fills in. Esc
+        stops it and takes away what is built."""
         if event.type == 'ESC':
             self.build.drop()
             self.end(context)
@@ -277,16 +314,20 @@ class MAGIC_OT_import_domain(bpy.types.Operator, ImportHelper):
             self.show_result()
             return {'CANCELLED'}
         if event.type != 'TIMER':
-            return {'PASS_THROUGH'}
+            return {'RUNNING_MODAL'}
         try:
             done = self.build.run(time.monotonic() + SLICE)
-        except (OSError, ValueError, KeyError) as failure:
+        except Exception as failure:
+            # Every failure takes the bar away, since the bar dims each 3D viewport. A fault of the add-on itself goes
+            # on to Blender with its traceback.
             self.build.drop()
             self.end(context)
+            if not isinstance(failure, (OSError, ValueError, KeyError)):
+                raise
             self.say('ERROR', str(failure))
             self.show_result()
             return {'CANCELLED'}
-        redraw_status(context)
+        redraw_views(context)
         if not done:
             return {'RUNNING_MODAL'}
         self.end(context)
@@ -331,11 +372,12 @@ class MAGIC_OT_import_domain(bpy.types.Operator, ImportHelper):
         bpy.ops.magic.import_result('INVOKE_DEFAULT')
 
     def end(self, context):
-        """Takes away the timer and the bar of an import that ended, whichever way it ended: no bar is left in the
-        status bar after an import that finished, that a person stopped or that failed."""
+        """Takes away the timer, the bar and the wait cursor of an import that ended, whichever way it ended: no bar is
+        left after an import that finished, that a person stopped or that failed."""
         context.window_manager.event_timer_remove(self.timer)
-        bpy.types.STATUSBAR_HT_header.remove(self.draw_bar)
-        redraw_status(context)
+        bpy.types.SpaceView3D.draw_handler_remove(self.bar, 'WINDOW')
+        context.window.cursor_modal_restore()
+        redraw_views(context)
 
 
 class MAGIC_OT_import_result(bpy.types.Operator):
@@ -709,3 +751,7 @@ def unregister():
     del bpy.types.Scene.magic_view_distance
     for held_class in reversed(CLASSES):
         bpy.utils.unregister_class(held_class)
+    # Blender takes away this module alone when it disables the add-on. The modules of the package stay, so the next
+    # enable after an install would run the new module on the old ones. Taking them away loads all of them new.
+    for name in [name for name in sys.modules if name.startswith(f'{__package__}.')]:
+        del sys.modules[name]
