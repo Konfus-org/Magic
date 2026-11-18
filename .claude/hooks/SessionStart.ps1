@@ -35,16 +35,6 @@ try {
     if ($finished -gt 0) {
         $out.Insert(2, "- Tidy first: $finished finished worktree(s) (the tidy-worktrees skill).")
     }
-    # Every slice in progress, from tools/Scripts/Claim.ps1, so this session works around them. A claim whose work is
-    # done is deleted here.
-    $claims = @(Get-OpenClaims $checkout.Common)
-    if ($claims.Count -gt 0) {
-        $out.Add('- Slices in progress and the paths each claims; never edit inside one without the user''s yes (AGENTS.md, Worktrees):')
-        foreach ($claim in $claims) {
-            $idle = if ($claim.state -eq 'idle') { " [idle for $ClaimIdleDays days: it no longer blocks]" } else { '' }
-            $out.Add("  - $($claim.branch): $($claim.slice) ($($claim.scope -join ', '))$idle")
-        }
-    }
     [Console]::Out.Write(($out -join "`n"))
 } catch {
     exit 0

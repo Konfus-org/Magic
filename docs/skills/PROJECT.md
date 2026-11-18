@@ -18,7 +18,7 @@ To use the skills in another repository, copy this folder. Then change only this
 | Simplest first | [Simplest First](../../AGENTS.md#simplest-first) |
 | Documentation rules | [Documentation Rules](../../AGENTS.md#documentation-rules) |
 | Branches and merges | [Branches and Merges](../../AGENTS.md#branches-and-merges). A hard rule: no skill overrides it. |
-| Worktrees and claims | [Worktrees](../../AGENTS.md#worktrees) |
+| Worktrees | [Worktrees](../../AGENTS.md#worktrees) |
 | Commits | [Commits](../../AGENTS.md#commits) |
 | Code standards | [Code Standards](../CODE_STANDARDS.md), for `.cs` files |
 | Naming | [Naming](../CODE_STANDARDS.md#naming) |
@@ -32,7 +32,6 @@ To use the skills in another repository, copy this folder. Then change only this
 | --- | --- |
 | Worktree folder | `../Magic-worktrees/<branch>` |
 | Logs | `Logs/` beside the Magic executable. A crash writes `Logs/<time>.crash`. |
-| Claims | `agent-claims/` in `git rev-parse --git-common-dir`. The claim command writes them. |
 | Reviews that git does not track | `Build/Reviews/` |
 | Profiles and dumps | `Build/profiles/` |
 | One area for a review | A gem, or a folder of Core |
@@ -54,8 +53,6 @@ The levels, from the lowest to the highest, are `Docs`, `Code` and `Visual`
 | Take a screenshot | `tools/Scripts/Screenshot.ps1 -Project <project> -Commands <commands>` |
 | Run one test project | `dotnet test --project tests/<Gem>.Tests/<Gem>.Tests.csproj` |
 | Read a value while the app runs | The console command `get <setting>` |
-| Claim | `tools/Scripts/Claim.ps1 -Slice <title> -Scope <paths>` |
-| Release a claim | `tools/Scripts/Claim.ps1 -Release`, with `-Branch <branch>` for the claim of another branch |
 | Take a profiling turn | `tools/Scripts/Profiling.ps1 -Minutes <n>`, at most 20 |
 | Release a profiling turn | `tools/Scripts/Profiling.ps1 -Release` |
 | The user's review | `plannotator review --base <merge target>`. `plannotator sessions --json` lists the URL and the worktree of each open review. |

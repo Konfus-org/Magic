@@ -22,7 +22,8 @@ flowchart TD
 ```
 
 1. Commit your work on the branch. Pull the main checkout's branch into it: `git merge <main checkout's branch>`.
-   Resolve conflicts only in your changes. If a conflict needs a change to the work of another agent, stop and ask
+   Apply both changes (Branches and merges): each side's change holds in the result, deletions included. Build, then
+   run the checks of each area that the two sides both changed. If the two changes cannot both stand, stop and ask
    the user.
 2. Get one review in a fresh context. Give the reviewer the worktree, the main checkout's branch and the slice, or the
    briefs of the slices of a root branch. Use the reviewer in PROJECT.md. If there is none, use a new session or
@@ -58,12 +59,10 @@ flowchart TD
    1. If the main checkout's branch moved, do step 1 and step 3 again. Do not get a new review. After a pull with no
       conflict, the stamp command runs only the build.
    2. In the main checkout, run the final merge command one time. Do not push.
-   3. Release the claim. Then run `git worktree remove`. Then run `git branch -d`. Do not use `-D`.
+   3. Run `git worktree remove`. Then run `git branch -d`. Do not use `-D`.
    4. Remove each other worktree and branch that you made for the task in the same way. This includes the worktree
       that the app made for the session. For a branch that you made from a remote branch, set its upstream to that
       branch first. Then `-d` removes it.
    5. Delete the side sessions that you started and that are done
       ([tidy-worktrees skill](../tidy-worktrees/SKILL.md)).
-   6. Look in the claims folder. Release each claim that is left of the branch, and of each branch that you made for
-      the task.
 9. Propose the next slice or effort in one line, and stop. Do not start it yourself.

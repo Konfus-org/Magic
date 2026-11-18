@@ -46,13 +46,13 @@ flowchart TD
      `--allowedTools <list>`. Do not use plan mode.
 2. **Split the effort into slices.** A coder writes and builds a slice in one run of one hour. Give each slice:
    - Its mode, its validation level and its check.
-   - Its scope, as the coder will claim it.
+   - Its scope: the files and folders that it changes.
    - The slices that it waits for.
 
    Keep each task of a list from the user as a task. Split a task only to fit the hour, and say so.
 3. **Write the swarm plan,** and get the user's yes.
    1. Make the root branch, `<type>/<effort>`, from the main checkout's branch in its own worktree:
-      `git worktree add <worktree folder>/<type>/<effort> -b <type>/<effort>`. Claim the scope of each slice for it.
+      `git worktree add <worktree folder>/<type>/<effort> -b <type>/<effort>`.
       Each slice branches from the root with `--track`, as `<type>/<effort>-<slice>`. Do not put a slice under the name
       of the root.
    2. Write the plan to `agent-swarm/<effort>.md` in `git rev-parse --git-common-dir`. Only you write it. Keep it
@@ -105,8 +105,7 @@ flowchart TD
    root, the decisions, and the other slices that run, with their scopes. Each brief names one check, the cheapest command
    that shows that the slice works. Only an engine change gets a run of Magic. For a script or an external tool, the
    check is the tool on a small input. A slice of docs or comments alone has no check. The prompt tells the coder:
-   - Make your worktree with `git worktree add --track -b <branch> <worktree folder>/<branch> <root>`. Claim your
-     scope.
+   - Make your worktree with `git worktree add --track -b <branch> <worktree folder>/<branch> <root>`.
    - Follow the slice skill from step 3 to step 7, and each skill that the work needs, such as investigate, cleanup,
      profiling and timeouts. Do not use the finish skill. Do not merge your branch anywhere: the coordinator merges it.
    - Build, then run the one check that the brief names, with its time limit. For a slice of docs or comments
@@ -116,8 +115,6 @@ flowchart TD
      profiling turn.
    - Commit on your branch as often as it helps. When the slice builds and its check passes, end with `STATE: done`.
      For a spike, write its summary and end with `STATE: answered`.
-   - Release your claim as your last step before `STATE: done`, `STATE: answered` and `STATE: too-big`. Keep it for
-     a state after which you continue the slice.
    - Do not ask the user anything. When a skill tells you to ask the user or to stop, end with `STATE: blocked`. Add
      the proposal, and each question as a choice of two to four options, the recommended one first.
    - Before you profile or measure, end with `STATE: needs-profiling`, with what you will run and for how long.
@@ -138,7 +135,7 @@ flowchart TD
    | --- | --- |
    | `done` | Merge it into the root (below). |
    | `answered` | Do step 8. |
-   | `conflict` or `broken`, from your merge | Resume the coder with the reason: "Pull the root into your branch, fix the conflict or the build, commit, and end with `done`." |
+   | `conflict` or `broken`, from your merge | Resume the coder with the reason: "Pull the root into your branch, apply both changes (Branches and merges), fix the build, commit, and end with `done`." |
    | `blocked` | Add its proposal and its questions to the queue for the user. If the block is a failure with a cause that is not proved, first start a spike that finds the cause. Give the user the choice of a fix only with that cause. |
    | `needs-profiling` | Add it to the profiling queue. |
    | `profiling-done` | End its turn. Resume it with "Continue your slice." |
@@ -150,7 +147,7 @@ flowchart TD
    2. Run the build with the validate command (`-Only Build`). Skip it for a slice of docs or comments alone. If it
       fails, run `git reset --keep ORIG_HEAD`, and make
       the slice `broken`, with the error.
-   3. If it builds, release the slice's claim with `-Branch <slice>`, if the coder left it. Run `git worktree remove`, then `git branch -d`. Then do step 8.
+   3. If it builds, run `git worktree remove`, then `git branch -d`. Then do step 8.
 
    - **A QA worker at its time limit:** resume it one time with "Continue." If it gets to the limit again, put its
      state in the notes and continue.
@@ -217,5 +214,4 @@ flowchart TD
     - The follow-ups that you did not do, with the reason for each.
     - All else that the user must know, such as a decision that you made for the user.
 
-    Do not offer to start any of these. Then delete the plan and the notes file. Look in the claims folder, and
-    release each claim that is left of the root and of its workers.
+    Do not offer to start any of these. Then delete the plan and the notes file.

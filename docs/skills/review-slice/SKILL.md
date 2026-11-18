@@ -32,7 +32,8 @@ build, run scripts, commit or merge.
      does not handle.
    - **Requirements:** the slice does not meet its check or its goal.
    - **Scope:** one of these:
-     - A change outside the slice or its claim, or inside the claim of another session.
+     - A change outside the slice.
+     - A merge that lost, undid or broke a change of another session (Branches and merges).
      - An abstraction or a general system that its mode does not allow.
      - Cleanup past the limits of the agent rules.
      - More than one logical change in a single slice. The number of lines is not a finding.

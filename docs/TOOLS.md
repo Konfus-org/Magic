@@ -130,17 +130,6 @@ that nothing disturbs its measurements. The scripts that run Magic or the tests 
 turn. On Windows, `Format.ps1` and the build of `Validate.ps1` run at once, at idle priority. On other systems, they
 wait.
 
-## Claim.ps1
-
-Claims the files and folders that a slice will change. All the worktrees see the claim. An agent hook refuses an edit
-inside the claim of another session ([Worktrees](../AGENTS.md#worktrees)).
-
-- A new claim replaces the old claim of the branch.
-- `-Release` removes the claim of the branch. `-Release -Branch <branch>` removes the claim of another branch.
-- Each run deletes the claims whose branch merged, or whose worktree or branch is gone.
-- A claim is idle after 3 days with no commit in its worktree and no new claim. An idle claim does not block edits
-  and is not an overlap.
-
 ## Templates
 
 `tools/VS Templates/` holds the `dotnet new` templates for a gem and a sample project. Each template is a project in

@@ -1,4 +1,4 @@
-# Shared by the hooks in this folder and tools/Scripts/Claim.ps1. Runs under Windows PowerShell 5.1 and pwsh.
+# Shared by the hooks in this folder. Runs under Windows PowerShell 5.1 and pwsh.
 # Every hook fails open: an error in a hook lets the action through rather than blocking work.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -103,23 +103,12 @@ function Get-ValidationStamp($checkout, [string] $tree) {
     return Join-Path (Join-Path $checkout.Common 'agent-task-complete') $tree
 }
 
-# A branch's name as one file name, for the stamps and claims kept per branch.
+# A branch's name as one file name, for the stamps kept per branch.
 function ConvertTo-BranchFileName([string] $branch) { return $branch -replace '[\\/:]', '__' }
 
 # A slice is reviewed once per branch. The stamp's first line is the slice's changed lines when it was reviewed.
 function Get-ReviewStamp($checkout, [string] $branch) {
     return Join-Path (Join-Path $checkout.Common 'agent-review') (ConvertTo-BranchFileName $branch)
-}
-
-# A claim tools/Scripts/Claim.ps1 wrote: its branch, worktree, slice and scope, one key a line.
-function Read-Claim([string] $path) {
-    $claim = @{ branch = ''; worktree = ''; slice = ''; scope = '' }
-    foreach ($line in [System.IO.File]::ReadAllLines($path)) {
-        if ($line -match '^(\w+):\s*(.*)$') { $claim[$Matches[1]] = $Matches[2] }
-    }
-    $claim.scope = @(([string]$claim.scope) -split ',\s*' | Where-Object { $_ })
-
-    return [pscustomobject]$claim
 }
 
 # Whether the work of a branch, in its worktree $top, is in its merge target: the target holds the branch's last
@@ -131,33 +120,4 @@ function Test-BranchMerged([string] $top, [string] $branch, [string] $target) {
     return $merged -contains $branch -and -not (Invoke-Git $top @('status', '--porcelain')) -and
         [string](Invoke-Git $top @('rev-parse', $branch)) -ne [string](Invoke-Git $top @('rev-parse', $target)) -and
         @(Invoke-Git $top @('reflog', 'show', '--format=%gs', "refs/heads/$branch")).Count -gt 1
-}
-
-# How long a claim blocks other sessions after the last sign of work in its worktree.
-$ClaimIdleDays = 3
-
-# Whether a worktree is idle: no commit, checkout or merge in it, as its HEAD log shows, and no write of its claim,
-# for $ClaimIdleDays days. The edit hook makes the same test on the same two files.
-function Test-WorktreeIdle([string] $top, [string] $claimPath) {
-    $log = Join-Path ([string](Invoke-Git $top @('rev-parse', '--path-format=absolute', '--git-dir'))) 'logs/HEAD'
-    $last = @($claimPath, $log) | Where-Object { Test-Path -LiteralPath $_ } |
-        ForEach-Object { (Get-Item -LiteralPath $_).LastWriteTimeUtc } | Sort-Object | Select-Object -Last 1
-    return $null -ne $last -and ([DateTime]::UtcNow - $last).TotalDays -ge $ClaimIdleDays
-}
-
-# The claims whose work is still open, each with its state: 'idle' for one that no longer blocks, otherwise 'live'.
-# Deletes each claim whose work is done: its worktree or its branch is gone, or its branch merged into its merge target.
-function Get-OpenClaims([string] $common) {
-    foreach ($file in @(Get-ChildItem -LiteralPath (Join-Path $common 'agent-claims') -File -ErrorAction SilentlyContinue)) {
-        $claim = Read-Claim $file.FullName
-        $checkout = if ($claim.worktree -and (Test-Path -LiteralPath $claim.worktree)) { Get-Checkout $claim.worktree }
-        if (-not $checkout -or
-            -not (Invoke-Git $checkout.Top @('rev-parse', '--verify', '--quiet', "refs/heads/$($claim.branch)")) -or
-            (Test-BranchMerged $checkout.Top $claim.branch $checkout.Target)) {
-            Remove-Item -LiteralPath $file.FullName -ErrorAction SilentlyContinue
-            continue
-        }
-        $state = if (Test-WorktreeIdle $checkout.Top $file.FullName) { 'idle' } else { 'live' }
-        $claim | Add-Member -NotePropertyName state -NotePropertyValue $state -PassThru
-    }
 }

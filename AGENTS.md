@@ -49,8 +49,6 @@ The scripts run under `pwsh` and Windows PowerShell ([Tools](docs/TOOLS.md)).
 - **Profiling:** `tools/Scripts/Profiling.ps1 -Minutes <n>` takes a profiling turn for the branch, and `-Release` ends
   it. While another branch's turn runs, the scripts that run Magic or the tests wait for it to end. On Windows, their
   builds and formats run at once, at idle priority.
-- **Claim:** `tools/Scripts/Claim.ps1 -Slice <title> -Scope <paths>` tells every other session what the slice will
-  change, and prints any overlap with theirs ([Worktrees](#worktrees)).
 - **Configuration:** build and run `Debug`. To measure or profile performance, use `Optimize`. Use `Release` only when
   the user asks for it.
 - **Time limit:** give every command you start a time limit. Never let a command run forever (the timeouts skill).
@@ -91,8 +89,6 @@ In Claude Code, the agent hooks in `.claude/settings.json` hold the workflow wit
 - A `claude -p` worker run without `--model`, or on a Fable or Mythos model, is refused (the parallelize skill).
 - A `dotnet build` or test run is refused while another branch's profiling turn runs. Build with
   `tools/Scripts/Validate.ps1 -Only Build` instead, which on Windows runs at idle priority and does not wait.
-- An edit inside another session's claim is refused unless this worktree's own claim covers it too
-  ([Worktrees](#worktrees)).
 - The status line shows the checkout's branch and how full the context is.
 - A `git merge` in the main checkout is refused for a branch that `tools/Scripts/AgentTaskComplete.ps1` hasn't
   stamped, or that the `slice-reviewer` subagent hasn't reviewed. A small branch needs no review: 50 changed lines or
@@ -289,7 +285,6 @@ Use the words in the glossary only with their meanings there.
 | main checkout | The first checkout of the repository. Agents do not edit in it. |
 | worktree | The git worktree that one branch is built in, under `Magic-worktrees/`. |
 | merge target | The branch that a branch merges into: its root branch for a slice of an effort, otherwise the branch of the main checkout. |
-| claim | The record of the paths that a slice changes (`tools/Scripts/Claim.ps1`). |
 | stamp | The record that `tools/Scripts/AgentTaskComplete.ps1` validated an exact state. |
 | review | The check of a slice by a reviewer in a fresh context (the review-slice skill). |
 | the user's review | The check of a slice by the user, in plannotator or in the chat. |
@@ -317,9 +312,19 @@ This is a hard rule. Each agent, skill and worker obeys it. No skill or plugin o
 - **Pull, do not merge.** A branch can pull the main checkout's branch into itself at any time. Nothing merges into
   the main checkout's branch while the work goes on: not after a slice, a review or a fix, and not because a skill
   says to finish a branch.
+- **Apply both changes.** A pull, and a merge into a root branch, joins your work with the work of other sessions.
+  Each side's change must hold in the result: what it added, what it changed and what it deleted.
+  - Read the other change before you resolve a conflict with it. Never take one side of a conflict whole to make the
+    merge pass, and never undo the other change because it is in the way.
+  - Code that the other change deleted, moved or renamed stays deleted, moved or renamed. If your change uses the old
+    code, make your change again on what replaced it. Do not bring the old code back, and do not keep a copy of it.
+  - Git joins lines, not behaviour, so a merge with no conflict can still be wrong. After each one, build. Then run
+    the checks of each area that the two sides both changed.
+  - A fault that the merge brings into your branch is yours. Fix it before the branch merges further.
+  - If the two changes cannot both stand, stop and ask the user.
 - **One merge at the end.** When the work is complete and settled, the session that owns the branch (the coordinator,
   or the session that ran the slices) does these steps (the finish skill):
-  1. Pulls the main checkout's branch into its branch, and resolves the conflicts.
+  1. Pulls the main checkout's branch into its branch, and applies both changes.
   2. Gets one review in a fresh context, then runs `tools/Scripts/AgentTaskComplete.ps1` one time, at the highest
      level of its slices.
   3. Asks the user if it can merge, in the user's review or in the chat, and waits for a yes.
@@ -337,21 +342,11 @@ checkout. The final merge is the one exception.
 - **Start:** start the session from the repository's root, never from a folder in it. Branch as
   [Branches and Merges](#branches-and-merges) says. Title the session with the branch's name, as
   `fix/material-cache-leak`.
-- **Claim:** right after making the worktree, claim the files and folders the slice will change:
-  `tools/Scripts/Claim.ps1 -Slice <title> -Scope <paths>`. Include any file every slice touches that you need:
-  `src/Magic.slnx`, `Directory.Packages.props`, `Directory.Build.props`, `Directory.Build.targets`, `AGENTS.md` and
-  `docs/`. Claim again when the scope changes: a new claim replaces the old one. If it reports overlap with another
-  claim or worktree, stop and ask the user whether to wait for that work, narrow the slice, or go ahead. Never edit
-  inside another session's claim without that yes.
-- **Release:** hold a claim only while you work in its scope.
-  - In an effort, each slice claims only its own scope when it starts. This releases the scope of the slice before.
-  - Release the claim with `-Release` as soon as the slice is answered or dropped, and as the last step of your work.
-    Before your final report, make sure that no claim of yours is left. A coordinator releases a worker's claim with
-    `-Release -Branch <branch>`.
-  - A claim also ends on its own: the scripts delete it when its branch merges or its worktree is removed. After 3
-    days with no commit and no new claim, a claim is idle and no longer blocks. Claim again to keep it.
+- **Other sessions:** other sessions change the same repository at the same time, each in its own worktree. Edit the
+  file that the change belongs in, also when another session changes it too. The pull joins the two changes
+  ([Branches and Merges](#branches-and-merges)).
 - **Finish** and merge as [Branches and Merges](#branches-and-merges) and the finish skill say.
-- **Abandoned work:** if the user drops the task, release its claim, leave the worktree and branch and say so.
+- **Abandoned work:** if the user drops the task, leave the worktree and branch and say so.
 - **Start of a session:** when the SessionStart note lists finished worktrees, remove what is
   finished and report the rest (the tidy-worktrees skill). Never remove a worktree or branch with work found nowhere
   else.

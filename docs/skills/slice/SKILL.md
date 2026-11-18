@@ -15,7 +15,7 @@ flowchart TD
     Size -- yes --> Split[Propose 2-4 slices]
     Size -- no --> Check[Examine the request] --> Brief
     Brief --> Agreed{Small, or in an agreed plan?}
-    Agreed -- yes --> Build[Worktree, claim, build]
+    Agreed -- yes --> Build[Worktree, build]
     Agreed -- no --> Plan[Plan, then the user's yes] --> Build
     Build --> One{Part of an effort?}
     One -- no --> Finish[Finish skill]
@@ -46,7 +46,7 @@ flowchart TD
    Goal: <one sentence>
    Serves: <the larger goal that it helps>
 
-   In scope: <the files and folders that it changes, as it will claim them>
+   In scope: <the files and folders that it changes>
    Out of scope: <the next step that you will not do, by name>
 
    Works when: <one check: a command, a sample and what it shows, or a test name. For docs or comments alone: none>
@@ -79,10 +79,8 @@ flowchart TD
 7. Build the slice:
    1. For a slice of an effort, work in the worktree of its root branch, on the root branch. Otherwise, make a
       worktree with a branch from the main checkout's branch (Branches and merges). A worker of a swarm makes the
-      worktree that its prompt gives. Then claim the scope of the brief (Worktrees and claims). In an effort, claim
-      only the scope of this slice: the new claim replaces the claim of the slice before.
-   2. If the claim reports an overlap, stop and ask the user.
-   3. Build the slice. Check a position, height or size that you work out from data against the running engine
+      worktree that its prompt gives.
+   2. Build the slice. Check a position, height or size that you work out from data against the running engine
       (`get`, a probe or a screenshot) before a later step depends on it.
 8. When the slice is built:
    - For a single slice, use the [finish skill](../finish/SKILL.md).
