@@ -244,7 +244,7 @@ Each rule here keeps a measurement honest, so each one comes from
 - Never use Fast GI for the reference. It takes 55.5 % of the room's light away.
 - **What Magic knows is asked from Magic through a command. A tool holds no copy of an engine rule.** This is the
   user's rule. Add a console command that prints what the tool needs, and read that
-  ([Commands in a run](../../../README.md#commands-in-a-run)). Never write a rule of the engine's a second time in a
+  ([Supported Commands and Options](../../CLI.md#supported-commands-and-options)). Never write a rule of the engine's a second time in a
   script. The copies that are still there are in [Reference views](../../DEBUGGING.md#reference-views).
 - Hold the fire and the lantern still before a still picture. A `Flicker` script drives both of them each frame, so
   two frames of the same scene hold different light. The tests take that script off and set the intensity of each

@@ -182,7 +182,7 @@ internal static class Program
         settings.ReportUnknownKeys();
         world.StartAsync(worldRestorePoint?.WaitAsync(app.Lifetime), Terminal.Progress, app.Lifetime).FireAndForget();
 
-        // A run that is not headless cannot continue without a window.
+        // A run with a window needs a gem that provides the window.
         if (!app.IsHeadless && app.Window is null)
         {
             Log.Warn(

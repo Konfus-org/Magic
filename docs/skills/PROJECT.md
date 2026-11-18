@@ -199,7 +199,7 @@ Run a Blender script as `blender.exe -b --python <script> -- <arguments>`, alway
 ### The engine's own commands
 
 A tool or an agent asks Magic what Magic knows. The form of each command, and what its JSON holds, is in
-[Commands in a run](../../README.md#commands-in-a-run).
+[Supported Commands and Options](../CLI.md#supported-commands-and-options).
 
 | Command | Gives |
 | --- | --- |
