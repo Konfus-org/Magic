@@ -5,13 +5,13 @@ description: Removes finished worktrees, branches and sessions, and reports the 
 
 # Tidy worktrees
 
-1. Run `git worktree list` and `git branch --no-merged <merge target>`. Look at the sessions of the repository.
+1. Run `git worktree list` and `git branch`. Look at the sessions of the repository.
 2. Remove each worktree and branch for which these two conditions are true:
    - Its session is gone.
-   - All its commits are merged into the merge target or into a remote branch.
+   - Its work is in the merge target, as the command in [PROJECT.md](../PROJECT.md) shows, or all its commits are in
+     a remote branch. The final merge makes one commit of a branch, so `git branch --merged` does not list it.
 
-   Run `git worktree remove`, then `git branch -d`. Do not use `-D`. For a branch that you made from a remote branch,
-   set its upstream to that remote branch first. Then `-d` removes it.
+   Run `git worktree remove`, then `git branch -D`. Use `-D` only after the check passed for that branch.
 4. Delete each session that is done. A session is done when these three conditions are true:
    - It does not run.
    - Its work merged, or its question has an answer.

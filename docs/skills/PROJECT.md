@@ -47,7 +47,8 @@ The levels, from the lowest to the highest, are `Docs`, `Code` and `Visual`
 | --- | --- |
 | Validate and stamp | `tools/Scripts/AgentTaskComplete.ps1 -Change <level>` |
 | Stamp only, for docs and comments | `tools/Scripts/AgentTaskComplete.ps1 -Change Docs` |
-| The final merge | `git merge --no-ff <branch>`, in the main checkout |
+| The final merge | `git merge --squash <branch>`, then `git commit -m "<type>: <subject>"`, each in a command of its own, in the main checkout |
+| Is a branch's work in its merge target | `git merge-tree --write-tree <merge target> <branch>` prints the same tree as `git rev-parse "<merge target>^{tree}"` |
 | Validate one step | `tools/Scripts/Validate.ps1 -Only Build`, `Test`, `Headless` or `Screenshot` |
 | Run the app | `tools/Scripts/Run.ps1 -Project <project> -Headless -Commands 'wait loaded', <commands>, 'exit'`. It exits `2` at the first error. Do not start the app in another way. |
 | Take a screenshot | `tools/Scripts/Screenshot.ps1 -Project <project> -Commands <commands>` |

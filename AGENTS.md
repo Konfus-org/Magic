@@ -328,8 +328,8 @@ This is a hard rule. Each agent, skill and worker obeys it. No skill or plugin o
   2. Gets one review in a fresh context, then runs `tools/Scripts/AgentTaskComplete.ps1` one time, at the highest
      level of its slices.
   3. Asks the user if it can merge, in the user's review or in the chat, and waits for a yes.
-  4. In the main checkout, runs `git merge --no-ff <branch>` one time. Then it removes the branch's worktree and
-     branch.
+  4. In the main checkout, runs `git merge --squash <branch>` one time, then `git commit`. The branch becomes one
+     commit, with a subject for all its work. Then it removes the branch's worktree and branch.
 - **Never push.**
 
 ### Worktrees
@@ -365,7 +365,8 @@ tidy-worktrees skill). A coordinator closes its own workers without a new approv
   or `Core, Gems:`. The `commit-msg` git hook refuses a commit whose subject lacks the type or has a scope, and the
   Commits check a push.
 - Commit on your own branch as often as it helps. Only the merge into the main checkout's branch waits for the
-  user ([Branches and Merges](#branches-and-merges)).
+  user ([Branches and Merges](#branches-and-merges)). That merge makes one commit of the branch, so the main
+  checkout's branch gets one commit for each single slice or effort.
 - Never push.
 - No co-author lines, and nothing in code, comments, commit messages or branch names that hints the work was
   generated.

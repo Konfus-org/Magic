@@ -58,11 +58,12 @@ flowchart TD
    the user's review. Then:
    1. If the main checkout's branch moved, do step 1 and step 3 again. Do not get a new review. After a pull with no
       conflict, the stamp command runs only the build.
-   2. In the main checkout, run the final merge command one time. Do not push.
-   3. Run `git worktree remove`. Then run `git branch -d`. Do not use `-D`.
+   2. In the main checkout, run the final merge command one time. It makes one commit of the branch. Write a subject
+      for all the work of the branch, and put its decisions in the body. Do not push.
+   3. Make sure that the branch's work is in the main checkout's branch, with the command in PROJECT.md. Then run
+      `git worktree remove` and `git branch -D`. Git does not see a squashed branch as merged, so `-d` refuses it.
    4. Remove each other worktree and branch that you made for the task in the same way. This includes the worktree
-      that the app made for the session. For a branch that you made from a remote branch, set its upstream to that
-      branch first. Then `-d` removes it.
+      that the app made for the session.
    5. Delete the side sessions that you started and that are done
       ([tidy-worktrees skill](../tidy-worktrees/SKILL.md)).
 9. Propose the next slice or effort in one line, and stop. Do not start it yourself.

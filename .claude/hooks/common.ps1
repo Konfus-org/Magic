@@ -111,13 +111,15 @@ function Get-ReviewStamp($checkout, [string] $branch) {
     return Join-Path (Join-Path $checkout.Common 'agent-review') (ConvertTo-BranchFileName $branch)
 }
 
-# Whether the work of a branch, in its worktree $top, is in its merge target: the target holds the branch's last
-# commit and has moved on since, and the worktree has no change that is not committed. A branch with no commit of its
-# own, as its reflog shows, is a slice that just started, so it does not count.
+# Whether the work of a branch, in its worktree $top, is in its merge target: a merge of the branch into the target
+# changes nothing, which is also true after a squash merge, the target has moved on since, and the worktree has no
+# change that is not committed. A branch with no commit of its own, as its reflog shows, is a slice that just started,
+# so it does not count.
 function Test-BranchMerged([string] $top, [string] $branch, [string] $target) {
     if (-not $target -or $branch -eq $target) { return $false }
-    $merged = @(Invoke-Git $top @('branch', '--merged', $target, '--format=%(refname:short)'))
-    return $merged -contains $branch -and -not (Invoke-Git $top @('status', '--porcelain')) -and
+    $merged = [string](Invoke-Git $top @('merge-tree', '--write-tree', $target, $branch))
+    return $merged -and $merged -eq [string](Invoke-Git $top @('rev-parse', "$target^{tree}")) -and
+        -not (Invoke-Git $top @('status', '--porcelain')) -and
         [string](Invoke-Git $top @('rev-parse', $branch)) -ne [string](Invoke-Git $top @('rev-parse', $target)) -and
         @(Invoke-Git $top @('reflog', 'show', '--format=%gs', "refs/heads/$branch")).Count -gt 1
 }
