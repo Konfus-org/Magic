@@ -97,15 +97,13 @@ $way = @(
 )
 
 # The world is loaded and settled, the spin is held at no turn so the camera keeps the heading each stop gives it, and
-# the camera's own script is kept, because the whole component is written. The sun's and the moon's scripts keep the
-# copy that runs, so writing the component only hands each the hour to hold.
+# the camera's own script is kept, because the whole component is written. Day.Hour holds the sun at the hour and the
+# moon opposite it.
 $lines = @('wait loaded', 'wait drawn', 'wait 20s', "set player.scriptcontainer '[{""id"":100411,""degreesPerSec"":0},{""id"":100412}]'", 'wait 30')
 foreach ($hour in $Hours) {
     $text = $hour.ToString([cultureinfo]::InvariantCulture)
-    $moon = (($hour + 12) % 24).ToString([cultureinfo]::InvariantCulture)
     $lines += @(
-        "set sun.scriptcontainer '[{""id"":100421,""hour"":$text,""hoursPerMinute"":0}]'",
-        "set moon.scriptcontainer '[{""id"":100421,""hour"":$moon,""hoursPerMinute"":0}]'",
+        "set Day.Hour $text",
         "set player.transform.position '$($way[0].Position)'",
         "set player.transform.rotation '$($way[0].Rotation)'",
         "wait ${HourSettle}s"

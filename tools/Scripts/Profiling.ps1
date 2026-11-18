@@ -15,8 +15,9 @@ so that it uses only what the profiled run leaves idle; elsewhere after -Wait. A
 holder that stops can't block the others. -Slot waits for a free run slot and returns it, open: the scripts that run
 Magic or the tests hold one while they run, so that the sessions can build at the same time but run only a few at a
 time (the environment variable MAGIC_RUN_SLOTS, 1 if not set). A slot is a file in the git folder that its holder keeps
-open; the holder disposes it when done, and the system frees it when the holder's process ends. Runs from any current
-directory.
+open; the holder disposes it when done, and the system frees it when the holder's process ends. MAGIC_RUN_SLOTS takes
+a whole number of 1 or more, and the wait for a slot gives up after 24 hours with the holders named. Runs from any
+current directory.
 
 .PARAMETER Minutes
 Takes the turn for this many minutes, at most 20.
@@ -140,16 +141,42 @@ function Get-OtherRuns {
     return $runs
 }
 
+# What holds each slot, read from the slot files, for the message of a wait that gave up.
+function Get-SlotHolders([string] $Folder, [int] $Count) {
+    return @(1..$Count | ForEach-Object {
+        $path = Join-Path $Folder "slot-$_"
+        try {
+            $stream = [System.IO.File]::Open($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read,
+                [System.IO.FileShare]::ReadWrite)
+            try {
+                $text = [System.IO.StreamReader]::new($stream).ReadToEnd()
+            } finally {
+                $stream.Dispose()
+            }
+            "slot ${_}: " + ((@($text -split "`n") | ForEach-Object { $_.Trim() } |
+                Where-Object { $_ }) -join ', ')
+        } catch [System.IO.IOException] {
+            "slot ${_}: no holder is named"
+        }
+    })
+}
+
 if ($Slot) {
     $slots = Join-Path $common 'agent-runs'
     New-Item -ItemType Directory -Force -Path $slots | Out-Null
-    $count = if ($env:MAGIC_RUN_SLOTS) { [int]$env:MAGIC_RUN_SLOTS } else { 1 }
+    # A full visual-test run holds a slot for hours, so the wait gives up only after a day, and then names the holders.
+    $limit = [TimeSpan]::FromHours(24)
+    $started = [DateTime]::UtcNow
+    $count = 1
+    if ($env:MAGIC_RUN_SLOTS -and -not ([int]::TryParse($env:MAGIC_RUN_SLOTS, [ref] $count) -and $count -ge 1)) {
+        throw "MAGIC_RUN_SLOTS is '$env:MAGIC_RUN_SLOTS': it takes a whole number of runs of 1 or more."
+    }
     $shown = $false
     while ($true) {
         for ($i = 1; $i -le $count; $i++) {
             try {
                 $file = [System.IO.File]::Open((Join-Path $slots "slot-$i"), [System.IO.FileMode]::OpenOrCreate,
-                    [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+                    [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::Read)
             } catch [System.IO.IOException] {
                 continue
             }
@@ -164,6 +191,10 @@ if ($Slot) {
         if (-not $shown) {
             Write-Host "Waiting for a free run slot: $count run(s) of Magic or the tests from other sessions are going (MAGIC_RUN_SLOTS)."
             $shown = $true
+        }
+        if (([DateTime]::UtcNow - $started) -gt $limit) {
+            throw ("No run slot became free in $($limit.TotalHours) hours. " +
+                ((Get-SlotHolders $slots $count) -join '; '))
         }
         Start-Sleep -Seconds 5
     }

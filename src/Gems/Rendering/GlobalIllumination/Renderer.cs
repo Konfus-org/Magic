@@ -47,6 +47,11 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
     /// How the light is traced, which <see cref="Render"/> reads each frame.
     /// </summary>
     private readonly GlobalIlluminationSettings _settings;
+
+    /// <summary>
+    /// Which terms of the light are on, which <see cref="Render"/> reads each frame.
+    /// </summary>
+    private readonly LightTerms _terms;
     private readonly Probes _probes;
     private readonly TracedDiffuse _diffuse;
     private readonly IGraphicsApi _gpu;
@@ -83,9 +88,16 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
     /// </summary>
     private readonly List<((int Width, int Height)? Traced, int Blended)> _views = [];
 
-    internal Renderer(GlobalIlluminationSettings settings, AssetManager assets, Threads threads, IGraphicsApi gpu)
+    internal Renderer(
+        GlobalIlluminationSettings settings,
+        LightTerms terms,
+        AssetManager assets,
+        Threads threads,
+        IGraphicsApi gpu
+    )
     {
         _settings = settings;
+        _terms = terms;
         _settling = new SettleWait(threads);
         unsafe
         {
@@ -286,10 +298,10 @@ public sealed class Renderer : IRender<GlobalIlluminationInput, IndirectLight>, 
                 1
             ),
             DiffuseTermsOff =
-                (_settings.IsHitProbeLightOn ? 0u : 1u)
-                | (_settings.IsDiffuseSkyOn ? 0u : 2u)
-                | (_settings.IsShadowFillOn ? 0u : 4u)
-                | (_settings.IsPixelProbeLightOn ? 0u : 8u),
+                (_terms.IsHitProbeLightOn ? 0u : 1u)
+                | (_terms.IsDiffuseSkyOn ? 0u : 2u)
+                | (_terms.IsShadowFillOn ? 0u : 4u)
+                | (_terms.IsPixelProbeLightOn ? 0u : 8u),
         };
         // Not staged: nothing is recorded, and the frame's row stays the view's default, which the shaders read as none.
         if (!graph.Upload(view.Constants, [gi]))

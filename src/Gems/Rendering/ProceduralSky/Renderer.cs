@@ -69,6 +69,9 @@ public sealed class Renderer : IRender<SkyInput, SkyTables>, IRender, IHookIntoD
     /// <summary>
     /// Fills the view's sky tables and writes their row into the view's frame buffer.
     /// </summary>
+    /// <remarks>
+    /// The brightness is the first sky entity's, so a domain holds one sky.
+    /// </remarks>
     /// <returns>
     /// The sky's shader type and the view's tables, the tables none while no entity has a sky, the shaders build, or
     /// the tables are not made. With none, the open sky lights the world.
@@ -76,7 +79,7 @@ public sealed class Renderer : IRender<SkyInput, SkyTables>, IRender, IHookIntoD
     public SkyTables? Render(in RenderFrame frame, RenderGraph graph, in SkyInput input)
     {
         SkyTables none = new(_skyType, GpuTexture.None, GpuTexture.None, GpuTexture.None);
-        if (_skies.TakeNewest() is not { Count: > 0 })
+        if (_skies.TakeNewest() is not { Count: > 0 } skies)
             return none;
 
         GpuState shaders = _gpu.GetState(_transmittanceShader, _multiScatteringShader, _viewShader);
@@ -103,6 +106,7 @@ public sealed class Renderer : IRender<SkyInput, SkyTables>, IRender, IHookIntoD
             Transmittance = transmittance.Value.Id,
             MultiScattering = multiScattering.Value.Id,
             View = view.Value.Id,
+            Brightness = skies.First[0].Brightness,
         };
         if (!graph.Upload(gpu.Frame, [row], GpuSkyTables.Offset))
             return none;

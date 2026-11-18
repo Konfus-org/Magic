@@ -1,0 +1,5 @@
+# The Python packages that the reference tools need, over the ones that Blender holds. Install them into Blender's
+# own Python, which runs tools/Reference/Compare.py:
+#   "<Blender>/python/bin/python.exe" -m pip install -r tools/Reference/requirements.txt
+# NVIDIA's FLIP, the difference evaluator that Compare.py measures a rendered picture against its reference with.
+flip-evaluator==1.7

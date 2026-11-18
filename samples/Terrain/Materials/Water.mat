@@ -1,0 +1,8 @@
+{
+    // Still water: almost black from above, and a mirror at a low angle.
+    "shader": { "id": 10001 },
+    "params": {
+        "color": { "r": 0.02, "g": 0.025, "b": 0.03, "a": 1 },
+        "roughness": { "x": 0.02 }
+    }
+}

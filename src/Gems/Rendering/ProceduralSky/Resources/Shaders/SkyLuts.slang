@@ -76,6 +76,9 @@ void FillSkyView(uint3 thread : SV_DispatchThreadID)
     float altitude = lights.cameraAltitude * 0.001;
     float3 direction = ToSkyViewDirection(GetTexelCenterUv(thread.xy, SkyViewLutSize), altitude);
     StorageRef target = { tables.view, 0u };
+
+    // The sky's brightness is in the table, so the sky that is seen, the light it gives the surfaces, the probes and
+    // the reflections all take it, and the sun's light, which comes from the transmittance table, does not.
     float3 sky = GetSkyView(transmittance, multi, sampler, direction, lights.sunDirection.xyz, altitude);
-    target.Store(thread.xy, float4(sky, 1.0));
+    target.Store(thread.xy, float4(sky * tables.brightness, 1.0));
 }

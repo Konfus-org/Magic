@@ -1,10 +1,14 @@
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Numerics;
+using System.Text.Json.Nodes;
 using Magic.Assets;
+using Magic.Assets.Pipeline;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
+using Magic.Files;
 using Magic.Utils;
 
 namespace Magic.CommandLine.Commands;
@@ -26,6 +30,62 @@ internal static class CommandLookups
         Log.Error($"No project is running to {what}.");
 
         return false;
+    }
+
+    /// <summary>
+    /// Writes <paramref name="json"/> to <paramref name="file"/>, or to standard output when no file is named.
+    /// </summary>
+    /// <remarks>
+    /// A file gets the JSON indented, for a person to read, and <paramref name="what"/> says in the log what is in it.
+    /// </remarks>
+    public static void Print(IFileSystem files, string? file, JsonObject json, string what)
+    {
+        string text = json.ToJsonString(Json.Indented);
+        if (file is null)
+        {
+            Terminal.Write(text);
+
+            return;
+        }
+
+        Result written = files.Write(file, text);
+        if (written.Ok)
+            Log.Info($"{what} {file}.");
+        else
+            Log.Error($"{file} was not written: {written.Error}");
+    }
+
+    /// <summary>
+    /// The asset with the id <paramref name="askedId"/>, or why there is none.
+    /// </summary>
+    public static Result<IndexedFile> FindAssetById(AssetManager assets, string askedId)
+    {
+        if (!ulong.TryParse(askedId, NumberStyles.None, CultureInfo.InvariantCulture, out ulong number))
+            return Result.Failure($"'{askedId}' is not an id.");
+
+        return assets.Database.Index.ById.TryGetValue(number, out IndexedFile? indexed)
+            ? Result.Success(indexed)
+            : Result.Failure($"no asset has the id {number}.");
+    }
+
+    /// <summary>
+    /// The asset at the path <paramref name="asked"/>, or else the first whose file has that name, as spawn and
+    /// open take one; or why there is none.
+    /// </summary>
+    public static Result<IndexedFile> FindAssetByPath(AssetManager assets, string asked)
+    {
+        if (assets.Database.Index.ByPath.TryGetValue(asked, out IndexedFile? indexed))
+            return Result.Success(indexed);
+
+        IndexedFile? named = assets
+            .Database.Index.ByPath.Values.OrderBy(other => other.Path, StringComparer.Ordinal)
+            .FirstOrDefault(other =>
+                string.Equals(Path.GetFileNameWithoutExtension(other.Path), asked, StringComparison.OrdinalIgnoreCase)
+            );
+
+        return named is not null
+            ? Result.Success(named)
+            : Result.Failure($"no asset is at {asked}, and no asset's file is named that.");
     }
 
     /// <summary>

@@ -1,41 +1,26 @@
 {
-    // The cabin's room faces +X to its hearth and -Z to its door. Four windows sit at a height of 1.3 to 2.45: two
-    // in the door wall at x -2.5 and x 2.5, one in the -X end wall, and one in the +Z wall at x -1. Slop's importer
-    // mirrored a model, this one does not, so most things in the room sit where Slop put them, turned half a turn
-    // about Y.
+    // The cabin's room faces +X to its hearth and -Z to its door. Two windows sit in the door wall at x -2.5 and
+    // x 2.5 and one in the +Z wall at x -1, each at a height of 1.3 to 2.45; the one in the -X end wall sits 6 cm
+    // higher, because that wall's log courses sit 12 cm higher. Slop's importer mirrored a model, this one does not,
+    // so most things in the room sit where Slop put them, turned half a turn about Y.
     "entities": [
-        // The model leaves the walls open to the sky: 20 cm between the top of the side logs and the roof's planks,
-        // 2 cm between the side logs and the stone base, 15 cm under the first log of each end wall, and 1 cm where
-        // the end walls meet the roof, and 5 cm between the head of the end wall's window and the log over it. The
-        // log under that window also stands 5 cm over its sill. Trim boxes fill or cover each one. Each sits inside
-        // the logs or the stone at its edges, so only its closing face shows.
-        {"name": "Cabin", "components": {"Transform": {}, "Renderer": {"model": {"id": 300051}, "materials": [{"id": 300061}, {"id": 300064}, {"id": 300063}, {"id": 300062}]}},
+        // The model holds the whole shell: the logs on their stone base and footings, the roof, the floor, the four
+        // window frames with their glass, and the door open a quarter turn on the jamb at -X. Its six materials go in
+        // the order of its submeshes: logs, stone, roof, planks, door, glass.
+        {"name": "Cabin", "components": {"Transform": {}, "Renderer": {"model": {"id": 300051}, "materials": [{"id": 300061}, {"id": 300064}, {"id": 300063}, {"id": 300062}, {"id": 300065}, {"id": 9074876982782962638}]}},
             "children": [
-                {"name": "Side trim", "components": {"Transform": {"position": {"x": 0, "y": 3.0, "z": 3.11}, "scale": {"x": 4.55, "y": 0.15, "z": 0.02}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300061}]}}},
-                {"name": "Side trim", "components": {"Transform": {"position": {"x": 0, "y": 3.0, "z": -3.11}, "scale": {"x": 4.55, "y": 0.15, "z": 0.02}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300061}]}}},
-                {"name": "End trim", "components": {"Transform": {"position": {"x": 3.98, "y": 3.08, "z": 0}, "scale": {"x": 0.05, "y": 0.05, "z": 3.15}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300061}]}}},
-                {"name": "End trim", "components": {"Transform": {"position": {"x": -3.98, "y": 3.08, "z": 0}, "scale": {"x": 0.05, "y": 0.05, "z": 3.15}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300061}]}}},
-                {"name": "Side footing", "components": {"Transform": {"position": {"x": 0, "y": 0.424, "z": 3.015}, "scale": {"x": 4.55, "y": 0.024, "z": 0.155}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300064}]}}},
-                {"name": "Side footing", "components": {"Transform": {"position": {"x": 0, "y": 0.424, "z": -3.015}, "scale": {"x": 4.55, "y": 0.024, "z": 0.155}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300064}]}}},
-                {"name": "End footing", "components": {"Transform": {"position": {"x": 3.98, "y": 0.5, "z": 0}, "scale": {"x": 0.14, "y": 0.1, "z": 3.0}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300064}]}}},
-                {"name": "End footing", "components": {"Transform": {"position": {"x": -3.98, "y": 0.5, "z": 0}, "scale": {"x": 0.14, "y": 0.1, "z": 3.0}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300064}]}}},
-                {"name": "End window head", "components": {"Transform": {"position": {"x": -4.0, "y": 2.545, "z": 0}, "scale": {"x": 0.155, "y": 0.095, "z": 0.67}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300062}]}}},
-                {"name": "End window sill", "components": {"Transform": {"position": {"x": -4.0, "y": 1.31, "z": 0}, "scale": {"x": 0.155, "y": 0.055, "z": 0.67}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300062}]}}},
                 {"name": "Doorstep", "components": {"Transform": {"position": {"x": 0, "y": 0.05, "z": -3.7}, "scale": {"x": 0.9, "y": 0.4, "z": 0.4}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300064}]}}}
             ]},
-        // The cabin's own door and its window panes are its last two submeshes. The renderer gives them no material,
-        // so they draw nothing and the doorway and all four windows stand open. This box, the door's size, stands
-        // open a quarter turn on the jamb at -X.
-        {"name": "Door", "components": {"Transform": {"position": {"x": -0.49, "y": 1.45, "z": -3.81}, "rotation": {"x": 0, "y": 0.70711, "z": 0, "w": 0.70711}, "scale": {"x": 0.49, "y": 0.99, "z": 0.025}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300065}]}}},
-        // One window of the door wall keeps its glass: this box fills the opening, set 5 cm into the reveal.
-        {"name": "Window pane", "components": {"Transform": {"position": {"x": 2.5, "y": 1.875, "z": -2.95}, "scale": {"x": 0.61, "y": 0.585, "z": 0.012}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 9074876982782962638}]}}},
+        // A light wool carpet, 1 cm thick, on the floor at 0.45 in the middle of the room: its bounce light shows on
+        // the walls and the ceiling.
+        {"name": "Carpet", "components": {"Transform": {"position": {"x": 0.2, "y": 0.455, "z": -0.2}, "scale": {"x": 1.4, "y": 0.005, "z": 1.0}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300124}]}}},
         {"name": "Bench", "components": {"Transform": {"position": {"x": 1.55, "y": 0.45, "z": 0.2}, "rotation": {"x": 0, "y": 0.70711, "z": 0, "w": -0.70711}}, "Renderer": {"model": {"id": 300052}, "materials": [{"id": 300066}]}}},
         {"name": "Rocking chair", "components": {"Transform": {"position": {"x": 1.3, "y": 0.45, "z": -1.6}, "rotation": {"x": 0, "y": 0.5373, "z": 0, "w": 0.84339}}, "Renderer": {"model": {"id": 300053}, "materials": [{"id": 300067}]}}},
         // The shelf is the one thing the half turn does not fit: it already backs on to its model's +z, so a turn
         // puts its open side in the wall and leaves its back board standing on the room's side of the logs.
         {"name": "Shelf", "components": {"Transform": {"position": {"x": -2.9, "y": 0.45, "z": 2.84}}, "Renderer": {"model": {"id": 300054}, "materials": [{"id": 300068}]}}},
         {"name": "Lantern", "components": {"Transform": {"position": {"x": 1.55, "y": 1, "z": 0.6}, "rotation": {"x": 0, "y": 1, "z": 0, "w": 0}, "scale": {"x": 1.6, "y": 1.6, "z": 1.6}}, "Renderer": {"model": {"id": 300055}, "materials": [{"id": 300069}, {"id": 300070}], "isShadowless": true}}},
-        {"name": "Lantern light", "components": {"Transform": {"position": {"x": 1.55, "y": 1.17, "z": 0.6}}, "PointLight": {"color": {"r": 1, "g": 0.72, "b": 0.42}, "intensity": 120, "range": 9}, "ScriptContainer": [{"id": 100330, "depth": 0.1}]}},
+        {"name": "Lantern light", "tags": ["lantern"], "components": {"Transform": {"position": {"x": 1.55, "y": 1.17, "z": 0.6}}, "PointLight": {"color": {"r": 1, "g": 0.402, "b": 0.083}, "intensity": 320, "range": 12}, "ScriptContainer": [{"id": 100330, "depth": 0.1}]}},
         {"name": "Ash", "components": {"Transform": {"position": {"x": 3.45, "y": 0.525, "z": 0}, "scale": {"x": 0.16, "y": 0.03, "z": 0.27}}, "Renderer": {"model": {"id": 517}, "materials": [{"id": 300073}]}}},
         {"name": "Coal", "components": {"Transform": {"position": {"x": 3.45, "y": 0.545, "z": 0.0}, "rotation": {"x": 0, "y": 0.30071, "z": 0, "w": 0.95372}, "scale": {"x": 0.095, "y": 0.055, "z": 0.085}}, "Renderer": {"model": {"id": 517}, "materials": [{"id": 300071}]}}},
         {"name": "Coal", "components": {"Transform": {"position": {"x": 3.39, "y": 0.542, "z": 0.17}, "rotation": {"x": 0, "y": 0.81915, "z": 0, "w": 0.57358}, "scale": {"x": 0.075, "y": 0.048, "z": 0.068}}, "Renderer": {"model": {"id": 517}, "materials": [{"id": 300071}]}}},
@@ -55,6 +40,27 @@
         {"name": "Flame", "components": {"Transform": {"position": {"x": 3.5, "y": 0.7, "z": -0.06}, "rotation": {"x": -0.061, "y": 0, "z": 0, "w": 0.9981}, "scale": {"x": 0.065, "y": 0.32, "z": 0.065}}, "Renderer": {"model": {"id": 513}, "materials": [{"id": 300076}], "isShadowless": true}}},
         {"name": "Flame", "components": {"Transform": {"position": {"x": 3.46, "y": 0.665, "z": 0.24}, "scale": {"x": 0.055, "y": 0.25, "z": 0.055}}, "Renderer": {"model": {"id": 513}, "materials": [{"id": 300076}], "isShadowless": true}}},
         {"name": "Flame", "components": {"Transform": {"position": {"x": 3.44, "y": 0.66, "z": -0.22}, "rotation": {"x": 0, "y": 0, "z": 0.0436, "w": 0.999}, "scale": {"x": 0.05, "y": 0.23, "z": 0.05}}, "Renderer": {"model": {"id": 513}, "materials": [{"id": 300076}], "isShadowless": true}}},
-        {"name": "Fire", "tags": ["fire"], "components": {"Transform": {"position": {"x": 3.0, "y": 0.7, "z": 0}}, "PointLight": {"color": {"r": 1, "g": 0.6, "b": 0.3}, "intensity": 300, "range": 12, "radius": 0.15}, "ScriptContainer": [{"id": 100330, "depth": 0.4}]}}
+        // A low table by the -X wall with one of each kind of surface on it, which the cabin-surfaces view looks
+        // at: a polished metal, a rough metal, a dark gloss that is not a metal, still water in a tray, and a
+        // bead that gives light. Reflections, metal and emissive surfaces have a test here that can fail.
+        {"name": "Table top", "components": {"Transform": {"position": {"x": -2.0, "y": 0.7, "z": 0.6}, "scale": {"x": 0.5, "y": 0.03, "z": 0.35}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300066}]}}},
+        {"name": "Table post", "components": {"Transform": {"position": {"x": -2.0, "y": 0.575, "z": 0.6}, "scale": {"x": 0.07, "y": 0.125, "z": 0.07}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300066}]}}},
+        {"name": "Table foot", "components": {"Transform": {"position": {"x": -2.0, "y": 0.465, "z": 0.6}, "scale": {"x": 0.28, "y": 0.015, "z": 0.2}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300066}]}}},
+        {"name": "Polished steel ball", "components": {"Transform": {"position": {"x": -2.28, "y": 0.79, "z": 0.72}, "scale": {"x": 0.06, "y": 0.06, "z": 0.06}}, "Renderer": {"model": {"id": 517}, "materials": [{"id": 300125}]}}},
+        {"name": "Rough iron block", "components": {"Transform": {"position": {"x": -2.26, "y": 0.78, "z": 0.45}, "rotation": {"x": 0, "y": 0.19081, "z": 0, "w": 0.98163}, "scale": {"x": 0.07, "y": 0.05, "z": 0.07}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300126}]}}},
+        {"name": "Dark lacquer ball", "components": {"Transform": {"position": {"x": -1.72, "y": 0.7875, "z": 0.7}, "scale": {"x": 0.0575, "y": 0.0575, "z": 0.0575}}, "Renderer": {"model": {"id": 517}, "materials": [{"id": 300127}]}}},
+        {"name": "Water tray", "components": {"Transform": {"position": {"x": -1.98, "y": 0.742, "z": 0.44}, "scale": {"x": 0.125, "y": 0.012, "z": 0.095}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300126}]}}},
+        {"name": "Water", "components": {"Transform": {"position": {"x": -1.98, "y": 0.752, "z": 0.44}, "scale": {"x": 0.11, "y": 0.004, "z": 0.08}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300128}]}}},
+        {"name": "Glow bead", "components": {"Transform": {"position": {"x": -1.6, "y": 0.755, "z": 0.45}, "scale": {"x": 0.025, "y": 0.025, "z": 0.025}}, "Renderer": {"model": {"id": 517}, "materials": [{"id": 300129}]}}},
+        // A brass plate on a cord from the roof, over the carpet, which turns one time in 6 seconds. The
+        // cabin-room view sees it move. Its angle comes from the time since the load, so each run shows it at the
+        // same place at the same time, and at a whole number of turns it stands where the Blender reference draws
+        // it. No point of a view is on it or on the circle that it sweeps.
+        {"name": "Turning ornament", "tags": ["ornament"], "components": {"Transform": {"position": {"x": 0.2, "y": 1.95, "z": -0.2}}, "ScriptContainer": [{"id": 100411, "degreesPerSec": 60}]},
+            "children": [
+                {"name": "Cord", "components": {"Transform": {"position": {"x": 0, "y": 0.775, "z": 0}, "scale": {"x": 0.008, "y": 0.775, "z": 0.008}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300066}]}}},
+                {"name": "Plate", "components": {"Transform": {"position": {"x": 0, "y": -0.2, "z": 0}, "scale": {"x": 0.16, "y": 0.1, "z": 0.04}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300069}]}}}
+            ]},
+        {"name": "Fire", "tags": ["fire"], "components": {"Transform": {"position": {"x": 3.0, "y": 0.7, "z": 0}}, "PointLight": {"color": {"r": 1, "g": 0.423, "b": 0.1}, "intensity": 760, "range": 16, "radius": 0.15}, "ScriptContainer": [{"id": 100330, "depth": 0.4}]}}
     ]
 }

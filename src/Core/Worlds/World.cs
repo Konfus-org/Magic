@@ -50,7 +50,7 @@ internal readonly record struct DomainRead(Handle<Domain> Domain, Domain Asset, 
 /// Make entity calls on the game thread. Make the other calls on any thread.
 /// </para>
 /// </remarks>
-public sealed class World : IEcs, IDisposable
+public sealed class World : IEcs, IWorldClock, IDisposable
 {
     /// <summary>
     /// How long the cover takes to fade in or out.
@@ -658,35 +658,17 @@ public sealed class World : IEcs, IDisposable
         [.. state.Placed.Values.Concat(state.Made).Select(entity => entity.Values.ToImmutableArray())];
 
     /// <summary>
-    /// The entities that the parts of a prefab spawn as: one for each part, and a part before the parts under it.
+    /// The entities that the parts of a prefab spawn as: one for each part, as <see cref="Prefab.Place"/> orders and
+    /// places them.
     /// </summary>
-    /// <remarks>
-    /// Each transform is placed under that of its parent, and the transforms of the top parts under
-    /// <paramref name="at"/>.
-    /// </remarks>
     private static ImmutableArray<ImmutableArray<IComponent>> GetEntities(Prefab prefab, Transform at)
     {
+        ImmutableArray<PlacedPart> parts = prefab.Place(at);
         ImmutableArray<ImmutableArray<IComponent>>.Builder entities = ImmutableArray.CreateBuilder<
             ImmutableArray<IComponent>
-        >();
-        AddEntities(prefab.Parts, at, entities);
-
-        return entities.ToImmutable();
-    }
-
-    private static void AddEntities(
-        ImmutableArray<PrefabPart> parts,
-        Transform parent,
-        ImmutableArray<ImmutableArray<IComponent>>.Builder entities
-    )
-    {
-        foreach (PrefabPart part in parts)
+        >(parts.Length);
+        foreach ((PrefabPart part, Transform placed) in parts)
         {
-            // The part's transform placed under its parent's, or the parent's place when it has none.
-            Transform placed = part
-                .Components.OfType<Transform>()
-                .Select(local => local.Under(parent))
-                .FirstOrDefault(parent);
             ImmutableArray<IComponent>.Builder components = ImmutableArray.CreateBuilder<IComponent>(
                 part.Components.Length
             );
@@ -696,8 +678,9 @@ public sealed class World : IEcs, IDisposable
             }
 
             entities.Add(components.MoveToImmutable());
-            AddEntities(part.Children, placed, entities);
         }
+
+        return entities.MoveToImmutable();
     }
 
     /// <summary>

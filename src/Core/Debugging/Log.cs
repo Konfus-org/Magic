@@ -27,6 +27,7 @@ public static class Log
     /// </summary>
     private static readonly Queue<Line> _history = new();
     private static int _errorCount;
+    private static int _warningCount;
 
     public static VerbosityLevel Verbosity
     {
@@ -44,6 +45,16 @@ public static class Log
     /// How many errors were logged. With --fail-on-error, one or more makes the exit code 2.
     /// </summary>
     public static int ErrorCount => Volatile.Read(ref _errorCount);
+
+    /// <summary>
+    /// How many warnings were logged, at any verbosity.
+    /// </summary>
+    public static int WarningCount => Volatile.Read(ref _warningCount);
+
+    /// <summary>
+    /// The file that holds the log of this process, in <c>Logs/</c> beside Magic; null when the run has none.
+    /// </summary>
+    public static string? FilePath { get; internal set; }
 
     /// <summary>
     /// Detail that is usually noise: logged only at detailed verbosity or above, and otherwise not even queued.
@@ -77,7 +88,7 @@ public static class Log
     }
 
     /// <summary>
-    /// Something works, only worse. With <paramref name="onScreen"/>, the debug UI shows it on screen too, for
+    /// Something works, only worse. Counted as a warning at any verbosity. With <paramref name="onScreen"/>, the debug UI shows it on screen too, for
     /// <paramref name="showForSec"/> seconds, or for the time its settings give when that is null.
     /// </summary>
     public static void Warn(
@@ -89,6 +100,7 @@ public static class Log
         [CallerLineNumber] int line = 0
     )
     {
+        Interlocked.Increment(ref _warningCount);
         if (Verbosity >= VerbosityLevel.Minimal)
             Write(LoggingLevel.Warn, message, member, file, line, onScreen, showForSec);
     }

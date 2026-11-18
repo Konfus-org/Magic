@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 namespace Magic.Ecs.Components;
 
 /// <summary>
@@ -9,6 +11,17 @@ namespace Magic.Ecs.Components;
 /// </remarks>
 public readonly record struct Tag(int Id)
 {
+    /// <summary>
+    /// The name of each tag that <see cref="From"/> made in this run, by its id. The tag itself stays a hash, so an
+    /// entity's tags keep their size.
+    /// </summary>
+    /// <remarks>
+    /// Every tag of a prefab and of a command goes through <see cref="From"/>, so the names of the world are here. A
+    /// tag that only a saved world holds has no name. It holds ids and text alone, so the code of a gem unloads with
+    /// its names still here.
+    /// </remarks>
+    private static readonly ConcurrentDictionary<int, string> _names = [];
+
     public static Tag None => default;
 
     /// <summary>
@@ -46,7 +59,14 @@ public readonly record struct Tag(int Id)
         }
 
         int id = unchecked((int)hash);
+        id = id == 0 ? 1 : id;
+        _names[id] = name;
 
-        return new Tag(id == 0 ? 1 : id);
+        return new Tag(id);
     }
+
+    /// <summary>
+    /// The name that this tag was made from, or null when no name of this run hashes to it.
+    /// </summary>
+    public string? GetName() => _names.GetValueOrDefault(Id);
 }

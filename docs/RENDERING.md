@@ -40,12 +40,13 @@ flowchart LR
 
 - An input with a nullable type is optional. Without the gem that makes it, the step that takes it runs without it.
 - The gems that trace rays need a GPU with ray queries. On a GPU without them, these gems make nothing.
-- The settings of the rendering gems are in the `<Gem>Settings` class of each gem. `get Rendering` and `get Debug`
+- The settings of the rendering gems are in the `<Gem>Settings` class of each gem. `query Rendering` and `query Debug`
   list them, and `set` changes them, as `set Rendering.ShadowScale 1`.
 - The shaders of a gem are the `Shaders/` modules in its `Resources` folder. They import the shader library
   ([Shaders](SHADERS.md)).
-- `bake` in the console loads each asset, which makes what each gem makes of each model. Then it opens each domain
-  under `Domains/` and exits. A release then ships with full caches.
+- `bake` in the console loads each asset, which makes what each gem makes of each model. `bake <path>` loads one
+  asset, or each asset under a folder. It opens no domain: a compiled shader is cached when a domain first draws
+  with it.
 
 ## DeferredRendering
 
@@ -113,6 +114,8 @@ ECS, the model importer and the texture importer, with a gem that draws its geom
 ### Lights and the sky
 
 - A pixel with no geometry shows the sky. The material of a sky entity draws the sky.
+- The `Brightness` of a `Sky` multiplies the sky that is seen, the light the sky gives the surfaces and what the haze
+  scatters. The sun and the moon keep their own light. 1, the default, is the sky of the air itself.
 - A sky gem makes the sky tables. Without a sky entity or a sky gem, there are no sky tables. The shading and the
   indirect light then use `OpenSky`, and the open sky lights the world at `Rendering.SkyBrightness`.
 - The directional light is the sun while it is above the horizon. Else it is the moon while the moon is above the
@@ -147,7 +150,7 @@ failures flash on the mesh of their entity ([Debugging](DEBUGGING.md)).
 
 ### Debug views
 
-`Debug.RenderView` shows one part of the GBuffer, or the indirect light, alone. `Final` shows the finished frame. The
+`DeferredRendering.RenderView` shows one part of the GBuffer, or the indirect light, alone. `Final` shows the finished frame. The
 names are in `DebugView`. With a gem that gives the debug UI, F2 opens the Rendering window. F5 and F6 step through
 the views.
 
@@ -274,6 +277,8 @@ renderer. The renderer shades the sky, the sun's colour and the sky's light on t
 - One time for each view, it hands on the shader type of the sky, `Atmosphere`, as its `SkyTables`. While an entity
   has a sky, it also makes the three sky tables of the view.
 - Its `Sky` material is the material for the `Sky` component.
+- The view's table holds the sky's light with the `Brightness` of the `Sky` in it, so everything that reads that table
+  takes it: the sky that is seen, the ambient light, the probes, the diffuse rays and the reflections.
 - Without the gem, the world is lit by the open sky.
 
 ## PostEffects

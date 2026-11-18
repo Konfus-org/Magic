@@ -1,0 +1,80 @@
+{
+  "cycles": {
+    "samples": 1024
+  },
+  "picture": {
+    "width": 1600,
+    "height": 900
+  },
+  "fieldOfView": 60,
+  "grade": {
+    "saturation": 1.12,
+    "contrast": 1.06,
+    "highlights": [1.03, 1.0, 0.97],
+    "shadows": [0.97, 0.99, 1.04]
+  },
+  "scene": {
+    "spinScript": 100411,
+    "glideScript": 100413,
+    "controllerScript": 100412,
+    "flickerScript": 100330,
+    "ornamentDegreesPerSecond": 60,
+    "fireIntensity": 760,
+    "fireFlickerDepth": 0.4,
+    "lanternIntensity": 320,
+    "lanternFlickerDepth": 0.1
+  },
+  "frames": {
+    "still": 6,
+    "angle": 3,
+    "moving": 4,
+    "moveHeld": 30,
+    "light": 40
+  },
+  "waitSeconds": {
+    "settle": 25,
+    "angle": 4,
+    "beforeMove": 3,
+    "light": 15
+  },
+  "turnSpeedsPerSecond": [6, 20, 120, 360],
+  "turnSeconds": 1.5,
+  "angleDegrees": 15,
+  "pointMargin": 0.03,
+  "lightChangeHours": 6,
+  "edgeNoise": {
+    "heldFrames": 6,
+    "stillFloor": 0.0005
+  },
+  "limits": {
+    "patchRatioMedian": { "min": 0.9, "max": 1.1 },
+    "patchRatioLow": { "min": 0.8 },
+    "patchRatioHigh": { "max": 1.25 },
+    "pointColour": { "max": 0.05 },
+    "pointAcrossAngles": { "max": 0.05 },
+    "settleFrames": { "max": 10 },
+    "edgeNoise": { "max": 1.5 },
+    "logWarnings": { "max": 0 },
+    "firefliesPerMillion": { "max": 50 },
+    "bandingPart": { "max": 0.05 },
+    "flickerPart": { "max": 0.1 },
+    "meanFlip": { "max": 0.25 },
+    "leakNits": { "max": 0.05 }
+  },
+  "proposed": [
+    "patchRatioMedian", "patchRatioLow", "patchRatioHigh", "firefliesPerMillion", "bandingPart", "flickerPart",
+    "meanFlip", "leakNits"
+  ],
+  "tolerances": {
+    "default": 0.05,
+    "gpuFrameMs": 0.1,
+    "flickerPart": 0.25,
+    "bandingPart": 0.35,
+    "pointColour": 0.35,
+    "pointAcrossAngles": 1.5
+  },
+  "proposedTolerances": [
+    "patchRatioMedian", "patchRatioLow", "patchRatioHigh", "meanFlip", "gpuFrameMs", "flickerPart", "bandingPart",
+    "pointColour", "pointAcrossAngles", "firefliesPerMillion"
+  ]
+}

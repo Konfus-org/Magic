@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using Magic.Utils;
 
 namespace Magic.Files;
@@ -27,6 +29,12 @@ public static class Json
     /// The dialect written indented, for a file a person reads and edits. It cannot be changed.
     /// </summary>
     internal static JsonSerializerOptions Indented { get; } = CreateIndented();
+
+    /// <summary>
+    /// The dialect without each member that holds what a new instance of its type holds. It is made from
+    /// <see cref="Options"/>, so it stands after it.
+    /// </summary>
+    private static JsonSerializerOptions WithoutDefaults { get; } = CreateWithoutDefaults();
 
     /// <summary>
     /// <paramref name="utf8"/> as a <typeparamref name="T"/>, or why it is not one.
@@ -69,11 +77,26 @@ public static class Json
     /// <paramref name="value"/>, a <paramref name="type"/> known only at run time, as JSON in the dialect, or why JSON
     /// cannot hold it: a type the serializer does not take, or one that refers to itself.
     /// </summary>
-    public static Result<JsonElement> Write(object? value, Type type)
+    public static Result<JsonElement> Write(object? value, Type type) => Write(value, type, Options);
+
+    /// <summary>
+    /// <paramref name="value"/>, a <paramref name="type"/> known only at run time, as JSON in the dialect, with or
+    /// without the defaults of its type, or why JSON cannot hold it.
+    /// </summary>
+    /// <remarks>
+    /// Without <paramref name="includesDefaults"/>, it is what a person writes in a file: at each depth, a member that
+    /// holds what a new instance of its own type holds is left out, so <see cref="Read(JsonElement, Type)"/> makes the
+    /// same value from it. A type that cannot be made without values keeps every member, and a required member is always
+    /// written.
+    /// </remarks>
+    public static Result<JsonElement> Write(object value, Type type, bool includesDefaults) =>
+        Write(value, type, includesDefaults ? Options : WithoutDefaults);
+
+    private static Result<JsonElement> Write(object? value, Type type, JsonSerializerOptions options)
     {
         try
         {
-            return Result.Success(JsonSerializer.SerializeToElement(value, type, Options));
+            return Result.Success(JsonSerializer.SerializeToElement(value, type, options));
         }
         catch (Exception ex)
             when (ex is ArgumentException or InvalidOperationException or NotSupportedException or JsonException)
@@ -109,6 +132,56 @@ public static class Json
 
         return options;
     }
+
+    private static JsonSerializerOptions CreateWithoutDefaults()
+    {
+        JsonSerializerOptions options = new(Options)
+        {
+            TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { LeaveOutDefaults } },
+        };
+        options.MakeReadOnly();
+
+        return options;
+    }
+
+    /// <summary>
+    /// Has each member of the object type <paramref name="described"/> written only when it holds something else than
+    /// a new instance of the type holds.
+    /// </summary>
+    /// <remarks>
+    /// The new instance is made at each write and nothing keeps it, so the load context of a gem unloads with its
+    /// types.
+    /// </remarks>
+    private static void LeaveOutDefaults(JsonTypeInfo described)
+    {
+        if (described.Kind != JsonTypeInfoKind.Object)
+            return;
+
+        foreach (JsonPropertyInfo member in described.Properties)
+        {
+            // A member that nothing can set is not read back, so it stays as the dialect has it. A required member
+            // stays too, because the reader refuses a file without it.
+            if (member.Get is not { } read || member.Set is null || member.IsRequired)
+                continue;
+
+            member.ShouldSerialize = (_, held) =>
+                !(
+                    described.Type.CreateDefault() is { Ok: true } fresh
+                    && IsSame(held, read(fresh.Value), member.PropertyType)
+                );
+        }
+    }
+
+    /// <summary>
+    /// Whether two values of a member are the same: equal, or written the same for a type that does not compare its
+    /// own values, such as a list.
+    /// </summary>
+    private static bool IsSame(object? held, object? other, Type type) =>
+        Equals(held, other)
+        || JsonNode.DeepEquals(
+            JsonSerializer.SerializeToNode(held, type, Options),
+            JsonSerializer.SerializeToNode(other, type, Options)
+        );
 
     /// <summary>
     /// <paramref name="value"/>, as JSON read it, or why it is not one: JSON's <c>null</c> is no value.

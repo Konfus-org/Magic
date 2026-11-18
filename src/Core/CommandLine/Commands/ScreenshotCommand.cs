@@ -34,8 +34,13 @@ internal static class ScreenshotCommand
                 return;
 
             string name = DateTime.Now.ToString("yyyyMMdd-HHmmss-fffffff", CultureInfo.InvariantCulture);
-            string path = files.Combine(AppContext.BaseDirectory, "Screenshots", $"{name}.{extension}");
+            string path = files.Combine(GetFolder(files), $"{name}.{extension}");
             events.Publish(new ScreenshotRequested(path));
         }
     }
+
+    /// <summary>
+    /// The folder that a screenshot goes in, beside Magic.
+    /// </summary>
+    public static string GetFolder(IFileSystem files) => files.Combine(AppContext.BaseDirectory, "Screenshots");
 }

@@ -4,7 +4,8 @@ using Magic.Input;
 namespace Magic.DeferredRendering;
 
 /// <summary>
-/// The renderer's debug window, which writes the view and whether it is open, as chosen this frame, into the settings.
+/// The renderer's debug window, which writes the view and whether it is open, as chosen this frame, into the
+/// <see cref="DebugViewState"/>.
 /// </summary>
 /// <remarks>
 /// Its key (F2) opens it, two more (F5 and F6) step through the views, and a line on screen names any view but the
@@ -21,21 +22,21 @@ internal sealed class RendererDebugWindow(IDebugUI ui, IInput? input)
 
     /// <summary>
     /// Draws the window and writes the view and whether the window is open, as chosen this frame, into
-    /// <paramref name="current"/>.
+    /// <paramref name="debugView"/>. The keys are those of <paramref name="settings"/>.
     /// </summary>
-    public void Update(DeferredRenderingSettings current)
+    public void Update(DeferredRenderingSettings settings, DebugViewState debugView)
     {
-        DebugView view = current.RenderView;
-        bool isOpen = current.IsRenderWindowOpen;
+        DebugView view = debugView.RenderView;
+        bool isOpen = debugView.IsRenderWindowOpen;
         if (input is not null)
         {
-            if (input[current.RenderWindowKey].WasPressed)
+            if (input[settings.RenderWindowKey].WasPressed)
                 isOpen = !isOpen;
 
-            if (input[current.PreviousViewKey].WasPressed)
+            if (input[settings.PreviousViewKey].WasPressed)
                 view = Step(view, -1);
 
-            if (input[current.NextViewKey].WasPressed)
+            if (input[settings.NextViewKey].WasPressed)
                 view = Step(view, 1);
         }
 
@@ -51,8 +52,8 @@ internal sealed class RendererDebugWindow(IDebugUI ui, IInput? input)
         if (view != DebugView.Final)
             ui.Text(_viewLines[(int)view]);
 
-        current.RenderView = view;
-        current.IsRenderWindowOpen = isOpen;
+        debugView.RenderView = view;
+        debugView.IsRenderWindowOpen = isOpen;
     }
 
     private static DebugView Step(DebugView view, int by) =>

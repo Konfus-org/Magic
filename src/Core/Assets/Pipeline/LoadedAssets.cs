@@ -61,13 +61,27 @@ internal delegate Result<object> AssetBuiltInReader(ReadOnlyMemory<byte> bytes, 
 internal delegate ulong AssetVersionRun(ReadOnlySpan<byte> bytes, JsonElement settings);
 
 /// <summary>
-/// An asset type, as a <c>.meta</c>'s <c>"type"</c> names it: the type, how its files are read, and their version.
+/// Loads asset <paramref name="id"/> as its type and writes it to <paramref name="file"/>, a path on the machine, or
+/// tells why it could not, with each value that holds its default when <paramref name="includesDefaults"/> says so.
+/// </summary>
+internal delegate Task<Result> AssetExportRun(
+    ulong id,
+    string file,
+    bool includesDefaults,
+    IProgress<LoadProgress>? progress,
+    CancellationToken cancel
+);
+
+/// <summary>
+/// An asset type, as a <c>.meta</c>'s <c>"type"</c> names it: the type, how its files are read and written, and their
+/// version.
 /// </summary>
 internal sealed record AssetType(
     Type Type,
     AssetImportRun Import,
     AssetBuiltInReader ReadBuiltIn,
-    AssetVersionRun ComputeVersion
+    AssetVersionRun ComputeVersion,
+    AssetExportRun Export
 );
 
 /// <summary>

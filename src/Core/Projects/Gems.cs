@@ -4,7 +4,9 @@ using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Reflection;
+using System.Text.Json.Nodes;
 using Magic.Assets;
+using Magic.CommandLine;
 using Magic.Configuration;
 using Magic.Debugging;
 using Magic.Ecs;
@@ -159,8 +161,19 @@ internal sealed class Gems : IDisposable
         services.MakeReadOnly();
         IServiceProvider provider = services.BuildServiceProvider();
 
+        // The console's own, which the host put among the services: it takes each part that has a console path.
+        ConsoleCommands commands = provider.GetRequiredService<ConsoleCommands>();
+
         // A constructor may load an asset of a type a gem made after it reads.
         assets.Expect(registered.SelectMany(gem => gem.PartTypes));
+
+        // What query gems prints: each gem that started, in the order of the project's list.
+        JsonArray started = [];
+        commands.RegisterQuery(
+            "gems",
+            "Prints each gem that the run started, with its version, its author and what it provides",
+            () => new JsonObject { ["gems"] = started.DeepClone() }
+        );
         foreach (RegisteredGem gem in registered)
         {
             if (gem.Resources is not null)
@@ -235,6 +248,9 @@ internal sealed class Gems : IDisposable
                 if (part is ILogSink sink)
                     loaded.Ends.Add(Log.Register(sink));
 
+                if (ServicePaths.FindMarked(part.GetType()) is { } marked)
+                    loaded.Ends.Add(commands.Register(marked.Path, part, marked.Type));
+
                 if (part is IEcs ecs)
                     loaded.Ends.Add(_world.Register(ecs));
 
@@ -260,6 +276,15 @@ internal sealed class Gems : IDisposable
 
             string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
             Log.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");
+            started.Add(
+                new JsonObject
+                {
+                    ["name"] = gem.Name,
+                    ["version"] = gem.Version.ToString(3),
+                    ["author"] = gem.Author,
+                    ["provides"] = new JsonArray([.. gem.Provides.Select(type => JsonValue.Create(type.Name))]),
+                }
+            );
         }
 
         // Once every gem renders, a gem that must take what no listed gem makes does not render until a gem that makes

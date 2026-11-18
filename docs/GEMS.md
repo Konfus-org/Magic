@@ -15,6 +15,40 @@ With `Private="false"`, the build does not copy the assembly of the other gem ne
 first and gives your gem that copy. If the project does not list the other gem, Magic refuses your gem and names the
 other gem.
 
+## Console commands
+
+A gem can add to Magic's console what only that gem knows. To do this, take `ConsoleCommands` in the constructor of
+the entry point of the gem.
+
+To let a tool read values, register a subject of `query`. The function gives the values as a JSON object:
+
+```csharp
+commands.RegisterQuery("sky", "Prints the lights and the factors of the sky", () => SkyQuery.Describe(ecs, settings));
+```
+
+`query sky` then prints the JSON, and `query sky --out <file>` writes it to a file. The sky gem adds
+`sky` this way (see the console commands in the [README](../README.md)).
+
+To add a command that does something else, call `commands.Register` with a `System.CommandLine` `Command`, as
+Magic's own commands are. Reference the package in the csproj of the gem with
+`PrivateAssets="all" ExcludeAssets="runtime"`, so that the gem builds against it and runs on the copy that Magic
+loaded.
+
+Give a subject or a command a name that Magic's own do not have. It joins the console before the next line is
+parsed, and stays to the end of the run.
+
+To let `set` and `query` reach the properties of a part, put `[CliPath]` on the class of the part, or on an
+interface that the part provides:
+
+```csharp
+[CliPath("Window")]
+public interface IWindow
+```
+
+`query Window.Title` then reads the property, and `set Window.Title "my run"` writes it. A property with no public
+setter is read-only. The console shows only the properties of the type that has the attribute. Use `[CliPath]` for
+state of the run, which is not saved. A value that the user keeps is a setting.
+
 ## Native libraries
 
 A gem can call a C library. Declare the library as a `NativeLibrary` item in the csproj of the gem. The build gets the
@@ -74,7 +108,7 @@ How a script runs:
   in the constructor. Do the first work in `Start`.
 - The values of the prefab are set on the copy before `Start`, so `Start` reads them.
 - Values that change in the slot later, as the `set` command of the console writes them, are set on the copy in
-  the frame after, so a script is tuned while it runs. A set marked `started`, which a `get` prints after a save,
+  the frame after, so a script is tuned while it runs. A set marked `started`, which a `query` prints after a save,
   sets the saved fields on the copy as well, and does not start it over. A setter that throws goes to the log, and
   the handle goes from the `ScriptContainer`.
 - The hooks of the behaviours run on the game thread, in the order that the copies started, after the hooks of the
@@ -116,7 +150,8 @@ Reads `.domain` files into domains. Provides `IAssetImporter<Domain>`.
 
 ### PrefabImporter
 
-Reads `.prefab` files into prefabs. Provides `IAssetImporter<Prefab>`.
+Reads `.prefab` files into prefabs, and writes a prefab as a `.prefab` file. Provides `IAssetImporter<Prefab>` and
+`IAssetExporter<Prefab>`.
 
 - A file is `{ "entities": [ ... ] }`. Each entity has a name, tags, components and the entities under it.
 - A component is the name of its type and its values as JSON.
@@ -150,7 +185,7 @@ failed. A gem that needs SDL references this project, and the csproj sets the ta
 Gives the window, the clipboard and the input, through [SDL3](https://github.com/libsdl-org/SDL). Provides `IWindow`,
 `IClipboard` and `IInput`. It also gets the events of the OS on the platform thread (`IPlatform`).
 
-The settings of the gem are in `SdlPlatformSettings`. `get Window`, `get Input` and `get Simulation` list them.
+The settings of the gem are in `SdlPlatformSettings`. `query Window`, `query Input` and `query Simulation` list them.
 
 #### Input
 
@@ -208,7 +243,7 @@ Compiles Slang entry points to SPIR-V for the GPU provider. Provides `IShaderCom
 - The compiler keeps the results in the cache of the project. A second run of a shader that did not change compiles
   nothing.
 - A change to the options or the tag of the compiler makes a new cache version. Then all the shaders compile again.
-- The settings of the gem are in `SlangShaderCompilerSettings`. `get Debug` lists them.
+- The settings of the gem are in `SlangShaderCompilerSettings`. `query Debug` lists them.
 - Warnings are errors. Matrices are row-major. Entry points keep their names.
 
 > **Note:** The bindings generator cannot bind the C++ interfaces of the compiler. `Slang.cs` binds by hand the calls
@@ -219,7 +254,7 @@ Compiles Slang entry points to SPIR-V for the GPU provider. Provides `IShaderCom
 The GPU through Vulkan 1.3. Provides `IGraphicsApi`.
 
 In the `.magic` file of a project, list it after the gems that provide the window and the shader compiler. The
-settings of the gem are in `VulkanGraphicsSettings`. `get Window` and `get Rendering` list them.
+settings of the gem are in `VulkanGraphicsSettings`. `query Window` and `query Rendering` list them.
 
 #### Resources
 

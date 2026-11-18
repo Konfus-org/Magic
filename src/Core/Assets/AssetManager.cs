@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
 using System.IO.Hashing;
 using System.Linq;
 using System.Reflection;
@@ -538,19 +539,39 @@ public sealed class AssetManager : IDisposable
     /// Each asset loads as the type its <c>.meta</c> names. It gives their ids, or why one could not be loaded. A
     /// preprocessor is an <see cref="IAssetPreprocessor{T, TMade}"/>.
     /// </remarks>
-    public Task<Result<ImmutableArray<ulong>>> BakeAsync(IProgress<LoadProgress>? progress, CancellationToken cancel)
-    {
-        LoadedAssets loaded = Loaded;
-        ImmutableArray<ulong> readable =
-        [
-            .. Database
-                .Index.ById.Values.Where(file =>
-                    loaded.Types.TryGetValue(file.Type, out AssetType? type) && CanImport(type.Type, loaded)
-                )
-                .Select(file => file.Id),
-        ];
+    public Task<Result<ImmutableArray<ulong>>> BakeAsync(IProgress<LoadProgress>? progress, CancellationToken cancel) =>
+        BakeAsync(Database.Index.ById.Values, progress, cancel);
 
-        return AssetCrawl.LoadAllAsync(this, readable, progress, cancel);
+    /// <summary>
+    /// Loads the asset at <paramref name="path"/>, or each asset in the folder there and every folder under it, as
+    /// <see cref="BakeAsync(IProgress{LoadProgress}?, CancellationToken)"/> loads them all.
+    /// </summary>
+    /// <remarks>
+    /// The path is as <see cref="Find{T}"/> takes it. It fails when the path is neither an asset nor a folder that
+    /// holds one.
+    /// </remarks>
+    public Task<Result<ImmutableArray<ulong>>> BakeAsync(
+        string path,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
+    {
+        ArgumentNullException.ThrowIfNull(path);
+
+        AssetIndex index = Database.Index;
+        if (index.ByPath.TryGetValue(path, out IndexedFile? file))
+            return BakeAsync([file], progress, cancel);
+
+        ImmutableArray<string> under = GetPathsUnder(path.TrimEnd('/'));
+        if (under.IsEmpty)
+        {
+            return Task.FromResult<Result<ImmutableArray<ulong>>>(
+                Result.Failure($"no asset is at {path}, and no folder of assets.")
+            );
+        }
+
+        // A path that left the index between the two reads of it is left out.
+        return BakeAsync(under.Select(index.ByPath.GetValueOrDefault).OfType<IndexedFile>(), progress, cancel);
     }
 
     /// <summary>
@@ -581,11 +602,13 @@ public sealed class AssetManager : IDisposable
     /// <remarks>
     /// With no sidecar, the file is not an asset. The <see cref="IAssetExporter{T}"/> that a gem gives for the type
     /// writes it, or Core writes it for a type marked <see cref="AssetFormatAttribute"/>. The path ends in the
-    /// exporter's extension. Any thread.
+    /// exporter's extension. A value that holds the default of its type is left out, unless
+    /// <paramref name="includesDefaults"/> asks for every value. Any thread.
     /// </remarks>
     public async Task<Result> ExportAsync<T>(
         T asset,
         string file,
+        bool includesDefaults,
         IProgress<LoadProgress>? progress,
         CancellationToken cancel
     )
@@ -600,11 +623,12 @@ public sealed class AssetManager : IDisposable
             if (!file.EndsWith(exporter.Extension, StringComparison.OrdinalIgnoreCase))
                 return Result.Failure($"a {typeof(T).Name}'s file ends in {exporter.Extension}, not {file}.");
 
-            bytes = await exporter.ExportAsync(asset, progress, cancel).ConfigureAwait(false);
+            bytes = await exporter.ExportAsync(asset, includesDefaults, progress, cancel).ConfigureAwait(false);
         }
         else if (typeof(T).GetCustomAttribute<AssetFormatAttribute>() is { } format)
         {
-            bytes = await Task.Run(() => WriteCoreFormat(asset, format.Format), cancel).ConfigureAwait(false);
+            bytes = await Task.Run(() => WriteCoreFormat(asset, format.Format, includesDefaults), cancel)
+                .ConfigureAwait(false);
         }
         else
         {
@@ -615,6 +639,80 @@ public sealed class AssetManager : IDisposable
             return Result.Failure(bytes.Error);
 
         return await Files.WriteAsync(file, bytes.Value, cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Loads asset <paramref name="id"/> as the type its <c>.meta</c> names, and writes it to <paramref name="file"/>
+    /// as <see cref="ExportAsync{T}"/> does.
+    /// </summary>
+    internal async Task<Result> ExportAsync(
+        ulong id,
+        string file,
+        bool includesDefaults,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
+    {
+        if (!Database.Index.ById.TryGetValue(id, out IndexedFile? indexed))
+            return Result.Failure($"no asset has the id {id}.");
+
+        if (!Loaded.Types.TryGetValue(indexed.Type, out AssetType? type))
+        {
+            return Result.Failure(
+                $"{indexed.Path} is a {indexed.Type}, which neither Magic nor a gem the project lists holds."
+            );
+        }
+
+        return await type.Export(id, file, includesDefaults, progress, cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Writes the <c>.meta</c> of <paramref name="file"/>, which has none: the next free id of its folder, and the type
+    /// that the other files with its extension have, and reads the asset folders again. A file that is an asset
+    /// already keeps the id it has.
+    /// </summary>
+    /// <remarks>
+    /// Game thread.
+    /// </remarks>
+    internal Result<IndexedFile> MakeHandle(string file)
+    {
+        if (!Files.FileExists(file))
+            return Result.Failure($"there is no file at {file}.");
+
+        AssetIndex index = Database.Index;
+        string sidecar = file + AssetIndex.Sidecar;
+        if (Files.FileExists(sidecar))
+            return ReadSidecar(index, file, sidecar);
+
+        if (GetTypeOf(index, file) is not { } type)
+        {
+            return Result.Failure(
+                $"no asset of this run has the extension of {file}, so its type is not known; give the file an "
+                    + ".meta with the type itself."
+            );
+        }
+
+        Result<ulong> next = index.GetNextId(file);
+        if (!next.Ok)
+            return Result.Failure(next.Error);
+
+        JsonObject meta = new() { ["id"] = next.Value, ["type"] = type };
+        Result written = Files.Write(sidecar, meta.ToJsonString(Json.Indented));
+        if (!written.Ok)
+            return Result.Failure($"{sidecar} was not written: {written.Error}");
+
+        // The watch of the folder takes the asset in only once its changes settle, so the folders are read now: the
+        // next file gets the id after this one, and the asset loads at once. No folder joins them during the read,
+        // because both happen on the game thread.
+        IndexedFile made = new(next.Value, type, GetAssetPath(index, file), file, default);
+        ImmutableArray<string> directories = Database.Directories;
+        Reindex(
+            directories,
+            AssetIndex.Create(Files, directories, BuiltIn),
+            ImmutableHashSet.Create(StringComparer.OrdinalIgnoreCase, made.Path)
+        );
+
+        return Result.Success(made);
     }
 
     /// <summary>
@@ -676,7 +774,8 @@ public sealed class AssetManager : IDisposable
             AssetImportRun import = GetGeneric(nameof(RunImportAsync), type).CreateDelegate<AssetImportRun>(this);
             AssetBuiltInReader readBuiltIn = GetGeneric(nameof(ReadBuiltIn), type).CreateDelegate<AssetBuiltInReader>();
             AssetVersionRun version = GetGeneric(nameof(ComputeVersion), type).CreateDelegate<AssetVersionRun>(this);
-            declared.Add(new AssetType(type, import, readBuiltIn, version));
+            AssetExportRun export = GetGeneric(nameof(ExportLoadedAsync), type).CreateDelegate<AssetExportRun>(this);
+            declared.Add(new AssetType(type, import, readBuiltIn, version, export));
         }
 
         LoadedAssets added;
@@ -1106,9 +1205,14 @@ public sealed class AssetManager : IDisposable
     /// It leaves out the <see cref="AssetMetaAttribute"/> properties, which the <c>.meta</c> holds. It fails when JSON
     /// cannot hold the asset.
     /// </remarks>
-    private static Result<ReadOnlyMemory<byte>> WriteCoreFormat<T>(T asset, AssetFileFormat format)
+    private static Result<ReadOnlyMemory<byte>> WriteCoreFormat<T>(
+        T asset,
+        AssetFileFormat format,
+        bool includesDefaults
+    )
+        where T : notnull
     {
-        Result<JsonElement> written = Json.Write(asset, typeof(T));
+        Result<JsonElement> written = Json.Write(asset, typeof(T), includesDefaults);
         if (!written.Ok)
             return Result.Failure(written.Error);
 
@@ -1128,6 +1232,31 @@ public sealed class AssetManager : IDisposable
             ? Result.Success<ReadOnlyMemory<byte>>(Encoding.UTF8.GetBytes(text))
             : Result.Failure($"a {typeof(T).Name} has no text.");
     }
+
+    /// <summary>
+    /// The path that <paramref name="file"/> has as an asset, which this run has not indexed yet; its file's name
+    /// where no asset directory of the run holds it.
+    /// </summary>
+    private static string GetAssetPath(AssetIndex index, string file)
+    {
+        Result<string> asset = index.GetAssetPath(file);
+
+        return asset.Ok ? asset.Value : Path.GetFileName(file);
+    }
+
+    /// <summary>
+    /// The type of the assets that have the extension of <paramref name="file"/>, which the new one is one of.
+    /// </summary>
+    private static string? GetTypeOf(AssetIndex index, string file) =>
+        index
+            .ById.Values.FirstOrDefault(asset =>
+                string.Equals(
+                    Path.GetExtension(asset.Path),
+                    Path.GetExtension(file),
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            ?.Type;
 
     /// <summary>
     /// Whether <paramref name="type"/> implements <see cref="IAsset{TSelf}"/> of itself.
@@ -1234,6 +1363,49 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
+    /// The id and the type that the <c>.meta</c> beside <paramref name="file"/> holds already, which this run may not
+    /// have indexed yet.
+    /// </summary>
+    private Result<IndexedFile> ReadSidecar(AssetIndex index, string file, string sidecar)
+    {
+        Result<string> text = Files.ReadText(sidecar);
+        if (!text.Ok)
+            return Result.Failure($"{sidecar} was not read: {text.Error}");
+
+        JsonNode? held = JsonNode.Parse(
+            text.Value,
+            documentOptions: new JsonDocumentOptions
+            {
+                CommentHandling = JsonCommentHandling.Skip,
+                AllowTrailingCommas = true,
+            }
+        );
+        if (held?["id"]?.GetValue<ulong>() is not { } id || held["type"]?.GetValue<string>() is not { } type)
+            return Result.Failure($"{sidecar} holds no id and type, so {file} is no asset.");
+
+        return Result.Success(new IndexedFile(id, type, GetAssetPath(index, file), file, default));
+    }
+
+    /// <summary>
+    /// Loads asset <paramref name="id"/> as a <typeparamref name="T"/> and writes it to <paramref name="file"/>.
+    /// </summary>
+    private async Task<Result> ExportLoadedAsync<T>(
+        ulong id,
+        string file,
+        bool includesDefaults,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
+        where T : IAsset<T>
+    {
+        Result<T> loaded = await LoadAsync(new Handle<T>(id), progress, cancel).ConfigureAwait(false);
+
+        return loaded.Ok
+            ? await ExportAsync(loaded.Value, file, includesDefaults, progress, cancel).ConfigureAwait(false)
+            : Result.Failure(loaded.Error);
+    }
+
+    /// <summary>
     /// The version of the <typeparamref name="T"/> that a file's <paramref name="bytes"/> and
     /// <paramref name="settings"/> make with the type's importer now.
     /// </summary>
@@ -1258,6 +1430,27 @@ public sealed class AssetManager : IDisposable
         }
 
         return new Made(Result.Success<object>(asset), version, AssetScan.FindHandles(asset));
+    }
+
+    /// <summary>
+    /// Loads each of <paramref name="files"/> whose type Magic or a gem reads: their ids, or why one could not be
+    /// loaded.
+    /// </summary>
+    private Task<Result<ImmutableArray<ulong>>> BakeAsync(
+        IEnumerable<IndexedFile> files,
+        IProgress<LoadProgress>? progress,
+        CancellationToken cancel
+    )
+    {
+        LoadedAssets loaded = Loaded;
+        ImmutableArray<ulong> readable =
+        [
+            .. files
+                .Where(file => loaded.Types.TryGetValue(file.Type, out AssetType? type) && CanImport(type.Type, loaded))
+                .Select(file => file.Id),
+        ];
+
+        return AssetCrawl.LoadAllAsync(this, readable, progress, cancel);
     }
 
     /// <summary>

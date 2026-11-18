@@ -16,8 +16,14 @@
 *.otf binary
 *.ttf binary
 
-# The forest's chunks: text, but a hundred thousand generated placements no diff should show.
-samples/Forest/Domains/Forest/*_0_*.prefab -diff
+# The cabin forest's chunks: text, but a hundred thousand generated placements no diff should show.
+samples/Terrain/Domains/Cabin/*_*_*.prefab -diff
 
 # The terrain sample's landscape: ten thousand generated tree placements.
 samples/Terrain/Domains/Terrain/landscape.prefab -diff
+
+# The Cycles reference pictures, which git keeps with Git LFS: each one is megabytes of HDR pixels that no diff can
+# show (tools/Scripts/UpdateReferences.ps1). A new clone runs `git lfs install` one time, and the checkout step of a
+# CI job needs lfs: true.
+tools/Reference/References/*.exr filter=lfs diff=lfs merge=lfs -text
+tools/Reference/References/*.png filter=lfs diff=lfs merge=lfs -text

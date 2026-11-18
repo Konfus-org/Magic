@@ -14,34 +14,46 @@ namespace Magic.DeferredRendering;
 /// Keeps the world on the GPU for the gems that draw it, and lights it with deferred shading.
 /// </summary>
 /// <remarks>
-/// The debug window also sets <see cref="Settings"/> when a gem provides the debug UI.
+/// The debug window also sets <see cref="DebugViewState"/> when a gem provides the debug UI.
 /// </remarks>
-public sealed class EntryPoint(
-    DeferredRenderingSettings settings,
-    IShaderCompiler shaders,
-    IGraphicsApi gpu,
-    AssetManager assets,
-    IEcs ecs,
-    Worlds.World world,
-    Threads threads,
-    EventCoordinator events,
-    IFileSystem files,
-    IDebugUI? debugUI = null,
-    IInput? input = null
-) : IGem, IDisposable
+public sealed class EntryPoint : IGem, IDisposable
 {
-    private readonly RendererDebugWindow? _debugWindow = debugUI is null ? null : new(debugUI, input);
+    private readonly RendererDebugWindow? _debugWindow;
+
+    public EntryPoint(
+        DeferredRenderingSettings settings,
+        IShaderCompiler shaders,
+        IGraphicsApi gpu,
+        AssetManager assets,
+        IEcs ecs,
+        Worlds.World world,
+        Threads threads,
+        EventCoordinator events,
+        IFileSystem files,
+        IDebugUI? debugUI = null,
+        IInput? input = null
+    )
+    {
+        _debugWindow = debugUI is null ? null : new(debugUI, input);
+        Settings = settings;
+        Renderer = new(settings, DebugViewState, shaders, gpu, assets, ecs, world, threads, events, files);
+    }
 
     /// <summary>
-    /// How the world is drawn and what the renderer shows. Game thread.
+    /// How the world is drawn. Game thread.
     /// </summary>
-    public DeferredRenderingSettings Settings { get; } = settings;
+    public DeferredRenderingSettings Settings { get; }
 
-    public Renderer Renderer { get; } = new(settings, shaders, gpu, assets, ecs, world, threads, events, files);
+    /// <summary>
+    /// The part of the frame that the renderer shows, which the debug window and the console set. Game thread.
+    /// </summary>
+    public DebugViewState DebugViewState { get; } = new();
+
+    public Renderer Renderer { get; }
 
     public void Dispose() => Renderer.Dispose();
 
-    public void Update(in Frame frame) => _debugWindow?.Update(Settings);
+    public void Update(in Frame frame) => _debugWindow?.Update(Settings, DebugViewState);
 
     public void LateUpdate(in Frame frame) => Renderer.PublishInputs(frame);
 }

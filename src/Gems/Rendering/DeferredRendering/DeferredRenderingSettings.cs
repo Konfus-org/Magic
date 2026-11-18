@@ -67,19 +67,6 @@ public sealed class DeferredRenderingSettings : ISettings
     public int DroppedTextureLevels { get; set; }
 
     /// <summary>
-    /// The part of the frame the window shows: Final is the finished frame, any other one part of the GBuffer or the
-    /// light alone.
-    /// </summary>
-    [Category("Debug")]
-    public DebugView RenderView { get; set; } = DebugView.Final;
-
-    /// <summary>
-    /// Whether the Rendering window, which chooses the view, is open. It needs a gem that provides the debug UI.
-    /// </summary>
-    [Category("Debug")]
-    public bool IsRenderWindowOpen { get; set; }
-
-    /// <summary>
     /// The key that opens and closes the Rendering window.
     /// </summary>
     [Category("Debug")]
@@ -96,12 +83,6 @@ public sealed class DeferredRenderingSettings : ISettings
     /// </summary>
     [Category("Debug")]
     public Control NextViewKey { get; set; } = Control.KeyF6;
-
-    /// <summary>
-    /// Metres from the camera at which the Depth view turns black; nearer is lighter, on a log scale.
-    /// </summary>
-    [Category("Debug")]
-    public float DepthViewFar { get; set; } = 1000;
 
     /// <summary>
     /// How the picture is read where it is stretched over the window or into a screenshot: Nearest keeps hard-edged

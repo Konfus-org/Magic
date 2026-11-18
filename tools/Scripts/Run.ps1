@@ -4,8 +4,8 @@ Runs Magic on a project for an agent: names its window for the session, sends it
 its time limit. Agents start Magic only through this script and the scripts that run Magic themselves.
 
 .DESCRIPTION
-Magic opens the project and reads the console lines: first name, with the worktree's branch, when it has a window, so
-the window shows whose run it is; then -Commands. End -Commands with exit to end the run. Without exit, a run with a
+Magic opens the project with --name, the worktree's branch, when it has a window, so the window shows whose run it
+is. Then it reads the console lines of -Commands. End -Commands with exit to end the run. Without exit, a run with a
 window goes on until the user closes it. A run still going after -Seconds is killed. With -Headless, the run has no
 window and exits 2 at the first error logged. The log is shown as it comes, and the script's output is what Magic
 prints, such as a screenshot's path, also when the run was killed. The script exits with Magic's exit code, or 1 when it
@@ -35,16 +35,16 @@ window opens on the main one.
 The window's name: the worktree's branch, the session's name, when left out.
 
 .EXAMPLE
-tools/Scripts/Run.ps1 -Project samples/Forest/Forest.magic
+tools/Scripts/Run.ps1 -Project samples/Terrain/Terrain.magic
 
 .EXAMPLE
-tools/Scripts/Run.ps1 -Headless -Commands 'wait loaded', 'get player.transform', 'exit'
+tools/Scripts/Run.ps1 -Headless -Commands 'wait loaded', 'query player.transform', 'exit'
 #>
 [CmdletBinding()]
 param(
     [ValidateSet('Debug', 'Optimize', 'Release')]
     [string] $Configuration = 'Debug',
-    [string] $Project = 'samples/HelloWorld/HelloWorld.magic',
+    [string] $Project = 'samples/Terrain/Terrain.magic',
     [string[]] $Commands = @(),
     [switch] $Headless,
     [ValidateRange(1, [int]::MaxValue)]
@@ -59,6 +59,8 @@ $ErrorActionPreference = 'Stop'
 # A native command's exit code is read below, never thrown (PowerShell 7.4 would otherwise throw on it).
 $PSNativeCommandUseErrorActionPreference = $false
 
+. (Join-Path $PSScriptRoot 'RunLib.ps1')
+
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 # Another branch's profiling turn must not be disturbed: wait for it to end.
 & (Join-Path $PSScriptRoot 'Profiling.ps1') -Wait
@@ -71,12 +73,14 @@ if (-not (Test-Path $magic)) {
 }
 $projectPath = if ([System.IO.Path]::IsPathRooted($Project)) { $Project } else { Join-Path $root $Project }
 
-# The window shows whose run it is from the start. A headless run has no window to name.
-$lines = @(if ($Name -and -not $Headless) { "name `"$Name`"" }) + $Commands
+$lines = $Commands
 $arguments = @('open', "`"$projectPath`"")
 if ($Headless) {
     $arguments += @('--headless', 'true', '--fail-on-error')
 } else {
+    # The window shows whose run it is from the moment it opens. A headless run has no window to name.
+    if ($Name) { $arguments += @('--name', "`"$Name`"") }
+    $Display = Limit-Display $Display
     # The window opens on -Display, behind the window that has the focus, so that it does not interrupt the user's work.
     # SDL reads the hint from the environment, and Magic inherits it.
     $arguments += @('--configure', "Window.Display=$Display")

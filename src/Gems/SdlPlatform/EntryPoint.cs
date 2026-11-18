@@ -26,10 +26,9 @@ public sealed class EntryPoint : IGem, IDisposable
         World world
     )
     {
-        string title = app.Project?.Name ?? string.Empty;
         Settings = settings;
-        _sdl = new SdlWindow(settings, title, app.IsHeadless);
-        Window = new Window(_sdl, settings, title, app, threads, assets);
+        _sdl = new SdlWindow(settings, app.WindowName, app.IsHeadless);
+        Window = new Window(_sdl, settings, app.WindowName, app, threads, assets);
         Clipboard = new Clipboard(_sdl, threads);
         Input = new Input(_sdl, settings, app, world);
         Platform = new Platform(_sdl, files);

@@ -85,6 +85,18 @@ public sealed class Assemblies : IDisposable
     }
 
     /// <summary>
+    /// Every <typeparamref name="T"/> that the loaded code declares, in the order of their names.
+    /// </summary>
+    public static ImmutableArray<Type> GetAll<T>() =>
+        [
+            .. Volatile
+                .Read(ref _byName)
+                .Values.SelectMany(named => named)
+                .Where(type => typeof(T).IsAssignableFrom(type) && !type.IsAbstract)
+                .OrderBy(type => type.Name, StringComparer.Ordinal),
+        ];
+
+    /// <summary>
     /// Unloads the code of the run. Dispose it after the gems, which use it.
     /// </summary>
     public void Dispose()

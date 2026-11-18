@@ -38,14 +38,16 @@ public Lights GetLights() { return LoadFrameRow<Lights>(LightsOffset); }
 
 // Where the sky's tables are in the frame's buffer, right after the lights, and their bytes: C#'s GpuSkyTables.
 public static const uint SkyTablesOffset = LightsOffset + LightsBytes;
-public static const uint SkyTablesBytes = 12u;
+public static const uint SkyTablesBytes = 16u;
 
-// The heap ids of the sky's three tables, all 0 where no sky entity draws the sky.
+// The heap ids of the sky's three tables, all 0 where no sky entity draws the sky, and the Sky component's
+// brightness, which the view's table already holds for what reads that table.
 public struct SkyTables
 {
     public uint transmittance;
     public uint multiScattering;
     public uint view;
+    public float brightness;
 }
 
 public SkyTables GetSkyTables() { return LoadFrameRow<SkyTables>(SkyTablesOffset); }
@@ -55,7 +57,12 @@ public bool HasSky(SkyTables tables) { return tables.transmittance != 0u; }
 
 // The open sky's light, which the air and the clouds take also where a sky entity draws the sky, as they are not
 // generic over the sky.
-public float3 GetOpenSkyRadiance(Lights lights) { return lights.skyRadiance.rgb * lights.sunIlluminance.r; }
+public float3 GetOpenSkyRadiance(Lights lights)
+{
+    SkyTables tables = GetSkyTables();
+
+    return lights.skyRadiance.rgb * lights.sunIlluminance.r * (HasSky(tables) ? tables.brightness : 1.0);
+}
 
 // The sun's light where it reaches the camera, through the sky's air.
 public float3 GetSunIlluminance<S : ISky>(Lights lights)

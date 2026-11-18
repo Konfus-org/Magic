@@ -45,7 +45,7 @@ public sealed class Settings
 
     /// <summary>
     /// What each settings class last ran with in this process, by its project and name, as
-    /// <c>Forest/PlayerSettings</c>.
+    /// <c>Terrain/PlayerSettings</c>.
     /// </summary>
     /// <remarks>
     /// It is a JSON object of the members that differ from the defaults. It outlasts the types of the class and, when

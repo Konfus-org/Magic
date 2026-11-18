@@ -94,6 +94,20 @@ public sealed class Renderer
         IHookIntoDomainLoading,
         IDisposable
 {
+    /// <summary>
+    /// The height, as the sine of the angle, down to which a sun under the horizon still lights the world's sky: 8
+    /// degrees under it, where its twilight is about as bright as a full moon.
+    /// </summary>
+    public const float TwilightEnd = -0.139f;
+
+    /// <summary>
+    /// The light of a world with no directional light: white, of 1 lux, from above.
+    /// </summary>
+    public static readonly (Vector3 Direction, Vector3 Illuminance) NoSun = (
+        Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)),
+        Vector3.One
+    );
+
     private const int DefaultWidth = 1280;
 
     private const int DefaultHeight = 720;
@@ -108,24 +122,15 @@ public sealed class Renderer
     private const uint NoEffects = 0x80000000u;
 
     /// <summary>
-    /// The height, as the sine of the angle, down to which a sun under the horizon still lights the world's sky: 8
-    /// degrees under it, where its twilight is about as bright as a full moon.
-    /// </summary>
-    private const float TwilightEnd = -0.139f;
-
-    /// <summary>
-    /// The light of a world with no directional light: white, of 1 lux, from above.
-    /// </summary>
-    private static readonly (Vector3 Direction, Vector3 Illuminance) _whiteSun = (
-        Vector3.Normalize(new Vector3(0.3f, 0.8f, -0.5f)),
-        Vector3.One
-    );
-
-    /// <summary>
-    /// How the world is drawn and what the renderer shows, which the debug window also sets on the game thread. Both
-    /// steps read it on the render thread.
+    /// How the world is drawn. Both steps read it on the render thread.
     /// </summary>
     private readonly DeferredRenderingSettings _settings;
+
+    /// <summary>
+    /// The part of the frame to show, which the debug window and the console set on the game thread. The shading step
+    /// reads it on the render thread.
+    /// </summary>
+    private readonly DebugViewState _debugView;
 
     private readonly IEcs _ecs;
 
@@ -233,6 +238,7 @@ public sealed class Renderer
 
     internal Renderer(
         DeferredRenderingSettings settings,
+        DebugViewState debugView,
         IShaderCompiler shaders,
         IGraphicsApi gpu,
         AssetManager assets,
@@ -244,6 +250,7 @@ public sealed class Renderer
     )
     {
         _settings = settings;
+        _debugView = debugView;
         _ecs = ecs;
         _world = world;
         _assets = assets;
@@ -275,6 +282,68 @@ public sealed class Renderer
         _openSky = SkyTables.GetOpenSky(assets);
         _skyType = _openSky;
     }
+
+    /// <summary>
+    /// Gets the directional light that the frame is lit by, from the lights at the same index of
+    /// <paramref name="transforms"/> and <paramref name="lights"/>.
+    /// </summary>
+    /// <remarks>
+    /// The sun while it is up or its twilight lights the sky, else the moon while it is up, else the first there is.
+    /// With no light, null: the frame is lit by <see cref="NoSun"/>.
+    /// </remarks>
+    /// <returns>
+    /// The unit direction towards the light, its colour times its intensity, in lux, above the air, and its mode.
+    /// </returns>
+    public static (Vector3 Direction, Vector3 Illuminance, DirectionalLightMode Mode)? GetSun(
+        ReadOnlySpan<Transform> transforms,
+        ReadOnlySpan<DirectionalLight> lights
+    )
+    {
+        (Vector3 Direction, Vector3 Illuminance, DirectionalLightMode Mode)? sun = null;
+        int sunRank = -1;
+        for (int i = 0; i < lights.Length; i++)
+        {
+            DirectionalLight light = lights[i];
+            Vector3 towards = GetDirection(transforms[i].Rotation);
+            int rank = 0;
+            if (towards.Y > TwilightEnd && light.Mode == DirectionalLightMode.Sun)
+                rank = 2;
+            else if (towards.Y > 0 && light.Mode == DirectionalLightMode.Moon)
+                rank = 1;
+
+            if (rank <= sunRank)
+                continue;
+
+            sun = (towards, GetIlluminance(light), light.Mode);
+            sunRank = rank;
+        }
+
+        return sun;
+    }
+
+    /// <summary>
+    /// The unit direction towards a directional light that <paramref name="rotation"/> turns: it shines along its own
+    /// +Z.
+    /// </summary>
+    public static Vector3 GetDirection(Quaternion rotation) =>
+        -Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, rotation));
+
+    /// <summary>
+    /// The open sky's radiance that the frame carries for <paramref name="skyBrightness"/>: the brightness with the
+    /// sky's own tint, which takes a little red and less green than blue.
+    /// </summary>
+    /// <remarks>
+    /// The shaders read it as <c>lights.skyRadiance</c>. It is here, and not in a shader, so that a command can print
+    /// the same numbers that the frame carries.
+    /// </remarks>
+    public static Vector3 GetSkyRadiance(float skyBrightness) =>
+        new(skyBrightness * 0.8f, skyBrightness * 0.9f, skyBrightness);
+
+    /// <summary>
+    /// What <paramref name="light"/> sends, in lux above the air: its colour times its intensity.
+    /// </summary>
+    public static Vector3 GetIlluminance(DirectionalLight light) =>
+        new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity;
 
     public void Dispose()
     {
@@ -670,7 +739,7 @@ public sealed class Renderer
             input.Upscaling is null ? 0 : MathF.Log2((float)view.Width / view.ShownWidth),
             GetSun(inputs.DirectionalLights.First, inputs.DirectionalLights.Second) is { } sun
                 ? (sun.Direction, sun.Illuminance)
-                : _whiteSun,
+                : NoSun,
             _settings.SkyBrightness,
             input.Traced is { } traced
                 ? new GpuTracedWorld { Acceleration = traced.Structure.Id, HitMaterials = traced.HitMaterials.Id }
@@ -716,7 +785,7 @@ public sealed class Renderer
             return null;
 
         GpuView gpu = input.View;
-        DebugView renderView = _settings.RenderView;
+        DebugView renderView = _debugView.RenderView;
         TextureFilter upscaleFilter = _settings.UpscaleFilter;
 
         ReadOnlySpan<GpuResource> indirect = input.Light is { } light
@@ -834,7 +903,7 @@ public sealed class Renderer
                 new GpuConstants(
                     gpu.Frame.Id,
                     (uint)renderView | (input.Effects is null ? NoEffects : 0),
-                    BitConverter.SingleToUInt32Bits(_settings.DepthViewFar),
+                    BitConverter.SingleToUInt32Bits(_debugView.DepthViewFar),
                     BitConverter.SingleToUInt32Bits(Math.Clamp(_settings.Gamma, 0.5f, 2f))
                 ),
                 RenderStages.Post
@@ -1082,46 +1151,6 @@ public sealed class Renderer
         return bits;
     }
 
-    /// <summary>
-    /// Gets the directional light that the frame is lit by, from the lights at the same index of
-    /// <paramref name="transforms"/> and <paramref name="lights"/>.
-    /// </summary>
-    /// <remarks>
-    /// The sun while it is up or its twilight lights the sky, else the moon while it is up, else the first there is. With no light, null: the frame
-    /// is lit by <see cref="_whiteSun"/>.
-    /// </remarks>
-    /// <returns>
-    /// The unit direction towards the light, its colour times its intensity, in lux, above the air, and its mode.
-    /// </returns>
-    private static (Vector3 Direction, Vector3 Illuminance, DirectionalLightMode Mode)? GetSun(
-        ReadOnlySpan<Transform> transforms,
-        ReadOnlySpan<DirectionalLight> lights
-    )
-    {
-        (Vector3 Direction, Vector3 Illuminance, DirectionalLightMode Mode)? sun = null;
-        int sunRank = -1;
-        for (int i = 0; i < lights.Length; i++)
-        {
-            DirectionalLight light = lights[i];
-            Vector3 towards = -Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, transforms[i].Rotation));
-            bool isUp = towards.Y > 0;
-            int rank = 0;
-            if (towards.Y > TwilightEnd && light.Mode == DirectionalLightMode.Sun)
-                rank = 2;
-            else if (isUp && light.Mode == DirectionalLightMode.Moon)
-                rank = 1;
-
-            if (rank <= sunRank)
-                continue;
-
-            Vector3 illuminance = new Vector3(light.Color.R, light.Color.G, light.Color.B) * light.Intensity;
-            sun = (towards, illuminance, light.Mode);
-            sunRank = rank;
-        }
-
-        return sun;
-    }
-
     private static bool IsHdr(string path) => path.EndsWith(".pfm", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
@@ -1228,7 +1257,9 @@ public sealed class Renderer
             HasMipmaps = false,
             IsCompressed = false,
         };
-        Result written = await _assets.ExportAsync(shot, path, null, CancellationToken.None).ConfigureAwait(false);
+        Result written = await _assets
+            .ExportAsync(shot, path, includesDefaults: false, null, CancellationToken.None)
+            .ConfigureAwait(false);
         if (written.Ok)
             Terminal.Write(path);
         else

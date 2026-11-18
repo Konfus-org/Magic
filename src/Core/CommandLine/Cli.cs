@@ -3,6 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json.Nodes;
 using Magic.Assets;
 using Magic.CommandLine.Commands;
 using Magic.Configuration;
@@ -27,9 +28,28 @@ internal sealed class Cli
 
     private readonly RootCommand _cliCommands;
 
+    /// <summary>
+    /// <c>query</c>, which takes the subjects that the gems add.
+    /// </summary>
+    private readonly Command _query;
+
+    /// <summary>
+    /// The <c>--out</c> option of <c>query</c>, which a subject that a gem adds reads as Magic's own do.
+    /// </summary>
+    private readonly Option<string> _queryOutput = QueryCommand.CreateOutput();
+
+    private readonly IFileSystem _files;
+
     public Cli(App app, Settings settings, IFileSystem files, EventCoordinator events, AssetManager assets, World world)
     {
+        _files = files;
         _queue = new CommandQueue(events);
+        _query = QueryCommand.Create(app, settings, files, assets, world, _queue, Commands, _queryOutput);
+
+        // The state of the run that Core itself gives a path, each through the few properties that the console shows.
+        // They last as long as the console.
+        Commands.Register("World", world, typeof(IWorldClock));
+        Commands.Register("App", app, typeof(IRunOptions));
 
         // The commands, each given only the services it uses: verbs that act on the app or do a job of their own, and
         // options that set how it runs, given before or after the verb.
@@ -38,18 +58,17 @@ internal sealed class Cli
             Subcommands =
             {
                 OpenCommand.Create(app, files, assets, world, _queue),
-                NewCommand.Create(),
+                NewCommand.Create(app, assets),
                 ScreenshotCommand.Create(app, files, events),
-                StatsCommand.Create(),
                 SaveCommand.Create(app, settings, world, _queue),
                 LoadCommand.Create(app, world, _queue),
                 BakeCommand.Create(app, assets, _queue),
-                SetCommand.Create(app, settings, world),
-                GetCommand.Create(app, settings, world),
-                TeleportCommand.Create(app, world, assets, _queue),
+                ImportCommand.Create(app, files, assets, _queue),
+                ExportCommand.Create(app, assets, _queue),
+                _query,
+                SetCommand.Create(app, settings, world, Commands),
                 SpawnCommand.Create(app, world, assets, _queue),
                 WaitCommand.Create(_queue, world),
-                NameCommand.Create(app),
                 ExitCommand.Create(app),
             },
             Options =
@@ -70,6 +89,11 @@ internal sealed class Cli
                     "--fail-on-error",
                     "Exit with code 2 as soon as an error is logged",
                     value => app.ShouldExitOnError = value
+                ),
+                CreateOption<string>(
+                    "--name",
+                    "Name the window from the moment it opens, as --name \"my run\"",
+                    value => app.WindowName = value
                 ),
                 CreateOption<string[]>(
                     "--configure",
@@ -116,6 +140,11 @@ internal sealed class Cli
     }
 
     /// <summary>
+    /// The commands that the gems of the run add, which join the console as each gem registers one.
+    /// </summary>
+    public ConsoleCommands Commands { get; } = new();
+
+    /// <summary>
     /// Executes the commands that Magic started with, or returns why they did not run.
     /// </summary>
     /// <remarks>
@@ -123,6 +152,7 @@ internal sealed class Cli
     /// </remarks>
     public Result Execute(string[] commands)
     {
+        TakeGemCommands();
         ParseResult parsed = _cliCommands.Parse(commands);
         if (parsed.Errors.Count == 0 && parsed.Action == _cliCommands.Action)
             return Result.Failure(
@@ -145,6 +175,7 @@ internal sealed class Cli
         if (words.Length == 0)
             return Result.Success();
 
+        TakeGemCommands();
         if (!words[0].StartsWith('-') && !_cliCommands.Subcommands.Any(subcommand => subcommand.Name == words[0]))
             words[0] = (words[0].Length == 1 ? "-" : "--") + words[0];
 
@@ -233,5 +264,27 @@ internal sealed class Cli
             Log.Error(errors.ToString().TrimEnd());
 
         return Result.Success();
+    }
+
+    /// <summary>
+    /// Puts the commands that gems registered since the last parse beside Magic's own, and their subjects of
+    /// <c>query</c> beside Magic's.
+    /// </summary>
+    /// <remarks>
+    /// The gems are made after the console, so a gem's command joins it here, before the line that uses it is parsed.
+    /// </remarks>
+    private void TakeGemCommands()
+    {
+        while (Commands.TryTake(out Command? command))
+        {
+            _cliCommands.Subcommands.Add(command);
+        }
+
+        while (Commands.TryTakeQuery(out (string Name, string Description, Func<JsonObject> Read) added))
+        {
+            _query.Subcommands.Add(
+                QueryCommand.CreateSubject(_files, _queryOutput, added.Name, added.Description, added.Read)
+            );
+        }
     }
 }

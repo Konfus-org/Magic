@@ -22,10 +22,13 @@ public interface IAssetExporter<T>
     /// Makes the file that holds <paramref name="asset"/>, or tells why it cannot.
     /// </summary>
     /// <remarks>
-    /// It runs on a worker thread.
+    /// A format of named values leaves out each value that holds the default of its type, as a person writes the
+    /// file, unless <paramref name="includesDefaults"/> asks for every value. A format that has no such values, such
+    /// as a picture, ignores it. It runs on a worker thread.
     /// </remarks>
     Task<Result<ReadOnlyMemory<byte>>> ExportAsync(
         T asset,
+        bool includesDefaults,
         IProgress<LoadProgress>? progress,
         CancellationToken cancel
     );

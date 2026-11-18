@@ -58,27 +58,4 @@ public sealed class GlobalIlluminationSettings : ISettings
     /// and flickers more.
     /// </summary>
     public float ProbeUpdateSpeed { get; set; } = 0.5f;
-
-    /// <summary>
-    /// Whether a diffuse ray's hit takes the probes' light around it. Off, it takes only its direct light, to measure
-    /// the probes' share against the reference view (PROTO).
-    /// </summary>
-    public bool IsHitProbeLightOn { get; set; } = true;
-
-    /// <summary>
-    /// Whether a diffuse ray that reaches nothing brings back the sky's light. Off, it brings back none, to measure the
-    /// sky's share against the reference view (PROTO).
-    /// </summary>
-    public bool IsDiffuseSkyOn { get; set; } = true;
-
-    /// <summary>
-    /// Whether a shadowed surface takes the shadow fill, to measure it against the reference view (PROTO).
-    /// </summary>
-    public bool IsShadowFillOn { get; set; } = true;
-
-    /// <summary>
-    /// Whether the probes' light stands in where the traced diffuse light does not cover a pixel, to measure it against
-    /// the reference view (PROTO).
-    /// </summary>
-    public bool IsPixelProbeLightOn { get; set; } = true;
 }

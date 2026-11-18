@@ -46,5 +46,8 @@ Cache/
 # Launch profiles Visual Studio writes into a runnable project. Core's is tracked: its F5 opens the sample.
 **/Properties/launchSettings.json
 
+# Python caches of the reference tools.
+__pycache__/
+
 # NRD's shader front end, which the indirect light's build writes
 src/Gems/Rendering/GlobalIllumination/Resources/Shaders/Nrd.slang*

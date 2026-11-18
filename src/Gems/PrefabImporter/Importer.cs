@@ -136,6 +136,7 @@ public sealed class Importer : IAssetImporter<Prefab>
             {
                 Name = entity.Name,
                 Components = components.ToImmutable(),
+                Placed = entity.Prefab,
                 Children = children.ToImmutable(),
             }
         );

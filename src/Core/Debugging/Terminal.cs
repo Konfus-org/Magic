@@ -9,7 +9,7 @@ namespace Magic.Debugging;
 /// The terminal Magic runs in. Any thread.
 /// </summary>
 /// <remarks>
-/// Standard output holds only what a command gives back, such as the values of <c>get</c> or a screenshot's path. The
+/// Standard output holds only what a command gives back, such as the values of <c>query</c> or a screenshot's path. The
 /// log, the progress bars and the prompt go to standard error, so a pipe never mixes the two.
 /// </remarks>
 [SuppressMessage(

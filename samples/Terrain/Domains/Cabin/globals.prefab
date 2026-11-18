@@ -1,7 +1,19 @@
 {
     "entities": [
         {"name": "Spawn", "tags": ["spawn"], "components": {"Transform": {"position": {"x": -3074.1, "y": 1151.45, "z": -217.2}, "rotation": {"x": 0, "y": -0.5373, "z": 0, "w": 0.84339}}}},
-        {"name": "Sky", "components": {"Sky": {"material": {"id": 4569236087865836549}}}},
+        // One entity for each view of tools/Scripts/ReferenceViews.json: its transform is where the camera
+        // stands and how it is turned, for Magic's capture and for the Blender reference of the same view. The
+        // render-reference tag is what the tools find them by.
+        {"name": "ReferenceView.CabinWall", "tags": ["render-reference"], "components": {"Transform": {"position": {"x": -3071.406, "y": 1151.4, "z": -217.574}, "rotation": {"x": 0.000000, "y": -0.793353, "z": 0.000000, "w": 0.608761}}}},
+        {"name": "ReferenceView.CabinWindowGlow", "tags": ["render-reference"], "components": {"Transform": {"position": {"x": -3073.152, "y": 1151.25, "z": -215.877}, "rotation": {"x": 0.000000, "y": 0.737277, "z": 0.000000, "w": 0.675590}}}},
+        {"name": "ReferenceView.CabinRoom", "tags": ["render-reference"], "components": {"Transform": {"position": {"x": -3076.191, "y": 1151.0, "z": -216.004}, "rotation": {"x": 0.093301, "y": 0.830578, "z": -0.146453, "w": 0.529137}}}},
+        {"name": "ReferenceView.CabinOutside", "tags": ["render-reference"], "components": {"Transform": {"position": {"x": -3067.484, "y": 1151.02, "z": -220.285}, "rotation": {"x": 0.000000, "y": -0.537300, "z": 0.000000, "w": 0.843391}}}},
+        {"name": "ReferenceView.CabinTrees", "tags": ["render-reference"], "components": {"Transform": {"position": {"x": -3046.100, "y": 1150.333, "z": -210.200}, "rotation": {"x": -0.018756, "y": -0.932301, "z": -0.048860, "w": 0.357877}}}},
+        {"name": "ReferenceView.CabinSurfaces", "tags": ["render-reference"], "components": {"Transform": {"position": {"x": -3074.876, "y": 1150.650, "z": -217.445}, "rotation": {"x": 0.032443, "y": -0.965266, "z": 0.146340, "w": 0.213994}}}},
+        {"name": "ReferenceView.LeakRoom", "tags": ["render-reference"], "components": {"Transform": {"position": {"x": -3069.870, "y": 1150.540, "z": -208.990}, "rotation": {"x": -0.173648, "y": 0.000000, "z": 0.000000, "w": 0.984808}}}},
+        // The look: the sky gives 1.6 times the light of the air itself, which lifts the shadows and the room, and
+        // the sun and the moon keep their own light.
+        {"name": "Sky", "tags": ["sky"], "components": {"Sky": {"material": {"id": 4569236087865836549}, "brightness": 1.6}}},
         // The sun faces west along the door wall, so at noon it stands south, on the door wall's normal, the cabin's -Z:
         // through the middle of the day it shines into the room through the doorway and the door wall's window, and the
         // open door panel, which stands out from that wall, throws a shadow on the wall and the doorstep.
@@ -10,16 +22,30 @@
         // down. Its hour and its speed keep it there: a change to the sun's needs the same change here.
         {"name": "Moon", "tags": ["moon"], "components": {"Transform": {"rotation": {"x": 0, "y": 0.9763, "z": 0, "w": -0.21644}}, "DirectionalLight": {"mode": "moon", "color": {"r": 0.75, "g": 0.85, "b": 1}, "intensity": 0.3}, "ScriptContainer": [{"id": 100421, "hour": 3, "hoursPerMinute": 1}]}},
         {"name": "Terrain", "components": {"Transform": {}, "Renderer": {"model": {"id": 300001}, "materials": [{"id": 300011}]}}},
+        // A sealed room 10 m behind the cabin, in the clearing: a shell of the cabin's own logs, floorboards and
+        // slates, 0.5 m thick, around a space of 2 m on each axis, with no opening and no light in it. Every part
+        // runs past the next one, so no two faces meet on a line. Its floor stands clear of the ground, which
+        // slopes, and its slab reaches 0.9 m down into it. The leak-room view stands in it: what it sees
+        // must be black, and any light in it is a leak.
+        {"name": "Leak room", "components": {"Transform": {"position": {"x": -3069.87, "y": 1151.39, "z": -208.14}}},
+            "children": [
+                {"name": "Floor", "components": {"Transform": {"position": {"x": 0, "y": -1.45, "z": 0}, "scale": {"x": 1.5, "y": 0.45, "z": 1.5}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300062}]}}},
+                {"name": "Roof", "components": {"Transform": {"position": {"x": 0, "y": 1.25, "z": 0}, "scale": {"x": 1.5, "y": 0.25, "z": 1.5}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300063}]}}},
+                {"name": "Wall -X", "components": {"Transform": {"position": {"x": -1.25, "y": 0, "z": 0}, "scale": {"x": 0.25, "y": 1.25, "z": 1.5}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300061}]}}},
+                {"name": "Wall +X", "components": {"Transform": {"position": {"x": 1.25, "y": 0, "z": 0}, "scale": {"x": 0.25, "y": 1.25, "z": 1.5}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300061}]}}},
+                {"name": "Wall -Z", "components": {"Transform": {"position": {"x": 0, "y": 0, "z": -1.25}, "scale": {"x": 1.5, "y": 1.25, "z": 0.25}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300061}]}}},
+                {"name": "Wall +Z", "components": {"Transform": {"position": {"x": 0, "y": 0, "z": 1.25}, "scale": {"x": 1.5, "y": 1.25, "z": 0.25}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 300061}]}}}
+            ]},
         {"name": "Cabin", "prefab": {"id": 300091}, "components": {"Transform": {"position": {"x": -3074.1, "y": 1149.4, "z": -217.2}, "rotation": {"x": 0, "y": -0.5373, "z": 0, "w": 0.84339}}}},
-        {"prefab": {"id": 300021}, "components": {"Transform": {"position": {"x": -3085.824, "y": 1149.027, "z": -245.062}, "rotation": {"x": 0, "y": 0.51473, "z": 0, "w": 0.85735}, "scale": {"x": 0.988, "y": 0.988, "z": 0.988}}}},
-        {"prefab": {"id": 300023}, "components": {"Transform": {"position": {"x": -3043.511, "y": 1153.755, "z": -227.441}, "rotation": {"x": 0, "y": 0.45341, "z": 0, "w": -0.8913}, "scale": {"x": 0.789, "y": 0.789, "z": 0.789}}}},
-        {"prefab": {"id": 300021}, "components": {"Transform": {"position": {"x": -3088.99, "y": 1155.038, "z": -187.076}, "rotation": {"x": 0, "y": 0.70546, "z": 0, "w": -0.70875}, "scale": {"x": 0.966, "y": 0.966, "z": 0.966}}}},
-        {"prefab": {"id": 300023}, "components": {"Transform": {"position": {"x": -3078.964, "y": 1150.335, "z": -251.188}, "rotation": {"x": 0, "y": 0.99983, "z": 0, "w": -0.01868}, "scale": {"x": 1.224, "y": 1.224, "z": 1.224}}}},
-        {"prefab": {"id": 300021}, "components": {"Transform": {"position": {"x": -3049.218, "y": 1157.215, "z": -241.089}, "rotation": {"x": 0, "y": 0.00692, "z": 0, "w": -0.99998}, "scale": {"x": 1.038, "y": 1.038, "z": 1.038}}}},
-        {"prefab": {"id": 300023}, "components": {"Transform": {"position": {"x": -3040.572, "y": 1157.784, "z": -235.42}, "rotation": {"x": 0, "y": 0.70374, "z": 0, "w": -0.71045}, "scale": {"x": 0.796, "y": 0.796, "z": 0.796}}}},
-        {"prefab": {"id": 300023}, "components": {"Transform": {"position": {"x": -3050.446, "y": 1148.312, "z": -187.405}, "rotation": {"x": 0, "y": 0.60342, "z": 0, "w": 0.79742}, "scale": {"x": 0.927, "y": 0.927, "z": 0.927}}}},
-        {"prefab": {"id": 300022}, "components": {"Transform": {"position": {"x": -3095.381, "y": 1147.113, "z": -253.068}, "rotation": {"x": 0, "y": 0.25053, "z": 0, "w": 0.96811}, "scale": {"x": 1.196, "y": 1.196, "z": 1.196}}}},
-        {"prefab": {"id": 300022}, "components": {"Transform": {"position": {"x": -3031.419, "y": 1158.618, "z": -223.045}, "rotation": {"x": 0, "y": 0.02277, "z": 0, "w": 0.99974}, "scale": {"x": 1.181, "y": 1.181, "z": 1.181}}}},
-        {"prefab": {"id": 300023}, "components": {"Transform": {"position": {"x": -3073.933, "y": 1157.048, "z": -173.402}, "rotation": {"x": 0, "y": 0.41479, "z": 0, "w": -0.90992}, "scale": {"x": 0.78, "y": 0.78, "z": 0.78}}}}
+        {"prefab": {"id": 300021}, "components": {"Transform": {"position": {"x": -3085.824, "y": 1150.153, "z": -245.062}, "rotation": {"x": 0, "y": 0.51473, "z": 0, "w": 0.85735}, "scale": {"x": 0.988, "y": 0.988, "z": 0.988}}}},
+        {"prefab": {"id": 300023}, "components": {"Transform": {"position": {"x": -3043.511, "y": 1152.794, "z": -227.441}, "rotation": {"x": 0, "y": 0.45341, "z": 0, "w": -0.8913}, "scale": {"x": 0.789, "y": 0.789, "z": 0.789}}}},
+        {"prefab": {"id": 300021}, "components": {"Transform": {"position": {"x": -3088.99, "y": 1154.394, "z": -187.076}, "rotation": {"x": 0, "y": 0.70546, "z": 0, "w": -0.70875}, "scale": {"x": 0.966, "y": 0.966, "z": 0.966}}}},
+        {"prefab": {"id": 300023}, "components": {"Transform": {"position": {"x": -3078.964, "y": 1150.480, "z": -251.188}, "rotation": {"x": 0, "y": 0.99983, "z": 0, "w": -0.01868}, "scale": {"x": 1.224, "y": 1.224, "z": 1.224}}}},
+        {"prefab": {"id": 300021}, "components": {"Transform": {"position": {"x": -3049.218, "y": 1157.358, "z": -241.089}, "rotation": {"x": 0, "y": 0.00692, "z": 0, "w": -0.99998}, "scale": {"x": 1.038, "y": 1.038, "z": 1.038}}}},
+        {"prefab": {"id": 300023}, "components": {"Transform": {"position": {"x": -3040.572, "y": 1155.547, "z": -235.42}, "rotation": {"x": 0, "y": 0.70374, "z": 0, "w": -0.71045}, "scale": {"x": 0.796, "y": 0.796, "z": 0.796}}}},
+        {"prefab": {"id": 300023}, "components": {"Transform": {"position": {"x": -3050.446, "y": 1148.238, "z": -187.405}, "rotation": {"x": 0, "y": 0.60342, "z": 0, "w": 0.79742}, "scale": {"x": 0.927, "y": 0.927, "z": 0.927}}}},
+        {"prefab": {"id": 300022}, "components": {"Transform": {"position": {"x": -3095.381, "y": 1147.209, "z": -253.068}, "rotation": {"x": 0, "y": 0.25053, "z": 0, "w": 0.96811}, "scale": {"x": 1.196, "y": 1.196, "z": 1.196}}}},
+        {"prefab": {"id": 300022}, "components": {"Transform": {"position": {"x": -3031.419, "y": 1158.505, "z": -223.045}, "rotation": {"x": 0, "y": 0.02277, "z": 0, "w": 0.99974}, "scale": {"x": 1.181, "y": 1.181, "z": 1.181}}}},
+        {"prefab": {"id": 300023}, "components": {"Transform": {"position": {"x": -3073.933, "y": 1157.036, "z": -173.402}, "rotation": {"x": 0, "y": 0.41479, "z": 0, "w": -0.90992}, "scale": {"x": 0.78, "y": 0.78, "z": 0.78}}}}
     ]
 }

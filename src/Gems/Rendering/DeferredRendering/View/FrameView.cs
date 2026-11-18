@@ -121,7 +121,7 @@ internal sealed class FrameView(IGraphicsApi gpu)
         {
             SunDirection = new Vector4(sun.Direction, 0),
             SunIlluminance = new Vector4(sun.Illuminance, 0),
-            SkyRadiance = new Vector4(skyBrightness * 0.8f, skyBrightness * 0.9f, skyBrightness, 0),
+            SkyRadiance = new Vector4(Renderer.GetSkyRadiance(skyBrightness), 0),
             CameraAltitude = Math.Max(camera.Transform.Position.Y, 0),
             LutSampler = sampler.Value.Id,
             Table = view.LightTable.Id,

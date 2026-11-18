@@ -4,7 +4,7 @@ Runs a project with a window until its world has loaded, takes a screenshot thro
 path; with -Domains, then opens each of them in turn and takes one of each.
 
 .DESCRIPTION
-Magic runs with --fail-on-error and these console lines piped in: name with -Name, wait loaded and wait drawn, which hold until the world has loaded and its
+Magic runs with --fail-on-error, with --name for -Name, and with these console lines piped in: wait loaded and wait drawn, which hold until the world has loaded and its
 first frame is drawn, however long its shaders take to compile, a wait for what fades in to settle, any -Commands, a short wait for them, then
 screenshot and a wait for it to be written; then, for each of -Domains, open, which holds until that domain has replaced
 the world, the same waits, and screenshot; then exit. The log is shown as it comes; the script's only output is the
@@ -44,6 +44,11 @@ The display that the window opens on, by its place in SDL's list of displays, wh
 default, 1, is the display after the main one, so that the run does not cover the user's work. With one display, the
 window opens on the main one.
 
+.PARAMETER Size
+The width and the height of the window in pixels, which is the size of every screenshot of the run. Without it the
+window opens the way the project's settings say. The size reaches the window only at the launch, so no console line
+can change it.
+
 .PARAMETER AllowErrors
 Runs Magic without --fail-on-error, so a run that logs errors still takes its screenshots. The error lines of the log
 are shown again before the paths.
@@ -57,10 +62,10 @@ and whatever covers the window on the screen. Needs Windows; elsewhere the scrip
 tools/Scripts/Screenshot.ps1
 
 .EXAMPLE
-tools/Scripts/Screenshot.ps1 -Commands 'set Debug.RenderView Normal'
+tools/Scripts/Screenshot.ps1 -Commands 'set DeferredRendering.RenderView Normal'
 
 .EXAMPLE
-tools/Scripts/Screenshot.ps1 -Project samples/Forest/Forest.magic
+tools/Scripts/Screenshot.ps1 -Project samples/Terrain/Terrain.magic
 
 .EXAMPLE
 tools/Scripts/Screenshot.ps1 -AllowErrors -Window
@@ -73,12 +78,14 @@ param(
     [int] $Settle = 20,
     [ValidateRange(1, [int]::MaxValue)]
     [int] $Seconds = 600,
-    [string] $Project = 'samples/HelloWorld/HelloWorld.magic',
+    [string] $Project = 'samples/Terrain/Terrain.magic',
     [string[]] $Commands = @(),
     [string[]] $Domains = @(),
     [string] $Name,
     [ValidateRange(0, [int]::MaxValue)]
     [int] $Display = 1,
+    [ValidateCount(2, 2)]
+    [int[]] $Size,
     [switch] $AllowErrors,
     [switch] $Window
 )
@@ -87,6 +94,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 # A native command's exit code is read below, never thrown (PowerShell 7.4 would otherwise throw on it).
 $PSNativeCommandUseErrorActionPreference = $false
+
+. (Join-Path $PSScriptRoot 'RunLib.ps1')
 
 if ($Window -and [System.Environment]::OSVersion.Platform -ne 'Win32NT') {
     Write-Host 'The capture of the window needs Windows: run without -Window.'
@@ -105,18 +114,23 @@ if (-not (Test-Path $magic)) {
 }
 $projectPath = if ([System.IO.Path]::IsPathRooted($Project)) { $Project } else { Join-Path $root $Project }
 
-# The window shows whose run it is from the start. A screenshot is written by a worker, which takes seconds for a
-# window-sized picture, so the run waits seconds after each, not frames, before it goes on or quits.
-$lines = @(if ($Name) { "name `"$Name`"" }) + @('wait loaded', 'wait drawn', "wait ${Settle}s") + $Commands + @('wait 60', 'screenshot', 'wait 10s')
+# A screenshot is written by a worker, which takes seconds for a window-sized picture, so the run waits seconds after
+# each, not frames, before it goes on or quits.
+$lines = @('wait loaded', 'wait drawn', "wait ${Settle}s") + $Commands + @('wait 60', 'screenshot', 'wait 10s')
 foreach ($domain in $Domains) {
     $lines += @("open $domain", "wait ${Settle}s", 'screenshot', 'wait 10s')
 }
 $lines += 'exit'
 $arguments = @('open', "`"$projectPath`"")
 if (-not $AllowErrors) { $arguments += '--fail-on-error' }
+# The window shows whose run it is from the moment it opens.
+if ($Name) { $arguments += @('--name', "`"$Name`"") }
+$Display = Limit-Display $Display
 # The window opens on -Display, behind the window that has the focus, so that it does not interrupt the user's work.
-# SDL reads the hint from the environment, and Magic inherits it.
+# SDL reads the hint from the environment, and Magic inherits it. The mode and the size reach the window only as it is
+# made, so they are given here and not by a console line.
 $arguments += @('--configure', "Window.Display=$Display")
+if ($Size) { $arguments += @('Window.Mode=Windowed', "`"Window.WindowedSize=$($Size[0]) $($Size[1])`"") }
 $env:SDL_WINDOW_ACTIVATE_WHEN_SHOWN = '0'
 
 if ($Window) {

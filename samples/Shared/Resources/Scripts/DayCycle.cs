@@ -15,9 +15,9 @@ namespace Magic.SamplesShared.Resources.Scripts;
 /// The rotation of the prefab faces west, where the sun sets, and the sun rises opposite it. At noon the sun stands
 /// toward the south, the left of that facing, as high as <see cref="Latitude"/> lets it. Its colour and its intensity stay as they are, and the
 /// sky follows its direction. A prefab sets the hour it starts at and how fast the day goes beside the handle of the
-/// script.
+/// script. While <see cref="Day.Hour"/> is set, the sun stays at that hour and the moon 12 hours from it.
 /// </remarks>
-public sealed class DayCycle(Entity owner, World world) : IBehavior
+public sealed class DayCycle(Entity owner, World world, Day day) : IBehavior
 {
     /// <summary>
     /// What the sun turns in an hour: one turn in a day of 24 hours.
@@ -74,15 +74,19 @@ public sealed class DayCycle(Entity owner, World world) : IBehavior
 
     public void Update(in Frame frame)
     {
-        float gone = Hour + (HoursPerMinute * (float)frame.SimDeltaSec / 60);
+        // The moon goes the path of the sun 12 hours from it, so the hour that the console holds is the sun's.
+        bool isMoon = world.Get<DirectionalLight>(owner).Mode == DirectionalLightMode.Moon;
+        float gone = day.Hour is { } held
+            ? held + (isMoon ? 12 : 0)
+            : Hour + (HoursPerMinute * (float)frame.SimDeltaSec / 60);
         Hour = ((gone % 24) + 24) % 24;
 
         // A paused world, or a day that stands still, leaves the entity unchanged, so its renderer uploads nothing.
         // The path at the equator, tilted about the line through east and west: the sun still rises and sets there, and
         // stands lower toward the south at noon.
         Quaternion tilt = Quaternion.CreateFromAxisAngle(_west, float.DegreesToRadians(Latitude));
-        Quaternion day = Turn(_noon, (Hour - 12) * RadiansPerHour);
-        Quaternion turned = Quaternion.Normalize(Quaternion.Concatenate(day, tilt));
+        Quaternion atHour = Turn(_noon, (Hour - 12) * RadiansPerHour);
+        Quaternion turned = Quaternion.Normalize(Quaternion.Concatenate(atHour, tilt));
         if (turned != world.Get<Transform>(owner).Rotation)
             world.Mutate<Transform>(owner).Rotation = turned;
     }

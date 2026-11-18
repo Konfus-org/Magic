@@ -162,7 +162,7 @@ public record struct GpuLights
 }
 
 /// <summary>
-/// The heap ids of the sky's tables.
+/// The heap ids of the sky's tables, and what the sky's light is multiplied by.
 /// </summary>
 /// <remarks>
 /// The twin of <c>Scene/Lights.slang</c> SkyTables, written once a frame into the frame's buffer after
@@ -173,13 +173,15 @@ public record struct GpuSkyTables
 {
     public const int Offset = GpuLights.Offset + GpuLights.Bytes;
 
-    public const int Bytes = 12;
+    public const int Bytes = 16;
 
     public uint Transmittance;
 
     public uint MultiScattering;
 
     public uint View;
+
+    public float Brightness;
 }
 
 /// <summary>

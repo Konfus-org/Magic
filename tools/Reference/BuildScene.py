@@ -1,348 +1,102 @@
-# Builds one view of tools/Scripts/ReferenceViews.json as a Blender scene from the files Magic loads, renders it with
-# Cycles and writes a linear HDR EXR. Run it with Blender's own Python:
-#   blender -b --python tools/Reference/BuildScene.py -- --view cabin-wall --hour 12 --out picture.exr
-# Magic is left-handed with Y up; Blender is right-handed with Z up. A point (x, y, z) in Magic is (x, z, y) in
-# Blender, and a model imported by Blender's FBX importer is in Blender's axes, so its Magic axes are the same swap.
+# Renders the views of tools/Scripts/ReferenceViews.json with Cycles and writes a linear HDR EXR of each. The scene
+# comes from the Magic domain add-on in tools/Blender, which says what the reference cannot copy. Run it with
+# Blender's own Python:
+#   blender -b --python tools/Reference/BuildScene.py -- --view cabin-wall --light --hour 12 --altitude 1150
+# With --jobs, a JSON list of {"view", "hour", "pose", "out", "mask", "preview"}, it builds the scene one time and
+# renders every one of them from that build, which is what tools/Scripts/UpdateReferences.ps1 gives it: the build is
+# most of the time. Each job carries the pose of its camera in Magic's axes, which the engine itself resolved from
+# the entity that carries the view tag, so this script finds no camera of its own. The size of the picture and the
+# Cycles settings come from tools/Scripts/VisualTests.json.
 import argparse
 import json
 import math
 import os
-import re
 import sys
+import time
 
-import bmesh
 import bpy
-from mathutils import Matrix, Quaternion, Vector
+import numpy as np
+from mathutils import Matrix, Vector
 
-ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
-LUMENS_PER_WATT = 683
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import Camera  # noqa: E402
+import Photograph  # noqa: E402
+import Settings  # noqa: E402
 
-# The multiple scattering sky's sun above the air gives 181.6 W/m2 at a strength of 1 (measured in Blender 5.3 with
-# no air): this strength makes it Magic's 120,000 lux.
-SKY_STRENGTH = 120000 / LUMENS_PER_WATT / 181.6
+# The add-on that builds the scene, which runs from its folder and needs no install.
+sys.path.insert(0, os.path.join(Settings.ROOT, 'tools', 'Blender'))
+from magic_domain import import_domain, set_hour  # noqa: E402
+from magic_domain.lights import air_transmittance, lamp_reach, lit_by  # noqa: E402
+from magic_domain.project import (domain_entities, domain_folder, find_root, index_assets,  # noqa: E402
+                                  magic_matrix, query_skies)
 
-SWAP = Matrix(((1, 0, 0, 0), (0, 0, 1, 0), (0, 1, 0, 0), (0, 0, 0, 1)))
-
-
-def read_jsonc(path):
-    """Reads a JSON file with // comments."""
-    text = open(path, encoding='utf-8-sig').read()
-    out, in_string, i = [], False, 0
-    while i < len(text):
-        c = text[i]
-        if in_string:
-            out.append(c)
-            if c == '\\':
-                out.append(text[i + 1])
-                i += 1
-            elif c == '"':
-                in_string = False
-        elif c == '"':
-            in_string = True
-            out.append(c)
-        elif text.startswith('//', i):
-            i = text.find('\n', i)
-            i = len(text) if i < 0 else i
-            continue
-        else:
-            out.append(c)
-        i += 1
-    return json.loads(re.sub(r',(\s*[}\]])', r'\1', ''.join(out)))
+# The camera that set_view makes anew for each picture, and removes from the one before.
+CAMERA_NAME = 'ReferenceCamera'
 
 
-def index_assets():
-    """Each asset's id, from its .meta file, to the path of the file beside it."""
-    assets = {}
-    for folder in ('src', 'samples'):
-        for top, dirs, files in os.walk(os.path.join(ROOT, folder)):
-            dirs[:] = [d for d in dirs if d not in ('bin', 'obj', 'Build')]
-            for name in files:
-                if name.endswith('.meta'):
-                    path = os.path.join(top, name)
-                    meta = read_jsonc(path)
-                    if 'id' in meta:
-                        assets[meta['id']] = (path[:-5], meta)
-    return assets
+def project_path(view):
+    return os.path.join(Settings.ROOT, view['project'])
 
 
-def magic_matrix(transform):
-    p = transform.get('position', {})
-    r = transform.get('rotation', {})
-    s = transform.get('scale', {})
-    rotation = Quaternion((r.get('w', 1), r.get('x', 0), r.get('y', 0), r.get('z', 0)))
-    scale = Matrix.Diagonal((s.get('x', 1), s.get('y', 1), s.get('z', 1), 1))
-    return Matrix.Translation((p.get('x', 0), p.get('y', 0), p.get('z', 0))) @ rotation.to_matrix().to_4x4() @ scale
-
-
-def entities(assets, prefab_path, parent):
-    """Each entity of a prefab with its world matrix in Magic's axes, prefab instances and children expanded."""
-    for entity in read_jsonc(prefab_path)['entities']:
-        components = entity.get('components', {})
-        world = parent @ magic_matrix(components.get('Transform', {}))
-        if 'prefab' in entity:
-            yield from entities(assets, assets[entity['prefab']['id']][0], world)
-        yield entity, components, world
-        stack = [(child, world) for child in entity.get('children', [])]
-        while stack:
-            child, above = stack.pop()
-            child_world = above @ magic_matrix(child.get('components', {}).get('Transform', {}))
-            yield child, child.get('components', {}), child_world
-            stack += [(grandchild, child_world) for grandchild in child.get('children', [])]
-
-
-def rotate(q, v):
-    return q @ Vector(v)
-
-
-DAY_CYCLE = 100421
-
-
-def light_rotation(components, hour, latitude=35):
-    """The rotation of a directional light: the one that the samples' DayCycle script gives it at the hour (samples/Shared
-    DayCycle.cs), or its own when it has no DayCycle or no hour is given. A moon's DayCycle runs 12 hours behind."""
-    r = components.get('Transform', {}).get('rotation', {})
-    rotation = Quaternion((r.get('w', 1), r.get('x', 0), r.get('y', 0), r.get('z', 0)))
-    if hour is None or not any(s.get('id') == DAY_CYCLE for s in components.get('ScriptContainer', [])):
-        return rotation
-    if components['DirectionalLight'].get('mode') == 'moon':
-        hour -= 12
-    travel = rotate(rotation, (0, 0, 1)).normalized()
-    ground = Vector((travel.x, 0, travel.z))
-    axis = Vector((0, 1, 0)).cross(ground).normalized() if ground.length > 0 else Vector((1, 0, 0))
-    west = axis.cross(Vector((0, 1, 0)))
-
-    def turn(q, radians):
-        return (Quaternion(axis, radians) @ q).normalized()
-
-    noon = turn(rotation, math.acos(max(-1, min(1, -travel.y))))
-    day = turn(noon, (hour - 12) * math.tau / 24)
-    return (Quaternion(west, math.radians(latitude)) @ day).normalized()
-
-
-def image_node(tree, assets, texture_id, colour):
-    path = assets[texture_id][0]
-    node = tree.nodes.new('ShaderNodeTexImage')
-    node.image = bpy.data.images.load(path, check_existing=True)
-    node.image.colorspace_settings.name = 'sRGB' if colour else 'Non-Color'
-    return node
-
-
-def make_material(assets, material_id, cache):
-    if material_id in cache:
-        return cache[material_id]
-    path = assets[material_id][0]
-    data = read_jsonc(path)
-    params = data.get('params', {})
-    shader_path = assets.get(data['shader']['id'], ('',))[0]
-    material = bpy.data.materials.new(os.path.basename(path))
-    tree = material.node_tree
-    bsdf = tree.nodes['Principled BSDF']
-    links = tree.links
-    c = params.get('color', {'r': 1, 'g': 1, 'b': 1, 'a': 1})
-    colour = (c['r'], c['g'], c['b'], 1)
-    roughness = params.get('roughness', {'x': 1})['x']
-    if os.path.basename(shader_path).startswith('Glass'):
-        # Glass: clear for the shadow rays as far as its clarity lets light through, as Magic's shadows treat it.
-        glass = tree.nodes.new('ShaderNodeBsdfPrincipled')
-        glass.inputs['Base Color'].default_value = colour
-        glass.inputs['Roughness'].default_value = roughness
-        glass.inputs['Transmission Weight'].default_value = 1
-        glass.inputs['IOR'].default_value = 1.5
-        clear = tree.nodes.new('ShaderNodeBsdfTransparent')
-        clear.inputs[0].default_value = [params.get('clarity', {'x': 1})['x']] * 3 + [1]
-        path_node = tree.nodes.new('ShaderNodeLightPath')
-        mix = tree.nodes.new('ShaderNodeMixShader')
-        links.new(path_node.outputs['Is Shadow Ray'], mix.inputs[0])
-        links.new(glass.outputs[0], mix.inputs[1])
-        links.new(clear.outputs[0], mix.inputs[2])
-        links.new(mix.outputs[0], tree.nodes['Material Output'].inputs[0])
-        cache[material_id] = material
-        return material
-
-    bsdf.inputs['Base Color'].default_value = colour
-    bsdf.inputs['Roughness'].default_value = roughness
-    bsdf.inputs['Metallic'].default_value = params.get('metalness', {'x': 0})['x']
-    if 'colorMap' in params:
-        image = image_node(tree, assets, params['colorMap']['texture']['id'], True)
-        tint = tree.nodes.new('ShaderNodeMix')
-        tint.data_type = 'RGBA'
-        tint.blend_type = 'MULTIPLY'
-        tint.inputs['Factor'].default_value = 1
-        tint.inputs['A'].default_value = colour
-        links.new(image.outputs['Color'], tint.inputs['B'])
-        links.new(tint.outputs['Result'], bsdf.inputs['Base Color'])
-    if 'ormMap' in params:
-        image = image_node(tree, assets, params['ormMap']['texture']['id'], False)
-        split = tree.nodes.new('ShaderNodeSeparateColor')
-        links.new(image.outputs['Color'], split.inputs[0])
-        for channel, name, factor in ((1, 'Roughness', roughness),
-                                      (2, 'Metallic', params.get('metalness', {'x': 0})['x'])):
-            scale = tree.nodes.new('ShaderNodeMath')
-            scale.operation = 'MULTIPLY'
-            scale.inputs[1].default_value = factor
-            links.new(split.outputs[channel], scale.inputs[0])
-            links.new(scale.outputs[0], bsdf.inputs[name])
-    if 'normalMap' in params:
-        image = image_node(tree, assets, params['normalMap']['texture']['id'], False)
-        normal = tree.nodes.new('ShaderNodeNormalMap')
-        links.new(image.outputs['Color'], normal.inputs['Color'])
-        links.new(normal.outputs['Normal'], bsdf.inputs['Normal'])
-    if 'emissive' in params:
-        # Magic's emissive is a luminance in nits; Blender's emission is a radiance in W/sr/m2.
-        e = params['emissive']
-        bright = max(e['x'], e['y'], e['z'])
-        bsdf.inputs['Emission Strength'].default_value = bright / LUMENS_PER_WATT
-        bsdf.inputs['Emission Color'].default_value = (e['x'] / bright, e['y'] / bright, e['z'] / bright, 1)
-        if 'emissiveMap' in params:
-            image = image_node(tree, assets, params['emissiveMap']['texture']['id'], True)
-            tint = tree.nodes.new('ShaderNodeMix')
-            tint.data_type = 'RGBA'
-            tint.blend_type = 'MULTIPLY'
-            tint.inputs['Factor'].default_value = 1
-            tint.inputs['A'].default_value = bsdf.inputs['Emission Color'].default_value
-            links.new(image.outputs['Color'], tint.inputs['B'])
-            links.new(tint.outputs['Result'], bsdf.inputs['Emission Color'])
-    cache[material_id] = material
-    return material
-
-
-def import_model(path, cache):
-    """The model's mesh in Magic's model axes, its material slots in the order Assimp numbers them: the order in which
-    the file's faces first use each material."""
-    if path in cache:
-        return cache[path]
-    before = set(bpy.data.objects)
-    bpy.ops.import_scene.fbx(filepath=path)
-    imported = sorted((o for o in bpy.data.objects if o not in before), key=lambda o: o.name)
-    meshes = [o for o in imported if o.type == 'MESH']
-    order = []
-    for o in meshes:
-        for polygon in o.data.polygons:
-            slot = o.material_slots[polygon.material_index].material if o.material_slots else None
-            name = slot.name if slot else ''
-            if name not in order:
-                order.append(name)
-    combined = bpy.data.meshes.new(os.path.basename(path))
-    target = bmesh.new()
-    for o in meshes:
-        piece = bmesh.new()
-        piece.from_mesh(o.data)
-        piece.transform(SWAP @ o.matrix_world)
-        names = [s.material.name if s.material else '' for s in o.material_slots] or ['']
-        for face in piece.faces:
-            face.material_index = order.index(names[face.material_index] if face.material_index < len(names) else '')
-        scratch = bpy.data.meshes.new('piece')
-        piece.to_mesh(scratch)
-        piece.free()
-        target.from_mesh(scratch)
-        bpy.data.meshes.remove(scratch)
-    target.to_mesh(combined)
-    target.free()
-    for o in imported:
-        bpy.data.objects.remove(o)
-    cache[path] = (combined, len(order))
-    return cache[path]
-
-
-def place_renderer(assets, name, renderer, world, models, materials):
-    mesh, slots = import_model(assets[renderer['model']['id']][0], models)
-    mesh = mesh.copy()
-    ids = [m['id'] for m in renderer.get('materials', [])]
-    for i in range(slots):
-        mesh.materials.append(make_material(assets, ids[i], materials) if i < len(ids) else None)
-    if slots > len(ids):
-        # A slot with no material draws nothing in Magic.
-        b = bmesh.new()
-        b.from_mesh(mesh)
-        bmesh.ops.delete(b, geom=[f for f in b.faces if f.material_index >= len(ids)], context='FACES')
-        b.to_mesh(mesh)
-        b.free()
-    o = bpy.data.objects.new(name, mesh)
-    # The swap back to Blender's axes mirrors, and the mirror in the mesh undoes it.
-    o.matrix_world = SWAP @ world
-    bpy.context.scene.collection.objects.link(o)
-
-
-def place_point_light(name, light, world):
-    c = light.get('color', {'r': 1, 'g': 1, 'b': 1})
-    data = bpy.data.lights.new(name, 'POINT')
-    data.color = (c['r'], c['g'], c['b'])
-    # Candela to Blender's watts: a point light of P W gives P / 4pi W/sr.
-    data.energy = 4 * math.pi * light.get('intensity', 64) / LUMENS_PER_WATT
-    data.shadow_soft_size = light.get('radius', 0.025)
-    o = bpy.data.objects.new(name, data)
-    o.location = (SWAP @ world).to_translation()
-    bpy.context.scene.collection.objects.link(o)
-
-
-def build(view, hour, width, height):
-    assets = index_assets()
-    project = json.load(open(os.path.join(ROOT, view['project'])))
-    domain = assets[project['entryPoint']['id']][0]
-    bpy.ops.wm.read_factory_settings(use_empty=True)
-    scene = bpy.context.scene
-    models, materials = {}, {}
-    sun_direction = None
-    folder = os.path.dirname(domain)
-    for prefab in sorted(f for f in os.listdir(folder) if f.endswith('.prefab')):
-        for entity, components, world in entities(assets, os.path.join(folder, prefab), Matrix.Identity(4)):
-            name = entity.get('name', 'entity')
-            if 'Renderer' in components:
-                place_renderer(assets, name, components['Renderer'], world, models, materials)
-            if 'PointLight' in components:
-                place_point_light(name, components['PointLight'], world)
-            light = components.get('DirectionalLight')
-            if light:
-                travel = rotate(light_rotation(components, hour), (0, 0, 1))
-                towards = Vector((-travel.x, -travel.z, -travel.y))
-                if light.get('mode') == 'sun':
-                    sun_direction = towards
-                elif towards.z > 0:
-                    c = light.get('color', {'r': 1, 'g': 1, 'b': 1})
-                    data = bpy.data.lights.new(name, 'SUN')
-                    data.color = (c['r'], c['g'], c['b'])
-                    data.energy = light.get('intensity', 0.3) / LUMENS_PER_WATT
-                    data.angle = math.radians(0.5)
-                    o = bpy.data.objects.new(name, data)
-                    o.rotation_euler = towards.to_track_quat('Z', 'Y').to_euler()
-                    scene.collection.objects.link(o)
-
-    # The sky and its sun, at the sun's direction.
-    scene.world = bpy.data.worlds.new('Sky')
-    tree = scene.world.node_tree
-    sky = tree.nodes.new('ShaderNodeTexSky')
-    sky.sky_type = 'MULTIPLE_SCATTERING'
-    sky.sun_disc = True
-    sky.sun_elevation = math.asin(max(-1, min(1, sun_direction.z)))
-    # A rotation of 0 puts the sun toward +Y and 90 degrees toward +X (measured in Blender 5.3).
-    sky.sun_rotation = math.atan2(sun_direction.x, sun_direction.y)
-    tree.links.new(sky.outputs[0], tree.nodes['Background'].inputs[0])
-    tree.nodes['Background'].inputs[1].default_value = SKY_STRENGTH
-
-    # The camera, as tools/Scripts/CompareReference.ps1 poses Magic's: its yaw about up, then its pitch about its right.
-    yaw = math.radians(view['yaw']) / 2
-    pitch = math.radians(view['pitch']) / 2
-    q = Quaternion((math.cos(yaw) * math.cos(pitch), math.cos(yaw) * math.sin(pitch),
-                    math.sin(yaw) * math.cos(pitch), -math.sin(yaw) * math.sin(pitch)))
-    right, up, forward = (rotate(q, axis) for axis in ((1, 0, 0), (0, 1, 0), (0, 0, 1)))
+def place_camera(scene, view, pose):
+    """Poses the camera at the pose of the view, as the visual tests pose Magic's, and gives back where it stands in
+    Magic's axes. The pose holds a position and a rotation in Magic's axes, as the manifest of the references keeps
+    them. Magic's camera looks along its +Z with its +Y up; Blender's looks along its -Z."""
+    world = magic_matrix({'position': dict(zip('xyz', pose['position'])),
+                          'rotation': dict(zip('xyzw', pose['rotation']))})
+    position, rotation = world.to_translation(), world.to_quaternion()
+    right, up, forward = (rotation @ Vector(axis) for axis in ((1, 0, 0), (0, 1, 0), (0, 0, 1)))
     swap = Matrix(((1, 0, 0), (0, 0, 1), (0, 1, 0)))
     basis = Matrix((swap @ right, swap @ up, -(swap @ forward))).transposed()
-    camera = bpy.data.objects.new('Camera', bpy.data.cameras.new('Camera'))
-    p = view['position']
-    camera.matrix_world = Matrix.Translation((p['x'], p['z'], p['y'])) @ basis.to_4x4()
+    camera = bpy.data.objects.new(CAMERA_NAME, bpy.data.cameras.new(CAMERA_NAME))
+    camera.matrix_world = Matrix.Translation((position.x, position.z, position.y)) @ basis.to_4x4()
     camera.data.sensor_fit = 'VERTICAL'
-    camera.data.angle_y = math.radians(view.get('fieldOfView', 60))
+    camera.data.angle_y = math.radians(Camera.field_of_view(view))
     camera.data.clip_start = 0.05
     camera.data.clip_end = 20000
     scene.collection.objects.link(camera)
     scene.camera = camera
+    return position
 
+
+def setting_owner(scene, path):
+    """The object that holds a settings path, and the name of the setting on it."""
+    owner = scene
+    parts = path.split('.')
+    for part in parts[:-1]:
+        owner = getattr(owner, part)
+    return owner, parts[-1]
+
+
+def apply_settings(scene, settings):
+    """Sets Cycles by the names of its own settings, which tools/Scripts/VisualTests.json holds as data: each key is
+    the path of a setting under the scene, such as cycles.adaptive_threshold, and its value what to set it to."""
+    for path, value in settings.items():
+        owner, name = setting_owner(scene, path)
+        setattr(owner, name, value)
+
+
+def set_picture(scene):
+    """How a reference is written: linear light in an EXR, with the sky left in. The mask and the preview of a job
+    each write a picture of their own kind, so every one of these values is set again for each render, and a job
+    gives the same file whatever its place in a batch."""
+    scene.view_settings.view_transform = 'Standard'
+    scene.render.film_transparent = False
+    scene.render.image_settings.file_format = 'OPEN_EXR'
+    scene.render.image_settings.color_mode = 'RGB'
+    # A reference is kept in the repository, so it is packed: half floats, which git keeps at a third of the size of
+    # 32-bit floats, with a compression that loses nothing of what is left. Measured on cabin-outside at 12 against
+    # the 32-bit file: the median of the lit light moves 0.0004 %, the patch percentiles under 0.003 %, the worst lit
+    # pixel 0.05 %, and no value is lost to endlessness.
+    scene.render.image_settings.color_depth = '16'
+    scene.render.image_settings.exr_codec = 'ZIP'
+
+
+def set_cycles(scene, width, height):
     scene.render.engine = 'CYCLES'
     scene.render.resolution_x = width
     scene.render.resolution_y = height
-    scene.view_settings.view_transform = 'Standard'
-    scene.render.image_settings.file_format = 'OPEN_EXR'
-    scene.render.image_settings.color_depth = '32'
+    set_picture(scene)
     cycles = scene.cycles
     cycles.max_bounces = 16
     cycles.diffuse_bounces = 12
@@ -356,6 +110,12 @@ def build(view, hour, width, height):
     cycles.film_exposure = 1
     cycles.caustics_refractive = True
     cycles.caustics_reflective = True
+    # Every other key of the cycles block of VisualTests.json is the path of a Cycles setting under the scene.
+    apply_settings(scene, {path: value for path, value in Settings.TESTS['cycles'].items() if path != 'samples'})
+    # The scene is synced to the device one time and kept for every render of the run.
+    scene.render.use_persistent_data = True
+    scene.cycles.denoiser = 'OPENIMAGEDENOISE'
+    scene.cycles.denoising_input_passes = 'RGB_ALBEDO_NORMAL'
     preferences = bpy.context.preferences.addons['cycles'].preferences
     for kind in ('OPTIX', 'CUDA', 'HIP', 'ONEAPI', 'METAL'):
         try:
@@ -365,51 +125,166 @@ def build(view, hour, width, height):
                 for d in preferences.devices:
                     d.use = d.type == kind
                 cycles.device = 'GPU'
+                print(f'rendering on the {kind} device')
                 break
         except TypeError:
             continue
-    return scene
 
 
-def print_lights(view, hour):
-    """Prints 'sun x y z w' and 'moon x y z w': the rotation that DayCycle gives each light at the hour, which Magic is
-    set to with its DayCycle removed, since a new DayCycle starts from the rotation the light has then."""
-    assets = index_assets()
-    project = json.load(open(os.path.join(ROOT, view['project'])))
-    folder = os.path.dirname(assets[project['entryPoint']['id']][0])
-    for prefab in sorted(f for f in os.listdir(folder) if f.endswith('.prefab')):
-        for entity, components, world in entities(assets, os.path.join(folder, prefab), Matrix.Identity(4)):
-            light = components.get('DirectionalLight')
-            if light:
-                q = light_rotation(components, hour)
-                print(f"{light.get('mode', 'sun')} {q.x:.6f} {q.y:.6f} {q.z:.6f} {q.w:.6f}")
+def build_world(view, width, height):
+    """The part of the scene that no view and no hour changes: the domain and the Cycles settings. Building it is most
+    of the time of a render, so one build serves every picture."""
+    started = time.monotonic()
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    domain = import_domain(project_path(view))
+    set_cycles(domain.scene, width, height)
+    drawn = len([o for o in domain.scene.collection.objects if o.type != 'EMPTY'])
+    print(f'built {drawn} objects over {len(bpy.data.meshes)} meshes and {len(domain.markers)} markers '
+          f'in {time.monotonic() - started:.1f} s')
+    return domain
+
+
+def set_view(domain, view, sky, pose):
+    """Everything one picture changes: the camera at the pose of the view, and the light of the hour, from what
+    `query sky` prints at it."""
+    if CAMERA_NAME in bpy.data.objects:
+        bpy.data.objects.remove(bpy.data.objects[CAMERA_NAME], do_unlink=True)
+    position = place_camera(domain.scene, view, pose)
+    return set_hour(domain, sky, position.y)
+
+
+def render(scene, path, samples, settings):
+    """Writes the picture of the view the scene holds. A render on the GPU that the GPU refuses is taken again on the
+    CPU."""
+    set_picture(scene)
+    scene.cycles.samples = samples
+    scene.cycles.use_denoising = True
+    apply_settings(scene, settings)
+    scene.render.filepath = os.path.abspath(path)
+    try:
+        bpy.ops.render.render(write_still=True)
+    except RuntimeError as failure:
+        print(f'the {scene.cycles.device} render failed ({failure}): taking it again on the CPU')
+        scene.cycles.device = 'CPU'
+        bpy.ops.render.render(write_still=True)
+
+
+def write_mask(scene, path):
+    """Writes a black and white PNG of the view the scene already holds, black where the sky shows and white where a
+    surface does, which keeps the sky out of the numbers that Compare.py takes over the picture. One sample is enough
+    for the alpha that the mask is made from, and the scene is the built one, so the mask costs seconds. set_picture
+    sets each of these values again for the next render, so the mask puts none of them back."""
+    scene.render.film_transparent = True
+    scene.render.image_settings.color_mode = 'RGBA'
+    scene.cycles.samples = 1
+    scene.cycles.use_denoising = False
+    alpha = os.path.abspath(path) + '.exr'
+    scene.render.filepath = alpha
+    bpy.ops.render.render(write_still=True)
+    # The mask holds one of two values at each pixel, so it is kept as a small PNG and not as the HDR picture with an
+    # alpha that a transparent render writes: 2 MB in place of 18 MB of a 1920 by 987 view.
+    rendered = bpy.data.images.load(alpha)
+    width, height = rendered.size
+    pixels = np.empty(width * height * 4, dtype=np.float32)
+    rendered.pixels.foreach_get(pixels)
+    bpy.data.images.remove(rendered)
+    os.remove(alpha)
+    surface = np.where(pixels.reshape(-1, 4)[:, 3] < 0.5, 0, 1)
+    mask = bpy.data.images.new('mask', width, height)
+    mask.colorspace_settings.name = 'Non-Color'
+    mask.pixels.foreach_set(np.column_stack([surface, surface, surface, np.ones_like(surface)])
+                            .ravel().astype(np.float32))
+    mask.file_format = 'PNG'
+    mask.filepath_raw = os.path.abspath(path)
+    mask.save()
+    bpy.data.images.remove(mask)
+
+
+def write_preview(exr, path):
+    """The preview of a reference, written from the picture that was just rendered: the same look as a comparison's
+    split, at half the size. It is written here so that no second run of Blender reads the EXR again."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    Photograph.write_preview(exr, path, Photograph.exposure_for_leak(Settings.limit('leakNits')['max']))
+
+
+def domain_of(view):
+    """Each entity of the view's domain, read from the files with no Blender scene: what --light prints from."""
+    path = project_path(view)
+    assets = index_assets(find_root(path))
+    return domain_entities(assets, domain_folder(assets, path))
+
+
+def print_sun(view, hour, altitude):
+    """Prints the light that lights the world at the hour, as Magic's `query sky` gives it, its lux above the air and
+    at that height over the ground, the lux it gives a flat white plane in the open there, the sky's brightness, and
+    each lamp of the domain as this script reads it from the prefabs: the numbers to check the sun, the moon and the
+    look against."""
+    lamps = [(entity.get('name', 'point light'), components['PointLight'])
+             for entity, components, _, _ in domain_of(view) if 'PointLight' in components]
+    sky = query_skies(project_path(view), [hour])[hour]
+    brightness = sky['sky']['brightness']
+    towards, illuminance, mode = lit_by(sky)
+    through = air_transmittance(altitude, towards.y)
+    ground = Vector([illuminance[channel] * through[channel] for channel in range(3)])
+    print(f'{mode} at a height of {towards.y:.4f}, {altitude:.1f} m over the ground')
+    print(f'above the air {illuminance[0]:.3f} {illuminance[1]:.3f} {illuminance[2]:.3f} lux')
+    print(f'through the air {ground[0]:.3f} {ground[1]:.3f} {ground[2]:.3f} lux')
+    print(f'on a flat white plane in the open {ground[1] * towards.y:.3f} lux')
+    print(f"the sky's brightness x{brightness:g}, which the sun's lux above does not take")
+    for name, lamp in lamps:
+        c = lamp.get('color', {'r': 1, 'g': 1, 'b': 1})
+        intensity = lamp.get('intensity', 64)
+        print(f"lamp {name}: {intensity:g} cd, colour {c['r']:.3f} {c['g']:.3f} {c['b']:.3f}, "
+              f'reach {lamp_reach(lamp):.1f} m')
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--view', required=True)
-    parser.add_argument('--hour', type=float, help='The hour of a light with a DayCycle; without it, its own rotation.')
-    parser.add_argument('--out')
-    parser.add_argument('--sun', action='store_true',
-                        help="Print the sun's and the moon's rotation in Magic at the hour, from the domain, and stop.")
-    parser.add_argument('--samples', type=int, default=4096)
-    parser.add_argument('--width', type=int, default=1280)
-    parser.add_argument('--height', type=int, default=658)
-    parser.add_argument('--blend', help='Also save the scene as this .blend file.')
+    parser.add_argument('--view', help='One view of tools/Scripts/ReferenceViews.json.')
+    parser.add_argument('--jobs', help='A JSON list of {"view", "hour", "out", "mask", "preview"} to render from one '
+                                      'build of the scene.')
+    parser.add_argument('--hour', type=float,
+                        help='The hour that Magic holds its day at for --light; without it, the lights as the world '
+                             'has them once it is loaded.')
+    parser.add_argument('--light', action='store_true',
+                        help='Print the light that lights the world at the hour, its lux and each lamp, and stop.')
+    parser.add_argument('--altitude', type=float,
+                        help='Metres over the ground that --light measures at, which it needs.')
+    parser.add_argument('--samples', type=int,
+                        help='The Cycles samples of every job. Without it, the samples of VisualTests.json.')
+    parser.add_argument('--settings', help='A JSON object of Cycles settings by name, over the ones of '
+                                          'VisualTests.json.')
     args = parser.parse_args(sys.argv[sys.argv.index('--') + 1:])
-    views = json.load(open(os.path.join(ROOT, 'tools', 'Scripts', 'ReferenceViews.json')))
-    view = next(v for v in views if v['name'] == args.view)
-    if args.sun:
-        print_lights(view, args.hour)
+    by_name = {v['name']: v for v in Settings.views()}
+
+    if args.light:
+        if args.altitude is None:
+            raise SystemExit('--light measures the light at a height over the ground: give it --altitude.')
+        print_sun(by_name[args.view], args.hour, args.altitude)
         return
-    scene = build(view, args.hour, args.width, args.height)
-    scene.cycles.samples = args.samples
-    scene.cycles.use_denoising = True
-    scene.cycles.denoiser = 'OPENIMAGEDENOISE'
-    scene.render.filepath = os.path.abspath(args.out)
-    if args.blend:
-        bpy.ops.wm.save_as_mainfile(filepath=os.path.abspath(args.blend))
-    bpy.ops.render.render(write_still=True)
+
+    settings = json.loads(args.settings) if args.settings else {}
+    samples = args.samples if args.samples else Settings.TESTS['cycles']['samples']
+    with open(args.jobs, encoding='utf-8') as f:
+        jobs = json.load(f)
+    projects = sorted({by_name[job['view']]['project'] for job in jobs})
+    if len(projects) > 1:
+        raise SystemExit(f'The jobs name {len(projects)} projects ({", ".join(projects)}). One build holds the world '
+                         'of one project, so give each project a run of its own.')
+    # One run of Magic gives the light of every hour, before the build, which is the long part.
+    skies = query_skies(project_path(by_name[jobs[0]['view']]), sorted({job.get('hour') for job in jobs},
+                                                                    key=lambda hour: -1 if hour is None else hour))
+    domain = build_world(by_name[jobs[0]['view']], *Settings.picture_size())
+    for job in jobs:
+        started = time.monotonic()
+        lit = set_view(domain, by_name[job['view']], skies[job.get('hour')], job['pose'])
+        render(domain.scene, job['out'], samples, settings)
+        if job.get('mask'):
+            write_mask(domain.scene, job['mask'])
+        if job.get('preview'):
+            write_preview(job['out'], job['preview'])
+        print(f"rendered {job['view']} at {job.get('hour')}, lit by the {lit}, "
+              f'in {time.monotonic() - started:.1f} s')
 
 
 main()

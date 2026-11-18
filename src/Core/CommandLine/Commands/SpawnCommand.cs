@@ -2,10 +2,12 @@ using System.Collections.Immutable;
 using System.CommandLine;
 using System.Linq;
 using System.Numerics;
+using System.Text.Json.Nodes;
 using Magic.Assets;
 using Magic.Debugging;
 using Magic.Ecs;
 using Magic.Ecs.Components;
+using Magic.Files;
 using Magic.Threading;
 using Magic.Utils;
 using Magic.Worlds;
@@ -16,7 +18,7 @@ namespace Magic.CommandLine.Commands;
 /// <c>spawn</c>: puts a prefab, by its path or name, in the world at x y z, or a few metres in front of the player.
 /// </summary>
 /// <remarks>
-/// It holds <c>wait loaded</c> while the prefab comes, and logs the entities that it made.
+/// It holds <c>wait loaded</c> while the prefab comes, and prints the ids of the entities that it made as JSON.
 /// </remarks>
 internal static class SpawnCommand
 {
@@ -77,8 +79,11 @@ internal static class SpawnCommand
                 return;
             }
 
-            string ids = string.Join(", ", spawned.Value.Select(entity => entity.Id));
-            Log.Info($"Spawned {name} at {place.Position} as entities {ids}.");
+            JsonObject made = new()
+            {
+                ["entities"] = new JsonArray([.. spawned.Value.Select(entity => JsonValue.Create(entity.Id))]),
+            };
+            Terminal.Write(made.ToJsonString(Json.Options));
         }
 
         // SpawnAheadMetres in front of the player, the way it faces; the origin when there is no player.

@@ -10,8 +10,8 @@ using Magic.Worlds;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>open</c>: runs the project at a path and ends the run of any other, or opens a <c>.domain</c> in place of the
-/// world.
+/// <c>open</c>: runs the project at a path and ends the run of any other, or opens a domain of the running project,
+/// by its path or its name, in place of the world.
 /// </summary>
 /// <remarks>
 /// For a domain, it holds <c>wait loaded</c> while the domain comes.
@@ -20,10 +20,13 @@ internal static class OpenCommand
 {
     public static Command Create(App app, IFileSystem files, AssetManager assets, World world, CommandQueue queue)
     {
-        Argument<string> project = new("project") { Description = "The .magic file to run" };
+        Argument<string> project = new("project")
+        {
+            Description = "The .magic file to run; or the path or the name of a domain of the running project",
+        };
         Command open = new(
             "open",
-            "Opens the project at the given path and runs it, ending the run of any other; or, for a .domain, opens that domain in place of the world"
+            "Opens the project at the given path and runs it, ending the run of any other; or opens a domain of the running project in place of the world"
         )
         {
             project,
@@ -32,13 +35,23 @@ internal static class OpenCommand
 
         return open;
 
-        // Reads the project at the path and has the app run it; one that won't read is logged as an error, and whatever
-        // runs goes on.
+        // Opens the domain that the running project has at the path or by the name. Else it reads the project at the
+        // path and has the app run it; one that won't read is logged as an error, and whatever runs goes on.
         void Open(string path)
         {
+            Handle<Domain> domain = app.Project is null
+                ? Handle<Domain>.None
+                : CommandLookups.FindAsset<Domain>(assets, path);
+            if (domain != Handle<Domain>.None)
+            {
+                OpenDomainAsync(path, domain).FireAndForget();
+
+                return;
+            }
+
             if (path.EndsWith(".domain", StringComparison.OrdinalIgnoreCase))
             {
-                OpenDomainAsync(path).FireAndForget();
+                Log.Error($"There is no domain at {path}.");
 
                 return;
             }
@@ -61,20 +74,9 @@ internal static class OpenCommand
             app.Project = read.Value with { Path = path };
         }
 
-        // Opens the domain at the path in place of the world, holding wait loaded meanwhile.
-        async Task OpenDomainAsync(string path)
+        // Opens the domain in place of the world, holding wait loaded meanwhile.
+        async Task OpenDomainAsync(string path, Handle<Domain> domain)
         {
-            if (!CommandLookups.IsProjectOpen(app, $"open {path} in"))
-                return;
-
-            Handle<Domain> domain = assets.Find<Domain>(path);
-            if (domain == Handle<Domain>.None)
-            {
-                Log.Error($"There is no domain at {path}.");
-
-                return;
-            }
-
             Result opened = await queue
                 .ChangeWorldAsync(world.OpenAsync(domain, Terminal.Progress, CancellationToken.None))
                 .ConfigureAwait(false);

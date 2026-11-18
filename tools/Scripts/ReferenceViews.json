@@ -2,188 +2,101 @@
   {
     "name": "cabin-wall",
     "project": "samples/Terrain/Terrain.magic",
-    "hours": [
-      8,
-      12,
-      22
-    ],
-    "position": {
-      "x": -3071.406,
-      "y": 1151.4,
-      "z": -217.574
-    },
-    "yaw": -105,
-    "pitch": 0,
+    "entity": "ReferenceView.CabinWall",
+    "hours": [8, 12, 16, 22],
     "points": [
-      {
-        "name": "wall beside the shelf",
-        "position": {
-          "x": -3078.181,
-          "y": 1151.509,
-          "z": -219.644
-        }
-      },
-      {
-        "name": "log seam",
-        "position": {
-          "x": -3074.344,
-          "y": 1151.728,
-          "z": -221.427
-        }
-      },
-      {
-        "name": "sill",
-        "position": {
-          "x": -3077.067,
-          "y": 1150.669,
-          "z": -216.878
-        }
-      },
-      {
-        "name": "window's left reveal",
-        "position": {
-          "x": -3075.172,
-          "y": 1151.39,
-          "z": -220.96
-        }
-      },
-      {
-        "name": "floor in the room",
-        "position": {
-          "x": -3074.664,
-          "y": 1149.839,
-          "z": -219.364
-        }
-      },
-      {
-        "name": "ceiling",
-        "position": {
-          "x": -3076.661,
-          "y": 1153.681,
-          "z": -218.98
-        }
-      }
+      {"name": "logs beside the window", "position": {"x": -3076.934, "y": 1151.4, "z": -220.152}},
+      {"name": "logs under the window", "position": {"x": -3076.934, "y": 1150.6, "z": -220.152}},
+      {"name": "stone base course", "position": {"x": -3075.809, "y": 1149.96, "z": -220.657}},
+      {"name": "floor in the room", "position": {"x": -3076.993, "y": 1149.85, "z": -219.071}},
+      {"name": "floor in the corner", "position": {"x": -3077.168, "y": 1149.85, "z": -217.07}},
+      {"name": "ceiling boards", "position": {"x": -3077.248, "y": 1152.972, "z": -218.085}}
     ]
   },
   {
     "name": "cabin-window-glow",
     "project": "samples/Terrain/Terrain.magic",
-    "hours": [
-      8,
-      12,
-      22
-    ],
-    "position": {
-      "x": -3073.152,
-      "y": 1151.25,
-      "z": -215.877
-    },
-    "yaw": 95,
-    "pitch": 0,
+    "entity": "ReferenceView.CabinWindowGlow",
+    "hours": [8, 12, 16, 22],
     "points": [
-      {
-        "name": "middle",
-        "x": 0.5,
-        "y": 0.5
-      }
+      {"name": "logs beside the window", "position": {"x": -3070.06, "y": 1151.25, "z": -215.331}},
+      {"name": "logs under the window", "position": {"x": -3070.717, "y": 1150.793, "z": -216.763}},
+      {"name": "logs over the window", "position": {"x": -3070.034, "y": 1151.808, "z": -215.327}},
+      {"name": "logs at the foot of the wall", "position": {"x": -3070.434, "y": 1149.978, "z": -216.115}},
+      {"name": "logs between the windows", "position": {"x": -3070.922, "y": 1151.25, "z": -217.164}}
+    ]
+  },
+  {
+    "name": "cabin-room",
+    "project": "samples/Terrain/Terrain.magic",
+    "entity": "ReferenceView.CabinRoom",
+    "hours": [8, 12, 16, 22],
+    "strafe": {"meters": 1.5, "seconds": 2},
+    "points": [
+      {"name": "carpet", "position": {"x": -3073.956, "y": 1149.86, "z": -217.047}},
+      {"name": "floor before the carpet", "position": {"x": -3072.009, "y": 1149.85, "z": -216.97}},
+      {"name": "floor by the wall", "position": {"x": -3072.763, "y": 1149.85, "z": -218.587}},
+      {"name": "logs on the door wall", "position": {"x": -3070.94, "y": 1151.0, "z": -217.217}},
+      {"name": "logs by the doorway", "position": {"x": -3071.89, "y": 1151.0, "z": -219.246}}
     ]
   },
   {
     "name": "cabin-outside",
     "project": "samples/Terrain/Terrain.magic",
-    "hours": [
-      8,
-      12,
-      22
-    ],
-    "position": {
-      "x": -3067.484,
-      "y": 1151.02,
-      "z": -220.285
-    },
-    "yaw": -65,
-    "pitch": 0,
+    "entity": "ReferenceView.CabinOutside",
+    "hours": [8, 12, 16, 22],
     "points": [
-      {
-        "name": "middle",
-        "x": 0.5,
-        "y": 0.5
-      },
-      {
-        "name": "sunlit logs left",
-        "x": 0.09,
-        "y": 0.45
-      },
-      {
-        "name": "sunlit logs right",
-        "x": 0.9,
-        "y": 0.45
-      },
-      {
-        "name": "stonework",
-        "x": 0.2,
-        "y": 0.8
-      },
-      {
-        "name": "grass",
-        "x": 0.8,
-        "y": 0.92
-      },
-      {
-        "name": "roof",
-        "x": 0.5,
-        "y": 0.12
-      },
-      {
-        "name": "floor in the doorway",
-        "x": 0.5,
-        "y": 0.66
-      }
+      {"name": "logs left of the door", "position": {"x": -3071.743, "y": 1151.02, "z": -219.534}},
+      {"name": "logs right of the door", "position": {"x": -3070.798, "y": 1151.02, "z": -217.504}},
+      {"name": "logs over the window", "position": {"x": -3070.8, "y": 1151.783, "z": -217.502}},
+      {"name": "stone footing", "position": {"x": -3071.613, "y": 1149.494, "z": -219.557}},
+      {"name": "roof", "position": {"x": -3070.928, "y": 1152.403, "z": -218.679}}
     ]
   },
   {
-    "name": "helloworld",
-    "project": "samples/HelloWorld/HelloWorld.magic",
-    "position": {
-      "x": 0.6,
-      "y": 1.0,
-      "z": -2.5
-    },
-    "yaw": -13.5,
-    "pitch": 0,
+    "name": "cabin-trees",
+    "project": "samples/Terrain/Terrain.magic",
+    "entity": "ReferenceView.CabinTrees",
+    "hours": [8, 12, 16, 22],
     "points": [
-      {
-        "name": "shadow edge",
-        "position": {
-          "x": 0.885,
-          "y": -0.005,
-          "z": 1.513
-        }
-      },
-      {
-        "name": "block top",
-        "position": {
-          "x": -0.372,
-          "y": 0.278,
-          "z": -0.028
-        }
-      },
-      {
-        "name": "arch inside",
-        "position": {
-          "x": -0.126,
-          "y": 1.543,
-          "z": 0.121
-        }
-      },
-      {
-        "name": "floor in shadow",
-        "position": {
-          "x": 1.117,
-          "y": -0.003,
-          "z": 0.957
-        }
-      }
+      {"name": "a trunk where it meets the ground", "position": {"x": -3050.183, "y": 1150.418, "z": -221.847}},
+      {"name": "foliage of the near tree", "position": {"x": -3052.469, "y": 1152.006, "z": -222.982}},
+      {"name": "open ground in the clearing", "position": {"x": -3053.313, "y": 1150.24, "z": -218.211}},
+      {"name": "ground under the trees", "position": {"x": -3054.169, "y": 1150.743, "z": -226.286}},
+      {"name": "far foliage past the impostor switch", "position": {"x": -3086.212, "y": 1168.984, "z": -255.974}},
+      {"name": "the cabin's end wall", "position": {"x": -3072.83, "y": 1150.964, "z": -222.113}}
+    ]
+  },
+  {
+    "name": "cabin-surfaces",
+    "project": "samples/Terrain/Terrain.magic",
+    "entity": "ReferenceView.CabinSurfaces",
+    "hours": [8, 12, 16, 22],
+    "strafe": {"meters": 1.5, "seconds": 2},
+    "points": [
+      {"name": "polished steel ball", "position": {"x": -3075.716, "y": 1150.25, "z": -218.962}},
+      {"name": "rough iron block", "position": {"x": -3075.463, "y": 1150.23, "z": -219.058}},
+      {"name": "dark lacquer ball", "position": {"x": -3075.461, "y": 1150.245, "z": -218.463}},
+      {"name": "water in the tray", "position": {"x": -3075.336, "y": 1150.156, "z": -218.809}},
+      {"name": "the glow bead", "position": {"x": -3075.184, "y": 1150.18, "z": -218.46}},
+      {"name": "the table top beside them", "position": {"x": -3075.099, "y": 1150.13, "z": -218.632}}
+    ]
+  },
+  {
+    "name": "leak-room",
+    "project": "samples/Terrain/Terrain.magic",
+    "entity": "ReferenceView.LeakRoom",
+    "hours": [8, 12, 16, 22],
+    "points": [
+      {"name": "far wall at eye height", "position": {"x": -3069.87, "y": 1150.84, "z": -207.14}, "maxNits": 0.05},
+      {"name": "far wall at its foot", "position": {"x": -3069.87, "y": 1150.4, "z": -207.14}, "maxNits": 0.05},
+      {"name": "far wall under the roof", "position": {"x": -3069.87, "y": 1152.37, "z": -207.14}, "maxNits": 0.05},
+      {"name": "left wall", "position": {"x": -3070.87, "y": 1150.84, "z": -207.4}, "maxNits": 0.05},
+      {"name": "right wall", "position": {"x": -3068.87, "y": 1150.84, "z": -207.4}, "maxNits": 0.05},
+      {"name": "floor in the middle", "position": {"x": -3069.87, "y": 1150.39, "z": -207.7}, "maxNits": 0.05},
+      {"name": "floor by the far wall", "position": {"x": -3069.87, "y": 1150.39, "z": -207.3}, "maxNits": 0.05},
+      {"name": "corner left of the far wall", "position": {"x": -3070.82, "y": 1150.44, "z": -207.19}, "maxNits": 0.05},
+      {"name": "corner right of the far wall", "position": {"x": -3068.92, "y": 1150.44, "z": -207.19}, "maxNits": 0.05}
     ]
   }
 ]

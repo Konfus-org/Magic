@@ -1,0 +1,9 @@
+{
+    // Polished steel: a mirror-like metal that shows the room and the windows in it.
+    "shader": { "id": 10001 },
+    "params": {
+        "color": { "r": 0.56, "g": 0.57, "b": 0.58, "a": 1 },
+        "roughness": { "x": 0.05 },
+        "metalness": { "x": 1 }
+    }
+}

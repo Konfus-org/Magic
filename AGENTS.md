@@ -23,6 +23,7 @@ asked, when its trigger fits: read its `SKILL.md` and follow it. Claude Code als
 | [simplify-review](docs/skills/simplify-review/SKILL.md) | The user asks to simplify or review an area |
 | [timeouts](docs/skills/timeouts/SKILL.md) | Starting a build, a test run, a validation, a run of Magic, a wait or any background command |
 | [profiling](docs/skills/profiling/SKILL.md) | Profiling, or any mention of performance, frame time, stutter, allocations, memory, VRAM or GPU time |
+| [rendering](docs/skills/rendering/SKILL.md) | Any work on what the engine draws, the reference tools or the visual tests, and before you say that a picture is right |
 | [qa](docs/skills/qa/SKILL.md) | A swarm's QA worker, or the user asks for QA of a branch |
 | [retro](docs/skills/retro/SKILL.md) | A swarm finishes, a slice went badly, or the user corrects the workflow |
 | [ste-docs](docs/skills/ste-docs/SKILL.md) | Each doc, skill or code comment that you write or rewrite. A reply needs only the rules in [Writing](#writing) |
@@ -103,6 +104,7 @@ In Claude Code, the agent hooks in `.claude/settings.json` hold the workflow wit
 | [README](README.md) | When you do not know what Magic is, or where a thing is |
 | [Code Standards](docs/CODE_STANDARDS.md) | Before editing any `.cs` file: "How we write code" and "Ground rules", then each other section the change needs |
 | [Shader Standards](docs/SHADER_STANDARDS.md) | Before editing any `.slang` file, or a C# struct that a shader shares |
+| [Rendering skill](docs/skills/rendering/SKILL.md) | Before any work on what the engine draws, shaders included |
 | [Tests](docs/TESTS.md) | Before running or touching tests |
 | [Tools](docs/TOOLS.md) | "Traps" one time, and the section of a script before you run it the first time |
 

@@ -1,4 +1,5 @@
 using Magic.Assets;
+using Magic.CommandLine;
 
 namespace Magic.Platform;
 
@@ -9,8 +10,12 @@ namespace Magic.Platform;
 /// Use the title and the icon only on the game thread. The OS gets a new title or icon when the gem next updates the
 /// window. The platform thread writes the size as one value, and any thread can read it.
 /// </remarks>
+[CliPath("Window")]
 public interface IWindow
 {
+    /// <summary>
+    /// The name in the title bar of the window.
+    /// </summary>
     string Title { get; set; }
 
     /// <summary>

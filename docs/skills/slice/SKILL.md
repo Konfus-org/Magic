@@ -81,7 +81,7 @@ flowchart TD
       worktree with a branch from the main checkout's branch (Branches and merges). A worker of a swarm makes the
       worktree that its prompt gives.
    2. Build the slice. Check a position, height or size that you work out from data against the running engine
-      (`get`, a probe or a screenshot) before a later step depends on it.
+      (`query`, a probe or a screenshot) before a later step depends on it.
 8. When the slice is built:
    - For a single slice, use the [finish skill](../finish/SKILL.md).
    - For a slice of an effort, run its "Works when" check and commit on the root branch. Start the next approved

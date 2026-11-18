@@ -11,4 +11,12 @@ namespace Magic.Ecs.Components;
 public record struct Sky : IComponent
 {
     public Handle<Material> Material;
+
+    /// <summary>
+    /// What the sky's light is multiplied by, from 0: the sky that is seen, the light it gives the surfaces and what
+    /// the haze scatters. 1 is the sky of the air itself. The sun and the moon keep their light.
+    /// </summary>
+    public float Brightness = 1;
+
+    public Sky() { }
 }

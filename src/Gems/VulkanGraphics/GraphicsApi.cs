@@ -1,6 +1,7 @@
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text.Json.Nodes;
 using Magic.Debugging;
 using Magic.Graphics;
 using Magic.Platform;
@@ -29,22 +30,34 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
     /// How frames reach the window, which the render thread reads as each frame begins.
     /// </summary>
     private readonly VulkanGraphicsSettings _settings;
+
     private readonly Threads _threads;
+
     private readonly VulkanDevice _device;
+
     private readonly VulkanHeap _heap;
+
     private readonly VulkanResources _resources;
+
     private readonly VulkanFrames _frames;
+
     private readonly VulkanShaders _shaders;
+
     private readonly VulkanRecorder _recorder;
+
     private readonly VulkanSwapchain? _swapchain;
+
     private readonly Meter _meter;
+
     private readonly Gauge<long> _memoryUsage;
 
     /// <summary>
     /// Where <see cref="_memoryUsage"/> comes from: the driver's heaps, or the resources alone where it says nothing.
     /// </summary>
     private readonly KeyValuePair<string, object?> _memorySource;
+
     private readonly Gauge<long> _memoryAllocated;
+
     private readonly Gauge<long> _memoryLimit;
 
     /// <summary>
@@ -52,9 +65,13 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
     /// asks for, by their description, each with the description it was made to and the frame that last asked for it.
     /// </summary>
     private readonly Dictionary<string, Named<TextureDescription, GpuTexture>> _namedTextures = [];
+
     private readonly Dictionary<string, Named<BufferDescription, GpuBuffer>> _namedBuffers = [];
+
     private readonly Dictionary<string, Named<BottomLevelDescription, GpuAcceleration>> _namedBottomLevels = [];
+
     private readonly Dictionary<string, Named<TopLevelDescription, GpuAcceleration>> _namedTopLevels = [];
+
     private readonly Dictionary<SamplerDescription, Named<SamplerDescription, GpuSampler>> _samplers = [];
 
     internal GraphicsApi(
@@ -280,6 +297,26 @@ public sealed class GraphicsApi : IGraphicsApi, IDisposable
         }
 
         BeginFrame();
+    }
+
+    /// <summary>
+    /// The GPU that draws, as <c>query gpu</c> prints it: the tags of the gem's meter, the device memory and whether
+    /// the API validates.
+    /// </summary>
+    internal JsonObject Describe()
+    {
+        // A tag is named as an instrument is, and the answer keeps only what comes after the gem's part of the name.
+        const string GemPrefix = "magic.gems.vulkan_graphics.";
+        JsonObject described = [];
+        foreach ((string tag, object? value) in _device.Description)
+        {
+            described[tag[GemPrefix.Length..]] = value?.ToString();
+        }
+
+        described["memoryBytes"] = _device.Limits.DeviceMemoryBytes;
+        described["isValidating"] = _device.HasValidation;
+
+        return described;
     }
 
     private void Destroy(GpuBuffer buffer)

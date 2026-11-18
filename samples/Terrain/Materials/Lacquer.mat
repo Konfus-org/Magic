@@ -1,0 +1,8 @@
+{
+    // Black lacquer: a dark surface that is not a metal, with a sharp highlight on it.
+    "shader": { "id": 10001 },
+    "params": {
+        "color": { "r": 0.03, "g": 0.03, "b": 0.035, "a": 1 },
+        "roughness": { "x": 0.12 }
+    }
+}

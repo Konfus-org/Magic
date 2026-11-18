@@ -8,16 +8,25 @@ namespace Magic.DebugTools;
 /// <summary>
 /// The gem: it makes <see cref="DebugWindows"/> over its <see cref="Settings"/> and draws them each frame.
 /// </summary>
-public sealed class EntryPoint(DebugToolsSettings settings, Settings allSettings, IDebugUI ui, IInput? input = null)
-    : IGem,
-        IDisposable
+public sealed class EntryPoint : IGem, IDisposable
 {
-    private readonly DebugWindows _debugWindows = new(settings, allSettings, ui, input);
+    private readonly DebugWindows _debugWindows;
+
+    public EntryPoint(DebugToolsSettings settings, Settings allSettings, IDebugUI ui, IInput? input = null)
+    {
+        Settings = settings;
+        _debugWindows = new(settings, Windows, allSettings, ui, input);
+    }
 
     /// <summary>
-    /// Which lines and windows show, which the keys and the windows' close buttons also set. Game thread.
+    /// The keys of the lines and windows. Game thread.
     /// </summary>
-    public DebugToolsSettings Settings { get; } = settings;
+    public DebugToolsSettings Settings { get; }
+
+    /// <summary>
+    /// Which lines and windows show, which the keys, the windows' close buttons and the console set. Game thread.
+    /// </summary>
+    public OpenWindows Windows { get; } = new();
 
     public void Dispose() => _debugWindows.Dispose();
 

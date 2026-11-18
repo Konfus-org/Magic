@@ -1,0 +1,8 @@
+#!/bin/sh
+# Puts the Git LFS files of the checkout in place of their pointers.
+# git-lfs writes this hook itself; `git lfs install --manual` prints it for the hooks folder of this repository.
+command -v git-lfs >/dev/null 2>&1 || {
+    printf >&2 '\n%s\n\n' "This repository keeps the Cycles reference pictures with Git LFS, and 'git-lfs' is not on your path: install it and run 'git lfs install' one time."
+    exit 2
+}
+git lfs post-checkout "$@"

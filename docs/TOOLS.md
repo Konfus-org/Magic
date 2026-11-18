@@ -2,6 +2,11 @@
 
 The scripts in `tools/Scripts/` build and check Magic. Nothing in `tools/` ships.
 
+`tools/Blender/` holds a Blender add-on that reads a domain of a Magic project into Blender and writes it back:
+File > Import > Magic (.magic) and File > Export > Magic (.magic). The reference tools build their Cycles scene with
+its import ([Reference views](DEBUGGING.md#reference-views)). How to install it, and what the export writes and
+skips, are in [its README](../tools/Blender/README.md).
+
 ## Scripts
 
 Each script is one PowerShell file. It runs under `pwsh` and Windows PowerShell 5.1, from any folder. It exits `0`
@@ -70,6 +75,10 @@ Runs the checks that a change must pass. It runs these steps in order, and stops
    fails. A run that fails prints its last output.
 4. **Screenshot:** runs `Screenshot.ps1` on each sample project. This step needs a display and a GPU.
 
+The cabin sample builds its acceleration structure over all its entities in the first frame after a cold cache, and
+Windows can stop the device for it. Run the first `Headless` or `Screenshot` step after a cold cache one more time
+before you report it as a failure.
+
 `-Only` runs only the steps that you name. `-Project` runs other projects.
 
 ## AgentTaskComplete.ps1
@@ -87,11 +96,14 @@ into a stamped state, the script runs only the build.
 
 ## Run.ps1
 
-Runs a project for an agent, and names the window with the branch of the worktree. End `-Commands` with `exit` to end
-the run. The script does not build.
+Runs a project for an agent, and names the window with the branch of the worktree. The window has that name from the
+moment it opens, because the script gives the name to Magic with `--name`. End `-Commands` with `exit` to end the run.
+The script does not build.
 
 The window opens on the display after the main one, behind the window that has the focus, so that it does not interrupt
-the user. Use `-Display` to select a different display. `Screenshot.ps1` does the same.
+the user. Use `-Display` to select a different display. `Screenshot.ps1` does the same with the name and the display.
+
+The project's name shows in the title bar when the run gives no `--name`.
 
 ## Screenshot.ps1
 
@@ -106,7 +118,7 @@ The screenshot shows the scene only. To photograph a failure:
   The capture shows what is drawn onto the window too, such as the banner of a failure and the debug UI. It copies
   the screen, so keep other windows off the window of Magic. It needs Windows.
 
-The camera of HelloWorld turns. To stop it and face the spawn direction, send these lines with `-Commands`. The
+The camera of the sample turns. To stop it and face the spawn direction, send these lines with `-Commands`. The
 whole component is written, so the line names the camera's own script beside the one that turns it. A value in JSON
 goes in single quotes, which is what keeps its double quotes, and each of those single quotes is doubled inside the
 single-quoted line of PowerShell:
@@ -115,13 +127,60 @@ single-quoted line of PowerShell:
 tools/Scripts/Screenshot.ps1 -AllowErrors -Window -Commands 'set player.scriptcontainer ''[{"id":100411,"degreesPerSec":0},{"id":100412}]''', 'set player.transform.rotation 0.2164 0 0 0.9763'
 ```
 
-## CompareReference.ps1
+## VisualTests.ps1
 
-Measures Magic's light against a Blender Cycles render of the same view, at each of the view's hours. It runs Magic
-through `Screenshot.ps1`, Cycles through `tools/Reference/BuildScene.py` and the comparison through
-`tools/Reference/Compare.py`, then prints the paths of the pictures and the table of the view's points
-([Reference views](DEBUGGING.md#reference-views)). It needs Blender; give its path with `-Blender` when it is not the
-default one.
+Runs the visual tests of the cabin against its Blender Cycles references and prints PASS or FAIL for each view, hour
+and limit, with the paths of the AgX split pictures and of the report page.
+
+```pwsh
+tools/Scripts/VisualTests.ps1                                      # every view at each of its hours
+tools/Scripts/VisualTests.ps1 -View cabin-wall,cabin-outside -Hour 12,22
+tools/Scripts/VisualTests.ps1 -View cabin-outside -Hour 12 -Tier Quick
+```
+
+`-Tier Quick` takes the still frames and the two camera angles beside the view. `-Tier Full`, the default, takes the
+turns, the strafe and the light change as well, and so it judges the settle rows and the noise of a move too.
+
+`-UpdateBaseline` writes the baseline again from this run. `-Repeat <n>` runs each view and hour n times and prints
+the spread of each row. What a verdict beside PASS or FAIL means, and what the command's exit code says, are in
+[Reference views](DEBUGGING.md#reference-views).
+
+The views, their hours and the world points it measures are in `tools/Scripts/ReferenceViews.json`, and the limits
+are in `tools/Scripts/VisualTests.json`. It needs Blender. Give its path with `-Blender` when it is not the default
+one. What it runs, and how to read each picture and each verdict that it writes, is in
+[Reference views](DEBUGGING.md#reference-views).
+
+## JudgeVisualTests.ps1
+
+Judges the rows of a run of `VisualTests.ps1` against the limits, prints a table of each view and hour, and writes
+the report page: one HTML file with each table and the pictures of each measure, the failing and the worse rows
+first. The page asks nothing of the network and runs no script, so it opens from the file alone. `VisualTests.ps1`
+calls it at the end of a run, and writes `rows.json` beside the folders of the run for it. Run it by hand on the
+same folder after a change to a limit or a tolerance, and the run is judged again with no run of Magic:
+
+```pwsh
+tools/Scripts/JudgeVisualTests.ps1 -Run <the folder of a run>
+```
+
+It needs no Blender and no Magic.
+
+## UpdateReferences.ps1
+
+Renders the Blender Cycles reference of each view and hour of the cabin scene and stores it in the repository. This
+is the one script that runs Cycles. Run it by hand after a change to the scene: the materials, the models, the
+lights, the camera of a view, the hours, or the code that builds the scene in Blender.
+
+```pwsh
+tools/Scripts/UpdateReferences.ps1                                   # what is missing or stale
+tools/Scripts/UpdateReferences.ps1 -View cabin-room -Hour 12 -Samples 64
+tools/Scripts/UpdateReferences.ps1 -All                              # every view and hour again
+```
+
+`tools/Reference/References` holds one reference of each view and hour, and git keeps them with Git LFS. A new clone
+needs `git lfs install` one time, and the checkout step of a CI job needs `lfs: true`. What each stored file holds is
+in [Reference views](DEBUGGING.md#reference-views).
+
+It needs Blender. Give its path with `-Blender` when it is not the default one.
 
 ## Profiling.ps1
 
@@ -129,6 +188,13 @@ Takes, waits for or releases a profiling turn. In a profiling turn, only one wor
 that nothing disturbs its measurements. The scripts that run Magic or the tests wait while another worktree holds a
 turn. On Windows, `Format.ps1` and the build of `Validate.ps1` run at once, at idle priority. On other systems, they
 wait.
+
+`-Slot` waits for a free run slot, and gives the slot to the script that asked for it. Only `MAGIC_RUN_SLOTS` runs of
+Magic or of the tests go at the same time, from all the sessions, and only one run if the variable is not set.
+`Run.ps1`, `Screenshot.ps1` and the test and headless steps of `Validate.ps1` hold a slot while they run. Thus the
+sessions build and write code at the same time, but they do not run Magic at the same time. A slot is a file in the
+git folder that its holder keeps open. The system frees the slot when the holder stops, and thus a run that is killed
+does not keep its slot. The wait for a slot ends after the time in the script, with a message that names the holder.
 
 ## Templates
 

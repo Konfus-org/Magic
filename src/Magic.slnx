@@ -54,20 +54,8 @@
       <File Path="../samples/Terrain/Terrain.magic" />
       <Project Path="../samples/Terrain/Samples.Terrain.csproj" />
     </Folder>
-    <Folder Name="/Samples/Forest/">
-      <File Path="../samples/Forest/Forest.magic" />
-      <Project Path="../samples/Forest/Samples.Forest.csproj" />
-    </Folder>
-    <Folder Name="/Samples/Lights/">
-      <File Path="../samples/Lights/Lights.magic" />
-      <Project Path="../samples/Lights/Samples.Lights.csproj" />
-    </Folder>
   <Folder Name="/Samples/Shared/">
     <Project Path="../samples/Shared/SamplesShared.csproj" />
-  </Folder>
-  <Folder Name="/Samples/HelloWorld/">
-    <File Path="../samples/HelloWorld/HelloWorld.magic" />
-    <Project Path="../samples/HelloWorld/Samples.HelloWorld.csproj" />
   </Folder>
   <Folder Name="/Tools/">
   </Folder>

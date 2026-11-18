@@ -8,53 +8,50 @@ using Magic.Utils;
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
-/// <c>bake</c>: loads each asset and opens each domain, so that what the importers, preprocessors and drawing make is
-/// cached, then exits.
+/// <c>bake [path]</c>: loads one asset, each asset under a folder, or every asset, so that what the importers and
+/// preprocessors make of them is cached.
 /// </summary>
 /// <remarks>
-/// It queues the lines that open each domain under <c>Domains/</c> in turn and wait for each to load and settle.
+/// It holds the lines after it until the bake ends, so an <c>exit</c> after it leaves with full caches. It opens no
+/// domain, so what only drawing makes, such as a compiled shader, is cached when a domain first draws.
 /// </remarks>
 internal static class BakeCommand
 {
     public static Command Create(App app, AssetManager assets, CommandQueue queue)
     {
+        Argument<string?> path = new("path")
+        {
+            Description =
+                "An asset's path under its project, gem or Magic, as Materials/Carpet.mat, or a folder of them, as Materials; every asset when left out",
+            Arity = ArgumentArity.ZeroOrOne,
+        };
         Command bake = new(
             "bake",
-            "Loads every asset, then opens every domain under Domains/ in turn, so their caches are made, then exits"
-        );
-        bake.SetAction(_ => Bake());
+            "Loads an asset, each asset under a folder, or every asset, so that what importers and preprocessors make is cached"
+        )
+        {
+            path,
+        };
+        bake.SetAction(parsed => Bake(parsed.GetValue(path)));
 
         return bake;
 
-        void Bake()
+        void Bake(string? what)
         {
             if (!CommandLookups.IsProjectOpen(app, "bake"))
                 return;
 
-            Task baking = BakeAssetsAsync();
+            Task baking = BakeAsync(what);
             baking.FireAndForget();
             queue.Hold(() => !baking.IsCompleted);
-            int domains = 0;
-            foreach (string path in assets.GetPathsUnder("Domains"))
-            {
-                if (!path.EndsWith(".domain", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                domains++;
-                queue.Enqueue($"open {path}");
-                queue.Enqueue("wait loaded");
-                queue.Enqueue("wait 120");
-            }
-
-            Log.Info($"Baking every asset, then {domains} domains.");
-            queue.Enqueue("exit");
         }
 
-        async Task BakeAssetsAsync()
+        async Task BakeAsync(string? what)
         {
-            Result<ImmutableArray<ulong>> baked = await assets
-                .BakeAsync(Terminal.Progress, app.Lifetime)
-                .ConfigureAwait(false);
+            Task<Result<ImmutableArray<ulong>>> loading = what is null
+                ? assets.BakeAsync(Terminal.Progress, app.Lifetime)
+                : assets.BakeAsync(what, Terminal.Progress, app.Lifetime);
+            Result<ImmutableArray<ulong>> baked = await loading.ConfigureAwait(false);
             if (baked.Ok)
                 Log.Info($"Baked {baked.Value.Length} assets.");
             else

@@ -1,0 +1,17 @@
+schema_version = "1.0.0"
+
+id = "magic_domain"
+version = "0.2.0"
+name = "Magic domain"
+tagline = "Reads and writes a domain of a Magic project"
+maintainer = "Magic"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+
+[permissions]
+files = "Read a project, its prefabs, its models and its textures, and write its prefabs back"

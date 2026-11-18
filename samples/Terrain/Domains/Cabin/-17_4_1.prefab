@@ -1,0 +1,6 @@
+{
+    "entities": [
+        { "prefab": { "id": 300022 }, "components": { "Transform": { "position": { "x": 84.870, "y": 127.518, "z": 7.407 }, "rotation": { "x": 0, "y": -0.7615, "z": 0, "w": 0.6482 }, "scale": { "x": 1.337, "y": 1.337, "z": 1.337 } } } },
+        { "prefab": { "id": 300022 }, "components": { "Transform": { "position": { "x": 88.549, "y": 124.409, "z": 7.252 }, "rotation": { "x": 0, "y": -0.9932, "z": 0, "w": 0.1161 }, "scale": { "x": 1.023, "y": 1.023, "z": 1.023 } } } }
+    ]
+}

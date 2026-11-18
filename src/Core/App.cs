@@ -12,7 +12,7 @@ namespace Magic;
 /// Commands change it at launch and while it runs. It lasts for the whole process, so a value that a command sets stays
 /// set across runs.
 /// </remarks>
-public sealed class App : IDisposable
+public sealed class App : IRunOptions, IDisposable
 {
     /// <summary>
     /// Cancelled by <see cref="Exit"/> when the process must end, which also cancels the <see cref="Lifetime"/> of
@@ -51,6 +51,20 @@ public sealed class App : IDisposable
     /// The gem that provides the window owns it. The window is valid only while the run lasts.
     /// </remarks>
     public IWindow? Window { get; internal set; }
+
+    /// <summary>
+    /// The name that the window shows from the moment it opens: what <c>--name</c> on the command line gave, else the
+    /// name of the project that runs.
+    /// </summary>
+    /// <remarks>
+    /// The gem that provides the window reads it as it makes the window, and shows nothing else.
+    /// <c>set Window.Title</c> in the console renames a window that is already open.
+    /// </remarks>
+    public string WindowName
+    {
+        get => field.Length > 0 ? field : Project?.Name ?? string.Empty;
+        internal set;
+    } = string.Empty;
 
     /// <summary>
     /// The app that started Magic and keeps it running, or null when Magic runs alone. <c>--owner</c> on the command
@@ -111,6 +125,13 @@ public sealed class App : IDisposable
     /// Whether an error was logged while <see cref="ShouldExitOnError"/> is set.
     /// </summary>
     internal bool HasFailed => ShouldExitOnError && Log.ErrorCount > 0;
+
+    /// <inheritdoc/>
+    Log.VerbosityLevel IRunOptions.Verbosity
+    {
+        get => Log.Verbosity;
+        set => Log.Verbosity = value;
+    }
 
     public void Dispose()
     {

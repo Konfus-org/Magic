@@ -1,0 +1,10 @@
+{
+    // A small warm glass bead that gives light: 5000 nits at about 2700 K. Its area is small, so it adds about
+    // 10 candela to the room and stays a bright point in the picture.
+    "shader": { "id": 10001 },
+    "params": {
+        "color": { "r": 0, "g": 0, "b": 0, "a": 1 },
+        "roughness": { "x": 1 },
+        "emissive": { "x": 5000, "y": 4200, "z": 3200 }
+    }
+}

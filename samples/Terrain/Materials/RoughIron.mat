@@ -1,0 +1,9 @@
+{
+    // Cast iron with an oxide skin: a metal whose reflection is wide and soft.
+    "shader": { "id": 10001 },
+    "params": {
+        "color": { "r": 0.33, "g": 0.31, "b": 0.29, "a": 1 },
+        "roughness": { "x": 0.55 },
+        "metalness": { "x": 1 }
+    }
+}

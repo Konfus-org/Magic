@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.IO.Hashing;
 using System.Text;
 using System.Text.Json;
@@ -176,6 +177,38 @@ internal sealed record AssetIndex
     }
 
     /// <summary>
+    /// The id to give <paramref name="file"/>, which has no <c>.meta</c> yet: one above the highest id of the asset
+    /// directory that holds it, so that the ids of a project, of a gem and of Magic stay apart, and past each id that
+    /// another asset directory of the run already holds.
+    /// </summary>
+    /// <remarks>
+    /// It fails for a file that no asset directory of the run holds. This is the one rule that gives a new id.
+    /// </remarks>
+    public Result<ulong> GetNextId(string file)
+    {
+        if (!FindRoot(file, out _, out ulong highest))
+            return Result.Failure($"{file} is in no folder that this run reads assets from.");
+
+        ulong id = highest + 1;
+        while (ById.ContainsKey(id))
+            id++;
+
+        return Result.Success(id);
+    }
+
+    /// <summary>
+    /// The path that <paramref name="file"/> has as an asset: its path under the asset directory that holds it, as
+    /// <c>Materials/Carpet.mat</c>.
+    /// </summary>
+    /// <remarks>
+    /// It fails for a file that no asset directory of the run holds.
+    /// </remarks>
+    public Result<string> GetAssetPath(string file) =>
+        FindRoot(file, out string? root, out _)
+            ? Result.Success(file.Replace('\\', '/')[(root.Length + 1)..])
+            : Result.Failure($"{file} is in no folder that this run reads assets from.");
+
+    /// <summary>
     /// The built-in asset named <paramref name="name"/> in <paramref name="folder"/>, whatever its extension, or in its
     /// own folder of that name for an asset that is a folder; null when there is none.
     /// </summary>
@@ -271,6 +304,35 @@ internal sealed record AssetIndex
         return settings.Ok
             ? Result.Success(new IndexedFile(value, typeName, path, file, settings.Value))
             : Result.Failure(settings.Error);
+    }
+
+    /// <summary>
+    /// The asset directory that holds <paramref name="file"/>, and the highest id that an asset of the directories
+    /// holding it has; false when no asset directory of the run holds it.
+    /// </summary>
+    /// <remarks>
+    /// The longest directory that holds the file is the one it belongs to, as the directory of a gem can be under the
+    /// directory of a project.
+    /// </remarks>
+    private bool FindRoot(string file, [NotNullWhen(true)] out string? root, out ulong highest)
+    {
+        root = null;
+        highest = 0;
+        string asked = file.Replace('\\', '/');
+        foreach (IndexedFile indexed in ById.Values)
+        {
+            string directory = indexed.File[..^(indexed.Path.Length + 1)].Replace('\\', '/');
+            // The separator is part of the comparison, so that an Assets2 folder does not count as an Assets one.
+            if (!asked.StartsWith($"{directory}/", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (root is null || directory.Length > root.Length)
+                root = directory;
+
+            highest = Math.Max(highest, indexed.Id);
+        }
+
+        return root is not null;
     }
 }
 

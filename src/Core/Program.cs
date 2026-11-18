@@ -65,6 +65,8 @@ internal static class Program
         // An exception nothing caught, on any thread, crashes, leaving a crash file.
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Assert.Now($"Unhandled exception: {e.ExceptionObject}");
 
+        // The log of this process goes to a file of its own beside Magic, from here to the exit.
+        using Subscription logFile = LogFile.Start(new FileSystem());
         int exitCode = Run(commandLine);
         Log.Flush();
 
@@ -160,6 +162,7 @@ internal static class Program
         services.AddSingleton(caches);
         services.AddSingleton(assets);
         services.AddSingleton(world);
+        services.AddSingleton(cli.Commands);
 
         Log.Info($"Running {project.Name} in {(app.IsHeadless ? "headless" : "GUI")} mode.");
 

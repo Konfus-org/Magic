@@ -15,8 +15,13 @@ namespace Magic.DebugTools;
 /// the meters only while the counter or the stats window shows, and collects them as often as
 /// <see cref="DebugToolsSettings.StatsCollectSec"/> says.
 /// </remarks>
-internal sealed class DebugWindows(DebugToolsSettings settings, Settings allSettings, IDebugUI ui, IInput? input)
-    : IDisposable
+internal sealed class DebugWindows(
+    DebugToolsSettings settings,
+    OpenWindows open,
+    Settings allSettings,
+    IDebugUI ui,
+    IInput? input
+) : IDisposable
 {
     private readonly MetricsReader _metrics = new();
 
@@ -37,16 +42,16 @@ internal sealed class DebugWindows(DebugToolsSettings settings, Settings allSett
     internal void Update()
     {
         if (input is not null && input[settings.CounterKey].WasPressed)
-            settings.IsCounterShown = !settings.IsCounterShown;
+            open.IsCounterShown = !open.IsCounterShown;
 
         if (input is not null && input[settings.StatsKey].WasPressed)
-            settings.IsStatsOpen = !settings.IsStatsOpen;
+            open.IsStatsOpen = !open.IsStatsOpen;
 
         if (input is not null && input[settings.SettingsKey].WasPressed)
-            settings.IsSettingsOpen = !settings.IsSettingsOpen;
+            open.IsSettingsOpen = !open.IsSettingsOpen;
 
         // Collect what the meters measured every so often, while anything shows.
-        bool isListening = settings.IsCounterShown || settings.IsStatsOpen;
+        bool isListening = open.IsCounterShown || open.IsStatsOpen;
         _metrics.Listen(isListening);
         if (isListening && Stopwatch.GetElapsedTime(_collectedTimestamp).TotalSeconds >= settings.StatsCollectSec)
         {
@@ -54,17 +59,13 @@ internal sealed class DebugWindows(DebugToolsSettings settings, Settings allSett
             _stats.Refresh(_metrics.Collect());
         }
 
-        bool isStatsOpen = settings.IsStatsOpen;
+        bool isStatsOpen = open.IsStatsOpen;
         _stats.Update(ref isStatsOpen);
-        if (isStatsOpen != settings.IsStatsOpen)
-            settings.IsStatsOpen = isStatsOpen;
+        open.IsStatsOpen = isStatsOpen;
 
-        // Last, as a row may set these windows' own settings; only the close button is taken back from it.
-        bool wasSettingsOpen = settings.IsSettingsOpen;
-        bool isSettingsOpen = wasSettingsOpen;
+        bool isSettingsOpen = open.IsSettingsOpen;
         _settingsWindow.Update(ref isSettingsOpen);
-        if (isSettingsOpen != wasSettingsOpen)
-            settings.IsSettingsOpen = isSettingsOpen;
+        open.IsSettingsOpen = isSettingsOpen;
     }
 
     /// <summary>
@@ -76,7 +77,7 @@ internal sealed class DebugWindows(DebugToolsSettings settings, Settings allSett
     /// </remarks>
     internal void ReportCounter()
     {
-        if (settings.IsCounterShown)
+        if (open.IsCounterShown)
             ui.Text(_stats.CounterLine);
     }
 }

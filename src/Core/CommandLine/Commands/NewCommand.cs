@@ -1,21 +1,27 @@
 using System.CommandLine;
 using System.ComponentModel;
 using System.Diagnostics;
+using Magic.Assets;
 using Magic.Debugging;
 
 namespace Magic.CommandLine.Commands;
 
 /// <summary>
 /// <c>new</c>: makes a project or gem from the <c>dotnet new</c> templates of Magic, and passes on each option that
-/// Magic does not know, such as <c>-o</c>.
+/// Magic does not know, such as <c>-o</c>; <c>new handle</c> makes the <c>.meta</c> of a file.
 /// </summary>
 internal static class NewCommand
 {
-    public static Command Create()
+    public static Command Create(App app, AssetManager assets)
     {
         Argument<string> template = new("template") { Description = "Which template: X in dotnet new magic-X" };
         Argument<string> name = new("name") { Description = "What to call it" };
-        Command make = new("new", "Makes a project or gem from Magic's dotnet new templates") { template, name };
+        Command make = new("new", "Makes a project or gem from Magic's dotnet new templates, or the handle of a file")
+        {
+            template,
+            name,
+            HandleCommand.Create(app, assets),
+        };
 
         // Options Magic doesn't know, like -o or --force, go to dotnet new.
         make.TreatUnmatchedTokensAsErrors = false;

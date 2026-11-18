@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Magic.Ecs;
 using Magic.Ecs.Components;
 using Magic.Files;
@@ -16,26 +17,26 @@ namespace Magic.CommandLine;
 /// <remarks>
 /// A path is <c>entity.component.member</c>, to any depth, and <c>entity.component</c> is the whole component. The
 /// entity is an id, or the name of a tag, which names each entity with that tag. A component or member is its name in
-/// any case, or the initials of its capitals (<c>fov</c> for <c>FieldOfView</c>). The get command of the console
+/// any case, or the initials of its capitals (<c>fov</c> for <c>FieldOfView</c>). The query command of the console
 /// reads one, and its set command writes one.
 /// </remarks>
 internal static class EntityPaths
 {
     /// <summary>
-    /// The value at <paramref name="path"/> on each entity it names, as a line of JSON after the entity's id, or why
-    /// there is none.
+    /// The value at <paramref name="path"/> on each entity it names, each as the entity's id and the value in JSON, or
+    /// why there is none.
     /// </summary>
-    public static Result<ImmutableArray<string>> Read(IEcs ecs, string path)
+    public static Result<JsonArray> Read(IEcs ecs, string path)
     {
         Result<ImmutableArray<(Entity Entity, IComponent Component)>> found = FindComponents(ecs, path);
         if (!found.Ok)
             return Result.Failure(found.Error);
 
-        ImmutableArray<string>.Builder lines = ImmutableArray.CreateBuilder<string>();
+        JsonArray values = [];
         string[] members = path.Split('.')[2..];
         foreach ((Entity entity, IComponent component) in found.Value)
         {
-            Result<(object Value, Type Type)> value = ReadMembers(component, members);
+            Result<(object Value, Type Type)> value = ReadMembers(component, component.GetType(), members);
             if (!value.Ok)
                 return Result.Failure(value.Error);
 
@@ -43,10 +44,10 @@ internal static class EntityPaths
             if (!json.Ok)
                 return Result.Failure(json.Error);
 
-            lines.Add($"entity {entity.Id}: {json.Value.GetRawText()}");
+            values.Add(new JsonObject { ["entity"] = entity.Id, ["value"] = JsonNode.Parse(json.Value.GetRawText()) });
         }
 
-        return Result.Success(lines.ToImmutable());
+        return Result.Success(values);
     }
 
     /// <summary>
@@ -68,7 +69,7 @@ internal static class EntityPaths
         {
             IComponent component = held;
 
-            // A path that names no member names the whole component: the values give it as the JSON that get prints.
+            // A path that names no member names the whole component: the values give it as the JSON that query prints.
             if (members.Length == 0)
             {
                 Result<object> whole = ValueText.Parse(held.GetType(), values);
@@ -79,7 +80,7 @@ internal static class EntityPaths
             }
             else
             {
-                Result written = WriteMembers(held, members, values);
+                Result written = WriteMembers(held, held.GetType(), members, values);
                 if (!written.Ok)
                     return Result.Failure(written.Error);
             }
@@ -88,6 +89,99 @@ internal static class EntityPaths
         }
 
         return Result.Success(found.Value.Length);
+    }
+
+    /// <summary>
+    /// The public field, or the property with a public getter, of <paramref name="type"/> that
+    /// <paramref name="name"/> names.
+    /// </summary>
+    public static MemberInfo? FindMember(Type type, string name)
+    {
+        MemberInfo[] members =
+        [
+            .. type.GetMembers(BindingFlags.Public | BindingFlags.Instance)
+                .Where(member =>
+                    member is FieldInfo
+                    || (
+                        member is PropertyInfo { GetMethod.IsPublic: true } property
+                        && property.GetIndexParameters().Length == 0
+                    )
+                ),
+        ];
+        int index = FindName([.. members.Select(member => member.Name)], name);
+
+        return index < 0 ? null : members[index];
+    }
+
+    /// <summary>
+    /// Whether <paramref name="property"/> has a public setter, which is the only setter that the console writes
+    /// through.
+    /// </summary>
+    public static bool IsSettable(PropertyInfo property) => property.SetMethod is { IsPublic: true };
+
+    /// <summary>
+    /// The value at <paramref name="members"/> under <paramref name="owner"/>, and its type; the owner itself for none.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="type"/> is the type whose members the owner shows: its own, or an interface of it.
+    /// </remarks>
+    public static Result<(object Value, Type Type)> ReadMembers(object owner, Type type, ReadOnlySpan<string> members)
+    {
+        if (members.IsEmpty)
+            return Result.Success((owner, type));
+
+        if (FindMember(type, members[0]) is not { } member)
+            return Result.Failure($"{type.Name} has no {members[0]}.");
+
+        if (ValueText.GetValue(member, owner) is not { } value)
+            return Result.Failure($"{type.Name}.{member.Name} is null.");
+
+        return ReadMembers(value, value.GetType(), members[1..]);
+    }
+
+    /// <summary>
+    /// Writes <paramref name="values"/> at <paramref name="members"/> under <paramref name="owner"/>, a box that it
+    /// changes.
+    /// </summary>
+    /// <remarks>
+    /// Each value type on the way is a copy, which it writes into the copy above it after the change.
+    /// <paramref name="type"/> is the type whose members the owner shows: its own, or an interface of it.
+    /// </remarks>
+    public static Result WriteMembers(
+        object owner,
+        Type type,
+        ReadOnlySpan<string> members,
+        ReadOnlySpan<string> values
+    )
+    {
+        if (FindMember(type, members[0]) is not { } member)
+            return Result.Failure($"{type.Name} has no {members[0]}.");
+
+        // A setter that is not public is the code's own, which the console must not reach.
+        if (member is PropertyInfo property && !IsSettable(property))
+            return Result.Failure($"{type.Name}.{member.Name} follows from other values; set those.");
+
+        if (members.Length == 1)
+        {
+            Result<object> parsed = ValueText.Parse(ValueText.GetValueType(member), values);
+            if (!parsed.Ok)
+                return Result.Failure(parsed.Error);
+
+            ValueText.SetMember(member, owner, parsed.Value);
+
+            return Result.Success();
+        }
+
+        if (ValueText.GetValue(member, owner) is not { } child)
+            return Result.Failure($"{type.Name}.{member.Name} is null.");
+
+        Result written = WriteMembers(child, child.GetType(), members[1..], values);
+        if (!written.Ok)
+            return written;
+
+        ValueText.SetMember(member, owner, child);
+
+        return Result.Success();
     }
 
     /// <summary>
@@ -115,24 +209,6 @@ internal static class EntityPaths
         return found.Count == 0
             ? Result.Failure($"no entity {parts[0]} names has a {parts[1]}.")
             : Result.Success(found.ToImmutable());
-    }
-
-    /// <summary>
-    /// The public field or property of <paramref name="type"/> that <paramref name="name"/> names.
-    /// </summary>
-    private static MemberInfo? FindMember(Type type, string name)
-    {
-        MemberInfo[] members =
-        [
-            .. type.GetMembers(BindingFlags.Public | BindingFlags.Instance)
-                .Where(member =>
-                    member is FieldInfo
-                    || (member is PropertyInfo { CanRead: true } property && property.GetIndexParameters().Length == 0)
-                ),
-        ];
-        int index = FindName([.. members.Select(member => member.Name)], name);
-
-        return index < 0 ? null : members[index];
     }
 
     /// <summary>
@@ -195,60 +271,5 @@ internal static class EntityPaths
                         StringComparison.OrdinalIgnoreCase
                     )
             );
-    }
-
-    /// <summary>
-    /// The value at <paramref name="members"/> under <paramref name="owner"/>, and its type; the owner itself for none.
-    /// </summary>
-    private static Result<(object Value, Type Type)> ReadMembers(object owner, ReadOnlySpan<string> members)
-    {
-        if (members.IsEmpty)
-            return Result.Success((owner, owner.GetType()));
-
-        if (FindMember(owner.GetType(), members[0]) is not { } member)
-            return Result.Failure($"{owner.GetType().Name} has no {members[0]}.");
-
-        if (ValueText.GetValue(member, owner) is not { } value)
-            return Result.Failure($"{owner.GetType().Name}.{member.Name} is null.");
-
-        return ReadMembers(value, members[1..]);
-    }
-
-    /// <summary>
-    /// Writes <paramref name="values"/> at <paramref name="members"/> under <paramref name="owner"/>, a box that it
-    /// changes.
-    /// </summary>
-    /// <remarks>
-    /// Each value type on the way is a copy, which it writes into the copy above it after the change.
-    /// </remarks>
-    private static Result WriteMembers(object owner, ReadOnlySpan<string> members, ReadOnlySpan<string> values)
-    {
-        if (FindMember(owner.GetType(), members[0]) is not { } member)
-            return Result.Failure($"{owner.GetType().Name} has no {members[0]}.");
-
-        if (member is PropertyInfo { CanWrite: false })
-            return Result.Failure($"{owner.GetType().Name}.{member.Name} follows from other values; set those.");
-
-        if (members.Length == 1)
-        {
-            Result<object> parsed = ValueText.Parse(ValueText.GetValueType(member), values);
-            if (!parsed.Ok)
-                return Result.Failure(parsed.Error);
-
-            ValueText.SetMember(member, owner, parsed.Value);
-
-            return Result.Success();
-        }
-
-        if (ValueText.GetValue(member, owner) is not { } child)
-            return Result.Failure($"{owner.GetType().Name}.{member.Name} is null.");
-
-        Result written = WriteMembers(child, members[1..], values);
-        if (!written.Ok)
-            return written;
-
-        ValueText.SetMember(member, owner, child);
-
-        return Result.Success();
     }
 }

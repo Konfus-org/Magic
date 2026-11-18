@@ -16,12 +16,12 @@ namespace Magic.CommandLine.Commands;
 /// </remarks>
 internal static class SetCommand
 {
-    public static Command Create(App app, Settings settings, World world)
+    public static Command Create(App app, Settings settings, World world, ConsoleCommands commands)
     {
         Argument<string> setting = new("setting")
         {
             Description =
-                "A setting's key, as Rendering.Resolution; or the path to an entity's value or to a whole component: the entity a tag or an id, each part its name or initials",
+                "A setting's key, as Rendering.Resolution; or a property of a part of a gem, as Window.Title; or the path to an entity's value or to a whole component: the entity a tag or an id, each part its name or initials",
         };
         Argument<string[]> value = new("value")
         {
@@ -31,7 +31,7 @@ internal static class SetCommand
         };
         Command set = new(
             "set",
-            "Sets a setting, as Rendering.Resolution 2560 1440; or sets an entity's value, as entity.component.member and on to any depth, then the value; or a whole component, as entity.component then its JSON in single quotes"
+            "Sets a setting, as Rendering.Resolution 2560 1440; or a property of a part of a gem, as Window.Title; or sets an entity's value, as entity.component.member and on to any depth, then the value; or a whole component, as entity.component then its JSON in single quotes"
         )
         {
             setting,
@@ -52,6 +52,18 @@ internal static class SetCommand
                     Log.Info($"Set {option.Key} to {string.Join(' ', values)}.");
                 else
                     Log.Error($"{option.Key} was not set: {set.Error}");
+
+                return;
+            }
+
+            // Else a property of the part of a gem that has the path.
+            if (commands.FindService(what) is { } found)
+            {
+                Result set = ServicePaths.Write(found.Service, found.Type, what, values);
+                if (set.Ok)
+                    Log.Info($"Set {what} to {string.Join(' ', values)}.");
+                else
+                    Log.Error($"{what} was not set: {set.Error}");
 
                 return;
             }

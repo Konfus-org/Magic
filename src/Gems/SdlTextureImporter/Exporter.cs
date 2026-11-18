@@ -19,6 +19,7 @@ public sealed unsafe class Exporter : IAssetExporter<Texture>
 
     public Task<Result<ReadOnlyMemory<byte>>> ExportAsync(
         Texture asset,
+        bool includesDefaults,
         IProgress<LoadProgress>? progress,
         CancellationToken cancel
     ) => Task.FromResult(Export(asset));
